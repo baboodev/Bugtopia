@@ -9,11 +9,16 @@ namespace HeartopiaMod
     public static class TransformRotationPatch
     {
         // Token: 0x0600002D RID: 45 RVA: 0x000083D4 File Offset: 0x000065D4
-        public static bool SetRotationPrefix(Transform __instance, ref Quaternion value)
-        {
-            bool flag = __instance == null || __instance.gameObject == null;
-            bool result;
-            if (flag)
+		public static bool SetRotationPrefix(Transform __instance, ref Quaternion value)
+		{
+			if (!HeartopiaComplete.OverrideCameraPosition)
+			{
+				return true;
+			}
+
+			bool flag = __instance == null || __instance.gameObject == null;
+			bool result;
+			if (flag)
             {
                 result = true;
             }

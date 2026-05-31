@@ -8,10 +8,23 @@
     
     <HeartopiaDir>C:\Program Files (x86)\Steam\steamapps\common</HeartopiaDir>
 
-    3. Once finished, this file is ignored by git and should NOT be committed. 
+    3. If you want to build the BepInEx IL2CPP project too, you can also set:
+
+    <BepInExDir>C:\Path\To\Heartopia\BepInEx</BepInExDir>
+
+    If omitted, the BepInEx project defaults to "$(HeartopiaDir)\BepInEx".
+
+    4. GameInteropDir is optional. If you want to override where generated interop/game assemblies
+       come from for the BepInEx build, you can set:
+
+    <GameInteropDir>C:\Path\To\Heartopia\BepInEx\interop</GameInteropDir>
+
+    5. Once finished, this file is ignored by git and should NOT be committed. 
   -->
 
   <PropertyGroup>
     <HeartopiaDir>C:\Path\To\Heartopia</HeartopiaDir>
+    <BepInExDir>C:\Path\To\Heartopia\BepInEx</BepInExDir>
+    <GameInteropDir>C:\Path\To\Heartopia\BepInEx\interop</GameInteropDir>
   </PropertyGroup>
 </Project>

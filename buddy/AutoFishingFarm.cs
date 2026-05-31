@@ -1,0 +1,1082 @@
+using System;
+using MelonLoader;
+using UnityEngine;
+
+namespace HeartopiaMod
+{
+    public static class AutoFishingFarm
+    {
+        private const bool debugLoggingEnabled = HeartopiaComplete.MasterLogAutoFish;
+
+        private static bool enabled = false;
+        private static float fishShadowDetectRange = 60f;
+        private static string lastStatus = "Idle";
+        private static string lastToolStatus = "Unknown";
+        private static string lastTargetStatus = "None";
+        private const float RodEquipRetryInterval = 3.25f;
+        private static bool rodEquipRequestActive = false;
+        private static float nextRodEquipAttemptAt = -999f;
+        private static int previousToolEquipType = 0;
+        private static bool previousToolRestorePending = false;
+        private static float nextActionAt = -999f;
+        private static float sessionStartedAt = -999f;
+        private static float waitingSinceAt = -999f;
+        private static float hookedSinceAt = -999f;
+        private static float lastHookedStateAt = -999f;
+        private static float lastBattleStateAt = -999f;
+        private static float lastBattleLostBaitAt = -999f;
+        private static float ignoreStaleFishingStateUntil = -999f;
+        private static uint lastBattleBaitNetId = 0U;
+        private static float lastCastSentAt = -999f;
+        private static float nextWorldReadyLogAt = -999f;
+        private static float nextRuntimeReadyLogAt = -999f;
+        private static float nextFishingStateLogAt = -999f;
+        private static float nextActiveStateLogAt = -999f;
+        private static string lastActiveStateLogKey = string.Empty;
+        private static float nextTargetMissLogAt = -999f;
+        private static float nextPressUpdateAt = -999f;
+        private static int consecutiveTargetMisses = 0;
+        private static uint currentTargetNetId = 0U;
+        private static Vector3 currentTargetPos = Vector3.zero;
+        private static bool? lastRequestedPressed = null;
+        private const float BattlePressCooldown = 0.08f;
+        private const float TensionEmergencyReleaseThreshold = 0.15f;
+        private const float TensionResumePullThreshold = 0.35f;
+        private const float PostHookIdleGraceSeconds = 0.75f;
+        private const float PostBattleIdleGraceSeconds = 5f;
+        private const float PostLostBattleIdleGraceSeconds = 8f;
+        private const float StaleIdleGraceSeconds = 0.35f;
+        private const float PostCastIdleGraceSeconds = 4f;
+        private const float FastRecastDelay = 0.1f;
+        private const float AfterCastPollDelay = 0.15f;
+        private const float EmptyScanMinDelay = 0.55f;
+        private const float EmptyScanMaxDelay = 1.5f;
+        private const float EmptyScanMissLogInterval = 10f;
+
+        public static bool IsEnabled => enabled;
+        public static bool IsDebugLoggingEnabled() => debugLoggingEnabled;
+        public static string GetLastStatus() => GetDisplayStatus(lastStatus);
+        public static string GetLastToolStatus() => GetDisplayToolStatus(lastToolStatus);
+        public static string GetLastTargetStatus() => GetDisplayTargetStatus(lastTargetStatus);
+        public static float GetDetectRange() => fishShadowDetectRange;
+        public static void SetDetectRange(float value) => fishShadowDetectRange = Mathf.Clamp(value, 15f, 200f);
+
+        private static string GetDisplayStatus(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return "Idle";
+            }
+
+            string value = raw.Trim();
+            string lower = value.ToLowerInvariant();
+            if (lower.Contains("battle pull") || lower.Contains("battle proxy"))
+            {
+                return "Reeling";
+            }
+
+            if (lower.Contains("fish on hook") || lower.Contains("hooked"))
+            {
+                return "Fish hooked";
+            }
+
+            if (lower.Contains("fast recast") || lower.Contains("catch resolved"))
+            {
+                return "Catch secured";
+            }
+
+            if (lower.Contains("failed") || lower.Contains("fail") || lower.Contains("lost"))
+            {
+                return "Fish escaped";
+            }
+
+            if (lower.Contains("recasting") || lower.Contains("idle stall") || lower.Contains("stale"))
+            {
+                return "Preparing next cast";
+            }
+
+            if (lower.Contains("waiting for bite") || lower.Contains("waiting for cast") || lower.Contains("entering fishing"))
+            {
+                return "Waiting for bite";
+            }
+
+            if (lower.Contains("waiting for hook") || lower.Contains("catch resolution") || lower.Contains("battle resolution"))
+            {
+                return "Resolving catch";
+            }
+
+            if (lower.Contains("cast sent"))
+            {
+                return "Cast deployed";
+            }
+
+            if (lower.Contains("no fish shadow"))
+            {
+                return "Scanning for fish";
+            }
+
+            if (lower.Contains("tool check"))
+            {
+                return "Verifying equipment";
+            }
+
+            if (lower.Contains("equip rod"))
+            {
+                return "Fishing rod required";
+            }
+
+            if (lower.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Attention required";
+            }
+
+            if (string.Equals(value, "Battle", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Reeling";
+            }
+
+            if (string.Equals(value, "FishingOnHook", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Fish hooked";
+            }
+
+            if (string.Equals(value, "FishingFail", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "BattleFailSlack", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Fish escaped";
+            }
+
+            return value;
+        }
+
+        private static string GetDisplayToolStatus(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return "Unknown";
+            }
+
+            string value = raw.Trim();
+            string lower = value.ToLowerInvariant();
+            if (lower.Contains("fishing rod equipped"))
+            {
+                return "Fishing rod ready";
+            }
+
+            if (lower.Contains("holding other") || lower.Contains("not fishing rod") || lower.StartsWith("holding ", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Fishing rod required";
+            }
+
+            if (lower.Contains("no tool"))
+            {
+                return "No tool equipped";
+            }
+
+            if (lower.Contains("player unavailable") || lower.Contains("unavailable") || lower.Contains("exception"))
+            {
+                return "Equipment unavailable";
+            }
+
+            return value;
+        }
+
+        private static string GetDisplayTargetStatus(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return "None";
+            }
+
+            string value = raw.Trim();
+            string lower = value.ToLowerInvariant();
+            string distance = TryExtractDistance(value);
+            if (lower.Contains("netid=") || lower.Contains("target resolved"))
+            {
+                return string.IsNullOrEmpty(distance) ? "Target Lock" : "Target Lock (" + distance + ")";
+            }
+
+            if (lower.Contains("direct=") || lower.Contains("throw") || lower.Contains("enterfishing"))
+            {
+                return "Casting to target";
+            }
+
+            if (lower.Contains("no active fish shadows") || lower.Contains("not found") || lower.Contains("no fish shadow"))
+            {
+                return "Scanning for fish";
+            }
+
+            if (lower.Contains("range updated"))
+            {
+                return "Range updated";
+            }
+
+            if (lower.Contains("exitfishing") || lower.Contains("cancelfishing") || lower.Contains("reset"))
+            {
+                return "Resetting session";
+            }
+
+            if (lower.Contains("failed fish") || lower.Contains("fishing fail") || lower.Contains("lost fish"))
+            {
+                return "Fish escaped";
+            }
+
+            if (lower.Contains("hooked fish") || lower.Contains("landing fish"))
+            {
+                return "Fish hooked";
+            }
+
+            if (lower.Contains("recent") || lower.Contains("waiting"))
+            {
+                return "Awaiting update";
+            }
+
+            if (lower.Contains("stale") || lower.Contains("proxy"))
+            {
+                return "Refreshing session";
+            }
+
+            if (lower.Contains("fishing rod equipped"))
+            {
+                return "Ready";
+            }
+
+            if (lower.Contains("holding other") || lower.Contains("no tool") || lower.Contains("not fishing rod"))
+            {
+                return "Fishing rod required";
+            }
+
+            if (lower.Contains("unavailable") || lower.Contains("exception"))
+            {
+                return "Waiting for game state";
+            }
+
+            return value;
+        }
+
+        private static string TryExtractDistance(string value)
+        {
+            int start = value.IndexOf("dist=", StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+            {
+                return string.Empty;
+            }
+
+            start += 5;
+            int end = value.IndexOf('m', start);
+            if (end <= start)
+            {
+                return string.Empty;
+            }
+
+            string distance = value.Substring(start, end - start).Trim();
+            return string.IsNullOrWhiteSpace(distance) || string.Equals(distance, "unknown", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : distance + "m";
+        }
+
+        public static void SetEnabled(bool value, HeartopiaComplete host = null)
+        {
+            if (enabled == value)
+            {
+                return;
+            }
+
+            if (value && !enabled)
+            {
+                CapturePreviousTool(host);
+            }
+
+            enabled = value;
+            rodEquipRequestActive = false;
+            nextRodEquipAttemptAt = -999f;
+            nextActionAt = -999f;
+            sessionStartedAt = -999f;
+            waitingSinceAt = -999f;
+            hookedSinceAt = -999f;
+            lastHookedStateAt = -999f;
+            lastBattleStateAt = -999f;
+            lastBattleLostBaitAt = -999f;
+            ignoreStaleFishingStateUntil = -999f;
+            lastBattleBaitNetId = 0U;
+            lastCastSentAt = -999f;
+            nextWorldReadyLogAt = -999f;
+            nextRuntimeReadyLogAt = -999f;
+            nextFishingStateLogAt = -999f;
+            nextActiveStateLogAt = -999f;
+            lastActiveStateLogKey = string.Empty;
+            nextTargetMissLogAt = -999f;
+            nextPressUpdateAt = -999f;
+            consecutiveTargetMisses = 0;
+            currentTargetNetId = 0U;
+            currentTargetPos = Vector3.zero;
+            lastRequestedPressed = null;
+            lastStatus = enabled ? "Enabled" : "Disabled";
+            lastToolStatus = "Unknown";
+            lastTargetStatus = enabled ? "Scanning for fish shadows..." : "Idle";
+
+            if (!enabled && host != null)
+            {
+                try { host.TrySetFishingPressed(false, out _); } catch { }
+                RestorePreviousTool(host);
+            }
+
+            Log("Toggle changed: " + (enabled ? "enabled" : "disabled") + $" range={fishShadowDetectRange:F0}");
+        }
+
+        public static void ToggleEnabled(HeartopiaComplete host = null)
+        {
+            SetEnabled(!enabled, host);
+        }
+
+        public static float DrawSection(HeartopiaComplete host, int startY)
+        {
+            int num = startY;
+            GUIStyle small = new GUIStyle(GUI.skin.label) { fontSize = 12 };
+            GUIStyle header = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
+
+            GUI.Label(new Rect(20f, num, 320f, 22f), host.UI_Localize("Auto Fishing Farm"), header);
+            num += 28;
+
+            if (host.UI_DrawPrimaryActionButton(new Rect(20f, num, 260f, 35f), "Auto Equip Rod"))
+            {
+                host.StartToolEquipRequest(3);
+                Log("Auto Equip Rod button pressed.");
+            }
+            num += 42;
+
+            bool nextEnabled = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), enabled, "Auto Fish Shadow Net");
+            if (nextEnabled != enabled)
+            {
+                SetEnabled(nextEnabled, host);
+                host.UI_AddMenuNotification(
+                    "Auto Fish Shadow Net " + (nextEnabled ? "Enabled" : "Disabled"),
+                    nextEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+            }
+            num += 30;
+
+            GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Status: {0}", GetLastStatus()), small);
+            num += 24;
+            GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Tool: {0}", GetLastToolStatus()), small);
+            num += 24;
+            GUI.Label(new Rect(20f, num, 360f, 36f), host.UI_LocalizeFormat("Target: {0}", GetLastTargetStatus()), small);
+            num += 40;
+
+            GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Scan Range: {0:F0}m", fishShadowDetectRange), small);
+            num += 22;
+            float prevRange = fishShadowDetectRange;
+            fishShadowDetectRange = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), fishShadowDetectRange, 15f, 200f));
+            if (Math.Abs(fishShadowDetectRange - prevRange) > 0.0001f)
+            {
+                lastTargetStatus = "Range updated";
+                Log("Detect range changed to " + fishShadowDetectRange.ToString("F0") + "m");
+            }
+            num += 30;
+
+            return num + 20f;
+        }
+
+        public static void Update(HeartopiaComplete host)
+        {
+            if (!enabled || host == null)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            try
+            {
+                if (now < nextActionAt)
+                {
+                    return;
+                }
+
+                if (!host.IsFishingAutomationWorldReady())
+                {
+                    lastStatus = "Waiting for world";
+                    lastToolStatus = "Unavailable";
+                    lastTargetStatus = "Join the world first";
+                    nextActionAt = now + 1.5f;
+                    if (now >= nextWorldReadyLogAt)
+                    {
+                        nextWorldReadyLogAt = now + 5f;
+                        Log("World not ready yet; waiting for local player session.");
+                    }
+                    return;
+                }
+
+                nextWorldReadyLogAt = -999f;
+                bool hasFishingState = host.TryGetFishingAutomationState(out bool inFishingState, out string fishState, out bool pressed, out float pullStrength, out float rodDurability, out uint baitingFishNetId, out string fishingStateStatus);
+                if (!hasFishingState)
+                {
+                    if (sessionStartedAt > 0f && now - sessionStartedAt < 15f)
+                    {
+                        lastStatus = "Waiting for fishing state";
+                        lastTargetStatus = fishingStateStatus;
+                        nextActionAt = now + 1f;
+                        if (now >= nextFishingStateLogAt)
+                        {
+                            nextFishingStateLogAt = now + 5f;
+                            Log("Fishing state unavailable during active session. status=" + fishingStateStatus);
+                        }
+                        return;
+                    }
+
+                    if (now >= nextFishingStateLogAt)
+                    {
+                        nextFishingStateLogAt = now + 5f;
+                        Log("Fishing state unavailable before cast. Continuing with net-based setup. status=" + fishingStateStatus);
+                    }
+                }
+                else
+                {
+                    nextFishingStateLogAt = -999f;
+                }
+
+                if (hasFishingState)
+                {
+                    string activeStateKey = inFishingState + "|" + fishState + "|" + baitingFishNetId;
+                    if (!string.Equals(lastActiveStateLogKey, activeStateKey, StringComparison.Ordinal) || now >= nextActiveStateLogAt)
+                    {
+                        lastActiveStateLogKey = activeStateKey;
+                        nextActiveStateLogAt = now + 5f;
+                        Log($"Fishing state: inFishing={inFishingState} state={fishState} pressed={pressed} pull={pullStrength:F2} tension={rodDurability:F2} baitNetId={baitingFishNetId}");
+                    }
+                }
+
+                bool staleIdleFishingReport =
+                    hasFishingState
+                    && inFishingState
+                    && string.Equals(fishState, "Idle", StringComparison.OrdinalIgnoreCase)
+                    && baitingFishNetId != 0U
+                    && pullStrength > 0.05f
+                    && rodDurability <= 0.05f;
+
+                if (staleIdleFishingReport && now < ignoreStaleFishingStateUntil)
+                {
+                    hasFishingState = false;
+                    inFishingState = false;
+                    lastStatus = "Ignoring stale fishing state";
+                    lastTargetStatus = $"Stale bait netId={baitingFishNetId}; scanning for next shadow";
+                }
+
+                if (hasFishingState && inFishingState)
+                {
+                    if (sessionStartedAt <= 0f)
+                    {
+                        sessionStartedAt = now;
+                    }
+
+                    bool looksLikeBattleProxy =
+                        string.Equals(fishState, "Idle", StringComparison.OrdinalIgnoreCase)
+                        && baitingFishNetId != 0U
+                        && pullStrength > 0.05f
+                        && pullStrength <= 1.05f
+                        && rodDurability > 0.05f;
+
+                    if (string.Equals(fishState, "BattleFailSlack", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(fishState, "FishingFail", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if ((pressed || lastRequestedPressed != false) && now >= nextPressUpdateAt)
+                        {
+                            if (host.TrySetFishingPressed(false, out string failReleaseStatus))
+                            {
+                                lastRequestedPressed = false;
+                                Log("Fail state release updated pressed=False status=" + failReleaseStatus);
+                            }
+
+                            nextPressUpdateAt = now + BattlePressCooldown;
+                        }
+
+                        lastStatus = $"Fishing failed state {fishState}; released line";
+                        lastTargetStatus = baitingFishNetId != 0U ? $"Failed fish netId={baitingFishNetId}" : "Fishing fail";
+                        return;
+                    }
+
+                    if (string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase) || looksLikeBattleProxy)
+                    {
+                        waitingSinceAt = -999f;
+                        hookedSinceAt = -999f;
+                        bool lostBattleBait =
+                            !looksLikeBattleProxy
+                            && baitingFishNetId == 0U
+                            && lastBattleBaitNetId != 0U
+                            && lastBattleStateAt > 0f
+                            && now - lastBattleStateAt <= PostBattleIdleGraceSeconds;
+
+                        lastBattleStateAt = now;
+                        if (baitingFishNetId != 0U)
+                        {
+                            lastBattleBaitNetId = baitingFishNetId;
+                        }
+                        else if (lostBattleBait)
+                        {
+                            lastBattleLostBaitAt = now;
+                        }
+
+                        bool desiredPressed = true;
+                        bool tensionReadable = rodDurability >= 0f;
+                        bool tensionAboutToBreak = tensionReadable && rodDurability <= TensionEmergencyReleaseThreshold;
+                        bool recoveringFromBreakZone = lastRequestedPressed == false
+                            && tensionReadable
+                            && rodDurability < TensionResumePullThreshold;
+
+                        // The visible red line follows durability, not PullStrength.
+                        // Keep pulling through a full pull bar unless the line is actually near break.
+                        if (lostBattleBait || tensionAboutToBreak || recoveringFromBreakZone)
+                        {
+                            desiredPressed = false;
+                        }
+
+                        bool shouldSendPressUpdate =
+                            lastRequestedPressed == null
+                            || lastRequestedPressed.Value != desiredPressed
+                            || pressed != desiredPressed;
+                        bool requestedPressChanged =
+                            lastRequestedPressed == null
+                            || lastRequestedPressed.Value != desiredPressed;
+
+                        bool canSendPressUpdate = lostBattleBait || now >= nextPressUpdateAt;
+                        if (shouldSendPressUpdate && canSendPressUpdate)
+                        {
+                            if (host.TrySetFishingPressed(desiredPressed, out string pressedStatus))
+                            {
+                                lastRequestedPressed = desiredPressed;
+                                nextPressUpdateAt = now + BattlePressCooldown;
+                                if (requestedPressChanged || lostBattleBait)
+                                {
+                                    Log("Battle control updated pressed=" + desiredPressed + " status=" + pressedStatus);
+                                }
+                            }
+                            else
+                            {
+                                nextPressUpdateAt = now + BattlePressCooldown;
+                                Log("Battle control failed to update pressed=" + desiredPressed + " status=" + pressedStatus);
+                            }
+                        }
+
+                        string controlReason = desiredPressed
+                            ? "pulling"
+                            : (lostBattleBait ? "lost bait; released" : "saving line");
+                        lastStatus = looksLikeBattleProxy
+                            ? $"Battle proxy pull {pullStrength:F2} tension {rodDurability:F2} {controlReason}"
+                            : $"Battle pull {pullStrength:F2} tension {rodDurability:F2} {controlReason}";
+                        lastTargetStatus = baitingFishNetId != 0U
+                            ? $"Hooked fish netId={baitingFishNetId}"
+                            : (lostBattleBait
+                                ? $"Battle lost fish netId={lastBattleBaitNetId}; waiting for game resolution"
+                                : (looksLikeBattleProxy ? "Hooked fish awaiting state sync" : "Battle in progress"));
+                        return;
+                    }
+
+                    if ((pressed || lastRequestedPressed != false) && now >= nextPressUpdateAt)
+                    {
+                        if (host.TrySetFishingPressed(false, out _))
+                        {
+                            lastRequestedPressed = false;
+                        }
+                        nextPressUpdateAt = now + 0.15f;
+                    }
+
+                    if (string.Equals(fishState, "FishingOnHook", StringComparison.OrdinalIgnoreCase))
+                    {
+                        waitingSinceAt = -999f;
+                        if (hookedSinceAt <= 0f)
+                        {
+                            hookedSinceAt = now;
+                        }
+                        lastHookedStateAt = now;
+
+                        lastStatus = "Fish on hook";
+                        lastTargetStatus = baitingFishNetId != 0U
+                            ? $"Landing fish netId={baitingFishNetId}"
+                            : "Landing fish";
+
+                        if (now - hookedSinceAt >= PostHookIdleGraceSeconds)
+                        {
+                            lastStatus = "Waiting for hook resolution";
+                            lastTargetStatus = "FishingOnHook persisted; not canceling";
+                            nextActionAt = now + 0.2f;
+                        }
+                        return;
+                    }
+
+                    hookedSinceAt = -999f;
+
+                    if (string.Equals(fishState, "Waiting", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if ((pressed || lastRequestedPressed != false) && now >= nextPressUpdateAt)
+                        {
+                            if (host.TrySetFishingPressed(false, out string releaseStatus))
+                            {
+                                lastRequestedPressed = false;
+                                Log("Waiting release updated status=" + releaseStatus);
+                            }
+
+                            nextPressUpdateAt = now + 0.15f;
+                        }
+
+                        if (waitingSinceAt <= 0f)
+                        {
+                            waitingSinceAt = now;
+                        }
+
+                        lastStatus = "Waiting for bite";
+                        if (now - waitingSinceAt >= 12f)
+                        {
+                            if (host.TryExitFishing(out string exitStatus))
+                            {
+                                lastStatus = "Recasting after timeout";
+                                lastTargetStatus = exitStatus;
+                                waitingSinceAt = -999f;
+                                sessionStartedAt = -999f;
+                                nextActionAt = now + FastRecastDelay;
+                                Log("Waiting timeout reached; exit fishing invoked. status=" + exitStatus);
+                            }
+                            else
+                            {
+                                Log("Waiting timeout reached; exit fishing failed. status=" + exitStatus);
+                            }
+                        }
+                        return;
+                    }
+
+                    if (string.Equals(fishState, "FishingFail", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(fishState, "BattleFailSlack", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if ((pressed || lastRequestedPressed != false) && now >= nextPressUpdateAt)
+                        {
+                            if (host.TrySetFishingPressed(false, out string failReleaseStatus))
+                            {
+                                lastRequestedPressed = false;
+                                Log("Fail-state release updated status=" + failReleaseStatus);
+                            }
+
+                            nextPressUpdateAt = now + 0.15f;
+                        }
+
+                        lastStatus = string.Equals(fishState, "BattleFailSlack", StringComparison.OrdinalIgnoreCase)
+                            ? "Fish battle failed"
+                            : "Fishing failed";
+                        lastTargetStatus = "Waiting for fishing state reset";
+                        return;
+                    }
+
+                    if (string.Equals(fishState, "Idle", StringComparison.OrdinalIgnoreCase))
+                    {
+                        float activeFor = now - sessionStartedAt;
+                        bool hasCastTension = pullStrength > 0.05f;
+                        bool hasAttachedFishProxy = baitingFishNetId != 0U;
+                        bool staleFinishedProxy = hasAttachedFishProxy && hasCastTension && rodDurability <= 0.05f;
+                        bool looksLikePostCastWaitingProxy = hasCastTension || hasAttachedFishProxy;
+                        bool recentlySawHook = lastHookedStateAt > 0f && now - lastHookedStateAt <= PostHookIdleGraceSeconds;
+                        bool recentlySawBattle = lastBattleStateAt > 0f && now - lastBattleStateAt <= PostBattleIdleGraceSeconds;
+                        bool recentlyLostBattleBait = lastBattleLostBaitAt > 0f && now - lastBattleLostBaitAt <= PostLostBattleIdleGraceSeconds;
+                        bool recentlySentCast = lastCastSentAt > 0f && now - lastCastSentAt <= PostCastIdleGraceSeconds;
+                        bool looksLikeCatchResolvedIdle =
+                            recentlySawHook
+                            && !pressed
+                            && baitingFishNetId == 0U
+                            && pullStrength <= 0.05f
+                            && rodDurability <= 0.05f;
+
+                        if (staleFinishedProxy && activeFor >= StaleIdleGraceSeconds)
+                        {
+                            if (host.TryExitFishing(out string staleProxyExitStatus))
+                            {
+                                lastStatus = "Recasting after stale finished proxy";
+                                lastTargetStatus = staleProxyExitStatus;
+                                sessionStartedAt = -999f;
+                                waitingSinceAt = -999f;
+                                lastCastSentAt = -999f;
+                                lastBattleStateAt = -999f;
+                                lastBattleLostBaitAt = -999f;
+                                lastBattleBaitNetId = 0U;
+                                ignoreStaleFishingStateUntil = now + 3f;
+                                nextActionAt = now + FastRecastDelay;
+                                Log("Stale idle proxy cleared; exit fishing invoked. status=" + staleProxyExitStatus);
+                            }
+                            else
+                            {
+                                lastStatus = "Stale idle proxy";
+                                lastTargetStatus = staleProxyExitStatus;
+                                ignoreStaleFishingStateUntil = now + 1.5f;
+                                nextActionAt = now + 0.5f;
+                                Log("Stale idle proxy exit failed. status=" + staleProxyExitStatus);
+                            }
+                            return;
+                        }
+
+                        if (looksLikeCatchResolvedIdle)
+                        {
+                            if (host.TryExitFishing(out string catchExitStatus))
+                            {
+                                lastStatus = "Fast recast after catch";
+                                lastTargetStatus = catchExitStatus;
+                                sessionStartedAt = -999f;
+                                waitingSinceAt = -999f;
+                                hookedSinceAt = -999f;
+                                lastHookedStateAt = -999f;
+                                lastCastSentAt = -999f;
+                                lastBattleStateAt = -999f;
+                                lastBattleLostBaitAt = -999f;
+                                lastBattleBaitNetId = 0U;
+                                nextActionAt = now + FastRecastDelay;
+                                Log("Catch resolved; fast exit fishing invoked. status=" + catchExitStatus);
+                            }
+                            else
+                            {
+                                lastStatus = "Catch resolved";
+                                lastTargetStatus = catchExitStatus;
+                                nextActionAt = now + 0.2f;
+                                Log("Catch resolved; fast exit fishing failed. status=" + catchExitStatus);
+                            }
+                            return;
+                        }
+
+                        if (recentlySawHook)
+                        {
+                            if ((pressed || lastRequestedPressed != false) && now >= nextPressUpdateAt)
+                            {
+                                if (host.TrySetFishingPressed(false, out string postHookReleaseStatus))
+                                {
+                                    lastRequestedPressed = false;
+                                    Log("Post-hook idle release updated status=" + postHookReleaseStatus);
+                                }
+
+                                nextPressUpdateAt = now + 0.15f;
+                            }
+
+                            lastStatus = "Waiting for catch resolution";
+                            lastTargetStatus = "Recent FishingOnHook; not canceling idle state";
+                            nextActionAt = now + FastRecastDelay;
+                            return;
+                        }
+
+                        if (recentlySawBattle || recentlyLostBattleBait)
+                        {
+                            if ((pressed || lastRequestedPressed != false) && now >= nextPressUpdateAt)
+                            {
+                                if (host.TrySetFishingPressed(false, out string postBattleReleaseStatus))
+                                {
+                                    lastRequestedPressed = false;
+                                    Log("Post-battle idle release updated status=" + postBattleReleaseStatus);
+                                }
+
+                                nextPressUpdateAt = now + 0.15f;
+                            }
+
+                            lastStatus = "Waiting for battle resolution";
+                            lastTargetStatus = recentlyLostBattleBait && lastBattleBaitNetId != 0U
+                                ? $"Battle lost fish netId={lastBattleBaitNetId}; not canceling idle state"
+                                : lastBattleBaitNetId != 0U
+                                ? $"Recent battle netId={lastBattleBaitNetId}; not canceling idle state"
+                                : "Recent battle; not canceling idle state";
+                            nextActionAt = now + FastRecastDelay;
+                            return;
+                        }
+
+                        if (looksLikePostCastWaitingProxy)
+                        {
+                            if (waitingSinceAt <= 0f)
+                            {
+                                waitingSinceAt = now;
+                            }
+
+                            bool looksLikePreBattleHookProxy = hasAttachedFishProxy && pullStrength > 1.05f;
+                            lastStatus = looksLikePreBattleHookProxy
+                                ? $"Hooked waiting proxy netId={baitingFishNetId} pull {pullStrength:F2}"
+                                : (hasAttachedFishProxy
+                                    ? $"Fish attached proxy netId={baitingFishNetId} pull {pullStrength:F2}"
+                                    : $"Waiting for bite proxy pull {pullStrength:F2}");
+                            lastTargetStatus = looksLikePreBattleHookProxy
+                                ? "Fish is on the bait; waiting for battle state"
+                                : (hasAttachedFishProxy
+                                    ? "Fish shadow attached; waiting for battle state"
+                                    : "Cast is active; waiting for bite state");
+                            if (now - waitingSinceAt >= 12f)
+                            {
+                                if (host.TryExitFishing(out string proxyExitStatus))
+                                {
+                                    lastStatus = "Recasting after proxy timeout";
+                                    lastTargetStatus = proxyExitStatus;
+                                    waitingSinceAt = -999f;
+                                    sessionStartedAt = -999f;
+                                    nextActionAt = now + FastRecastDelay;
+                                    Log("Proxy waiting timeout reached; exit fishing invoked. status=" + proxyExitStatus);
+                                }
+                                else
+                                {
+                                    Log("Proxy waiting timeout reached; exit fishing failed. status=" + proxyExitStatus);
+                                }
+                            }
+                            return;
+                        }
+
+                        waitingSinceAt = -999f;
+                        if (recentlySentCast)
+                        {
+                            lastStatus = "Waiting for cast to settle";
+                            lastTargetStatus = "Recent cast; waiting for Waiting/Battle state";
+                            nextActionAt = now + AfterCastPollDelay;
+                            return;
+                        }
+
+                        if (activeFor < StaleIdleGraceSeconds)
+                        {
+                            lastStatus = "Entering fishing";
+                            lastTargetStatus = "Waiting for fishing state to advance";
+                            return;
+                        }
+
+                        if (host.TryExitFishing(out string exitStatus))
+                        {
+                            lastStatus = "Recasting after idle stall";
+                            lastTargetStatus = exitStatus;
+                                sessionStartedAt = -999f;
+                                waitingSinceAt = -999f;
+                                lastCastSentAt = -999f;
+                                lastBattleStateAt = -999f;
+                                lastBattleLostBaitAt = -999f;
+                                lastBattleBaitNetId = 0U;
+                                nextActionAt = now + FastRecastDelay;
+                            Log("Fishing stayed idle too long; exit fishing invoked. status=" + exitStatus);
+                        }
+                        else
+                        {
+                            lastStatus = "Idle fishing stall";
+                            lastTargetStatus = exitStatus;
+                            nextActionAt = now + 1f;
+                            Log("Fishing stayed idle too long; exit fishing failed. status=" + exitStatus);
+                        }
+                        return;
+                    }
+
+                    lastStatus = string.IsNullOrWhiteSpace(fishState) ? "Fishing active" : fishState;
+                    return;
+                }
+
+                waitingSinceAt = -999f;
+                hookedSinceAt = -999f;
+                lastHookedStateAt = -999f;
+                lastBattleStateAt = -999f;
+                lastBattleLostBaitAt = -999f;
+                lastBattleBaitNetId = 0U;
+                if (hasFishingState)
+                {
+                    sessionStartedAt = -999f;
+                    nextActiveStateLogAt = -999f;
+                    lastActiveStateLogKey = string.Empty;
+                }
+                if (lastRequestedPressed != false && host.TrySetFishingPressed(false, out _))
+                {
+                    lastRequestedPressed = false;
+                }
+
+                if (!host.TryGetFishingRodToolStatus(out bool rodEquipped, out string toolStatus))
+                {
+                    lastToolStatus = toolStatus;
+                    lastStatus = "Tool check unavailable";
+                    lastTargetStatus = toolStatus;
+                    nextActionAt = now + 1f;
+                    Log("Rod tool status unavailable: " + toolStatus);
+                    return;
+                }
+
+                lastToolStatus = toolStatus;
+                if (!rodEquipped)
+                {
+                    EnsureFishingRodEquipped(host);
+                    lastTargetStatus = toolStatus;
+                    nextActionAt = now + 1f;
+                    return;
+                }
+
+                rodEquipRequestActive = false;
+                nextRodEquipAttemptAt = -999f;
+
+                if (!host.TryFindNearestFishShadowTarget(fishShadowDetectRange, out uint targetNetId, out Vector3 targetPos, out float targetDistance, out int detectedCount, out string targetStatus))
+                {
+                    consecutiveTargetMisses++;
+                    float missDelay = Mathf.Min(EmptyScanMaxDelay, EmptyScanMinDelay + (consecutiveTargetMisses * 0.12f));
+                    lastStatus = "No fish shadow target";
+                    lastTargetStatus = targetStatus;
+                    nextActionAt = now + missDelay;
+                    if (now >= nextTargetMissLogAt)
+                    {
+                        nextTargetMissLogAt = now + EmptyScanMissLogInterval;
+                        Log("Fish shadow target not found. status=" + targetStatus + $" nextScan={missDelay:F1}s misses={consecutiveTargetMisses}");
+                    }
+                    return;
+                }
+
+                consecutiveTargetMisses = 0;
+                currentTargetNetId = targetNetId;
+                currentTargetPos = targetPos;
+                lastTargetStatus = $"netId={targetNetId} dist={(targetDistance > 0f ? targetDistance.ToString("F1") : "unknown")}m found={detectedCount}";
+                Log("Fish shadow target resolved: " + lastTargetStatus + " pos=" + targetPos);
+
+                if (host.TryEnterFishingAtTarget(targetPos, out string enterStatus))
+                {
+                    lastStatus = "Cast sent to fish shadow";
+                    lastTargetStatus = $"netId={targetNetId} dist={(targetDistance > 0f ? targetDistance.ToString("F1") : "unknown")}m";
+                    sessionStartedAt = now;
+                    waitingSinceAt = now;
+                    hookedSinceAt = -999f;
+                    lastHookedStateAt = -999f;
+                    lastBattleStateAt = -999f;
+                    lastBattleLostBaitAt = -999f;
+                    lastBattleBaitNetId = 0U;
+                    lastCastSentAt = now;
+                    lastRequestedPressed = false;
+                    nextPressUpdateAt = now + 0.15f;
+                    nextActionAt = now + AfterCastPollDelay;
+                    Log("EnterFishing succeeded. status=" + enterStatus + " targetNetId=" + targetNetId);
+                    return;
+                }
+
+                lastStatus = "Cast failed";
+                lastTargetStatus = enterStatus;
+                nextActionAt = now + FastRecastDelay;
+                Log("EnterFishing failed. status=" + enterStatus + " targetNetId=" + targetNetId);
+            }
+            catch (Exception ex)
+            {
+                lastStatus = "Error: " + ex.Message;
+                nextActionAt = now + 0.5f;
+                Log("Update error: " + ex);
+            }
+        }
+
+        public static void ForceStop(HeartopiaComplete host = null)
+        {
+            enabled = false;
+            rodEquipRequestActive = false;
+            nextRodEquipAttemptAt = -999f;
+            previousToolEquipType = 0;
+            previousToolRestorePending = false;
+            nextActionAt = -999f;
+            sessionStartedAt = -999f;
+            waitingSinceAt = -999f;
+            hookedSinceAt = -999f;
+            lastHookedStateAt = -999f;
+            lastBattleStateAt = -999f;
+            lastBattleLostBaitAt = -999f;
+            ignoreStaleFishingStateUntil = -999f;
+            lastBattleBaitNetId = 0U;
+            lastCastSentAt = -999f;
+            nextWorldReadyLogAt = -999f;
+            nextRuntimeReadyLogAt = -999f;
+            nextFishingStateLogAt = -999f;
+            lastActiveStateLogKey = string.Empty;
+            nextTargetMissLogAt = -999f;
+            nextPressUpdateAt = -999f;
+            consecutiveTargetMisses = 0;
+            currentTargetNetId = 0U;
+            currentTargetPos = Vector3.zero;
+            lastRequestedPressed = null;
+            lastStatus = "Disabled";
+            lastToolStatus = "Unknown";
+            lastTargetStatus = "Idle";
+            if (host != null)
+            {
+                try { host.TrySetFishingPressed(false, out _); } catch { }
+            }
+            Log("ForceStop invoked.");
+        }
+
+        private static void EnsureFishingRodEquipped(HeartopiaComplete host)
+        {
+            if (host == null)
+            {
+                return;
+            }
+
+            rodEquipRequestActive = true;
+            float now = Time.unscaledTime;
+            if (now >= nextRodEquipAttemptAt)
+            {
+                host.StartToolEquipRequest(3);
+                nextRodEquipAttemptAt = now + RodEquipRetryInterval;
+                lastStatus = "Equipping rod...";
+                Log("Fishing rod missing; sent equip request.");
+                return;
+            }
+
+            lastStatus = "Waiting for rod equip...";
+        }
+
+        private static void CapturePreviousTool(HeartopiaComplete host)
+        {
+            previousToolEquipType = 0;
+            previousToolRestorePending = false;
+
+            if (host == null || !host.TryGetCurrentToolInfo(out int toolId, out _, out _))
+            {
+                return;
+            }
+
+            previousToolEquipType = MapToolIdToEquipType(toolId);
+            previousToolRestorePending = previousToolEquipType != 0 && previousToolEquipType != 3;
+            if (previousToolRestorePending)
+            {
+                Log("Captured previous tool equipType=" + previousToolEquipType);
+            }
+        }
+
+        private static void RestorePreviousTool(HeartopiaComplete host)
+        {
+            if (host == null)
+            {
+                previousToolEquipType = 0;
+                previousToolRestorePending = false;
+                return;
+            }
+
+            if (!previousToolRestorePending || previousToolEquipType == 0)
+            {
+                if (host.TryGetFishingRodToolStatus(out bool rodEquipped, out _) && rodEquipped)
+                {
+                    host.StartToolEquipRequest(3);
+                    Log("No previous supported tool captured; attempting to toggle rod off.");
+                }
+
+                previousToolEquipType = 0;
+                previousToolRestorePending = false;
+                return;
+            }
+
+            host.StartToolEquipRequest(previousToolEquipType);
+            Log("Restoring previous tool equipType=" + previousToolEquipType);
+            previousToolEquipType = 0;
+            previousToolRestorePending = false;
+        }
+
+        private static int MapToolIdToEquipType(int toolId)
+        {
+            switch (toolId)
+            {
+                case 1:
+                    return 1;
+                case 3:
+                    return 3;
+                case 4:
+                    return 4;
+                case 5:
+                    return 2;
+                default:
+                    return 0;
+            }
+        }
+
+        private static void Log(string message)
+        {
+            if (!debugLoggingEnabled)
+            {
+                return;
+            }
+
+            MelonLogger.Msg("[AutoFishingFarm] " + message);
+        }
+    }
+}

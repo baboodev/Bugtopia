@@ -1,1 +1,7 @@
 Directory.Build.Props
+buddy/bin
+buddy/obj
+.cache
+tools/bin
+tools/cpp2il_out
+tools/reports
