@@ -58,7 +58,7 @@ namespace HeartopiaMod
         public static string GetLastToolStatus() => GetDisplayToolStatus(lastToolStatus);
         public static string GetLastTargetStatus() => GetDisplayTargetStatus(lastTargetStatus);
         public static float GetDetectRange() => fishShadowDetectRange;
-        public static void SetDetectRange(float value) => fishShadowDetectRange = Mathf.Clamp(value, 15f, 200f);
+        public static void SetDetectRange(float value) => fishShadowDetectRange = Mathf.Clamp(value, 1f, 200f);
 
         private static string GetDisplayStatus(string raw)
         {
@@ -364,7 +364,7 @@ namespace HeartopiaMod
             GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Scan Range: {0:F0}m", fishShadowDetectRange), small);
             num += 22;
             float prevRange = fishShadowDetectRange;
-            fishShadowDetectRange = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), fishShadowDetectRange, 15f, 200f));
+            fishShadowDetectRange = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), fishShadowDetectRange, 1f, 200f));
             if (Math.Abs(fishShadowDetectRange - prevRange) > 0.0001f)
             {
                 lastTargetStatus = "Range updated";
