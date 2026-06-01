@@ -1923,6 +1923,7 @@ namespace HeartopiaMod
                 this.EnsurePetPlayRuntimePatches();
             }
             this.EnsureStrangerChatBypassPatch();
+            WarehouseBypassFeature.Update(this);
             this.UpdatePetPlayAutomation();
             this.UpdateGameUiClickBlockState();
             this.UpdateMouseLookState();
@@ -15613,6 +15614,516 @@ namespace HeartopiaMod
             {
                 this.BirdFarmNetLog("MaxPhoto direct patch failed: " + ex.Message);
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // Warehouse Anywhere — off-home warehouse tab (AuraMono SetInteractable + Unity UI).
+        // ─────────────────────────────────────────────────────────────────
+        private bool warehouseMonoTabGiveUp;
+        private float warehouseMonoTabNextAttemptAt = -999f;
+        private bool warehouseMonoTabUnlockCommitted;
+        private bool warehouseMonoTabUnlockedLogged;
+        private bool warehouseMonoMoveButtonLogged;
+        private IntPtr warehouseAuraBagPanelTypeObj;
+        private int warehouseBagOpenBypassCacheFrame = -1;
+        private bool warehouseBagOpenBypassCacheValue;
+
+        private const int BagPanelLifeCycleOpening = 1;
+        private const int BagPanelLifeCycleOpened = 2;
+        private const int BagPanelLifeCycleClosing = 3;
+        private const int BagPanelLifeCycleClosed = 4;
+
+        internal unsafe void ModWarehouseBypassTickBagOpenState(out bool bypassOpen)
+        {
+            bypassOpen = this.ModTryWarehouseBagOpenForBypassCached();
+        }
+
+        internal unsafe void ModTryEnableWarehouseTabViaMono(bool itemSelected)
+        {
+            if (!this.warehouseBypassEnabled || this.warehouseMonoTabGiveUp)
+            {
+                return;
+            }
+
+            if (ModTryUnityFindActiveBagPanel(out GameObject unityBag)
+                && ModTryUnityBagPanelLooksStaleClosed(unityBag))
+            {
+                return;
+            }
+
+            if (!this.ModTryWarehouseBagOpenForBypassCached())
+            {
+                return;
+            }
+
+            if (this.ModTryResolveAuraMonoBagPanel(out IntPtr bagPanelLifeObj) && bagPanelLifeObj != IntPtr.Zero
+                && this.ModTryAuraMonoReadBagPanelLifeCycle(bagPanelLifeObj, out int lifeCycle)
+                && lifeCycle != BagPanelLifeCycleOpened)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            bool maintainOnly = this.warehouseMonoTabUnlockCommitted;
+            float throttle = maintainOnly ? 1.5f : 0.25f;
+            if (now < this.warehouseMonoTabNextAttemptAt)
+            {
+                return;
+            }
+
+            this.warehouseMonoTabNextAttemptAt = now + throttle;
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    return;
+                }
+
+                if (!this.ModTryResolveAuraMonoBagPanel(out IntPtr bagPanelObj) || bagPanelObj == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                if (!this.TryInvokeAuraMonoZeroArg(bagPanelObj, out IntPtr nodesObj, "get_nodes") || nodesObj == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                if (!this.TryReadAuraMonoObjectField(nodesObj, out IntPtr tabBarObj, "tabBar_widget") || tabBarObj == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                IntPtr tabBarClass = auraMonoObjectGetClass(tabBarObj);
+                IntPtr getChildAt = this.FindAuraMonoMethodOnHierarchy(tabBarClass, "GetChildAt", 1);
+                if (getChildAt == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                int warehouseIndex = 1;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* childArgs = stackalloc IntPtr[1];
+                childArgs[0] = (IntPtr)(&warehouseIndex);
+                IntPtr tabWidgetObj = auraMonoRuntimeInvoke(getChildAt, tabBarObj, (IntPtr)childArgs, ref exc);
+                if (exc != IntPtr.Zero || tabWidgetObj == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                if (!maintainOnly)
+                {
+                    IntPtr tabWidgetClass = auraMonoObjectGetClass(tabWidgetObj);
+                    IntPtr setInteractable = this.FindAuraMonoMethodOnHierarchy(tabWidgetClass, "SetInteractable", 1);
+                    if (setInteractable == IntPtr.Zero)
+                    {
+                        return;
+                    }
+
+                    int interactable = 1;
+                    exc = IntPtr.Zero;
+                    IntPtr* interactArgs = stackalloc IntPtr[1];
+                    interactArgs[0] = (IntPtr)(&interactable);
+                    auraMonoRuntimeInvoke(setInteractable, tabWidgetObj, (IntPtr)interactArgs, ref exc);
+                    if (exc != IntPtr.Zero)
+                    {
+                        return;
+                    }
+                }
+
+                if (!this.warehouseMonoTabUnlockedLogged)
+                {
+                    this.warehouseMonoTabUnlockedLogged = true;
+                    this.warehouseMonoTabUnlockCommitted = true;
+                    WarehouseBypassFeature.LogMonoTabUnlockOnce(
+                        "[WarehouseBypass] Mono tab unlock OK — TabWidget.SetInteractable(true) on warehouse tab.");
+                }
+
+                if (itemSelected)
+                {
+                    IntPtr bagPanelClass = auraMonoObjectGetClass(bagPanelObj);
+                    IntPtr setBtnFrame = bagPanelClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(bagPanelClass, "SetBtnFrame", 1) : IntPtr.Zero;
+                    if (setBtnFrame != IntPtr.Zero)
+                    {
+                        int frame = 1;
+                        exc = IntPtr.Zero;
+                        IntPtr* frameArgs = stackalloc IntPtr[1];
+                        frameArgs[0] = (IntPtr)(&frame);
+                        auraMonoRuntimeInvoke(setBtnFrame, bagPanelObj, (IntPtr)frameArgs, ref exc);
+                        if (exc == IntPtr.Zero && !this.warehouseMonoMoveButtonLogged)
+                        {
+                            this.warehouseMonoMoveButtonLogged = true;
+                            ModLogger.Msg("[WarehouseBypass] SetBtnFrame(1) — Store/Carry for selected item.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                this.warehouseMonoTabGiveUp = true;
+                ModLogger.Msg("[WarehouseBypass] Mono tab unlock failed: " + ex.Message);
+            }
+        }
+
+        internal void ModWarehouseOnBagClosed()
+        {
+            this.warehouseMonoTabNextAttemptAt = -999f;
+            this.warehouseMonoTabUnlockCommitted = false;
+            this.warehouseMonoMoveButtonLogged = false;
+            this.warehouseBagOpenBypassCacheFrame = -1;
+            WarehouseBypassFeature.ResetWarehouseBagSession();
+            WarehouseBypassFeature.ResetWarehouseTabMonoWarmup();
+        }
+
+        private unsafe bool ModTryAuraMonoReadBoolProperty(IntPtr targetObj, string propertyName, out bool value)
+        {
+            value = false;
+            if (targetObj == IntPtr.Zero || string.IsNullOrEmpty(propertyName) || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+
+            IntPtr targetClass = auraMonoObjectGetClass(targetObj);
+            IntPtr getter = this.FindAuraMonoMethodOnHierarchy(targetClass, propertyName, 0);
+            if (getter == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(getter, targetObj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxed, out value))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private unsafe bool ModTryAuraMonoBagPanelObjectIsBagPanel(IntPtr bagPanelObj)
+        {
+            if (bagPanelObj == IntPtr.Zero || !this.TryInvokeAuraMonoZeroArg(bagPanelObj, out IntPtr typeObj, "GetType"))
+            {
+                return false;
+            }
+
+            if (typeObj == IntPtr.Zero || !this.TryInvokeAuraMonoZeroArg(typeObj, out IntPtr nameObj, "get_Name"))
+            {
+                return false;
+            }
+
+            if (!this.TryReadMonoString(nameObj, out string name))
+            {
+                return false;
+            }
+
+            return string.Equals(name, "BagPanel", StringComparison.Ordinal);
+        }
+
+        private unsafe bool ModTryAuraMonoReadBagPanelLifeCycle(IntPtr bagPanelObj, out int lifeCycle)
+        {
+            lifeCycle = -1;
+            if (bagPanelObj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoFieldGetValueObject == null)
+            {
+                return false;
+            }
+
+            IntPtr bagPanelClass = auraMonoObjectGetClass(bagPanelObj);
+            IntPtr lifeCycleField = this.FindAuraMonoFieldOnHierarchy(bagPanelClass, "lifeCycleState");
+            if (lifeCycleField == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr boxedState = auraMonoFieldGetValueObject(this.auraMonoRootDomain, lifeCycleField, bagPanelObj);
+            if (boxedState == IntPtr.Zero || !this.TryUnboxMonoInt32(boxedState, out lifeCycle))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private unsafe bool ModTryAuraMonoBagPanelUiIsVisible(IntPtr bagPanelObj)
+        {
+            if (bagPanelObj == IntPtr.Zero
+                || !this.TryReadAuraMonoObjectField(bagPanelObj, out IntPtr uiObj, "ui")
+                || uiObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(uiObj, out IntPtr goObj, "get_gameObject") || goObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.ModTryAuraMonoReadBoolProperty(goObj, "get_activeInHierarchy", out bool activeInHierarchy) || !activeInHierarchy)
+            {
+                return false;
+            }
+
+            if (this.TryReadAuraMonoObjectField(uiObj, out IntPtr canvasObj, "canvas") && canvasObj != IntPtr.Zero)
+            {
+                if (!this.ModTryAuraMonoReadBoolProperty(canvasObj, "get_enabled", out bool canvasEnabled) || !canvasEnabled)
+                {
+                    return false;
+                }
+            }
+
+            if (this.TryReadAuraMonoObjectField(uiObj, out IntPtr canvasGroupObj, "canvasGroup") && canvasGroupObj != IntPtr.Zero)
+            {
+                if (!this.ModTryAuraMonoReadBoolProperty(canvasGroupObj, "get_interactable", out bool interactable) || !interactable)
+                {
+                    return false;
+                }
+            }
+
+            if (this.TryInvokeAuraMonoZeroArg(bagPanelObj, out IntPtr nodesObj, "get_nodes") && nodesObj != IntPtr.Zero
+                && this.TryReadAuraMonoObjectField(nodesObj, out IntPtr rootGroupObj, "root_group") && rootGroupObj != IntPtr.Zero)
+            {
+                if (!this.ModTryAuraMonoReadBoolProperty(rootGroupObj, "get_interactable", out bool rootInteractable) || !rootInteractable)
+                {
+                    return false;
+                }
+            }
+
+            IntPtr bagPanelClass = auraMonoObjectGetClass(bagPanelObj);
+            IntPtr getIsGotFocus = this.FindAuraMonoMethodOnHierarchy(bagPanelClass, "get_IsGotFocus", 0);
+            if (getIsGotFocus == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr focusBoxed = auraMonoRuntimeInvoke(getIsGotFocus, bagPanelObj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || focusBoxed == IntPtr.Zero || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+
+            IntPtr focusRaw = auraMonoObjectUnbox(focusBoxed);
+            return focusRaw != IntPtr.Zero && (*(byte*)focusRaw) != 0;
+        }
+
+        internal static bool ModTryUnityBagPanelRootGroupInteractable(GameObject bag, out bool interactable)
+        {
+            interactable = true;
+            if (bag == null)
+            {
+                return false;
+            }
+
+            CanvasGroup[] groups = bag.GetComponentsInChildren<CanvasGroup>(true);
+            for (int i = 0; i < groups.Length; i++)
+            {
+                CanvasGroup group = groups[i];
+                if (group == null)
+                {
+                    continue;
+                }
+
+                string nodeName = group.gameObject.name;
+                if (nodeName == "root_group" || nodeName.StartsWith("root_group@", StringComparison.Ordinal))
+                {
+                    interactable = group.interactable;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        internal static bool ModTryUnityFindActiveBagPanel(out GameObject bag)
+        {
+            bag = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Scene/BagPanel(Clone)");
+            if (bag == null)
+            {
+                bag = GameObject.Find("BagPanel(Clone)");
+            }
+
+            if (bag == null || !bag.activeInHierarchy)
+            {
+                bag = null;
+                return false;
+            }
+
+            return true;
+        }
+
+        internal static bool ModTryUnityBagPanelLooksStaleClosed(GameObject bag)
+        {
+            return bag != null
+                && ModTryUnityBagPanelRootGroupInteractable(bag, out bool rootInteractable)
+                && !rootInteractable;
+        }
+
+        internal static bool ModTryUnityWarehouseBagShouldSkipMonoProbe()
+        {
+            if (!ModTryUnityFindActiveBagPanel(out GameObject bag))
+            {
+                return true;
+            }
+
+            return ModTryUnityBagPanelLooksStaleClosed(bag);
+        }
+
+        private unsafe bool ModTryResolveAuraMonoUIManager(out IntPtr uiManagerObj, out IntPtr uiManagerClass)
+        {
+            uiManagerObj = IntPtr.Zero;
+            uiManagerClass = IntPtr.Zero;
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoClassFromName == null
+                || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr uiImage = this.FindAuraMonoImage(new string[] { "XDTGameUI", "XDTGameUI.dll" });
+            uiManagerClass = uiImage != IntPtr.Zero
+                ? auraMonoClassFromName(uiImage, "XDTGame.Core", "UIManager")
+                : IntPtr.Zero;
+            if (uiManagerClass == IntPtr.Zero)
+            {
+                uiManagerClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTGame.Core", "UIManager");
+            }
+
+            IntPtr getInstance = uiManagerClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(uiManagerClass, "get_Instance", 0) : IntPtr.Zero;
+            if (getInstance == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            uiManagerObj = auraMonoRuntimeInvoke(getInstance, IntPtr.Zero, IntPtr.Zero, ref exc);
+            return exc == IntPtr.Zero && uiManagerObj != IntPtr.Zero;
+        }
+
+        internal unsafe bool ModTryResolveAuraMonoBagPanel(out IntPtr bagPanelObj)
+        {
+            bagPanelObj = IntPtr.Zero;
+            if (!this.ModTryResolveAuraMonoUIManager(out IntPtr uiManagerObj, out IntPtr uiManagerClass)
+                || auraMonoStringNew == null
+                || this.auraMonoRootDomain == IntPtr.Zero
+                || this.auraMonoTypeGetTypeMethodPtr == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr getView = this.FindAuraMonoMethodOnHierarchy(uiManagerClass, "GetView", 1);
+            if (getView == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr bagPanelTypeObj = this.BuildAuraMonoBagPanelType();
+            if (bagPanelTypeObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* viewArgs = stackalloc IntPtr[1];
+            viewArgs[0] = bagPanelTypeObj;
+            bagPanelObj = auraMonoRuntimeInvoke(getView, uiManagerObj, (IntPtr)viewArgs, ref exc);
+            return exc == IntPtr.Zero && bagPanelObj != IntPtr.Zero;
+        }
+
+        internal unsafe bool ModTryWarehouseBagOpenForBypass()
+        {
+            return this.ModTryWarehouseBagOpenForBypassCached();
+        }
+
+        internal unsafe bool ModTryWarehouseBagOpenForBypassCached()
+        {
+            if (Time.frameCount == this.warehouseBagOpenBypassCacheFrame)
+            {
+                return this.warehouseBagOpenBypassCacheValue;
+            }
+
+            this.warehouseBagOpenBypassCacheValue = this.ModTryWarehouseBagOpenForBypassCore();
+            this.warehouseBagOpenBypassCacheFrame = Time.frameCount;
+            return this.warehouseBagOpenBypassCacheValue;
+        }
+
+        private unsafe bool ModTryWarehouseBagOpenForBypassCore()
+        {
+            if (ModTryUnityWarehouseBagShouldSkipMonoProbe())
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            if (!this.ModTryResolveAuraMonoBagPanel(out IntPtr bagPanelObj) || bagPanelObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.ModTryAuraMonoBagPanelObjectIsBagPanel(bagPanelObj))
+            {
+                return false;
+            }
+
+            if (!this.ModTryAuraMonoReadBagPanelLifeCycle(bagPanelObj, out int lifeCycle))
+            {
+                return false;
+            }
+
+            if (lifeCycle == BagPanelLifeCycleClosing || lifeCycle == BagPanelLifeCycleClosed || lifeCycle != BagPanelLifeCycleOpened)
+            {
+                return false;
+            }
+
+            return this.ModTryAuraMonoBagPanelUiIsVisible(bagPanelObj);
+        }
+
+        private unsafe IntPtr BuildAuraMonoBagPanelType()
+        {
+            if (this.warehouseAuraBagPanelTypeObj != IntPtr.Zero)
+            {
+                return this.warehouseAuraBagPanelTypeObj;
+            }
+
+            if (auraMonoStringNew == null || auraMonoRuntimeInvoke == null
+                || this.auraMonoRootDomain == IntPtr.Zero || this.auraMonoTypeGetTypeMethodPtr == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            string[] typeNameCandidates = new string[]
+            {
+                "XDTGame.UI.Panel.BagPanel, XDTGameUI",
+                "XDTGame.UI.Panel.BagPanel, XDTGameUI.dll",
+                "XDTGame.UI.Panel.BagPanel, XDTLevelAndEntity",
+                "XDTGame.UI.Panel.BagPanel"
+            };
+
+            for (int i = 0; i < typeNameCandidates.Length; i++)
+            {
+                IntPtr typeNameStr = auraMonoStringNew(this.auraMonoRootDomain, typeNameCandidates[i]);
+                if (typeNameStr == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* typeArgs = stackalloc IntPtr[1];
+                typeArgs[0] = typeNameStr;
+                IntPtr typeObj = auraMonoRuntimeInvoke(this.auraMonoTypeGetTypeMethodPtr, IntPtr.Zero, (IntPtr)typeArgs, ref exc);
+                if (exc == IntPtr.Zero && typeObj != IntPtr.Zero)
+                {
+                    this.warehouseAuraBagPanelTypeObj = typeObj;
+                    return typeObj;
+                }
+            }
+
+            return IntPtr.Zero;
         }
 
         // ─────────────────────────────────────────────────────────────────
@@ -45070,6 +45581,52 @@ namespace HeartopiaMod
             return false;
         }
 
+        internal Type ModFindLoadedType(params string[] names) => this.FindLoadedType(names);
+
+        internal bool ModTryGetObjectMember(object instance, string memberName, out object value) =>
+            this.TryGetObjectMember(instance, memberName, out value);
+
+        internal bool ModTrySetObjectMember(object instance, string memberName, object value) =>
+            this.TrySetObjectMember(instance, memberName, value);
+
+        internal bool ModTryGetManagedSelfPlayerObject(out object playerObj, out string source) =>
+            this.TryGetManagedSelfPlayerObject(out playerObj, out source);
+
+        internal bool ModTryInvokeInstanceMethod(object instance, string methodName, params object[] args)
+        {
+            if (instance == null || string.IsNullOrEmpty(methodName))
+            {
+                return false;
+            }
+
+            try
+            {
+                Type type = instance.GetType();
+                MethodInfo method = type.GetMethod(
+                    methodName,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    null,
+                    args == null || args.Length == 0 ? Type.EmptyTypes : args.Select(a => a?.GetType() ?? typeof(object)).ToArray(),
+                    null);
+                if (method == null && (args == null || args.Length == 0))
+                {
+                    method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                }
+
+                if (method == null)
+                {
+                    return false;
+                }
+
+                method.Invoke(instance, args);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private bool TrySetObjectMember(object instance, string memberName, object value)
         {
             if (instance == null)
@@ -59379,7 +59936,7 @@ namespace HeartopiaMod
 
             num += (int)languagePanel.height + (int)sectionGap;
 
-            Rect behaviorPanel = new Rect(left, (float)num, contentWidth, this.customDisplayIdEnabled ? 314f : 276f);
+            Rect behaviorPanel = new Rect(left, (float)num, contentWidth, this.customDisplayIdEnabled ? 344f : 306f);
             this.DrawExentriSectionPanel(behaviorPanel, accent, panelFill, panelLine);
             GUI.Label(new Rect(behaviorPanel.x + 14f, behaviorPanel.y + 12f, behaviorPanel.width - 28f, 18f), this.L("BEHAVIOR"), subHeaderStyle);
 
@@ -59504,6 +60061,33 @@ namespace HeartopiaMod
                 else
                 {
                     this.AddMenuNotification(this.L("Block Input Disabled"), new Color(0.88f, 0.6f, 0.6f));
+                }
+            }
+
+            rowY += 30f;
+            bool newWarehouseBypass = this.DrawSwitchToggle(new Rect(behaviorPanel.x + 16f, rowY, behaviorPanel.width - 32f, rowHeight), this.warehouseBypassEnabled, "Warehouse Anywhere");
+            if (newWarehouseBypass != this.warehouseBypassEnabled)
+            {
+                this.warehouseBypassEnabled = newWarehouseBypass;
+                WarehouseBypassFeature.ResetState();
+                this.warehouseMonoTabGiveUp = false;
+                this.warehouseMonoTabNextAttemptAt = -999f;
+                this.warehouseMonoTabUnlockCommitted = false;
+                this.warehouseMonoTabUnlockedLogged = false;
+                this.warehouseMonoMoveButtonLogged = false;
+                this.warehouseBagOpenBypassCacheFrame = -1;
+                if (!this.warehouseBypassEnabled)
+                {
+                    this.warehouseAuraBagPanelTypeObj = IntPtr.Zero;
+                }
+                this.SaveKeybinds(false);
+                if (this.warehouseBypassEnabled)
+                {
+                    this.AddMenuNotification(this.L("Warehouse Anywhere Enabled"), new Color(0.55f, 0.88f, 1f));
+                }
+                else
+                {
+                    this.AddMenuNotification(this.L("Warehouse Anywhere Disabled"), new Color(0.88f, 0.6f, 0.6f));
                 }
             }
 
@@ -60330,6 +60914,7 @@ namespace HeartopiaMod
 
         // Token: 0x04000003 RID: 3
         private new static HarmonyLib.Harmony harmonyInstance;
+        internal static HarmonyLib.Harmony ModHarmony => harmonyInstance;
 
         // Token: 0x04000004 RID: 4
         public static bool OverridePlayerPosition;
@@ -61456,6 +62041,8 @@ namespace HeartopiaMod
         private bool birdFarmMaxPhotoPatchApplied = false;
         private bool birdFarmMaxPhotoPatchUnavailableLogged = false;
         private float nextBirdFarmMaxPhotoPatchAttemptAt = -999f;
+        private bool warehouseBypassEnabled = false;
+        internal bool WarehouseBypassEnabled => this.warehouseBypassEnabled;
         // Stranger Chat Bypass
         private bool strangerChatBypassEnabled = false;
         private bool strangerChatBypassPatchApplied = false;

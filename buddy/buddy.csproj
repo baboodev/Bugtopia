@@ -187,6 +187,7 @@
     <Compile Include="PuzzleNetFeature.cs" />
     <Compile Include="TransformPositionPatch.cs" />
     <Compile Include="TransformRotationPatch.cs" />
+    <Compile Include="WarehouseBypassFeature.cs" />
   </ItemGroup>
 
   <ItemGroup>
