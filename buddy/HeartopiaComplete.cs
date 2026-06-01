@@ -53070,6 +53070,10 @@ namespace HeartopiaMod
             {
                 assemblies = new[] { "XDTGameSystem", "XDTGameSystem.dll", "Client", "Client.dll" };
             }
+            else if (fullTypeName.StartsWith("XDTGame.UI.", StringComparison.Ordinal))
+            {
+                assemblies = new[] { "XDTGameUI", "XDTGameUI.dll", "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" };
+            }
             else if (fullTypeName.StartsWith("XDTLevelAndEntity.", StringComparison.Ordinal))
             {
                 assemblies = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" };
@@ -53124,7 +53128,11 @@ namespace HeartopiaMod
             {
                 imageNames = new[] { "XDTGameSystem", "XDTGameSystem.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
             }
-            else if (!string.IsNullOrEmpty(nameSpace) && (nameSpace.StartsWith("XDTLevelAndEntity", StringComparison.Ordinal) || nameSpace.StartsWith("XDTGame.UI", StringComparison.Ordinal)))
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTGame.UI", StringComparison.Ordinal))
+            {
+                imageNames = new[] { "XDTGameUI", "XDTGameUI.dll", "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
+            }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTLevelAndEntity", StringComparison.Ordinal))
             {
                 imageNames = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
             }
@@ -53148,6 +53156,7 @@ namespace HeartopiaMod
             {
                 imageNames = new[]
                 {
+                    "XDTGameUI", "XDTGameUI.dll",
                     "XDTGameSystem", "XDTGameSystem.dll",
                     "XDTLevelAndEntity", "XDTLevelAndEntity.dll",
                     "XDTBaseService", "XDTBaseService.dll",
