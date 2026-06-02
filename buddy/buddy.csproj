@@ -178,6 +178,7 @@
     <Compile Include="InputGetKeyUpStringPatch.cs" />
     <Compile Include="InsectNetFarm.cs" />
     <Compile Include="LocalizationManager.cs" />
+    <Compile Include="LodSettingsFeature.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />

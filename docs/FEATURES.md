@@ -349,6 +349,7 @@ Sections typically include:
 | Localization | Language: en, es, zh-CN, pt-BR |
 | Notifications | Enable, screen position (9 positions) |
 | Overlay | Status overlay toggle |
+| Performance | FPS bypass; LOD override (game default / better / performance / custom bias & max level) |
 | Misc | Restore defaults, export-related options |
 
 Config persisted to `%LocalLow%/HelperSettings/Config.xml` (XML serialized `UnifiedConfigData`).

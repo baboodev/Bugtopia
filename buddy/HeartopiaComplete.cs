@@ -344,6 +344,9 @@ namespace HeartopiaMod
             public float gameSpeed;
             public bool fpsBypassEnabled;
             public int fpsBypassTarget;
+            public int lodOverrideMode;
+            public float lodCustomBias;
+            public int lodCustomMaxLevel;
             public bool customCameraFOVEnabled;
             public float cameraFOV;
             public float snowClickInterval;
@@ -902,6 +905,9 @@ namespace HeartopiaMod
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
             data.fpsBypassTarget = this.fpsBypassTarget;
+            data.lodOverrideMode = this.lodOverrideMode;
+            data.lodCustomBias = this.lodCustomBias;
+            data.lodCustomMaxLevel = this.lodCustomMaxLevel;
             data.customCameraFOVEnabled = this.customCameraFOVEnabled;
             data.cameraFOV = this.cameraFOV;
             data.snowClickInterval = this.snowClickInterval;
@@ -1014,6 +1020,10 @@ namespace HeartopiaMod
             this.gameSpeed = data.gameSpeed;
             this.fpsBypassEnabled = data.fpsBypassEnabled;
             this.fpsBypassTarget = Mathf.Clamp(data.fpsBypassTarget <= 0 ? 144 : data.fpsBypassTarget, 30, 360);
+            this.lodOverrideMode = Mathf.Clamp(data.lodOverrideMode, 0, 3);
+            this.lodCustomBias = Mathf.Clamp(data.lodCustomBias <= 0f ? 1f : data.lodCustomBias, 0.25f, 4f);
+            this.lodCustomMaxLevel = Mathf.Clamp(data.lodCustomMaxLevel, 0, 4);
+            this.SyncLodOverrideAfterConfigLoad();
             this.customCameraFOVEnabled = data.customCameraFOVEnabled;
             this.cameraFOV = data.cameraFOV;
             this.snowClickInterval = data.snowClickInterval;
@@ -1327,6 +1337,9 @@ namespace HeartopiaMod
                         else if (line.Contains("gameSpeed")) this.gameSpeed = GetJsonFloat(line, "\"gameSpeed\":");
                         else if (line.Contains("fpsBypassEnabled")) this.fpsBypassEnabled = GetJsonInt(line, "\"fpsBypassEnabled\":") != 0;
                         else if (line.Contains("fpsBypassTarget")) this.fpsBypassTarget = Mathf.Clamp(GetJsonInt(line, "\"fpsBypassTarget\":"), 30, 360);
+                        else if (line.Contains("lodOverrideMode")) this.lodOverrideMode = Mathf.Clamp(GetJsonInt(line, "\"lodOverrideMode\":"), 0, 3);
+                        else if (line.Contains("lodCustomBias")) this.lodCustomBias = Mathf.Clamp(GetJsonFloat(line, "\"lodCustomBias\":"), 0.25f, 4f);
+                        else if (line.Contains("lodCustomMaxLevel")) this.lodCustomMaxLevel = Mathf.Clamp(GetJsonInt(line, "\"lodCustomMaxLevel\":"), 0, 4);
                         else if (line.Contains("customCameraFOVEnabled")) this.customCameraFOVEnabled = GetJsonInt(line, "\"customCameraFOVEnabled\":") != 0;
                         else if (line.Contains("cameraFOV")) this.cameraFOV = GetJsonFloat(line, "\"cameraFOV\":");
                         else if (line.Contains("snowClickInterval")) this.snowClickInterval = GetJsonFloat(line, "\"snowClickInterval\":");
@@ -1380,6 +1393,7 @@ namespace HeartopiaMod
                         else if (line.Contains("collectBurdock")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectBurdock\":") != 0);
                         else if (line.Contains("collectMustardGreens")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectMustardGreens\":") != 0);
                     }
+                    this.SyncLodOverrideAfterConfigLoad();
                     ModLogger.Msg("Keybinds Loaded.");
                     this.AddMenuNotification("Keybinds loaded", new Color(0.55f, 0.88f, 1f));
                 }
@@ -1933,6 +1947,7 @@ namespace HeartopiaMod
                 }
                 this.nextFpsBypassApplyAt = Time.unscaledTime + 0.5f;
             }
+            this.ProcessLodOverrideOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
             bool flag2 = HeartopiaComplete.OverridePlayerPosition && this.teleportFramesRemaining > 0;
@@ -2147,6 +2162,8 @@ namespace HeartopiaMod
                     this.SetGameSpeed(1f);
                     this.fpsBypassEnabled = false;
                     this.ApplyFpsBypass(false);
+                    this.lodOverrideMode = 0;
+                    this.RevertLodOverride();
                     this.StopAllAutoFishing();
                     this.autoResourceFarmEnabled = false;
                     this.autoSellEnabled = false;
@@ -60872,6 +60889,10 @@ namespace HeartopiaMod
                 this.fpsBypassEnabled = false;
                 this.fpsBypassTarget = 144;
                 this.ApplyFpsBypass(false);
+                this.lodOverrideMode = 0;
+                this.lodCustomBias = 1f;
+                this.lodCustomMaxLevel = 0;
+                this.RevertLodOverride();
                 this.showStatusOverlay = false;
                 this.SaveKeybinds(false);
                 this.AddMenuNotification(this.L("Defaults restored (Toggle Menu: Insert)"), new Color(1f, 0.75f, 0.75f));
@@ -61254,7 +61275,8 @@ namespace HeartopiaMod
 
             num += (int)behaviorPanel.height + (int)sectionGap;
 
-            Rect performancePanel = new Rect(left, (float)num, contentWidth, this.fpsBypassEnabled ? 106f : 76f);
+            float performancePanelHeight = 48f + rowHeight + (this.fpsBypassEnabled ? rowHeight : 0f) + this.GetLodSettingsPanelHeight();
+            Rect performancePanel = new Rect(left, (float)num, contentWidth, performancePanelHeight);
             this.DrawExentriSectionPanel(performancePanel, accent, panelFill, panelLine);
             GUI.Label(new Rect(performancePanel.x + 14f, performancePanel.y + 12f, performancePanel.width - 28f, 18f), this.L("PERFORMANCE"), subHeaderStyle);
 
@@ -61273,9 +61295,9 @@ namespace HeartopiaMod
                     this.fpsBypassEnabled ? new Color(0.55f, 0.88f, 1f) : new Color(0.88f, 0.6f, 0.6f));
             }
 
+            rowY += 30f;
             if (this.fpsBypassEnabled)
             {
-                rowY += 36f;
                 GUI.Label(new Rect(performancePanel.x + 16f, rowY, 180f, 20f), this.LF("Target Max FPS: {0}", this.fpsBypassTarget), rowLabelStyle);
                 int newFpsTarget = Mathf.RoundToInt(this.DrawAccentSlider(new Rect(performancePanel.x + 200f, rowY, performancePanel.width - 230f, 20f), (float)this.fpsBypassTarget, 30f, 361f));
                 if (newFpsTarget != this.fpsBypassTarget)
@@ -61285,7 +61307,10 @@ namespace HeartopiaMod
                     this.SaveKeybinds(false);
                 }
 
+                rowY += 30f;
             }
+
+            this.DrawLodSettingsInPerformancePanel(performancePanel, rowY, rowHeight, rowLabelStyle);
 
             num += (int)performancePanel.height + (int)sectionGap;
 
@@ -63816,6 +63841,7 @@ namespace HeartopiaMod
                 patrolCoroutine = null;
             }
             isPatrolActive = false;
+            this.RevertLodOverride();
 
             foreach (Texture2D texture in this.themeTextures)
             {
