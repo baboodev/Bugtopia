@@ -222,8 +222,11 @@ Orphan `.cs` files in `buddy/` (legacy fish, ECS dump, etc.) are **not** in the 
 | Both loaders installed | Remove one; conflicts are likely |
 | Menu won't open | Check keybind in Settings (default Insert) |
 | Harmony `[ERR]` lines | Game update broke patches — rebuild against new interop |
+| Feature says type `unavailable` / `Null` | See [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md); enter world, check probe logs, verify names in ILSpy |
 | Auto fishing inactive | Use **Resource Gathering → Fishing** (`AutoFishingFarm`); legacy `AutoFishLogic` is not compiled |
 | BepInEx: no UI | Check `LogOutput.log` and `UserData/helper.log` |
+
+**BepInEx log (Steam default):** `<Game>/BepInEx/LogOutput.log` — e.g. `C:\Program Files (x86)\Steam\steamapps\common\Heartopia\BepInEx\LogOutput.log`
 
 ---
 
@@ -242,3 +245,4 @@ When reporting bugs, include game patch, loader name + version, and git commit.
 
 - [FEATURES.md](./FEATURES.md) — UI and features
 - [TECHNICAL.md](./TECHNICAL.md) — architecture and config schema
+- [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) — runtime type lookup (`FindLoadedType`, SendCommand, Mono)

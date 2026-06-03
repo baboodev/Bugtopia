@@ -143,7 +143,7 @@ Status strings: `IDLE`, `TELEPORTING...`, `GATHERING...`, etc.
 
 Server-command style farming without teleporting to each node:
 
-- Resolves game types at runtime via reflection (`ResourceProtocolManager`, `InteractSystem`, `EntityHelper`, etc.).
+- Resolves game types at runtime via reflection (`ResourceProtocolManager`, `InteractSystem`, `EntityHelper`, etc.). Details: [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md).
 - Sends pick/attack/hit commands for bushes, trees, and stones in radius (~8 m direct scan).
 - Throttled per-target cooldown; merged target cap (32).
 - Toggle independent of teleport foraging; both can conflict — UI warns when radar/foraging preconditions fail.

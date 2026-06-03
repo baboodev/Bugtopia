@@ -78,6 +78,7 @@ namespace HeartopiaMod
         private KeyCode keyAutoDogTrain = KeyCode.None;
         private KeyCode keyFeedAllCats = KeyCode.None;
         private KeyCode keyFeedAllDogs = KeyCode.None;
+        private KeyCode keySpawnBubble = KeyCode.None;
         
         // Key Rebinding State
         private string keyBindingActive = "";
@@ -335,6 +336,7 @@ namespace HeartopiaMod
             public int keyAutoDogTrain;
             public int keyFeedAllCats;
             public int keyFeedAllDogs;
+            public int keySpawnBubble;
             public float noclipSpeed;
             public float noclipBoostMultiplier;
             public float areaLoadDelay;
@@ -351,6 +353,9 @@ namespace HeartopiaMod
             public float cameraFOV;
             public bool hideJumpButtonEnabled;
             public bool bunnyHopEnabled;
+            public bool fastBubbleGenEnabled;
+            public bool spawnBubbleAtPlayerEnabled;
+            public float bubbleBubblesPerMinute;
             public float snowClickInterval;
             public float sculptIconClickInterval;
             public float cookingAutoSpeed;
@@ -898,6 +903,7 @@ namespace HeartopiaMod
             data.keyAutoDogTrain = (int)this.keyAutoDogTrain;
             data.keyFeedAllCats = (int)this.keyFeedAllCats;
             data.keyFeedAllDogs = (int)this.keyFeedAllDogs;
+            data.keySpawnBubble = (int)this.keySpawnBubble;
             data.noclipSpeed = this.noclipSpeed;
             data.noclipBoostMultiplier = this.noclipBoostMultiplier;
             data.areaLoadDelay = this.areaLoadDelay;
@@ -914,6 +920,9 @@ namespace HeartopiaMod
             data.cameraFOV = this.cameraFOV;
             data.hideJumpButtonEnabled = this.hideJumpButtonEnabled;
             data.bunnyHopEnabled = this.bunnyHopEnabled;
+            data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
+            data.spawnBubbleAtPlayerEnabled = this.spawnBubbleAtPlayerEnabled;
+            data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
             data.snowClickInterval = this.snowClickInterval;
             data.sculptIconClickInterval = this.sculptIconClickInterval;
             data.cookingAutoSpeed = this.cookingAutoSpeed;
@@ -1015,6 +1024,7 @@ namespace HeartopiaMod
             this.keyAutoDogTrain = (KeyCode)data.keyAutoDogTrain;
             this.keyFeedAllCats = (KeyCode)data.keyFeedAllCats;
             this.keyFeedAllDogs = (KeyCode)data.keyFeedAllDogs;
+            this.keySpawnBubble = (KeyCode)data.keySpawnBubble;
             this.noclipSpeed = data.noclipSpeed;
             this.noclipBoostMultiplier = data.noclipBoostMultiplier;
             this.areaLoadDelay = data.areaLoadDelay;
@@ -1032,6 +1042,9 @@ namespace HeartopiaMod
             this.cameraFOV = data.cameraFOV;
             this.hideJumpButtonEnabled = data.hideJumpButtonEnabled;
             this.bunnyHopEnabled = data.bunnyHopEnabled;
+            this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
+            this.spawnBubbleAtPlayerEnabled = data.spawnBubbleAtPlayerEnabled;
+            this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
             this.snowClickInterval = data.snowClickInterval;
             this.sculptIconClickInterval = data.sculptIconClickInterval;
             this.cookingAutoSpeed = data.cookingAutoSpeed;
@@ -1332,6 +1345,7 @@ namespace HeartopiaMod
                         else if (line.Contains("keyAutoDogTrain")) this.keyAutoDogTrain = (KeyCode)GetJsonInt(line, "\"keyAutoDogTrain\":");
                         else if (line.Contains("keyFeedAllCats")) this.keyFeedAllCats = (KeyCode)GetJsonInt(line, "\"keyFeedAllCats\":");
                         else if (line.Contains("keyFeedAllDogs")) this.keyFeedAllDogs = (KeyCode)GetJsonInt(line, "\"keyFeedAllDogs\":");
+                        else if (line.Contains("keySpawnBubble")) this.keySpawnBubble = (KeyCode)GetJsonInt(line, "\"keySpawnBubble\":");
                         else if (line.Contains("keyCameraToggle")) this.keyCameraToggle = (KeyCode)GetJsonInt(line, "\"keyCameraToggle\":");
                         else if (line.Contains("keyNoclip")) this.keyNoclip = (KeyCode)GetJsonInt(line, "\"keyNoclip\":");
                         else if (line.Contains("noclipSpeed")) this.noclipSpeed = GetJsonFloat(line, "\"noclipSpeed\":");
@@ -1350,6 +1364,9 @@ namespace HeartopiaMod
                         else if (line.Contains("cameraFOV")) this.cameraFOV = GetJsonFloat(line, "\"cameraFOV\":");
                         else if (line.Contains("hideJumpButtonEnabled")) this.hideJumpButtonEnabled = GetJsonInt(line, "\"hideJumpButtonEnabled\":") != 0;
                         else if (line.Contains("bunnyHopEnabled")) this.bunnyHopEnabled = GetJsonInt(line, "\"bunnyHopEnabled\":") != 0;
+                        else if (line.Contains("fastBubbleGenEnabled")) this.fastBubbleGenEnabled = GetJsonInt(line, "\"fastBubbleGenEnabled\":") != 0;
+                        else if (line.Contains("spawnBubbleAtPlayerEnabled")) this.spawnBubbleAtPlayerEnabled = GetJsonInt(line, "\"spawnBubbleAtPlayerEnabled\":") != 0;
+                        else if (line.Contains("bubbleBubblesPerMinute")) this.bubbleBubblesPerMinute = Mathf.Clamp(GetJsonFloat(line, "\"bubbleBubblesPerMinute\":"), 0f, 100f);
                         else if (line.Contains("snowClickInterval")) this.snowClickInterval = GetJsonFloat(line, "\"snowClickInterval\":");
                         else if (line.Contains("sculptIconClickInterval")) this.sculptIconClickInterval = GetJsonFloat(line, "\"sculptIconClickInterval\":");
             else if (line.Contains("cookingAutoSpeed")) this.cookingAutoSpeed = GetJsonFloat(line, "\"cookingAutoSpeed\":");
@@ -1845,6 +1862,14 @@ namespace HeartopiaMod
             catch
             {
             }
+            try
+            {
+                this.InitializeBubbleFeature();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[ERR] BubbleFeature init failed: " + ex.Message);
+            }
         }
 
         // Token: 0x06000004 RID: 4 RVA: 0x00002390 File Offset: 0x00000590
@@ -1963,6 +1988,7 @@ namespace HeartopiaMod
             this.ProcessLodOverrideOnUpdate();
             this.ProcessHideJumpButtonOnUpdate();
             this.ProcessBunnyHopOnUpdate();
+            this.ProcessBubbleFeatureOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
             bool flag2 = HeartopiaComplete.OverridePlayerPosition && this.teleportFramesRemaining > 0;
@@ -2134,6 +2160,13 @@ namespace HeartopiaMod
                 if (Input.GetKeyDown(this.keyFeedAllDogs))
                 {
                     this.StartPetFeedAll(true);
+                }
+                if (Input.GetKeyDown(this.keySpawnBubble))
+                {
+                    bool spawned = this.TrySpawnBubbleOnKeybind();
+                    this.AddMenuNotification(
+                        spawned ? "Bubble spawned" : "Bubble spawn failed (enter world / wait for mono hooks)",
+                        spawned ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
                 if (Input.GetKeyDown(this.keyBypassUI))
                 {
@@ -23695,6 +23728,42 @@ namespace HeartopiaMod
                 num += Mathf.CeilToInt(toggleHeight + 8f);
                 toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Bird Vacuum (Client Side)", 25f);
                 this.birdVacuumEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.birdVacuumEnabled, "Bird Vacuum (Client Side)", 25f);
+                num += Mathf.CeilToInt(toggleHeight + 8f);
+                
+                bool prevFastBubbleGen = this.fastBubbleGenEnabled;
+                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Fast Bubble Gen", 25f);
+                this.fastBubbleGenEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.fastBubbleGenEnabled, "Fast Bubble Gen", 25f);
+                if (this.fastBubbleGenEnabled != prevFastBubbleGen)
+                {
+                    this.bubbleSpawnRateAccumulator = 0f;
+                    this.RequestBubbleFeatureImmediateRetry();
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+                num += Mathf.CeilToInt(toggleHeight + 8f);
+
+                if (this.fastBubbleGenEnabled)
+                {
+                    GUI.Label(new Rect(20f, (float)num, 260f, 20f), string.Format("Bubbles per minute: {0:F0}", this.bubbleBubblesPerMinute));
+                    num += 22;
+                    float prevBubbleRate = this.bubbleBubblesPerMinute;
+                    float newBubbleRate = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.bubbleBubblesPerMinute, 0f, 100f);
+                    if (Math.Abs(newBubbleRate - prevBubbleRate) > 0.01f)
+                    {
+                        this.bubbleBubblesPerMinute = Mathf.Clamp(newBubbleRate, 0f, 100f);
+                        this.bubbleSpawnRateAccumulator = 0f;
+                        try { this.SaveKeybinds(false); } catch { }
+                    }
+                    num += 28;
+                }
+                
+                bool prevSpawnBubbleAtPlayer = this.spawnBubbleAtPlayerEnabled;
+                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Spawn Bubble at Player", 25f);
+                this.spawnBubbleAtPlayerEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.spawnBubbleAtPlayerEnabled, "Spawn Bubble at Player", 25f);
+                if (this.spawnBubbleAtPlayerEnabled != prevSpawnBubbleAtPlayer)
+                {
+                    this.RequestBubbleFeatureImmediateRetry();
+                    try { this.SaveKeybinds(false); } catch { }
+                }
                 num += Mathf.CeilToInt(toggleHeight + 10f);
 
                 Rect rect = new Rect(20f, (float)num, 260f, 20f);
@@ -60829,6 +60898,7 @@ namespace HeartopiaMod
                             case "Auto Dog Train": this.keyAutoDogTrain = newKey; break;
                             case "Feed All Cats": this.keyFeedAllCats = newKey; break;
                             case "Feed All Dogs": this.keyFeedAllDogs = newKey; break;
+                            case "Spawn Bubble": this.keySpawnBubble = newKey; break;
                         }
                         this.keyBindingActive = "";
                         this.keyBindAssignedAt = Time.unscaledTime;
@@ -60849,7 +60919,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Inspect Move", ref this.keyInspectMove);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 16, subHeaderStyle, accent, panelFill, panelLine);
+            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 17, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Foraging", ref this.keyAutoForaging);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Aura Farm", ref this.keyAuraFarm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Insect Farm", ref this.keyAutoInsectFarm);
@@ -60862,6 +60932,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Feed All Dogs", ref this.keyFeedAllDogs);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Snow Sculpture", ref this.autoSnowHotkey);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Bird Vacuum", ref this.keyBirdVacuum);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Spawn Bubble", ref this.keySpawnBubble);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Repair", ref this.keyAutoRepair);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Eat", ref this.keyAutoEat);
             num += 14;
@@ -60922,6 +60993,7 @@ namespace HeartopiaMod
                 this.keyAutoDogTrain = KeyCode.None;
                 this.keyFeedAllCats = KeyCode.None;
                 this.keyFeedAllDogs = KeyCode.None;
+                this.keySpawnBubble = KeyCode.None;
                 this.notificationsEnabled = true;
                 this.notificationPosition = 5;
                 this.hideIdEnabled = false;
@@ -62544,6 +62616,9 @@ namespace HeartopiaMod
         private float liveCameraFOVBase = -1f;
         private float lastAppliedCustomCameraFOV = -1f;
         private Camera mainCamera = null;
+        private bool fastBubbleGenEnabled = false;
+        private bool spawnBubbleAtPlayerEnabled = false;
+        private float bubbleBubblesPerMinute = 15f;
 
         // Advanced Cooking Bot Variables
         private bool cookingCleanupMode = false;

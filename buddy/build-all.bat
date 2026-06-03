@@ -2,16 +2,17 @@
 setlocal
 cd /d "%~dp0"
 
-echo Building MelonLoader...
-dotnet build buddy.csproj -c Release -p:Loader=MelonLoader
-if errorlevel 1 exit /b 1
+@rem To compile MelonLoader target, uncomment the lines below:
+@rem echo Building MelonLoader...
+@rem dotnet build buddy.csproj -c Release -p:Loader=MelonLoader
+@rem if errorlevel 1 exit /b 1
+@rem echo.
 
-echo.
 echo Building BepInEx...
 dotnet build buddy.csproj -c Release -p:Loader=BepInEx
 if errorlevel 1 exit /b 1
 
 echo.
 echo Done.
-echo   MelonLoader: bin\MelonLoader\Release\helper.dll  -^> copy to Mods\
+@rem echo   MelonLoader: bin\MelonLoader\Release\helper.dll  -^> copy to Mods\
 echo   BepInEx:     bin\BepInEx\Release\helper.dll      -^> copy to BepInEx\plugins\

@@ -29,6 +29,7 @@ Configure your game path: copy `buddy/Directory.Build.props.example` → `buddy/
 | [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md) | Prerequisites, build, deploy, logs |
 | [docs/FEATURES.md](docs/FEATURES.md) | Menu tabs and features |
 | [docs/TECHNICAL.md](docs/TECHNICAL.md) | Architecture, patches, config |
+| [docs/TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md) | How the mod resolves IL2CPP types (`FindLoadedType`, SendCommand, Mono) |
 
 ## Credits
 

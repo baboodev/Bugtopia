@@ -58,6 +58,9 @@
     <Reference Include="Assembly-CSharp">
       <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Assembly-CSharp.dll</HintPath>
     </Reference>
+    <Reference Include="Il2CppClient">
+      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Il2CppClient.dll</HintPath>
+    </Reference>
     <Reference Include="Il2Cppmscorlib">
       <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Il2Cppmscorlib.dll</HintPath>
     </Reference>
@@ -117,6 +120,9 @@
     </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>$(HeartopiaDir)\BepInEx\interop\Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="Client">
+      <HintPath>$(HeartopiaDir)\BepInEx\interop\Client.dll</HintPath>
     </Reference>
     <Reference Include="Il2Cppmscorlib">
       <HintPath>$(HeartopiaDir)\BepInEx\interop\Il2Cppmscorlib.dll</HintPath>
@@ -181,6 +187,8 @@
     <Compile Include="LodSettingsFeature.cs" />
     <Compile Include="HideJumpButtonFeature.cs" />
     <Compile Include="BunnyHopFeature.cs" />
+    <Compile Include="BubbleFeature.cs" />
+    <Compile Include="BubbleMonoNativeHook.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />

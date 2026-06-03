@@ -300,6 +300,15 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void MonoRuntimeObjectInitDelegate(IntPtr obj);
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void MonoCompileMethodDelegate(IntPtr method);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr MonoMethodGetUnmanagedThunkDelegate(IntPtr method);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr MonoMethodGetUnmanagedDelegate(IntPtr method);
+
         private static MonoGetRootDomainDelegate auraMonoGetRootDomain;
         private static MonoThreadAttachDelegate auraMonoThreadAttach;
         private static MonoImageLoadedDelegate auraMonoImageLoaded;
@@ -335,6 +344,9 @@ namespace HeartopiaMod
         private static MonoFieldStaticGetValueDelegate auraMonoFieldStaticGetValue;
         private static MonoObjectNewDelegate auraMonoObjectNew;
         private static MonoRuntimeObjectInitDelegate auraMonoRuntimeObjectInit;
+        private static MonoCompileMethodDelegate auraMonoCompileMethod;
+        private static MonoMethodGetUnmanagedThunkDelegate auraMonoMethodGetUnmanagedThunk;
+        private static MonoMethodGetUnmanagedDelegate auraMonoMethodGetUnmanaged;
 
         private IntPtr auraMonoTypeGetTypeMethodPtr = IntPtr.Zero;
         private IntPtr auraMonoActivatorCreateInstanceMethodPtr = IntPtr.Zero;
@@ -4124,6 +4136,9 @@ namespace HeartopiaMod
             auraMonoFieldStaticGetValue = this.GetAuraMonoExport<MonoFieldStaticGetValueDelegate>(monoModule, "mono_field_static_get_value");
             auraMonoObjectNew = this.GetAuraMonoExport<MonoObjectNewDelegate>(monoModule, "mono_object_new");
             auraMonoRuntimeObjectInit = this.GetAuraMonoExport<MonoRuntimeObjectInitDelegate>(monoModule, "mono_runtime_object_init");
+            auraMonoCompileMethod = this.GetAuraMonoExport<MonoCompileMethodDelegate>(monoModule, "mono_compile_method");
+            auraMonoMethodGetUnmanagedThunk = this.GetAuraMonoExport<MonoMethodGetUnmanagedThunkDelegate>(monoModule, "mono_method_get_unmanaged_thunk");
+            auraMonoMethodGetUnmanaged = this.GetAuraMonoExport<MonoMethodGetUnmanagedDelegate>(monoModule, "mono_method_get_unmanaged");
 
             this.auraMonoApiReady = auraMonoGetRootDomain != null
                 && auraMonoThreadAttach != null

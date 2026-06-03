@@ -47,7 +47,7 @@ flowchart TB
 - **Monolithic core:** ~59,000 lines in `HeartopiaComplete.cs`.
 - **Partial classes:** Farms and features split across files, merged at compile time.
 - **Static farm controllers:** Ticked from `HeartopiaComplete.OnUpdate`.
-- **Runtime reflection:** Game types resolved by name after load.
+- **Runtime reflection:** Game types resolved by name after load (see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md)).
 
 ---
 
@@ -255,11 +255,9 @@ Reflection / Il2Cpp calls on `HeartopiaComplete` (representative):
 
 ### Method resolution
 
-`ResolveAuraFarmRuntimeMethods()` scans loaded assemblies matching fragments:
+Uses the Aura-specific pipeline documented in [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md): `FindTypeByName` → `FindTypeBySignature` → optional **Mono** `mono_runtime_invoke`.
 
-`Assembly-CSharp`, `Il2CppAssembly-CSharp`, `XDT`, `Game`
-
-Excluded: Unity, System, MelonLoader, Harmony, etc.
+Preferred assembly name fragments: `Assembly-CSharp`, `Il2CppAssembly-CSharp`, `XDT`, `Game`. Excluded: Unity, System, MelonLoader, Harmony, etc.
 
 Caches `MethodInfo` / `FieldInfo` for:
 
@@ -428,6 +426,8 @@ Uses Windows known folder GUID `A520A1A4-1780-4FF6-BD18-167343C5AF16` (LocalLow)
 - Game objects often accessed via `GameObject.Find` with full hierarchy paths — fragile across patches.
 - Player object frequently resolved as `p_player_skeleton(Clone)`.
 
+**Type and method resolution** (`FindLoadedType`, network commands, Harmony targets, Mono fallback, pitfalls): see **[TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md)**.
+
 ---
 
 ## UI Implementation
@@ -511,7 +511,7 @@ Recommended workflow:
 1. Launch game with your loader; check which Harmony patches fail.
 2. Regenerate interop (MelonLoader Il2CppAssemblies or BepInEx interop) after game updates.
 3. Rebuild both targets: `build-all.bat` or `-p:Loader=...` for the loader you use.
-4. For aura/fish/insect/bird: enable `MasterLog*` flags, fix reflection type names if needed.
+4. For aura/fish/insect/bird: enable `MasterLog*` flags; fix type names per [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md).
 5. For bag/UI automation: verify UI hierarchy paths still exist.
 6. Test in a private town, one feature at a time.
 
@@ -530,3 +530,4 @@ Recommended workflow:
 
 - [BUILD_AND_RUN.md](./BUILD_AND_RUN.md)
 - [FEATURES.md](./FEATURES.md)
+- [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) — how the mod finds game types at runtime
