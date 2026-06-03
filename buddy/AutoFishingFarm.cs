@@ -369,6 +369,7 @@ namespace HeartopiaMod
             {
                 lastTargetStatus = "Range updated";
                 Log("Detect range changed to " + fishShadowDetectRange.ToString("F0") + "m");
+                try { host.UI_SaveKeybinds(false); } catch { }
             }
             num += 30;
 

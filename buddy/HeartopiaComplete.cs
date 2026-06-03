@@ -935,7 +935,7 @@ namespace HeartopiaMod
             data.netCookMiniGameOnly = this.netCookMiniGameOnly;
             data.autoFishScanTimeout = -1f;
             data.autoFishTeleportDelay = -1f;
-            data.autoFishFishShadowDetectRange = -1f;
+            data.autoFishFishShadowDetectRange = AutoFishingFarm.GetDetectRange();
             data.autoFishReelMaxDuration = -1f;
             data.autoFishReelHoldDuration = -1f;
             data.autoFishReelPauseDuration = -1f;
@@ -1069,6 +1069,10 @@ namespace HeartopiaMod
             if (data.insectScanRange > 0f)
             {
                 InsectNetFarm.SetScanRange(data.insectScanRange);
+            }
+            if (data.autoFishFishShadowDetectRange > 0f)
+            {
+                AutoFishingFarm.SetDetectRange(data.autoFishFishShadowDetectRange);
             }
             if (data.insectBatchSize > 0)
             {
@@ -1381,7 +1385,7 @@ namespace HeartopiaMod
             else if (line.Contains("netCookMiniGameOnly")) this.netCookMiniGameOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMiniGameOnly\":") != 0;
             else if (line.Contains("autoFishScanTimeout")) this.saved_autoFishScanTimeout = GetJsonFloat(line, "\"autoFishScanTimeout\":");
                         else if (line.Contains("autoFishTeleportDelay")) this.saved_autoFishTeleportDelay = GetJsonFloat(line, "\"autoFishTeleportDelay\":");
-                        else if (line.Contains("autoFishFishShadowDetectRange")) this.saved_autoFishFishShadowDetectRange = GetJsonFloat(line, "\"autoFishFishShadowDetectRange\":");
+                        else if (line.Contains("autoFishFishShadowDetectRange")) AutoFishingFarm.SetDetectRange(GetJsonFloat(line, "\"autoFishFishShadowDetectRange\":"));
                         else if (line.Contains("autoFishReelMaxDuration")) this.saved_autoFishReelMaxDuration = GetJsonFloat(line, "\"autoFishReelMaxDuration\":");
                         else if (line.Contains("autoFishReelHoldDuration")) this.saved_autoFishReelHoldDuration = GetJsonFloat(line, "\"autoFishReelHoldDuration\":");
                         else if (line.Contains("autoFishReelPauseDuration")) this.saved_autoFishReelPauseDuration = GetJsonFloat(line, "\"autoFishReelPauseDuration\":");
