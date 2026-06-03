@@ -1,9 +1,7 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
-#if BEPINEX
 using Il2CppInterop.Runtime.Runtime;
-#endif
 using System;
 using System.IO;
 using System.Collections;
@@ -55015,7 +55013,6 @@ namespace HeartopiaMod
             }
         }
 
-#if BEPINEX
         private unsafe bool TryResolveBattlePassCurrencyIl2Cpp(int periodId, out int currencyId, out string status)
         {
             currencyId = 0;
@@ -55079,7 +55076,6 @@ namespace HeartopiaMod
             status = "IL2CPP periodId=" + periodId + " currency=" + currencyId;
             return true;
         }
-#endif
 
         private bool TryResolveBattlePassPeriodCurrencyIdAura(out int currencyId, out string status)
         {
@@ -55230,7 +55226,6 @@ namespace HeartopiaMod
 
 
 
-#if BEPINEX
         private static readonly Dictionary<string, IntPtr> autoSellIl2CppClassCache = new Dictionary<string, IntPtr>(StringComparer.Ordinal);
 
         private unsafe IntPtr TryFindIl2CppClass(string className, params string[] nameSpaces)
@@ -55376,9 +55371,6 @@ namespace HeartopiaMod
             IL2CPP.il2cpp_field_get_value(obj, field, &value);
             return value;
         }
-
-
-#endif
 
 
 
