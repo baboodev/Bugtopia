@@ -180,6 +180,7 @@
     <Compile Include="LocalizationManager.cs" />
     <Compile Include="LodSettingsFeature.cs" />
     <Compile Include="HideJumpButtonFeature.cs" />
+    <Compile Include="BunnyHopFeature.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />

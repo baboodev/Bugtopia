@@ -350,6 +350,7 @@ namespace HeartopiaMod
             public bool customCameraFOVEnabled;
             public float cameraFOV;
             public bool hideJumpButtonEnabled;
+            public bool bunnyHopEnabled;
             public float snowClickInterval;
             public float sculptIconClickInterval;
             public float cookingAutoSpeed;
@@ -912,6 +913,7 @@ namespace HeartopiaMod
             data.customCameraFOVEnabled = this.customCameraFOVEnabled;
             data.cameraFOV = this.cameraFOV;
             data.hideJumpButtonEnabled = this.hideJumpButtonEnabled;
+            data.bunnyHopEnabled = this.bunnyHopEnabled;
             data.snowClickInterval = this.snowClickInterval;
             data.sculptIconClickInterval = this.sculptIconClickInterval;
             data.cookingAutoSpeed = this.cookingAutoSpeed;
@@ -1029,6 +1031,7 @@ namespace HeartopiaMod
             this.customCameraFOVEnabled = data.customCameraFOVEnabled;
             this.cameraFOV = data.cameraFOV;
             this.hideJumpButtonEnabled = data.hideJumpButtonEnabled;
+            this.bunnyHopEnabled = data.bunnyHopEnabled;
             this.snowClickInterval = data.snowClickInterval;
             this.sculptIconClickInterval = data.sculptIconClickInterval;
             this.cookingAutoSpeed = data.cookingAutoSpeed;
@@ -1346,6 +1349,7 @@ namespace HeartopiaMod
                         else if (line.Contains("customCameraFOVEnabled")) this.customCameraFOVEnabled = GetJsonInt(line, "\"customCameraFOVEnabled\":") != 0;
                         else if (line.Contains("cameraFOV")) this.cameraFOV = GetJsonFloat(line, "\"cameraFOV\":");
                         else if (line.Contains("hideJumpButtonEnabled")) this.hideJumpButtonEnabled = GetJsonInt(line, "\"hideJumpButtonEnabled\":") != 0;
+                        else if (line.Contains("bunnyHopEnabled")) this.bunnyHopEnabled = GetJsonInt(line, "\"bunnyHopEnabled\":") != 0;
                         else if (line.Contains("snowClickInterval")) this.snowClickInterval = GetJsonFloat(line, "\"snowClickInterval\":");
                         else if (line.Contains("sculptIconClickInterval")) this.sculptIconClickInterval = GetJsonFloat(line, "\"sculptIconClickInterval\":");
             else if (line.Contains("cookingAutoSpeed")) this.cookingAutoSpeed = GetJsonFloat(line, "\"cookingAutoSpeed\":");
@@ -1818,7 +1822,12 @@ namespace HeartopiaMod
                     }
                 };
 
-                ModLogger.Msg("AutoFish input patch registration skipped.");
+                patchInputPostfix("GetKey", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyPatch), "Input.GetKey F");
+                patchInputPostfix("GetKey", new Type[] { typeof(string) }, typeof(InputGetKeyStringPatch), "Input.GetKey string F");
+                patchInputPostfix("GetKeyDown", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyDownPatch), "Input.GetKeyDown F");
+                patchInputPostfix("GetKeyDown", new Type[] { typeof(string) }, typeof(InputGetKeyDownStringPatch), "Input.GetKeyDown string F");
+                patchInputPostfix("GetKeyUp", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyUpPatch), "Input.GetKeyUp F");
+                patchInputPostfix("GetKeyUp", new Type[] { typeof(string) }, typeof(InputGetKeyUpStringPatch), "Input.GetKeyUp string F");
             }
             catch (Exception ex5)
             {
@@ -1953,6 +1962,7 @@ namespace HeartopiaMod
             }
             this.ProcessLodOverrideOnUpdate();
             this.ProcessHideJumpButtonOnUpdate();
+            this.ProcessBunnyHopOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
             bool flag2 = HeartopiaComplete.OverridePlayerPosition && this.teleportFramesRemaining > 0;
@@ -23670,6 +23680,19 @@ namespace HeartopiaMod
                     try { this.SaveKeybinds(false); } catch { }
                 }
                 num += Mathf.CeilToInt(toggleHeight + 8f);
+                bool prevBunnyHop = this.bunnyHopEnabled;
+                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Bunny Hop (hold Space)", 25f);
+                this.bunnyHopEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.bunnyHopEnabled, "Bunny Hop (hold Space)", 25f);
+                if (this.bunnyHopEnabled != prevBunnyHop)
+                {
+                    if (!this.bunnyHopEnabled)
+                    {
+                        this.ResetBunnyHopState();
+                    }
+
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+                num += Mathf.CeilToInt(toggleHeight + 8f);
                 toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Bird Vacuum (Client Side)", 25f);
                 this.birdVacuumEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.birdVacuumEnabled, "Bird Vacuum (Client Side)", 25f);
                 num += Mathf.CeilToInt(toggleHeight + 10f);
@@ -23724,6 +23747,8 @@ namespace HeartopiaMod
                     this.bypassEnabled = false;
                     this.hideJumpButtonEnabled = false;
                     this.cachedJumpButtonGo = null;
+                    this.bunnyHopEnabled = false;
+                    this.ResetBunnyHopState();
                     this.birdVacuumEnabled = false;
                     this.antiAfkEnabled = false;
                     this.antiAfkMouseDownClearAt = 0f;
