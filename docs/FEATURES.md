@@ -13,6 +13,7 @@ Complete feature catalog for **Heartopia Helper**. Works identically under Melon
 | 0 | **Self** | Player movement, camera, AFK, building overlap bypass |
 | 2 | **Resource Gathering** | Foraging, chop/mine, fishing, insects, birds |
 | 3 | **Features** | Automation utilities (food, repair, shops, cooking, puzzle, pets) |
+| 8 | **New Features** | Experimental utilities (animal care) |
 | 4 | **Radar** | World resource radar + visual ESP |
 | 5 | **Teleport** | Fast travel, NPCs, events, custom points |
 | 6 | **Bag / Warehouse** | Backpack ↔ warehouse transfer via `BackPackSystem` / `MoveBatchBackpackItems` |
@@ -51,6 +52,12 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Mass Cook | Network cooking at patrol points |
 | Puzzle | Auto puzzle solver |
 | Pet Care | Feed all pets, auto cat play, auto dog train |
+
+**New Features**
+
+| Sub-tab | Content |
+|---------|---------|
+| Animal Care | Wild animal trough feed (manual), claim all wild animal gifts |
 
 **Teleport**
 

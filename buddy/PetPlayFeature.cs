@@ -39,7 +39,7 @@ namespace HeartopiaMod
 
         private float DrawPetPlayTab(int startY)
         {
-            int num = startY;
+            float num = startY;
             const float left = 40f;
             const float width = 520f;
 

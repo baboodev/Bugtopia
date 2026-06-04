@@ -121,6 +121,8 @@ namespace HeartopiaMod
 #endif
         private const bool MasterLogPetPlay = false;
         private const bool MasterLogPetFeed = false;
+        private const bool MasterLogWildAnimalFeed = false;
+        private const bool MasterLogWildAnimalGift = false;
         private const bool MasterLogStrangerChat = false;
 
         private void AutoFishLog(string message)
@@ -2241,6 +2243,7 @@ namespace HeartopiaMod
                     this.puzzleAutoEnabled = false;
                     this.petPlayAutoCatEnabled = false;
                     this.petPlayAutoDogEnabled = false;
+                    this.StopWildAnimalFeedCoroutine();
                     SimulateFKeyHeld = false;
                     SimulateFKeyDown = false;
                     SimulateFKeyUp = false;
@@ -2826,15 +2829,17 @@ namespace HeartopiaMod
                 new Rect(navListRect.x, navListRect.y + 168f, navListRect.width, 40f),
                 new Rect(navListRect.x, navListRect.y + 224f, navListRect.width, 40f),
                 new Rect(navListRect.x, navListRect.y + 280f, navListRect.width, 40f),
-                new Rect(navListRect.x, navListRect.y + 336f, navListRect.width, 40f)
+                new Rect(navListRect.x, navListRect.y + 336f, navListRect.width, 40f),
+                new Rect(navListRect.x, navListRect.y + 392f, navListRect.width, 40f)
             };
             this.DrawSidebarTabButton(sidebarButtonRects[0], "Self", 0);
             this.DrawSidebarTabButton(sidebarButtonRects[1], "Resource Gathering", 2);
             this.DrawSidebarTabButton(sidebarButtonRects[2], "Features", 3);
-            this.DrawSidebarTabButton(sidebarButtonRects[3], "Radar", 4);
-            this.DrawSidebarTabButton(sidebarButtonRects[4], "Teleport", 5);
-            this.DrawSidebarTabButton(sidebarButtonRects[5], "Bag / Warehouse", 6);
-            this.DrawSidebarTabButton(sidebarButtonRects[6], "Settings", 7);
+            this.DrawSidebarTabButton(sidebarButtonRects[3], "New Features", 8);
+            this.DrawSidebarTabButton(sidebarButtonRects[4], "Radar", 4);
+            this.DrawSidebarTabButton(sidebarButtonRects[5], "Teleport", 5);
+            this.DrawSidebarTabButton(sidebarButtonRects[6], "Bag / Warehouse", 6);
+            this.DrawSidebarTabButton(sidebarButtonRects[7], "Settings", 7);
 
             var subTabs = this.GetActiveTopSubTabs();
             if (subTabs.Count > 0)
@@ -2929,6 +2934,7 @@ namespace HeartopiaMod
                 if (this.selectedTab == 0) calculatedHeight = this.DrawSelfTab(contentY);
                 else if (this.selectedTab == 2) calculatedHeight = this.DrawAutoFarmTab(contentY);
                 else if (this.selectedTab == 3) calculatedHeight = this.DrawAutomationTab(contentY);
+                else if (this.selectedTab == 8) calculatedHeight = this.DrawNewFeaturesTab(contentY);
                 else if (this.selectedTab == 4) calculatedHeight = this.DrawRadarTab(contentY);
                 else if (this.selectedTab == 5) calculatedHeight = this.DrawTeleportTab(contentY);
                 else if (this.selectedTab == 6) calculatedHeight = this.DrawBulkSelectorTab(contentY);
@@ -3044,6 +3050,10 @@ namespace HeartopiaMod
             if (this.selectedTab == 3)
             {
                 return this.CalculateFeaturesTabHeight();
+            }
+            if (this.selectedTab == 8)
+            {
+                return this.CalculateNewFeaturesTabHeight();
             }
             if (this.selectedTab == 4)
             {
@@ -3180,6 +3190,11 @@ namespace HeartopiaMod
             if (this.automationSubTab == 6)
             {
                 return 620f;
+            }
+
+            if (this.automationSubTab == 7)
+            {
+                return 820f;
             }
 
             return 900f;
@@ -17720,6 +17735,7 @@ namespace HeartopiaMod
             if (this.selectedTab == 0) return this.L("Self");
             if (this.selectedTab == 2) return this.L("Resource Gathering");
             if (this.selectedTab == 3) return this.L("Features");
+            if (this.selectedTab == 8) return this.L("New Features");
             if (this.selectedTab == 4) return this.L("Radar");
             if (this.selectedTab == 5) return this.L("Teleport");
             if (this.selectedTab == 6) return this.L("Bag / Warehouse");
@@ -23084,6 +23100,10 @@ namespace HeartopiaMod
                 tabs.Add(("Mass Cook", () => this.automationSubTab == 5, () => this.SetAutomationSubTab(5)));
                 tabs.Add(("Puzzle", () => this.automationSubTab == 6, () => this.SetAutomationSubTab(6)));
                 tabs.Add(("Pet Care", () => this.automationSubTab == 7, () => this.SetAutomationSubTab(7)));
+            }
+            else if (this.selectedTab == 8)
+            {
+                tabs.Add(("Animal Care", () => this.newFeaturesSubTab == 0, () => this.SetNewFeaturesSubTab(0)));
             }
             else if (this.selectedTab == 4)
             {
@@ -47433,6 +47453,11 @@ namespace HeartopiaMod
             Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
             foreach (string text in names)
             {
+                if (string.IsNullOrEmpty(text))
+                {
+                    continue;
+                }
+
                 Type type = Type.GetType(text, false);
                 if (type != null)
                 {
@@ -47484,6 +47509,11 @@ namespace HeartopiaMod
                     {
                         foreach (string text2 in names)
                         {
+                            if (string.IsNullOrEmpty(text2))
+                            {
+                                continue;
+                            }
+
                             if (string.Equals(type3.FullName, text2, StringComparison.Ordinal) || string.Equals(type3.Name, text2, StringComparison.Ordinal))
                             {
                                 if (!string.IsNullOrEmpty(cacheKey))
