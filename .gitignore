@@ -6,6 +6,8 @@ tools/bin
 tools/cpp2il_out
 tools/reports
 tools/ilspy-verify
+tools/InspectIl2Cpp
+tools/PeekDll
 .cursor
 ilspy-dumps
 scratch

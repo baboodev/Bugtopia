@@ -22,6 +22,11 @@ namespace HeartopiaMod
                 return this.DrawAnimalCareTab(startY);
             }
 
+            if (this.newFeaturesSubTab == 1)
+            {
+                return this.DrawDailyQuestSubmitControls(startY) + 40f;
+            }
+
             return startY + 40f;
         }
 
@@ -37,6 +42,11 @@ namespace HeartopiaMod
             if (this.newFeaturesSubTab == 0)
             {
                 return 560f;
+            }
+
+            if (this.newFeaturesSubTab == 1)
+            {
+                return 200f;
             }
 
             return 400f;

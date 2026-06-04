@@ -256,6 +256,9 @@ namespace HeartopiaMod
         private delegate IntPtr MonoClassGetTypeDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr MonoClassBindGenericParametersDelegate(IntPtr klass, int paramType, IntPtr types, int typesLen);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoTypeGetObjectDelegate(IntPtr domain, IntPtr type);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -329,6 +332,7 @@ namespace HeartopiaMod
         private static MonoObjectGetClassDelegate auraMonoObjectGetClass;
         private static MonoClassIsValueTypeDelegate auraMonoClassIsValueType;
         private static MonoClassGetTypeDelegate auraMonoClassGetType;
+        private static MonoClassBindGenericParametersDelegate auraMonoClassBindGenericParameters;
         private static MonoTypeGetObjectDelegate auraMonoTypeGetObject;
         private static MonoClassGetParentDelegate auraMonoClassGetParent;
         private static MonoClassGetNameDelegate auraMonoClassGetName;
@@ -4121,6 +4125,7 @@ namespace HeartopiaMod
             auraMonoObjectGetClass = this.GetAuraMonoExport<MonoObjectGetClassDelegate>(monoModule, "mono_object_get_class");
             auraMonoClassIsValueType = this.GetAuraMonoExport<MonoClassIsValueTypeDelegate>(monoModule, "mono_class_is_valuetype");
             auraMonoClassGetType = this.GetAuraMonoExport<MonoClassGetTypeDelegate>(monoModule, "mono_class_get_type");
+            auraMonoClassBindGenericParameters = this.GetAuraMonoExport<MonoClassBindGenericParametersDelegate>(monoModule, "mono_class_bind_generic_parameters");
             auraMonoTypeGetObject = this.GetAuraMonoExport<MonoTypeGetObjectDelegate>(monoModule, "mono_type_get_object");
             auraMonoClassGetParent = this.GetAuraMonoExport<MonoClassGetParentDelegate>(monoModule, "mono_class_get_parent");
             auraMonoClassGetName = this.GetAuraMonoExport<MonoClassGetNameDelegate>(monoModule, "mono_class_get_name");

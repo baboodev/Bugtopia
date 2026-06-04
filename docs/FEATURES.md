@@ -58,6 +58,9 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Sub-tab | Content |
 |---------|---------|
 | Animal Care | Wild animal trough feed (manual), claim all wild animal gifts |
+| Daily Quests | Auto-submit item delivery orders (CanSubmit) |
+
+Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pets): **[BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md)**.
 
 **Teleport**
 
@@ -256,9 +259,13 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 ### Auto Sell
 
-- Scans bag (and optional alternate sources) for matching item keys.
-- Filters: star rating, skip 5★, reserve count, max per stack, sell full stack, match item family.
+- **Scan source:** Bag only, Warehouse only, or **Both** (dropdown).
+- **Obtain:** `BackPackSystem.GetAllItem` per storage (managed + AuraMono); optional runtime snapshot when scanning warehouse-only.
+- **Filter:** configured item key (descriptor substring / `p_` photo prefix); **star filter** (0 = any, 1–5 = exact star); **skip 5★**; reserve count per group; max per stack; sell full stack.
+- **Sort:** none — all matching `netId` stacks are aggregated and sold.
 - Interval-based loop; can hide bag items from normal UI while running.
+
+See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#auto-sell-detail).
 
 ### Mass Cook (Net Cook)
 
@@ -282,7 +289,10 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 - Feed all visible cats or dogs in sequence.
 - Cooldown between bulk feed runs.
 - Per-pet single feed from UI list.
-- Opens pet interaction UI and selects food from inventory.
+- Food list from `PetSystem.GetFoods()` (not a full-bag scan); sorts by **lowest fullness** first, then `staticId`.
+- Optional selected-food filter in UI.
+
+See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
 
 **Pet Play (`PetPlayFeature`)**
 
@@ -337,11 +347,48 @@ Weighted preference for specific forage types when multiple markers compete (fid
 ## Bag / Warehouse
 
 - Scans **Bag** or **Warehouse** through `BackPackSystem.GetAllItem` (AuraMono), one row per `netId` stack.
+- Grid sorted by **display name** (A→Z); user picks stacks (no auto “cheapest” picker).
 - Transfer sends `BackpackProtocolManager.MoveBatchBackpackItems` (`BatchMoveNetworkCommand`, max 256 stacks per request; mod chunks larger batches).
 - Direction: Bag → Warehouse (`targetStorageType = 2`), Warehouse → Bag (`targetStorageType = 1`).
 - Does **not** require opening the in-game bag, warehouse tab, or multi-select UI.
 - Optional **Multi** mode: click stacks to build a batch, set quantity, then **Transfer**.
 - Locked stacks are shown but skipped on send.
+- **Warehouse Anywhere:** while the game bag UI is open, unlocks the warehouse tab client-side (does not move items by itself).
+
+Full pipeline: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#bag--warehouse-transfer-detail).
+
+---
+
+## New Features — Animal Care & Daily Quests
+
+### Wild animal feed (`WildAnimalFeedFeature`)
+
+- Scans **backpack** via `GetAllItem`; matches food allowed for the animal **group** (fullness table per `staticId` + star).
+- **Skip 5 Star Food** (default on): never uses 5★ food.
+- Picks food with highest score: bond EXP (favorites weighted) + fullness contribution.
+- Manual **Feed**; separate from daily quests.
+
+### Wild animal gifts (`WildAnimalGiftFeature`)
+
+- Scans world for gift entities; **Claim all** sends take-gift commands with cooldown between targets.
+
+### Daily Quests
+
+| Control | Purpose |
+|---------|---------|
+| **Auto submit items** | For orders in **CanSubmit** state, builds `List<ItemNetPair>` on game Mono and calls `ClientSubmitTaskItem` / `ClientSubmitNpcTaskItem`. |
+| **Skip 5 Star Items** | Excludes 5★ stacks from submission (saved in config). |
+
+**Item selection (auto submit):**
+
+1. Enumerate **backpack + warehouse** (`EStorageType` 1 and 2).
+2. Match targets via `CheckSubmitItems` (all targets) and `CheckSubmitItem`; honor `quality` on target rows.
+3. Sort matches: **lowest sell price**, then **lowest star**.
+4. Fill `needNum` from cheapest stacks; skip locked and (optional) 5★.
+
+Does **not** use `AutoSubmitNpcTaskItem` success alone — that only opens NPC dialogue in vanilla UI.
+
+Details and troubleshooting: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#daily-quests-detail).
 
 ---
 
@@ -433,5 +480,7 @@ See root [README.md](../README.md) disclaimer.
 
 ## Related Documentation
 
+- [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md) — inventory access, filters, sorting per feature
 - [BUILD_AND_RUN.md](./BUILD_AND_RUN.md)
 - [TECHNICAL.md](./TECHNICAL.md)
+- [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md)

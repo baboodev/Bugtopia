@@ -123,6 +123,7 @@ namespace HeartopiaMod
         private const bool MasterLogPetFeed = false;
         private const bool MasterLogWildAnimalFeed = false;
         private const bool MasterLogWildAnimalGift = false;
+        private const bool MasterLogDailyQuestSubmit = true;
         private const bool MasterLogStrangerChat = false;
 
         private void AutoFishLog(string message)
@@ -413,6 +414,7 @@ namespace HeartopiaMod
             public bool autoSellAllMatchingStacks;
             public bool autoSellFullStack;
             public bool autoSellSkipFiveStar;
+            public bool dailyQuestSubmitSkipFiveStar;
             public bool autoSellMatchFamily;
             public bool autoSellHideBagItems;
             public int autoSellStarFilter;
@@ -981,6 +983,7 @@ namespace HeartopiaMod
             data.autoSellAllMatchingStacks = this.autoSellAllMatchingStacks;
             data.autoSellFullStack = this.autoSellFullStack;
             data.autoSellSkipFiveStar = this.autoSellSkipFiveStar;
+            data.dailyQuestSubmitSkipFiveStar = this.dailyQuestSubmitSkipFiveStar;
             data.autoSellMatchFamily = this.autoSellMatchFamily;
             data.autoSellHideBagItems = this.autoSellHideBagItems;
             data.autoSellStarFilter = this.autoSellStarFilter;
@@ -1128,6 +1131,7 @@ namespace HeartopiaMod
             this.autoSellAllMatchingStacks = hasAutoSellConfig ? data.autoSellAllMatchingStacks : true;
             this.autoSellFullStack = hasAutoSellConfig ? data.autoSellFullStack : true;
             this.autoSellSkipFiveStar = hasAutoSellConfig ? data.autoSellSkipFiveStar : true;
+            this.dailyQuestSubmitSkipFiveStar = data.dailyQuestSubmitSkipFiveStar;
             this.autoSellMatchFamily = hasAutoSellConfig ? data.autoSellMatchFamily : true;
             this.autoSellHideBagItems = hasAutoSellConfig && data.autoSellHideBagItems;
             this.autoSellStarFilter = Mathf.Clamp(data.autoSellStarFilter, 0, 5);
@@ -23104,6 +23108,7 @@ namespace HeartopiaMod
             else if (this.selectedTab == 8)
             {
                 tabs.Add(("Animal Care", () => this.newFeaturesSubTab == 0, () => this.SetNewFeaturesSubTab(0)));
+                tabs.Add(("Daily Quests", () => this.newFeaturesSubTab == 1, () => this.SetNewFeaturesSubTab(1)));
             }
             else if (this.selectedTab == 4)
             {
@@ -58207,9 +58212,13 @@ namespace HeartopiaMod
             {
                 assemblies = new[] { "EcsClient", "EcsClient.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll" };
             }
+            else if (fullTypeName.StartsWith("XDT.Scene.", StringComparison.Ordinal))
+            {
+                assemblies = new[] { "EcsClient", "EcsClient.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
+            }
             else
             {
-                assemblies = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTGameSystem", "XDTGameSystem.dll", "XDTBaseService", "XDTBaseService.dll", "Client", "Client.dll" };
+                assemblies = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTGameSystem", "XDTGameSystem.dll", "XDTBaseService", "XDTBaseService.dll", "EcsClient", "EcsClient.dll", "Client", "Client.dll" };
             }
 
             foreach (string assembly in assemblies)
@@ -58268,6 +58277,10 @@ namespace HeartopiaMod
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("EcsClient", StringComparison.Ordinal))
             {
                 imageNames = new[] { "EcsClient", "EcsClient.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll" };
+            }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDT.Scene.", StringComparison.Ordinal))
+            {
+                imageNames = new[] { "EcsClient", "EcsClient.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
             }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTDataAndProtocol", StringComparison.Ordinal))
             {
@@ -63133,6 +63146,7 @@ namespace HeartopiaMod
         private bool autoSellAllMatchingStacks = true;
         private bool autoSellFullStack = true;
         private bool autoSellSkipFiveStar = true;
+        private bool dailyQuestSubmitSkipFiveStar = true;
         private bool autoSellMatchFamily = true;
         private bool autoSellHideBagItems = false;
         private int autoSellStarFilter = 0;

@@ -341,6 +341,8 @@ Maps sprite name → list of UI `Transform` slots in `slotCache`.
 
 Enables clicking matching slots without manual item ID entry.
 
+**Bag / Warehouse tab** no longer depends on this hook for listing stacks — it calls `BackPackSystem.GetAllItem` directly (AuraMono). See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md).
+
 ---
 
 ## Configuration System
@@ -376,7 +378,7 @@ Notable floats:
 - `gameSpeed`, `cameraFOV`, snow/cook intervals
 - `autoFish*` tuning (legacy keys still serialized)
 - `insect*` tuning
-- Auto sell / eat / repair booleans and thresholds
+- Auto sell / eat / repair booleans and thresholds (`autoSellScanSource`, `autoSellSkipFiveStar`, `dailyQuestSubmitSkipFiveStar`, …)
 
 ### Secondary / legacy files
 
@@ -531,3 +533,4 @@ Recommended workflow:
 - [BUILD_AND_RUN.md](./BUILD_AND_RUN.md)
 - [FEATURES.md](./FEATURES.md)
 - [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) — how the mod finds game types at runtime
+- [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md) — EcsClient, interop, LocalLow dumps, tools

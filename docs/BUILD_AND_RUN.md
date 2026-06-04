@@ -246,3 +246,4 @@ When reporting bugs, include game patch, loader name + version, and git commit.
 - [FEATURES.md](./FEATURES.md) — UI and features
 - [TECHNICAL.md](./TECHNICAL.md) — architecture and config schema
 - [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) — runtime type lookup (`FindLoadedType`, SendCommand, Mono)
+- [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md) — EcsClient, interop generation, `DotnetAssemblies` dumps, required tools

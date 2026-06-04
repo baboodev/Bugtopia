@@ -2,7 +2,7 @@
 
 How **Heartopia Helper** finds game classes and methods at runtime. Required reading when a feature logs `unavailable`, `Null`, or Harmony never applies.
 
-For build/interop setup see [BUILD_AND_RUN.md](./BUILD_AND_RUN.md). For architecture overview see [TECHNICAL.md](./TECHNICAL.md).
+For build/interop setup see [BUILD_AND_RUN.md](./BUILD_AND_RUN.md). For assembly locations, EcsClient, LocalLow dumps, and tools see [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md). For architecture overview see [TECHNICAL.md](./TECHNICAL.md).
 
 ---
 
@@ -239,6 +239,7 @@ Features should **not** call `FindLoadedType` every frame without cache; use mis
 | Bubbles (spawn) | `CreateActivityEventPersonalRewardBubbleNetworkCommand`, `CreateBubbleNetworkCommand` |
 | Bubbles (world) | `BubbleComponent`, `BubbleMoveComponent`, `ActivityEventModule` |
 | Cooking | `PrepareCookingNetworkCommand`, cooking protocol / `CookingSystem` (Mono) |
+| Backpack / tasks | `BackPackSystem`, `BackpackProtocolManager`, `TaskProtocolManager`, `ItemNetPair` |
 | Player | `Character`, `p_player_skeleton(Clone)` via `GameObject.Find` |
 
 Exact strings change with game version — always verify in ILSpy for your build.
@@ -254,11 +255,14 @@ Exact strings change with game version — always verify in ILSpy for your build
 | `buddy/BubbleFeature.cs` | SendCommand patch, bubble-specific scans |
 | `buddy/BirdNetFarm.cs` | Uses host resolvers + bird caches |
 | `buddy/PetFeedFeature.cs`, `PetPlayFeature.cs`, `PuzzleNetFeature.cs` | `FindLoadedType` per feature |
+| `buddy/DailyQuestSubmitFeature.cs`, `buddy/WildAnimalFeedFeature.cs` | Backpack + task protocol resolution |
 
 ---
 
 ## Related documentation
 
 - [BUILD_AND_RUN.md](./BUILD_AND_RUN.md) — interop generation, deploy, logs
+- [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md) — EcsClient, LocalLow `DotnetAssemblies`, tool checklist
 - [TECHNICAL.md](./TECHNICAL.md) — architecture, Harmony, farms
 - [FEATURES.md](./FEATURES.md) — what each feature expects at runtime
+- [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md) — inventory enumeration and per-feature filters

@@ -28,8 +28,10 @@ Configure your game path: copy `buddy/Directory.Build.props.example` → `buddy/
 |----------|----------|
 | [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md) | Prerequisites, build, deploy, logs |
 | [docs/FEATURES.md](docs/FEATURES.md) | Menu tabs and features |
+| [docs/BACKPACK_AND_ITEMS.md](docs/BACKPACK_AND_ITEMS.md) | Inventory scan, filters, sorting (auto sell, transfer, daily quests, feed) |
 | [docs/TECHNICAL.md](docs/TECHNICAL.md) | Architecture, patches, config |
 | [docs/TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md) | How the mod resolves IL2CPP types (`FindLoadedType`, SendCommand, Mono) |
+| [docs/GAME_ASSEMBLIES_AND_TOOLS.md](docs/GAME_ASSEMBLIES_AND_TOOLS.md) | EcsClient, interop vs LocalLow dumps, IL2CPP/AuraMono access, tools |
 
 ## Credits
 
