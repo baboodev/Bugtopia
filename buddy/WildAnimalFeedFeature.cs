@@ -54,6 +54,25 @@ namespace HeartopiaMod
         private Type wildAnimalFeedBackPackSystemType = null;
         private MethodInfo wildAnimalFeedBackPackGetAllItemMethod = null;
         private MethodInfo wildAnimalFeedGetAnimalFoodThoughMethod = null;
+        private Type wildAnimalFeedTableDataType = null;
+        private MethodInfo wildAnimalFeedGetAnimalGroupMethod = null;
+        private MethodInfo wildAnimalFeedGetEntityMethod = null;
+        private bool wildAnimalFeedTableDataReflectionResolved = false;
+        private IntPtr wildAnimalFeedAuraTableDataClass = IntPtr.Zero;
+        private IntPtr wildAnimalFeedAuraGetAnimalFoodThoughMethod = IntPtr.Zero;
+        private bool wildAnimalFeedAuraTableDataCacheAttempted = false;
+
+        private sealed class WildAnimalFeedManagedInventorySnapshot
+        {
+            public readonly Dictionary<string, List<object>> ItemsByStorage = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
+            public bool Ready;
+        }
+
+        private sealed class WildAnimalFeedAuraInventorySnapshot
+        {
+            public readonly Dictionary<string, List<IntPtr>> ItemsByStorage = new Dictionary<string, List<IntPtr>>(StringComparer.OrdinalIgnoreCase);
+            public bool Ready;
+        }
 
         private sealed class WildAnimalFeedCollectStats
         {
@@ -99,6 +118,7 @@ namespace HeartopiaMod
             public Dictionary<uint, int> ReservedCountsByNetId = new Dictionary<uint, int>();
             public int CheckedGroups;
             public int HungryGroups;
+            public WildAnimalFeedAuraInventorySnapshot Inventory;
         }
 
         private void StopWildAnimalFeedCoroutine()
@@ -254,10 +274,26 @@ namespace HeartopiaMod
             if (managedReady)
             {
                 object wildAnimalSystem = this.wildAnimalFeedWildAnimalSystemInstanceProperty.GetValue(null, null);
-                if (wildAnimalSystem != null && this.TryBuildWildAnimalFeedPlans(out plans, out status) && plans.Count > 0)
+                if (wildAnimalSystem != null)
                 {
-                    complete(plans, status);
-                    yield break;
+                    bool managedBuildOk = false;
+                    IEnumerator managedRoutine = this.TryBuildWildAnimalFeedPlansRoutine(plans, (ok, buildStatus) =>
+                    {
+                        managedBuildOk = ok;
+                        status = buildStatus;
+                    });
+                    while (managedRoutine.MoveNext())
+                    {
+                        yield return managedRoutine.Current;
+                    }
+
+                    if (managedBuildOk)
+                    {
+                        complete(plans, status);
+                        yield break;
+                    }
+
+                    this.WildAnimalFeedLog("Managed plan build failed, trying AuraMono: " + status);
                 }
             }
 
@@ -277,70 +313,493 @@ namespace HeartopiaMod
             this.wildAnimalFeedGroupIdsByStaticIdCache.Clear();
         }
 
+        private bool EnsureWildAnimalFeedTableDataReflection()
+        {
+            if (this.wildAnimalFeedTableDataReflectionResolved)
+            {
+                return this.wildAnimalFeedTableDataType != null;
+            }
+
+            this.wildAnimalFeedTableDataReflectionResolved = true;
+            this.wildAnimalFeedTableDataType = this.FindLoadedTypeByFullName("EcsClient.TableData")
+                ?? this.FindLoadedType("EcsClient.TableData", "TableData")
+                ?? this.FindLoadedTypeByFullName("TableData");
+            if (this.wildAnimalFeedTableDataType == null)
+            {
+                return false;
+            }
+
+            if (this.wildAnimalFeedGetAnimalFoodThoughMethod == null)
+            {
+                this.wildAnimalFeedGetAnimalFoodThoughMethod = this.wildAnimalFeedTableDataType.GetMethod(
+                    "GetAnimalFoodThough",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(int) },
+                    null);
+                if (this.wildAnimalFeedGetAnimalFoodThoughMethod == null)
+                {
+                    this.wildAnimalFeedGetAnimalFoodThoughMethod = this.wildAnimalFeedTableDataType.GetMethod(
+                        "GetAnimalFoodThough",
+                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        new[] { typeof(int), typeof(bool) },
+                        null);
+                }
+            }
+
+            if (this.wildAnimalFeedGetAnimalGroupMethod == null)
+            {
+                this.wildAnimalFeedGetAnimalGroupMethod = this.wildAnimalFeedTableDataType.GetMethod(
+                    "GetAnimalGroup",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(int), typeof(bool) },
+                    null)
+                    ?? this.wildAnimalFeedTableDataType.GetMethod(
+                        "GetAnimalGroup",
+                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        new[] { typeof(int) },
+                        null);
+            }
+
+            if (this.wildAnimalFeedGetEntityMethod == null)
+            {
+                this.wildAnimalFeedGetEntityMethod = this.wildAnimalFeedTableDataType.GetMethod(
+                    "GetEntity",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(int) },
+                    null);
+            }
+
+            return true;
+        }
+
+        private unsafe bool EnsureWildAnimalFeedAuraTableDataCache()
+        {
+            if (this.wildAnimalFeedAuraGetAnimalFoodThoughMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (this.wildAnimalFeedAuraTableDataCacheAttempted)
+            {
+                return false;
+            }
+
+            this.wildAnimalFeedAuraTableDataCacheAttempted = true;
+            this.wildAnimalFeedAuraTableDataClass = this.ResolveWildAnimalFeedAuraMonoTableDataClassUncached();
+            if (this.wildAnimalFeedAuraTableDataClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            this.wildAnimalFeedAuraGetAnimalFoodThoughMethod = this.FindAuraMonoMethodOnHierarchy(
+                this.wildAnimalFeedAuraTableDataClass,
+                "GetAnimalFoodThough",
+                1);
+            if (this.wildAnimalFeedAuraGetAnimalFoodThoughMethod == IntPtr.Zero)
+            {
+                this.wildAnimalFeedAuraGetAnimalFoodThoughMethod = this.FindAuraMonoMethodOnHierarchy(
+                    this.wildAnimalFeedAuraTableDataClass,
+                    "GetAnimalFoodThough",
+                    2);
+            }
+
+            return this.wildAnimalFeedAuraGetAnimalFoodThoughMethod != IntPtr.Zero;
+        }
+
+        private bool TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(int staticId, out object row)
+        {
+            row = null;
+            if (staticId <= 0 || !this.EnsureWildAnimalFeedTableDataReflection() || this.wildAnimalFeedGetAnimalFoodThoughMethod == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                ParameterInfo[] parameters = this.wildAnimalFeedGetAnimalFoodThoughMethod.GetParameters();
+                row = parameters.Length >= 2
+                    ? this.wildAnimalFeedGetAnimalFoodThoughMethod.Invoke(null, new object[] { staticId, false })
+                    : this.wildAnimalFeedGetAnimalFoodThoughMethod.Invoke(null, new object[] { staticId });
+                return row != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private unsafe bool TryInvokeWildAnimalFeedGetAnimalFoodThoughAuraMono(int staticId, out IntPtr rowObj)
+        {
+            rowObj = IntPtr.Zero;
+            if (staticId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null
+                || !this.EnsureWildAnimalFeedAuraTableDataCache())
+            {
+                return false;
+            }
+
+            try
+            {
+                bool needException = false;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&staticId);
+                args[1] = (IntPtr)(&needException);
+                IntPtr exc = IntPtr.Zero;
+                rowObj = auraMonoRuntimeInvoke(this.wildAnimalFeedAuraGetAnimalFoodThoughMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+                {
+                    IntPtr* argsOne = stackalloc IntPtr[1];
+                    argsOne[0] = (IntPtr)(&staticId);
+                    exc = IntPtr.Zero;
+                    rowObj = auraMonoRuntimeInvoke(this.wildAnimalFeedAuraGetAnimalFoodThoughMethod, IntPtr.Zero, (IntPtr)argsOne, ref exc);
+                }
+
+                return exc == IntPtr.Zero && rowObj != IntPtr.Zero;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryBuildWildAnimalFeedManagedInventorySnapshot(WildAnimalFeedManagedInventorySnapshot snapshot)
+        {
+            snapshot.ItemsByStorage.Clear();
+            snapshot.Ready = false;
+            if (snapshot == null || !this.EnsureWildAnimalFeedBackpackReflection())
+            {
+                return false;
+            }
+
+            object backPackObj = this.GetWildAnimalFeedBackPackSystemInstance();
+            if (backPackObj == null)
+            {
+                return false;
+            }
+
+            foreach (string storageName in WildAnimalFeedStorageNames)
+            {
+                if (!this.TryGetWildAnimalFeedStorageObject(storageName, out object storage))
+                {
+                    continue;
+                }
+
+                object itemListObj;
+                try
+                {
+                    ParameterInfo[] parameters = this.wildAnimalFeedBackPackGetAllItemMethod.GetParameters();
+                    itemListObj = parameters.Length == 1
+                        ? this.wildAnimalFeedBackPackGetAllItemMethod.Invoke(backPackObj, new[] { storage })
+                        : this.wildAnimalFeedBackPackGetAllItemMethod.Invoke(backPackObj, null);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (itemListObj == null)
+                {
+                    continue;
+                }
+
+                List<object> items = new List<object>();
+                if (!this.TryEnumerateWildAnimalFeedObjects(itemListObj, items))
+                {
+                    continue;
+                }
+
+                snapshot.ItemsByStorage[storageName] = items;
+            }
+
+            snapshot.Ready = snapshot.ItemsByStorage.Count > 0;
+            return snapshot.Ready;
+        }
+
+        private unsafe bool TryBuildWildAnimalFeedAuraInventorySnapshot(WildAnimalFeedAuraInventorySnapshot snapshot)
+        {
+            snapshot.ItemsByStorage.Clear();
+            snapshot.Ready = false;
+            if (snapshot == null || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPackObj)
+                || backPackObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr backPackClass = auraMonoObjectGetClass(backPackObj);
+            IntPtr getAllItemMethodWithStorage = this.FindAuraMonoMethodOnHierarchy(backPackClass, "GetAllItem", 1);
+            IntPtr getAllItemMethodNoArgs = this.FindAuraMonoMethodOnHierarchy(backPackClass, "GetAllItem", 0);
+            if (getAllItemMethodWithStorage == IntPtr.Zero && getAllItemMethodNoArgs == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            foreach (string storageName in WildAnimalFeedStorageNames)
+            {
+                if (!this.TryGetWildAnimalFeedStorageValue(storageName, out int storageValue))
+                {
+                    continue;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr itemsObj;
+                if (getAllItemMethodWithStorage != IntPtr.Zero)
+                {
+                    IntPtr* args = stackalloc IntPtr[1];
+                    args[0] = (IntPtr)(&storageValue);
+                    itemsObj = auraMonoRuntimeInvoke(getAllItemMethodWithStorage, backPackObj, (IntPtr)args, ref exc);
+                }
+                else
+                {
+                    itemsObj = auraMonoRuntimeInvoke(getAllItemMethodNoArgs, backPackObj, IntPtr.Zero, ref exc);
+                }
+
+                if (exc != IntPtr.Zero || itemsObj == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                List<IntPtr> items = new List<IntPtr>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, items))
+                {
+                    continue;
+                }
+
+                snapshot.ItemsByStorage[storageName] = items;
+            }
+
+            snapshot.Ready = snapshot.ItemsByStorage.Count > 0;
+            return snapshot.Ready;
+        }
+
+        private void AppendWildAnimalFeedCandidatesFromPreScannedBackpackManaged(
+            int groupId,
+            HashSet<int> favoriteIds,
+            List<int> staticFavorites,
+            int favoriteAddition,
+            List<WildAnimalFeedFoodCandidate> candidates,
+            HashSet<uint> seenNetIds,
+            WildAnimalFeedCollectStats stats,
+            WildAnimalFeedManagedInventorySnapshot inventory,
+            bool favoritesOnly)
+        {
+            if (inventory == null || !inventory.Ready)
+            {
+                return;
+            }
+
+            foreach (string storageName in WildAnimalFeedStorageNames)
+            {
+                if (!inventory.ItemsByStorage.TryGetValue(storageName, out List<object> backpackItems) || backpackItems == null)
+                {
+                    continue;
+                }
+
+                this.WildAnimalFeedLogDetail("Group " + groupId + " PreScan " + storageName
+                    + (favoritesOnly ? " favOnly" : " all")
+                    + " items=" + backpackItems.Count);
+
+                string source = "PreScan/" + storageName + (favoritesOnly ? "/favOnly" : "/all");
+                foreach (object item in backpackItems)
+                {
+                    stats.RawItems++;
+                    if (!this.TryBuildWildAnimalFeedFoodCandidateFromBackpackItem(
+                        item,
+                        groupId,
+                        favoriteIds,
+                        staticFavorites,
+                        favoriteAddition,
+                        out WildAnimalFeedFoodCandidate candidate,
+                        out WildAnimalFeedSkipReason skipReason))
+                    {
+                        this.IncrementWildAnimalFeedSkip(stats, skipReason);
+                        this.WildAnimalFeedLogRejectManaged(groupId, source, item, skipReason);
+                        continue;
+                    }
+
+                    if (favoritesOnly && this.wildAnimalFeedPreferFavorites && !candidate.IsFavorite)
+                    {
+                        stats.SkippedFavorite++;
+                        this.WildAnimalFeedLogRejectManaged(groupId, source, item, WildAnimalFeedSkipReason.None, "not-favorite");
+                        continue;
+                    }
+
+                    if (!seenNetIds.Add(candidate.NetId))
+                    {
+                        continue;
+                    }
+
+                    stats.Accepted++;
+                    candidates.Add(candidate);
+                    this.WildAnimalFeedLogDetail("Group " + groupId + " " + source + " ACCEPT staticId=" + candidate.StaticId
+                        + " netId=" + candidate.NetId + " fullness=" + candidate.Fullness);
+                }
+            }
+        }
+
+        private unsafe void AppendWildAnimalFeedCandidatesFromPreScannedBackpackAuraMono(
+            int groupId,
+            HashSet<int> favoriteIds,
+            List<int> staticFavorites,
+            int favoriteAddition,
+            List<WildAnimalFeedFoodCandidate> candidates,
+            HashSet<uint> seenNetIds,
+            WildAnimalFeedCollectStats stats,
+            WildAnimalFeedAuraInventorySnapshot inventory,
+            bool favoritesOnly)
+        {
+            if (inventory == null || !inventory.Ready)
+            {
+                return;
+            }
+
+            foreach (string storageName in WildAnimalFeedStorageNames)
+            {
+                if (!inventory.ItemsByStorage.TryGetValue(storageName, out List<IntPtr> backpackItems) || backpackItems == null)
+                {
+                    continue;
+                }
+
+                this.WildAnimalFeedLogDetail("AuraMono PreScan " + storageName + " items=" + backpackItems.Count);
+                string source = "AuraPreScan/" + storageName + (favoritesOnly ? "/favOnly" : "/all");
+                foreach (IntPtr item in backpackItems)
+                {
+                    stats.RawItems++;
+                    if (!this.TryBuildWildAnimalFeedFoodCandidateAuraMono(
+                        item,
+                        groupId,
+                        favoriteIds,
+                        staticFavorites,
+                        favoriteAddition,
+                        out WildAnimalFeedFoodCandidate candidate,
+                        out WildAnimalFeedSkipReason skipReason))
+                    {
+                        this.IncrementWildAnimalFeedSkip(stats, skipReason);
+                        this.WildAnimalFeedLogRejectAuraMono(groupId, source, item, skipReason);
+                        continue;
+                    }
+
+                    if (favoritesOnly && this.wildAnimalFeedPreferFavorites && !candidate.IsFavorite)
+                    {
+                        stats.SkippedFavorite++;
+                        continue;
+                    }
+
+                    if (!seenNetIds.Add(candidate.NetId))
+                    {
+                        continue;
+                    }
+
+                    stats.Accepted++;
+                    candidates.Add(candidate);
+                    this.WildAnimalFeedLogDetail("AuraMono ACCEPT group=" + groupId + " staticId=" + candidate.StaticId + " netId=" + candidate.NetId);
+                }
+            }
+        }
+
         private static long WildAnimalFeedFullnessCacheKey(int staticId, int groupId, int starRate)
         {
             return ((long)staticId << 24) | ((long)groupId << 8) | (uint)(starRate & 0xFF);
         }
 
-        private bool TryBuildWildAnimalFeedPlans(out List<WildAnimalFeedGroupPlan> plans, out string status)
+        private IEnumerator TryBuildWildAnimalFeedPlansRoutine(List<WildAnimalFeedGroupPlan> plans, Action<bool, string> complete)
         {
-            plans = new List<WildAnimalFeedGroupPlan>();
-            status = string.Empty;
+            plans.Clear();
+            string status = string.Empty;
 
+            this.WildAnimalFeedLog("=== Plan build start (managed path) ===");
+            this.WildAnimalFeedLogToggles();
+
+            if (!this.EnsureWildAnimalFeedReflection(out status))
+            {
+                this.WildAnimalFeedLog("Managed reflection failed: " + status);
+                complete(false, status);
+                yield break;
+            }
+
+            this.WildAnimalFeedLog("Managed reflection OK");
+
+            object wildAnimalSystem = this.wildAnimalFeedWildAnimalSystemInstanceProperty.GetValue(null, null);
+            if (wildAnimalSystem == null)
+            {
+                status = "WildAnimalSystem unavailable";
+                this.WildAnimalFeedLog(status);
+                complete(false, status);
+                yield break;
+            }
+
+            this.WildAnimalFeedLog("WildAnimalSystem=" + wildAnimalSystem.GetType().FullName);
+
+            object groupsObj;
             try
             {
-                this.WildAnimalFeedLog("=== Plan build start (managed path) ===");
-                this.WildAnimalFeedLogToggles();
+                groupsObj = this.wildAnimalFeedGetUnlockedAnimalsMethod.Invoke(wildAnimalSystem, null);
+            }
+            catch (Exception ex)
+            {
+                status = (ex.InnerException ?? ex).Message;
+                this.WildAnimalFeedLog("Plan exception: " + ex);
+                complete(false, status);
+                yield break;
+            }
 
-                if (!this.EnsureWildAnimalFeedReflection(out status))
+            if (groupsObj == null)
+            {
+                status = "no unlocked animal groups";
+                this.WildAnimalFeedLog(status);
+                complete(true, status);
+                yield break;
+            }
+
+            int checkedGroups = 0;
+            int hungryGroups = 0;
+            int totalRawFoods = 0;
+            int totalAcceptedFoods = 0;
+            int totalSkippedStar = 0;
+            int totalSkippedEgg = 0;
+            int totalSkippedFavorite = 0;
+            int totalSkippedLock = 0;
+            int totalSkippedInvalid = 0;
+            Dictionary<uint, int> reservedCountsByNetId = new Dictionary<uint, int>();
+            List<object> unlockedGroups = new List<object>();
+            if (!this.TryEnumerateManagedCollectionItems(groupsObj, unlockedGroups))
+            {
+                status = "cannot enumerate unlocked groups";
+                this.WildAnimalFeedLog(status + " collectionType=" + (groupsObj?.GetType().FullName ?? "null"));
+                complete(false, status);
+                yield break;
+            }
+
+            this.WildAnimalFeedLog("Unlocked groups enumerated: count=" + unlockedGroups.Count
+                + " collectionType=" + groupsObj.GetType().FullName);
+
+            WildAnimalFeedManagedInventorySnapshot inventory = new WildAnimalFeedManagedInventorySnapshot();
+            if (this.TryBuildWildAnimalFeedManagedInventorySnapshot(inventory))
+            {
+                this.WildAnimalFeedLog("Inventory snapshot: "
+                    + string.Join(", ", WildAnimalFeedStorageNames.Select(name =>
+                        name + "=" + (inventory.ItemsByStorage.TryGetValue(name, out List<object> bucket) ? bucket.Count : 0)).ToArray()));
+            }
+            else
+            {
+                this.WildAnimalFeedLog("Inventory snapshot unavailable; per-group GetAllItem fallback may run");
+            }
+
+            yield return null;
+
+            for (int groupIndex = 0; groupIndex < unlockedGroups.Count; groupIndex++)
+            {
+                try
                 {
-                    this.WildAnimalFeedLog("Managed reflection failed: " + status);
-                    return false;
-                }
-
-                this.WildAnimalFeedLog("Managed reflection OK");
-
-                object wildAnimalSystem = this.wildAnimalFeedWildAnimalSystemInstanceProperty.GetValue(null, null);
-                if (wildAnimalSystem == null)
-                {
-                    status = "WildAnimalSystem unavailable";
-                    this.WildAnimalFeedLog(status);
-                    return false;
-                }
-
-                this.WildAnimalFeedLog("WildAnimalSystem=" + wildAnimalSystem.GetType().FullName);
-
-                object groupsObj = this.wildAnimalFeedGetUnlockedAnimalsMethod.Invoke(wildAnimalSystem, null);
-                if (groupsObj == null)
-                {
-                    status = "no unlocked animal groups";
-                    this.WildAnimalFeedLog(status);
-                    return false;
-                }
-
-                int checkedGroups = 0;
-                int hungryGroups = 0;
-                int totalRawFoods = 0;
-                int totalAcceptedFoods = 0;
-                int totalSkippedStar = 0;
-                int totalSkippedEgg = 0;
-                int totalSkippedFavorite = 0;
-                int totalSkippedLock = 0;
-                int totalSkippedInvalid = 0;
-                Dictionary<uint, int> reservedCountsByNetId = new Dictionary<uint, int>();
-                List<object> unlockedGroups = new List<object>();
-                if (!this.TryEnumerateManagedCollectionItems(groupsObj, unlockedGroups))
-                {
-                    status = "cannot enumerate unlocked groups";
-                    this.WildAnimalFeedLog(status + " collectionType=" + (groupsObj?.GetType().FullName ?? "null"));
-                    return false;
-                }
-
-                this.WildAnimalFeedLog("Unlocked groups enumerated: count=" + unlockedGroups.Count
-                    + " collectionType=" + groupsObj.GetType().FullName);
-
-                foreach (object groupObj in unlockedGroups)
-                {
+                    object groupObj = unlockedGroups[groupIndex];
                     if (!this.TryGetAnimalGroupId(groupObj, out int groupId) || groupId <= 0)
                     {
                         continue;
@@ -378,7 +837,8 @@ namespace HeartopiaMod
                         groupEnum,
                         groupId,
                         favoriteIds,
-                        collectStats);
+                        collectStats,
+                        inventory);
                     totalRawFoods += collectStats.RawItems;
                     totalAcceptedFoods += collectStats.Accepted;
                     totalSkippedStar += collectStats.SkippedStar;
@@ -414,47 +874,50 @@ namespace HeartopiaMod
                         FoodNetIds = foodNetIds
                     });
                 }
-
-                status = "groups=" + checkedGroups + " hungry=" + hungryGroups + " feedable=" + plans.Count
-                    + " foods=" + totalAcceptedFoods + "/" + totalRawFoods;
-                if (totalSkippedStar > 0)
+                catch (Exception ex)
                 {
-                    status += " skip5*=" + totalSkippedStar;
-                }
-                if (totalSkippedEgg > 0)
-                {
-                    status += " skipEgg=" + totalSkippedEgg;
-                }
-                if (totalSkippedFavorite > 0)
-                {
-                    status += " skipFav=" + totalSkippedFavorite;
-                }
-                if (totalSkippedLock > 0)
-                {
-                    status += " skipLock=" + totalSkippedLock;
-                }
-                if (totalSkippedInvalid > 0)
-                {
-                    status += " skipInv=" + totalSkippedInvalid;
-                }
-                if (plans.Count == 0 && hungryGroups > 0 && totalRawFoods == 0)
-                {
-                    status += " (no food found in bag/warehouse)";
-                }
-                else if (plans.Count == 0 && hungryGroups > 0 && totalAcceptedFoods == 0 && totalRawFoods > 0)
-                {
-                    status += " (all food filtered by toggles)";
+                    status = (ex.InnerException ?? ex).Message;
+                    this.WildAnimalFeedLog("Plan exception: " + ex);
+                    complete(false, status);
+                    yield break;
                 }
 
-                this.WildAnimalFeedLog("=== Plan result: " + status + " ===");
-                return true;
+                yield return null;
             }
-            catch (Exception ex)
+
+            status = "groups=" + checkedGroups + " hungry=" + hungryGroups + " feedable=" + plans.Count
+                + " foods=" + totalAcceptedFoods + "/" + totalRawFoods;
+            if (totalSkippedStar > 0)
             {
-                status = (ex.InnerException ?? ex).Message;
-                this.WildAnimalFeedLog("Plan exception: " + ex);
-                return false;
+                status += " skip5*=" + totalSkippedStar;
             }
+            if (totalSkippedEgg > 0)
+            {
+                status += " skipEgg=" + totalSkippedEgg;
+            }
+            if (totalSkippedFavorite > 0)
+            {
+                status += " skipFav=" + totalSkippedFavorite;
+            }
+            if (totalSkippedLock > 0)
+            {
+                status += " skipLock=" + totalSkippedLock;
+            }
+            if (totalSkippedInvalid > 0)
+            {
+                status += " skipInv=" + totalSkippedInvalid;
+            }
+            if (plans.Count == 0 && hungryGroups > 0 && totalRawFoods == 0)
+            {
+                status += " (no food found in bag/warehouse)";
+            }
+            else if (plans.Count == 0 && hungryGroups > 0 && totalAcceptedFoods == 0 && totalRawFoods > 0)
+            {
+                status += " (all food filtered by toggles)";
+            }
+
+            this.WildAnimalFeedLog("=== Plan result: " + status + " ===");
+            complete(true, status);
         }
 
         private IEnumerator BuildWildAnimalFeedPlansAuraMonoRoutine(
@@ -479,6 +942,20 @@ namespace HeartopiaMod
                 setStatus?.Invoke(status);
                 yield break;
             }
+
+            context.Inventory = new WildAnimalFeedAuraInventorySnapshot();
+            if (this.TryBuildWildAnimalFeedAuraInventorySnapshot(context.Inventory))
+            {
+                this.WildAnimalFeedLog("AuraMono inventory snapshot: "
+                    + string.Join(", ", WildAnimalFeedStorageNames.Select(name =>
+                        name + "=" + (context.Inventory.ItemsByStorage.TryGetValue(name, out List<IntPtr> bucket) ? bucket.Count : 0)).ToArray()));
+            }
+            else
+            {
+                this.WildAnimalFeedLog("AuraMono inventory snapshot unavailable");
+            }
+
+            yield return null;
 
             for (int i = 0; i < context.GroupItems.Count; i++)
             {
@@ -622,7 +1099,8 @@ namespace HeartopiaMod
                 context.GetFoodsMethod,
                 groupId,
                 favoriteIds,
-                collectStats);
+                collectStats,
+                context.Inventory);
             if (candidates.Count == 0)
             {
                 return;
@@ -652,7 +1130,8 @@ namespace HeartopiaMod
             object groupEnum,
             int groupId,
             HashSet<int> favoriteIds,
-            WildAnimalFeedCollectStats stats)
+            WildAnimalFeedCollectStats stats,
+            WildAnimalFeedManagedInventorySnapshot inventory)
         {
             List<WildAnimalFeedFoodCandidate> candidates = new List<WildAnimalFeedFoodCandidate>();
             HashSet<uint> seenNetIds = new HashSet<uint>();
@@ -704,6 +1183,7 @@ namespace HeartopiaMod
                     candidates,
                     seenNetIds,
                     stats,
+                    inventory,
                     favoritesOnly: this.wildAnimalFeedPreferFavorites);
                 this.WildAnimalFeedLogDetail("Group " + groupId + " Backpack scan: +" + (candidates.Count - before));
 
@@ -718,6 +1198,7 @@ namespace HeartopiaMod
                         candidates,
                         seenNetIds,
                         stats,
+                        inventory,
                         favoritesOnly: false);
                     this.WildAnimalFeedLogDetail("Group " + groupId + " Backpack allFood: +" + (candidates.Count - before));
                 }
@@ -851,8 +1332,24 @@ namespace HeartopiaMod
             List<WildAnimalFeedFoodCandidate> candidates,
             HashSet<uint> seenNetIds,
             WildAnimalFeedCollectStats stats,
+            WildAnimalFeedManagedInventorySnapshot inventory,
             bool favoritesOnly)
         {
+            if (inventory != null && inventory.Ready)
+            {
+                this.AppendWildAnimalFeedCandidatesFromPreScannedBackpackManaged(
+                    groupId,
+                    favoriteIds,
+                    staticFavorites,
+                    favoriteAddition,
+                    candidates,
+                    seenNetIds,
+                    stats,
+                    inventory,
+                    favoritesOnly);
+                return;
+            }
+
             if (!this.EnsureWildAnimalFeedBackpackReflection())
             {
                 this.WildAnimalFeedLogDetail("Group " + groupId + " Backpack reflection unavailable");
@@ -985,7 +1482,8 @@ namespace HeartopiaMod
             IntPtr getFoodsMethod,
             int groupId,
             HashSet<int> favoriteIds,
-            WildAnimalFeedCollectStats stats)
+            WildAnimalFeedCollectStats stats,
+            WildAnimalFeedAuraInventorySnapshot inventory)
         {
             List<WildAnimalFeedFoodCandidate> candidates = new List<WildAnimalFeedFoodCandidate>();
             HashSet<uint> seenNetIds = new HashSet<uint>();
@@ -1038,6 +1536,7 @@ namespace HeartopiaMod
                     candidates,
                     seenNetIds,
                     stats,
+                    inventory,
                     favoritesOnly: this.wildAnimalFeedPreferFavorites);
                 this.WildAnimalFeedLogDetail("AuraMono group " + groupId + " Backpack: +" + (candidates.Count - before));
 
@@ -1052,6 +1551,7 @@ namespace HeartopiaMod
                         candidates,
                         seenNetIds,
                         stats,
+                        inventory,
                         favoritesOnly: false);
                     this.WildAnimalFeedLogDetail("AuraMono group " + groupId + " Backpack allFood: +" + (candidates.Count - before));
                 }
@@ -1122,8 +1622,24 @@ namespace HeartopiaMod
             List<WildAnimalFeedFoodCandidate> candidates,
             HashSet<uint> seenNetIds,
             WildAnimalFeedCollectStats stats,
+            WildAnimalFeedAuraInventorySnapshot inventory,
             bool favoritesOnly)
         {
+            if (inventory != null && inventory.Ready)
+            {
+                this.AppendWildAnimalFeedCandidatesFromPreScannedBackpackAuraMono(
+                    groupId,
+                    favoriteIds,
+                    staticFavorites,
+                    favoriteAddition,
+                    candidates,
+                    seenNetIds,
+                    stats,
+                    inventory,
+                    favoritesOnly);
+                return;
+            }
+
             if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
             {
                 return;
@@ -1500,6 +2016,12 @@ namespace HeartopiaMod
             }
 
             groupIds = new HashSet<int>();
+            if (this.TryGetWildAnimalFoodGroupIdsForStaticIdManaged(staticId, groupIds) && groupIds.Count > 0)
+            {
+                this.wildAnimalFeedGroupIdsByStaticIdCache[staticId] = groupIds;
+                return true;
+            }
+
             if (this.TryGetWildAnimalFoodGroupIdsForStaticIdAuraMono(staticId, groupIds) && groupIds.Count > 0)
             {
                 this.wildAnimalFeedGroupIdsByStaticIdCache[staticId] = groupIds;
@@ -1508,6 +2030,26 @@ namespace HeartopiaMod
 
             this.wildAnimalFeedGroupIdsByStaticIdCache[staticId] = groupIds;
             return false;
+        }
+
+        private bool TryGetWildAnimalFoodGroupIdsForStaticIdManaged(int staticId, HashSet<int> groupIds)
+        {
+            if (staticId <= 0 || groupIds == null || !this.TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(staticId, out object row))
+            {
+                return false;
+            }
+
+            if (!this.TryReadIntListFromMember(row, "groupId", out List<int> ids) || ids == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < ids.Count; i++)
+            {
+                groupIds.Add(ids[i]);
+            }
+
+            return groupIds.Count > 0;
         }
 
         private bool TryGetWildAnimalFoodFullnessForGroup(int staticId, int starRate, int groupId, out int fullness)
@@ -1540,22 +2082,19 @@ namespace HeartopiaMod
 
             try
             {
-                if (this.EnsureWildAnimalFeedBackpackReflection())
+                if (this.TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(staticId, out object row)
+                    && row != null
+                    && this.TryReadIntArrayFromMember(row, "feedValue", out int[] feedValues)
+                    && feedValues != null
+                    && feedValues.Length > 0)
                 {
-                    object row = this.wildAnimalFeedGetAnimalFoodThoughMethod.Invoke(null, new object[] { staticId });
-                    if (row != null
-                        && this.TryReadIntArrayFromMember(row, "feedValue", out int[] feedValues)
-                        && feedValues != null
-                        && feedValues.Length > 0)
+                    int index = starRate > 0 && starRate <= 5 ? starRate - 1 : 0;
+                    index = Mathf.Clamp(index, 0, feedValues.Length - 1);
+                    fullness = feedValues[index];
+                    if (fullness > 0)
                     {
-                        int index = starRate > 0 && starRate <= 5 ? starRate - 1 : 0;
-                        index = Mathf.Clamp(index, 0, feedValues.Length - 1);
-                        fullness = feedValues[index];
-                        if (fullness > 0)
-                        {
-                            this.wildAnimalFeedFullnessByKeyCache[cacheKey] = fullness;
-                            return true;
-                        }
+                        this.wildAnimalFeedFullnessByKeyCache[cacheKey] = fullness;
+                        return true;
                     }
                 }
             }
@@ -1575,45 +2114,14 @@ namespace HeartopiaMod
 
         private unsafe bool TryGetWildAnimalFoodGroupIdsForStaticIdAuraMono(int staticId, HashSet<int> groupIds)
         {
-            if (staticId <= 0 || groupIds == null || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            if (staticId <= 0 || groupIds == null)
             {
                 return false;
             }
 
             try
             {
-                IntPtr tableDataClass = this.TryGetWildAnimalFeedAuraMonoTableDataClass();
-                if (tableDataClass == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                IntPtr getFoodMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetAnimalFoodThough", 1);
-                if (getFoodMethod == IntPtr.Zero)
-                {
-                    getFoodMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetAnimalFoodThough", 2);
-                }
-
-                if (getFoodMethod == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                bool needException = false;
-                IntPtr* args = stackalloc IntPtr[2];
-                args[0] = (IntPtr)(&staticId);
-                args[1] = (IntPtr)(&needException);
-                IntPtr exc = IntPtr.Zero;
-                IntPtr rowObj = auraMonoRuntimeInvoke(getFoodMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
-                {
-                    IntPtr* argsOne = stackalloc IntPtr[1];
-                    argsOne[0] = (IntPtr)(&staticId);
-                    exc = IntPtr.Zero;
-                    rowObj = auraMonoRuntimeInvoke(getFoodMethod, IntPtr.Zero, (IntPtr)argsOne, ref exc);
-                }
-
-                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+                if (!this.TryInvokeWildAnimalFeedGetAnimalFoodThoughAuraMono(staticId, out IntPtr rowObj))
                 {
                     return false;
                 }
@@ -1639,45 +2147,14 @@ namespace HeartopiaMod
         private unsafe bool TryGetWildAnimalFoodFullnessForGroupAuraMono(int staticId, int starRate, int groupId, out int fullness)
         {
             fullness = 0;
-            if (staticId <= 0 || groupId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            if (staticId <= 0 || groupId <= 0)
             {
                 return false;
             }
 
             try
             {
-                IntPtr tableDataClass = this.TryGetWildAnimalFeedAuraMonoTableDataClass();
-                if (tableDataClass == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                IntPtr getFoodMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetAnimalFoodThough", 1);
-                if (getFoodMethod == IntPtr.Zero)
-                {
-                    getFoodMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetAnimalFoodThough", 2);
-                }
-
-                if (getFoodMethod == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                bool needException = false;
-                IntPtr* args = stackalloc IntPtr[2];
-                args[0] = (IntPtr)(&staticId);
-                args[1] = (IntPtr)(&needException);
-                IntPtr exc = IntPtr.Zero;
-                IntPtr rowObj = auraMonoRuntimeInvoke(getFoodMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
-                {
-                    IntPtr* argsOne = stackalloc IntPtr[1];
-                    argsOne[0] = (IntPtr)(&staticId);
-                    exc = IntPtr.Zero;
-                    rowObj = auraMonoRuntimeInvoke(getFoodMethod, IntPtr.Zero, (IntPtr)argsOne, ref exc);
-                }
-
-                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+                if (!this.TryInvokeWildAnimalFeedGetAnimalFoodThoughAuraMono(staticId, out IntPtr rowObj))
                 {
                     return false;
                 }
@@ -1920,19 +2397,12 @@ namespace HeartopiaMod
 
             try
             {
-                Type tableDataType = this.FindLoadedTypeByFullName("TableData");
-                if (tableDataType == null)
+                if (!this.EnsureWildAnimalFeedTableDataReflection() || this.wildAnimalFeedGetEntityMethod == null)
                 {
                     return string.Empty;
                 }
 
-                MethodInfo getEntity = tableDataType.GetMethod("GetEntity", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int) }, null);
-                if (getEntity == null)
-                {
-                    return string.Empty;
-                }
-
-                object entity = getEntity.Invoke(null, new object[] { staticId });
+                object entity = this.wildAnimalFeedGetEntityMethod.Invoke(null, new object[] { staticId });
                 if (entity == null)
                 {
                     return string.Empty;
@@ -2343,23 +2813,15 @@ namespace HeartopiaMod
             groupName = string.Empty;
             try
             {
-                Type tableDataType = this.FindLoadedTypeByFullName("TableData");
-                if (tableDataType == null)
+                if (!this.EnsureWildAnimalFeedTableDataReflection() || this.wildAnimalFeedGetAnimalGroupMethod == null)
                 {
                     return false;
                 }
 
-                MethodInfo getAnimalGroup = tableDataType.GetMethod("GetAnimalGroup", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null)
-                    ?? tableDataType.GetMethod("GetAnimalGroup", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int) }, null);
-                if (getAnimalGroup == null)
-                {
-                    return false;
-                }
-
-                object[] args = getAnimalGroup.GetParameters().Length == 2
+                object[] args = this.wildAnimalFeedGetAnimalGroupMethod.GetParameters().Length == 2
                     ? new object[] { groupId, false }
                     : new object[] { groupId };
-                object group = getAnimalGroup.Invoke(null, args);
+                object group = this.wildAnimalFeedGetAnimalGroupMethod.Invoke(null, args);
                 if (group == null)
                 {
                     return false;
@@ -2393,20 +2855,7 @@ namespace HeartopiaMod
             bondExp = 0;
             try
             {
-                Type tableDataType = this.FindLoadedTypeByFullName("TableData");
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                MethodInfo getFood = tableDataType.GetMethod("GetAnimalFoodThough", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int) }, null);
-                if (getFood == null)
-                {
-                    return false;
-                }
-
-                object row = getFood.Invoke(null, new object[] { staticId });
-                if (row == null)
+                if (!this.TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(staticId, out object row) || row == null)
                 {
                     return false;
                 }
@@ -2491,26 +2940,10 @@ namespace HeartopiaMod
 
             this.wildAnimalFeedBackPackSystemType = this.FindLoadedTypeByFullName("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem")
                 ?? this.FindLoadedType("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", "BackPackSystem");
-            Type tableDataType = this.FindLoadedTypeByFullName("TableData");
-            if (this.wildAnimalFeedBackPackSystemType == null || tableDataType == null || this.wildAnimalFeedStorageTypeType == null)
+            if (this.wildAnimalFeedBackPackSystemType == null || this.wildAnimalFeedStorageTypeType == null
+                || !this.EnsureWildAnimalFeedTableDataReflection())
             {
                 return false;
-            }
-
-            this.wildAnimalFeedGetAnimalFoodThoughMethod = tableDataType.GetMethod(
-                "GetAnimalFoodThough",
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { typeof(int) },
-                null);
-            if (this.wildAnimalFeedGetAnimalFoodThoughMethod == null)
-            {
-                this.wildAnimalFeedGetAnimalFoodThoughMethod = tableDataType.GetMethod(
-                    "GetAnimalFoodThough",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                    null,
-                    new[] { typeof(int), typeof(bool) },
-                    null);
             }
 
             object storageProbe = Enum.Parse(this.wildAnimalFeedStorageTypeType, "Backpack");
@@ -2689,6 +3122,21 @@ namespace HeartopiaMod
         }
 
         private IntPtr TryGetWildAnimalFeedAuraMonoTableDataClass()
+        {
+            if (this.wildAnimalFeedAuraTableDataClass != IntPtr.Zero)
+            {
+                return this.wildAnimalFeedAuraTableDataClass;
+            }
+
+            if (this.EnsureWildAnimalFeedAuraTableDataCache())
+            {
+                return this.wildAnimalFeedAuraTableDataClass;
+            }
+
+            return IntPtr.Zero;
+        }
+
+        private IntPtr ResolveWildAnimalFeedAuraMonoTableDataClassUncached()
         {
             IntPtr ecsImage = this.FindAuraMonoImage(new[] { "EcsClient", "EcsClient.dll" });
             IntPtr tableDataClass = ecsImage != IntPtr.Zero ? auraMonoClassFromName(ecsImage, string.Empty, "TableData") : IntPtr.Zero;
