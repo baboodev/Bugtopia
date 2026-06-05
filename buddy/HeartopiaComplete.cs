@@ -19065,19 +19065,207 @@ namespace HeartopiaMod
             return 0;
         }
 
+        private bool IsLocalPlayerOnFishingShip(out uint shipNetId)
+        {
+            shipNetId = 0U;
+            if (this.TryGetLocalPlayerFishingShipNetId(out shipNetId) && shipNetId != 0U)
+            {
+                return true;
+            }
+
+            GameObject skeleton = HeartopiaComplete.GetLocalPlayer();
+            if (skeleton == null)
+            {
+                return false;
+            }
+
+            for (Transform parent = skeleton.transform.parent; parent != null; parent = parent.parent)
+            {
+                if (HeartopiaComplete.IsLikelyFishingShipTransform(parent))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsLikelyFishingShipTransform(Transform transform)
+        {
+            if (transform == null)
+            {
+                return false;
+            }
+
+            string name = transform.gameObject != null ? transform.gameObject.name ?? string.Empty : string.Empty;
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            return name.IndexOf("fishboat", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("fishingboat", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("fish_boat", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("boat", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("ship", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool TryGetLocalPlayerFishingShipNetId(out uint shipNetId)
+        {
+            shipNetId = 0U;
+
+            try
+            {
+                if (!this.TryGetManagedSelfPlayerObject(out object playerObj, out _) || playerObj == null)
+                {
+                    return false;
+                }
+
+                if (this.TryGetManagedUInt32Member(playerObj, "attachShipNetId", out shipNetId) && shipNetId != 0U)
+                {
+                    return true;
+                }
+
+                object entityObj = null;
+                if (!this.TryGetObjectMember(playerObj, "entity", out entityObj) || entityObj == null)
+                {
+                    entityObj = playerObj;
+                }
+
+                Type shipComponentType = this.FindLoadedType(
+                    "XDTLevelAndEntity.Gameplay.Component.Fish.PlayerFishingShipComponent",
+                    "PlayerFishingShipComponent");
+                if (shipComponentType != null)
+                {
+                    object shipComponent = this.TryInvokeManagedGetComponent(entityObj, shipComponentType);
+                    if (shipComponent != null
+                        && this.TryGetManagedUInt32Member(shipComponent, "attachShipNetId", out shipNetId)
+                        && shipNetId != 0U)
+                    {
+                        return true;
+                    }
+                }
+
+                if (this.TryGetManagedUInt32Member(entityObj, "netId", out uint playerNetId) && playerNetId != 0U)
+                {
+                    Type dataCenterType = this.FindLoadedType(
+                        "XDTDataAndProtocol.ComponentsData.DataCenter",
+                        "ScriptsRefactory.DataAndProtocol.ComponentsData.DataCenter",
+                        "DataCenter");
+                    Type shipDataType = this.FindLoadedType(
+                        "XDTDataAndProtocol.ComponentsData.PlayerFishingShipComponentData",
+                        "ScriptsRefactory.DataAndProtocol.ComponentsData.PlayerFishingShipComponentData",
+                        "PlayerFishingShipComponentData");
+                    Type netIdType = this.cachedAutoSellNetIdType
+                        ?? this.FindLoadedType("XDT.Scene.Shared.NetId", "NetId", "EcsClient.XDT.Scene.Shared.NetId");
+                    if (dataCenterType != null && shipDataType != null && netIdType != null)
+                    {
+                        MethodInfo tryGetComponentData = null;
+                        foreach (MethodInfo method in dataCenterType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                        {
+                            if (method == null || method.Name != "TryGetComponentData" || !method.IsGenericMethodDefinition)
+                            {
+                                continue;
+                            }
+
+                            ParameterInfo[] parameters = method.GetParameters();
+                            if (parameters.Length == 2)
+                            {
+                                tryGetComponentData = method;
+                                break;
+                            }
+                        }
+
+                        if (tryGetComponentData != null)
+                        {
+                            MethodInfo closedMethod = tryGetComponentData.MakeGenericMethod(shipDataType);
+                            object netIdArg = netIdType.IsValueType
+                                ? Activator.CreateInstance(netIdType)
+                                : null;
+                            if (netIdType == typeof(uint))
+                            {
+                                netIdArg = playerNetId;
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    netIdArg = Convert.ChangeType(playerNetId, netIdType);
+                                }
+                                catch
+                                {
+                                    netIdArg = null;
+                                }
+                            }
+
+                            if (netIdArg != null)
+                            {
+                                object[] args = new object[] { netIdArg, null };
+                                if (closedMethod.Invoke(null, args) is bool found && found && args[1] != null)
+                                {
+                                    if (this.TryGetManagedUInt32Member(args[1], "shipNetId", out shipNetId) && shipNetId != 0U)
+                                    {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return shipNetId != 0U;
+        }
+
+        private object TryInvokeManagedGetComponent(object entityObj, Type componentType)
+        {
+            if (entityObj == null || componentType == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                foreach (MethodInfo method in entityObj.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (method == null || method.Name != "GetComponent" || !method.IsGenericMethodDefinition)
+                    {
+                        continue;
+                    }
+
+                    if (method.GetParameters().Length != 0)
+                    {
+                        continue;
+                    }
+
+                    return method.MakeGenericMethod(componentType).Invoke(entityObj, null);
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
         private bool TryFacePlayerTowardCastTarget(Vector3 targetPos, out string status)
         {
             status = "Player unavailable";
 
             try
             {
-                GameObject playerRoot = this.FindPlayerRoot();
-                if (playerRoot == null)
+                GameObject skeleton = HeartopiaComplete.GetLocalPlayer();
+                GameObject positionSource = skeleton != null ? skeleton : this.FindPlayerRoot();
+                if (positionSource == null)
                 {
                     return false;
                 }
 
-                Vector3 playerPos = playerRoot.transform.position;
+                bool onFishingShip = this.IsLocalPlayerOnFishingShip(out uint _);
+                Vector3 playerPos = positionSource.transform.position;
                 Vector3 flatDir = targetPos - playerPos;
                 flatDir.y = 0f;
                 if (flatDir.sqrMagnitude < 0.04f)
@@ -19091,21 +19279,25 @@ namespace HeartopiaMod
                 float targetYaw = faceRot.eulerAngles.y;
                 Vector3 eulerAngles = new Vector3(0f, targetYaw, 0f);
 
-                if (this.TrySyncLocalPlayerCastFacingMono(playerPos, eulerAngles, faceRot, flatDir, out string monoStatus))
+                if (this.TrySyncLocalPlayerCastFacingMono(playerPos, eulerAngles, faceRot, flatDir, onFishingShip, out string monoStatus))
                 {
                     status = monoStatus;
                     this.AutoFishLog("Pre-cast entity facing yaw=" + targetYaw.ToString("F1") + " " + status + " target=" + targetPos);
                     return true;
                 }
 
-                playerRoot.transform.rotation = faceRot;
-                GameObject skeleton = HeartopiaComplete.GetLocalPlayer();
-                if (skeleton != null && skeleton != playerRoot)
+                if (skeleton != null)
                 {
                     skeleton.transform.rotation = faceRot;
                 }
+                else if (!onFishingShip)
+                {
+                    positionSource.transform.rotation = faceRot;
+                }
 
-                status = "visual-only fallback yaw=" + targetYaw.ToString("F1");
+                status = onFishingShip
+                    ? "visual-only ship-safe yaw=" + targetYaw.ToString("F1")
+                    : "visual-only fallback yaw=" + targetYaw.ToString("F1");
                 this.AutoFishLog("Pre-cast facing fallback " + status + " target=" + targetPos);
                 return true;
             }
@@ -19117,7 +19309,7 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TrySyncLocalPlayerCastFacingMono(Vector3 playerPos, Vector3 eulerAngles, Quaternion faceRot, Vector3 flatDir, out string status)
+        private unsafe bool TrySyncLocalPlayerCastFacingMono(Vector3 playerPos, Vector3 eulerAngles, Quaternion faceRot, Vector3 flatDir, bool onFishingShip, out string status)
         {
             status = "Mono entity facing unavailable";
 
@@ -19141,50 +19333,58 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr playerClass = auraMonoObjectGetClass(playerObj);
-            IntPtr transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 4);
-            if (transferMethod == IntPtr.Zero)
+            if (!onFishingShip)
             {
-                transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 2);
+                onFishingShip = this.IsLocalPlayerOnFishingShip(out uint _);
             }
 
-            if (transferMethod != IntPtr.Zero)
+            IntPtr playerClass = auraMonoObjectGetClass(playerObj);
+            if (!onFishingShip)
             {
-                int transferArgCount = this.TryGetAuraMonoMethodParamCount(transferMethod);
-                IntPtr exc = IntPtr.Zero;
-                if (transferArgCount >= 4)
+                IntPtr transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 4);
+                if (transferMethod == IntPtr.Zero)
                 {
-                    Vector3 posValue = playerPos;
-                    Vector3 eulerValue = eulerAngles;
-                    uint parentNetId = 0U;
-                    bool checkCollision = false;
-                    IntPtr* transferArgs = stackalloc IntPtr[4];
-                    transferArgs[0] = (IntPtr)(&posValue);
-                    transferArgs[1] = (IntPtr)(&eulerValue);
-                    transferArgs[2] = (IntPtr)(&parentNetId);
-                    transferArgs[3] = (IntPtr)(&checkCollision);
-                    auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
-                }
-                else
-                {
-                    Vector3 posValue = playerPos;
-                    Vector3 eulerValue = eulerAngles;
-                    IntPtr* transferArgs = stackalloc IntPtr[2];
-                    transferArgs[0] = (IntPtr)(&posValue);
-                    transferArgs[1] = (IntPtr)(&eulerValue);
-                    auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
+                    transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 2);
                 }
 
-                if (exc == IntPtr.Zero)
+                if (transferMethod != IntPtr.Zero)
                 {
-                    status = "Transfer yaw=" + eulerAngles.y.ToString("F1");
-                    return true;
+                    int transferArgCount = this.TryGetAuraMonoMethodParamCount(transferMethod);
+                    IntPtr exc = IntPtr.Zero;
+                    if (transferArgCount >= 4)
+                    {
+                        Vector3 posValue = playerPos;
+                        Vector3 eulerValue = eulerAngles;
+                        uint parentNetId = 0U;
+                        bool checkCollision = false;
+                        IntPtr* transferArgs = stackalloc IntPtr[4];
+                        transferArgs[0] = (IntPtr)(&posValue);
+                        transferArgs[1] = (IntPtr)(&eulerValue);
+                        transferArgs[2] = (IntPtr)(&parentNetId);
+                        transferArgs[3] = (IntPtr)(&checkCollision);
+                        auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
+                    }
+                    else
+                    {
+                        Vector3 posValue = playerPos;
+                        Vector3 eulerValue = eulerAngles;
+                        IntPtr* transferArgs = stackalloc IntPtr[2];
+                        transferArgs[0] = (IntPtr)(&posValue);
+                        transferArgs[1] = (IntPtr)(&eulerValue);
+                        auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
+                    }
+
+                    if (exc == IntPtr.Zero)
+                    {
+                        status = "Transfer yaw=" + eulerAngles.y.ToString("F1");
+                        return true;
+                    }
                 }
             }
 
             if (!this.TryGetBunnyHopMonoMoveComponent(playerObj, out IntPtr moveObj) || moveObj == IntPtr.Zero)
             {
-                status = "Mono moveComponent unavailable";
+                status = onFishingShip ? "Ship-safe facing unavailable" : "Mono moveComponent unavailable";
                 return false;
             }
 
@@ -19207,25 +19407,30 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr setPosRotMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetPositionAndRotation", 3);
-            if (setPosRotMethod != IntPtr.Zero)
+            if (!onFishingShip)
             {
-                Vector3 posValue = playerPos;
-                Quaternion rotArg = faceRot;
-                bool worldSpace = true;
-                IntPtr* setArgs = stackalloc IntPtr[3];
-                setArgs[0] = (IntPtr)(&posValue);
-                setArgs[1] = (IntPtr)(&rotArg);
-                setArgs[2] = (IntPtr)(&worldSpace);
-                exc2 = IntPtr.Zero;
-                auraMonoRuntimeInvoke(setPosRotMethod, moveObj, (IntPtr)setArgs, ref exc2);
+                IntPtr setPosRotMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetPositionAndRotation", 3);
+                if (setPosRotMethod != IntPtr.Zero)
+                {
+                    Vector3 posValue = playerPos;
+                    Quaternion rotArg = faceRot;
+                    bool worldSpace = true;
+                    IntPtr* setArgs = stackalloc IntPtr[3];
+                    setArgs[0] = (IntPtr)(&posValue);
+                    setArgs[1] = (IntPtr)(&rotArg);
+                    setArgs[2] = (IntPtr)(&worldSpace);
+                    exc2 = IntPtr.Zero;
+                    auraMonoRuntimeInvoke(setPosRotMethod, moveObj, (IntPtr)setArgs, ref exc2);
+                }
             }
 
             Vector2 forward2D = new Vector2(flatDir.x, flatDir.z);
             this.TrySetMonoVector2Member(moveObj, "_Forward", forward2D);
             this.TrySetMonoVector2Member(moveObj, "Forward", forward2D);
 
-            status = "WorldFaceTo yaw=" + eulerAngles.y.ToString("F1");
+            status = onFishingShip
+                ? "Ship-safe WorldFaceTo yaw=" + eulerAngles.y.ToString("F1")
+                : "WorldFaceTo yaw=" + eulerAngles.y.ToString("F1");
             return true;
         }
 
