@@ -26,6 +26,9 @@ namespace HeartopiaMod
         // mode = HobbyProtocolManager.TryGetHobbySkillParam(HobbySkillEnum.Water)[0].
         // Skill levels: 1 (default), 3, 6, 9. Match to player's current skill.
         private const int HomelandFarmCastBatchDefault = 9;
+        // Crop-box sow put-zone slot: levelObjectNetId = (slot << 32) | planterNetId. Crop boxes use
+        // slot 2 (craft raycast put-zone), per HOMELAND_SOW_ALIGNMENT.md.
+        private const int HomelandFarmCropBoxCraftPutZoneSlot = 2;
         // ToolType.Sprinkler — equipped via HoldToolCommand / ToolSystem.SetHandhold, not backpack AddHolder.
         private const int HomelandFarmSprinklerToolTypeId = 2;
         private const float HomelandFarmCommandDelaySeconds = 0.35f;
@@ -241,7 +244,10 @@ namespace HeartopiaMod
         private List<object> homelandFarmSowSlotPoints;
         private string homelandFarmSowSlotStatus = string.Empty;
         private bool homelandFarmSowSlotOk = false;
-        private bool homelandFarmSowGcGuardLogged = false;
+        // Set once the manure visual refresh is found structurally unavailable on this build
+        // (Entities.PlayVfxAt missing / crops have no CropComponent). Each failed attempt does heavy
+        // AuraMono work, so without this fertilize-all lags ~2-3s per batch refreshing cosmetics.
+        private bool homelandFarmManureVisualUnavailable = false;
         private IntPtr homelandFarmAuraEntitiesGetComponentsMethod = IntPtr.Zero;
         private readonly Dictionary<IntPtr, IntPtr> homelandFarmAuraComponentListClassByComponentClass = new Dictionary<IntPtr, IntPtr>();
         private readonly Dictionary<IntPtr, IntPtr> homelandFarmAuraInflatedGetComponentsMethodByComponentClass = new Dictionary<IntPtr, IntPtr>();
@@ -2853,7 +2859,8 @@ namespace HeartopiaMod
             string label,
             bool requireOwn,
             HashSet<uint> preCollectedNetIds = null,
-            bool logScanSummary = true)
+            bool logScanSummary = true,
+            bool includePlantData = false)
         {
             List<uint> result = new List<uint>();
             if (cropPredicate == null || !this.EnsureHomelandFarmReflectionReady())
@@ -2908,7 +2915,8 @@ namespace HeartopiaMod
                 hasPlayerPos,
                 playerPos,
                 radius,
-                logScanSummary);
+                logScanSummary,
+                includePlantData);
         }
 
         private List<uint> FilterHomelandFarmCropsFromNetIds(
@@ -2922,7 +2930,8 @@ namespace HeartopiaMod
             bool hasPlayerPos,
             Vector3 playerPos,
             float radius,
-            bool logScanSummary = true)
+            bool logScanSummary = true,
+            bool includePlantData = false)
         {
             List<uint> result = new List<uint>();
             if (netIds == null || netIds.Count == 0 || cropPredicate == null)
@@ -2976,6 +2985,41 @@ namespace HeartopiaMod
                         && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 cropPos)
                         && cropPos != Vector3.zero
                         && (cropPos - playerPos).sqrMagnitude > radiusSq)
+                    {
+                        continue;
+                    }
+
+                    result.Add(netId);
+                    continue;
+                }
+
+                // On builds where the growing crop resolves as PlantItemData (CropItemData absent),
+                // treat the plant entity as the crop. Scoped via includePlantData so weed/harvest
+                // (which read CropItemData-specific fields) are unaffected.
+                if (includePlantData
+                    && this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object directPlantData, out _, "PlantItemData")
+                    && directPlantData != null)
+                {
+                    if (!seenCrops.Add(netId))
+                    {
+                        continue;
+                    }
+
+                    if (!cropPredicate(directPlantData))
+                    {
+                        continue;
+                    }
+
+                    if (requireOwn
+                        && !this.TryHomelandFarmTryResolveOwnCropOwnerNetId(netId, netIds, playerNetId, effectiveOwnerNetId, onOwnField, out _))
+                    {
+                        continue;
+                    }
+
+                    if (hasPlayerPos
+                        && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 plantPos)
+                        && plantPos != Vector3.zero
+                        && (plantPos - playerPos).sqrMagnitude > radiusSq)
                     {
                         continue;
                     }
@@ -16391,10 +16435,20 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr putZoneObj = IntPtr.Zero;
-            if (this.TryHomelandFarmTryInvokeAuraGetLevelObject(putZoneId, out putZoneObj, out status)
+            // Prefer the CACHED entity world position. The previous primary path called
+            // GetLevelObject(putZoneId) + read rectMatrix per box, holding raw mono pointers across
+            // invokes; with mono_gc_disable unavailable on this build a GC mid-read randomly AVs
+            // (the sow-all crash). The crop-box entity sits at the put-zone cell, so worldToLocal +
+            // grid-snap + y-normalize downstream yield the same field-local cell without that call.
+            if (this.TryHomelandFarmResolveFarmEntityPosition(planterNetId, out Vector3 entityWorldPos)
+                && entityWorldPos != Vector3.zero)
+            {
+                worldPosition = entityWorldPos;
+            }
+            else if (this.TryHomelandFarmTryInvokeAuraGetLevelObject(putZoneId, out IntPtr putZoneObj, out status)
                 && putZoneObj != IntPtr.Zero)
             {
+                // Rare fallback (entity position unavailable): read the put-zone rect.
                 if (this.TryHomelandFarmTryGetAuraPutZoneRectMatrix(putZoneObj, out Matrix4x4 rectMatrix))
                 {
                     worldPosition = rectMatrix.MultiplyPoint(Vector3.zero);
@@ -16406,26 +16460,13 @@ namespace HeartopiaMod
                 }
             }
 
-            if (worldPosition == Vector3.zero
-                && this.TryHomelandFarmResolveFarmEntityPosition(planterNetId, out Vector3 entityWorldPos)
-                && entityWorldPos != Vector3.zero)
-            {
-                worldPosition = entityWorldPos;
-            }
-
             if (worldPosition == Vector3.zero)
             {
                 status = "PutZone/entity world position unavailable planter=" + planterNetId + ".";
                 return false;
             }
 
-            if (!this.TryHomelandFarmTryResolveSowPreviewWorldRotation(out worldRotation))
-            {
-                if (putZoneObj != IntPtr.Zero)
-                {
-                    this.TryHomelandFarmTryGetAuraLevelObjectWorldPose(putZoneObj, out _, out worldRotation);
-                }
-            }
+            this.TryHomelandFarmTryResolveSowPreviewWorldRotation(out worldRotation);
 
             status = "Seed root world pos=" + worldPosition + ".";
             return true;
@@ -16568,21 +16609,17 @@ namespace HeartopiaMod
                 return false;
             }
 
-            // Fast, crash-safe path FIRST: the crop-box put-zone is encode(planter, slot) and uses
-            // slot 2. Probe {2,1,0} and take the first validated slot (one GetLevelObject per box).
-            // Run this before the dictionary/scoring fallback below, which enumerates the WHOLE
-            // LevelObjectManager dictionary per planter (the documented native-AV hazard on this
-            // build) and crashes sow-all at radius 30. ProbeValidated already checks owner + flags.
-            int[] fastSowSlots = { 2, 1, 0 };
-            for (int fs = 0; fs < fastSowSlots.Length; fs++)
+            // Fast, crash-safe path FIRST: the crop-box put-zone is deterministically
+            // encode(planter, slot=2). The caller already confirmed this is an owned crop box, so we
+            // do NOT call GetLevelObject to validate here — that native call holds a raw mono pointer
+            // and randomly AVs across a sow-all batch (mono_gc_disable is unavailable on this build).
+            // If the put-zone were wrong the server simply rejects with InvalidPlantBox (no crash).
+            ulong fastPutZone = TryHomelandFarmEncodeLevelObjectId(planterNetId, HomelandFarmCropBoxCraftPutZoneSlot);
+            if (fastPutZone != 0UL)
             {
-                if (this.TryHomelandFarmTryProbeValidatedSowPutZone(planterNetId, fastSowSlots[fs], out ulong fastCandidate, out _)
-                    && fastCandidate != 0UL)
-                {
-                    levelObjectNetId = fastCandidate;
-                    this.HomelandFarmLog("Sow putZone planter=" + planterNetId + " slot=" + fastSowSlots[fs] + " -> " + levelObjectNetId + " (mono GetLevelObject).");
-                    return true;
-                }
+                levelObjectNetId = fastPutZone;
+                this.HomelandFarmLog("Sow putZone planter=" + planterNetId + " slot=" + HomelandFarmCropBoxCraftPutZoneSlot + " -> " + levelObjectNetId + " (deterministic).");
+                return true;
             }
 
             int slot = -1;
@@ -17434,16 +17471,11 @@ namespace HeartopiaMod
             int sinceYield = 0;
 
             this.EnsureHomelandFarmScannerTypes();
-            if (!this.homelandFarmSowGcGuardLogged)
-            {
-                this.homelandFarmSowGcGuardLogged = true;
-                this.HomelandFarmLog("Sow GC guard available=" + (auraMonoGcDisable != null && auraMonoGcEnable != null) + ".");
-            }
 
-            // Suspend the mono GC for the ENTIRE per-box resolution (including across yields): each
-            // box holds raw mono object pointers (GetLevelObject -> rectMatrix reads) across several
-            // invokes, and a GC firing mid-resolution collects/moves them -> native AV (random box
-            // on sow-all). Re-enabled in finally. yield inside try/finally is legal in iterators.
+            // Best-effort GC suspension for the per-box resolution. The crash-prone per-box
+            // GetLevelObject/rectMatrix calls were removed (put-zone is deterministic, world pose
+            // comes from the cached entity position), so this is now only cheap insurance for the
+            // remaining GetAllComponents reads. No-op where mono_gc_disable is unavailable.
             this.HomelandFarmAuraGcDisable();
             try
             {
@@ -17794,18 +17826,19 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out object cropData, out _, "CropItemData")
-                || cropData == null)
+            if ((!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out object cropData, out _, "CropItemData")
+                    || cropData == null)
+                // This build's growing crop data is PlantItemData, not CropItemData.
+                && (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, cropNetId, out cropData, out _, "PlantItemData")
+                    || cropData == null))
             {
                 reason = "Crop data missing.";
                 return false;
             }
 
-            if (this.TryHomelandFarmReadComponentInt(cropData, out int stage, "stage", "Stage") && stage == 4)
-            {
-                reason = "Crop already mature.";
-                return false;
-            }
+            // NOTE: previously rejected stage==4 as "already mature", but on this build stage-4
+            // crops are still fertilizable (confirmed: they can be fertilized manually). Let the
+            // server be the authority on maturity; do not pre-reject by stage here.
 
             bool hasTableRow = this.TryHomelandFarmTryGetCropFertilizerTableRow(
                 fertilizerStaticId,
@@ -18077,7 +18110,8 @@ namespace HeartopiaMod
                     cropData => cropData != null,
                     "Fertilizable crops",
                     requireOwn: true,
-                    preCollectedNetIds: scanNetIds);
+                    preCollectedNetIds: scanNetIds,
+                    includePlantData: true);
                 Dictionary<string, int> rejectReasons = new Dictionary<string, int>(StringComparer.Ordinal);
                 int maxTargets = Math.Max(1, fertilizer.Count);
                 for (int i = 0; i < ownCrops.Count; i++)
