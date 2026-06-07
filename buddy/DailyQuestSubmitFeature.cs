@@ -10,6 +10,7 @@ namespace HeartopiaMod
     {
         private const bool DailyQuestSubmitLogsEnabled = MasterLogDailyQuestSubmit;
         private const float DailyQuestSubmitDelaySeconds = 0.65f;
+        private const int DailyQuestSubmitStateCanAccept = 2;
         private const int DailyQuestSubmitStateCanSubmit = 4;
         private const int DailyQuestBackpackStorageType = 1;
         private const int DailyQuestWarehouseStorageType = 2;
@@ -26,6 +27,7 @@ namespace HeartopiaMod
         private IntPtr dailyQuestSubmitAuraItemNetPairListAddMethod = IntPtr.Zero;
         private IntPtr dailyQuestSubmitClientSubmitMethod = IntPtr.Zero;
         private IntPtr dailyQuestSubmitClientSubmitNpcMethod = IntPtr.Zero;
+        private IntPtr dailyQuestSubmitClientAcceptMethod = IntPtr.Zero;
         private int dailyQuestSubmitClientSubmitTaskItemParamCount = 0;
 
         private void StartDailyQuestAutoSubmitItems(bool silent)
@@ -80,6 +82,52 @@ namespace HeartopiaMod
 
             this.DailyQuestSubmitLogOrderSnapshot(orders);
 
+            int accepted = 0;
+            for (int i = 0; i < orders.Count; i++)
+            {
+                if (!this.TryResolveDailyQuestTaskIdFromOrder(orders[i], out int acceptTaskId, out int acceptOrderKey, out string acceptOrderFields))
+                {
+                    this.DailyQuestSubmitLog(
+                        "accept order[" + i + "] skip: unresolved"
+                        + (string.IsNullOrEmpty(acceptOrderFields) ? string.Empty : " | " + acceptOrderFields));
+                    continue;
+                }
+
+                if (!this.TryGetGameTaskStateAura(acceptTaskId, out int acceptState, out string acceptStateStatus))
+                {
+                    this.DailyQuestSubmitLog("accept order[" + i + "] taskId=" + acceptTaskId + " GetTaskState failed: " + acceptStateStatus);
+                    continue;
+                }
+
+                if (acceptState != DailyQuestSubmitStateCanAccept)
+                {
+                    continue;
+                }
+
+                this.DailyQuestSubmitLog(
+                    "accept order[" + i + "] orderKey=" + acceptOrderKey
+                    + " taskId=" + acceptTaskId
+                    + " state=CanAccept"
+                    + " | " + acceptOrderFields);
+                if (this.TryInvokeDailyQuestClientAcceptTaskAura(acceptTaskId, out string acceptStatus))
+                {
+                    accepted++;
+                    this.DailyQuestSubmitLog("accept ok taskId=" + acceptTaskId + " " + acceptStatus);
+                }
+                else
+                {
+                    this.DailyQuestSubmitLog("accept failed taskId=" + acceptTaskId + ": " + acceptStatus);
+                }
+
+                yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds * 0.35f);
+            }
+
+            if (accepted > 0)
+            {
+                this.DailyQuestSubmitLog("accepted " + accepted + " CanAccept order(s), waiting for server sync");
+                yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds);
+            }
+
             int attempted = 0;
             int submitted = 0;
             int skipped = 0;
@@ -94,27 +142,22 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                int orderKey = this.TryGetMonoIntMember(orderComponent, "TaskOrderId", out int key) ? key : 0;
-                if (orderKey <= 0)
+                if (!this.TryResolveDailyQuestTaskIdFromOrder(orderComponent, out int taskId, out int orderKey, out string orderFields))
                 {
                     this.DailyQuestSubmitLog(
                         "process order[" + i + "] skip: invalid TaskOrderId"
-                        + " | " + this.FormatDailyQuestOrderComponentFields(orderComponent));
+                        + (string.IsNullOrEmpty(orderFields) ? string.Empty : " | " + orderFields));
                     skipped++;
                     continue;
                 }
 
                 this.TryResolveDailyQuestTaskFromOrderKey(
                     orderKey,
-                    out int taskId,
+                    out _,
                     out int orderRefreshType,
                     out int orderSpecialId,
                     out int orderLevel,
                     out string resolveNote);
-                if (taskId <= 0)
-                {
-                    taskId = orderKey;
-                }
 
                 this.DailyQuestSubmitLog(
                     "process order[" + i + "] orderKey=" + orderKey
@@ -123,13 +166,36 @@ namespace HeartopiaMod
                     + " refreshType=" + orderRefreshType
                     + " specialId=" + orderSpecialId
                     + " level=" + orderLevel
-                    + " | " + this.FormatDailyQuestOrderComponentFields(orderComponent));
+                    + " | " + orderFields);
 
                 if (!this.TryGetGameTaskStateAura(taskId, out int state, out string stateStatus))
                 {
                     this.DailyQuestSubmitLog("skip taskId=" + taskId + " GetTaskState failed: " + stateStatus);
                     skipped++;
                     continue;
+                }
+
+                if (state == DailyQuestSubmitStateCanAccept)
+                {
+                    this.DailyQuestSubmitLog("retry accept taskId=" + taskId + " still CanAccept before submit");
+                    if (this.TryInvokeDailyQuestClientAcceptTaskAura(taskId, out string retryAcceptStatus))
+                    {
+                        accepted++;
+                        this.DailyQuestSubmitLog("accept ok taskId=" + taskId + " " + retryAcceptStatus);
+                        yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds);
+                        if (!this.TryGetGameTaskStateAura(taskId, out state, out stateStatus))
+                        {
+                            this.DailyQuestSubmitLog("skip taskId=" + taskId + " GetTaskState failed after accept: " + stateStatus);
+                            skipped++;
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        this.DailyQuestSubmitLog("accept failed taskId=" + taskId + ": " + retryAcceptStatus);
+                        skipped++;
+                        continue;
+                    }
                 }
 
                 if (state != DailyQuestSubmitStateCanSubmit)
@@ -194,7 +260,8 @@ namespace HeartopiaMod
                 yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds * 0.5f);
             }
 
-            this.dailyQuestSubmitLastStatus = "Done: " + submitted + "/" + attempted + " submitted, " + skipped + " skipped";
+            this.dailyQuestSubmitLastStatus = "Done: " + submitted + "/" + attempted
+                + " submitted, " + accepted + " accepted, " + skipped + " skipped";
             this.DailyQuestSubmitLog(this.dailyQuestSubmitLastStatus);
             if (!silent || submitted > 0)
             {
@@ -966,6 +1033,92 @@ namespace HeartopiaMod
             return true;
         }
 
+
+        private bool TryResolveDailyQuestTaskIdFromOrder(IntPtr orderComponent, out int taskId, out int orderKey, out string orderFields)
+        {
+            taskId = 0;
+            orderKey = 0;
+            orderFields = string.Empty;
+            if (orderComponent == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            orderFields = this.FormatDailyQuestOrderComponentFields(orderComponent);
+            orderKey = this.TryGetMonoIntMember(orderComponent, "TaskOrderId", out int key) ? key : 0;
+            if (orderKey <= 0)
+            {
+                return false;
+            }
+
+            this.TryResolveDailyQuestTaskFromOrderKey(orderKey, out taskId, out _, out _, out _, out _);
+            if (taskId <= 0)
+            {
+                taskId = orderKey;
+            }
+
+            return taskId > 0;
+        }
+
+        private unsafe bool TryInvokeDailyQuestClientAcceptTaskAura(int taskId, out string status)
+        {
+            status = string.Empty;
+            if (taskId <= 0 || auraMonoRuntimeInvoke == null)
+            {
+                status = "accept args invalid";
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                status = "AuraMono attach failed";
+                return false;
+            }
+
+            if (!this.TryResolveDailyQuestClientAcceptMethod(out IntPtr acceptMethod))
+            {
+                status = "ClientAcceptTask method missing";
+                return false;
+            }
+
+            int gameTaskId = taskId;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&gameTaskId);
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(acceptMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                status = "ClientAcceptTask exc=0x" + exc.ToInt64().ToString("X");
+                return false;
+            }
+
+            status = "aura ClientAcceptTask";
+            return true;
+        }
+
+        private bool TryResolveDailyQuestClientAcceptMethod(out IntPtr acceptMethod)
+        {
+            acceptMethod = this.dailyQuestSubmitClientAcceptMethod;
+            if (acceptMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            IntPtr protocolClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Task.TaskProtocolManager");
+            if (protocolClass == IntPtr.Zero)
+            {
+                protocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ProtocolService.Task", "TaskProtocolManager");
+            }
+
+            if (protocolClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            acceptMethod = this.FindAuraMonoMethodOnHierarchy(protocolClass, "ClientAcceptTask", 1);
+            this.dailyQuestSubmitClientAcceptMethod = acceptMethod;
+            return acceptMethod != IntPtr.Zero;
+        }
 
         private bool TryResolveDailyQuestClientSubmitNpcMethod(out IntPtr submitMethod)
         {
