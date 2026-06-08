@@ -14799,6 +14799,18 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Match the Bag / Warehouse and Auto Sell tabs: resolve the canonical
+            // item name from the static-id game table first (TableData.GetBackPackName).
+            // The PetFeed-style paths below stay as fallbacks. Without this, fertilizer
+            // and seed labels came from the live AuraMono item Name + pet-food
+            // normalization, so they diverged from every other tab.
+            if (this.TryGetResolvedFoodNameFromStaticId(staticId, out string tableDisplayName)
+                && !this.IsPoorBagItemDisplayName(tableDisplayName, staticId))
+            {
+                displayName = tableDisplayName;
+                return true;
+            }
+
             if (auraItemObj != IntPtr.Zero)
             {
                 string auraName = this.ReadPetFeedBackpackItemNameAuraMono(auraItemObj);
@@ -18445,13 +18457,13 @@ namespace HeartopiaMod
                 selectedIndex = (selectedIndex - 1 + items.Count) % items.Count;
             }
 
-            GUI.Label(new Rect(left + 34f, y, width - 104f, rowH), label, GUI.skin.label);
-            if (GUI.Button(new Rect(left + width - 64f, y, 28f, rowH), this.L("homeland_farm.next")))
+            GUI.Label(new Rect(left + 34f, y, width - 124f, rowH), label, GUI.skin.label);
+            if (GUI.Button(new Rect(left + width - 84f, y, 28f, rowH), this.L("homeland_farm.next")))
             {
                 selectedIndex = (selectedIndex + 1) % items.Count;
             }
 
-            GUI.Label(new Rect(left + width - 30f, y, 30f, rowH), (selectedIndex + 1) + "/" + items.Count, GUI.skin.label);
+            GUI.Label(new Rect(left + width - 50f, y, 50f, rowH), (selectedIndex + 1) + "/" + items.Count, GUI.skin.label);
             return y + rowH + 8f;
         }
 
