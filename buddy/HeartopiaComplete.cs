@@ -47,6 +47,7 @@ namespace HeartopiaMod
         private KeyCode keyToggleRadar = KeyCode.None;
         private KeyCode keyAutoForaging = KeyCode.None;
         private KeyCode keyAuraFarm = KeyCode.None;
+        private KeyCode keyWaterWeedRadius = KeyCode.None;
         private KeyCode keyAutoFish = KeyCode.None;
         private KeyCode keyAutoFishingTeleport = KeyCode.None;
         private KeyCode keyAutoFishShadowNet = KeyCode.None;
@@ -310,6 +311,7 @@ namespace HeartopiaMod
             public int keyToggleRadar;
             public int keyAutoForaging;
             public int keyAuraFarm;
+            public int keyWaterWeedRadius;
             public int keyAutoFish;
             public int keyAutoFishingTeleport;
             public int keyAutoFishShadowNet;
@@ -370,6 +372,7 @@ namespace HeartopiaMod
             public float netCookInterval;
             public float netCookScanRadiusMeters;
             public bool netCookMiniGameOnly;
+            public float homelandFarmWaterRadius;
             public float autoFishScanTimeout = -1f;
             public float autoFishTeleportDelay = -1f;
             public float autoFishFishShadowDetectRange = -1f;
@@ -882,6 +885,7 @@ namespace HeartopiaMod
             data.keyToggleRadar = (int)this.keyToggleRadar;
             data.keyAutoForaging = (int)this.keyAutoForaging;
             data.keyAuraFarm = (int)this.keyAuraFarm;
+            data.keyWaterWeedRadius = (int)this.keyWaterWeedRadius;
             data.keyAutoFish = (int)this.keyAutoFish;
             data.keyAutoFishingTeleport = (int)this.keyAutoFishingTeleport;
             data.keyAutoFishShadowNet = (int)this.keyAutoFishShadowNet;
@@ -942,6 +946,7 @@ namespace HeartopiaMod
             data.netCookInterval = this.netCookInterval;
             data.netCookScanRadiusMeters = this.netCookScanRadiusMeters;
             data.netCookMiniGameOnly = this.netCookMiniGameOnly;
+            data.homelandFarmWaterRadius = this.homelandFarmWaterRadius;
             data.autoFishScanTimeout = -1f;
             data.autoFishTeleportDelay = -1f;
             data.autoFishFishShadowDetectRange = AutoFishingFarm.GetDetectRange();
@@ -1005,6 +1010,7 @@ namespace HeartopiaMod
             this.keyToggleRadar = (KeyCode)data.keyToggleRadar;
             this.keyAutoForaging = (KeyCode)data.keyAutoForaging;
             this.keyAuraFarm = (KeyCode)data.keyAuraFarm;
+            this.keyWaterWeedRadius = (KeyCode)data.keyWaterWeedRadius;
             this.keyAutoFish = (KeyCode)data.keyAutoFish;
             this.keyAutoFishingTeleport = (KeyCode)data.keyAutoFishingTeleport;
             this.keyAutoFishShadowNet = (KeyCode)data.keyAutoFishShadowNet;
@@ -1066,6 +1072,7 @@ namespace HeartopiaMod
             this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
             this.netCookScanRadiusMeters = Mathf.Clamp(data.netCookScanRadiusMeters > 0f ? data.netCookScanRadiusMeters : NetCookDefaultScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
             this.netCookMiniGameOnly = data.netCookMiniGameOnly;
+            this.homelandFarmWaterRadius = Mathf.Clamp(data.homelandFarmWaterRadius > 0f ? data.homelandFarmWaterRadius : HomelandFarmDefaultWaterRadius, HomelandFarmMinWaterRadius, HomelandFarmMaxWaterRadius);
             this.saved_autoFishScanTimeout = data.autoFishScanTimeout;
             this.saved_autoFishTeleportDelay = data.autoFishTeleportDelay;
             this.saved_autoFishFishShadowDetectRange = data.autoFishFishShadowDetectRange;
@@ -2124,6 +2131,10 @@ namespace HeartopiaMod
                 if (Input.GetKeyDown(this.keyAuraFarm))
                 {
                     this.SetAuraFarmEnabled(!this.auraFarmEnabled);
+                }
+                if (Input.GetKeyDown(this.keyWaterWeedRadius))
+                {
+                    this.StartHomelandFarmWaterAndWeed(silent: false);
                 }
                 if (Input.GetKeyDown(this.keyAutoInsectFarm))
                 {
@@ -11192,7 +11203,7 @@ namespace HeartopiaMod
             IntPtr getItemMethod = this.FindAuraMonoMethodOnHierarchy(collectionClass, "get_Item", 1);
             if (getCountMethod != IntPtr.Zero && getItemMethod != IntPtr.Zero)
             {
-                int count = Math.Min(this.GetAuraMonoIntCount(collectionObj, getCountMethod), 4096);
+                int count = Math.Min(this.GetAuraMonoIntCount(collectionObj, getCountMethod), MaxAuraMonoCollectionItems);
                 for (int i = 0; i < count; i++)
                 {
                     unsafe
@@ -11237,7 +11248,7 @@ namespace HeartopiaMod
                     if (moveNextMethod != IntPtr.Zero && getCurrentMethod != IntPtr.Zero)
                     {
                         int safety = 0;
-                        while (safety < 4096)
+                        while (safety < MaxAuraMonoCollectionItems)
                         {
                             exc = IntPtr.Zero;
                             IntPtr moved = auraMonoRuntimeInvoke(moveNextMethod, enumeratorObj, IntPtr.Zero, ref exc);
@@ -11326,7 +11337,7 @@ namespace HeartopiaMod
                     IntPtr getValueMethod = this.FindAuraMonoMethodOnHierarchy(nodeClass, "get_Value", 0);
                     IntPtr getNextMethod = this.FindAuraMonoMethodOnHierarchy(nodeClass, "get_Next", 0);
                     int safety = 0;
-                    while (nodeObj != IntPtr.Zero && getValueMethod != IntPtr.Zero && getNextMethod != IntPtr.Zero && safety < 4096)
+                    while (nodeObj != IntPtr.Zero && getValueMethod != IntPtr.Zero && getNextMethod != IntPtr.Zero && safety < MaxAuraMonoCollectionItems)
                     {
                         exc = IntPtr.Zero;
                         IntPtr valueObj = auraMonoRuntimeInvoke(getValueMethod, nodeObj, IntPtr.Zero, ref exc);
@@ -11350,7 +11361,10 @@ namespace HeartopiaMod
             return output.Count > 0;
         }
 
-        private const int MaxAuraMonoEntities = 4096; // Dense towns can exceed 2000 loaded entities; NetCook needs later cook-builds too.
+        private const int MaxAuraMonoEntities = 8192; // Dense towns can exceed 2000 loaded entities; NetCook needs later cook-builds too.
+        // Truncation guard for generic AuraMono collection enumeration (e.g. LevelObjectManager._dictionary,
+        // which holds crop boxes / planters). Raised from 4096 so dense worlds don't hide farm targets.
+        private const int MaxAuraMonoCollectionItems = 8192;
 
         // One-shot actions (e.g. wild gift claim) can opt out of the 4096 truncation so dense towns don't hide targets.
         // 0 = use the default MaxAuraMonoEntities cap. Always reset via try/finally after the enumeration.
@@ -61581,6 +61595,7 @@ namespace HeartopiaMod
                             case "Toggle Radar": this.keyToggleRadar = newKey; break;
                             case "Auto Foraging": this.keyAutoForaging = newKey; break;
                             case "Aura Farm": this.keyAuraFarm = newKey; break;
+                            case "Water + Weed Radius": this.keyWaterWeedRadius = newKey; break;
                             case "Auto Fish Farm (Auto Teleport)": this.keyAutoFishingTeleport = newKey; break;
                             case "Auto Fishing (Teleport)": this.keyAutoFishingTeleport = newKey; break;
                             case "Auto Fish (No Teleport)": this.keyAutoFish = newKey; break;
@@ -61637,9 +61652,10 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Inspect Move", ref this.keyInspectMove);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 16, subHeaderStyle, accent, panelFill, panelLine);
+            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 17, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Foraging", ref this.keyAutoForaging);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Aura Farm", ref this.keyAuraFarm);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Water + Weed Radius", ref this.keyWaterWeedRadius);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Insect Farm", ref this.keyAutoInsectFarm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Bird Farm", ref this.keyAutoBirdFarm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Fish Shadow Net", ref this.keyAutoFishShadowNet);
@@ -61680,6 +61696,7 @@ namespace HeartopiaMod
                 this.keyToggleRadar = KeyCode.None;
                 this.keyAutoForaging = KeyCode.None;
                 this.keyAuraFarm = KeyCode.None;
+                this.keyWaterWeedRadius = KeyCode.None;
                 this.keyAutoFish = KeyCode.None;
                 this.keyAutoFishingTeleport = KeyCode.None;
                 this.keyAutoFishShadowNet = KeyCode.None;

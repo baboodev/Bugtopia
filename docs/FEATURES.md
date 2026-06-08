@@ -13,7 +13,7 @@ Complete feature catalog for **Heartopia Helper**. Works identically under Melon
 | 0 | **Self** | Player movement, camera, AFK, building overlap bypass |
 | 2 | **Resource Gathering** | Foraging, chop/mine, fishing, insects, birds |
 | 3 | **Features** | Automation utilities (food, repair, shops, cooking, puzzle, pets) |
-| 8 | **New Features** | Experimental utilities (animal care) |
+| 8 | **New Features** | Animal care, daily quests, homeland farm (crop-box automation) |
 | 4 | **Radar** | World resource radar + visual ESP |
 | 5 | **Teleport** | Fast travel, NPCs, events, custom points |
 | 6 | **Bag / Warehouse** | Backpack ↔ warehouse transfer via `BackPackSystem` / `MoveBatchBackpackItems` |
@@ -59,6 +59,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 |---------|---------|
 | Animal Care | Wild animal trough feed (manual), claim all wild animal gifts |
 | Daily Quests | Auto-submit item delivery orders (CanSubmit) |
+| Homeland Farm | Crop-box farming: auto farm, water/weed/harvest/sow/fertilize in radius, seed/fertilizer selection |
 
 Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pets): **[BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md)**.
 
@@ -399,6 +400,47 @@ Details and troubleshooting: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#dai
 
 ---
 
+## New Features — Homeland Farm
+
+Crop-box (planter) farming inside your homeland. All operations are **radius-based** around the player and send real server commands. Implemented in `HomelandFarmFeature.cs` (resolved via reflection + **AuraMono** native path — managed component types are absent under BepInEx).
+
+Tab layout (top → bottom):
+
+1. **Auto Farming** — Capture planters + Start / Stop.
+2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**.
+3. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
+4. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
+5. **Operations** — buttons: Water in radius · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
+6. Status panel + **Stop** (cancels the running operation).
+
+### Manual operations (radius)
+
+| Button | Action | Owner filter |
+|--------|--------|--------------|
+| Water in radius | Waters crop boxes + plants (batch = watering hobby-skill cell count) | any |
+| Weed | Removes the `hasWeed` flag on crops | any |
+| Harvest | Collects ripe crops (`stage == 4`) | **own only** |
+| Collect seeds | Collects ready plant seeds | any |
+| Sow | Fills empty planter slots with the **selected seed** (batch = sprinkler/hobby cell count) | own |
+| Fertilize | Applies the **selected fertilizer** to own crops | own |
+
+Item names in the seed/fertilizer selectors resolve through the same game-table path as the Bag / Auto Sell tabs (`TableData.GetBackPackName` first), so labels match across the mod.
+
+### Auto Farming
+
+**Capture planters** snapshots the crop boxes in radius (like Mass Cook "Capture Stoves") and pins the working-zone center. **Start auto farm** then runs an autonomous loop (disabled until seeds are selected):
+
+1. **Discovery first** — one radius scan builds a crop-netId cache (so it never re-sows already-occupied planters on restart).
+2. **Poll** the cached crops directly (no re-scan): remove weeds, harvest ripe crops, drop them from the cache.
+3. **Sow** a new generation **only when the zone holds no crops** (start, or after the whole generation is harvested) and a post-sow cooldown has elapsed — prevents re-sowing boxes the server hasn't registered yet (`MaxPlantCountLimit`).
+4. **Time-scheduled weeding** — sleep is driven by the crops' exact maturity (`mature = sowTime + ripeGrowTime − growTime`, read from `CropItemData`; "now" via the game clock `GameTimeUtility.GetUnixTime()`). Coarse weeding while far from ripe; **weed every second in the final minute** before harvest.
+
+**Stop:** manual (Stop button / Stop auto farm), or automatic once the selected seed runs out **and** the last harvest is collected.
+
+Notes & limits: crop discovery uses an AuraMono proximity scan; in very dense homelands the inspect cap and the global entity/level-object enumeration caps (raised to 8192) bound it. The targeted `Entities.GetComponents<CropBoxComponent>` source is unavailable on this build, so discovery falls back to the proximity scan. Enable `MasterLogHomelandFarm` for per-tick logs (`Auto crop timing`, `Auto poll`, `next ripe in …`).
+
+---
+
 ## Settings Tab
 
 Sections typically include:
@@ -413,7 +455,7 @@ Sections typically include:
 | Performance | FPS bypass; LOD override (game default / better / performance / custom bias & max level) |
 | Misc | Restore defaults, export-related options |
 
-Config persisted to `%LocalLow%/HelperSettings/Config.xml` (XML serialized `UnifiedConfigData`).
+Config persisted to `%LocalLow%/HelperSettings/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, and the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30).
 
 Separate legacy-compatible JSON fragments still loaded line-by-line for some keys in older migration path.
 
@@ -429,6 +471,7 @@ All default to **KeyCode.None** except menu toggle.
 | Toggle Radar | — |
 | Auto Foraging | — |
 | Aura Farm | — |
+| Water + Weed Radius | — |
 | Auto Fish | — |
 | Teleport Fishing | — |
 | Bypass UI | — |

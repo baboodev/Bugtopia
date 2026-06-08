@@ -42,11 +42,24 @@ namespace HeartopiaMod
         private const float HomelandFarmHarvestDelaySeconds = 0f;
         private const float HomelandFarmCollectSeedDelaySeconds = 0.6f;
         private const float HomelandFarmWeedDelaySeconds = 0f;
+        // Auto farming (time-scheduled model):
+        // - After each sow, rebuild the crop-netId cache once (one radius scan). Between sows we
+        //   only re-read stage/hasWeed per cached netId (cheap directed poll, no radius scan).
+        // - Sleep is driven by the crops' exact maturity (FarmUtil: mature = sowTime + ripeGrowTime
+        //   - growTime). Coarse weeding while far from ripe; aggressive 1s weeding in the final minute.
+        private const float HomelandFarmAutoDiscoveryDelaySeconds = 2.5f; // let server register just-sown crops
+        private const long HomelandFarmAutoFinalMinuteSeconds = 60L;      // "final minute" threshold
+        private const float HomelandFarmAutoFinalWeedIntervalSeconds = 1f;
+        private const float HomelandFarmAutoCoarseWeedIntervalSeconds = 30f;
+        private const float HomelandFarmAutoEmptyRetrySeconds = 5f;       // cache empty + seeds left, sow found nothing
+        // Minimum gap between sow passes. The server takes a moment to register sown crops; sowing
+        // again before that re-sows the same boxes → OnBuildSeedResult MaxPlantCountLimit.
+        private const float HomelandFarmAutoSowCooldownSeconds = 15f;
         private const int HomelandFarmMaxTotalWaterLevel = 5;
         private const int HomelandFarmDefaultPlantWaterMode = 0;
-        private const int HomelandFarmMaxSpatialLevelObjectEntries = 512;
-        private const int HomelandFarmMaxAuraFarmEntityInspect = 4096;
-        private const int HomelandFarmMaxAuraFarmComponentChecks = 768;
+        private const int HomelandFarmMaxSpatialLevelObjectEntries = 1024;
+        private const int HomelandFarmMaxAuraFarmEntityInspect = 8192;
+        private const int HomelandFarmMaxAuraFarmComponentChecks = 1536;
         private const int HomelandFarmMaxAuraFarmSpatialCandidates = 256;
         private const int HomelandFarmMaxAuraFarmSpatialVerifyCount = 24;
         private const float HomelandFarmAuraSpatialVerifyBudgetSeconds = 2.5f;
@@ -55,7 +68,11 @@ namespace HeartopiaMod
         private const float HomelandFarmAuraSpatialCollectBudgetSeconds = 0.75f;
         private const float HomelandFarmAuraProximityComponentScanBudgetSeconds = 8f;
         private const float HomelandFarmWaterLogProximityBudgetSeconds = 2f;
-        private const int HomelandFarmMaxAuraProximityComponentInspect = 512;
+        // Dense homelands can pack 4000+ entities inside the scan radius. With a 512 inspect cap
+        // (distance-sorted), crop boxes that sort behind 512 nearer non-farm entities were never
+        // inspected → intermittent undercount. Classification is cheap (~8ms/512 measured), so
+        // raise the cap to cover the whole nearby set; the time budget still bounds worst cases.
+        private const int HomelandFarmMaxAuraProximityComponentInspect = 8192;
         private const int HomelandFarmMaxRegisteredFarmTargets = 512;
         private const int HomelandFarmHarvestFramePaceBatch = 4;
         private const float HomelandFarmAuraComponentClassResolveRetrySeconds = 30f;
@@ -130,6 +147,26 @@ namespace HeartopiaMod
         private int homelandFarmSelectedFertilizerIndex = 0;
         private float homelandFarmSeedsCacheTime = 0f;
         private float homelandFarmFertilizersCacheTime = 0f;
+
+        // --- Auto farming (capture planters in radius, then loop sow -> weed -> harvest) ---
+        private bool homelandFarmAutoCaptured = false;
+        private Vector3 homelandFarmAutoCenter = Vector3.zero;
+        private float homelandFarmAutoCaptureRadius = 0f;
+        private int homelandFarmAutoPlanterCount = 0;
+        private int homelandFarmAutoCaptureExcludedOutsideRadius = 0;
+        private bool homelandFarmAutoRunning = false;
+        private int homelandFarmAutoSowCount = 0;
+        // Crop netIds discovered after sow; polled directly each tick (no radius re-scan).
+        private readonly List<uint> homelandFarmAutoCropNetIds = new List<uint>();
+        // Harvest was already sent for these netIds this auto-farm run. Client PlantItemData often
+        // lingers at stage 4 after the server cleared the box — exclude from cache/occupied scans.
+        private readonly HashSet<uint> homelandFarmAutoHarvestedNetIds = new HashSet<uint>();
+        // Planter boxes sown this generation but not yet visible to the crop scan / occupied check.
+        private readonly HashSet<uint> homelandFarmAutoPendingSowBoxNetIds = new HashSet<uint>();
+        private readonly Dictionary<uint, ulong> homelandFarmResolvedPutZoneByPlanterNetId = new Dictionary<uint, ulong>();
+        // While set, every radius scan (sow slots, weed, harvest) centers on the captured
+        // planter zone instead of the live player position, so the player may drift slightly.
+        private Vector3? homelandFarmScanCenterOverride = null;
         private readonly Dictionary<uint, int> homelandFarmSyncedManureVisualByCropNetId = new Dictionary<uint, int>();
         private sealed class HomelandFarmPlanterSowAnchor
         {
@@ -143,6 +180,14 @@ namespace HeartopiaMod
         private readonly Dictionary<ulong, Vector3> homelandFarmPutZoneWorldPositionById = new Dictionary<ulong, Vector3>();
         private readonly Dictionary<ulong, Quaternion> homelandFarmPutZoneWorldRotationById = new Dictionary<ulong, Quaternion>();
         private readonly HashSet<uint> homelandFarmLastScanCropBoxNetIds = new HashSet<uint>();
+        // Short-lived reuse for back-to-back manual radius actions (water then weed, etc.).
+        private readonly HashSet<uint> homelandFarmLastManualRadiusCollectNetIds = new HashSet<uint>();
+        private Vector3 homelandFarmLastManualRadiusCollectCenter = Vector3.zero;
+        private float homelandFarmLastManualRadiusCollectRadius = 0f;
+        private float homelandFarmLastManualRadiusCollectAt = -999f;
+        private uint homelandFarmLastManualRadiusCollectFieldOwner = 0U;
+        private const float HomelandFarmManualRadiusCollectReuseSeconds = 12f;
+        private const float HomelandFarmManualRadiusCollectCenterTolerance = 3f;
         // Negative-only: never cache component handles (stale IntPtr → native AV on reuse).
         private readonly HashSet<string> homelandFarmAuraComponentMissCache = new HashSet<string>(StringComparer.Ordinal);
 
@@ -2141,6 +2186,42 @@ namespace HeartopiaMod
             return false;
         }
 
+        private bool TryHomelandFarmReadComponentLong(object data, out long value, params string[] members)
+        {
+            value = 0L;
+            if (data is HomelandFarmAuraComponentData auraData && auraData.Handle != IntPtr.Zero)
+            {
+                for (int i = 0; i < members.Length; i++)
+                {
+                    // 8-byte field read; reinterpret as signed (sowTime uses -1 as a sentinel).
+                    if (this.TryGetMonoUInt64Member(auraData.Handle, members[i], out ulong raw))
+                    {
+                        value = (long)raw;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (this.TryGetObjectMember(data, members[i], out object boxed) && boxed != null)
+                {
+                    try
+                    {
+                        value = Convert.ToInt64(boxed);
+                        return true;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return false;
+        }
+
         private bool TryHomelandFarmResolveAuraComponentData(uint netId, string dataTypeName, out IntPtr dataHandle)
         {
             dataHandle = IntPtr.Zero;
@@ -2692,7 +2773,12 @@ namespace HeartopiaMod
                 float radius = scanRadiusOverride > 0f
                     ? scanRadiusOverride + 2f
                     : Mathf.Max(this.homelandFarmWaterRadius, HomelandFarmDefaultWaterRadius);
-                if (!this.TryHomelandFarmCollectFarmEntityNetIds(netIds, out scanSource, playerPos, radius))
+                if (!this.TryHomelandFarmCollectFarmEntityNetIds(
+                        netIds,
+                        out scanSource,
+                        playerPos,
+                        radius,
+                        useAutoFarmCollectShortcuts: false))
                 {
                     status = string.IsNullOrEmpty(scanSource) ? "No homeland farm entities found." : scanSource;
                     return false;
@@ -2860,7 +2946,9 @@ namespace HeartopiaMod
             bool requireOwn,
             HashSet<uint> preCollectedNetIds = null,
             bool logScanSummary = true,
-            bool includePlantData = false)
+            bool includePlantData = false,
+            bool useAutoFarmCollectShortcuts = false,
+            bool useCapturedScanCenter = false)
         {
             List<uint> result = new List<uint>();
             if (cropPredicate == null || !this.EnsureHomelandFarmReflectionReady())
@@ -2889,18 +2977,37 @@ namespace HeartopiaMod
             }
 
             HashSet<uint> netIds = preCollectedNetIds;
-            bool hasPlayerPos = this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos);
+            bool hasPlayerPos = useCapturedScanCenter || useAutoFarmCollectShortcuts
+                ? this.TryGetHomelandFarmScanCenter(out Vector3 playerPos)
+                : this.TryGetHomelandFarmPlayerPosition(out playerPos);
             float radius = this.homelandFarmWaterRadius;
             if (netIds == null)
             {
                 netIds = new HashSet<uint>();
-                if (hasPlayerPos)
+                float collectRadius = radius + 2f;
+                if (!useAutoFarmCollectShortcuts
+                    && hasPlayerPos
+                    && this.TryHomelandFarmTryReuseManualRadiusCollect(playerPos, collectRadius, netIds))
                 {
-                    this.TryHomelandFarmCollectFarmEntityNetIds(netIds, out _, playerPos, radius + 2f);
+                    this.HomelandFarmLog(label + ": reusing manual radius collect (" + netIds.Count + " netId(s)).");
+                }
+                else if (hasPlayerPos)
+                {
+                    this.TryHomelandFarmCollectFarmEntityNetIds(
+                        netIds,
+                        out _,
+                        playerPos,
+                        collectRadius,
+                        useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
                 }
                 else
                 {
-                    this.TryHomelandFarmCollectFarmEntityNetIds(netIds, out _);
+                    this.TryHomelandFarmCollectFarmEntityNetIds(
+                        netIds,
+                        out _,
+                        Vector3.zero,
+                        0f,
+                        useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
                 }
             }
 
@@ -3152,7 +3259,12 @@ namespace HeartopiaMod
             float radius = this.homelandFarmWaterRadius;
             if (hasPlayerPos)
             {
-                this.TryHomelandFarmCollectFarmEntityNetIds(netIds, out _, playerPos, radius + 2f);
+                this.TryHomelandFarmCollectFarmEntityNetIds(
+                    netIds,
+                    out _,
+                    playerPos,
+                    radius + 2f,
+                    useAutoFarmCollectShortcuts: false);
             }
             else
             {
@@ -3194,6 +3306,19 @@ namespace HeartopiaMod
                 cropData => this.TryHomelandFarmReadComponentBool(cropData, out bool hasWeed, "hasWeed", "_hasWeed", "HasWeed") && hasWeed,
                 "Weedable crops",
                 requireOwn: false);
+        }
+
+        // Center used by the radius scans. During auto farming this returns the captured
+        // planter-zone center so the working set stays fixed even if the player nudges around.
+        private bool TryGetHomelandFarmScanCenter(out Vector3 pos)
+        {
+            if (this.homelandFarmScanCenterOverride.HasValue)
+            {
+                pos = this.homelandFarmScanCenterOverride.Value;
+                return true;
+            }
+
+            return this.TryGetHomelandFarmPlayerPosition(out pos);
         }
 
         private bool TryGetHomelandFarmPlayerPosition(out Vector3 pos)
@@ -9317,13 +9442,28 @@ namespace HeartopiaMod
             if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
             {
                 float radius = Mathf.Max(this.homelandFarmWaterRadius, HomelandFarmDefaultWaterRadius);
-                return this.TryHomelandFarmCollectFarmEntityNetIds(output, out source, playerPos, radius);
+                return this.TryHomelandFarmCollectFarmEntityNetIds(
+                    output,
+                    out source,
+                    playerPos,
+                    radius,
+                    useAutoFarmCollectShortcuts: false);
             }
 
-            return this.TryHomelandFarmCollectFarmEntityNetIds(output, out source, Vector3.zero, 0f);
+            return this.TryHomelandFarmCollectFarmEntityNetIds(
+                output,
+                out source,
+                Vector3.zero,
+                0f,
+                useAutoFarmCollectShortcuts: false);
         }
 
-        private bool TryHomelandFarmCollectFarmEntityNetIds(HashSet<uint> output, out string source, Vector3 scanCenter, float scanRadius)
+        private bool TryHomelandFarmCollectFarmEntityNetIds(
+            HashSet<uint> output,
+            out string source,
+            Vector3 scanCenter,
+            float scanRadius,
+            bool useAutoFarmCollectShortcuts = true)
         {
             return this.TryHomelandFarmCollectFarmEntityNetIds(
                 output,
@@ -9332,7 +9472,8 @@ namespace HeartopiaMod
                 scanRadius,
                 allowUnsafeAuraMonoGetComponents: false,
                 proximityBudgetSeconds: HomelandFarmAuraProximityComponentScanBudgetSeconds,
-                allowAuraEntityFunnel: true);
+                allowAuraEntityFunnel: true,
+                useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
         }
 
         private bool TryHomelandFarmCollectFarmEntityNetIds(
@@ -9342,7 +9483,8 @@ namespace HeartopiaMod
             float scanRadius,
             bool allowUnsafeAuraMonoGetComponents,
             float proximityBudgetSeconds = HomelandFarmAuraProximityComponentScanBudgetSeconds,
-            bool allowAuraEntityFunnel = true)
+            bool allowAuraEntityFunnel = true,
+            bool useAutoFarmCollectShortcuts = true)
         {
             source = string.Empty;
             if (output == null)
@@ -9358,7 +9500,8 @@ namespace HeartopiaMod
             List<string> sources = new List<string>(8);
             bool spatialScan = scanRadius > 0f && scanCenter != Vector3.zero;
 
-            if (spatialScan
+            if (useAutoFarmCollectShortcuts
+                && spatialScan
                 && this.TryHomelandFarmCollectFarmNetIdsFromRegisteredCache(scanCenter, scanRadius, output, out int registeredAdded)
                 && registeredAdded > 0)
             {
@@ -9409,7 +9552,8 @@ namespace HeartopiaMod
             // cache here — it is the cheapest source (no reflection, no native invokes) and
             // catches the common water/sow targets before we ever touch the expensive funnel.
             before = output.Count;
-            if (spatialScan
+            if (useAutoFarmCollectShortcuts
+                && spatialScan
                 && this.TryHomelandFarmCollectLevelObjectNetIdsFromPositionCache(scanCenter, scanRadius, output, out int levelCacheAdded)
                 && levelCacheAdded > 0)
             {
@@ -9419,25 +9563,42 @@ namespace HeartopiaMod
             // Crop boxes are live entities — ComponentRadius (GetComponents) and proximity scan
             // above are the fast paths. Skip duplicate ComponentRadius call here.
             before = output.Count;
-            if (spatialScan
-                && this.homelandFarmLastScanCropBoxNetIds.Count == 0
-                && this.TryHomelandFarmCollectFarmNetIdsFromAuraProximityComponentScan(
+            bool runAuraProximity = spatialScan
+                && (!useAutoFarmCollectShortcuts || this.homelandFarmLastScanCropBoxNetIds.Count == 0);
+            int proximityAdded = 0;
+            int proximityInspected = 0;
+            bool proximityScanRan = false;
+            if (runAuraProximity)
+            {
+                proximityScanRan = this.TryHomelandFarmCollectFarmNetIdsFromAuraProximityComponentScan(
                     scanCenter,
                     scanRadius,
                     output,
-                    out int proximityAdded,
-                    out int proximityInspected,
-                    proximityBudgetSeconds)
-                && proximityAdded > 0)
-            {
-                sources.Add("AuraProximity(" + proximityAdded + "/" + proximityInspected + ")");
+                    out proximityAdded,
+                    out proximityInspected,
+                    proximityBudgetSeconds);
+                if (proximityScanRan && proximityAdded > 0)
+                {
+                    sources.Add("AuraProximity(" + proximityAdded + "/" + proximityInspected + ")");
+                }
             }
 
-            // Aura funnel: skip when any spatial source already found farm entities (especially crop boxes).
+            // Aura funnel: auto farm skips when RegisteredCache/proximity already hit. Manual radius
+            // scans skip when proximity classified in-radius entities — avoids a second 900+ entity
+            // funnel immediately after water (water+weed crash on visiting fields).
             before = output.Count;
             bool skipAuraEntityFunnel = !allowAuraEntityFunnel
-                || (spatialScan
-                && (this.homelandFarmLastScanCropBoxNetIds.Count > 0 || output.Count > 0));
+                || (useAutoFarmCollectShortcuts
+                    && spatialScan
+                    && (this.homelandFarmLastScanCropBoxNetIds.Count > 0 || output.Count > 0))
+                // Manual radius scans (water/weed/hotkey): once the proximity scan has been attempted,
+                // the heavy AuraMono loaded-entity enumeration is already done. Running the AuraEntities
+                // funnel afterwards repeats that 900+ entity native pass — the doubled enumeration is
+                // what crashes water+weed on other players' fields. Skip it whenever proximity ran,
+                // regardless of how many it matched (proximityScanRan only reports added>0).
+                || (!useAutoFarmCollectShortcuts
+                    && spatialScan
+                    && runAuraProximity);
             if (!skipAuraEntityFunnel)
             {
                 if (this.TryHomelandFarmCollectFarmNetIdsFromAuraLoadedEntities(
@@ -9475,7 +9636,66 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!useAutoFarmCollectShortcuts && spatialScan && output.Count > 0)
+            {
+                this.HomelandFarmRememberManualRadiusCollect(output, scanCenter, scanRadius);
+            }
+
             source = string.Join("+", sources.ToArray());
+            return output.Count > 0;
+        }
+
+        private void HomelandFarmRememberManualRadiusCollect(HashSet<uint> netIds, Vector3 center, float radius)
+        {
+            this.homelandFarmLastManualRadiusCollectNetIds.Clear();
+            if (netIds != null)
+            {
+                foreach (uint netId in netIds)
+                {
+                    if (netId != 0U)
+                    {
+                        this.homelandFarmLastManualRadiusCollectNetIds.Add(netId);
+                    }
+                }
+            }
+
+            this.homelandFarmLastManualRadiusCollectCenter = center;
+            this.homelandFarmLastManualRadiusCollectRadius = radius;
+            this.homelandFarmLastManualRadiusCollectAt = Time.realtimeSinceStartup;
+            // Field owner pins the reuse to a specific plot/instance. Different homeland instances
+            // share the SAME local coordinates, so a position-only key wrongly matches your field to
+            // someone else's you just visited — reusing their now-unloaded netIds → native AV.
+            this.homelandFarmLastManualRadiusCollectFieldOwner =
+                this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint rememberFieldOwner) ? rememberFieldOwner : 0U;
+        }
+
+        private bool TryHomelandFarmTryReuseManualRadiusCollect(Vector3 center, float radius, HashSet<uint> output)
+        {
+            if (output == null
+                || this.homelandFarmLastManualRadiusCollectNetIds.Count == 0
+                || Time.realtimeSinceStartup - this.homelandFarmLastManualRadiusCollectAt > HomelandFarmManualRadiusCollectReuseSeconds)
+            {
+                return false;
+            }
+
+            // Only reuse on the exact same field/instance. Require a known, matching field owner —
+            // if it is unknown (0) or differs, re-scan instead of reusing another plot's stale netIds.
+            if (this.homelandFarmLastManualRadiusCollectFieldOwner == 0U
+                || !this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint currentFieldOwner)
+                || currentFieldOwner == 0U
+                || currentFieldOwner != this.homelandFarmLastManualRadiusCollectFieldOwner)
+            {
+                return false;
+            }
+
+            float centerToleranceSq = HomelandFarmManualRadiusCollectCenterTolerance * HomelandFarmManualRadiusCollectCenterTolerance;
+            if ((center - this.homelandFarmLastManualRadiusCollectCenter).sqrMagnitude > centerToleranceSq
+                || Mathf.Abs(radius - this.homelandFarmLastManualRadiusCollectRadius) > 2f)
+            {
+                return false;
+            }
+
+            output.UnionWith(this.homelandFarmLastManualRadiusCollectNetIds);
             return output.Count > 0;
         }
 
@@ -11028,9 +11248,15 @@ namespace HeartopiaMod
                 }
 
                 HomelandFarmRegisteredFarmTarget registered = entry.Value;
-                if (spatialScan && registered.LastPosition != Vector3.zero)
+                if (spatialScan)
                 {
-                    if ((registered.LastPosition - scanCenter).sqrMagnitude > radiusSq)
+                    // A registered target whose position never resolved (LastPosition == zero) must NOT
+                    // be served in a radius scan: it can't be placed, and including it unconditionally
+                    // (the old behaviour) floods the result with un-positioned targets that then get
+                    // dropped as skippedNoPos AND short-circuits the real entity scan → nothing found.
+                    // Capture's world-wide component scan registers many such zero-position boxes.
+                    if (registered.LastPosition == Vector3.zero
+                        || (registered.LastPosition - scanCenter).sqrMagnitude > radiusSq)
                     {
                         continue;
                     }
@@ -12452,7 +12678,8 @@ namespace HeartopiaMod
                     radius,
                     allowUnsafeAuraMonoGetComponents: HomelandFarmAllowUnsafeAuraMonoGetComponents,
                     proximityBudgetSeconds: HomelandFarmWaterLogProximityBudgetSeconds,
-                    allowAuraEntityFunnel: false))
+                    allowAuraEntityFunnel: false,
+                    useAutoFarmCollectShortcuts: false))
             {
                 this.HomelandFarmLog("Water diagnostics: no farm entities found.");
                 return;
@@ -13780,7 +14007,1055 @@ namespace HeartopiaMod
             }
 
             this.homelandFarmCoroutine = null;
+            // Unity does not run finally blocks on a stopped coroutine, so clear auto-farm
+            // state here too (otherwise the scan-center override would leak into manual ops).
+            this.homelandFarmAutoRunning = false;
+            this.homelandFarmScanCenterOverride = null;
+            this.ClearHomelandFarmAutoCaches();
             this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
+        }
+
+        // Drops every auto-farm-only entity cache. Called when (re)capturing planters and when auto
+        // farm stops, so a fresh run never reuses targets registered on a previous run / another
+        // player's field (stale RegisteredCache netIds were the source of the immediate Capture crash:
+        // classifying an unloaded foreign entity triggers a native AuraMono AV with no log).
+        private void ClearHomelandFarmAutoCaches()
+        {
+            this.homelandFarmAutoCropNetIds.Clear();
+            this.homelandFarmAutoHarvestedNetIds.Clear();
+            this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+            this.homelandFarmRegisteredFarmTargets.Clear();
+        }
+
+        // Snapshot the planters (crop boxes) within the current radius around the player,
+        // analogous to Mass Cook "Capture Stoves". The captured center pins the auto-farm
+        // working zone; the planter count is informational.
+        private void CaptureHomelandFarmAutoPlanters()
+        {
+            if (this.homelandFarmAutoRunning)
+            {
+                this.AddMenuNotification("Stop auto farm before re-capturing.", new Color(1f, 0.75f, 0.45f));
+                return;
+            }
+
+            if (!this.TryBeginHomelandFarmAction(silent: false, out _, allowVisitingFarmArea: true))
+            {
+                return;
+            }
+
+            // Capture is synchronous (no coroutine), so release the action cooldown immediately.
+            this.homelandFarmBusyUntil = 0f;
+
+            // Drop any auto-farm caches from a previous run / field before scanning. Stale
+            // RegisteredCache netIds (e.g. from another player's field we just visited) would
+            // otherwise be classified here and crash on an unloaded entity.
+            this.ClearHomelandFarmAutoCaches();
+
+            if (!this.TryGetHomelandFarmPlayerPosition(out Vector3 center))
+            {
+                this.homelandFarmAutoCaptured = false;
+                this.homelandFarmLastStatus = "Auto farm: could not read player position.";
+                this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
+                return;
+            }
+
+            float radius = this.homelandFarmWaterRadius;
+
+            // NOTE: do NOT force a dictionary rebuild here. TryHomelandFarmCacheAuraLevelObjectPositions
+            // with allowDictionaryScan:true clears the cache and re-enumerates LevelObjectManager._dictionary,
+            // which is unsafe outside warmup on this IL2CPP build (crashes / returns a partial set) and made
+            // capture find FEWER planters. The warmup-populated cache is the reliable source.
+            // useAutoFarmCollectShortcuts:false — capture must scan live entities only, never the
+            // RegisteredCache / level-object cache. Reading cached (possibly stale/foreign) netIds is
+            // what crashed Capture immediately with no log.
+            HashSet<uint> farmNetIds = new HashSet<uint>();
+            this.TryHomelandFarmCollectFarmEntityNetIds(farmNetIds, out _, center, radius + 2f, useAutoFarmCollectShortcuts: false);
+
+            // Resolve crop boxes with the same tiered logic the sow slot scan uses, taking the
+            // UNION of every tier (not just the first that yields) so nothing is dropped:
+            //   1) boxes the scan itself flagged, 2) per-netId classification,
+            //   3) full component scan (world-wide), radius-filtered for boxes the spatial
+            //      sources missed entirely — the main reason capture undercounted vs sow.
+            HashSet<uint> cropBoxNetIds = new HashSet<uint>();
+            foreach (uint boxNetId in this.homelandFarmLastScanCropBoxNetIds)
+            {
+                if (boxNetId != 0U && farmNetIds.Contains(boxNetId))
+                {
+                    cropBoxNetIds.Add(boxNetId);
+                }
+            }
+
+            int tier1 = cropBoxNetIds.Count;
+
+            foreach (uint netId in farmNetIds)
+            {
+                if (netId != 0U
+                    && !cropBoxNetIds.Contains(netId)
+                    && this.TryHomelandFarmClassifyFarmNetId(netId, out bool isCropBox)
+                    && isCropBox)
+                {
+                    cropBoxNetIds.Add(netId);
+                }
+            }
+
+            int tier2 = cropBoxNetIds.Count - tier1;
+
+            HashSet<uint> componentBoxes = new HashSet<uint>();
+            bool componentScanOk = this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropBoxComponentType, componentBoxes, "CropBoxComponent(capture)");
+            float captureRadiusSq = (radius + 2f) * (radius + 2f);
+            int excludedOutsideRadius = 0;
+            int beforeTier3 = cropBoxNetIds.Count;
+            foreach (uint netId in componentBoxes)
+            {
+                if (netId == 0U || cropBoxNetIds.Contains(netId))
+                {
+                    continue;
+                }
+
+                // Match the crop scan's filter semantics: exclude a box ONLY when its position is
+                // known AND provably outside the radius. Crop-box positions live solely in the
+                // level-object cache; if that cache is incomplete the position won't resolve, and
+                // dropping such boxes (the old behaviour) caused the intermittent undercount.
+                // Unknown position → keep it.
+                if (this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 boxPos)
+                    && boxPos != Vector3.zero
+                    && (boxPos - center).sqrMagnitude > captureRadiusSq)
+                {
+                    excludedOutsideRadius++;
+                    continue;
+                }
+
+                cropBoxNetIds.Add(netId);
+            }
+
+            int tier3 = cropBoxNetIds.Count - beforeTier3;
+            int planterCount = cropBoxNetIds.Count;
+            this.homelandFarmAutoCaptureExcludedOutsideRadius = excludedOutsideRadius;
+
+            // Compact per-source breakdown so undercounts are diagnosable without enabling logs.
+            //   farm = raw farm netIds in radius; t1/t2/t3 = crop boxes from each tier;
+            //   comp = component-scan boxes (ok = whether that scan ran); out = excluded by radius.
+            string diag = "[farm=" + farmNetIds.Count
+                + " t1=" + tier1 + " t2=" + tier2 + " t3=" + tier3
+                + " comp=" + componentBoxes.Count + (componentScanOk ? "" : "(off)")
+                + " out=" + excludedOutsideRadius + "]";
+            this.HomelandFarmLog("Auto capture: planters=" + planterCount + " " + diag);
+
+            this.homelandFarmAutoCenter = center;
+            this.homelandFarmAutoCaptureRadius = radius;
+            this.homelandFarmAutoPlanterCount = planterCount;
+            this.homelandFarmAutoCaptured = true;
+
+            string radiusNote = excludedOutsideRadius > 0
+                ? " (" + excludedOutsideRadius + " outside radius)"
+                : string.Empty;
+            this.homelandFarmLastStatus = "Auto farm: captured " + planterCount + " planter(s)" + radiusNote + ". " + diag;
+            this.AddMenuNotification(
+                "Auto farm: captured " + planterCount + " planter(s)" + radiusNote,
+                excludedOutsideRadius > 0 ? new Color(1f, 0.85f, 0.4f)
+                    : (planterCount > 0 ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.75f, 0.45f)));
+            this.HomelandFarmLog("Auto capture center=" + center + " radius=" + radius.ToString("F0") + " planters=" + planterCount);
+        }
+
+        private void StartHomelandFarmAuto()
+        {
+            if (!this.homelandFarmAutoCaptured || this.homelandFarmAutoPlanterCount <= 0)
+            {
+                this.homelandFarmLastStatus = "Auto farm: capture planters first.";
+                this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.75f, 0.45f));
+                return;
+            }
+
+            if (!this.TryBeginHomelandFarmAction(silent: false, out _, allowVisitingFarmArea: true))
+            {
+                return;
+            }
+
+            this.HomelandFarmLog("Start auto farm center=" + this.homelandFarmAutoCenter + " radius=" + this.homelandFarmAutoCaptureRadius.ToString("F0"));
+            this.homelandFarmLastStatus = "Auto farming...";
+            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmAutoRoutine());
+        }
+
+        private HomelandFarmInventoryItem FindHomelandFarmSeedByStaticId(int staticId)
+        {
+            if (staticId <= 0)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < this.homelandFarmScannedSeeds.Count; i++)
+            {
+                HomelandFarmInventoryItem seed = this.homelandFarmScannedSeeds[i];
+                if (seed != null && seed.StaticId == staticId && seed.NetId != 0U && seed.Count > 0)
+                {
+                    return seed;
+                }
+            }
+
+            return null;
+        }
+
+        // Game (server-synced) unix seconds, used for exact crop maturity. The game clock is offset
+        // from local UTC (observed ~+6.8h), so the UTC fallback gave wrong (even negative) remaining
+        // times. Prefer the game's own GameTimeUtility.GetUnixTime() — via AuraMono first (managed
+        // type is absent under BepInEx), then managed, and only UTC as a last resort.
+        private bool TryHomelandFarmGetGameUnixTime(out long unix)
+        {
+            unix = 0L;
+            if (this.TryHomelandFarmGetGameUnixTimeAuraMono(out unix) && unix > 0L)
+            {
+                return true;
+            }
+
+            try
+            {
+                Type t = this.FindLoadedType("GameTimeUtility", "XDTDataAndProtocol.ProtocolService.GameTimeUtility");
+                MethodInfo m = t?.GetMethod("GetUnixTime", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+                if (m != null)
+                {
+                    object r = m.Invoke(null, null);
+                    if (r != null)
+                    {
+                        unix = Convert.ToInt64(r);
+                        if (unix > 0L)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            unix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            return unix > 0L;
+        }
+
+        private unsafe bool TryHomelandFarmGetGameUnixTimeAuraMono(out long unix)
+        {
+            unix = 0L;
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+
+            IntPtr cls = this.FindHomelandFarmAuraClass(
+                "XDTDataAndProtocol.ProtocolService.GameTimeUtility",
+                "XDTDataAndProtocol.ProtocolService",
+                "GameTimeUtility");
+            if (cls == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "GetUnixTime", 0);
+            if (method == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(method, IntPtr.Zero, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            unix = *(long*)raw;
+            return unix > 0L;
+        }
+
+        // Reads live crop state for a netId: stage (4 = ripe), weed flag, and exact seconds left
+        // until ripe (FarmUtil: matureUnix = sowTime + ripeGrowTime - growTime). Returns false if
+        // the crop no longer exists (harvested / unloaded). remainingSeconds = long.MaxValue when
+        // timing fields are unavailable so callers fall back to coarse polling.
+        private bool TryHomelandFarmReadCropState(uint cropNetId, out int stage, out bool hasWeed, out long remainingSeconds)
+        {
+            stage = 0;
+            hasWeed = false;
+            remainingSeconds = long.MaxValue;
+            if (cropNetId == 0U)
+            {
+                return false;
+            }
+
+            object cropData = null;
+            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out cropData, out _, "CropItemData")
+                || cropData == null)
+            {
+                // Crop-box crops on this IL2CPP build are PlantItemData entities, not CropItemData.
+                if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, cropNetId, out cropData, out _, "PlantItemData")
+                    || cropData == null)
+                {
+                    return false;
+                }
+            }
+
+            this.TryHomelandFarmReadComponentInt(cropData, out stage, "stage", "Stage");
+            this.TryHomelandFarmReadComponentBool(cropData, out hasWeed, "hasWeed", "_hasWeed", "HasWeed");
+
+            bool haveSow = this.TryHomelandFarmReadComponentLong(cropData, out long sowTime, "sowTime", "SowTime");
+            bool haveRipe = this.TryHomelandFarmReadComponentLong(cropData, out long ripeGrowTime, "ripeGrowTime", "RipeGrowTime");
+            bool haveGrow = this.TryHomelandFarmReadComponentLong(cropData, out long growTime, "growTime", "GrowTime");
+            if (haveSow && haveRipe && haveGrow && ripeGrowTime > 0L
+                && this.TryHomelandFarmGetGameUnixTime(out long nowUnix) && nowUnix > 0L)
+            {
+                long matureUnix = sowTime + ripeGrowTime - growTime;
+                remainingSeconds = matureUnix - nowUnix;
+            }
+
+            return true;
+        }
+
+        // Client-side crop/plant entities that must not keep auto farm busy (harvest already sent,
+        // or the game marked the crop picked). Without this, stale PlantItemData at stage 4 blocks sow.
+        private bool TryHomelandFarmIsDiscardedAutoFarmCropNetId(uint netId)
+        {
+            if (netId == 0U)
+            {
+                return false;
+            }
+
+            if (this.homelandFarmAutoHarvestedNetIds.Contains(netId))
+            {
+                return true;
+            }
+
+            object cropData = null;
+            if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out cropData, out _, "CropItemData")
+                || (this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out cropData, out _, "PlantItemData")
+                    && cropData != null))
+            {
+                return this.TryHomelandFarmReadComponentBool(cropData, out bool isPick, "isPick", "_isPick", "IsPick") && isPick;
+            }
+
+            return false;
+        }
+
+        private HashSet<uint> HomelandFarmGetCapturedCropBoxNetIds()
+        {
+            HashSet<uint> cropBoxNetIds = new HashSet<uint>();
+            foreach (uint boxNetId in this.homelandFarmLastScanCropBoxNetIds)
+            {
+                if (boxNetId != 0U)
+                {
+                    cropBoxNetIds.Add(boxNetId);
+                }
+            }
+
+            if (cropBoxNetIds.Count > 0 || !this.homelandFarmAutoCaptured)
+            {
+                return cropBoxNetIds;
+            }
+
+            if (!this.TryGetHomelandFarmScanCenter(out Vector3 center))
+            {
+                return cropBoxNetIds;
+            }
+
+            HashSet<uint> farmNetIds = new HashSet<uint>();
+            this.TryHomelandFarmCollectFarmEntityNetIds(farmNetIds, out _, center, this.homelandFarmWaterRadius + 2f);
+            foreach (uint netId in farmNetIds)
+            {
+                if (netId != 0U
+                    && this.TryHomelandFarmClassifyFarmNetId(netId, out bool isCropBox)
+                    && isCropBox)
+                {
+                    cropBoxNetIds.Add(netId);
+                }
+            }
+
+            return cropBoxNetIds;
+        }
+
+        private bool TryHomelandFarmCollectOccupiedCapturedPlanterNetIds(out HashSet<uint> occupiedBoxes, out HashSet<uint> scanNetIds)
+        {
+            scanNetIds = new HashSet<uint>();
+            if (this.TryGetHomelandFarmScanCenter(out Vector3 center))
+            {
+                this.TryHomelandFarmCollectFarmEntityNetIds(
+                    scanNetIds,
+                    out _,
+                    center,
+                    this.homelandFarmWaterRadius + 2f,
+                    useAutoFarmCollectShortcuts: false);
+            }
+
+            return this.TryHomelandFarmBuildOccupiedFromScanNetIds(scanNetIds, out occupiedBoxes);
+        }
+
+        // Pure occupied-box derivation from an already-collected farm-entity set — no radius scan.
+        // Lets a caller that already has the scan (e.g. RebuildHomelandFarmAutoCropCache) avoid
+        // repeating the heavy proximity enumeration.
+        private bool TryHomelandFarmBuildOccupiedFromScanNetIds(HashSet<uint> scanNetIds, out HashSet<uint> occupiedBoxes)
+        {
+            occupiedBoxes = new HashSet<uint>();
+            HashSet<uint> cropBoxNetIds = this.HomelandFarmGetCapturedCropBoxNetIds();
+            if (cropBoxNetIds.Count == 0)
+            {
+                return false;
+            }
+
+            this.TryHomelandFarmBuildOccupiedCropBoxNetIds(cropBoxNetIds, scanNetIds ?? new HashSet<uint>(), occupiedBoxes);
+            return true;
+        }
+
+        private bool TryHomelandFarmScanHasCropItemDataEntities(HashSet<uint> scanNetIds)
+        {
+            if (scanNetIds == null || scanNetIds.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (uint netId in scanNetIds)
+            {
+                if (netId != 0U
+                    && this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // When the scan has zero CropItemData, sub-ripe PlantItemData-only entities are client ghosts
+        // (live growing crops on this build also register CropItemData — see cropPlants in diagnostics).
+        private bool TryHomelandFarmIsOrphanPlantOnlyWithoutCropData(uint netId, HashSet<uint> scanNetIds)
+        {
+            if (netId == 0U
+                || scanNetIds == null
+                || this.TryHomelandFarmScanHasCropItemDataEntities(scanNetIds)
+                || this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData"))
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object plantData, out _, "PlantItemData")
+                || plantData == null)
+            {
+                return false;
+            }
+
+            return this.TryHomelandFarmReadComponentInt(plantData, out int stage, "stage", "Stage") && stage < 4;
+        }
+
+        private void HomelandFarmPruneAutoPendingSowBoxes(HashSet<uint> occupiedBoxes)
+        {
+            if (occupiedBoxes == null || occupiedBoxes.Count == 0 || this.homelandFarmAutoPendingSowBoxNetIds.Count == 0)
+            {
+                return;
+            }
+
+            uint[] pending = new uint[this.homelandFarmAutoPendingSowBoxNetIds.Count];
+            this.homelandFarmAutoPendingSowBoxNetIds.CopyTo(pending);
+            for (int i = 0; i < pending.Length; i++)
+            {
+                if (occupiedBoxes.Contains(pending[i]))
+                {
+                    this.homelandFarmAutoPendingSowBoxNetIds.Remove(pending[i]);
+                }
+            }
+        }
+
+        private bool TryHomelandFarmTryReadPlanterNetIdFromSowPoint(object point, out uint planterNetId)
+        {
+            planterNetId = 0U;
+            if (point == null)
+            {
+                return false;
+            }
+
+            if (point is HomelandFarmCropPlantPointData data)
+            {
+                planterNetId = data.PlanterNetId;
+                return planterNetId != 0U;
+            }
+
+            if (this.TryGetUIntMember(point, "planterNetId", out planterNetId) && planterNetId != 0U)
+            {
+                return true;
+            }
+
+            if (this.TryGetUIntMember(point, "PlanterNetId", out planterNetId) && planterNetId != 0U)
+            {
+                return true;
+            }
+
+            if ((this.TryReadManagedUInt64Member(point, "levelObjectNetId", out ulong levelObjectNetId)
+                    || this.TryReadManagedUInt64Member(point, "LevelObjectNetId", out levelObjectNetId))
+                && levelObjectNetId != 0UL)
+            {
+                planterNetId = HomelandFarmDecodePlanterNetIdFromLevelObjectId(levelObjectNetId);
+                return planterNetId != 0U;
+            }
+
+            return false;
+        }
+
+        private void HomelandFarmRememberAutoSowPendingBoxes(IEnumerable<object> plantPoints)
+        {
+            if (plantPoints == null)
+            {
+                return;
+            }
+
+            foreach (object point in plantPoints)
+            {
+                if (this.TryHomelandFarmTryReadPlanterNetIdFromSowPoint(point, out uint planterNetId) && planterNetId != 0U)
+                {
+                    this.homelandFarmAutoPendingSowBoxNetIds.Add(planterNetId);
+                }
+            }
+        }
+
+        private bool TryHomelandFarmIsLiveCropOnCapturedPlanter(
+            uint cropNetId,
+            HashSet<uint> occupiedBoxes,
+            HashSet<uint> scanNetIds = null)
+        {
+            if (cropNetId == 0U || occupiedBoxes == null || occupiedBoxes.Count == 0)
+            {
+                return false;
+            }
+
+            if (this.TryHomelandFarmIsDiscardedAutoFarmCropNetId(cropNetId)
+                || this.TryHomelandFarmIsOrphanPlantOnlyWithoutCropData(cropNetId, scanNetIds))
+            {
+                return false;
+            }
+
+            return this.TryHomelandFarmTryFindCropBoxNetIdForCrop(cropNetId, out uint boxNetId)
+                && boxNetId != 0U
+                && occupiedBoxes.Contains(boxNetId);
+        }
+
+        // occupiedBoxes/scanNetIds are precomputed by the caller (one shared scan) to avoid repeating
+        // the radius enumeration inside the sanitize pass.
+        private void HomelandFarmSanitizeAutoCropNetIds(List<uint> netIds, HashSet<uint> occupiedBoxes, HashSet<uint> scanNetIds)
+        {
+            if (netIds == null || netIds.Count == 0)
+            {
+                return;
+            }
+
+            if (occupiedBoxes == null)
+            {
+                return;
+            }
+
+            if (occupiedBoxes.Count == 0)
+            {
+                netIds.Clear();
+                if (this.homelandFarmAutoPendingSowBoxNetIds.Count > 0)
+                {
+                    this.HomelandFarmLog("Auto crop cache: waiting for " + this.homelandFarmAutoPendingSowBoxNetIds.Count
+                        + " sown crop(s) to register.");
+                }
+                else
+                {
+                    this.HomelandFarmLog("Auto crop cache: all captured planters empty - 0 crop(s).");
+                }
+
+                return;
+            }
+
+            Dictionary<uint, uint> bestNetIdByBox = new Dictionary<uint, uint>();
+            for (int i = netIds.Count - 1; i >= 0; i--)
+            {
+                uint netId = netIds[i];
+                if (this.TryHomelandFarmIsDiscardedAutoFarmCropNetId(netId)
+                    || this.TryHomelandFarmIsOrphanPlantOnlyWithoutCropData(netId, scanNetIds)
+                    || !this.TryHomelandFarmIsLiveCropOnCapturedPlanter(netId, occupiedBoxes, scanNetIds))
+                {
+                    netIds.RemoveAt(i);
+                    continue;
+                }
+
+                if (!this.TryHomelandFarmTryFindCropBoxNetIdForCrop(netId, out uint boxNetId) || boxNetId == 0U)
+                {
+                    netIds.RemoveAt(i);
+                    continue;
+                }
+
+                if (!bestNetIdByBox.TryGetValue(boxNetId, out uint existingNetId))
+                {
+                    bestNetIdByBox[boxNetId] = netId;
+                    continue;
+                }
+
+                bool netIdIsCropData = this.TryHomelandFarmGetComponentData(
+                    this.homelandFarmCropItemDataType,
+                    netId,
+                    out _,
+                    out _,
+                    "CropItemData");
+                bool existingIsCropData = this.TryHomelandFarmGetComponentData(
+                    this.homelandFarmCropItemDataType,
+                    existingNetId,
+                    out _,
+                    out _,
+                    "CropItemData");
+                if (netIdIsCropData && !existingIsCropData)
+                {
+                    bestNetIdByBox[boxNetId] = netId;
+                }
+            }
+
+            netIds.Clear();
+            foreach (KeyValuePair<uint, uint> entry in bestNetIdByBox)
+            {
+                if (entry.Value != 0U)
+                {
+                    netIds.Add(entry.Value);
+                }
+            }
+        }
+
+        // Rebuilds the auto-farm crop cache for the captured zone: a crop scan, then an
+        // occupied-planter cross-check + sanitize to keep one live crop netId per occupied box and
+        // drop ghosts/orphans. Runs after each sow (and at start), NOT every poll tick — it triggers
+        // several radius scans, so it is deliberately infrequent (steady-growth polling is directed).
+        private void RebuildHomelandFarmAutoCropCache()
+        {
+            // includePlantData:true — on this IL2CPP build crop-box crops are PlantItemData entities
+            // (CropItemData absent). TryHomelandFarmReadCropState reads either type. Accept stage 0..4
+            // (any live crop), NOT just 1..4: a freshly sown crop starts at stage 0
+            // for a moment, so a stage>=1 filter found 0 right after sow → the loop thought the zone
+            // was empty and re-sowed already-planted boxes → MaxPlantCountLimit. Exclude already-picked
+            // crops (isPick) so the cache still empties once everything is harvested → re-sow fires.
+            // ONE shared radius scan for the whole rebuild. The crop filter, the occupied-box
+            // derivation and the sanitize pass all reuse this single farm-entity set instead of each
+            // running its own proximity enumeration (was 3-5 heavy scans per sow → now 1).
+            HashSet<uint> farmNetIds = new HashSet<uint>();
+            if (this.TryGetHomelandFarmScanCenter(out Vector3 scanCenter))
+            {
+                this.TryHomelandFarmCollectFarmEntityNetIds(
+                    farmNetIds,
+                    out _,
+                    scanCenter,
+                    this.homelandFarmWaterRadius + 2f,
+                    useAutoFarmCollectShortcuts: false);
+            }
+
+            List<uint> crops = this.ScanHomelandFarmCropsByRadius(
+                cropData =>
+                {
+                    if (this.TryHomelandFarmReadComponentInt(cropData, out int stage, "stage", "Stage") && stage > 4)
+                    {
+                        return false;
+                    }
+
+                    if (this.TryHomelandFarmReadComponentBool(cropData, out bool isPick, "isPick", "_isPick", "IsPick") && isPick)
+                    {
+                        return false;
+                    }
+
+                    return true;
+                },
+                "Auto crop cache",
+                // requireOwn:false — freshly sown crops have an unresolved owner for a while (and the
+                // own-field fallback misses when the scan center is the captured point rather than the
+                // live player), so requireOwn:true dropped just-sown crops → cache stuck at 0 forever.
+                // The captured zone is the player's own farm; harvest is still own-gated server-side.
+                requireOwn: false,
+                preCollectedNetIds: farmNetIds,
+                logScanSummary: false,
+                includePlantData: true,
+                useAutoFarmCollectShortcuts: false,
+                useCapturedScanCenter: true);
+
+            List<uint> sanitized = new List<uint>(crops.Count);
+            HashSet<uint> seen = new HashSet<uint>();
+            for (int i = 0; i < crops.Count; i++)
+            {
+                if (crops[i] != 0U && seen.Add(crops[i]))
+                {
+                    sanitized.Add(crops[i]);
+                }
+            }
+
+            this.TryHomelandFarmBuildOccupiedFromScanNetIds(farmNetIds, out HashSet<uint> occupiedBoxes);
+            this.HomelandFarmPruneAutoPendingSowBoxes(occupiedBoxes);
+            this.HomelandFarmSanitizeAutoCropNetIds(sanitized, occupiedBoxes, farmNetIds);
+
+            this.homelandFarmAutoCropNetIds.Clear();
+            this.homelandFarmAutoCropNetIds.AddRange(sanitized);
+
+            this.HomelandFarmLog("Auto crop cache rebuilt: " + this.homelandFarmAutoCropNetIds.Count + " crop(s).");
+
+            // Raw timing dump for the first cached crop — diagnoses maturity/unit mismatches
+            // (mature = sowTime + ripeGrowTime - growTime, all in game-unix seconds per FarmUtil).
+            if (this.homelandFarmAutoCropNetIds.Count > 0
+                && this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, this.homelandFarmAutoCropNetIds[0], out object sampleCrop, out _, "CropItemData")
+                && sampleCrop != null)
+            {
+                this.TryHomelandFarmReadComponentInt(sampleCrop, out int sStage, "stage", "Stage");
+                this.TryHomelandFarmReadComponentLong(sampleCrop, out long sSow, "sowTime", "SowTime");
+                this.TryHomelandFarmReadComponentLong(sampleCrop, out long sRipe, "ripeGrowTime", "RipeGrowTime");
+                this.TryHomelandFarmReadComponentLong(sampleCrop, out long sGrow, "growTime", "GrowTime");
+                this.TryHomelandFarmReadComponentInt(sampleCrop, out int sGrowthVal, "growthValue", "GrowthValue");
+                this.TryHomelandFarmGetGameUnixTime(out long sNow);
+                this.HomelandFarmLog("Auto crop timing netId=" + this.homelandFarmAutoCropNetIds[0]
+                    + " stage=" + sStage
+                    + " sowTime=" + sSow
+                    + " ripeGrowTime=" + sRipe
+                    + " growTime=" + sGrow
+                    + " growthValue=" + sGrowthVal
+                    + " gameUnix=" + sNow
+                    + " mature=" + (sSow + sRipe - sGrow)
+                    + " remaining=" + (sSow + sRipe - sGrow - sNow) + "s"
+                    + " (elapsedSinceSow=" + (sNow - sSow) + "s)");
+            }
+        }
+
+        private IEnumerator HomelandFarmAutoRoutine()
+        {
+            yield return null;
+
+            this.homelandFarmAutoRunning = true;
+            this.homelandFarmScanCenterOverride = this.homelandFarmAutoCenter;
+            this.homelandFarmAutoCropNetIds.Clear();
+            this.homelandFarmAutoHarvestedNetIds.Clear();
+            this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+
+            int totalSown = 0;
+            int totalWeeded = 0;
+            int totalHarvested = 0;
+            bool seedsExhausted = false;
+            int seedStaticId = 0;
+            bool needDiscovery = true;   // discover current crops first (so we never sow occupied planters)
+            bool discoveryDelay = false; // wait before discovery only after an actual sow
+            float nextSowAllowedAt = 0f; // post-sow cooldown (server registration of sown crops)
+            // Generation lock: once we sow, do NOT sow again until this generation has actually been
+            // harvested. Freshly sown crops are invisible to the crop scan for tens of seconds (early
+            // stage isn't CropItemData yet), so a "cache empty → sow" rule alone re-sows the same boxes
+            // → MaxPlantCountLimit. A real harvest is the ground-truth signal that a generation ended.
+            bool awaitingHarvest = false;
+
+            try
+            {
+                if (this.homelandFarmScannedSeeds.Count == 0)
+                {
+                    this.RefreshHomelandFarmSeeds();
+                }
+
+                if (this.homelandFarmScannedSeeds.Count > 0)
+                {
+                    int idx = Mathf.Clamp(this.homelandFarmSelectedSeedIndex, 0, this.homelandFarmScannedSeeds.Count - 1);
+                    HomelandFarmInventoryItem selected = this.homelandFarmScannedSeeds[idx];
+                    seedStaticId = selected != null ? selected.StaticId : 0;
+                }
+
+                if (seedStaticId <= 0)
+                {
+                    // No seed selected: just harvest whatever is already growing, then stop.
+                    seedsExhausted = true;
+                    this.HomelandFarmLog("Auto: no seed selected; harvest-only until zone is empty.");
+                }
+
+                while (true)
+                {
+                    // 1. DISCOVERY FIRST — (re)build the crop cache so we know what is actually in the
+                    //    zone BEFORE deciding to sow. This is the only radius scan in the loop. Running
+                    //    it before sow is what prevents re-sowing already-occupied planters on a restart
+                    //    (the sow-slot occupied check is unreliable right after a previous sow). Wait the
+                    //    registration delay only when we just sowed.
+                    if (needDiscovery)
+                    {
+                        needDiscovery = false;
+                        if (discoveryDelay)
+                        {
+                            discoveryDelay = false;
+                            this.homelandFarmLastStatus = "Auto: scanning new crops...";
+                            yield return new WaitForSecondsRealtime(HomelandFarmAutoDiscoveryDelaySeconds);
+                        }
+                        else
+                        {
+                            this.homelandFarmLastStatus = "Auto: scanning crops...";
+                        }
+
+                        this.RebuildHomelandFarmAutoCropCache();
+                    }
+
+                    // 2. Directed poll of cached crops: weed flagged, harvest ripe (drop from cache),
+                    //    and track the soonest maturity. Harvest does NOT immediately re-trigger sow —
+                    //    we re-sow only once the whole generation is collected (cache empty), so we
+                    //    never re-sow boxes the server hasn't freed/registered yet.
+                    long minRemaining = long.MaxValue;
+                    int weededThisTick = 0;
+                    int harvestedThisTick = 0;
+                    int prunedThisTick = 0;
+                    HashSet<uint> occupiedPlanters = null;
+                    HashSet<uint> pollScanNetIds = null;
+                    // The occupied-planter cross-check is a full radius scan (proximity over thousands
+                    // of entities + component-class warmup). Only run it while we're still waiting for a
+                    // just-sown generation to register (pending boxes) — that's when the cache needs
+                    // validation. During steady growth the directed per-netId poll (readCropState) is
+                    // enough, so we avoid a heavy scan + warmup on every tick.
+                    bool haveOccupiedPlanters = false;
+                    if (this.homelandFarmAutoPendingSowBoxNetIds.Count > 0)
+                    {
+                        haveOccupiedPlanters = this.TryHomelandFarmCollectOccupiedCapturedPlanterNetIds(
+                            out occupiedPlanters,
+                            out pollScanNetIds);
+                        if (haveOccupiedPlanters)
+                        {
+                            this.HomelandFarmPruneAutoPendingSowBoxes(occupiedPlanters);
+                        }
+                    }
+
+                    if (haveOccupiedPlanters
+                        && occupiedPlanters.Count == 0
+                        && this.homelandFarmAutoCropNetIds.Count > 0
+                        && this.homelandFarmAutoPendingSowBoxNetIds.Count == 0
+                        && !awaitingHarvest)
+                    {
+                        prunedThisTick = this.homelandFarmAutoCropNetIds.Count;
+                        this.homelandFarmAutoCropNetIds.Clear();
+                        this.HomelandFarmLog("Auto poll: all captured planters empty - cleared stale cache.");
+                    }
+
+                    for (int i = this.homelandFarmAutoCropNetIds.Count - 1; i >= 0; i--)
+                    {
+                        uint cropNetId = this.homelandFarmAutoCropNetIds[i];
+                        if (this.TryHomelandFarmIsDiscardedAutoFarmCropNetId(cropNetId)
+                            || this.TryHomelandFarmIsOrphanPlantOnlyWithoutCropData(cropNetId, pollScanNetIds)
+                            || (occupiedPlanters != null
+                                && !this.TryHomelandFarmIsLiveCropOnCapturedPlanter(cropNetId, occupiedPlanters, pollScanNetIds)))
+                        {
+                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
+                            prunedThisTick++;
+                            continue;
+                        }
+
+                        if (!this.TryHomelandFarmReadCropState(cropNetId, out int stage, out bool hasWeed, out long remaining))
+                        {
+                            // Crop entity gone (harvested elsewhere / unloaded) — drop it.
+                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
+                            prunedThisTick++;
+                            continue;
+                        }
+
+                        if (hasWeed && this.TryHomelandFarmWeed(cropNetId, out _))
+                        {
+                            totalWeeded++;
+                            weededThisTick++;
+                        }
+
+                        if (stage >= 4)
+                        {
+                            if (this.TryHomelandFarmHarvestCrop(cropNetId, out _))
+                            {
+                                totalHarvested++;
+                                harvestedThisTick++;
+                            }
+
+                            this.homelandFarmAutoHarvestedNetIds.Add(cropNetId);
+                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
+                            continue;
+                        }
+
+                        if (remaining < minRemaining)
+                        {
+                            minRemaining = remaining;
+                        }
+
+                        if (i % HomelandFarmHarvestFramePaceBatch == 0)
+                        {
+                            yield return null;
+                        }
+                    }
+
+                    if (harvestedThisTick > 0)
+                    {
+                        // A real harvest happened → this generation is being collected; re-sow is
+                        // allowed once the cache empties.
+                        awaitingHarvest = false;
+                        if (this.homelandFarmAutoCropNetIds.Count == 0)
+                        {
+                            this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+                        }
+                    }
+
+                    if (weededThisTick > 0 || harvestedThisTick > 0 || prunedThisTick > 0)
+                    {
+                        this.HomelandFarmLog("Auto poll: weeded=" + weededThisTick + " harvested=" + harvestedThisTick
+                            + " pruned=" + prunedThisTick + " remaining=" + this.homelandFarmAutoCropNetIds.Count);
+                    }
+
+                    // 3. SOW — only when the zone holds no tracked crops AND we are not still waiting
+                    //    for the previous generation to be harvested. The generation lock (awaitingHarvest)
+                    //    is the key fix: a freshly sown crop is invisible to the crop scan for tens of
+                    //    seconds, so "cache empty" right after a sow does NOT mean the zone is free — only
+                    //    an actual harvest does. Without this, the loop re-sows the same boxes →
+                    //    OnBuildSeedResult MaxPlantCountLimit.
+                    if (this.homelandFarmAutoCropNetIds.Count == 0)
+                    {
+                        // Done only when seeds are gone AND the final generation has been harvested.
+                        if (seedsExhausted && !awaitingHarvest)
+                        {
+                            break;
+                        }
+
+                        if (!awaitingHarvest && !seedsExhausted && Time.realtimeSinceStartup >= nextSowAllowedAt)
+                        {
+                            this.RefreshHomelandFarmSeeds();
+                            HomelandFarmInventoryItem seed = this.FindHomelandFarmSeedByStaticId(seedStaticId);
+                            if (seed == null)
+                            {
+                                seedsExhausted = true;
+                                this.HomelandFarmLog("Auto: selected seed exhausted.");
+                            }
+                            else
+                            {
+                                this.homelandFarmLastStatus = "Auto: sowing " + seed.Label + "...";
+                                this.homelandFarmAutoSowCount = 0;
+                                IEnumerator sowPass = this.HomelandFarmAutoSowPassRoutine(seed);
+                                while (sowPass.MoveNext())
+                                {
+                                    yield return sowPass.Current;
+                                }
+
+                                if (this.homelandFarmAutoSowCount > 0)
+                                {
+                                    totalSown += this.homelandFarmAutoSowCount;
+                                    awaitingHarvest = true; // lock until this generation is harvested
+                                    nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoSowCooldownSeconds;
+                                    needDiscovery = true;
+                                    discoveryDelay = true; // server needs a beat to create the new crops
+                                    this.HomelandFarmLog("Auto: sowed " + this.homelandFarmAutoSowCount
+                                        + " point(s); waiting for crop registration.");
+                                    continue; // re-discover the new crops before the next decision
+                                }
+                            }
+                        }
+
+                        // Either waiting for the sown generation to grow into view / be harvested, or the
+                        // cooldown hasn't elapsed / no empty planters were found. Wait, then re-discover
+                        // (picks up crops once they register) before deciding again.
+                        this.homelandFarmLastStatus = awaitingHarvest
+                            ? "Auto: waiting for crops to grow..."
+                            : "Auto: waiting for empty planters...";
+                        yield return new WaitForSecondsRealtime(HomelandFarmAutoEmptyRetrySeconds);
+                        needDiscovery = true;
+                        continue;
+                    }
+
+                    // 5. Sleep until the next meaningful moment, driven by exact maturity:
+                    //    final minute → weed every second; otherwise coarse weeding cadence.
+                    float sleep;
+                    if (minRemaining == long.MaxValue)
+                    {
+                        sleep = HomelandFarmAutoCoarseWeedIntervalSeconds;
+                    }
+                    else if (minRemaining <= HomelandFarmAutoFinalMinuteSeconds)
+                    {
+                        sleep = HomelandFarmAutoFinalWeedIntervalSeconds;
+                    }
+                    else
+                    {
+                        sleep = Mathf.Min(
+                            HomelandFarmAutoCoarseWeedIntervalSeconds,
+                            (float)(minRemaining - HomelandFarmAutoFinalMinuteSeconds));
+                        sleep = Mathf.Max(sleep, HomelandFarmAutoFinalWeedIntervalSeconds);
+                    }
+
+                    string remainLabel = minRemaining == long.MaxValue
+                        ? "?"
+                        : Mathf.Max(0, (int)minRemaining) + "s";
+                    this.homelandFarmLastStatus = "Auto farming — sown " + totalSown + ", weeded " + totalWeeded
+                        + ", harvested " + totalHarvested + ". Next ripe in " + remainLabel + ".";
+                    this.HomelandFarmLog("Auto: next ripe in " + remainLabel + " (" + this.homelandFarmAutoCropNetIds.Count
+                        + " crop(s) tracked), sleeping " + sleep.ToString("F0") + "s.");
+                    yield return new WaitForSecondsRealtime(sleep);
+                }
+
+                this.homelandFarmLastStatus = "Auto farm complete — sown " + totalSown + ", weeded " + totalWeeded
+                    + ", harvested " + totalHarvested + ".";
+                this.AddMenuNotification(this.homelandFarmLastStatus, new Color(0.45f, 1f, 0.55f));
+                this.HomelandFarmLog("Auto farm complete sown=" + totalSown + " weeded=" + totalWeeded + " harvested=" + totalHarvested);
+            }
+            finally
+            {
+                this.homelandFarmScanCenterOverride = null;
+                this.homelandFarmAutoRunning = false;
+                this.homelandFarmAutoCropNetIds.Clear();
+                this.homelandFarmAutoHarvestedNetIds.Clear();
+                this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+                this.homelandFarmCoroutine = null;
+                this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
+            }
+        }
+
+        // One sow pass: fills every currently-empty captured planter with the selected seed,
+        // up to the available seed count. Mirrors HomelandFarmSowAllRoutine (single radius scan,
+        // never re-scan — the server has not marked just-sown slots occupied yet) but without the
+        // coroutine bookkeeping, since the auto loop owns homelandFarmCoroutine. Result in
+        // homelandFarmAutoSowCount.
+        private IEnumerator HomelandFarmAutoSowPassRoutine(HomelandFarmInventoryItem seed)
+        {
+            this.homelandFarmAutoSowCount = 0;
+            if (seed == null || seed.NetId == 0U || seed.Count <= 0)
+            {
+                yield break;
+            }
+
+            int sowBatchSize = Mathf.Clamp(this.TryHomelandFarmGetSprinklerCellCount(), 1, HomelandFarmBatchLimit);
+            int remainingSeeds = seed.Count;
+            int sowedPoints = 0;
+
+            while (remainingSeeds > 0)
+            {
+                IEnumerator slotRoutine = this.FindEmptyCropPlanterSlotsRoutine(remainingSeeds, useAutoFarmCollectShortcuts: true);
+                while (slotRoutine.MoveNext())
+                {
+                    yield return slotRoutine.Current;
+                }
+
+                List<object> plantPoints = this.homelandFarmSowSlotPoints;
+                if (!this.homelandFarmSowSlotOk || plantPoints == null || plantPoints.Count == 0)
+                {
+                    break;
+                }
+
+                this.HomelandFarmRememberAutoSowPendingBoxes(plantPoints);
+                yield return null;
+
+                for (int offset = 0; offset < plantPoints.Count && remainingSeeds > 0; offset += sowBatchSize)
+                {
+                    int batchSize = Math.Min(sowBatchSize, Math.Min(plantPoints.Count - offset, remainingSeeds));
+                    List<object> batch = plantPoints.GetRange(offset, batchSize);
+                    if (this.TryHomelandFarmSow(seed.NetId, batch, out string sowStatus))
+                    {
+                        sowedPoints += batch.Count;
+                        remainingSeeds -= batch.Count;
+                        this.HomelandFarmLog("Auto sow batch ok seedNetId=" + seed.NetId + " count=" + batch.Count + " " + sowStatus);
+                    }
+                    else
+                    {
+                        this.HomelandFarmLog("Auto sow batch failed: " + sowStatus);
+                        this.homelandFarmAutoSowCount = sowedPoints;
+                        yield break;
+                    }
+
+                    yield return new WaitForSecondsRealtime(HomelandFarmCommandDelaySeconds);
+                }
+
+                // Single radius scan already returns every empty planter; re-scanning re-sows the
+                // same not-yet-occupied slots and floods CropSeeding (crash + wasted seeds).
+                break;
+            }
+
+            this.homelandFarmAutoSowCount = sowedPoints;
         }
 
         private bool TryBeginHomelandFarmAction(bool silent, out string blockReason, bool allowVisitingFarmArea = false)
@@ -13901,6 +15176,51 @@ namespace HeartopiaMod
             this.HomelandFarmLog("Start weed crops in radius");
             this.homelandFarmLastStatus = "Weeding crops in radius...";
             this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmWeedAllRoutine(silent));
+        }
+
+        // Hotkey convenience: water in radius, then weed in radius, as a single action.
+        private void StartHomelandFarmWaterAndWeed(bool silent)
+        {
+            if (!this.TryBeginHomelandFarmAction(silent, out _, allowVisitingFarmArea: true))
+            {
+                return;
+            }
+
+            this.HomelandFarmLog("Start water + weed in radius");
+            this.homelandFarmLastStatus = "Water + weed in radius...";
+            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmWaterAndWeedRoutine(silent));
+        }
+
+        private IEnumerator HomelandFarmWaterAndWeedRoutine(bool silent)
+        {
+            try
+            {
+                // Drive the two existing routines in sequence. Each manages its own batching; their
+                // finally blocks clear homelandFarmCoroutine, but homelandFarmBusyUntil (set by the
+                // initial TryBegin and by each routine) guards against overlapping actions meanwhile.
+                IEnumerator water = this.HomelandFarmWaterRoutine(HomelandFarmWaterMode.InRadius, silent);
+                while (water.MoveNext())
+                {
+                    yield return water.Current;
+                }
+
+                // Let native water commands and the first radius collect settle before weed reuses
+                // that collect or runs another proximity pass (back-to-back Aura scans crash).
+                yield return null;
+                yield return null;
+                yield return new WaitForSecondsRealtime(0.35f);
+
+                IEnumerator weed = this.HomelandFarmWeedAllRoutine(silent);
+                while (weed.MoveNext())
+                {
+                    yield return weed.Current;
+                }
+            }
+            finally
+            {
+                this.homelandFarmCoroutine = null;
+                this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
+            }
         }
 
         private IEnumerator HomelandFarmWaterRoutine(HomelandFarmWaterMode mode, bool silent)
@@ -14292,6 +15612,7 @@ namespace HeartopiaMod
 
         private IEnumerator HomelandFarmWeedAllRoutine(bool silent)
         {
+            yield return null;
             yield return null;
 
             try
@@ -15351,10 +16672,14 @@ namespace HeartopiaMod
                 bool setPos = this.TrySetFieldValue(this.homelandFarmCropPlantPointType, ref pointRef, "pos", pos);
                 bool setAngle = this.TrySetFieldValue(this.homelandFarmCropPlantPointType, ref pointRef, "angle", angle);
                 bool setNetId = this.TrySetFieldValue(this.homelandFarmCropPlantPointType, ref pointRef, "levelObjectNetId", levelObjectNetId);
+                bool setPlanter = planterNetId != 0U
+                    && (this.TrySetFieldValue(this.homelandFarmCropPlantPointType, ref pointRef, "planterNetId", planterNetId)
+                        || this.TrySetFieldValue(this.homelandFarmCropPlantPointType, ref pointRef, "PlanterNetId", planterNetId));
                 if (!setPos || !setNetId)
                 {
                     this.HomelandFarmLog("CropPlantPoint create: field set pos=" + setPos
                         + " angle=" + setAngle + " levelObjectNetId=" + setNetId
+                        + " planterNetId=" + setPlanter
                         + " on " + this.homelandFarmCropPlantPointType.FullName + ".");
                 }
 
@@ -15473,6 +16798,11 @@ namespace HeartopiaMod
             }
 
             return (ulong)ownerNetId | ((ulong)(uint)slot << 32);
+        }
+
+        private static uint HomelandFarmDecodePlanterNetIdFromLevelObjectId(ulong levelObjectNetId)
+        {
+            return (uint)(levelObjectNetId & 0xFFFFFFFFUL);
         }
 
         private static bool HomelandFarmPutZoneFlagsIncludeCropland(int flags)
@@ -16621,6 +17951,13 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (this.homelandFarmResolvedPutZoneByPlanterNetId.TryGetValue(planterNetId, out ulong cachedPutZone)
+                && cachedPutZone != 0UL)
+            {
+                levelObjectNetId = cachedPutZone;
+                return true;
+            }
+
             // Fast, crash-safe path FIRST: the crop-box put-zone is deterministically
             // encode(planter, slot=2). The caller already confirmed this is an owned crop box, so we
             // do NOT call GetLevelObject to validate here — that native call holds a raw mono pointer
@@ -16630,7 +17967,7 @@ namespace HeartopiaMod
             if (fastPutZone != 0UL)
             {
                 levelObjectNetId = fastPutZone;
-                this.HomelandFarmLog("Sow putZone planter=" + planterNetId + " slot=" + HomelandFarmCropBoxCraftPutZoneSlot + " -> " + levelObjectNetId + " (deterministic).");
+                this.homelandFarmResolvedPutZoneByPlanterNetId[planterNetId] = levelObjectNetId;
                 return true;
             }
 
@@ -16639,7 +17976,7 @@ namespace HeartopiaMod
                 && levelObjectNetId != 0UL
                 && this.TryHomelandFarmValidateSowPutZoneLevelObject(levelObjectNetId))
             {
-                this.HomelandFarmLog("Sow putZone planter=" + planterNetId + " slot=" + slot + " -> " + levelObjectNetId + " (aura).");
+                this.homelandFarmResolvedPutZoneByPlanterNetId[planterNetId] = levelObjectNetId;
                 return true;
             }
 
@@ -16648,7 +17985,7 @@ namespace HeartopiaMod
                 && levelObjectNetId != 0UL
                 && this.TryHomelandFarmValidateSowPutZoneLevelObject(levelObjectNetId))
             {
-                this.HomelandFarmLog("Sow putZone planter=" + planterNetId + " slot=" + slot + " -> " + levelObjectNetId + " (managed).");
+                this.homelandFarmResolvedPutZoneByPlanterNetId[planterNetId] = levelObjectNetId;
                 return true;
             }
 
@@ -16682,7 +18019,7 @@ namespace HeartopiaMod
             if (bestNetId != 0UL)
             {
                 levelObjectNetId = bestNetId;
-                this.HomelandFarmLog("Sow putZone planter=" + planterNetId + " slot=" + bestSlot + " -> " + levelObjectNetId + " (mono GetLevelObject).");
+                this.homelandFarmResolvedPutZoneByPlanterNetId[planterNetId] = levelObjectNetId;
                 return true;
             }
 
@@ -16715,11 +18052,10 @@ namespace HeartopiaMod
             if (bestNetId != 0UL)
             {
                 levelObjectNetId = bestNetId;
-                this.HomelandFarmLog("Sow putZone planter=" + planterNetId + " slot=" + bestSlot + " -> " + levelObjectNetId + " (managed GetLevelObject).");
+                this.homelandFarmResolvedPutZoneByPlanterNetId[planterNetId] = levelObjectNetId;
                 return true;
             }
 
-            this.HomelandFarmLog("Sow putZone missing planter=" + planterNetId + " (no validated putZone).");
             return false;
         }
 
@@ -17011,6 +18347,14 @@ namespace HeartopiaMod
                 }
             }
 
+            foreach (uint pendingBoxNetId in this.homelandFarmAutoPendingSowBoxNetIds)
+            {
+                if (pendingBoxNetId != 0U && cropBoxNetIds.Contains(pendingBoxNetId))
+                {
+                    occupiedOut.Add(pendingBoxNetId);
+                }
+            }
+
             // Also run the position-match pass on AuraMono builds: CropBoxItemData link fields are
             // empty here even when a crop is growing, so TryHomelandFarmCropBoxHasCrop above misses
             // occupied boxes (occupied=0) and sow then targets planted boxes -> server InvalidPlantBox.
@@ -17020,8 +18364,57 @@ namespace HeartopiaMod
             }
         }
 
+        // Best-effort: resolve sow put-zone anchors for every box so plant→box matching can use the
+        // same world/field-local poses as CropSeeding (entity positions alone are unreliable here).
+        private void TryHomelandFarmWarmPlanterSowAnchorsForCropBoxes(
+            HashSet<uint> cropBoxNetIds,
+            Dictionary<string, uint> sowFieldCellToBoxOut = null)
+        {
+            if (cropBoxNetIds == null || cropBoxNetIds.Count == 0)
+            {
+                return;
+            }
+
+            foreach (uint boxNetId in cropBoxNetIds)
+            {
+                if (boxNetId == 0U)
+                {
+                    continue;
+                }
+
+                if (!this.TryHomelandFarmResolveBoxFieldPlacement(boxNetId, out _, out Vector3 sowFieldLocal, out _))
+                {
+                    continue;
+                }
+
+                if (sowFieldCellToBoxOut != null && sowFieldLocal != Vector3.zero)
+                {
+                    sowFieldCellToBoxOut[HomelandFarmFieldCellKey(sowFieldLocal)] = boxNetId;
+                }
+            }
+        }
+
+        private bool TryHomelandFarmIsFarmCropOrPlantNetId(uint netId)
+        {
+            if (netId == 0U)
+            {
+                return false;
+            }
+
+            if (this.HomelandFarmPrefersAuraComponentData())
+            {
+                return this.TryHomelandFarmAuraEntityClassifyFarm(netId, out bool isCropBox, out bool isPlant, out bool isCrop)
+                    && !isCropBox
+                    && (isPlant || isCrop);
+            }
+
+            return this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData")
+                || this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out _, out _, "PlantItemData");
+        }
+
         // Crop plants are separate entities from crop boxes; link fields on CropBoxItemData are often
-        // empty even when a crop is growing. Match CropItemData entities to boxes by field cell.
+        // empty even when a crop is growing. Match CropItemData / PlantItemData entities to boxes by
+        // sow field cell, planter anchors, or world proximity.
         private void TryHomelandFarmMarkOccupiedCropBoxesByEntityPosition(
             HashSet<uint> cropBoxNetIds,
             HashSet<uint> scanNetIds,
@@ -17032,7 +18425,11 @@ namespace HeartopiaMod
                 return;
             }
 
+            Dictionary<string, uint> boxBySowFieldCell = new Dictionary<string, uint>(cropBoxNetIds.Count);
+            this.TryHomelandFarmWarmPlanterSowAnchorsForCropBoxes(cropBoxNetIds, boxBySowFieldCell);
+
             Dictionary<string, uint> boxByFieldCell = new Dictionary<string, uint>(cropBoxNetIds.Count);
+            Dictionary<uint, Vector3> boxAnchorWorldPos = new Dictionary<uint, Vector3>(cropBoxNetIds.Count);
             Dictionary<uint, Vector3> boxWorldPos = new Dictionary<uint, Vector3>(cropBoxNetIds.Count);
             foreach (uint boxNetId in cropBoxNetIds)
             {
@@ -17046,6 +18443,13 @@ namespace HeartopiaMod
                     boxByFieldCell[HomelandFarmFieldCellKey(boxFieldLocal)] = boxNetId;
                 }
 
+                if (this.homelandFarmPlanterSowAnchorByNetId.TryGetValue(boxNetId, out HomelandFarmPlanterSowAnchor sowAnchor)
+                    && sowAnchor != null
+                    && sowAnchor.WorldPosition != Vector3.zero)
+                {
+                    boxAnchorWorldPos[boxNetId] = sowAnchor.WorldPosition;
+                }
+
                 if (this.TryHomelandFarmResolveFarmEntityPosition(boxNetId, out Vector3 boxPos) && boxPos != Vector3.zero)
                 {
                     boxWorldPos[boxNetId] = boxPos;
@@ -17055,30 +18459,65 @@ namespace HeartopiaMod
             float worldMatchRadiusSq = HomelandFarmCropBoxWorldMatchRadius * HomelandFarmCropBoxWorldMatchRadius;
             foreach (uint cropNetId in scanNetIds)
             {
-                if (cropNetId == 0U)
+                if (cropNetId == 0U || cropBoxNetIds.Contains(cropNetId))
                 {
                     continue;
                 }
 
-                // A box is occupied if a growing crop entity sits on it. The growing crop is a
-                // CropItemData OR (on this build, the common case) a PlantItemData entity — match
-                // either, else occupied detection misses everything and sow hits InvalidPlantBox.
-                if (cropBoxNetIds.Contains(cropNetId)
-                    || (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out _, out _, "CropItemData")
-                        && !this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, cropNetId, out _, out _, "PlantItemData")))
+                if (!this.TryHomelandFarmIsFarmCropOrPlantNetId(cropNetId))
                 {
                     continue;
                 }
 
-                if (this.TryHomelandFarmResolveEntityFieldLocalPosition(cropNetId, out Vector3 cropFieldLocal)
-                    && boxByFieldCell.TryGetValue(HomelandFarmFieldCellKey(cropFieldLocal), out uint matchedBoxNetId)
-                    && matchedBoxNetId != 0U)
+                if (this.TryHomelandFarmIsDiscardedAutoFarmCropNetId(cropNetId)
+                    || this.TryHomelandFarmIsOrphanPlantOnlyWithoutCropData(cropNetId, scanNetIds))
                 {
-                    occupiedOut.Add(matchedBoxNetId);
                     continue;
+                }
+
+                if (this.TryHomelandFarmTryFindCropBoxNetIdForCrop(cropNetId, out uint linkedBoxNetId)
+                    && linkedBoxNetId != 0U
+                    && cropBoxNetIds.Contains(linkedBoxNetId))
+                {
+                    occupiedOut.Add(linkedBoxNetId);
+                    continue;
+                }
+
+                if (this.TryHomelandFarmResolveEntityFieldLocalPosition(cropNetId, out Vector3 cropFieldLocal))
+                {
+                    string cropCellKey = HomelandFarmFieldCellKey(cropFieldLocal);
+                    if (boxBySowFieldCell.TryGetValue(cropCellKey, out uint sowMatchedBoxNetId) && sowMatchedBoxNetId != 0U)
+                    {
+                        occupiedOut.Add(sowMatchedBoxNetId);
+                        continue;
+                    }
+
+                    if (boxByFieldCell.TryGetValue(cropCellKey, out uint matchedBoxNetId) && matchedBoxNetId != 0U)
+                    {
+                        occupiedOut.Add(matchedBoxNetId);
+                        continue;
+                    }
                 }
 
                 if (!this.TryHomelandFarmResolveFarmEntityPosition(cropNetId, out Vector3 cropPos) || cropPos == Vector3.zero)
+                {
+                    continue;
+                }
+
+                bool matched = false;
+                foreach (KeyValuePair<uint, Vector3> boxEntry in boxAnchorWorldPos)
+                {
+                    Vector3 delta = boxEntry.Value - cropPos;
+                    delta.y = 0f;
+                    if (delta.sqrMagnitude <= worldMatchRadiusSq)
+                    {
+                        occupiedOut.Add(boxEntry.Key);
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if (matched)
                 {
                     continue;
                 }
@@ -17185,6 +18624,11 @@ namespace HeartopiaMod
             }
 
             if (occupiedCropBoxNetIds != null && occupiedCropBoxNetIds.Contains(netId))
+            {
+                return false;
+            }
+
+            if (this.homelandFarmAutoPendingSowBoxNetIds.Contains(netId))
             {
                 return false;
             }
@@ -17385,7 +18829,7 @@ namespace HeartopiaMod
         // Coroutine: resolves empty planter slots, yielding every HomelandFarmSowSlotsPerFrame boxes
         // so the per-box AuraMono resolution is spread across frames (prevents the native crash on
         // sow-all at large radius). Results are returned via homelandFarmSowSlotPoints/Status/Ok.
-        private IEnumerator FindEmptyCropPlanterSlotsRoutine(int maxSlots)
+        private IEnumerator FindEmptyCropPlanterSlotsRoutine(int maxSlots, bool useAutoFarmCollectShortcuts = false)
         {
             this.homelandFarmSowSlotOk = false;
             this.homelandFarmSowSlotPoints = new List<object>();
@@ -17417,7 +18861,9 @@ namespace HeartopiaMod
             this.homelandFarmAuraComponentMissCache.Clear();
 
             this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
-            bool hasPlayerPos = this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos);
+            bool hasPlayerPos = useAutoFarmCollectShortcuts
+                ? this.TryGetHomelandFarmScanCenter(out Vector3 playerPos)
+                : this.TryGetHomelandFarmPlayerPosition(out playerPos);
             float radius = this.homelandFarmWaterRadius;
             HashSet<uint> cropNetIds = new HashSet<uint>();
             if (hasPlayerPos)
@@ -17425,7 +18871,12 @@ namespace HeartopiaMod
                 // Use the exact sow radius (no +2 padding): padding pulls in occupied planters
                 // outside the intended zone, and the server then rejects the whole batch with
                 // PlantBoxHasCrop even though the planters the player is standing on are empty.
-                this.TryHomelandFarmCollectFarmEntityNetIds(cropNetIds, out _, playerPos, radius);
+                this.TryHomelandFarmCollectFarmEntityNetIds(
+                    cropNetIds,
+                    out _,
+                    playerPos,
+                    radius,
+                    useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
             }
             else
             {
@@ -18113,7 +19564,12 @@ namespace HeartopiaMod
                 HashSet<uint> scanNetIds = new HashSet<uint>();
                 if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
                 {
-                    this.TryHomelandFarmCollectFarmEntityNetIds(scanNetIds, out _, playerPos, this.homelandFarmWaterRadius + 2f);
+                    this.TryHomelandFarmCollectFarmEntityNetIds(
+                        scanNetIds,
+                        out _,
+                        playerPos,
+                        this.homelandFarmWaterRadius + 2f,
+                        useAutoFarmCollectShortcuts: false);
                 }
 
                 yield return null;
@@ -18627,67 +20083,78 @@ namespace HeartopiaMod
             bool busy = this.IsHomelandFarmBusy();
             bool farmInteractive = !busy && this.IsHomelandFarmWarmupReady();
 
-            // Single radius slider drives every radius-based operation below.
-            Rect opsRect = new Rect(left, y, width, 222f);
-            GUI.Box(opsRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
-            this.DrawCardOutline(opsRect, 1f);
-            GUI.Label(new Rect(opsRect.x + 16f, opsRect.y + 12f, 300f, 20f), this.L("homeland_farm.operations_section"), labelStyle);
-            float settingsX = opsRect.x + 16f;
-            float settingsWidth = width - 32f;
-            float settingsY = opsRect.y + 38f;
+            // 1. AUTO FARMING — capture planters, then loop sow -> weed -> harvest.
+            Rect autoRect = new Rect(left, y, width, 150f);
+            GUI.Box(autoRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
+            this.DrawCardOutline(autoRect, 1f);
+            GUI.Label(new Rect(autoRect.x + 16f, autoRect.y + 12f, 300f, 20f), this.L("homeland_farm.auto_section"), labelStyle);
+            float autoY = autoRect.y + 38f;
+
+            GUI.enabled = farmInteractive && !this.homelandFarmAutoRunning;
+            if (GUI.Button(new Rect(autoRect.x + 16f, autoY, 200f, 28f), this.L("homeland_farm.auto_capture"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.CaptureHomelandFarmAutoPlanters();
+            }
+
+            GUI.enabled = true;
+            GUI.Label(new Rect(autoRect.x + 226f, autoY + 5f, width - 242f, 18f),
+                this.homelandFarmAutoCaptured
+                    ? this.LF("homeland_farm.auto_captured", this.homelandFarmAutoPlanterCount)
+                    : this.L("homeland_farm.auto_not_captured"),
+                sectionStyle);
+            autoY += 36f;
+
+            GUI.Label(new Rect(autoRect.x + 16f, autoY, width - 32f, 18f), this.L("homeland_farm.auto_hint"), sectionStyle);
+            autoY += 24f;
+
+            if (this.homelandFarmAutoRunning)
+            {
+                if (GUI.Button(new Rect(autoRect.x + 16f, autoY, width - 32f, 32f), this.L("homeland_farm.auto_stop"), this.themeDangerButtonStyle ?? GUI.skin.button))
+                {
+                    this.StopHomelandFarmCoroutine();
+                    this.homelandFarmLastStatus = "homeland_farm.status_stopped";
+                }
+            }
+            else
+            {
+                GUI.enabled = farmInteractive
+                    && this.homelandFarmAutoCaptured
+                    && this.homelandFarmAutoPlanterCount > 0
+                    && this.homelandFarmScannedSeeds.Count > 0;
+                if (GUI.Button(new Rect(autoRect.x + 16f, autoY, width - 32f, 32f), this.L("homeland_farm.auto_start"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+                {
+                    this.StartHomelandFarmAuto();
+                }
+
+                GUI.enabled = true;
+            }
+
+            y += 162f;
+
+            // 2. FARM RADIUS — single slider drives every radius-based action below.
             GUIStyle valueLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, alignment = TextAnchor.MiddleRight };
             valueLabelStyle.normal.textColor = textColor;
             GUIStyle sliderLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Bold };
             sliderLabelStyle.normal.textColor = new Color(textColor.r, textColor.g, textColor.b, 0.78f);
-            GUI.Label(new Rect(settingsX, settingsY, settingsWidth * 0.55f, 18f), this.L("homeland_farm.radius_slider_label"), sliderLabelStyle);
-            GUI.Label(new Rect(settingsX + settingsWidth * 0.55f, settingsY, settingsWidth * 0.45f, 18f),
-                $"{this.homelandFarmWaterRadius:F0}m",
-                valueLabelStyle);
-            settingsY += 20f;
+
+            Rect radiusRect = new Rect(left, y, width, 70f);
+            GUI.Box(radiusRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
+            this.DrawCardOutline(radiusRect, 1f);
+            GUI.Label(new Rect(radiusRect.x + 16f, radiusRect.y + 10f, 300f, 18f), this.L("homeland_farm.radius_section"), labelStyle);
+            float radiusInner = width - 32f;
+            float radiusSliderY = radiusRect.y + 34f;
+            GUI.Label(new Rect(radiusRect.x + 16f, radiusSliderY, radiusInner * 0.55f, 18f), this.L("homeland_farm.radius_slider_label"), sliderLabelStyle);
+            GUI.Label(new Rect(radiusRect.x + 16f + radiusInner * 0.55f, radiusSliderY, radiusInner * 0.45f, 18f), $"{this.homelandFarmWaterRadius:F0}m", valueLabelStyle);
+            radiusSliderY += 20f;
             this.homelandFarmWaterRadius = Mathf.Round(this.DrawAccentSlider(
-                new Rect(settingsX, settingsY, settingsWidth, 20f),
+                new Rect(radiusRect.x + 16f, radiusSliderY, radiusInner, 20f),
                 this.homelandFarmWaterRadius,
                 HomelandFarmMinWaterRadius,
                 HomelandFarmMaxWaterRadius));
+            y += 82f;
 
-            const float buttonW = 230f;
-            const float buttonH = 30f;
-            const float buttonGapX = 12f;
-            const float buttonGapY = 8f;
-            float col1 = opsRect.x + 16f;
-            float col2 = opsRect.x + 16f + buttonW + buttonGapX;
-            float rowY = settingsY + 38f;
-            GUI.enabled = farmInteractive;
-            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.water_in_radius"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartHomelandFarmWater(HomelandFarmWaterMode.InRadius, silent: false);
-            }
-
-            if (GUI.Button(new Rect(col2, rowY, buttonW, buttonH), this.L("homeland_farm.harvest_crops_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartHomelandFarmHarvestCrops(silent: false);
-            }
-
-            rowY += buttonH + buttonGapY;
-            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.weed_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartHomelandFarmWeedAll(silent: false);
-            }
-
-            if (GUI.Button(new Rect(col2, rowY, buttonW, buttonH), this.L("homeland_farm.collect_plant_seeds_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartHomelandFarmCollectPlantSeeds(silent: false);
-            }
-
-            rowY += buttonH + buttonGapY;
-            if (GUI.Button(new Rect(col1, rowY, width - 32f, buttonH), this.L("homeland_farm.log_water_radius"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.LogHomelandFarmRadiusWaterDiagnostics();
-            }
-
-            y += 234f;
-
-            Rect sowRect = new Rect(left, y, width, 218f);
+            // 3. CROPS — scan + select the seed used by Sow / Auto farm.
+            Rect sowRect = new Rect(left, y, width, 160f);
             GUI.Box(sowRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
             this.DrawCardOutline(sowRect, 1f);
             GUI.Label(new Rect(sowRect.x + 16f, sowRect.y + 12f, 200f, 20f), this.L("homeland_farm.sow_section"), labelStyle);
@@ -18720,15 +20187,11 @@ namespace HeartopiaMod
                 this.homelandFarmScannedSeeds,
                 ref this.homelandFarmSelectedSeedIndex,
                 this.L("homeland_farm.no_seeds"));
-            if (GUI.Button(new Rect(sowRect.x + 16f, sowY, 160f, 30f), this.L("homeland_farm.sow_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartHomelandFarmSowAll(silent: false);
-            }
-
             GUI.enabled = true;
-            y += 230f;
+            y += 172f;
 
-            Rect fertRect = new Rect(left, y, width, 218f);
+            // 4. FERTILIZER — scan + select the fertilizer used by Fertilize.
+            Rect fertRect = new Rect(left, y, width, 160f);
             GUI.Box(fertRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
             this.DrawCardOutline(fertRect, 1f);
             GUI.Label(new Rect(fertRect.x + 16f, fertRect.y + 12f, 220f, 20f), this.L("homeland_farm.fertilize_section"), labelStyle);
@@ -18761,13 +20224,63 @@ namespace HeartopiaMod
                 this.homelandFarmScannedFertilizers,
                 ref this.homelandFarmSelectedFertilizerIndex,
                 this.L("homeland_farm.no_fertilizers"));
-            if (GUI.Button(new Rect(fertRect.x + 16f, fertY, 180f, 30f), this.L("homeland_farm.fertilize_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            GUI.enabled = true;
+            y += 172f;
+
+            // 5. ACTION BUTTONS — use the radius + selected seed/fertilizer above.
+            Rect opsRect = new Rect(left, y, width, 196f);
+            GUI.Box(opsRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
+            this.DrawCardOutline(opsRect, 1f);
+            GUI.Label(new Rect(opsRect.x + 16f, opsRect.y + 12f, 300f, 20f), this.L("homeland_farm.operations_section"), labelStyle);
+
+            const float buttonW = 230f;
+            const float buttonH = 30f;
+            const float buttonGapX = 12f;
+            const float buttonGapY = 8f;
+            float col1 = opsRect.x + 16f;
+            float col2 = opsRect.x + 16f + buttonW + buttonGapX;
+            float rowY = opsRect.y + 40f;
+            GUI.enabled = farmInteractive;
+            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.water_in_radius"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.StartHomelandFarmWater(HomelandFarmWaterMode.InRadius, silent: false);
+            }
+
+            if (GUI.Button(new Rect(col2, rowY, buttonW, buttonH), this.L("homeland_farm.harvest_crops_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.StartHomelandFarmHarvestCrops(silent: false);
+            }
+
+            rowY += buttonH + buttonGapY;
+            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.weed_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.StartHomelandFarmWeedAll(silent: false);
+            }
+
+            if (GUI.Button(new Rect(col2, rowY, buttonW, buttonH), this.L("homeland_farm.collect_plant_seeds_all"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.StartHomelandFarmCollectPlantSeeds(silent: false);
+            }
+
+            rowY += buttonH + buttonGapY;
+            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.sow"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.StartHomelandFarmSowAll(silent: false);
+            }
+
+            if (GUI.Button(new Rect(col2, rowY, buttonW, buttonH), this.L("homeland_farm.fertilize"), this.themePrimaryButtonStyle ?? GUI.skin.button))
             {
                 this.StartHomelandFarmFertilizeAll(silent: false);
             }
 
+            rowY += buttonH + buttonGapY;
+            if (GUI.Button(new Rect(col1, rowY, width - 32f, buttonH), this.L("homeland_farm.log_water_radius"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.LogHomelandFarmRadiusWaterDiagnostics();
+            }
+
             GUI.enabled = true;
-            y += 230f;
+            y += 208f;
 
             Rect statusRect = new Rect(left, y, width, 52f);
             GUI.Box(statusRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
