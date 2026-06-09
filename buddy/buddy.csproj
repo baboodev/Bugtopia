@@ -198,6 +198,7 @@
     <Compile Include="HideJumpButtonFeature.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />
+    <Compile Include="PadBuildHotkeyFeature.cs" />
     <Compile Include="BunnyHopFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
     <Compile Include="BubbleMonoNativeHook.cs" />

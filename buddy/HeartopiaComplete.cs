@@ -75,6 +75,11 @@ namespace HeartopiaMod
         private KeyCode keyEquipSprinkler = KeyCode.None;
         private KeyCode keyEquipBirdScanner = KeyCode.None;
         private KeyCode keyEquipPad = KeyCode.None;
+        private KeyCode keyPadConfirm = KeyCode.None;
+        private KeyCode keyPadCancel = KeyCode.None;
+        private KeyCode keyPadRotate = KeyCode.None;
+        private KeyCode keyPadMove = KeyCode.None;
+        private KeyCode keyPadDelete = KeyCode.None;
         private KeyCode keyAutoInsectFarm = KeyCode.None;
         private KeyCode keyAutoBirdFarm = KeyCode.None;
         private KeyCode keyMassCook = KeyCode.None;
@@ -128,6 +133,7 @@ namespace HeartopiaMod
         private const bool MasterLogPetFeed = false;
         private const bool MasterLogWildAnimalFeed = false;
         private const bool MasterLogHomelandFarm = true;
+        private const bool MasterLogPadBuild = false;
         private const bool MasterLogWildAnimalGift = true;
         private const bool MasterLogDailyQuestSubmit = true;
         private const bool MasterLogBirdPhotoSubmit = false;
@@ -344,6 +350,11 @@ namespace HeartopiaMod
             public int keyEquipSprinkler;
             public int keyEquipBirdScanner;
             public int keyEquipPad;
+            public int keyPadConfirm;
+            public int keyPadCancel;
+            public int keyPadRotate;
+            public int keyPadMove;
+            public int keyPadDelete;
             public int keyAutoInsectFarm;
             public int keyAutoBirdFarm;
             public int keyMassCook;
@@ -922,6 +933,11 @@ namespace HeartopiaMod
             data.keyEquipSprinkler = (int)this.keyEquipSprinkler;
             data.keyEquipBirdScanner = (int)this.keyEquipBirdScanner;
             data.keyEquipPad = (int)this.keyEquipPad;
+            data.keyPadConfirm = (int)this.keyPadConfirm;
+            data.keyPadCancel = (int)this.keyPadCancel;
+            data.keyPadRotate = (int)this.keyPadRotate;
+            data.keyPadMove = (int)this.keyPadMove;
+            data.keyPadDelete = (int)this.keyPadDelete;
             data.keyAutoInsectFarm = (int)this.keyAutoInsectFarm;
             data.keyAutoBirdFarm = (int)this.keyAutoBirdFarm;
             data.keyMassCook = (int)this.keyMassCook;
@@ -1051,6 +1067,11 @@ namespace HeartopiaMod
             this.keyEquipSprinkler = (KeyCode)data.keyEquipSprinkler;
             this.keyEquipBirdScanner = (KeyCode)data.keyEquipBirdScanner;
             this.keyEquipPad = (KeyCode)data.keyEquipPad;
+            this.keyPadConfirm = (KeyCode)data.keyPadConfirm;
+            this.keyPadCancel = (KeyCode)data.keyPadCancel;
+            this.keyPadRotate = (KeyCode)data.keyPadRotate;
+            this.keyPadMove = (KeyCode)data.keyPadMove;
+            this.keyPadDelete = (KeyCode)data.keyPadDelete;
             this.keyAutoInsectFarm = (KeyCode)data.keyAutoInsectFarm;
             this.keyAutoBirdFarm = (KeyCode)data.keyAutoBirdFarm;
             this.keyMassCook = (KeyCode)data.keyMassCook;
@@ -2412,6 +2433,7 @@ namespace HeartopiaMod
                         this.AddMenuNotification(unequipped ? "Unequipping Pad" : "Equipping Pad", new Color(0.45f, 1f, 0.55f));
                     }
                 }
+                this.ProcessPadBuildHotkeysOnUpdate();
             }
 
             this.RunAntiAfkTick();
@@ -3244,7 +3266,7 @@ namespace HeartopiaMod
             // Settings tab with sub-tabs
             if (this.settingsSubTab == 1)
             {
-                return string.IsNullOrEmpty(this.keyBindingActive) ? 1560f : 300f;
+                return string.IsNullOrEmpty(this.keyBindingActive) ? 1680f : 300f;
             }
             if (this.settingsSubTab == 2)
             {
@@ -61423,6 +61445,11 @@ namespace HeartopiaMod
                             case "Equip Sprinkler": this.keyEquipSprinkler = newKey; break;
                             case "Equip Bird Scanner": this.keyEquipBirdScanner = newKey; break;
                             case "Equip Pad": this.keyEquipPad = newKey; break;
+                            case "Pad Confirm": this.keyPadConfirm = newKey; break;
+                            case "Pad Cancel": this.keyPadCancel = newKey; break;
+                            case "Pad Rotate": this.keyPadRotate = newKey; break;
+                            case "Pad Move": this.keyPadMove = newKey; break;
+                            case "Pad Delete": this.keyPadDelete = newKey; break;
                             case "Auto Insect Farm": this.keyAutoInsectFarm = newKey; break;
                             case "Auto Bird Farm": this.keyAutoBirdFarm = newKey; break;
                             case "Mass Cook": this.keyMassCook = newKey; break;
@@ -61482,7 +61509,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Bypass Overlap", ref this.keyBypassOverlap);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "SPEED & TOOLS", 10, subHeaderStyle, accent, panelFill, panelLine);
+            this.BeginKeybindSection(ref num, left, contentWidth, "SPEED & TOOLS", 15, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Game Speed 1x", ref this.keyGameSpeed1x);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Game Speed 2x", ref this.keyGameSpeed2x);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Game Speed 5x", ref this.keyGameSpeed5x);
@@ -61493,6 +61520,11 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Equip Sprinkler", ref this.keyEquipSprinkler);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Equip Bird Scanner", ref this.keyEquipBirdScanner);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Equip Pad", ref this.keyEquipPad);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Confirm", ref this.keyPadConfirm);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Cancel", ref this.keyPadCancel);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Rotate", ref this.keyPadRotate);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Move", ref this.keyPadMove);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Delete", ref this.keyPadDelete);
             num += 18;
 
             if (this.DrawDangerActionButton(new Rect(left, (float)num, contentWidth, 34f), "RESET TO DEFAULTS"))
@@ -61530,6 +61562,11 @@ namespace HeartopiaMod
                 this.keyEquipSprinkler = KeyCode.None;
                 this.keyEquipBirdScanner = KeyCode.None;
                 this.keyEquipPad = KeyCode.None;
+                this.keyPadConfirm = KeyCode.None;
+                this.keyPadCancel = KeyCode.None;
+                this.keyPadRotate = KeyCode.None;
+                this.keyPadMove = KeyCode.None;
+                this.keyPadDelete = KeyCode.None;
                 this.keyAutoInsectFarm = KeyCode.None;
                 this.keyAutoBirdFarm = KeyCode.None;
                 this.keyMassCook = KeyCode.None;
