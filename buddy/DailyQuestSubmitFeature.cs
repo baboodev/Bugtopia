@@ -80,12 +80,21 @@ namespace HeartopiaMod
                 yield break;
             }
 
-            this.DailyQuestSubmitLogOrderSnapshot(orders);
+            // Resolve every order's task id / order key up front, with the mono GC suspended, so we
+            // never touch the raw game-object pointers in `orders` again. Holding those pointers across
+            // the WaitForSeconds yields below would let the GC collect/move them mid-run, which crashed
+            // the game with a native AV partway through the order list (same class of bug as the
+            // homeland sow-all native AV that the GC-disable guard already fixes).
+            List<DailyQuestResolvedOrder> resolved = this.ResolveDailyQuestOrdersForSubmit(orders);
 
             int accepted = 0;
-            for (int i = 0; i < orders.Count; i++)
+            for (int i = 0; i < resolved.Count; i++)
             {
-                if (!this.TryResolveDailyQuestTaskIdFromOrder(orders[i], out int acceptTaskId, out int acceptOrderKey, out string acceptOrderFields))
+                DailyQuestResolvedOrder acceptEntry = resolved[i];
+                int acceptTaskId = acceptEntry.TaskId;
+                int acceptOrderKey = acceptEntry.OrderKey;
+                string acceptOrderFields = acceptEntry.Fields;
+                if (!acceptEntry.Resolved || acceptTaskId <= 0)
                 {
                     this.DailyQuestSubmitLog(
                         "accept order[" + i + "] skip: unresolved"
@@ -132,17 +141,13 @@ namespace HeartopiaMod
             int submitted = 0;
             int skipped = 0;
 
-            for (int i = 0; i < orders.Count; i++)
+            for (int i = 0; i < resolved.Count; i++)
             {
-                IntPtr orderComponent = orders[i];
-                if (orderComponent == IntPtr.Zero)
-                {
-                    this.DailyQuestSubmitLog("process order[" + i + "] skip: null component");
-                    skipped++;
-                    continue;
-                }
-
-                if (!this.TryResolveDailyQuestTaskIdFromOrder(orderComponent, out int taskId, out int orderKey, out string orderFields))
+                DailyQuestResolvedOrder entry = resolved[i];
+                int taskId = entry.TaskId;
+                int orderKey = entry.OrderKey;
+                string orderFields = entry.Fields;
+                if (!entry.Resolved || taskId <= 0)
                 {
                     this.DailyQuestSubmitLog(
                         "process order[" + i + "] skip: invalid TaskOrderId"
@@ -271,6 +276,69 @@ namespace HeartopiaMod
             }
 
             this.dailyQuestSubmitCoroutine = null;
+        }
+
+        // Reads the task id / order key off every raw order pointer in one synchronous pass with the
+        // mono GC suspended, capturing them into managed value types. After this the coroutine drives
+        // its loops from ints only and never dereferences the raw `orders` pointers across a yield,
+        // where the GC could otherwise collect/move them (native AV mid-order, see caller comment).
+        private List<DailyQuestResolvedOrder> ResolveDailyQuestOrdersForSubmit(List<IntPtr> orders)
+        {
+            List<DailyQuestResolvedOrder> resolved = new List<DailyQuestResolvedOrder>(orders != null ? orders.Count : 0);
+            if (orders == null)
+            {
+                return resolved;
+            }
+
+            this.DailyQuestSubmitAuraGcDisable();
+            try
+            {
+                this.DailyQuestSubmitLogOrderSnapshot(orders);
+
+                for (int i = 0; i < orders.Count; i++)
+                {
+                    DailyQuestResolvedOrder entry = default(DailyQuestResolvedOrder);
+                    entry.Resolved = this.TryResolveDailyQuestTaskIdFromOrder(
+                        orders[i],
+                        out int taskId,
+                        out int orderKey,
+                        out string fields);
+                    entry.TaskId = taskId;
+                    entry.OrderKey = orderKey;
+                    entry.Fields = fields;
+                    resolved.Add(entry);
+                }
+            }
+            finally
+            {
+                this.DailyQuestSubmitAuraGcEnable();
+            }
+
+            return resolved;
+        }
+
+        // Suspend/resume the mono GC so raw order pointers held during the synchronous resolve pass are
+        // not collected/moved mid-sequence. Paired in a finally. No-op if the export is unavailable.
+        private void DailyQuestSubmitAuraGcDisable()
+        {
+            try
+            {
+                auraMonoGcDisable?.Invoke();
+            }
+            catch
+            {
+            }
+        }
+
+        private void DailyQuestSubmitAuraGcEnable()
+        {
+            try
+            {
+                auraMonoGcEnable?.Invoke();
+            }
+            catch
+            {
+            }
         }
 
         private bool TrySubmitDailyQuestCheapestItemsAura(
@@ -2158,6 +2226,14 @@ namespace HeartopiaMod
 
             status = "ok";
             return true;
+        }
+
+        private struct DailyQuestResolvedOrder
+        {
+            public bool Resolved;
+            public int TaskId;
+            public int OrderKey;
+            public string Fields;
         }
 
         private struct DailyQuestGameTaskInfo
