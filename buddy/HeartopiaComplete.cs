@@ -23434,6 +23434,7 @@ namespace HeartopiaMod
                 tabs.Add(("Animal Care", () => this.newFeaturesSubTab == 0, () => this.SetNewFeaturesSubTab(0)));
                 tabs.Add(("Daily Quests", () => this.newFeaturesSubTab == 1, () => this.SetNewFeaturesSubTab(1)));
                 tabs.Add((this.L("homeland_farm.title"), () => this.newFeaturesSubTab == 2, () => this.SetNewFeaturesSubTab(2)));
+                tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
             }
             else if (this.selectedTab == 4)
             {

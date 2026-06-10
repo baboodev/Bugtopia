@@ -208,6 +208,7 @@
     <Compile Include="ModLogger.cs" />
     <Compile Include="PetFeedFeature.cs" />
     <Compile Include="PetPlayFeature.cs" />
+    <Compile Include="PicturesDecryptFeature.cs" />
     <Compile Include="WildAnimalFeedFeature.cs" />
     <Compile Include="WildAnimalGiftFeature.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

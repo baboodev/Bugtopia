@@ -34,6 +34,11 @@ namespace HeartopiaMod
                 return this.DrawHomelandFarmTab(startY);
             }
 
+            if (this.newFeaturesSubTab == 3)
+            {
+                return this.DrawPicturesTab(startY);
+            }
+
             return startY + 40f;
         }
 
@@ -59,6 +64,11 @@ namespace HeartopiaMod
             if (this.newFeaturesSubTab == 2)
             {
                 return 1230f;
+            }
+
+            if (this.newFeaturesSubTab == 3)
+            {
+                return 560f;
             }
 
             return 400f;
