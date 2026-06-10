@@ -61218,9 +61218,14 @@ namespace HeartopiaMod
                 }
             }
             GUI.enabled = true;
-            num += 38;
 
             float toggleRowY = sourceRowY + actionRowHeight + 6f;
+            if (this.transferScanSourceDropdownOpen)
+            {
+                float panelHeight = this.transferScanSourceLabels.Length * 30f + 8f;
+                toggleRowY = sourceDropdownRect.yMax + 4f + panelHeight + 8f;
+            }
+
             float toggleGap = 12f;
             float toggleWidth = (panelWidth - toggleGap) * 0.5f;
             bool prevMulti = this.transferMultiSelectMode;
@@ -61230,26 +61235,7 @@ namespace HeartopiaMod
                 this.transferBatch.Clear();
             }
             this.transferSelectFullStack = this.DrawSwitchToggle(new Rect(left + toggleWidth + toggleGap, toggleRowY, toggleWidth, 28f), this.transferSelectFullStack, "Full stack");
-            num = Mathf.Max(num, Mathf.CeilToInt(toggleRowY + 34f));
-
-            if (this.transferScanSourceDropdownOpen)
-            {
-                float panelHeight = this.transferScanSourceLabels.Length * 30f + 8f;
-                Rect dropdownPanel = new Rect(left, sourceDropdownRect.yMax + 4f, 120f, panelHeight);
-                GUI.Box(dropdownPanel, "", this.themePanelStyle ?? GUI.skin.box);
-                for (int i = 0; i < this.transferScanSourceLabels.Length; i++)
-                {
-                    if (GUI.Button(new Rect(dropdownPanel.x + 4f, dropdownPanel.y + 4f + i * 30f, dropdownPanel.width - 8f, 26f), this.transferScanSourceLabels[i], this.themeSidebarButtonStyle ?? GUI.skin.button))
-                    {
-                        this.transferScanSource = i;
-                        this.transferScanSourceDropdownOpen = false;
-                        this.transferItems = null;
-                        this.selectedTransferIndex = -1;
-                        this.transferBatch.Clear();
-                    }
-                }
-                num = Mathf.Max(num, Mathf.CeilToInt(dropdownPanel.yMax + 8f));
-            }
+            num = Mathf.CeilToInt(toggleRowY + 34f);
 
             if (this.transferBatch.Count > 0)
             {
@@ -61401,6 +61387,25 @@ namespace HeartopiaMod
             {
                 GUI.Label(new Rect(left, (float)num, panelWidth, 24f), "Press Scan Items to load inventory from BackPackSystem.");
                 num += 28;
+            }
+
+            if (this.transferScanSourceDropdownOpen)
+            {
+                float panelHeight = this.transferScanSourceLabels.Length * 30f + 8f;
+                Rect dropdownPanel = new Rect(left, sourceDropdownRect.yMax + 4f, 120f, panelHeight);
+                GUI.Box(dropdownPanel, "", this.themePanelStyle ?? GUI.skin.box);
+                this.DrawCardOutline(dropdownPanel, 1f);
+                for (int i = 0; i < this.transferScanSourceLabels.Length; i++)
+                {
+                    if (GUI.Button(new Rect(dropdownPanel.x + 4f, dropdownPanel.y + 4f + i * 30f, dropdownPanel.width - 8f, 26f), this.transferScanSourceLabels[i], this.themeSidebarButtonStyle ?? GUI.skin.button))
+                    {
+                        this.transferScanSource = i;
+                        this.transferScanSourceDropdownOpen = false;
+                        this.transferItems = null;
+                        this.selectedTransferIndex = -1;
+                        this.transferBatch.Clear();
+                    }
+                }
             }
 
             return (float)num + 12f;
