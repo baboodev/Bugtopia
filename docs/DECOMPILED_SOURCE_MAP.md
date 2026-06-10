@@ -230,7 +230,7 @@ the native body.
 | BagPanel | Warehouse bypass, bag automation |
 | TrackingPanel / TrackingCatPlay | Cat play automation |
 | CatPlayStatusPanel, DogPlayStatusPanel | Pet play |
-| DressShopPanel, FaceShopPanel | Force-open shop helpers |
+| DressShopPanel, FaceShopPanel, ShopPanel, WeatherExchangeShopPanel | Force-open shop helpers |
 
 **UIManager:** `XDTGame.Core.UIManager` — AuraMono `GetView<T>()`.
 
@@ -794,9 +794,11 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Features:** Pet feed UI icons
 - **Access:** **R**
 
-#### Shop panels (`DressShopPanel`, `FaceShopPanel`)
+#### Shop panels (`DressShopPanel`, `FaceShopPanel`, `ShopPanel`, `WeatherExchangeShopPanel`)
 - **Features:** Force open shop from mod menu
-- **Access:** **A** static `Open` / `OpenAvatarPanelShop`
+- **Access:** **A** — AuraMono static invoke (`Open`, `OpenAvatarPanelShop`, `OpenShopPanel`, `OpenWeatherExchangePanel`). **Not** Harmony / `FindLoadedType` on this build.
+- **Dialogue:** `DialogueNodeBranch.ProcessUiFunction` — case **1** = `ShopPanel`, case **10** = `WeatherExchangeShopPanel` (`UIParam` = `storeId`)
+- **Docs:** [TYPE_RESOLUTION.md § UI panels, hooks, and IL2CPP](./TYPE_RESOLUTION.md#ui-panels-hooks-and-il2cpp-worked-example-weather-exchange-shop)
 
 ---
 

@@ -258,6 +258,14 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 - Teleport → open cooking store → buy configured items → return.
 - Master log flag `MasterLogAutoBuy` / `MasterLogForceOpenShop` in source.
 
+### Force Open Shop
+
+- Menu: **Features** tab → dropdown of hardcoded shops → **OPEN SELECTED SHOP**.
+- Normal NPC stores: `ShopPanel.OpenShopPanel(storeId)` via AuraMono (`TryOpenShopPanelByStoreId`).
+- Fortune rainbow/rain (wish stars): storeId **86** / **87** — still `ShopPanel`, not exchange.
+- **Meteor / Starfall exchange** (Doris, starfall shards): `WeatherExchangeShopPanel.OpenWeatherExchangePanel` — storeId **140** (`MeteorStarfallExchangeStoreId`).
+- How to add or debug similar panels (IL2CPP vs mono hooks, `storeId` discovery): **[TYPE_RESOLUTION.md § UI panels, hooks, and IL2CPP](./TYPE_RESOLUTION.md#ui-panels-hooks-and-il2cpp-worked-example-weather-exchange-shop)**.
+
 ### Auto Sell
 
 - **Scan source:** Bag only, Warehouse only, or **Both** (dropdown).

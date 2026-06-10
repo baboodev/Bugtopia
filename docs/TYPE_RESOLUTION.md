@@ -338,6 +338,109 @@ Some UI/world hooks use `GameObject.Find("…")` with fixed paths (fragile on ga
 
 ---
 
+## UI panels, hooks, and IL2CPP (worked example: weather exchange shop)
+
+Force-open shop and similar UI features are the main place where **the wrong hook style looks successful but never fires in-game**.
+
+### Three runtime paths (pick the right one)
+
+| Path | Who uses it | Mod can hook with |
+|------|-------------|-------------------|
+| **IL2CPP native** | Most `XDTGameUI` panels at runtime (`OpenWeatherExchangePanel`, `ProcessUiFunction`, `UIManager.OpenView`) | **Not** `FindLoadedType` + Harmony; **not** mono thunk detour on the panel method |
+| **AuraMono `mono_runtime_invoke`** | Mod calling into game (`TryInvokeAuraMonoStaticIntIntMethod`, `FindAuraMonoClassByFullName`) | **Yes** — preferred way for the mod to **open** a panel |
+| **Mono native thunk** | Some protocol managers (`ActivityEventProtocolManager`, `BubbleProtocolManager`) when the game still hits embedded Mono exports | **Yes** — `BubbleMonoNativeHook` + `mono_method_get_unmanaged_thunk` (see `BubbleFeature.TryApplyBubbleMonoNativeHooks`) |
+
+`XDTGame.UI.Panel.*` types are usually **AuraMono-class-only** in `AppDomain` (no interop stub). `FindLoadedType("XDTGame.UI.Panel.WeatherExchangeShopPanel")` returns `null` even after entering town.
+
+### Opening a shop panel from the mod (production pattern)
+
+1. Decompile `ilspy-dumps/XDTGameUI/…` — find the real static entry (not `ShopPanel` for every shop).
+2. Resolve class with `FindAuraMonoClassByFullName(fullName)` (image `XDTGameUI.dll`).
+3. Call static method via `TryInvokeAuraMonoStaticIntIntMethod` / `TryInvokeAuraMonoStaticNullBoolMethod` / `UIManager.OpenView` AuraMono path.
+
+**Worked example — Meteor / Starfall exchange (Doris, starfall event):**
+
+| Item | Value |
+|------|--------|
+| Panel | `XDTGame.UI.Panel.WeatherExchangeShopPanel` |
+| Entry | `OpenWeatherExchangePanel(int storeId, int slotId = 0)` → builds `Intent`, then `UIManager.OpenView<WeatherExchangeShopPanel>` |
+| Dialogue path | `DialogueNodeBranch.ProcessUiFunction` **case 10** → `OpenWeatherExchangePanel(nodeData.UIParam)` |
+| Fortune rainbow/rain (wish stars) | `ShopPanel.OpenShopPanel` — **storeId 86 / 87**, `UIFunction` **1**, not case 10 |
+| Verified `storeId` (starfall exchange) | **140** — hardcoded as `MeteorStarfallExchangeStoreId` in `HeartopiaComplete.cs` |
+
+```csharp
+// Mod opens exchange shop — AuraMono invoke only
+TryInvokeAuraMonoStaticIntIntMethod(
+    "XDTGame.UI.Panel.WeatherExchangeShopPanel",
+    "OpenWeatherExchangePanel",
+    storeId: 140,
+    slotId: 0,
+    successStatus);
+```
+
+Same pattern as `TryOpenShopPanelByStoreId` → `ShopPanel.OpenShopPanel` for normal NPC stores.
+
+### What **not** to do for IL2CPP UI
+
+| Approach | Symptom | Why |
+|----------|---------|-----|
+| Harmony on `FindLoadedType` panel type | `panel type not found` / patch skipped | Type not in interop / `AppDomain` |
+| Mono native hook on `OpenWeatherExchangePanel` thunk | Log says `[OK] Mono hook …` but **nothing on Doris → Fortune Store** | Game calls **IL2CPP** code; hook is on Mono export the game never hits |
+| Install hook in `OnInitializeMelon` | `AuraMono not ready` / class not found | Aura API and `XDTGameUI` image load after world entry |
+| Heuristic `storeId` from `TableStoreInfos` scoring (`1033`, `rainshop`) | Wrong NPC (Atara), empty shop, rain items | Event/fortune tables ≠ Doris weather exchange |
+
+### When mono native hooks **do** work
+
+Use them for **protocol / data-layer** methods the game still dispatches through embedded Mono, not for `XDTGame.UI.Panel` openers.
+
+Reference: `buddy/BubbleFeature.cs`
+
+1. Wait until `EnsureAuraMonoApiReady()` + `AttachAuraMonoThread()` (retry from `ProcessBubbleFeatureOnUpdate`, ~5 s).
+2. `FindAuraMonoClassByFullName` → `FindAuraMonoMethodOnHierarchy` → `TryGetAuraMonoMethodNativePointer` (`mono_compile_method`, `mono_method_get_unmanaged_thunk`).
+3. Install with `BubbleMonoNativeHook.TryInstall(nativePtr, hookDelegate, out trampoline)`.
+4. Delegate calling convention: **`CallingConvention.Cdecl`**; match arity and types exactly (`Vector3*` for bubble spawn).
+
+Do **not** copy this pipeline to UI panel static openers expecting in-game capture.
+
+### Discovering unknown `storeId` / `UIParam` (debug only)
+
+Use once per game build, then **hardcode** the verified id in source.
+
+| Method | How | Notes |
+|--------|-----|--------|
+| **ILSpy dialogue branch** | `DialogueNodeBranch.cs` case **10** → `nodeData.UIParam` | Doris Fortune Store during starfall |
+| **Poll open panel** | `UIManager.GetView<WeatherExchangeShopPanel>` → read `intent.GetInt("storeId")` | Reliable on IL2CPP; pattern mirrors `ModTryResolveAuraMonoBagPanel` |
+| **Mono hook on panel open** | Only fires when **mod** calls via `mono_runtime_invoke`, not from game dialogue | Misleading for validation |
+
+After capture (e.g. `storeId=140`), remove poll/hook debug code; keep `TryOpenWeatherExchangeShopPanelByStoreId` + constant.
+
+### Hook install timing checklist
+
+1. **Never** at mod init alone — defer until AuraMono ready (in-world).
+2. **Retry** with backoff (`ProcessBubbleFeatureOnUpdate` pattern) if class/method missing on first frame.
+3. **Log which tier succeeded** once: `panelHook` / `dialogueHook` / `poll` / `AuraMono invoke`.
+4. **Ship** with hardcoded ids from decompile + one in-game confirmation, not runtime discovery.
+
+### Decision flow
+
+```mermaid
+flowchart TD
+  Q[Need to affect UI shop?]
+  Q --> Open[Mod opens panel]
+  Q --> Capture[Learn storeId when player opens in game]
+  Q --> Intercept[Intercept game protocol action]
+
+  Open --> AuraInvoke["AuraMono: FindAuraMonoClassByFullName + mono_runtime_invoke"]
+  Capture --> Poll["Poll GetView + intent OR read DialogueNodeBranch case 10 in ILSpy"]
+  Capture --> Hardcode[Hardcode verified storeId]
+  Intercept --> ProtoHook["Mono native hook on protocol manager OR Harmony SendCommand"]
+
+  Wrong1["Harmony on FindLoadedType XDTGame.UI.*"] -.->|fails| Q
+  Wrong2["Mono thunk on OpenWeatherExchangePanel for game capture"] -.->|silent no-op| Q
+```
+
+---
+
 ## Caching and retries
 
 | Mechanism | Purpose |
@@ -381,6 +484,9 @@ Features should **not** call `FindLoadedType` every frame without cache; use mis
 | Silent native crash (no log) inflating a generic method via Mono | `MonoGenericContext.method_inst` was a raw `MonoType*[]` | Build a real `MonoGenericInst*` with `mono_metadata_get_generic_inst` ([detail](#three-native-av-gotchas-each-cost-a-crash-to-find)) |
 | Silent native crash invoking a Mono method taking `ref`/`out` | Passed the object pointer for a by-ref param | Pass a pointer-to-pointer (`List**`); read the slot back after invoke |
 | `…Component=missing` though sibling components resolve | Wrong namespace assumed (e.g. `.Plant` vs `.Homeland`) | Confirm exact namespace per type in `ilspy-dumps/` |
+| `[OK] Mono hook WeatherExchangeShopPanel…` but no capture in-game | UI runs on IL2CPP, not Mono thunk | Open via AuraMono invoke; discover `storeId` via ILSpy/poll, then hardcode |
+| `WeatherExchange capture hook deferred: AuraMono not ready` | Hook attempted before world / AuraMono attach | Defer install to `Update` retry (see `ProcessBubbleFeatureOnUpdate`) |
+| Exchange opens with wrong NPC or empty list | Wrong `storeId` heuristic (e.g. 127, 87) | Doris starfall = `WeatherExchangeShopPanel` + case 10; rain/rainbow fortune = `ShopPanel` 86/87 |
 
 ---
 
@@ -399,6 +505,9 @@ Features should **not** call `FindLoadedType` every frame without cache; use mis
 | Wild animal gifts | **AuraMono class lookup only** — `WildAnimalProtocolManager`, `AnimalUtil`, `AnimalProtocolManager` (no `FindLoadedType`, no `IWildAnimalService` interop) |
 | Daily claims (sign-in, town guide, mail, BP) | `EcsService`, `IOperationActivityCenterService`, `ITownGuidesService`, `IMailClientService`, `BattlePassSystem` — see [GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md) |
 | Player | `Character`, `p_player_skeleton(Clone)` via `GameObject.Find` |
+| NPC shops (`ShopPanel`) | `XDTGame.UI.Panel.ShopPanel.OpenShopPanel(storeId, slotId)` — AuraMono invoke |
+| Weather exchange (`UIFunction` 10) | `XDTGame.UI.Panel.WeatherExchangeShopPanel.OpenWeatherExchangePanel` — AuraMono invoke; dialogue `DialogueNodeBranch` case 10 |
+| UI manager | `XDTGame.Core.UIManager` — `get_Instance`, `GetView(Type)`, `OpenView` |
 
 Exact strings change with game version — always verify in ILSpy for your build.
 
