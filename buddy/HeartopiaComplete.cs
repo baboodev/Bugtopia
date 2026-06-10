@@ -136,6 +136,7 @@ namespace HeartopiaMod
         private const bool MasterLogPadBuild = false;
         private const bool MasterLogWildAnimalGift = true;
         private const bool MasterLogDailyQuestSubmit = true;
+        internal const bool MasterLogDailyClaims = true;
         private const bool MasterLogBirdPhotoSubmit = false;
         private const bool MasterLogStrangerChat = false;
 
@@ -58583,6 +58584,10 @@ namespace HeartopiaMod
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTDataAndProtocol", StringComparison.Ordinal))
             {
                 imageNames = new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll" };
+            }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("ClientSystem", StringComparison.Ordinal))
+            {
+                imageNames = new[] { "EcsSystem", "EcsSystem.dll", "Client", "Client.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll" };
             }
             else
             {

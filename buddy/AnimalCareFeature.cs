@@ -25,6 +25,7 @@ namespace HeartopiaMod
             if (this.newFeaturesSubTab == 1)
             {
                 float y = this.DrawDailyQuestSubmitControls(startY);
+                y = this.DrawDailyClaimsControls(y);
                 return this.DrawBirdPhotoSubmitControls(y) + 40f;
             }
 
@@ -52,7 +53,7 @@ namespace HeartopiaMod
 
             if (this.newFeaturesSubTab == 1)
             {
-                return 280f;
+                return 720f;
             }
 
             if (this.newFeaturesSubTab == 2)

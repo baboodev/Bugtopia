@@ -26,7 +26,7 @@ namespace HeartopiaMod
 
         private void StartBirdPhotoAutoSubmit(bool silent)
         {
-            if (this.birdPhotoSubmitCoroutine != null || this.dailyQuestSubmitCoroutine != null)
+            if (this.birdPhotoSubmitCoroutine != null || this.dailyQuestSubmitCoroutine != null || this.dailyClaimsCoroutine != null)
             {
                 if (!silent)
                 {
@@ -558,7 +558,7 @@ namespace HeartopiaMod
             const float left = 40f;
             const float width = 520f;
 
-            bool busy = this.birdPhotoSubmitCoroutine != null || this.dailyQuestSubmitCoroutine != null;
+            bool busy = this.birdPhotoSubmitCoroutine != null || this.dailyQuestSubmitCoroutine != null || this.dailyClaimsCoroutine != null;
             GUI.enabled = !busy;
             if (GUI.Button(new Rect(left, y, 240f, 32f), this.L("Submit Bird Photo"), this.themePrimaryButtonStyle ?? GUI.skin.button))
             {

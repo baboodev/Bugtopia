@@ -4,6 +4,8 @@ How **Heartopia Helper** finds game classes and methods at runtime. Required rea
 
 For build/interop setup see [BUILD_AND_RUN.md](./BUILD_AND_RUN.md). For assembly locations, EcsClient, LocalLow dumps, and tools see [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md). For architecture overview see [TECHNICAL.md](./TECHNICAL.md).
 
+For **ECS services** (`EcsService.TryGet<T>`), `ClientSystem.*` implementations, `DataModule<T>.Instance`, protocol managers, enum/list reading, and the **Daily Claims** type table see **[GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md)**.
+
 ---
 
 ## Two layers: interop DLL vs reflection
@@ -395,6 +397,7 @@ Features should **not** call `FindLoadedType` every frame without cache; use mis
 | Cooking | `PrepareCookingNetworkCommand`, cooking protocol / `CookingSystem` (Mono) |
 | Backpack / tasks | `BackPackSystem`, `BackpackProtocolManager`, `TaskProtocolManager`, `ItemNetPair` |
 | Wild animal gifts | **AuraMono class lookup only** — `WildAnimalProtocolManager`, `AnimalUtil`, `AnimalProtocolManager` (no `FindLoadedType`, no `IWildAnimalService` interop) |
+| Daily claims (sign-in, town guide, mail, BP) | `EcsService`, `IOperationActivityCenterService`, `ITownGuidesService`, `IMailClientService`, `BattlePassSystem` — see [GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md) |
 | Player | `Character`, `p_player_skeleton(Clone)` via `GameObject.Find` |
 
 Exact strings change with game version — always verify in ILSpy for your build.
@@ -411,6 +414,7 @@ Exact strings change with game version — always verify in ILSpy for your build
 | `buddy/BirdNetFarm.cs` | Uses host resolvers + bird caches |
 | `buddy/PetFeedFeature.cs`, `PetPlayFeature.cs`, `PuzzleNetFeature.cs` | `FindLoadedType` per feature |
 | `buddy/DailyQuestSubmitFeature.cs`, `buddy/WildAnimalFeedFeature.cs` | Backpack + task protocol resolution |
+| `buddy/DailyClaimsFeature.cs` | `EcsService.TryGet<T>` inflation, `DataModule<BattlePassSystem>`, mail/BP state — see [GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md) |
 | `buddy/WildAnimalGiftFeature.cs` | AuraMono `FindAuraMonoClassByFullName` / `mono_runtime_invoke` only — see [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#wild-animal-gifts-detail) |
 
 ---
@@ -422,3 +426,4 @@ Exact strings change with game version — always verify in ILSpy for your build
 - [TECHNICAL.md](./TECHNICAL.md) — architecture, Harmony, farms
 - [FEATURES.md](./FEATURES.md) — what each feature expects at runtime
 - [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md) — inventory enumeration and per-feature filters
+- [GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md) — ECS services, ClientSystem types, DataModule, Daily Claims reference

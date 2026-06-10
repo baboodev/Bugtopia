@@ -9,7 +9,7 @@ Detailed guide to offline decompilation folders and **every game type** that **H
 
 See [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md) § [GameAssembly decompilation](./GAME_ASSEMBLIES_AND_TOOLS.md#gameassembly-decompilation-il2cpp) for regeneration steps.
 
-See also: [ARCHITECTURE.md](./ARCHITECTURE.md), [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md), [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md).
+See also: [ARCHITECTURE.md](./ARCHITECTURE.md), [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md), [GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md), [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md).
 
 ---
 
@@ -417,9 +417,31 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Files:** `HC`, farms
 
 #### `EcsService`
-- **Dump:** `ProtocolService/EcsService.cs`
-- **Features:** Tool durability fallback via service locator
-- **Access:** **R** + shape scan `FindLoadedEcsServiceType`
+- **Dump:** `XDTDataAndProtocol.ProtocolService/EcsService.cs`
+- **Features:** Service locator for all `I*Service` / `ClientSystem.*` injects; Daily Claims sign-in, town guide, mail
+- **Access:** **A** — `EcsService.TryGet<T>` via AuraMono generic inflation (managed `FindLoadedEcsServiceType` often null under BepInEx)
+- **How:** `FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.EcsService")` → inflate `TryGet` → invoke; see [GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md)
+- **Not:** `Managers._serviceDic` — services are **not** registered there
+
+#### `IOperationActivityCenterService` / `OperationActivityCenterClientService`
+- **Dump:** `XDTDataAndProtocol.../IOperationActivityCenterService.cs`, `EcsSystem/ClientSystem.OperationActivityCenter/OperationActivityCenterClientService.cs`
+- **Features:** Daily Claims sign-in state (`GetAliveActivityIds`, `GetActivityNodeStateById`)
+- **Access:** **A** via `EcsService.TryGet<IOperationActivityCenterService>`
+
+#### `ITownGuidesService` / `TownGuidesClientService`
+- **Dump:** `XDTDataAndProtocol.../ITownGuidesService.cs`, `EcsSystem/ClientSystem.TownGuides/TownGuidesClientService.cs`
+- **Features:** Daily Claims town guide (`GetAllChapterInfo`, `GetChapterInfo`)
+- **Access:** **A** via `EcsService.TryGet<ITownGuidesService>`
+
+#### `IMailClientService` / `MailServiceClient`
+- **Dump:** `XDTDataAndProtocol.../IMailClientService.cs`, `EcsSystem/ClientSystem.Mail/MailServiceClient.cs`
+- **Features:** Daily Claims mail probe (`IsAnyRewardable`, `GetMails`)
+- **Access:** **A** via `EcsService.TryGet<IMailClientService>`
+
+#### `BattlePassSystem` / `BattlePassProtocolManager`
+- **Dump:** `XDTGameSystem.../BattlePassSystem.cs`, `XDTDataAndProtocol.../BattlePassProtocolManager.cs`
+- **Features:** Daily Claims mini BP + loop state; claim via protocol or `SendCommand`
+- **Access:** **A** — `DataModule<BattlePassSystem>.Instance` + static protocol invoke
 
 ---
 
@@ -829,6 +851,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 | Radar / ESP | Entities, resource components, BubbleComponent | HC, HeartopiaResourceVisualEsp.cs | R + G |
 | Bag / transfer | BackPackSystem, BackpackProtocolManager, EStorageType | HC, DailyQuestSubmitFeature | A + R |
 | Daily quest submit | BackPackSystem, TaskProtocolManager, ItemNetPair, TableData | DailyQuestSubmitFeature.cs | A (+ N) |
+| Daily claims | EcsService, IOperationActivityCenterService, ITownGuidesService, IMailClientService, BattlePassSystem, *ProtocolManager | DailyClaimsFeature.cs | A + S |
 | Auto sell | BackPackSystem, TableData, sell protocol (HC) | HC | A + R + N |
 | Net cook | CookingSystem, PrepareCookingNetworkCommand, Entities | HC | A + S + H |
 | Pet feed | PetSystem, PetProtocolManager, TableData | PetFeedFeature.cs | A + R |
@@ -866,6 +889,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 |----------|----------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Overall game + mod architecture |
 | [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) | FindLoadedType, miss cache, shape checks |
+| [GAME_TYPES_AND_SERVICES.md](./GAME_TYPES_AND_SERVICES.md) | EcsService, ClientSystem, DataModule, Daily Claims type table |
 | [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md) | Interop vs MonoDump vs IL2CPP dumps; regeneration commands |
 | [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md) | Three inventory pipelines |
 | [FEATURES.md](./FEATURES.md) | User-facing menu features |
