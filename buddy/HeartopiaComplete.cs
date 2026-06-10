@@ -2338,7 +2338,6 @@ namespace HeartopiaMod
                     if (this.TryGetModHotkeyDown(this.autoSnowHotkey))
                     {
                         this.autoSnowEnabled = !this.autoSnowEnabled;
-                        if (!this.autoSnowEnabled) this.snowWidgetQueue.Clear();
                         this.AddMenuNotification($"Auto Snow Sculpture {(this.autoSnowEnabled ? "Enabled" : "Disabled")}", this.autoSnowEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                     }
                 }
@@ -2562,14 +2561,7 @@ namespace HeartopiaMod
             {
                 this.ProcessNetCookLoop();
             }
-            if (this.autoSnowEnabled)
-            {
-                this.RunAutoSnowLogic();
-            }
-            if (this.autoSculptureIconRapidEnabled)
-            {
-                this.RunSculptIconRapid();
-            }
+            this.ProcessSnowSculptureOnUpdate();
             if (this.autoBuyEnabled && Time.unscaledTime >= this.nextAutoBuyLogicTime)
             {
                 this.nextAutoBuyLogicTime = Time.unscaledTime + 0.05f;
@@ -24853,8 +24845,8 @@ namespace HeartopiaMod
                 {
                     GUI.Box(new Rect(left, (float)num, 520f, 80f), "");
                     GUIStyle header = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperLeft, fontSize = 12 };
-                    GUI.Label(new Rect(left + 10f, (float)num + 8f, 260f, 22f), $"Click Count: {this.snowClickCount}", header);
-                    GUI.Label(new Rect(left + 10f, (float)num + 30f, 260f, 22f), $"Queue: {this.snowWidgetQueue.Count}", header);
+                    GUI.Label(new Rect(left + 10f, (float)num + 8f, 400f, 22f), $"Rounds: {this.snowClickCount}", header);
+                    GUI.Label(new Rect(left + 10f, (float)num + 30f, 400f, 22f), $"API: {this.snowSculptureLastActionStatus}", header);
                     num += 100;
                 }
                 else
@@ -24882,9 +24874,30 @@ namespace HeartopiaMod
                 float prevSculpt = this.sculptIconClickInterval;
                 this.sculptIconClickInterval = this.UI_DrawAccentSlider(new Rect(left, (float)num, 360f, 20f), this.sculptIconClickInterval, 0.01f, 0.5f);
                 if (Math.Abs(this.sculptIconClickInterval - prevSculpt) > 0.000001f) { try { this.SaveKeybinds(false); } catch { } }
-                num += 30;
+                num += 34;
 
-                
+                if (GUI.Button(new Rect(left, (float)num, 280f, 32f), this.L("Move snowballs to backpack"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+                {
+                    if (this.TryMoveSnowballsWarehouseToBackpack(out string moveStatus))
+                    {
+                        this.snowMoveSnowballsStatus = moveStatus;
+                        this.AddMenuNotification(moveStatus, new Color(0.45f, 1f, 0.55f));
+                    }
+                    else
+                    {
+                        this.snowMoveSnowballsStatus = moveStatus;
+                        this.AddMenuNotification(moveStatus, new Color(1f, 0.55f, 0.55f));
+                    }
+                }
+
+                num += 38;
+                if (!string.IsNullOrEmpty(this.snowMoveSnowballsStatus))
+                {
+                    GUIStyle moveStatusStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
+                    moveStatusStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
+                    GUI.Label(new Rect(left, (float)num, 520f, 36f), this.snowMoveSnowballsStatus, moveStatusStyle);
+                    num += 40;
+                }
 
                 return (float)num;
             }
@@ -48623,110 +48636,6 @@ namespace HeartopiaMod
             }
         }
 
-        // --- Auto Snow Sculpture logic (scans SnowSculpturePanel and clicks lit buttons) ---
-        private void RunAutoSnowLogic()
-        {
-            float unscaledTime = Time.unscaledTime;
-            bool hasQueue = this.snowWidgetQueue.Count > 0;
-            if (hasQueue)
-            {
-                if (unscaledTime - this.lastSnowClickTime >= this.snowClickInterval)
-                {
-                    this.lastSnowClickTime = unscaledTime;
-                    GameObject widget = this.snowWidgetQueue.Dequeue();
-                    if (widget != null && widget.activeInHierarchy)
-                    {
-                        this.DirectClickSnowWidget(widget);
-                        this.snowClickCount++;
-                    }
-                }
-            }
-            else
-            {
-                if (unscaledTime - this.lastSnowClickTime < this.snowClickInterval) return;
-                this.lastSnowClickTime = unscaledTime;
-                try
-                {
-                    GameObject panel = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Status/SnowSculpturePanel(Clone)");
-                    if (panel == null || !panel.activeInHierarchy) return;
-                    Transform[] all = panel.GetComponentsInChildren<Transform>(true);
-                    foreach (Transform t in all)
-                    {
-                        if (!t.name.Contains("SnowSculptureButtonWidget")) continue;
-                        if (!t.gameObject.activeInHierarchy) continue;
-                        Transform ani = t.Find("AniRoot@queuegroup");
-                        if (ani == null) continue;
-                        Transform btn = ani.Find("Button");
-                        if (btn == null || !btn.gameObject.activeInHierarchy) continue;
-                        Transform light = btn.Find("Light@go");
-                        Transform correct = btn.Find("Correct@go");
-                        bool hasLight = light != null && light.gameObject.activeInHierarchy;
-                        bool hasCorrect = correct != null && correct.gameObject.activeInHierarchy;
-                        if (hasLight && !hasCorrect)
-                        {
-                            this.snowWidgetQueue.Enqueue(t.gameObject);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Msg("[AutoSnow] Error: " + ex.Message);
-                }
-            }
-        }
-
-        private void DirectClickSnowWidget(GameObject widgetObj)
-        {
-            try
-            {
-                RectTransform rt = widgetObj.GetComponent<RectTransform>();
-                Vector2 pos = Vector2.zero;
-                if (rt != null)
-                {
-                    Vector3 p = rt.position;
-                    pos = new Vector2(p.x, p.y);
-                }
-                PointerEventData pd = new PointerEventData(EventSystem.current);
-                pd.button = PointerEventData.InputButton.Left;
-                pd.position = pos;
-                pd.pressPosition = pos;
-                pd.pointerPress = widgetObj;
-                pd.rawPointerPress = widgetObj;
-                pd.pointerEnter = widgetObj;
-                pd.clickCount = 1;
-                pd.eligibleForClick = true;
-                GraphicRaycaster gr = widgetObj.GetComponentInParent<GraphicRaycaster>();
-                pd.pointerCurrentRaycast = new RaycastResult { gameObject = widgetObj, module = gr, screenPosition = pos };
-                pd.pointerPressRaycast = pd.pointerCurrentRaycast;
-                ExecuteEvents.Execute<IPointerEnterHandler>(widgetObj, pd, ExecuteEvents.pointerEnterHandler);
-                ExecuteEvents.Execute<IPointerDownHandler>(widgetObj, pd, ExecuteEvents.pointerDownHandler);
-                ExecuteEvents.Execute<IPointerUpHandler>(widgetObj, pd, ExecuteEvents.pointerUpHandler);
-                ExecuteEvents.Execute<IPointerClickHandler>(widgetObj, pd, ExecuteEvents.pointerClickHandler);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[AutoSnow] Widget click error: " + ex.Message);
-            }
-        }
-
-        // Rapid click routine for the tracking icon in the bottom tracking bar
-        private void RunSculptIconRapid()
-        {
-            try
-            {
-                float unscaled = Time.unscaledTime;
-                if (unscaled - this.lastSculptIconClickTime < this.sculptIconClickInterval) return;
-                this.lastSculptIconClickTime = unscaled;
-                GameObject icon = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
-                if (icon == null || !icon.activeInHierarchy) return;
-                this.DirectClickSnowWidget(icon);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[SculptRapid] Error: " + ex.Message);
-            }
-        }
-
         // --- Auto Buy helpers + logic ---
         private void StartAutoBuy()
         {
@@ -63436,19 +63345,6 @@ namespace HeartopiaMod
         private string treeFarmStatus = "Idle";
         // If true, tree farm will use hardcoded map positions (like Resource farm)
         private bool treeFarmUseHardcoded = false;
-
-        // Auto Snow Sculpture fields (ported from decompiled helper)
-        private bool autoSnowEnabled = false;
-        private float snowClickInterval = 0.02f;
-        private float lastSnowClickTime = 0f;
-        private int snowClickCount = 0;
-        private KeyCode autoSnowHotkey = KeyCode.None;
-        private bool isListeningForAutoSnowHotkey = false;
-        private Queue<GameObject> snowWidgetQueue = new Queue<GameObject>();
-        // Rapid tracking icon click (Sculpture subtab)
-        private bool autoSculptureIconRapidEnabled = false;
-        private float sculptIconClickInterval = 0.05f;
-        private float lastSculptIconClickTime = 0f;
 
         // Auto Buy fields
         private bool autoBuyEnabled = false;

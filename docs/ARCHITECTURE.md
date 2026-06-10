@@ -647,6 +647,7 @@ buddy/
 │   ├── AuraFarm.cs
 │   ├── BubbleFeature.cs
 │   ├── DailyQuestSubmitFeature.cs
+│   ├── SnowSculptureFeature.cs
 │   ├── BirdPhotoSubmitFeature.cs
 │   ├── PetFeedFeature.cs
 │   ├── PetPlayFeature.cs

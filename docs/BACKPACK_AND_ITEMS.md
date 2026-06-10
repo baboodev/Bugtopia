@@ -106,6 +106,7 @@ Transfer grid can filter tiles by star when picking stacks (same `autoSellStarFi
 |---------|-----|------------------|--------|--------|-------------|--------|
 | **Auto Sell** | Features → Auto Sell | Bag / Warehouse / Both (dropdown) | Snapshot (warehouse-only mode) + managed + Mono `GetAllItem` | Item key substring match on descriptor; star filter; skip 5★; reserve groups; max per stack; sell full stack | Aggregates counts per `netId` (no “cheapest” sort — sells all matching stacks) | Direct sell / period-currency split |
 | **Bag / Warehouse** | Bag / Warehouse | One side at a time (Bag **or** Warehouse) | Mono `GetAllItem` only | Locked stacks shown but **not** sent; `netId == 0` skipped | Display name **A→Z** | `MoveBatchBackpackItems` → opposite storage (1↔2) |
+| **Snow Sculpting — move snowballs** | Features → Snow Sculpting | **Warehouse only** | AuraMono `GetAllItem(2)` | **`staticId == 5100`** only; locked skipped | All matching stacks in one action | `MoveBatchBackpackItems` → bag (**1**); reuses transfer send helpers in `HeartopiaComplete` |
 | **Daily Quest submit** | New Features → Daily Quests | **Backpack + warehouse together** | Managed + AuraMono; dedupe by `netId` | `CheckSubmitItem` per target row; locked skipped; skip 5★ optional | **Price ↑**, then **star ↑** (same as game `CompareSubmitItem`); greedy stack fill for `needNum` | `ClientSubmitNpcTaskItem` / Il2Cpp `List<ItemNetPair>`; verifies task state leaves `CanSubmit` (4) |
 | **Daily Quest probe** | Same | N/A (reads `DailyOrderSystem` / tasks) | AuraMono table + task rows | Logs only | N/A | BepInEx / `helper.log` dump |
 | **Wild animal feed** | New Features → Animal Care | Backpack (+ AuraMono path) | `GetAllItem` per storage; `GetAnimalFoodThough` | Allowed food static IDs; fullness for animal **group**; skip 5★ food; favorites boost bond in score | **SortScore ↓** = `bondExp×10000 + fullness` (favorite bond % bonus) | Trough feed commands |
@@ -306,6 +307,7 @@ Enable verbose gift logs: set `WildAnimalGiftLogsEnabled = true` in `WildAnimalG
 | `buddy/WildAnimalGiftFeature.cs` | Gift pending groups + ECS entity scan + `TakeGift` |
 | `buddy/PetFeedFeature.cs` | Pet food list + sort |
 | `buddy/WarehouseBypassFeature.cs` | Bag UI warehouse tab unlock |
+| `buddy/SnowSculptureFeature.cs` | Warehouse → bag move for snowball `staticId` **5100** (`MoveBatchBackpackItems`) |
 | `ilspy-dumps/.../BackPackSystem.cs` | Vanilla `CompareSubmitItem`, `CheckSubmitItem` |
 
 ---

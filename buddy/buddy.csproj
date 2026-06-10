@@ -201,6 +201,7 @@
     <Compile Include="HomelandFarmFeature.cs" />
     <Compile Include="PadBuildHotkeyFeature.cs" />
     <Compile Include="BunnyHopFeature.cs" />
+    <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
     <Compile Include="BubbleMonoNativeHook.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />

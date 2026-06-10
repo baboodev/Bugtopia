@@ -46,7 +46,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 |---------|---------|
 | Main | Quick toggles, game speed, hide UI/player, bird vacuum, FOV, login helpers |
 | Food & Repair | Auto eat, auto repair, bag automation |
-| Snow Sculpting | Auto snow sculpture clicking |
+| Snow Sculpting | Auto QTE, interact-icon start, move snowballs (id 5100) warehouse → bag |
 | Auto Buy | Cooking store purchase automation |
 | Auto Sell | Inventory sell automation |
 | Mass Cook | Network cooking at patrol points |
@@ -266,8 +266,34 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 ### Snow Sculpting
 
-- Auto-clicks snow sculpture UI at configurable interval.
-- Separate icon click interval for sculpt icons.
+**Tab:** Features → **Snow Sculpting** (`automationSubTab == 2`). Source: `buddy/SnowSculptureFeature.cs` (partial `HeartopiaComplete`).
+
+#### Auto Snow Sculpture
+
+- Configurable click interval (default 20 ms).
+- When `SnowSculpturePanel` is open and in **Round** state: invokes `OnPressDown` for all lit QTE buttons via AuraMono (`GetView<SnowSculpturePanel>` → `_lightButtons`). The game sends `ReportSculptingScore` on round end — the mod does **not** duplicate score packets while the panel path is active.
+- Fallback (no panel): `SnowSculptureProtocolManager.ReportSculptingScore` / `SendCommand` if managed types resolve.
+- Status box: round count + last API status line.
+
+#### Auto Click Icon
+
+- Configurable interval (default 50 ms).
+- Replaces UI clicks on the tracking interact icon with the game interact pipeline:
+  1. Collect interact targets (`InteractSystem` via AuraMono + static helper).
+  2. `ConfirmExecuteHasTargetCommand` for snow commands **15** (start sculpt), **14** (put snowball), **16** (gather statue) — skip if confirm dialog required.
+  3. `PlayerInteraction.ExecuteHasTargetCommand(levelObjectId, commandId)` (managed + AuraMono).
+- Skips while the snow sculpture QTE panel is already open.
+- Decompiled reference: `InteractTrackCellModel.TriggerOnClickByView` → same `ExecuteHasTargetCommand` call.
+
+#### Move snowballs to backpack
+
+- Button **Move snowballs to backpack** on the same tab.
+- Scans **warehouse only** (`EStorageType` **2**), filters stacks with **`staticId == 5100`** (Snowball). Locked stacks are skipped.
+- Sends `BackpackProtocolManager.MoveBatchBackpackItems` → bag (`targetStorageType` **1**), chunked at 256 stacks per batch (same as Bag/Warehouse transfer). See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md).
+
+#### Debug
+
+- `MasterLogSnowSculpture` in `SnowSculptureFeature.cs` (default **false**) — `[SnowSculpture]` lines in `helper.log`.
 
 ### Auto Buy
 

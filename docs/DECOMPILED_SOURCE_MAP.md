@@ -849,6 +849,32 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 
 ---
 
+### 3.18 Snow sculpting
+
+#### `SnowSculpturePanel`
+- **Dump:** `XDTGameUI/.../SnowSculpturePanel.cs`
+- **Features:** Auto QTE — `OnPressDown(int)` on lit buttons in **Round** state (`_state`, `_lightButtons`)
+- **Access:** **A** — `UIManager.GetView<SnowSculpturePanel>`
+- **File:** `SnowSculptureFeature.cs`
+
+#### `SnowSculptureProtocolManager`
+- **Dump:** `XDTDataAndProtocol/ProtocolService/Snow/SnowSculptureProtocolManager.cs`
+- **Features:** `ReportSculptingScore(baseNetId, score)` when panel path unavailable; score fallback only
+- **Access:** **A** (primary), **R**, **S** (`SnowSculptingReportQteScoreNetworkCommand`)
+
+#### `PlayerInteraction` / `InteractSystem`
+- **Dump:** `XDTLevelAndEntity/.../PlayerInteraction.cs`, `InteractTrackCellModel.TriggerOnClickByView`
+- **Features:** **Auto Click Icon** — `ConfirmExecuteHasTargetCommand` then `ExecuteHasTargetCommand(levelObjectId, commandId)`
+- **Interact commands:** **14** `PutSnowBallCommand`, **15** `SnowSculptingCommand`, **16** `GatherSnowSculptureCommand` (`[InteractSetting(n)]` in command classes)
+- **Access:** **A**, **R**
+
+#### Snowball warehouse → bag
+- **Types:** `BackPackSystem.GetAllItem(Warehouse)`, `BackpackProtocolManager.MoveBatchBackpackItems` → bag (**1**)
+- **Filter:** `BackpackItem.staticId == 5100` only
+- **File:** `SnowSculptureFeature.cs` (send helpers in `HeartopiaComplete.cs`)
+
+---
+
 ## 4. Matrix: Feature → types → mod file
 
 | Feature | Key game types | Mod file(s) | Dominant access |
@@ -859,7 +885,8 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 | Bird farm | BirdScannableComponent, TakingBirdPhotoCommand, BirdProtocolManager, ScannerStatusPanel | BirdNetFarm.cs, HC | R + A + S |
 | Bubble | WebRequestUtility, Create*Bubble*Command, ActivityEvent/Bubble protocol | BubbleFeature.cs | H + S + A |
 | Radar / ESP | Entities, resource components, BubbleComponent | HC, HeartopiaResourceVisualEsp.cs | R + G |
-| Bag / transfer | BackPackSystem, BackpackProtocolManager, EStorageType | HC, DailyQuestSubmitFeature | A + R |
+| Bag / transfer | BackPackSystem, BackpackProtocolManager, EStorageType | HC, DailyQuestSubmitFeature, SnowSculptureFeature | A + R |
+| Snow sculpting | SnowSculpturePanel, SnowSculptureProtocolManager, PlayerInteraction, InteractSystem, snow interact commands 14–16 | SnowSculptureFeature.cs | A (+ R) |
 | Daily quest submit | BackPackSystem, TaskProtocolManager, ItemNetPair, TableData | DailyQuestSubmitFeature.cs | A (+ N) |
 | Daily claims | EcsService, IOperationActivityCenterService, ITownGuidesService, IMailClientService, BattlePassSystem, *ProtocolManager | DailyClaimsFeature.cs | A + S |
 | Auto sell | BackPackSystem, TableData, sell protocol (HC) | HC | A + R + N |
