@@ -3147,7 +3147,7 @@ namespace HeartopiaMod
 
             if (this.automationSubTab == 3)
             {
-                return this.forceOpenShopDropdownOpen ? 1028f : 808f;
+                return this.forceOpenShopDropdownOpen ? 1348f : 1128f;
             }
 
             if (this.automationSubTab == 5)
@@ -25378,7 +25378,7 @@ namespace HeartopiaMod
                 }
 
                 num += 36;
-                float forcePanelHeight = 378f + (this.forceOpenShopDropdownOpen ? (this.forceOpenShopOptions.Length * 28f) + 12f : 0f);
+                float forcePanelHeight = 734f + (this.forceOpenShopDropdownOpen ? (this.forceOpenShopOptions.Length * 28f) + 12f : 0f);
                 Rect forcePanel = new Rect(left, (float)num, panelWidth, forcePanelHeight);
                 this.DrawExentriSectionPanel(forcePanel, accent, panelFill, panelLine);
                 GUI.Label(new Rect(forcePanel.x + 14f, forcePanel.y + 12f, forcePanel.width - 28f, 18f), this.L("FORCE OPEN SHOP"), sectionStyle);
@@ -25470,6 +25470,44 @@ namespace HeartopiaMod
                 num += 36;
                 GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 18f), this.shopBuyAllStatus, bodyStyle);
                 num += 22;
+
+                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "DUMP SHOP RESEARCH"))
+                {
+                    this.StartShopResearchDump();
+                }
+                num += 40;
+                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 36f), this.shopDumpStatus ?? "Idle.", bodyStyle);
+                num += 40;
+
+                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "DUMP ALL ITEMS"))
+                {
+                    this.StartTableEntityDump();
+                }
+                num += 40;
+                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 36f), this.itemDumpStatus ?? "Idle.", bodyStyle);
+                num += 40;
+
+                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "DUMP SHOP ITEM IDS"))
+                {
+                    this.StartShopItemIdDump();
+                }
+                num += 40;
+                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 36f), this.shopItemDumpStatus ?? "Idle.", bodyStyle);
+                num += 40;
+
+                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 20f), "QuickBuyItem (store / slot / item)", bodyStyle);
+                num += 22;
+                this.shopQuickBuyStoreIdInput = GUI.TextField(new Rect(forceLeft, (float)num, 90f, 28f), this.shopQuickBuyStoreIdInput ?? string.Empty, 8);
+                this.shopQuickBuySlotIdInput = GUI.TextField(new Rect(forceLeft + 98f, (float)num, 90f, 28f), this.shopQuickBuySlotIdInput ?? string.Empty, 8);
+                this.shopQuickBuyItemIdInput = GUI.TextField(new Rect(forceLeft + 196f, (float)num, 100f, 28f), this.shopQuickBuyItemIdInput ?? string.Empty, 10);
+                num += 34;
+                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "OPEN BUY PANEL"))
+                {
+                    this.StartShopQuickBuyOpenPanel();
+                }
+                num += 36;
+                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 36f), this.shopQuickBuyStatus ?? "Idle.", bodyStyle);
+                num += 40;
 
                 GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 20f), this.L("Manual Store ID"), bodyStyle);
                 num += 24;
@@ -61474,6 +61512,24 @@ namespace HeartopiaMod
             }
 
             string trimmed = displayName.Trim();
+            if (trimmed.Length > 0)
+            {
+                bool allQuestionMarks = true;
+                for (int i = 0; i < trimmed.Length; i++)
+                {
+                    if (trimmed[i] != '?')
+                    {
+                        allQuestionMarks = false;
+                        break;
+                    }
+                }
+
+                if (allQuestionMarks)
+                {
+                    return true;
+                }
+            }
+
             if (staticId > 0 && trimmed.StartsWith(staticId.ToString(), StringComparison.Ordinal))
             {
                 string suffix = trimmed.Substring(staticId.ToString().Length).Trim();

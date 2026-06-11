@@ -215,6 +215,9 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="PuzzleNetFeature.cs" />
     <Compile Include="ShopBuyAllFeature.cs" />
+    <Compile Include="ShopDumpFeature.cs" />
+    <Compile Include="ShopQuickBuyFeature.cs" />
+    <Compile Include="ItemDumpFeature.cs" />
     <Compile Include="TransformPositionPatch.cs" />
     <Compile Include="TransformRotationPatch.cs" />
     <Compile Include="NoclipFeature.cs" />
