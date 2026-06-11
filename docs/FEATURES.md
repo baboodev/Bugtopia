@@ -189,7 +189,7 @@ Tree/stone **patrol automation**:
 
 ### Fishing (`AutoFishingFarm`)
 
-**This is the active fishing system on `main`.** Legacy `AutoFishLogic` / `AutoFishFarm` exist as orphan files but are **not compiled**.
+**This is the active fishing system on `main`.** (The legacy `AutoFishLogic` / `AutoFishFarm` input-simulation orphans were deleted.)
 
 Behavior:
 

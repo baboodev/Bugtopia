@@ -148,11 +148,11 @@ BepInEx requires `ModCoroutines.SetHost(this)` in `HeartopiaBehaviour.Awake` bef
 
 ## Harmony Patches
 
-### Active at runtime (registered in `OnInitializeMelon`)
+### Movement / input patches (installed lazily — see below, not in `OnInitializeMelon`)
 
 | Patch class | Target | Type | Purpose |
 |-------------|--------|------|---------|
-| `CharacterControllerPatch` | `CharacterController.Move` | Prefix | When `OverridePlayerPosition`, replaces motion with delta to override pos; when blocking input, zero motion |
+| `CharacterControllerPatch` | `CharacterController.Move` | Prefix | When `OverridePlayerPosition`, replaces motion with delta to override pos (teleport/noclip). NOTE: the local player isn't actually driven by this method — see menu-block note below |
 | `TransformPositionPatch` | `Transform.position` setter | Prefix | Blocks or redirects unauthorized position writes during teleport/noclip |
 | `TransformRotationPatch` | `Transform.rotation` setter | Prefix | Guards rotation during controlled movement |
 | `CharacterRotationPatch` | `Transform.rotation` setter | Prefix | Additional character-specific rotation guard (second patch on same setter) |
@@ -160,24 +160,13 @@ BepInEx requires `ModCoroutines.SetHost(this)` in `HeartopiaBehaviour.Awake` bef
 
 Patches are applied with explicit `MethodInfo` lookup — failures log `[ERR]` with null method diagnostics.
 
-### Compiled but **not** registered
+### Lazily installed (not at startup)
 
-These files are in `buddy.csproj` but **`OnInitializeMelon` never calls the `patchInputPostfix` helper** (lambda is defined then discarded):
+The movement/input patches above are **NOT** patched in `OnInitializeMelon` — they are installed on first feature use via `EnsurePositionOverridePatched` / `EnsureMovePatched` / `EnsureRotationOverridePatched` / `EnsureInputSimPatched`, gated at the top of `OnUpdate` plus direct calls at same-frame transform writers. This avoids taxing every frame of normal gameplay (a prior cause of periodic native crashes).
 
-- `InputGetKeyDownPatch.cs`
-- `InputGetKeyPatch.cs`
-- `InputGetKeyUpPatch.cs`
-- `InputGetKeyDownStringPatch.cs`
-- `InputGetKeyStringPatch.cs`
-- `InputGetKeyUpStringPatch.cs`
+The 6 `InputGetKey*Patch.cs` (KeyCode + string variants) are postfixes that inject `HeartopiaComplete.SimulateFKeyDown/Hold/Up` into Unity `Input` queries. Installed by `EnsureInputSimPatched` when the **resource farm / interact F-sim** path is active. **`AutoFishingFarm` does NOT rely on this** — fishing and insect (`InsectNetFarm`) are net-based (network commands), not key simulation.
 
-They would inject `HeartopiaComplete.SimulateFKeyDown/Hold/Up` into Unity `Input` queries.
-
-**Impact:** Code that sets `SimulateFKey*` static flags only works if patches are registered. **`AutoFishingFarm` does not rely on this** — it calls `TrySetFishingPressed` on game fishing APIs. Legacy `AutoFishLogic` (orphan) did rely on Input simulation.
-
-### Orphan Harmony patches (not in csproj)
-
-All `AutoFishGet*.cs` files patch `Input` for mouse, axes, W/A/S/D — tied to orphan `AutoFishLogic`.
+**Menu movement block:** "block input while menu open" does NOT use the `CharacterController.Move` patch (the local player isn't driven by it). `UpdateMenuMovementInputBlock` disables `InputEvent.Move` on the game's `MonoInputManager` instead (refcounted Disable/Enable).
 
 ### Dynamic patches
 
@@ -492,11 +481,11 @@ Loaded from manifest resources at runtime.
 These exist under `buddy/` but are **excluded** from `buddy.csproj` (`EnableDefaultCompileItems=false`):
 
 ```
-AutoFishLogic.cs, AutoFishFarm.cs, AutoFishGet*.cs   Legacy fishing
-InsectFarm.cs                                         Pre-InsectNetFarm
 MonoEcsCapture.cs, MonoEcsLoadHook.cs, RuntimeDump.cs Experimental dump tooling
 FishingAutoDump.cs                                    (if present) debug capture
 ```
+
+(The legacy fishing input-sim files `AutoFishLogic.cs` / `AutoFishFarm.cs` / `AutoFishGet*.cs` and `InsectFarm.cs` were deleted — fishing/insect ship as net-based `AutoFishingFarm.cs` / `InsectNetFarm.cs`.)
 
 Extended fishing debug / ECS work may live on the **`test`** git branch.
 

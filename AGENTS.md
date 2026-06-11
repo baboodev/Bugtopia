@@ -55,7 +55,7 @@ Heartopia-Helper/
 └── gameassembly-dumps/       ← offline IL2CPP decompile (gitignored)
 ```
 
-**Not compiled** (on disk but excluded from `buddy.csproj`): legacy `AutoFish*.cs`, `InsectFarm.cs`, research dumps. Do not edit them for shipping features.
+**Not compiled** (on disk but excluded from `buddy.csproj`): research dumps / experimental tooling. Do not edit them for shipping features. (The legacy `AutoFish*.cs` and `InsectFarm.cs` orphans were deleted — fishing/insect now ship as the net-based `AutoFishingFarm.cs` / `InsectNetFarm.cs`.)
 
 ---
 

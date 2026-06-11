@@ -24407,7 +24407,7 @@ namespace HeartopiaMod
 
         // Auto Draw tab removed
 
-        // Insect farm UI moved to InsectFarm.cs
+        // Insect farm UI lives in InsectNetFarm.cs
 
         // Token: 0x06000009 RID: 9 RVA: 0x00002E24 File Offset: 0x00001024
         private float DrawAutomationTab(int startY)

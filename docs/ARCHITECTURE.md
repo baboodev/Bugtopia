@@ -391,9 +391,8 @@ All merge into `public partial class HeartopiaComplete`:
 
 **Harmony patch files** (standalone static patch classes):
 
-- Movement: `CharacterControllerPatch`, `TransformPositionPatch`, `TransformRotationPatch`, `CharacterRotationPatch`
-- Input (registered at startup): `InputGetKey*Patch.cs` (6 files)
-- Legacy/orphan (not in csproj): `AutoFishGet*.cs`, `AutoFishLogic.cs`, `AutoFishFarm.cs`, `InsectFarm.cs`
+- Movement (installed lazily on first feature use, not at startup): `TransformPositionPatch`, `CharacterControllerPatch`, `TransformRotationPatch`, `CharacterRotationPatch`
+- Input (installed lazily): `InputGetKey*Patch.cs` (6 files) — simulated F-key for resource farm / interact helpers
 
 **Standalone utility:**
 
@@ -681,10 +680,7 @@ buddy/
 └── Directory.Build.props         # HeartopiaDir (gitignored)
 ```
 
-**Not compiled** (exist on disk but excluded from csproj):
-
-- `AutoFishLogic.cs`, `AutoFishFarm.cs`, `AutoFishGet*.cs` — legacy fishing input simulation
-- `InsectFarm.cs` — superseded by `InsectNetFarm.cs`
+**Not compiled** (exist on disk but excluded from csproj): experimental dump tooling only. The legacy fishing input-simulation files (`AutoFishLogic.cs`, `AutoFishFarm.cs`, `AutoFishGet*.cs`) and `InsectFarm.cs` were deleted — fishing/insect ship as the net-based `AutoFishingFarm.cs` / `InsectNetFarm.cs`.
 
 ---
 
