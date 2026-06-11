@@ -124,12 +124,16 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (candidate.ItemStaticId > 0 && this.TryGetPlayerItemCount(candidate.ItemStaticId, out int ownedCount) && ownedCount > 0)
+            if (candidate.IsLimitedOne
+                && candidate.ItemStaticId > 0
+                && this.TryGetPlayerItemCount(candidate.ItemStaticId, out int ownedCount)
+                && ownedCount > 0)
             {
                 return true;
             }
 
-            if (managedItem != null
+            if (candidate.IsLimitedOne
+                && managedItem != null
                 && this.TryGetObjectMember(managedItem, "isObtained", out object obtainedObj)
                 && obtainedObj is bool isObtained
                 && isObtained)
