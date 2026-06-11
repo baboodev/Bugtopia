@@ -17922,27 +17922,39 @@ namespace HeartopiaMod
             return status;
         }
 
+        private bool IsForceShopBuyAllSupported(int selectedIndex, out string reason)
+        {
+            reason = null;
+            switch (selectedIndex)
+            {
+                case 0:
+                    reason = "No shop selected.";
+                    return false;
+                case 17:
+                    reason = "Meteor Exchange uses item cost, not Coin.";
+                    return false;
+            }
+
+            return true;
+        }
+
         private bool TryResolveForceOpenShopStoreId(int selectedIndex, out int storeId, out string label, out string unsupportedReason)
         {
             storeId = 0;
             label = string.Empty;
             unsupportedReason = null;
 
+            if (!this.IsForceShopBuyAllSupported(selectedIndex, out unsupportedReason))
+            {
+                return false;
+            }
+
             switch (selectedIndex)
             {
-                case 0:
-                    unsupportedReason = "No shop selected.";
-                    return false;
                 case 4:
                     storeId = 5;
                     label = "Clothing Store";
                     return true;
-                case 6:
-                    unsupportedReason = "Face Shop is not a Coin shop panel.";
-                    return false;
-                case 17:
-                    unsupportedReason = "Meteor Exchange uses item cost, not Coin.";
-                    return false;
                 case 1:
                     storeId = 55;
                     label = "Birdwatching Store";
@@ -25461,13 +25473,19 @@ namespace HeartopiaMod
                 }
                 num += 40;
 
-                GUI.enabled = !this.shopBuyAllRunning;
+                bool shopBuyAllSupported = this.IsForceShopBuyAllSupported(this.forceOpenShopSelectedIndex, out string shopBuyAllBlockReason);
+                GUI.enabled = !this.shopBuyAllRunning && shopBuyAllSupported;
                 if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), this.L("BUY ALL (COIN)")))
                 {
                     this.StartShopBuyAllGold();
                 }
                 GUI.enabled = true;
                 num += 36;
+                if (!shopBuyAllSupported && !string.IsNullOrEmpty(shopBuyAllBlockReason))
+                {
+                    GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 32f), shopBuyAllBlockReason, bodyStyle);
+                    num += 20;
+                }
                 GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 18f), this.shopBuyAllStatus, bodyStyle);
                 num += 22;
 

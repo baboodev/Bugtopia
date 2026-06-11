@@ -78,6 +78,12 @@ namespace HeartopiaMod
                 return;
             }
 
+            if (this.forceOpenShopSelectedIndex == 6)
+            {
+                this.StartFaceShopBuyAllCoin();
+                return;
+            }
+
             if (!this.TryResolveForceOpenShopStoreId(this.forceOpenShopSelectedIndex, out int storeId, out string label, out string unsupported))
             {
                 this.shopBuyAllStatus = unsupported ?? "Shop not supported.";
