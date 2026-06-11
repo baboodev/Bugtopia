@@ -266,7 +266,8 @@ namespace HeartopiaMod
 
         private void InitializeNoclipOverridePosition()
         {
-            this.EnsureMovementOverridePatched();
+            this.EnsurePositionOverridePatched();
+            this.EnsureMovePatched();
             if (this.TryResolveNoclipVehicleContext(out IntPtr vehicleComponentObj, out IntPtr vehicleControllerObj, out Vector3 vehiclePosition))
             {
                 HeartopiaComplete.OverridePlayerPosition = false;
@@ -753,6 +754,31 @@ namespace HeartopiaMod
             {
                 this.noclipVehicleJumpInputSuppressed = suppressed;
             }
+        }
+
+        // Calls MonoInputManager.DisableInput / EnableInput for a given InputEvent. The game
+        // keeps a per-event disable refcount, so every Disable must be balanced by exactly one
+        // Enable. Returns true if the invoke succeeded. InputEvent values: Move=0, Jump=1
+        // (ScriptsRefactory.BaseService.Input.InputEvent).
+        private unsafe bool TrySetMonoInputDisabled(int inputEvent, bool disable)
+        {
+            if (!this.TryEnsureNoclipMonoInputManagerMethods())
+            {
+                return false;
+            }
+
+            IntPtr method = disable ? this.noclipAuraDisableInputMethod : this.noclipAuraEnableInputMethod;
+            if (method == IntPtr.Zero || this.noclipAuraMonoInputManagerObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            int ev = inputEvent;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&ev);
+            auraMonoRuntimeInvoke(method, this.noclipAuraMonoInputManagerObj, (IntPtr)args, ref exc);
+            return exc == IntPtr.Zero;
         }
 
         private unsafe void TryInvokeNoclipVehicleResetVirtualInput(IntPtr vehicleComponentObj)

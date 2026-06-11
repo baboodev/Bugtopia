@@ -408,6 +408,12 @@ namespace HeartopiaMod
         private bool homelandFarmTableDataReflectionResolved = false;
         private float homelandFarmNextRuntimeResolveAt = 0f;
         private const float HomelandFarmRuntimeResolveRetryIntervalSeconds = 0.5f;
+        // Warmup diagnostics (visible via ModLogger, throttled so they don't spam).
+        private bool homelandFarmWarmupStartedLogged = false;
+        private bool homelandFarmWarmupReadyLogged = false;
+        private int homelandFarmWarmupAttempts = 0;
+        private float homelandFarmNextWarmupFailLogAt = 0f;
+        private const float HomelandFarmWarmupFailLogIntervalSeconds = 5f;
 
         private bool EnsureHomelandFarmReflectionReady()
         {
@@ -997,16 +1003,52 @@ namespace HeartopiaMod
 
         internal void UpdateHomelandFarmBackground()
         {
-            if (!this.auraFarmMethodsReady)
+            if (this.auraFarmMethodsReady)
             {
-                float now = Time.unscaledTime;
-                if (now < this.homelandFarmNextRuntimeResolveAt)
+                // Already warmed up. Log the success exactly once so we can see when it happened.
+                if (!this.homelandFarmWarmupReadyLogged)
                 {
-                    return;
+                    this.homelandFarmWarmupReadyLogged = true;
+                    ModLogger.Msg($"[HomelandFarm] Warmup SUCCESS: aura/farm runtime resolved after {this.homelandFarmWarmupAttempts} attempt(s).");
                 }
+                return;
+            }
 
-                this.homelandFarmNextRuntimeResolveAt = now + HomelandFarmRuntimeResolveRetryIntervalSeconds;
-                this.ResolveAuraFarmRuntimeMethods();
+            float now = Time.unscaledTime;
+            if (now < this.homelandFarmNextRuntimeResolveAt)
+            {
+                return;
+            }
+
+            this.homelandFarmNextRuntimeResolveAt = now + HomelandFarmRuntimeResolveRetryIntervalSeconds;
+
+            if (!this.homelandFarmWarmupStartedLogged)
+            {
+                this.homelandFarmWarmupStartedLogged = true;
+                ModLogger.Msg("[HomelandFarm] Warmup started: resolving aura/farm runtime methods...");
+            }
+
+            this.homelandFarmWarmupAttempts++;
+            bool ready = this.ResolveAuraFarmRuntimeMethods();
+
+            if (ready)
+            {
+                // Success path is logged on the next tick via the branch above (keeps a single
+                // source of truth), but emit it here too so it shows up on the resolving frame.
+                if (!this.homelandFarmWarmupReadyLogged)
+                {
+                    this.homelandFarmWarmupReadyLogged = true;
+                    ModLogger.Msg($"[HomelandFarm] Warmup SUCCESS: aura/farm runtime resolved after {this.homelandFarmWarmupAttempts} attempt(s).");
+                }
+                return;
+            }
+
+            // Not ready yet — surface WHAT is missing, throttled so the log isn't spammed every 0.5s.
+            if (now >= this.homelandFarmNextWarmupFailLogAt)
+            {
+                this.homelandFarmNextWarmupFailLogAt = now + HomelandFarmWarmupFailLogIntervalSeconds;
+                string detail = string.IsNullOrEmpty(this.auraLastError) ? "<no detail>" : this.auraLastError;
+                ModLogger.Msg($"[HomelandFarm] Warmup pending (attempt {this.homelandFarmWarmupAttempts}, AuraMono ready={this.auraMonoApiReady}): {detail}");
             }
         }
 

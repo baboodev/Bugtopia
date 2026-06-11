@@ -92,6 +92,12 @@ namespace HeartopiaMod
             "Il2CppSystem"
         };
 
+        // CS0649: several of these managed-reflection fields (notably auraResourceProtocolManagerType,
+        // auraInteractSystemType and the auraSend*/auraInteractSystem* members) are intentionally
+        // never assigned on this native-only build — their managed resolution was removed because the
+        // types are absent from interop. Consumers read them as null and fall through to the Mono path
+        // (see ResolveAuraFarmRuntimeMethodsViaMono). The remaining fields here are still resolved.
+#pragma warning disable CS0649
         private Type auraResourceProtocolManagerType;
         private Type auraInteractSystemType;
         private Type auraEntityHelperType;
@@ -159,6 +165,7 @@ namespace HeartopiaMod
         private PropertyInfo auraCylinderHeightProperty;
         private FieldInfo auraSelectPriorityInfoShapeField;
         private PropertyInfo auraSelectPriorityInfoShapeProperty;
+#pragma warning restore CS0649
         private FieldInfo[] auraInteractTargetCandidateFields = Array.Empty<FieldInfo>();
         private PropertyInfo[] auraInteractTargetCandidateProperties = Array.Empty<PropertyInfo>();
         private bool auraMonoApiReady = false;
@@ -1122,23 +1129,15 @@ namespace HeartopiaMod
             {
                 this.auraLastError = string.Empty;
 
-                if (this.auraResourceProtocolManagerType == null)
-                {
-                    this.auraResourceProtocolManagerType = this.FindTypeByName("XDTDataAndProtocol.ProtocolService.Resource.ResourceProtocolManager", "XDTDataAndProtocol.ProtocolService.Resource", "ResourceProtocolManager");
-                    if (this.auraResourceProtocolManagerType == null)
-                    {
-                        this.auraResourceProtocolManagerType = this.FindTypeBySignature("ResourceProtocolManager", "XDTDataAndProtocol", true, false);
-                    }
-                }
-
-                if (this.auraInteractSystemType == null)
-                {
-                    this.auraInteractSystemType = this.FindTypeByName("XDTLevelAndEntity.BaseSystem.InteractSystem.InteractSystem", "XDTLevelAndEntity.BaseSystem.InteractSystem", "InteractSystem");
-                    if (this.auraInteractSystemType == null)
-                    {
-                        this.auraInteractSystemType = this.FindTypeBySignature("InteractSystem", "XDTLevelAndEntity", false, true);
-                    }
-                }
+                // NOTE: The managed resolution for ResourceProtocolManager and InteractSystem was
+                // removed. On this (native-only) build those types are never present in interop
+                // (ResourceType=null / InteractType=null forever), so the FindTypeByName/
+                // FindTypeBySignature scans here were pure dead background work every retry. The
+                // gather commands (pick/attack/stone) and the interact-system reads are resolved
+                // and driven entirely through Mono in ResolveAuraFarmRuntimeMethodsViaMono() below.
+                // auraResourceProtocolManagerType / auraInteractSystemType simply stay null and the
+                // dozens of consumer sites already fall through to their Mono paths when null.
+                // (If a future build ships these types in interop, re-add the managed lookups.)
 
                 if (this.auraEntityHelperType == null)
                 {
@@ -1239,125 +1238,11 @@ namespace HeartopiaMod
                     this.auraDynamicBushComponentType = this.FindTypeByName("XDTLevelAndEntity.Gameplay.Component.Gather.DynamicBushComponent", "XDTLevelAndEntity.Gameplay.Component.Gather", "DynamicBushComponent");
                 }
 
-                if (this.auraResourceProtocolManagerType != null)
-                {
-                    if (this.auraSendPickBushMethod == null)
-                    {
-                        this.auraSendPickBushMethod = this.GetMethodQuiet(this.auraResourceProtocolManagerType, "SendPickBushCommand", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, new Type[] { typeof(uint) });
-                    }
-
-                    if (this.auraSendAttackTreeMethod == null)
-                    {
-                        this.auraSendAttackTreeMethod = this.GetMethodQuiet(this.auraResourceProtocolManagerType, "SendAttackTreeCommand", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, new Type[] { typeof(uint), typeof(bool) });
-                    }
-
-                    if (this.auraSendHitStoneMethod == null)
-                    {
-                        this.auraSendHitStoneMethod = this.GetMethodQuiet(this.auraResourceProtocolManagerType, "SendHitStoneCommand", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, new Type[] { typeof(uint), typeof(bool) });
-                    }
-                }
-
-                if (this.auraInteractSystemType != null)
-                {
-                    if (this.auraInteractSystemGetInstanceMethod == null)
-                    {
-                        this.auraInteractSystemGetInstanceMethod = this.GetMethodQuiet(this.auraInteractSystemType, "get_Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance, Type.EmptyTypes);
-                        if (this.auraInteractSystemGetInstanceMethod == null)
-                        {
-                            PropertyInfo prop = this.GetPropertyQuiet(this.auraInteractSystemType, "Instance");
-                            if (prop != null)
-                            {
-                                this.auraInteractSystemGetInstanceMethod = prop.GetGetMethod(true);
-                            }
-                        }
-
-                        if (this.auraInteractSystemGetInstanceMethod == null)
-                        {
-                            this.auraInteractSystemGetInstanceMethod = this.GetMethodQuiet(this.auraInteractSystemType, "GetInstance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance, Type.EmptyTypes)
-                                ?? this.GetMethodQuiet(this.auraInteractSystemType, "get_Singleton", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance, Type.EmptyTypes);
-                        }
-                    }
-
-                    if (this.auraInteractSystemInstanceField == null)
-                    {
-                        this.auraInteractSystemInstanceField = this.GetFieldQuiet(this.auraInteractSystemType, "Instance")
-                            ?? this.GetFieldQuiet(this.auraInteractSystemType, "_instance")
-                            ?? this.GetFieldQuiet(this.auraInteractSystemType, "instance");
-                    }
-
-                    if (this.auraInteractSystemCurrentTargetField == null)
-                    {
-                        this.auraInteractSystemCurrentTargetField = this.GetFieldQuiet(this.auraInteractSystemType, "_currentSelectTarget");
-                    }
-
-                    if (this.auraInteractSystemFocusLevelObjectsField == null)
-                    {
-                        this.auraInteractSystemFocusLevelObjectsField = this.GetFieldQuiet(this.auraInteractSystemType, "_focusLevelObjects");
-                    }
-
-                    if (this.auraInteractSystemSelectedField == null)
-                    {
-                        this.auraInteractSystemSelectedField = this.GetFieldQuiet(this.auraInteractSystemType, "_selected");
-                    }
-
-                    if (this.auraInteractSystemSelectPriorityLengthField == null)
-                    {
-                        this.auraInteractSystemSelectPriorityLengthField = this.GetFieldQuiet(this.auraInteractSystemType, "_selectPriorityLength");
-                    }
-
-                    if (this.auraInteractSystemSelectPriorityInfoArrayField == null)
-                    {
-                        this.auraInteractSystemSelectPriorityInfoArrayField = this.GetFieldQuiet(this.auraInteractSystemType, "_selectPriorityInfoArray");
-                    }
-
-                    if (this.auraInteractSystemInteractCylinderField == null)
-                    {
-                        this.auraInteractSystemInteractCylinderField = this.GetFieldQuiet(this.auraInteractSystemType, "interactCylinder");
-                    }
-
-                    if (this.auraInteractSystemGetTargetListMethod == null)
-                    {
-                        this.auraInteractSystemGetTargetListMethod = this.GetMethodByNameAndParamCountQuiet(this.auraInteractSystemType, "GetInteractTargetList", 1);
-                    }
-
-                    if (this.auraInteractSystemGetPlayerMethod == null)
-                    {
-                        this.auraInteractSystemGetPlayerMethod = this.GetMethodQuiet(this.auraInteractSystemType, "get_player", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes)
-                            ?? this.GetMethodQuiet(this.auraInteractSystemType, "GetPlayer", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, Type.EmptyTypes);
-                    }
-
-                    if (this.auraInteractSystemCurrentTargetProperty == null)
-                    {
-                        this.auraInteractSystemCurrentTargetProperty = this.GetPropertyQuiet(this.auraInteractSystemType, "CurrentSelectTarget")
-                            ?? this.GetPropertyQuiet(this.auraInteractSystemType, "currentSelectTarget");
-                    }
-
-                    if (this.auraInteractSystemFocusLevelObjectsProperty == null)
-                    {
-                        this.auraInteractSystemFocusLevelObjectsProperty = this.GetPropertyQuiet(this.auraInteractSystemType, "FocusLevelObjects")
-                            ?? this.GetPropertyQuiet(this.auraInteractSystemType, "focusLevelObjects");
-                    }
-
-                    if (this.auraInteractSystemSelectedProperty == null)
-                    {
-                        this.auraInteractSystemSelectedProperty = this.GetPropertyQuiet(this.auraInteractSystemType, "Selected")
-                            ?? this.GetPropertyQuiet(this.auraInteractSystemType, "selected");
-                    }
-
-                    if (this.auraInteractSystemInteractCylinderProperty == null)
-                    {
-                        this.auraInteractSystemInteractCylinderProperty = this.GetPropertyQuiet(this.auraInteractSystemType, "interactCylinder")
-                            ?? this.GetPropertyQuiet(this.auraInteractSystemType, "InteractCylinder");
-                    }
-
-                    if (this.auraInteractSystemPlayerProperty == null)
-                    {
-                        this.auraInteractSystemPlayerProperty = this.GetPropertyQuiet(this.auraInteractSystemType, "player")
-                            ?? this.GetPropertyQuiet(this.auraInteractSystemType, "Player");
-                    }
-
-                    this.RefreshAuraInteractCandidateMembers();
-                }
+                // Managed method/field resolution for ResourceProtocolManager and InteractSystem
+                // removed: both types are absent from interop on this build (see note above), so
+                // these blocks (guarded by `type != null`) never executed. The gather commands and
+                // interact-system state are resolved via Mono in ResolveAuraFarmRuntimeMethodsViaMono().
+                // The auraSend*/auraInteractSystem* managed fields stay null; consumers fall to Mono.
 
                 if (this.auraAxeCheckerType != null)
                 {

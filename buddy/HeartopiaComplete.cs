@@ -1812,7 +1812,7 @@ namespace HeartopiaMod
             // setters, Input.GetKey*) are intentionally NOT patched here. Patching them globally
             // taxes every frame of normal gameplay even when no mod feature is active, and is a
             // known source of periodic native crashes. They are now installed lazily on first use
-            // via EnsureMovementOverridePatched / EnsureRotationOverridePatched / EnsureInputSimPatched.
+            // via EnsurePositionOverridePatched / EnsureMovePatched / EnsureRotationOverridePatched / EnsureInputSimPatched.
             ModLogger.Msg("=== Hot-path patches deferred (installed on demand) ===");
 
             ModLogger.Msg("AutoFish subsystem disabled.");
@@ -1887,22 +1887,33 @@ namespace HeartopiaMod
             // Lazily install the hot-path patches only while a feature that needs them is active.
             // This is the safety net for sustained, multi-frame effects; one-shot writers that
             // touch a transform in the same call (teleport, camera) also Ensure directly at the site.
-            if (this.noclipEnabled || this.mouseLookEnabled
-                || HeartopiaComplete.OverridePlayerPosition || HeartopiaComplete.OverrideCameraPosition
-                || this.teleportFramesRemaining > 0 || this.cameraOverrideFramesRemaining > 0
-                || (this.showMenu && this.blockGameUiWhenMenuOpen)
-                || Time.unscaledTime < this.blockInputReleaseUntil)
+            // Player teleport / noclip: pin position (Transform.position setter) + redirect motion (Move).
+            if (this.noclipEnabled || HeartopiaComplete.OverridePlayerPosition || this.teleportFramesRemaining > 0)
             {
-                this.EnsureMovementOverridePatched();
+                this.EnsurePositionOverridePatched();
+                this.EnsureMovePatched();
             }
-            if (this.mouseLookEnabled
-                || HeartopiaComplete.OverrideCameraPosition || HeartopiaComplete.OverridePlayerRotation
-                || this.cameraOverrideFramesRemaining > 0 || this.playerRotationFramesRemaining > 0)
+            // Camera mouse-look: pin camera position + rotation. Does NOT need CharacterController.Move.
+            if (this.mouseLookEnabled || HeartopiaComplete.OverrideCameraPosition || this.cameraOverrideFramesRemaining > 0)
+            {
+                this.EnsurePositionOverridePatched();
+                this.EnsureRotationOverridePatched();
+            }
+            // Player rotation override.
+            if (HeartopiaComplete.OverridePlayerRotation || this.playerRotationFramesRemaining > 0)
             {
                 this.EnsureRotationOverridePatched();
             }
-            if (AutoFishingFarm.IsEnabled || InsectNetFarm.IsEnabled || this.autoResourceFarmEnabled
-                || this.autoCookEnabled || this.autoFarmActive
+            // Menu input-block: stop player movement while the menu is open. Routed through the
+            // game's MonoInputManager (the player isn't driven by Unity's CharacterController.Move),
+            // so no hot-path Harmony patch is installed for this.
+            this.UpdateMenuMovementInputBlock();
+            // Simulated F-key (Input.GetKey* patches). NOTE: fishing (AutoFishingFarm) and insect
+            // (InsectNetFarm) are net-based and do NOT use F-sim, so they are not gated here. Real
+            // users: resource farm + auto-forage (set SimulateFKey* directly) and the SimulateFKeyPulse
+            // callers (camera-toggle interact, meteor auto-interact, SendFMessage), which also call
+            // EnsureInputSimPatched() at their own site.
+            if (this.autoResourceFarmEnabled || this.autoFarmActive
                 || HeartopiaComplete.SimulateFKeyHeld || HeartopiaComplete.SimulateFKeyDown || HeartopiaComplete.SimulateFKeyUp)
             {
                 this.EnsureInputSimPatched();
@@ -23095,6 +23106,36 @@ namespace HeartopiaMod
                     Time.unscaledTime < instance.blockInputReleaseUntil);
         }
 
+        // Blocks player movement while the mod menu is open (with "block game input" enabled).
+        // The game does NOT move the local player via Unity's CharacterController.Move, so the
+        // Harmony Move patch can't stop it — movement goes through MonoInputManager. We disable
+        // the Move InputEvent there instead. Edge-triggered so the disable refcount stays balanced.
+        private void UpdateMenuMovementInputBlock()
+        {
+            bool shouldBlock = ShouldBlockGameplayInput();
+            if (shouldBlock == this.menuMoveInputDisabled)
+            {
+                return;
+            }
+
+            // InputEvent.Move == 0 (ScriptsRefactory.BaseService.Input.InputEvent).
+            const int InputEventMove = 0;
+            if (shouldBlock)
+            {
+                // Only flip our state once the disable actually lands, so we don't leave an
+                // unbalanced Enable later if the input manager wasn't ready yet (retry next frame).
+                if (this.TrySetMonoInputDisabled(InputEventMove, true))
+                {
+                    this.menuMoveInputDisabled = true;
+                }
+            }
+            else
+            {
+                this.TrySetMonoInputDisabled(InputEventMove, false);
+                this.menuMoveInputDisabled = false;
+            }
+        }
+
         public static bool ShouldForceMouseLookButton(int button)
         {
             return false;
@@ -23331,7 +23372,7 @@ namespace HeartopiaMod
             {
                 cam.fieldOfView = this.mouseLookDefaultCameraFov;
             }
-            this.EnsureMovementOverridePatched();
+            this.EnsurePositionOverridePatched();
             this.EnsureRotationOverridePatched();
             HeartopiaComplete.CameraOverridePos = desiredCameraPos;
             HeartopiaComplete.CameraOverrideRot = desiredCameraRot;
@@ -23528,17 +23569,18 @@ namespace HeartopiaMod
             }
         }
 
-        // Installs the player/camera position patches (Transform.position setter +
-        // CharacterController.Move) the first time a movement-override feature is used
-        // (teleport, noclip, camera mouse-look, menu input block).
-        private void EnsureMovementOverridePatched()
+        // Installs the Transform.position setter patch (player teleport/noclip pinning and
+        // camera position override) on first use. This is the hotter of the movement patches,
+        // so it is kept separate from the lighter CharacterController.Move patch below and is
+        // NOT pulled in by the menu input-block (which only needs Move).
+        private void EnsurePositionOverridePatched()
         {
-            if (this.movementOverridePatched) return;
-            this.movementOverridePatched = true; // set first so a failed attempt is not retried every frame
+            if (this.positionOverridePatched) return;
+            this.positionOverridePatched = true; // set first so a failed attempt is not retried every frame
             try
             {
                 var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) { this.movementOverridePatched = false; return; }
+                if (harmony == null) { this.positionOverridePatched = false; return; }
 
                 MethodInfo posSetter = typeof(Transform).GetProperty("position").GetSetMethod();
                 MethodInfo posPrefix = typeof(TransformPositionPatch).GetMethod("SetPositionPrefix");
@@ -23547,6 +23589,25 @@ namespace HeartopiaMod
                     harmony.Patch(posSetter, new HarmonyMethod(posPrefix), null, null, null, null);
                 }
 
+                ModLogger.Msg("[Patch] Position override installed (Transform.position setter).");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[Patch] Position override patch failed: " + ex.Message);
+            }
+        }
+
+        // Installs the CharacterController.Move patch on first use. Needed by teleport/noclip
+        // (motion redirect) and by the menu input-block (zero motion while the mod menu is open).
+        private void EnsureMovePatched()
+        {
+            if (this.movePatched) return;
+            this.movePatched = true;
+            try
+            {
+                var harmony = HeartopiaComplete.harmonyInstance;
+                if (harmony == null) { this.movePatched = false; return; }
+
                 MethodInfo move = typeof(CharacterController).GetMethod("Move", new Type[] { typeof(Vector3) });
                 MethodInfo movePrefix = typeof(CharacterControllerPatch).GetMethod("MovePrefix");
                 if (move != null && movePrefix != null)
@@ -23554,11 +23615,11 @@ namespace HeartopiaMod
                     harmony.Patch(move, new HarmonyMethod(movePrefix), null, null, null, null);
                 }
 
-                ModLogger.Msg("[Patch] Movement override installed (Transform.position + CharacterController.Move).");
+                ModLogger.Msg("[Patch] Move override installed (CharacterController.Move).");
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[Patch] Movement override patch failed: " + ex.Message);
+                ModLogger.Msg("[Patch] Move override patch failed: " + ex.Message);
             }
         }
 
@@ -45410,7 +45471,7 @@ namespace HeartopiaMod
                 {
                     HeartopiaComplete.CameraOverrideRot = Quaternion.LookRotation(vector4);
                 }
-                this.EnsureMovementOverridePatched();
+                this.EnsurePositionOverridePatched();
                 this.EnsureRotationOverridePatched();
                 HeartopiaComplete.CameraOverridePos = vector3;
                 HeartopiaComplete.OverrideCameraPosition = true;
@@ -48163,7 +48224,8 @@ namespace HeartopiaMod
             else
             {
                 Vector3 position = gameObject.transform.position;
-                this.EnsureMovementOverridePatched();
+                this.EnsurePositionOverridePatched();
+                this.EnsureMovePatched();
                 HeartopiaComplete.OverridePosition = targetPos;
                 HeartopiaComplete.OverridePlayerPosition = true;
                 CharacterController component = gameObject.GetComponent<CharacterController>();
@@ -48193,7 +48255,8 @@ namespace HeartopiaMod
             else
             {
                 Vector3 position = gameObject.transform.position;
-                this.EnsureMovementOverridePatched();
+                this.EnsurePositionOverridePatched();
+                this.EnsureMovePatched();
                 this.EnsureRotationOverridePatched();
                 HeartopiaComplete.OverridePosition = targetPos;
                 HeartopiaComplete.OverridePlayerPosition = true;
@@ -48720,7 +48783,8 @@ namespace HeartopiaMod
 
         private void TeleportTo(Vector3 targetPos)
         {
-            this.EnsureMovementOverridePatched();
+            this.EnsurePositionOverridePatched();
+            this.EnsureMovePatched();
             OverridePosition = targetPos;
             OverridePlayerPosition = true;
             teleportFramesRemaining = 10;
@@ -64072,9 +64136,14 @@ namespace HeartopiaMod
         // Lazy patch state for the hot Unity methods (Transform.position/rotation setters,
         // CharacterController.Move, Input.GetKey*). These are only installed once the
         // corresponding in-game feature is actually used, so they cost nothing when idle.
-        private bool movementOverridePatched = false;
+        private bool positionOverridePatched = false;
+        private bool movePatched = false;
         private bool rotationOverridePatched = false;
         private bool inputSimPatched = false;
+
+        // True while we have an outstanding DisableInput(Move) on the game's MonoInputManager
+        // because the mod menu is open with "block game input" on. Must be balanced 1:1 with EnableInput.
+        private bool menuMoveInputDisabled = false;
 
         // Bypass overlap building state
         private bool bypassOverlapEnabled = false;
