@@ -1821,7 +1821,7 @@ namespace HeartopiaMod
             // setters, Input.GetKey*) are intentionally NOT patched here. Patching them globally
             // taxes every frame of normal gameplay even when no mod feature is active, and is a
             // known source of periodic native crashes. They are now installed lazily on first use
-            // via EnsurePositionOverridePatched / EnsureMovePatched / EnsureRotationOverridePatched / EnsureInputSimPatched.
+            // via EnsurePositionOverridePatched / EnsureRotationOverridePatched / EnsureInputSimPatched.
             ModLogger.Msg("=== Hot-path patches deferred (installed on demand) ===");
 
             ModLogger.Msg("AutoFish subsystem disabled.");
@@ -1896,11 +1896,11 @@ namespace HeartopiaMod
             // Lazily install the hot-path patches only while a feature that needs them is active.
             // This is the safety net for sustained, multi-frame effects; one-shot writers that
             // touch a transform in the same call (teleport, camera) also Ensure directly at the site.
-            // Player teleport / noclip: pin position (Transform.position setter) + redirect motion (Move).
+            // Player teleport / noclip: pin position via the Transform.position setter. (The
+            // CharacterController.Move patch was removed — the local player isn't driven by it.)
             if (this.noclipEnabled || HeartopiaComplete.OverridePlayerPosition || this.teleportFramesRemaining > 0)
             {
                 this.EnsurePositionOverridePatched();
-                this.EnsureMovePatched();
             }
             // Camera mouse-look: pin camera position + rotation. Does NOT need CharacterController.Move.
             if (this.mouseLookEnabled || HeartopiaComplete.OverrideCameraPosition || this.cameraOverrideFramesRemaining > 0)
@@ -23608,32 +23608,6 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 ModLogger.Msg("[Patch] Position override patch failed: " + ex.Message);
-            }
-        }
-
-        // Installs the CharacterController.Move patch on first use. Needed by teleport/noclip
-        // (motion redirect) and by the menu input-block (zero motion while the mod menu is open).
-        private void EnsureMovePatched()
-        {
-            if (this.movePatched) return;
-            this.movePatched = true;
-            try
-            {
-                var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) { this.movePatched = false; return; }
-
-                MethodInfo move = typeof(CharacterController).GetMethod("Move", new Type[] { typeof(Vector3) });
-                MethodInfo movePrefix = typeof(CharacterControllerPatch).GetMethod("MovePrefix");
-                if (move != null && movePrefix != null)
-                {
-                    harmony.Patch(move, new HarmonyMethod(movePrefix), null, null, null, null);
-                }
-
-                ModLogger.Msg("[Patch] Move override installed (CharacterController.Move).");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Patch] Move override patch failed: " + ex.Message);
             }
         }
 
@@ -49309,7 +49283,6 @@ namespace HeartopiaMod
             {
                 Vector3 position = gameObject.transform.position;
                 this.EnsurePositionOverridePatched();
-                this.EnsureMovePatched();
                 HeartopiaComplete.OverridePosition = targetPos;
                 HeartopiaComplete.OverridePlayerPosition = true;
                 CharacterController component = gameObject.GetComponent<CharacterController>();
@@ -49340,7 +49313,6 @@ namespace HeartopiaMod
             {
                 Vector3 position = gameObject.transform.position;
                 this.EnsurePositionOverridePatched();
-                this.EnsureMovePatched();
                 this.EnsureRotationOverridePatched();
                 HeartopiaComplete.OverridePosition = targetPos;
                 HeartopiaComplete.OverridePlayerPosition = true;
@@ -49855,7 +49827,6 @@ namespace HeartopiaMod
         private void TeleportTo(Vector3 targetPos)
         {
             this.EnsurePositionOverridePatched();
-            this.EnsureMovePatched();
             OverridePosition = targetPos;
             OverridePlayerPosition = true;
             teleportFramesRemaining = 10;
@@ -65226,7 +65197,6 @@ namespace HeartopiaMod
         // CharacterController.Move, Input.GetKey*). These are only installed once the
         // corresponding in-game feature is actually used, so they cost nothing when idle.
         private bool positionOverridePatched = false;
-        private bool movePatched = false;
         private bool rotationOverridePatched = false;
         private bool inputSimPatched = false;
 

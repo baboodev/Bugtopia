@@ -267,7 +267,6 @@ namespace HeartopiaMod
         private void InitializeNoclipOverridePosition()
         {
             this.EnsurePositionOverridePatched();
-            this.EnsureMovePatched();
             if (this.TryResolveNoclipVehicleContext(out IntPtr vehicleComponentObj, out IntPtr vehicleControllerObj, out Vector3 vehiclePosition))
             {
                 HeartopiaComplete.OverridePlayerPosition = false;

@@ -180,7 +180,6 @@
     <Compile Include="AutoFishingFarm.cs" />
     <Compile Include="BepInExPlugin.cs" />
     <Compile Include="BirdNetFarm.cs" />
-    <Compile Include="CharacterControllerPatch.cs" />
     <Compile Include="CharacterRotationPatch.cs" />
     <Compile Include="MonoAssemblyDump.cs" />
     <Compile Include="HeartopiaComplete.cs" />
