@@ -383,7 +383,6 @@ namespace HeartopiaMod
             public bool hideJumpButtonEnabled;
             public bool bunnyHopEnabled;
             public bool fastBubbleGenEnabled;
-            public bool spawnBubbleAtPlayerEnabled;
             public float bubbleBubblesPerMinute;
             public float snowClickInterval;
             public float sculptIconClickInterval;
@@ -969,7 +968,6 @@ namespace HeartopiaMod
             data.hideJumpButtonEnabled = this.hideJumpButtonEnabled;
             data.bunnyHopEnabled = this.bunnyHopEnabled;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
-            data.spawnBubbleAtPlayerEnabled = this.spawnBubbleAtPlayerEnabled;
             data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
             data.snowClickInterval = this.snowClickInterval;
             data.sculptIconClickInterval = this.sculptIconClickInterval;
@@ -1107,7 +1105,6 @@ namespace HeartopiaMod
             this.hideJumpButtonEnabled = data.hideJumpButtonEnabled;
             this.bunnyHopEnabled = data.bunnyHopEnabled;
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
-            this.spawnBubbleAtPlayerEnabled = data.spawnBubbleAtPlayerEnabled;
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
             this.snowClickInterval = data.snowClickInterval;
             this.sculptIconClickInterval = data.sculptIconClickInterval;
@@ -1441,7 +1438,6 @@ namespace HeartopiaMod
                         else if (line.Contains("hideJumpButtonEnabled")) this.hideJumpButtonEnabled = GetJsonInt(line, "\"hideJumpButtonEnabled\":") != 0;
                         else if (line.Contains("bunnyHopEnabled")) this.bunnyHopEnabled = GetJsonInt(line, "\"bunnyHopEnabled\":") != 0;
                         else if (line.Contains("fastBubbleGenEnabled")) this.fastBubbleGenEnabled = GetJsonInt(line, "\"fastBubbleGenEnabled\":") != 0;
-                        else if (line.Contains("spawnBubbleAtPlayerEnabled")) this.spawnBubbleAtPlayerEnabled = GetJsonInt(line, "\"spawnBubbleAtPlayerEnabled\":") != 0;
                         else if (line.Contains("bubbleBubblesPerMinute")) this.bubbleBubblesPerMinute = Mathf.Clamp(GetJsonFloat(line, "\"bubbleBubblesPerMinute\":"), 0f, 100f);
                         else if (line.Contains("snowClickInterval")) this.snowClickInterval = GetJsonFloat(line, "\"snowClickInterval\":");
                         else if (line.Contains("sculptIconClickInterval")) this.sculptIconClickInterval = GetJsonFloat(line, "\"sculptIconClickInterval\":");
@@ -24489,16 +24485,6 @@ namespace HeartopiaMod
                     }
                     num += 28;
                 }
-                
-                bool prevSpawnBubbleAtPlayer = this.spawnBubbleAtPlayerEnabled;
-                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Spawn Bubble at Player", 25f);
-                this.spawnBubbleAtPlayerEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.spawnBubbleAtPlayerEnabled, "Spawn Bubble at Player", 25f);
-                if (this.spawnBubbleAtPlayerEnabled != prevSpawnBubbleAtPlayer)
-                {
-                    this.RequestBubbleFeatureImmediateRetry();
-                    try { this.SaveKeybinds(false); } catch { }
-                }
-                num += Mathf.CeilToInt(toggleHeight + 10f);
 
                 Rect rect = new Rect(20f, (float)num, 260f, 20f);
                 GUI.Label(rect, this.LF("Game Speed: {0:F1}x", this.gameSpeed));
@@ -64430,7 +64416,6 @@ namespace HeartopiaMod
         private float lastAppliedCustomCameraFOV = -1f;
         private Camera mainCamera = null;
         private bool fastBubbleGenEnabled = false;
-        private bool spawnBubbleAtPlayerEnabled = false;
         private float bubbleBubblesPerMinute = 15f;
 
         // Advanced Cooking Bot Variables

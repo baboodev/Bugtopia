@@ -13490,10 +13490,9 @@ namespace HeartopiaMod
                 return true;
             }
 
-            Type webRequestType = this.FindWebRequestUtilityRuntimeType()
-                ?? this.FindHomelandFarmRuntimeType(
-                    "WebRequestUtility",
-                    "XDTDataAndProtocol.ProtocolService");
+            Type webRequestType = this.FindHomelandFarmRuntimeType(
+                "WebRequestUtility",
+                "XDTDataAndProtocol.ProtocolService");
             if (webRequestType == null)
             {
                 return false;

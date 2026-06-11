@@ -203,7 +203,6 @@
     <Compile Include="BunnyHopFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
-    <Compile Include="BubbleMonoNativeHook.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />
