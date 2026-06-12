@@ -283,7 +283,10 @@ See [FEATURES.md § Aura Farm](docs/FEATURES.md), [TECHNICAL.md § Aura Farm](do
 ### Code style (project)
 
 - Match surrounding naming and patterns; minimal diff scope.
-- Cache resolved `Type` / `MethodInfo` / `IntPtr` — do not scan assemblies every frame.
+- Cache resolved `Type` / `MethodInfo` / `IntPtr` — do not scan assemblies every frame. Class/method `IntPtr`s may stay raw (image lifetime); **object** `IntPtr`s cached across frames go through `AuraMonoObjectCache` (AuraFarm.cs).
+- New AuraMono invokes: prefer `TryAuraInvoke(method, obj, args, out result, out error)`; the `auraMonoRuntimeInvoke` delegate is also safe (bound to the central guard), the raw export is not.
+- Per-frame feature ticks: wrap in a `FeatureBreakerState` (ModLogger.cs) so a systematic failure cools down instead of spamming every frame.
+- Crash-hardening invariants are enforced by `ci/crash-hardening-lint.ps1` (runs in CI; run locally before pushing interop changes).
 - Log failures **once** (`ModLogger.Msg`); use `MasterLog*` flags in `HeartopiaComplete.cs` for verbose traces (default `false`).
 - `AllowUnsafeBlocks` is on — AuraMono paths use `unsafe` and pointers; follow existing `ref`/`out` pointer patterns ([TYPE_RESOLUTION.md § gotchas](docs/TYPE_RESOLUTION.md)).
 
@@ -325,6 +328,12 @@ Log locations: [BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md).
 | Do not | Why |
 |--------|-----|
 | Guess namespaces | Builds differ; use dumps |
+| Cache a MonoObject* across frames in a raw `IntPtr` field | bdwgc collects it once the game drops its reference → random AV; use `AuraMonoObjectCache` (gchandle + world-epoch invalidation). CI lint E3 |
+| Call `auraMonoRuntimeInvokeRaw` or re-resolve `mono_runtime_invoke` | Bypasses `InvokeAuraMonoChecked` (null guard, exc check, garbage-result suppression); use `auraMonoRuntimeInvoke` or `TryAuraInvoke`. CI lint E1/E2 |
+| Carry an object `IntPtr` across `yield return` in a coroutine | GC can collect it between frames; scalarize to netIds/strings before the first yield, or pin via `AuraMonoPin` in try/finally. CI lint W1 |
+| Pass an out-param slot to `mono_runtime_invoke` for a value type wider than a pointer | mono writes the whole struct into the slot → stack corruption (crashed AutoSell scan); use `ContainsKey` + `get_Item` (boxed returns) |
+| Probe a dictionary with `get_Count` + `get_Item(0..n)` | Dictionary `get_Item` takes a KEY, not an index — exceptions per element / wrong items; use the enumerator path |
+| Invoke an inflated generic method without signature validation | Wrong `method_inst` AVs the process on invoke; check `AuraMonoMethodParamCountIs` first |
 | Use `gameassembly-dumps` for `XDT*` gameplay | Wrong runtime — use `ilspy-dumps` |
 | Harmony on `FindLoadedType("XDTGame.UI.*")` | UI types often AuraMono-only |
 | Mono thunk hook on IL2CPP UI openers | Hook never fires in-game |

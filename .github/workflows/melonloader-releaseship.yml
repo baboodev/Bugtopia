@@ -34,6 +34,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Crash-hardening lint
+        shell: pwsh
+        run: pwsh ci/crash-hardening-lint.ps1
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
