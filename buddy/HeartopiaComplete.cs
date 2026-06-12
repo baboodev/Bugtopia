@@ -62,6 +62,7 @@ namespace HeartopiaMod
         private KeyCode keyNoclip = KeyCode.None;
         private KeyCode keyCameraToggle = KeyCode.None;
         private KeyCode keyAutoEat = KeyCode.None;
+        private KeyCode keyUseBait = KeyCode.None;
         private KeyCode keyAntiAfk = KeyCode.None;
         private KeyCode keyBypassOverlap = KeyCode.None;
         private KeyCode keyBirdVacuum = KeyCode.None;
@@ -337,6 +338,7 @@ namespace HeartopiaMod
             public int keyNoclip;
             public int keyCameraToggle;
             public int keyAutoEat;
+            public int keyUseBait;
             public int keyAntiAfk;
             public int keyBypassOverlap;
             public int keyBirdVacuum;
@@ -702,6 +704,10 @@ namespace HeartopiaMod
         private const int DIRECT_REPAIR_STEP_VERIFY = 102;
         private const int DIRECT_EAT_STEP_USE = 100;
         private const int DIRECT_EAT_STEP_DELAY = 101;
+        private const int BaitStaticId = 20511;
+        private const int BackpackFuncChumBait = 103;
+        private float nextUseBaitAllowedAt = -999f;
+        private const float UseBaitCooldownSeconds = 1f;
         // Resource-farm: pause when auto-repair triggered (seconds)
         private float resourceAutoRepairPauseSeconds = 20f;
         private float resourceRepairPauseUntil = 0f;
@@ -922,6 +928,7 @@ namespace HeartopiaMod
             data.keyNoclip = (int)this.keyNoclip;
             data.keyCameraToggle = (int)this.keyCameraToggle;
             data.keyAutoEat = (int)this.keyAutoEat;
+            data.keyUseBait = (int)this.keyUseBait;
             data.keyAntiAfk = (int)this.keyAntiAfk;
             data.keyBypassOverlap = (int)this.keyBypassOverlap;
             data.keyBirdVacuum = (int)this.keyBirdVacuum;
@@ -1058,6 +1065,7 @@ namespace HeartopiaMod
             this.keyNoclip = (KeyCode)data.keyNoclip;
             this.keyCameraToggle = (KeyCode)data.keyCameraToggle;
             this.keyAutoEat = (KeyCode)data.keyAutoEat;
+            this.keyUseBait = (KeyCode)data.keyUseBait;
             this.keyAntiAfk = (KeyCode)data.keyAntiAfk;
             this.keyBypassOverlap = (KeyCode)data.keyBypassOverlap;
             this.keyBirdVacuum = (KeyCode)data.keyBirdVacuum;
@@ -1467,6 +1475,7 @@ namespace HeartopiaMod
                         else if (line.Contains("insectTeleportCooldown")) InsectNetFarm.SetCatchCooldown(GetJsonFloat(line, "\"insectTeleportCooldown\":"));
                         else if (line.Contains("insectScanTimeout")) InsectNetFarm.SetScanRange(GetJsonFloat(line, "\"insectScanTimeout\":"));
                         else if (line.Contains("keyAutoEat")) this.keyAutoEat = (KeyCode)GetJsonInt(line, "\"keyAutoEat\":");
+                        else if (line.Contains("keyUseBait")) this.keyUseBait = (KeyCode)GetJsonInt(line, "\"keyUseBait\":");
                         else if (line.Contains("keyAntiAfk")) this.keyAntiAfk = (KeyCode)GetJsonInt(line, "\"keyAntiAfk\":");
                         else if (line.Contains("keyBypassOverlap")) this.keyBypassOverlap = (KeyCode)GetJsonInt(line, "\"keyBypassOverlap\":");
                         else if (line.Contains("keyBirdVacuum")) this.keyBirdVacuum = (KeyCode)GetJsonInt(line, "\"keyBirdVacuum\":");
@@ -2239,6 +2248,10 @@ namespace HeartopiaMod
                     {
                         this.AddMenuNotification(this.L("Auto Eat already running"), new Color(1f, 0.55f, 0.55f));
                     }
+                }
+                if (this.TryGetModHotkeyDown(this.keyUseBait))
+                {
+                    this.TryUseBaitFromBagWithNotification();
                 }
                 if (this.TryGetModHotkeyDown(this.keyCameraToggle))
                 {
@@ -53370,6 +53383,219 @@ namespace HeartopiaMod
             return false;
         }
 
+        private void TryUseBaitFromBagWithNotification()
+        {
+            if (Time.unscaledTime < this.nextUseBaitAllowedAt)
+            {
+                return;
+            }
+
+            if (this.TryUseBaitFromBag())
+            {
+                this.AddMenuNotification(this.L("Bait used"), new Color(0.45f, 1f, 0.55f));
+            }
+            else
+            {
+                this.AddMenuNotification(this.L("No bait found in bag"), new Color(1f, 0.65f, 0.45f));
+            }
+        }
+
+        private bool TryUseBaitFromBag()
+        {
+            try
+            {
+                if (Time.unscaledTime < this.nextUseBaitAllowedAt)
+                {
+                    return false;
+                }
+
+                if (!this.TryFindDirectBackpackItemByStaticId(BaitStaticId, out uint netId) || netId == 0U)
+                {
+                    this.AutoEatRepairLog("[UseBait] Backpack bait not found for staticId=" + BaitStaticId);
+                    return false;
+                }
+
+                this.AutoEatRepairLog("[UseBait] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending ChumBait function.");
+                if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncChumBait, netId))
+                {
+                    this.AutoEatRepairLog("[UseBait] ExecuteBackpackItemFunc failed for netId=" + netId);
+                    return false;
+                }
+
+                this.nextUseBaitAllowedAt = Time.unscaledTime + UseBaitCooldownSeconds;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.AutoEatRepairLog("[UseBait] Exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryFindDirectBackpackItemByStaticId(int staticId, out uint netId)
+        {
+            netId = 0U;
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            this.lastDirectBackpackMatchedNetId = 0U;
+            this.lastDirectBackpackMatchedStaticId = 0;
+            this.lastDirectBackpackMatchedEntityType = 0;
+            this.lastDirectBackpackMatchedCount = 0;
+
+            if (this.TryRefreshDirectBackpackRuntimeSnapshot(false))
+            {
+                for (int i = 0; i < this.directBackpackRuntimeItems.Count; i++)
+                {
+                    DirectBackpackRuntimeItem item = this.directBackpackRuntimeItems[i];
+                    if (item == null || item.NetId == 0U || item.StaticId != staticId)
+                    {
+                        continue;
+                    }
+
+                    netId = item.NetId;
+                    this.lastDirectBackpackMatchedNetId = item.NetId;
+                    this.lastDirectBackpackMatchedStaticId = item.StaticId;
+                    this.lastDirectBackpackMatchedEntityType = item.EntityType;
+                    this.lastDirectBackpackMatchedCount = item.Count;
+                    this.AutoEatRepairLog("[UseBait] Runtime snapshot match netId=" + item.NetId + " staticId=" + item.StaticId + " count=" + item.Count);
+                    return true;
+                }
+            }
+
+            if (this.TryFindDirectBackpackItemByStaticIdManaged(staticId, out netId))
+            {
+                return true;
+            }
+
+            if (!DirectBackpackUnsafeAuraMonoFallbackEnabled)
+            {
+                return false;
+            }
+
+            return this.TryFindDirectBackpackItemByStaticIdAuraMono(staticId, out netId);
+        }
+
+        private bool TryFindDirectBackpackItemByStaticIdManaged(int staticId, out uint netId)
+        {
+            netId = 0U;
+            try
+            {
+                if (!this.TryGetDirectBackpackSystem(out object backPackObj, out MethodInfo getAllItem, out Type storageType, out bool getAllItemNeedsStorage))
+                {
+                    return false;
+                }
+
+                object backpackStorage = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, 1) : (object)1;
+                object itemListObj = getAllItemNeedsStorage
+                    ? getAllItem.Invoke(backPackObj, new[] { backpackStorage })
+                    : getAllItem.Invoke(backPackObj, null);
+
+                IEnumerable items = itemListObj as IEnumerable;
+                if (items == null)
+                {
+                    return false;
+                }
+
+                foreach (object item in items)
+                {
+                    if (item == null
+                        || !this.TryGetManagedInt32Member(item, "staticId", out int candidateStaticId)
+                        || candidateStaticId != staticId
+                        || !this.TryGetManagedUInt32Member(item, "netId", out uint candidateNetId)
+                        || candidateNetId == 0U)
+                    {
+                        continue;
+                    }
+
+                    netId = candidateNetId;
+                    this.lastDirectBackpackMatchedNetId = candidateNetId;
+                    this.lastDirectBackpackMatchedStaticId = candidateStaticId;
+                    this.TryGetManagedInt32Member(item, "entityType", out this.lastDirectBackpackMatchedEntityType);
+                    this.TryGetManagedBackpackItemCount(item, out this.lastDirectBackpackMatchedCount);
+                    this.AutoEatRepairLog("[UseBait] Managed match netId=" + candidateNetId + " staticId=" + candidateStaticId + " count=" + this.lastDirectBackpackMatchedCount);
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private bool TryFindDirectBackpackItemByStaticIdAuraMono(int staticId, out uint netId)
+        {
+            netId = 0U;
+            try
+            {
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPackSystemObj) || backPackSystemObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr backPackClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(backPackSystemObj) : IntPtr.Zero;
+                IntPtr getAllItemMethod = this.FindAuraMonoMethodOnHierarchy(backPackClass, "GetAllItem", 1);
+                bool getAllItemNeedsStorageType = true;
+                if (getAllItemMethod == IntPtr.Zero)
+                {
+                    getAllItemMethod = this.FindAuraMonoMethodOnHierarchy(backPackClass, "GetAllItem", 0);
+                    getAllItemNeedsStorageType = false;
+                }
+                if (getAllItemMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                int storageTypeBackpack = 1;
+                IntPtr itemListObj;
+                unsafe
+                {
+                    IntPtr* args = stackalloc IntPtr[1];
+                    args[0] = (IntPtr)(&storageTypeBackpack);
+                    itemListObj = auraMonoRuntimeInvoke(getAllItemMethod, backPackSystemObj, getAllItemNeedsStorageType ? (IntPtr)args : IntPtr.Zero, ref exc);
+                }
+                if (exc != IntPtr.Zero || itemListObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                List<IntPtr> items = new List<IntPtr>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items) || items.Count == 0)
+                {
+                    return false;
+                }
+
+                foreach (IntPtr itemObj in items)
+                {
+                    if (itemObj == IntPtr.Zero
+                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int candidateStaticId)
+                        || candidateStaticId != staticId
+                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint candidateNetId)
+                        || candidateNetId == 0U)
+                    {
+                        continue;
+                    }
+
+                    netId = candidateNetId;
+                    this.lastDirectBackpackMatchedNetId = candidateNetId;
+                    this.lastDirectBackpackMatchedStaticId = candidateStaticId;
+                    this.TryGetDirectBackpackItemEntityType(itemObj, out this.lastDirectBackpackMatchedEntityType);
+                    this.TryGetDirectBackpackItemCount(itemObj, out this.lastDirectBackpackMatchedCount);
+                    this.AutoEatRepairLog("[UseBait] AuraMono match netId=" + candidateNetId + " staticId=" + candidateStaticId + " count=" + this.lastDirectBackpackMatchedCount);
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
         private bool TryDirectUseFood()
         {
             try
@@ -62698,6 +62924,7 @@ namespace HeartopiaMod
                             case "Join Public": this.keyJoinPublic = newKey; break;
                             case "Join My Town": this.keyJoinMyTown = newKey; break;
                             case "Auto Eat": this.keyAutoEat = newKey; break;
+                            case "Use Bait": this.keyUseBait = newKey; break;
                             case "Anti AFK": this.keyAntiAfk = newKey; break;
                             case "Bypass Overlap": this.keyBypassOverlap = newKey; break;
                             case "Bird Vacuum": this.keyBirdVacuum = newKey; break;
@@ -62746,7 +62973,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Inspect Move", ref this.keyInspectMove);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 18, subHeaderStyle, accent, panelFill, panelLine);
+            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 19, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Foraging", ref this.keyAutoForaging);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Aura Farm", ref this.keyAuraFarm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Water + Weed Radius", ref this.keyWaterWeedRadius);
@@ -62765,6 +62992,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Spawn Bubble", ref this.keySpawnBubble);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Repair", ref this.keyAutoRepair);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Eat", ref this.keyAutoEat);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Use Bait", ref this.keyUseBait);
             num += 14;
 
             this.BeginKeybindSection(ref num, left, contentWidth, "PLAYER", 5, subHeaderStyle, accent, panelFill, panelLine);
@@ -62814,6 +63042,7 @@ namespace HeartopiaMod
                 this.keyJoinPublic = KeyCode.None;
                 this.keyJoinMyTown = KeyCode.None;
                 this.keyAutoEat = KeyCode.None;
+                this.keyUseBait = KeyCode.None;
                 this.keyAntiAfk = KeyCode.None;
                 this.autoSnowHotkey = KeyCode.None;
                 this.keyBypassOverlap = KeyCode.None;
