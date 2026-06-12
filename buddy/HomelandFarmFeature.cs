@@ -65,6 +65,8 @@ namespace HeartopiaMod
         // cheaper to harvest+re-sow them together on the next wake.
         private const long HomelandFarmAutoPostHarvestResowThresholdSeconds = 5L;
         private const int HomelandFarmMaxTotalWaterLevel = 5;
+        // Max guest GUID entries in waterGuids/friends; at capacity the server rejects visitor water.
+        private const int HomelandFarmMaxVisitorWaterSlots = 5;
         private const int HomelandFarmDefaultPlantWaterMode = 0;
         private const int HomelandFarmMaxSpatialLevelObjectEntries = 1024;
         private const int HomelandFarmMaxAuraFarmEntityInspect = 8192;
@@ -11941,40 +11943,32 @@ namespace HeartopiaMod
             if (selfWateredReadOk)
             {
                 selfWatered = this.TryHomelandFarmComponentListContainsGuid(componentData, selfGuid, listMembers);
-                int totalWaterLevel = 0;
-                bool totalWaterLevelReadOk = false;
+                int friendWaterCount = 0;
+                bool friendWaterCountReadOk = false;
                 if (isCropBox)
                 {
-                    this.TryHomelandFarmTryReadCropBoxWaterState(
+                    this.TryHomelandFarmTryReadComponentListCount(
                         componentData,
-                        out bool ownerWatered,
-                        out bool ownerWateredReadOk,
-                        out int friendWaterCount,
-                        out bool friendWaterCountReadOk);
-                    if (ownerWateredReadOk || friendWaterCountReadOk)
-                    {
-                        totalWaterLevel = HomelandFarmComputeCropTotalWaterLevel(ownerWateredReadOk && ownerWatered, friendWaterCountReadOk ? friendWaterCount : 0);
-                        totalWaterLevelReadOk = true;
-                    }
+                        out friendWaterCount,
+                        out friendWaterCountReadOk,
+                        "waterGuids",
+                        "WaterGuids",
+                        "_waterGuids");
                 }
                 else
                 {
-                    this.TryHomelandFarmTryReadPlantWaterState(
+                    this.TryHomelandFarmTryReadComponentListCount(
                         componentData,
-                        out bool masterWater,
-                        out bool masterWaterReadOk,
-                        out bool weatherWater,
-                        out bool weatherWaterReadOk,
-                        out int friendWaterCount,
-                        out bool friendWaterCountReadOk,
-                        out totalWaterLevel,
-                        out totalWaterLevelReadOk,
-                        out _,
-                        out _);
+                        out friendWaterCount,
+                        out friendWaterCountReadOk,
+                        "friends",
+                        "Friends",
+                        "_friends");
                 }
 
-                canAddVisitorWater = !selfWatered
-                    && (!totalWaterLevelReadOk || totalWaterLevel < HomelandFarmMaxTotalWaterLevel);
+                bool hasVisitorSlot = !friendWaterCountReadOk
+                    || friendWaterCount < HomelandFarmMaxVisitorWaterSlots;
+                canAddVisitorWater = !selfWatered && hasVisitorSlot;
                 return true;
             }
 
