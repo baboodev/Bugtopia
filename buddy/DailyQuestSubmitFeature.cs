@@ -15,6 +15,10 @@ namespace HeartopiaMod
         private const int DailyQuestBackpackStorageType = 1;
         private const int DailyQuestWarehouseStorageType = 2;
         private const int DailyQuestRefreshTypeDaily = 2;
+        // TableTaskOrder.specialId of the "daily personal goals" group on the daily board
+        // (DailyOrderPanel splits specialId==1 into its own section; DailyOrderSystem.GetOrderType
+        // maps 1 -> Story). Accepted first in the auto-submit accept phase.
+        private const int DailyQuestOrderSpecialIdPersonalGoal = 1;
         private static readonly int[] DailyQuestSubmitStorageTypes = { DailyQuestBackpackStorageType, DailyQuestWarehouseStorageType };
 
         private object dailyQuestSubmitCoroutine = null;
@@ -87,9 +91,40 @@ namespace HeartopiaMod
             // homeland sow-all native AV that the GC-disable guard already fixes).
             List<DailyQuestResolvedOrder> resolved = this.ResolveDailyQuestOrdersForSubmit(orders);
 
-            int accepted = 0;
+            // Accept daily personal goals (the specialId == 1 group on the daily board) before
+            // everything else: actions the rest of this routine performs (accepting/submitting
+            // NPC orders) only count toward a goal's progress once that goal task is accepted.
+            // GetOrders sorts by specialId DESCENDING, so without this reorder the goals would
+            // be accepted nearly last.
+            List<int> acceptOrderIndices = new List<int>(resolved.Count);
+            List<int> acceptOrderIndicesTail = new List<int>(resolved.Count);
             for (int i = 0; i < resolved.Count; i++)
             {
+                int orderSpecialIdForAccept = 0;
+                if (resolved[i].Resolved)
+                {
+                    this.TryResolveDailyQuestTaskFromOrderKey(resolved[i].OrderKey, out _, out _, out orderSpecialIdForAccept, out _, out _);
+                }
+
+                if (orderSpecialIdForAccept == DailyQuestOrderSpecialIdPersonalGoal)
+                {
+                    acceptOrderIndices.Add(i);
+                }
+                else
+                {
+                    acceptOrderIndicesTail.Add(i);
+                }
+            }
+            if (acceptOrderIndices.Count > 0)
+            {
+                this.DailyQuestSubmitLog("accept phase: " + acceptOrderIndices.Count + " personal goal(s) first, then " + acceptOrderIndicesTail.Count + " other order(s)");
+            }
+            acceptOrderIndices.AddRange(acceptOrderIndicesTail);
+
+            int accepted = 0;
+            for (int acceptPass = 0; acceptPass < acceptOrderIndices.Count; acceptPass++)
+            {
+                int i = acceptOrderIndices[acceptPass];
                 DailyQuestResolvedOrder acceptEntry = resolved[i];
                 int acceptTaskId = acceptEntry.TaskId;
                 int acceptOrderKey = acceptEntry.OrderKey;
