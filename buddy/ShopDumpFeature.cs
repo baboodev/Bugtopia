@@ -11,6 +11,21 @@ namespace HeartopiaMod
     {
         private const int ShopDumpClothingStoreId = 5;
 
+        // Stores used by dedicated panels / events but often missing from TableStoreInfos.
+        private static readonly (int StoreId, string Label)[] ShopDumpSupplementalPanelStores = new (int, string)[]
+        {
+            (142, "Research Shop"),
+            (131, "Battle Pass Shop"),
+            (140, "Meteor / Starfall Exchange"),
+            (100000, "Activity Suit Shop"),
+            (88, "Weekly Pay Shop"),
+            (80, "Event / Dialogue Shop"),
+            (127, "Mid-Autumn Week Shop"),
+            (128, "LinLee Week Shop"),
+            (148, "Sea Lantern Festival Shop"),
+            (158, "Christmas Week Shop"),
+        };
+
         private string shopDumpStatus = "Idle.";
         private IntPtr shopDumpAuraGetGroupGoodsDataMethod = IntPtr.Zero;
 
@@ -50,7 +65,7 @@ namespace HeartopiaMod
         private int DumpShopResearchToLog()
         {
             int lines = 0;
-            lines += this.ShopDumpLogLine("========== shop research dump begin (ALL TableStoreInfos) ==========");
+            lines += this.ShopDumpLogLine("========== shop research dump begin (TableStoreInfos + supplemental) ==========");
             lines += this.ShopDumpLogLine("time=" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
 
             List<ShopDumpStoreInfoRow> allStores = new List<ShopDumpStoreInfoRow>();
@@ -61,8 +76,30 @@ namespace HeartopiaMod
                 return lines;
             }
 
+            int tableStoreInfoCount = allStores.Count;
+            HashSet<int> tableStoreInfoIds = new HashSet<int>();
+            for (int i = 0; i < allStores.Count; i++)
+            {
+                if (allStores[i].StoreId > 0)
+                {
+                    tableStoreInfoIds.Add(allStores[i].StoreId);
+                }
+            }
+
             Dictionary<int, ShopDumpStoreInfoRow> storeInfoById = new Dictionary<int, ShopDumpStoreInfoRow>();
-            lines += this.ShopDumpLogLine("TableStoreInfos count=" + allStores.Count);
+
+            List<ShopDumpSlotRow> allSlots = new List<ShopDumpSlotRow>();
+            if (!this.TryCollectTableStoreSlots(allSlots))
+            {
+                lines += this.ShopDumpLogLine("WARN: TableStoreSlots unavailable.");
+            }
+
+            int supplementalAdded = this.AugmentShopDumpStores(allStores, allSlots);
+            lines += this.ShopDumpLogLine(
+                "store list: TableStoreInfos=" + tableStoreInfoCount
+                + " supplementalAdded=" + supplementalAdded
+                + " total=" + allStores.Count);
+
             for (int i = 0; i < allStores.Count; i++)
             {
                 ShopDumpStoreInfoRow row = allStores[i];
@@ -72,18 +109,14 @@ namespace HeartopiaMod
                 }
 
                 storeInfoById[row.StoreId] = row;
+                bool supplemental = !tableStoreInfoIds.Contains(row.StoreId);
                 lines += this.ShopDumpLogLine(
                     "storeInfo id=" + row.StoreId
+                    + (supplemental ? " [supplemental]" : string.Empty)
                     + " name='" + row.DisplayName + "'"
                     + " npc='" + row.NpcPicture + "'"
                     + " bg='" + row.BgPicture + "'"
                     + " decor='" + row.DecorationPicture + "'");
-            }
-
-            List<ShopDumpSlotRow> allSlots = new List<ShopDumpSlotRow>();
-            if (!this.TryCollectTableStoreSlots(allSlots))
-            {
-                lines += this.ShopDumpLogLine("WARN: TableStoreSlots unavailable.");
             }
 
             List<ShopDumpSelectorRow> allSelectors = new List<ShopDumpSelectorRow>();
@@ -1115,6 +1148,134 @@ namespace HeartopiaMod
             }
 
             return false;
+        }
+
+        private int AugmentShopDumpStores(List<ShopDumpStoreInfoRow> allStores, List<ShopDumpSlotRow> allSlots)
+        {
+            HashSet<int> existing = new HashSet<int>();
+            for (int i = 0; i < allStores.Count; i++)
+            {
+                if (allStores[i].StoreId > 0)
+                {
+                    existing.Add(allStores[i].StoreId);
+                }
+            }
+
+            int added = 0;
+            for (int i = 0; i < allSlots.Count; i++)
+            {
+                int storeId = allSlots[i].StoreId;
+                if (storeId <= 0 || !existing.Add(storeId))
+                {
+                    continue;
+                }
+
+                if (!this.TryCreateShopDumpSupplementalStoreRow(storeId, "TableStoreSlots", out ShopDumpStoreInfoRow row))
+                {
+                    existing.Remove(storeId);
+                    continue;
+                }
+
+                allStores.Add(row);
+                added++;
+            }
+
+            for (int i = 0; i < ShopDumpSupplementalPanelStores.Length; i++)
+            {
+                int storeId = ShopDumpSupplementalPanelStores[i].StoreId;
+                string label = ShopDumpSupplementalPanelStores[i].Label;
+                if (storeId <= 0 || !existing.Add(storeId))
+                {
+                    continue;
+                }
+
+                if (!this.TryCreateShopDumpSupplementalStoreRow(storeId, label, out ShopDumpStoreInfoRow row))
+                {
+                    existing.Remove(storeId);
+                    continue;
+                }
+
+                allStores.Add(row);
+                added++;
+            }
+
+            if (added > 0)
+            {
+                allStores.Sort((a, b) => a.StoreId.CompareTo(b.StoreId));
+            }
+
+            return added;
+        }
+
+        private bool TryCreateShopDumpSupplementalStoreRow(int storeId, string sourceLabel, out ShopDumpStoreInfoRow row)
+        {
+            row = default(ShopDumpStoreInfoRow);
+            if (storeId <= 0)
+            {
+                return false;
+            }
+
+            if (this.TryReadShopDumpStoreInfoById(storeId, out row))
+            {
+                return true;
+            }
+
+            string label = string.IsNullOrEmpty(sourceLabel) ? ("store " + storeId) : sourceLabel;
+            row = new ShopDumpStoreInfoRow
+            {
+                StoreId = storeId,
+                DisplayName = label + " [supplemental]",
+                CombinedText = label.ToLowerInvariant()
+            };
+            return true;
+        }
+
+        private bool TryReadShopDumpStoreInfoById(int storeId, out ShopDumpStoreInfoRow row)
+        {
+            row = default(ShopDumpStoreInfoRow);
+            if (storeId <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
+                if (tableDataType == null)
+                {
+                    return false;
+                }
+
+                FieldInfo field = tableDataType.GetField("TableStoreInfos", BindingFlags.Public | BindingFlags.Static);
+                if (!(field?.GetValue(null) is IDictionary dictionary))
+                {
+                    return false;
+                }
+
+                if (!dictionary.Contains(storeId))
+                {
+                    return false;
+                }
+
+                object value = dictionary[storeId];
+                if (value == null)
+                {
+                    return false;
+                }
+
+                MethodInfo localizationMethod = this.FindTableLocalizationMethod(tableDataType);
+                row.StoreId = storeId;
+                row.DisplayName = this.TryGetLocalizedStoreName(value, localizationMethod);
+                row.NpcPicture = this.TryReadObjectString(value, "npcPictureName");
+                row.BgPicture = this.TryReadObjectString(value, "bgPictureId");
+                row.DecorationPicture = this.TryReadObjectString(value, "decorationPictureName");
+                row.CombinedText = ((row.DisplayName ?? string.Empty) + " " + row.NpcPicture + " " + row.BgPicture + " " + row.DecorationPicture).ToLowerInvariant();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private bool TryCollectTableStoreInfos(List<ShopDumpStoreInfoRow> rows)
