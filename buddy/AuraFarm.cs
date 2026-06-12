@@ -399,7 +399,11 @@ namespace HeartopiaMod
         private static MonoFieldGetValueDelegate auraMonoFieldGetValue;
         private static MonoFieldGetValueObjectDelegate auraMonoFieldGetValueObject;
         private static MonoFieldSetValueDelegate auraMonoFieldSetValue;
+        // auraMonoRuntimeInvoke is NOT the raw export: it is bound to InvokeAuraMonoChecked, the
+        // central guard every invoke site goes through (see "AuraMono invoke guard" below).
+        // The raw export lives in auraMonoRuntimeInvokeRaw — never call it from feature code.
         private static MonoRuntimeInvokeDelegate auraMonoRuntimeInvoke;
+        private static MonoRuntimeInvokeDelegate auraMonoRuntimeInvokeRaw;
         private static MonoObjectUnboxDelegate auraMonoObjectUnbox;
         private static MonoStringNewDelegate auraMonoStringNew;
         private static MonoStringToUtf8Delegate auraMonoStringToUtf8;
@@ -529,6 +533,95 @@ namespace HeartopiaMod
             }
             try { auraMonoGcHandleFree(handle); }
             catch { }
+        }
+
+        // ---- AuraMono invoke guard ------------------------------------------------------------
+        // Every call site in the mod invokes through the auraMonoRuntimeInvoke delegate, which is
+        // bound to this method rather than to the raw mono_runtime_invoke export. Guarantees:
+        //   1. a null method / missing export can never reach native code;
+        //   2. when the managed callee throws, the (undefined) native return value is replaced
+        //      with IntPtr.Zero, so call sites that only check the result — or check nothing —
+        //      can never unbox/deref garbage;
+        //   3. every game-side exception is counted and logged (throttled), even at the ~50 call
+        //      sites that ignore the exc out-param.
+        private static int auraInvokeExceptionCount;
+        private static int auraInvokeNextExceptionLogTick;
+        private static string auraInvokeLastExceptionName = string.Empty;
+        private const int AuraInvokeExceptionLogThrottleMs = 2000;
+
+        private static IntPtr InvokeAuraMonoChecked(IntPtr method, IntPtr obj, IntPtr parameters, ref IntPtr exc)
+        {
+            MonoRuntimeInvokeDelegate raw = auraMonoRuntimeInvokeRaw;
+            if (raw == null || method == IntPtr.Zero)
+            {
+                exc = IntPtr.Zero;
+                return IntPtr.Zero;
+            }
+
+            IntPtr result = raw(method, obj, parameters, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                RecordAuraInvokeException(exc);
+                return IntPtr.Zero;
+            }
+            return result;
+        }
+
+        private static void RecordAuraInvokeException(IntPtr exc)
+        {
+            auraInvokeExceptionCount++;
+            try
+            {
+                string name = "<unknown>";
+                MonoObjectGetClassDelegate getClass = auraMonoObjectGetClass;
+                if (getClass != null)
+                {
+                    IntPtr klass = getClass(exc);
+                    if (klass != IntPtr.Zero)
+                    {
+                        // mono_class_get_name/namespace return image-owned const char* — no free.
+                        string ns = auraMonoClassGetNamespace != null ? Marshal.PtrToStringAnsi(auraMonoClassGetNamespace(klass)) : null;
+                        string cn = auraMonoClassGetName != null ? Marshal.PtrToStringAnsi(auraMonoClassGetName(klass)) : null;
+                        if (!string.IsNullOrEmpty(cn))
+                        {
+                            name = string.IsNullOrEmpty(ns) ? cn : ns + "." + cn;
+                        }
+                    }
+                }
+                auraInvokeLastExceptionName = name;
+
+                int now = Environment.TickCount;
+                if (unchecked(now - auraInvokeNextExceptionLogTick) >= 0)
+                {
+                    auraInvokeNextExceptionLogTick = now + AuraInvokeExceptionLogThrottleMs;
+                    ModLogger.Msg("[AuraMono] Invoke raised " + name + " (total exceptions: " + auraInvokeExceptionCount + ").");
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        // Preferred invoke API for new code: explicit success flag + readable error, result is
+        // always Zero on failure. Existing sites reach the same guard via the delegate binding.
+        internal static bool TryAuraInvoke(IntPtr method, IntPtr obj, IntPtr args, out IntPtr result, out string error)
+        {
+            result = IntPtr.Zero;
+            error = null;
+            if (method == IntPtr.Zero || auraMonoRuntimeInvokeRaw == null)
+            {
+                error = "AuraMono invoke unavailable (method or export missing).";
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            result = InvokeAuraMonoChecked(method, obj, args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                error = "AuraMono invoke raised " + auraInvokeLastExceptionName + ".";
+                return false;
+            }
+            return true;
         }
 
         // Cross-frame cache for a MonoObject*: rooted via GC handle when the gchandle exports are
@@ -5683,7 +5776,8 @@ namespace HeartopiaMod
             auraMonoFieldGetValue = this.GetAuraMonoExport<MonoFieldGetValueDelegate>(monoModule, "mono_field_get_value");
             auraMonoFieldGetValueObject = this.GetAuraMonoExport<MonoFieldGetValueObjectDelegate>(monoModule, "mono_field_get_value_object");
             auraMonoFieldSetValue = this.GetAuraMonoExport<MonoFieldSetValueDelegate>(monoModule, "mono_field_set_value");
-            auraMonoRuntimeInvoke = this.GetAuraMonoExport<MonoRuntimeInvokeDelegate>(monoModule, "mono_runtime_invoke");
+            auraMonoRuntimeInvokeRaw = this.GetAuraMonoExport<MonoRuntimeInvokeDelegate>(monoModule, "mono_runtime_invoke");
+            auraMonoRuntimeInvoke = auraMonoRuntimeInvokeRaw != null ? new MonoRuntimeInvokeDelegate(InvokeAuraMonoChecked) : null;
             auraMonoObjectUnbox = this.GetAuraMonoExport<MonoObjectUnboxDelegate>(monoModule, "mono_object_unbox");
             auraMonoStringNew = this.GetAuraMonoExport<MonoStringNewDelegate>(monoModule, "mono_string_new");
             auraMonoStringToUtf8 = this.GetAuraMonoExport<MonoStringToUtf8Delegate>(monoModule, "mono_string_to_utf8");
