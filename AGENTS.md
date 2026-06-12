@@ -329,6 +329,7 @@ Log locations: [BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md).
 |--------|-----|
 | Guess namespaces | Builds differ; use dumps |
 | Cache a MonoObject* across frames in a raw `IntPtr` field | bdwgc collects it once the game drops its reference → random AV; use `AuraMonoObjectCache` (gchandle + world-epoch invalidation). CI lint E3 |
+| Cache or pin **transient** character states (`GamePhotoMode`, equip states, UI panels) across frames | Not singletons — the game tears them down on tool/state change; a pin keeps a detached object alive → AV on field read. Re-resolve from `Character._states` (or equivalent) each tick; pointer valid only in sync scope |
 | Call `auraMonoRuntimeInvokeRaw` or re-resolve `mono_runtime_invoke` | Bypasses `InvokeAuraMonoChecked` (null guard, exc check, garbage-result suppression); use `auraMonoRuntimeInvoke` or `TryAuraInvoke`. CI lint E1/E2 |
 | Carry an object `IntPtr` across `yield return` in a coroutine | GC can collect it between frames; scalarize to netIds/strings before the first yield, or pin via `AuraMonoPin` in try/finally. CI lint W1 |
 | Pass an out-param slot to `mono_runtime_invoke` for a value type wider than a pointer | mono writes the whole struct into the slot → stack corruption (crashed AutoSell scan); use `ContainsKey` + `get_Item` (boxed returns) |

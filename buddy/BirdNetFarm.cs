@@ -115,6 +115,7 @@ namespace HeartopiaMod
             if (!enabled)
             {
                 RestorePreviousTool(host);
+                host?.ClearBirdFarmRuntimeState();
                 sessionCatchCount = 0;
                 sessionScaredCount = 0;
                 sessionCountedNetIds.Clear();

@@ -7992,9 +7992,7 @@ namespace HeartopiaMod
             this.cachedBirdFarmAuraCacheTtl = 5f;
             this.cachedBirdFarmAuraMoveTolerance = 4f;
             this.cachedBirdFarmAuraEntityCount = 0;
-            this.cachedBirdFarmAuraPhotoModeObj.Clear();
-            this.cachedBirdFarmAuraPhotoModeSource = string.Empty;
-            this.cachedBirdFarmAuraPhotoModeExpiresAt = -999f;
+            this.nextBirdFarmPhotoModeMissingBackoffAt = -999f;
             this.nextBirdFarmPhotoModeComponentRefreshAt = -999f;
             this.nextBirdFarmManagedFallbackScanAt = -999f;
             this.nextBirdFarmCleanupAt = -999f;
@@ -8500,8 +8498,6 @@ namespace HeartopiaMod
 
                 if (!this.TryGetMonoObjectMember(photoModeObj, "_birdScannables", out IntPtr birdListObj) || birdListObj == IntPtr.Zero)
                 {
-                    this.cachedBirdFarmAuraPhotoModeObj.Clear();
-                    this.cachedBirdFarmAuraPhotoModeExpiresAt = -999f;
                     status = "Aura PhotoMode _birdScannables unavailable";
                     return false;
                 }
@@ -8739,18 +8735,21 @@ namespace HeartopiaMod
             return 0;
         }
 
+        // GamePhotoMode is a transient Character state (created/destroyed with the bird scanner),
+        // not a process-lifetime singleton. Per AGENTS.md §12: do not cache its MonoObject* across
+        // frames (raw IntPtr → UAF; AuraMonoObjectCache pin → stale detached state AV). Re-resolve
+        // from Character._states on every call; the pointer is only valid in the caller's sync scope.
         private bool TryResolveAuraMonoGamePhotoModeObject(out IntPtr photoModeObj, out string status)
         {
             photoModeObj = IntPtr.Zero;
             status = "not attempted";
 
             float now = Time.unscaledTime;
-            if (now < this.cachedBirdFarmAuraPhotoModeExpiresAt && this.cachedBirdFarmAuraPhotoModeObj.TryGet(out photoModeObj))
+            if (now < this.nextBirdFarmPhotoModeMissingBackoffAt)
             {
-                status = string.IsNullOrWhiteSpace(this.cachedBirdFarmAuraPhotoModeSource) ? "cached" : this.cachedBirdFarmAuraPhotoModeSource;
-                return true;
+                status = "GamePhotoMode resolve throttled";
+                return false;
             }
-            photoModeObj = IntPtr.Zero;
 
             if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
             {
@@ -8805,15 +8804,14 @@ namespace HeartopiaMod
                         {
                             photoModeObj = stateObj;
                             status = "Character._states";
-                            this.cachedBirdFarmAuraPhotoModeObj.Set(photoModeObj);
-                            this.cachedBirdFarmAuraPhotoModeSource = status;
-                            this.cachedBirdFarmAuraPhotoModeExpiresAt = now + 5f;
+                            this.nextBirdFarmPhotoModeMissingBackoffAt = -999f;
                             return true;
                         }
                     }
                 }
             }
 
+            this.nextBirdFarmPhotoModeMissingBackoffAt = now + 0.75f;
             status = "GamePhotoMode not found in Character states";
             return false;
         }
@@ -65798,9 +65796,7 @@ namespace HeartopiaMod
         private float cachedBirdFarmAuraCacheTtl = 5f;
         private float cachedBirdFarmAuraMoveTolerance = 4f;
         private int cachedBirdFarmAuraEntityCount = 0;
-        private AuraMonoObjectCache cachedBirdFarmAuraPhotoModeObj;
-        private string cachedBirdFarmAuraPhotoModeSource = string.Empty;
-        private float cachedBirdFarmAuraPhotoModeExpiresAt = -999f;
+        private float nextBirdFarmPhotoModeMissingBackoffAt = -999f;
         private float nextBirdFarmPhotoModeComponentRefreshAt = -999f;
         private float nextBirdFarmManagedFallbackScanAt = -999f;
         private float nextBirdFarmCleanupAt = -999f;
