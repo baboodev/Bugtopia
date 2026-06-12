@@ -793,11 +793,17 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemObj))
+            {
+                error = "Aura ShopSystem instance stale.";
+                return false;
+            }
+
             int slotValue = slotId;
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&slotValue);
             IntPtr exc = IntPtr.Zero;
-            listObj = auraMonoRuntimeInvoke(this.shopDumpAuraGetGroupGoodsDataMethod, this.shopBuyAllShopSystemObj, (IntPtr)args, ref exc);
+            listObj = auraMonoRuntimeInvoke(this.shopDumpAuraGetGroupGoodsDataMethod, shopSystemObj, (IntPtr)args, ref exc);
             if (exc != IntPtr.Zero || listObj == IntPtr.Zero)
             {
                 error = "Aura GetGroupGoodsData invoke failed.";
@@ -820,7 +826,8 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr shopClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(this.shopBuyAllShopSystemObj) : IntPtr.Zero;
+            this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemForLookup);
+            IntPtr shopClass = auraMonoObjectGetClass != null && shopSystemForLookup != IntPtr.Zero ? auraMonoObjectGetClass(shopSystemForLookup) : IntPtr.Zero;
             IntPtr getGroupGoods = shopClass != IntPtr.Zero
                 ? this.FindAuraMonoMethodOnHierarchy(shopClass, "GetGroupGoodsData", 1)
                 : IntPtr.Zero;

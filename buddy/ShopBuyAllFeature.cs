@@ -27,8 +27,8 @@ namespace HeartopiaMod
         private IntPtr shopBuyAllShelfBuyItemMethod = IntPtr.Zero;
         private IntPtr shopBuyAllShelfBuyClothesMethod = IntPtr.Zero;
         private IntPtr shopBuyAllGetStoreGoodsDataMethod = IntPtr.Zero;
-        private IntPtr shopBuyAllShopSystemObj = IntPtr.Zero;
-        private IntPtr shopBuyAllPlayerServiceObj = IntPtr.Zero;
+        private AuraMonoObjectCache shopBuyAllShopSystemObj;
+        private AuraMonoObjectCache shopBuyAllPlayerServiceObj;
         private IntPtr shopBuyAllGetCurrencyCountMethod = IntPtr.Zero;
         private IntPtr shopBuyAllGetItemCountMethod = IntPtr.Zero;
         private IntPtr shopBuyAllCheckAvatarObtainMethod = IntPtr.Zero;
@@ -450,7 +450,7 @@ namespace HeartopiaMod
         private bool TryEnsureShopBuyAllAuraShopSystem(out string error)
         {
             error = null;
-            if (this.shopBuyAllShopSystemObj != IntPtr.Zero)
+            if (this.shopBuyAllShopSystemObj.TryGet(out _))
             {
                 return true;
             }
@@ -475,7 +475,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.shopBuyAllShopSystemObj = shopSys;
+            this.shopBuyAllShopSystemObj.Set(shopSys);
             return true;
         }
 
@@ -492,7 +492,8 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr shopClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(this.shopBuyAllShopSystemObj) : IntPtr.Zero;
+            this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemForListing);
+            IntPtr shopClass = auraMonoObjectGetClass != null && shopSystemForListing != IntPtr.Zero ? auraMonoObjectGetClass(shopSystemForListing) : IntPtr.Zero;
             IntPtr getGoods = shopClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(shopClass, "GetStoreGoodsData", 1) : IntPtr.Zero;
             if (getGoods == IntPtr.Zero)
             {
@@ -512,11 +513,17 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemObj))
+            {
+                error = "Aura ShopSystem instance stale.";
+                return false;
+            }
+
             int storeIdValue = storeId;
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&storeIdValue);
             IntPtr exc = IntPtr.Zero;
-            listObj = auraMonoRuntimeInvoke(this.shopBuyAllGetStoreGoodsDataMethod, this.shopBuyAllShopSystemObj, (IntPtr)args, ref exc);
+            listObj = auraMonoRuntimeInvoke(this.shopBuyAllGetStoreGoodsDataMethod, shopSystemObj, (IntPtr)args, ref exc);
             if (exc != IntPtr.Zero || listObj == IntPtr.Zero)
             {
                 error = "Aura GetStoreGoodsData invoke failed.";
@@ -547,6 +554,11 @@ namespace HeartopiaMod
                 _ => 2
             };
 
+            if (!this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemObj))
+            {
+                return false;
+            }
+
             unsafe
             {
                 int unlockTypeValue = avatarUnlockType;
@@ -555,7 +567,7 @@ namespace HeartopiaMod
                 args[0] = (IntPtr)(&unlockTypeValue);
                 args[1] = (IntPtr)(&staticIdValue);
                 IntPtr exc = IntPtr.Zero;
-                IntPtr boxed = auraMonoRuntimeInvoke(this.shopBuyAllCheckAvatarObtainMethod, this.shopBuyAllShopSystemObj, (IntPtr)args, ref exc);
+                IntPtr boxed = auraMonoRuntimeInvoke(this.shopBuyAllCheckAvatarObtainMethod, shopSystemObj, (IntPtr)args, ref exc);
                 if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
                 {
                     return false;
@@ -579,7 +591,8 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr shopClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(this.shopBuyAllShopSystemObj) : IntPtr.Zero;
+            this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemForCheck);
+            IntPtr shopClass = auraMonoObjectGetClass != null && shopSystemForCheck != IntPtr.Zero ? auraMonoObjectGetClass(shopSystemForCheck) : IntPtr.Zero;
             IntPtr checkMethod = shopClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(shopClass, "CheckIfAvatarHasObtain", 2) : IntPtr.Zero;
             if (checkMethod == IntPtr.Zero)
             {
@@ -653,9 +666,14 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!this.shopBuyAllPlayerServiceObj.TryGet(out IntPtr playerServiceForCount))
+            {
+                return false;
+            }
+
             if (this.shopBuyAllGetItemCountMethod == IntPtr.Zero)
             {
-                IntPtr playerClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(this.shopBuyAllPlayerServiceObj) : IntPtr.Zero;
+                IntPtr playerClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(playerServiceForCount) : IntPtr.Zero;
                 this.shopBuyAllGetItemCountMethod = playerClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(playerClass, "GetItemCount", 1) : IntPtr.Zero;
                 if (this.shopBuyAllGetItemCountMethod == IntPtr.Zero)
                 {
@@ -667,7 +685,7 @@ namespace HeartopiaMod
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&staticIdValue);
             IntPtr exc = IntPtr.Zero;
-            IntPtr boxed = auraMonoRuntimeInvoke(this.shopBuyAllGetItemCountMethod, this.shopBuyAllPlayerServiceObj, (IntPtr)args, ref exc);
+            IntPtr boxed = auraMonoRuntimeInvoke(this.shopBuyAllGetItemCountMethod, playerServiceForCount, (IntPtr)args, ref exc);
             if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
             {
                 return false;
@@ -694,7 +712,7 @@ namespace HeartopiaMod
         private unsafe bool TryEnsureShopBuyAllPlayerService(out string error)
         {
             error = null;
-            if (this.shopBuyAllPlayerServiceObj != IntPtr.Zero && this.shopBuyAllGetCurrencyCountMethod != IntPtr.Zero)
+            if (this.shopBuyAllPlayerServiceObj.TryGet(out _) && this.shopBuyAllGetCurrencyCountMethod != IntPtr.Zero)
             {
                 return true;
             }
@@ -726,7 +744,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.shopBuyAllPlayerServiceObj = playerServiceObj;
+            this.shopBuyAllPlayerServiceObj.Set(playerServiceObj);
             this.shopBuyAllGetCurrencyCountMethod = getCurrencyCount;
             return true;
         }
@@ -740,11 +758,17 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!this.shopBuyAllPlayerServiceObj.TryGet(out IntPtr playerServiceObj))
+            {
+                error = "PlayerService instance stale.";
+                return false;
+            }
+
             int currencyType = ShopBuyAllCurrencyCoin;
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&currencyType);
             IntPtr exc = IntPtr.Zero;
-            IntPtr boxed = auraMonoRuntimeInvoke(this.shopBuyAllGetCurrencyCountMethod, this.shopBuyAllPlayerServiceObj, (IntPtr)args, ref exc);
+            IntPtr boxed = auraMonoRuntimeInvoke(this.shopBuyAllGetCurrencyCountMethod, playerServiceObj, (IntPtr)args, ref exc);
             if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
             {
                 error = "GetCurrencyCount invoke failed.";

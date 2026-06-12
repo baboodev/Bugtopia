@@ -250,7 +250,8 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr shopClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(this.shopBuyAllShopSystemObj) : IntPtr.Zero;
+            this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemForClass);
+            IntPtr shopClass = auraMonoObjectGetClass != null && shopSystemForClass != IntPtr.Zero ? auraMonoObjectGetClass(shopSystemForClass) : IntPtr.Zero;
             if (shopClass == IntPtr.Zero)
             {
                 error = "Aura ShopSystem class missing.";
@@ -344,6 +345,11 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!this.shopBuyAllShopSystemObj.TryGet(out IntPtr shopSystemObj))
+            {
+                return false;
+            }
+
             byte* quickBuyPtr = stackalloc byte[12];
             *(int*)(quickBuyPtr + 0) = storeId;
             *(int*)(quickBuyPtr + 4) = slotId;
@@ -354,7 +360,7 @@ namespace HeartopiaMod
             for (int i = 0; i < candidates.Count; i++)
             {
                 IntPtr exc = IntPtr.Zero;
-                IntPtr boxed = auraMonoRuntimeInvoke(candidates[i], this.shopBuyAllShopSystemObj, (IntPtr)getArgs, ref exc);
+                IntPtr boxed = auraMonoRuntimeInvoke(candidates[i], shopSystemObj, (IntPtr)getArgs, ref exc);
                 if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
                 {
                     continue;

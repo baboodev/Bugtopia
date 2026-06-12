@@ -35,8 +35,8 @@ namespace HeartopiaMod
         private float noclipVehicleAuraRetryAt;
         private bool noclipVehicleAuraReady;
         private bool noclipVehicleAuraProbeLogged;
-        private IntPtr cachedNoclipVehicleComponentObj;
-        private IntPtr cachedNoclipVehicleControllerObj;
+        private AuraMonoObjectCache cachedNoclipVehicleComponentObj;
+        private AuraMonoObjectCache cachedNoclipVehicleControllerObj;
         private IntPtr noclipAuraVehicleManagerClass;
         private IntPtr noclipAuraGetSelfEntityVehicleMethod;
         private IntPtr noclipAuraGetPassengerVehicleMethod;
@@ -44,7 +44,7 @@ namespace HeartopiaMod
         private IntPtr noclipAuraWorldPlaceToMethod;
         private IntPtr noclipAuraForceDisplacementMethod;
         private IntPtr noclipAuraResetVirtualInputMethod;
-        private IntPtr noclipAuraMonoInputManagerObj;
+        private AuraMonoObjectCache noclipAuraMonoInputManagerObj;
         private IntPtr noclipAuraDisableInputMethod;
         private IntPtr noclipAuraEnableInputMethod;
         private bool noclipVehicleJumpInputSuppressed;
@@ -252,16 +252,16 @@ namespace HeartopiaMod
         {
             NoclipFeature.OverrideVehiclePosition = false;
 
-            IntPtr vehicleComponentObj = this.cachedNoclipVehicleComponentObj;
-            IntPtr vehicleControllerObj = this.cachedNoclipVehicleControllerObj;
+            this.cachedNoclipVehicleComponentObj.TryGet(out IntPtr vehicleComponentObj);
+            this.cachedNoclipVehicleControllerObj.TryGet(out IntPtr vehicleControllerObj);
             if (vehicleComponentObj == IntPtr.Zero && this.IsPlayerDrivingVehicle())
             {
                 this.TryResolveNoclipVehicleContext(out vehicleComponentObj, out vehicleControllerObj, out _);
             }
 
             this.RestoreNoclipVehicleDrivingState(vehicleComponentObj, vehicleControllerObj);
-            this.cachedNoclipVehicleComponentObj = IntPtr.Zero;
-            this.cachedNoclipVehicleControllerObj = IntPtr.Zero;
+            this.cachedNoclipVehicleComponentObj.Clear();
+            this.cachedNoclipVehicleControllerObj.Clear();
         }
 
         private void InitializeNoclipOverridePosition()
@@ -272,8 +272,8 @@ namespace HeartopiaMod
                 HeartopiaComplete.OverridePlayerPosition = false;
                 NoclipFeature.OverrideVehiclePosition = true;
                 NoclipFeature.OverrideVehicleTarget = vehiclePosition;
-                this.cachedNoclipVehicleComponentObj = vehicleComponentObj;
-                this.cachedNoclipVehicleControllerObj = vehicleControllerObj;
+                this.cachedNoclipVehicleComponentObj.Set(vehicleComponentObj);
+                this.cachedNoclipVehicleControllerObj.Set(vehicleControllerObj);
                 this.ActivateNoclipVehicleDrivingOverride(vehicleComponentObj, vehicleControllerObj);
                 return;
             }
@@ -303,8 +303,8 @@ namespace HeartopiaMod
             if (this.TryResolveNoclipVehicleContext(out IntPtr vehicleComponentObj, out IntPtr vehicleControllerObj, out Vector3 vehiclePosition))
             {
                 HeartopiaComplete.OverridePlayerPosition = false;
-                this.cachedNoclipVehicleComponentObj = vehicleComponentObj;
-                this.cachedNoclipVehicleControllerObj = vehicleControllerObj;
+                this.cachedNoclipVehicleComponentObj.Set(vehicleComponentObj);
+                this.cachedNoclipVehicleControllerObj.Set(vehicleControllerObj);
                 this.ActivateNoclipVehicleDrivingOverride(vehicleComponentObj, vehicleControllerObj);
 
                 Vector3 moveDirection = this.BuildNoclipMoveDirection();
@@ -348,16 +348,18 @@ namespace HeartopiaMod
                 return;
             }
 
-            IntPtr vehicleComponentObj = this.cachedNoclipVehicleComponentObj;
-            IntPtr vehicleControllerObj = this.cachedNoclipVehicleControllerObj;
-            if (vehicleComponentObj == IntPtr.Zero
-                && !this.TryResolveNoclipVehicleContext(out vehicleComponentObj, out vehicleControllerObj, out _))
+            this.cachedNoclipVehicleComponentObj.TryGet(out IntPtr vehicleComponentObj);
+            this.cachedNoclipVehicleControllerObj.TryGet(out IntPtr vehicleControllerObj);
+            if (vehicleComponentObj == IntPtr.Zero)
             {
-                return;
+                if (!this.TryResolveNoclipVehicleContext(out vehicleComponentObj, out vehicleControllerObj, out _))
+                {
+                    return;
+                }
+                this.cachedNoclipVehicleComponentObj.Set(vehicleComponentObj);
+                this.cachedNoclipVehicleControllerObj.Set(vehicleControllerObj);
             }
 
-            this.cachedNoclipVehicleComponentObj = vehicleComponentObj;
-            this.cachedNoclipVehicleControllerObj = vehicleControllerObj;
             this.ActivateNoclipVehicleDrivingOverride(vehicleComponentObj, vehicleControllerObj);
             this.ApplyNoclipVehicleWorldPlace(vehicleComponentObj, NoclipFeature.OverrideVehicleTarget);
         }
@@ -630,7 +632,7 @@ namespace HeartopiaMod
 
         private bool TryEnsureNoclipMonoInputManagerMethods()
         {
-            if (this.noclipAuraMonoInputManagerObj != IntPtr.Zero
+            if (this.noclipAuraMonoInputManagerObj.TryGet(out _)
                 && this.noclipAuraDisableInputMethod != IntPtr.Zero
                 && this.noclipAuraEnableInputMethod != IntPtr.Zero)
             {
@@ -660,7 +662,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.noclipAuraMonoInputManagerObj = managerObj;
+            this.noclipAuraMonoInputManagerObj.Set(managerObj);
             this.noclipAuraDisableInputMethod = disableMethod;
             this.noclipAuraEnableInputMethod = enableMethod;
             return true;
@@ -738,7 +740,7 @@ namespace HeartopiaMod
             }
 
             IntPtr method = suppressed ? this.noclipAuraDisableInputMethod : this.noclipAuraEnableInputMethod;
-            if (method == IntPtr.Zero || this.noclipAuraMonoInputManagerObj == IntPtr.Zero)
+            if (method == IntPtr.Zero || !this.noclipAuraMonoInputManagerObj.TryGet(out IntPtr inputManagerObj))
             {
                 return;
             }
@@ -748,7 +750,7 @@ namespace HeartopiaMod
             IntPtr exc = IntPtr.Zero;
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&jumpInputEvent);
-            auraMonoRuntimeInvoke(method, this.noclipAuraMonoInputManagerObj, (IntPtr)args, ref exc);
+            auraMonoRuntimeInvoke(method, inputManagerObj, (IntPtr)args, ref exc);
             if (exc == IntPtr.Zero)
             {
                 this.noclipVehicleJumpInputSuppressed = suppressed;
@@ -767,7 +769,7 @@ namespace HeartopiaMod
             }
 
             IntPtr method = disable ? this.noclipAuraDisableInputMethod : this.noclipAuraEnableInputMethod;
-            if (method == IntPtr.Zero || this.noclipAuraMonoInputManagerObj == IntPtr.Zero)
+            if (method == IntPtr.Zero || !this.noclipAuraMonoInputManagerObj.TryGet(out IntPtr inputManagerObj))
             {
                 return false;
             }
@@ -776,7 +778,7 @@ namespace HeartopiaMod
             IntPtr exc = IntPtr.Zero;
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&ev);
-            auraMonoRuntimeInvoke(method, this.noclipAuraMonoInputManagerObj, (IntPtr)args, ref exc);
+            auraMonoRuntimeInvoke(method, inputManagerObj, (IntPtr)args, ref exc);
             return exc == IntPtr.Zero;
         }
 

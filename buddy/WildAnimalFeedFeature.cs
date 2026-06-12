@@ -1079,20 +1079,49 @@ namespace HeartopiaMod
                 this.WildAnimalFeedLog("AuraMono inventory snapshot unavailable");
             }
 
-            yield return null;
-
+            // Root every Mono object the plan context carries across the per-group yields below:
+            // the GC may otherwise collect group rows / inventory items between frames.
+            List<uint> auraPlanPins = new List<uint>(context.GroupItems.Count + 8);
+            auraPlanPins.Add(AuraMonoPinNew(context.WildAnimalSystemObj));
             for (int i = 0; i < context.GroupItems.Count; i++)
             {
-                try
+                auraPlanPins.Add(AuraMonoPinNew(context.GroupItems[i]));
+            }
+            if (context.Inventory != null && context.Inventory.ItemsByStorage != null)
+            {
+                foreach (List<IntPtr> bucket in context.Inventory.ItemsByStorage.Values)
                 {
-                    this.TryAppendWildAnimalFeedAuraMonoGroupPlan(context, plans, context.GroupItems[i]);
+                    for (int i = 0; bucket != null && i < bucket.Count; i++)
+                    {
+                        auraPlanPins.Add(AuraMonoPinNew(bucket[i]));
+                    }
                 }
-                catch (Exception ex)
-                {
-                    this.WildAnimalFeedLog("AuraMono group exception: " + ex.Message);
-                }
+            }
 
+            try
+            {
                 yield return null;
+
+                for (int i = 0; i < context.GroupItems.Count; i++)
+                {
+                    try
+                    {
+                        this.TryAppendWildAnimalFeedAuraMonoGroupPlan(context, plans, context.GroupItems[i]);
+                    }
+                    catch (Exception ex)
+                    {
+                        this.WildAnimalFeedLog("AuraMono group exception: " + ex.Message);
+                    }
+
+                    yield return null;
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < auraPlanPins.Count; i++)
+                {
+                    AuraMonoPinFree(auraPlanPins[i]);
+                }
             }
 
             status = "AuraMono groups=" + context.CheckedGroups + " hungry=" + context.HungryGroups + " feedable=" + plans.Count;

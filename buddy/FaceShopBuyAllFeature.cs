@@ -33,7 +33,7 @@ namespace HeartopiaMod
             public IntPtr AuraAvatarFaceValueClass;
         }
 
-        private IntPtr faceShopAuraFaceSystemObj = IntPtr.Zero;
+        private AuraMonoObjectCache faceShopAuraFaceSystemObj;
         private IntPtr faceShopAuraFaceSystemClass = IntPtr.Zero;
         private IntPtr faceShopAuraRefreshShopDataMethod = IntPtr.Zero;
         private IntPtr faceShopAuraGetCurrentAvatarMethod = IntPtr.Zero;
@@ -93,7 +93,9 @@ namespace HeartopiaMod
             }
 
             runtime.UseAura = true;
-            runtime.AuraFaceSystem = this.faceShopAuraFaceSystemObj;
+            // Raw copy is safe while the pinned field cache below keeps the object rooted.
+            this.faceShopAuraFaceSystemObj.TryGet(out IntPtr auraFaceSystemObj);
+            runtime.AuraFaceSystem = auraFaceSystemObj;
             runtime.AuraFaceSystemClass = this.faceShopAuraFaceSystemClass;
             runtime.AuraTableDataClass = this.FindAuraMonoTableDataClass();
             runtime.AuraAvatarFaceValueClass = this.faceShopAuraAvatarFaceValueClass;
@@ -109,7 +111,7 @@ namespace HeartopiaMod
         private bool TryEnsureFaceShopAuraRuntime(out string error)
         {
             error = null;
-            if (this.faceShopAuraFaceSystemObj != IntPtr.Zero
+            if (this.faceShopAuraFaceSystemObj.TryGet(out _)
                 && this.faceShopAuraRefreshShopDataMethod != IntPtr.Zero
                 && this.faceShopAuraGetCurrentAvatarMethod != IntPtr.Zero
                 && this.faceShopAuraSaveFaceDataMethod != IntPtr.Zero
@@ -135,15 +137,16 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.faceShopAuraFaceSystemObj == IntPtr.Zero)
+            if (!this.faceShopAuraFaceSystemObj.TryGet(out _))
             {
-                this.faceShopAuraFaceSystemObj = this.TryGetAuraMonoDataModuleInstance(this.faceShopAuraFaceSystemClass);
-                if (this.faceShopAuraFaceSystemObj == IntPtr.Zero
-                    && !this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.DressingUp.AvatarFaceSystem", out this.faceShopAuraFaceSystemObj))
+                IntPtr faceSystemObj = this.TryGetAuraMonoDataModuleInstance(this.faceShopAuraFaceSystemClass);
+                if (faceSystemObj == IntPtr.Zero
+                    && !this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.DressingUp.AvatarFaceSystem", out faceSystemObj))
                 {
                     error = "Aura AvatarFaceSystem instance missing.";
                     return false;
                 }
+                this.faceShopAuraFaceSystemObj.Set(faceSystemObj);
             }
 
             this.faceShopAuraRefreshShopDataMethod = this.FindAuraMonoMethodOnHierarchy(this.faceShopAuraFaceSystemClass, "RefreshShopData", 1);
@@ -1255,6 +1258,12 @@ namespace HeartopiaMod
                 yield break;
             }
 
+            // The baseline face object lives across the whole multi-frame buy loop; root it so
+            // the GC cannot collect it between yields (it may be referenced only by this routine).
+            uint baselineFaceAuraPin = AuraMonoPinNew(baselineFaceAura);
+            try
+            {
+
             List<FaceShopBuyAllCandidate> items = new List<FaceShopBuyAllCandidate>();
             long coinBalance = long.MaxValue;
             this.TryGetPlayerCoinBalance(out coinBalance, out _);
@@ -1354,6 +1363,12 @@ namespace HeartopiaMod
             this.AddMenuNotification(this.shopBuyAllStatus, new Color(0.55f, 1f, 0.65f));
             this.shopBuyAllRunning = false;
             this.shopBuyAllCoroutine = null;
+
+            }
+            finally
+            {
+                AuraMonoPinFree(baselineFaceAuraPin);
+            }
         }
     }
 }

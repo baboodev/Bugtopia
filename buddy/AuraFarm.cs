@@ -452,18 +452,132 @@ namespace HeartopiaMod
         private IntPtr auraMonoUInt64ListCountMethodPtr = IntPtr.Zero;
         private IntPtr auraMonoUInt64ListGetItemMethodPtr = IntPtr.Zero;
         private IntPtr auraMonoUInt64ListClearMethodPtr = IntPtr.Zero;
-        private IntPtr auraMonoCachedUInt64ListObj = IntPtr.Zero;
         private IntPtr auraMonoSelectPriorityListClassPtr = IntPtr.Zero;
         private IntPtr auraMonoSelectPriorityListCountMethodPtr = IntPtr.Zero;
         private IntPtr auraMonoSelectPriorityListGetItemMethodPtr = IntPtr.Zero;
         private IntPtr auraMonoSelectPriorityListClearMethodPtr = IntPtr.Zero;
-        private IntPtr auraMonoCachedSelectPriorityListObj = IntPtr.Zero;
 
         [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
         private static extern IntPtr GetModuleHandle(string lpModuleName);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+
+        // ---- AuraMono object pinning (GC-handle rooting) -------------------------------------
+        // bdwgc collects a MonoObject the moment the game drops its last managed reference; a raw
+        // IntPtr in mod fields is invisible to mono's GC, so any MonoObject* cached across frames
+        // must be rooted through a GC handle. Epoch: bumped on active-scene change so caches of
+        // per-world instances (modules, systems, panels) drop and re-resolve after a world load.
+
+        internal static int AuraMonoWorldEpoch => auraMonoWorldEpoch;
+        private static int auraMonoWorldEpoch = 1;
+        private int auraMonoLastSceneHandle = 0;
+        private float auraMonoNextSceneEpochCheckAt = 0f;
+
+        // Polled from OnUpdate (throttled): detects world loads via the active-scene handle.
+        private void UpdateAuraMonoWorldEpoch()
+        {
+            if (Time.unscaledTime < this.auraMonoNextSceneEpochCheckAt)
+            {
+                return;
+            }
+            this.auraMonoNextSceneEpochCheckAt = Time.unscaledTime + 0.5f;
+            try
+            {
+                int handle = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
+                if (handle != this.auraMonoLastSceneHandle)
+                {
+                    bool firstObservation = this.auraMonoLastSceneHandle == 0;
+                    this.auraMonoLastSceneHandle = handle;
+                    if (!firstObservation)
+                    {
+                        auraMonoWorldEpoch++;
+                        ModLogger.Msg("[AuraMono] Active scene changed — world epoch -> " + auraMonoWorldEpoch + " (cached object pointers will re-resolve).");
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        internal static uint AuraMonoPinNew(IntPtr obj)
+        {
+            if (obj == IntPtr.Zero || auraMonoGcHandleNew == null)
+            {
+                return 0;
+            }
+            try { return auraMonoGcHandleNew(obj, true); }
+            catch { return 0; }
+        }
+
+        internal static IntPtr AuraMonoPinTarget(uint handle)
+        {
+            if (handle == 0 || auraMonoGcHandleGetTarget == null)
+            {
+                return IntPtr.Zero;
+            }
+            try { return auraMonoGcHandleGetTarget(handle); }
+            catch { return IntPtr.Zero; }
+        }
+
+        internal static void AuraMonoPinFree(uint handle)
+        {
+            if (handle == 0 || auraMonoGcHandleFree == null)
+            {
+                return;
+            }
+            try { auraMonoGcHandleFree(handle); }
+            catch { }
+        }
+
+        // Cross-frame cache for a MonoObject*: rooted via GC handle when the gchandle exports are
+        // available, raw-pointer fallback otherwise (pre-existing behavior), invalidated on world
+        // epoch change. Mutable struct — keep instances as fields, never copy into locals to Set/Clear.
+        internal struct AuraMonoObjectCache
+        {
+            private uint handle;
+            private IntPtr raw;
+            private int epoch;
+
+            public void Set(IntPtr obj)
+            {
+                this.Clear();
+                if (obj == IntPtr.Zero)
+                {
+                    return;
+                }
+                this.handle = AuraMonoPinNew(obj);
+                this.raw = this.handle != 0 ? IntPtr.Zero : obj;
+                this.epoch = auraMonoWorldEpoch;
+            }
+
+            // Zero result means "stale or collected" — re-resolve and Set again.
+            public bool TryGet(out IntPtr obj)
+            {
+                if ((this.handle == 0 && this.raw == IntPtr.Zero) || this.epoch != auraMonoWorldEpoch)
+                {
+                    this.Clear();
+                    obj = IntPtr.Zero;
+                    return false;
+                }
+                obj = this.handle != 0 ? AuraMonoPinTarget(this.handle) : this.raw;
+                if (obj == IntPtr.Zero)
+                {
+                    this.Clear();
+                    return false;
+                }
+                return true;
+            }
+
+            public void Clear()
+            {
+                AuraMonoPinFree(this.handle);
+                this.handle = 0;
+                this.raw = IntPtr.Zero;
+                this.epoch = 0;
+            }
+        }
 
         private void SetAuraFarmEnabled(bool enabled)
         {

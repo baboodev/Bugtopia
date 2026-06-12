@@ -59,7 +59,7 @@ namespace HeartopiaMod
 
         // Tier 2 (AuraMono) cache. Module object is dropped on any invoke failure (pointer can go
         // stale after GC/level switch); class + method ptrs are stable for the process lifetime.
-        private IntPtr padBuildAuraModuleObj = IntPtr.Zero;
+        private AuraMonoObjectCache padBuildAuraModuleObj;
         private IntPtr padBuildAuraModuleClass = IntPtr.Zero;
         private IntPtr padBuildAuraConfirmMethod = IntPtr.Zero;
         private IntPtr padBuildAuraCancelMethod = IntPtr.Zero;
@@ -457,8 +457,7 @@ namespace HeartopiaMod
 
         private unsafe bool TryGetPadBuildAuraModule(out IntPtr moduleObj)
         {
-            moduleObj = this.padBuildAuraModuleObj;
-            if (moduleObj != IntPtr.Zero)
+            if (this.padBuildAuraModuleObj.TryGet(out moduleObj))
             {
                 return true;
             }
@@ -542,13 +541,13 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                this.padBuildAuraModuleObj = moduleObj;
+                this.padBuildAuraModuleObj.Set(moduleObj);
                 this.PadBuildHotkeyLog("aura: BuildModule resolved via Managers.GetModule(Type)");
                 return true;
             }
             catch (Exception ex)
             {
-                this.padBuildAuraModuleObj = IntPtr.Zero;
+                this.padBuildAuraModuleObj.Clear();
                 moduleObj = IntPtr.Zero;
                 this.PadBuildHotkeyLog("aura: resolve exception: " + ex.Message);
                 return false;
@@ -580,7 +579,7 @@ namespace HeartopiaMod
                 IntPtr boxed = auraMonoRuntimeInvoke(this.padBuildAuraGetSubStateMethod, moduleObj, IntPtr.Zero, ref exc);
                 if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
                 {
-                    this.padBuildAuraModuleObj = IntPtr.Zero; // possibly stale — re-resolve next press
+                    this.padBuildAuraModuleObj.Clear(); // possibly stale — re-resolve next press
                     status = "sub state unavailable";
                     return false;
                 }
@@ -604,7 +603,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                this.padBuildAuraModuleObj = IntPtr.Zero;
+                this.padBuildAuraModuleObj.Clear();
                 status = "sub state exc: " + ex.Message;
                 return false;
             }
@@ -643,7 +642,7 @@ namespace HeartopiaMod
 
                 if (exc != IntPtr.Zero)
                 {
-                    this.padBuildAuraModuleObj = IntPtr.Zero;
+                    this.padBuildAuraModuleObj.Clear();
                     status = op + " invoke exc";
                     return false;
                 }
@@ -654,7 +653,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                this.padBuildAuraModuleObj = IntPtr.Zero;
+                this.padBuildAuraModuleObj.Clear();
                 status = op + " invoke exception: " + ex.Message;
                 return false;
             }

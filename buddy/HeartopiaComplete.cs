@@ -762,14 +762,14 @@ namespace HeartopiaMod
         private float nextToolClientServiceResolveAttemptAt = -999f;
         private float nextToolReflectionResolveAttemptAt = -999f;
         private float nextAuraMonoToolSystemResolveAttemptAt = -999f;
-        private IntPtr cachedAuraMonoToolSystemObj = IntPtr.Zero;
+        private AuraMonoObjectCache cachedAuraMonoToolSystemObj;
         private IntPtr cachedAuraMonoToolSystemGetCurrentToolMethod = IntPtr.Zero;
         private float nextAutoRepairExpensiveDurabilityFallbackAt = -999f;
         private const float AutoRepairExpensiveFallbackRetrySeconds = 2f;
         private const float AutoRepairExpensiveFallbackMissBackoffSeconds = 8f;
         // Cached AuraMono BagModule pointer + ExecuteBackpackItemFunc method to avoid
         // re-scanning Managers._moduleDic on every repair/eat trigger (FPS fix).
-        private IntPtr cachedAuraMonoBagModuleObj = IntPtr.Zero;
+        private AuraMonoObjectCache cachedAuraMonoBagModuleObj;
         private IntPtr cachedAuraMonoBagExecuteMethod = IntPtr.Zero;
         private float nextAutoEatRepairSlowRuntimeLogAt = 0f;
         private Component cachedHudDurabilityComponent = null;
@@ -1902,6 +1902,8 @@ namespace HeartopiaMod
         // Token: 0x06000005 RID: 5 RVA: 0x000024C0 File Offset: 0x000006C0
         public void OnUpdate()
         {
+            // World-epoch poll: invalidates AuraMono object caches after a scene/world change.
+            this.UpdateAuraMonoWorldEpoch();
             // Lazily install the hot-path patches only while a feature that needs them is active.
             // This is the safety net for sustained, multi-frame effects; one-shot writers that
             // touch a transform in the same call (teleport, camera) also Ensure directly at the site.
@@ -4631,7 +4633,7 @@ namespace HeartopiaMod
                 }
 
                 float now = Time.unscaledTime;
-                IntPtr toolSystemObj = this.cachedAuraMonoToolSystemObj;
+                this.cachedAuraMonoToolSystemObj.TryGet(out IntPtr toolSystemObj);
                 IntPtr getCurrentToolMethod = this.cachedAuraMonoToolSystemGetCurrentToolMethod;
                 if (toolSystemObj == IntPtr.Zero || getCurrentToolMethod == IntPtr.Zero)
                 {
@@ -4662,7 +4664,7 @@ namespace HeartopiaMod
                         return false;
                     }
 
-                    this.cachedAuraMonoToolSystemObj = toolSystemObj;
+                    this.cachedAuraMonoToolSystemObj.Set(toolSystemObj);
                     this.cachedAuraMonoToolSystemGetCurrentToolMethod = getCurrentToolMethod;
                     this.nextAuraMonoToolSystemResolveAttemptAt = -999f;
                 }
@@ -4671,7 +4673,7 @@ namespace HeartopiaMod
                 IntPtr toolObj = auraMonoRuntimeInvoke(getCurrentToolMethod, toolSystemObj, IntPtr.Zero, ref exc);
                 if (exc != IntPtr.Zero || toolObj == IntPtr.Zero)
                 {
-                    this.cachedAuraMonoToolSystemObj = IntPtr.Zero;
+                    this.cachedAuraMonoToolSystemObj.Clear();
                     status = "AuraMono current tool unavailable";
                     return false;
                 }
@@ -7959,7 +7961,7 @@ namespace HeartopiaMod
             this.cachedBirdFarmAuraCacheTtl = 5f;
             this.cachedBirdFarmAuraMoveTolerance = 4f;
             this.cachedBirdFarmAuraEntityCount = 0;
-            this.cachedBirdFarmAuraPhotoModeObj = IntPtr.Zero;
+            this.cachedBirdFarmAuraPhotoModeObj.Clear();
             this.cachedBirdFarmAuraPhotoModeSource = string.Empty;
             this.cachedBirdFarmAuraPhotoModeExpiresAt = -999f;
             this.nextBirdFarmPhotoModeComponentRefreshAt = -999f;
@@ -8467,7 +8469,7 @@ namespace HeartopiaMod
 
                 if (!this.TryGetMonoObjectMember(photoModeObj, "_birdScannables", out IntPtr birdListObj) || birdListObj == IntPtr.Zero)
                 {
-                    this.cachedBirdFarmAuraPhotoModeObj = IntPtr.Zero;
+                    this.cachedBirdFarmAuraPhotoModeObj.Clear();
                     this.cachedBirdFarmAuraPhotoModeExpiresAt = -999f;
                     status = "Aura PhotoMode _birdScannables unavailable";
                     return false;
@@ -8712,12 +8714,12 @@ namespace HeartopiaMod
             status = "not attempted";
 
             float now = Time.unscaledTime;
-            if (this.cachedBirdFarmAuraPhotoModeObj != IntPtr.Zero && now < this.cachedBirdFarmAuraPhotoModeExpiresAt)
+            if (now < this.cachedBirdFarmAuraPhotoModeExpiresAt && this.cachedBirdFarmAuraPhotoModeObj.TryGet(out photoModeObj))
             {
-                photoModeObj = this.cachedBirdFarmAuraPhotoModeObj;
                 status = string.IsNullOrWhiteSpace(this.cachedBirdFarmAuraPhotoModeSource) ? "cached" : this.cachedBirdFarmAuraPhotoModeSource;
                 return true;
             }
+            photoModeObj = IntPtr.Zero;
 
             if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
             {
@@ -8772,7 +8774,7 @@ namespace HeartopiaMod
                         {
                             photoModeObj = stateObj;
                             status = "Character._states";
-                            this.cachedBirdFarmAuraPhotoModeObj = photoModeObj;
+                            this.cachedBirdFarmAuraPhotoModeObj.Set(photoModeObj);
                             this.cachedBirdFarmAuraPhotoModeSource = status;
                             this.cachedBirdFarmAuraPhotoModeExpiresAt = now + 5f;
                             return true;
@@ -28095,10 +28097,25 @@ namespace HeartopiaMod
                     && this.TryEnumerateAuraMonoLoadedEntityObjects(out List<IntPtr> entityObjects, out string enumerateStatus)
                     && entityObjects.Count > 0)
                 {
+                    // Raw entity pointers must not survive a yield (the GC can collect entities
+                    // between frames): scalarize the enumeration to netIds in this same frame,
+                    // then re-resolve each entity by netId inside the throttled loop below.
+                    List<uint> broadEntityNetIds = new List<uint>(entityObjects.Count);
+                    for (int entityIndex = 0; entityIndex < entityObjects.Count; entityIndex++)
+                    {
+                        IntPtr candidateEntityObj = entityObjects[entityIndex];
+                        if (candidateEntityObj != IntPtr.Zero
+                            && this.TryGetAuraMonoEntityNetId(candidateEntityObj, out uint candidateNetId)
+                            && candidateNetId != 0U)
+                        {
+                            broadEntityNetIds.Add(candidateNetId);
+                        }
+                    }
+
                     float maxScanDistance = Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
                     int broadFrameInspections = 0;
                     this.netCookStatus = "Refreshing nearby stove cache... " + this.netCookTargets.Count + " stove(s).";
-                    for (int entityIndex = 0; entityIndex < entityObjects.Count && this.netCookTargets.Count < NetCookMaxCaptureTargets; entityIndex++)
+                    for (int entityIndex = 0; entityIndex < broadEntityNetIds.Count && this.netCookTargets.Count < NetCookMaxCaptureTargets; entityIndex++)
                     {
                         broadInspected++;
                         broadFrameInspections++;
@@ -28113,13 +28130,14 @@ namespace HeartopiaMod
                             }
                         }
 
-                        IntPtr ownerEntityObj = entityObjects[entityIndex];
-                        if (ownerEntityObj == IntPtr.Zero || !this.TryResolveNetCookBuildComponentAuraMono(ownerEntityObj, out IntPtr cookBuildComponentObj, out _))
+                        uint ownerCookBuildNetId = broadEntityNetIds[entityIndex];
+                        if (inspectedOwnerNetIds.Contains(ownerCookBuildNetId))
                         {
                             continue;
                         }
 
-                        if (!this.TryGetAuraMonoEntityNetId(ownerEntityObj, out uint ownerCookBuildNetId) || ownerCookBuildNetId == 0U || inspectedOwnerNetIds.Contains(ownerCookBuildNetId))
+                        if (!this.TryGetAuraMonoEntityObjectByNetId(ownerCookBuildNetId, out IntPtr ownerEntityObj) || ownerEntityObj == IntPtr.Zero
+                            || !this.TryResolveNetCookBuildComponentAuraMono(ownerEntityObj, out IntPtr cookBuildComponentObj, out _))
                         {
                             continue;
                         }
@@ -58990,7 +59008,7 @@ namespace HeartopiaMod
 
                 // Use cached BagModule + method pointers — avoid re-scanning Managers._moduleDic
                 // via native Mono API on every single repair/eat trigger (was the FPS drop cause).
-                IntPtr bagModuleObj = this.cachedAuraMonoBagModuleObj;
+                this.cachedAuraMonoBagModuleObj.TryGet(out IntPtr bagModuleObj);
                 IntPtr executeMethod = this.cachedAuraMonoBagExecuteMethod;
 
                 if (bagModuleObj == IntPtr.Zero || executeMethod == IntPtr.Zero)
@@ -59012,7 +59030,7 @@ namespace HeartopiaMod
                     }
 
                     // Store for subsequent calls.
-                    this.cachedAuraMonoBagModuleObj = bagModuleObj;
+                    this.cachedAuraMonoBagModuleObj.Set(bagModuleObj);
                     this.cachedAuraMonoBagExecuteMethod = executeMethod;
                 }
 
@@ -59033,7 +59051,7 @@ namespace HeartopiaMod
                 if (exc != IntPtr.Zero)
                 {
                     // Stale module pointer (e.g. after scene reload) — clear cache so next call re-resolves.
-                    this.cachedAuraMonoBagModuleObj = IntPtr.Zero;
+                    this.cachedAuraMonoBagModuleObj.Clear();
                     this.cachedAuraMonoBagExecuteMethod = IntPtr.Zero;
                     this.AutoEatRepairLog("[DirectBackpackMono] ExecuteBackpackItemFunc raised exception; clearing cache and trying protocol fallback.");
                     return this.TryExecuteDirectBackpackProtocolFallback(functionValue, netId);
@@ -59045,7 +59063,7 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 // Clear cache on exception to prevent reusing a bad pointer.
-                this.cachedAuraMonoBagModuleObj = IntPtr.Zero;
+                this.cachedAuraMonoBagModuleObj.Clear();
                 this.cachedAuraMonoBagExecuteMethod = IntPtr.Zero;
                 this.AutoEatRepairLog("[DirectBackpackMono] Execute exception: " + ex.Message);
                 return this.TryExecuteDirectBackpackProtocolFallback(functionValue, netId);
@@ -65532,7 +65550,7 @@ namespace HeartopiaMod
         private float cachedBirdFarmAuraCacheTtl = 5f;
         private float cachedBirdFarmAuraMoveTolerance = 4f;
         private int cachedBirdFarmAuraEntityCount = 0;
-        private IntPtr cachedBirdFarmAuraPhotoModeObj = IntPtr.Zero;
+        private AuraMonoObjectCache cachedBirdFarmAuraPhotoModeObj;
         private string cachedBirdFarmAuraPhotoModeSource = string.Empty;
         private float cachedBirdFarmAuraPhotoModeExpiresAt = -999f;
         private float nextBirdFarmPhotoModeComponentRefreshAt = -999f;
