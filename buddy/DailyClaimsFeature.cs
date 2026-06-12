@@ -1543,9 +1543,10 @@ namespace HeartopiaMod
                 }
             }
 
-            // Inflated TryGet<T> must still take exactly 1 parameter (out slot); a mismatched
-            // method_inst would AV the process on invoke instead of throwing.
-            if (!AuraMonoMethodParamCountIs(inflatedMethod, 1))
+            // Inflated TryGet<T> must still take exactly 2 parameters (resolved via
+            // FindAuraMonoMethodOnHierarchy(..., "TryGet", 2) above); a mismatched method_inst
+            // would AV the process on invoke instead of throwing.
+            if (!AuraMonoMethodParamCountIs(inflatedMethod, 2))
             {
                 return false;
             }
