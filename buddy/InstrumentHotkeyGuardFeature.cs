@@ -325,7 +325,8 @@ namespace HeartopiaMod
                         "XDTGame.UI.Panel.InstrumentPanel",
                         "InstrumentPanel",
                         out IntPtr panelObj,
-                        out _)
+                        out _,
+                        allowServiceDicFallback: false)
                     || panelObj == IntPtr.Zero)
                 {
                     return false;

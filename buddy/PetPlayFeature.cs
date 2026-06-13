@@ -839,7 +839,7 @@ namespace HeartopiaMod
             return this.TryGetAuraMonoUiView("XDTGame.UI.Panel.TrackingPanel", "TrackingPanel", out trackingPanelObj, out status);
         }
 
-        private unsafe bool TryGetAuraMonoUiView(string viewTypeName, string viewLabel, out IntPtr viewObj, out string status)
+        private unsafe bool TryGetAuraMonoUiView(string viewTypeName, string viewLabel, out IntPtr viewObj, out string status, bool allowServiceDicFallback = true)
         {
             viewObj = IntPtr.Zero;
             status = viewLabel + " not resolved.";
@@ -852,7 +852,7 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryGetAuraMonoUiManagerObject(out IntPtr uiManagerObj, out status) || uiManagerObj == IntPtr.Zero)
+                if (!this.TryGetAuraMonoUiManagerObject(out IntPtr uiManagerObj, out status, allowServiceDicFallback) || uiManagerObj == IntPtr.Zero)
                 {
                     return false;
                 }
@@ -893,8 +893,21 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetAuraMonoUiManagerObject(out IntPtr uiManagerObj, out string status)
+        // The resolved UIManager pinned across frames. It is a per-world singleton, and resolving
+        // it (especially the Managers._serviceDic enumeration fallback) is heavy and was a crash
+        // source — so cache it once, return the pinned pointer thereafter, and let
+        // AuraMonoObjectCache re-resolve only after a world-epoch change or GC collection.
+        private AuraMonoObjectCache cachedAuraMonoUiManagerObj;
+
+        private bool TryGetAuraMonoUiManagerObject(out IntPtr uiManagerObj, out string status, bool allowServiceDicFallback = true)
         {
+            // Fast path: pinned, world-epoch-validated cache — no per-frame invoke/enumeration.
+            if (this.cachedAuraMonoUiManagerObj.TryGet(out uiManagerObj))
+            {
+                status = "UIManager (cached).";
+                return true;
+            }
+
             uiManagerObj = IntPtr.Zero;
             status = "UI manager not resolved.";
 
@@ -910,13 +923,26 @@ namespace HeartopiaMod
                         uiManagerObj = auraMonoRuntimeInvoke(getInstanceMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
                         if (exc == IntPtr.Zero && uiManagerObj != IntPtr.Zero)
                         {
+                            this.cachedAuraMonoUiManagerObj.Set(uiManagerObj);
                             status = "UIManager.Instance ready.";
                             return true;
                         }
                     }
                 }
 
-                return this.TryGetAuraMonoUiManagerFromManagersServiceDic(out uiManagerObj, out status);
+                if (!allowServiceDicFallback)
+                {
+                    status = "UIManager.Instance unavailable (serviceDic fallback disabled).";
+                    return false;
+                }
+
+                if (this.TryGetAuraMonoUiManagerFromManagersServiceDic(out uiManagerObj, out status))
+                {
+                    this.cachedAuraMonoUiManagerObj.Set(uiManagerObj);
+                    return true;
+                }
+
+                return false;
             }
             catch (Exception ex)
             {
@@ -946,50 +972,63 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> entries = new List<IntPtr>(16);
-            if (!this.TryEnumerateAuraMonoCollectionItems(serviceDicObj, entries) || entries.Count == 0)
+            List<uint> entryPins = new List<uint>(16);
+            try
             {
-                status = "Managers._serviceDic empty.";
+                if (!this.TryEnumerateAuraMonoCollectionItems(serviceDicObj, entries, entryPins) || entries.Count == 0)
+                {
+                    status = "Managers._serviceDic empty.";
+                    return false;
+                }
+
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    IntPtr entryObj = entries[i];
+                    if (entryObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    if ((!this.TryGetMonoObjectMember(entryObj, "Value", out IntPtr serviceObj) || serviceObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(entryObj, "value", out serviceObj) || serviceObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(entryObj, "_value", out serviceObj) || serviceObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
+                    if ((!this.TryGetMonoObjectMember(serviceObj, "manager", out IntPtr managerObj) || managerObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(serviceObj, "_manager", out managerObj) || managerObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
+                    // The class-name read and GetView lookup below allocate (boxing/strings), so a
+                    // GC could move managerObj before we return it. Pin it for the rest of the loop
+                    // body (freed with the rest in finally; the caller pins it again via the cache).
+                    entryPins.Add(AuraMonoPinNew(managerObj));
+
+                    IntPtr managerClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(managerObj) : IntPtr.Zero;
+                    string managerName = managerClass != IntPtr.Zero ? this.GetAuraMonoClassDisplayName(managerClass) : string.Empty;
+                    bool looksLikeUiManager = managerName.EndsWith("UIManager", StringComparison.Ordinal)
+                        || managerName.EndsWith(".UIManager", StringComparison.Ordinal)
+                        || this.FindAuraMonoMethodOnHierarchy(managerClass, "GetView", 1) != IntPtr.Zero;
+                    if (!looksLikeUiManager)
+                    {
+                        continue;
+                    }
+
+                    uiManagerObj = managerObj;
+                    status = "UI manager resolved via Managers._serviceDic: " + managerName + ".";
+                    return true;
+                }
+
+                status = "Managers._serviceDic had no UI manager.";
                 return false;
             }
-
-            for (int i = 0; i < entries.Count; i++)
+            finally
             {
-                IntPtr entryObj = entries[i];
-                if (entryObj == IntPtr.Zero)
-                {
-                    continue;
-                }
-
-                if ((!this.TryGetMonoObjectMember(entryObj, "Value", out IntPtr serviceObj) || serviceObj == IntPtr.Zero)
-                    && (!this.TryGetMonoObjectMember(entryObj, "value", out serviceObj) || serviceObj == IntPtr.Zero)
-                    && (!this.TryGetMonoObjectMember(entryObj, "_value", out serviceObj) || serviceObj == IntPtr.Zero))
-                {
-                    continue;
-                }
-
-                if ((!this.TryGetMonoObjectMember(serviceObj, "manager", out IntPtr managerObj) || managerObj == IntPtr.Zero)
-                    && (!this.TryGetMonoObjectMember(serviceObj, "_manager", out managerObj) || managerObj == IntPtr.Zero))
-                {
-                    continue;
-                }
-
-                IntPtr managerClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(managerObj) : IntPtr.Zero;
-                string managerName = managerClass != IntPtr.Zero ? this.GetAuraMonoClassDisplayName(managerClass) : string.Empty;
-                bool looksLikeUiManager = managerName.EndsWith("UIManager", StringComparison.Ordinal)
-                    || managerName.EndsWith(".UIManager", StringComparison.Ordinal)
-                    || this.FindAuraMonoMethodOnHierarchy(managerClass, "GetView", 1) != IntPtr.Zero;
-                if (!looksLikeUiManager)
-                {
-                    continue;
-                }
-
-                uiManagerObj = managerObj;
-                status = "UI manager resolved via Managers._serviceDic: " + managerName + ".";
-                return true;
+                FreeAuraMonoPins(entryPins);
             }
-
-            status = "Managers._serviceDic had no UI manager.";
-            return false;
         }
 
         private unsafe bool TryRemoveActiveCatQuestionCell(uint catNetId)
