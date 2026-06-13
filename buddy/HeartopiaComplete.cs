@@ -23284,30 +23284,64 @@ namespace HeartopiaMod
 
         private void UpdateGameUiClickBlockState()
         {
-            bool shouldBlock = this.showMenu && this.blockGameUiWhenMenuOpen && !this.autoBuyEnabled;
-            if (shouldBlock && !this.eventSystemBlockedByMenu)
+            // Block game clicks while the mod menu is open (+ a short grace period after it closes,
+            // blockInputReleaseUntil). A click landing on the menu must never reach the game.
+            //
+            // Mechanism: a transparent full-screen uGUI overlay (Canvas + GraphicRaycaster + Image
+            // with raycastTarget) sorted on top of every game canvas. The pointer raycast hits the
+            // overlay (which has no handler → does nothing) instead of the game's world-input
+            // component, so the click is neither passed through immediately NOR buffered. This
+            // replaces the old EventSystem.enabled toggle, which caused a stale click to fire at the
+            // current cursor when the EventSystem was re-enabled on menu close.
+            //
+            // autoBuy needs real game-UI clicks, so it stays excluded.
+            bool shouldBlock = (this.showMenu || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
+            this.EnsureModClickBlockerOverlay(shouldBlock);
+        }
+
+        private GameObject modClickBlockerOverlay;
+
+        private void EnsureModClickBlockerOverlay(bool active)
+        {
+            try
             {
-                EventSystem current = EventSystem.current;
-                if (current != null)
+                if (this.modClickBlockerOverlay == null)
                 {
-                    this.blockedEventSystem = current;
-                    this.eventSystemPrevEnabled = current.enabled;
-                    current.SetSelectedGameObject(null);
-                    current.enabled = false;
-                    this.eventSystemBlockedByMenu = true;
+                    if (!active)
+                    {
+                        return; // create lazily only when first needed
+                    }
+
+                    GameObject go = new GameObject("HeartopiaModClickBlocker");
+                    Object.DontDestroyOnLoad(go);
+
+                    Canvas canvas = go.AddComponent<Canvas>();
+                    canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                    canvas.overrideSorting = true;
+                    canvas.sortingOrder = 32000; // above all game canvases
+
+                    go.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+
+                    UnityEngine.UI.Image img = go.AddComponent<UnityEngine.UI.Image>();
+                    img.color = new Color(0f, 0f, 0f, 0f); // fully transparent
+                    img.raycastTarget = true;
+                    RectTransform rt = img.rectTransform;
+                    rt.anchorMin = Vector2.zero;
+                    rt.anchorMax = Vector2.one;
+                    rt.offsetMin = Vector2.zero;
+                    rt.offsetMax = Vector2.zero;
+
+                    this.modClickBlockerOverlay = go;
+                }
+
+                if (this.modClickBlockerOverlay != null && this.modClickBlockerOverlay.activeSelf != active)
+                {
+                    this.modClickBlockerOverlay.SetActive(active);
                 }
             }
-            else if (!shouldBlock && this.eventSystemBlockedByMenu)
+            catch (Exception ex)
             {
-                EventSystem restoreTarget = this.blockedEventSystem != null ? this.blockedEventSystem : EventSystem.current;
-                if (restoreTarget != null)
-                {
-                    restoreTarget.enabled = this.eventSystemPrevEnabled;
-                    restoreTarget.SetSelectedGameObject(null);
-                    restoreTarget.sendNavigationEvents = true;
-                }
-                this.eventSystemBlockedByMenu = false;
-                this.blockedEventSystem = null;
+                ModLogger.Msg("[ClickBlocker] overlay error: " + ex.Message);
             }
         }
 
