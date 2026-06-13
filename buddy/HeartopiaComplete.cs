@@ -23631,6 +23631,7 @@ namespace HeartopiaMod
                 tabs.Add(("Daily Quests", () => this.newFeaturesSubTab == 1, () => this.SetNewFeaturesSubTab(1)));
                 tabs.Add((this.L("homeland_farm.title"), () => this.newFeaturesSubTab == 2, () => this.SetNewFeaturesSubTab(2)));
                 tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
+                tabs.Add(("Extras", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
             }
             else if (this.selectedTab == 4)
             {
