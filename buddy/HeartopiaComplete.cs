@@ -135,7 +135,7 @@ namespace HeartopiaMod
         private const bool MasterLogPetFeed = false;
         private const bool MasterLogWildAnimalFeed = false;
         private const bool MasterLogHomelandFarm = true;
-        private const bool MasterLogPadBuild = false;
+        private const bool MasterLogPadBuild = true;
         private const bool MasterLogWildAnimalGift = true;
         private const bool MasterLogAutoIceSkating = false;
         private const bool MasterLogDailyQuestSubmit = true;
@@ -23719,6 +23719,7 @@ namespace HeartopiaMod
                 tabs.Add((this.L("homeland_farm.title"), () => this.newFeaturesSubTab == 2, () => this.SetNewFeaturesSubTab(2)));
                 tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
                 tabs.Add(("Ice Skating", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
+                tabs.Add(("Building", () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
             }
             else if (this.selectedTab == 4)
             {

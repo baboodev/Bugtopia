@@ -44,6 +44,11 @@ namespace HeartopiaMod
                 return this.DrawIceSkatingExtrasTab(startY);
             }
 
+            if (this.newFeaturesSubTab == 5)
+            {
+                return this.DrawBuildingTab(startY);
+            }
+
             return startY + 40f;
         }
 
@@ -79,6 +84,11 @@ namespace HeartopiaMod
             if (this.newFeaturesSubTab == 4)
             {
                 return 480f;
+            }
+
+            if (this.newFeaturesSubTab == 5)
+            {
+                return 560f;
             }
 
             return 400f;
