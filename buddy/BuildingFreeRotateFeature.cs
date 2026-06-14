@@ -71,6 +71,31 @@ namespace HeartopiaMod
         // void-return (it only forces JIT), so we declare our own IntPtr-returning variant here.
         private delegate IntPtr BuildingMonoCompileMethodDelegate(IntPtr method);
 
+        // Surface-limit bypass. "Target exceeds available placement surface" = ErrorCode.OutOfPutZoneXZ
+        // (309). On the placing path it is raised by Alignment.DetectAlignmentWithoutCheckZone when no
+        // aligned cell fits the put-zone area (line ~755), gated by _IsAlignmentPosInArea. We detour
+        // that single leaf predicate and force it true (the object's footprint always "fits"):
+        //   _IsAlignmentPosInArea(Vector3, in Quaternion, BuildFocus) -> bool ⇒ return true.
+        // DetectCollisionAndFieldArea still runs afterwards, so collisions and homeland bounds stay
+        // enforced (only the put-zone surface limit is lifted).
+        //
+        // CRITICAL safety lesson (this hung+crashed the first time): the hook MUST NOT call back into
+        // game-Mono code from the reverse-pinvoke callback. A previous design also detoured
+        // DetectAlignment and called the original via a trampoline (+ re-ran WCZ) every placing tick —
+        // those coreCLR→Mono re-entries on the game thread froze then crashed the process (cf. memory
+        // coreclr-coroutine-bridge-gc). So the hook is a pure constant (return 1, like the cell hook),
+        // and we APPLY/UNDO the detour with the toggle instead of branching to the original inside it.
+        // The hook only runs while applied (= toggle on), so the unconditional true is correct.
+        // (The size gate at DetectAlignment line ~622 is left intact — it only blocks an object wholly
+        //  larger than the surface, which the area gate above does not cover; revisit only if needed.)
+        private static bool buildingIgnoreSurfaceLimit;
+        private bool buildingSurfacePatchTried;                              // detour created once
+        private static MonoMod.RuntimeDetour.NativeDetour buildingInAreaDetour;
+        private static AlignmentInAreaDelegate buildingInAreaHook;           // anti-GC
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate byte AlignmentInAreaDelegate(IntPtr self, IntPtr worldPos, IntPtr quatRef, IntPtr placeBox);
+
         // AuraMono send cache. BuildMoveData/BuildTransformData/HomelandProtocolManager are NOT in
         // the managed interop (verified: move=False xf=False proto=False), so build + send via Mono.
         private static readonly string[] BuildOpImageNames =
@@ -195,10 +220,22 @@ namespace HeartopiaMod
                 GUI.HorizontalSlider(new Rect(left + 170f, y + 6f, 280f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
             y += 26f;
 
+            bool prevSurface = buildingIgnoreSurfaceLimit;
+            buildingIgnoreSurfaceLimit = GUI.Toggle(new Rect(left, y, 460f, 22f), buildingIgnoreSurfaceLimit,
+                "  Ignore surface limit (place beyond a surface's edge)");
+            // Apply/undo of the detour is driven from UpdateBuildingFreeSnapOverrides (OnUpdate), not here.
+            y += 26f;
+
             if (this.buildingFreeAngleEnabled != prevAngle || this.buildingFreeGridEnabled != prevGrid)
             {
                 this.AddMenuNotification(
                     "Free build: angle=" + (this.buildingFreeAngleEnabled ? "on" : "off") + " grid=" + (this.buildingFreeGridEnabled ? "on" : "off"),
+                    new Color(0.45f, 1f, 0.55f));
+            }
+            if (buildingIgnoreSurfaceLimit != prevSurface)
+            {
+                this.AddMenuNotification(
+                    "Surface limit " + (buildingIgnoreSurfaceLimit ? "ignored (place anywhere on/over surfaces)" : "enforced"),
                     new Color(0.45f, 1f, 0.55f));
             }
 
@@ -757,6 +794,17 @@ namespace HeartopiaMod
                 buildingFreeCellOverride = 0f;
             }
 
+            // Surface-limit bypass: apply the detour while the toggle is on, undo it when off
+            // (independent of the angle/grid toggles, which the early-return below gates on).
+            if (buildingIgnoreSurfaceLimit)
+            {
+                this.EnsureBuildingSurfacePatch();
+            }
+            else if (buildingInAreaDetour != null)
+            {
+                this.RemoveBuildingSurfacePatch();
+            }
+
             bool anyOn = this.buildingFreeAngleEnabled || this.buildingFreeGridEnabled;
             bool anyCached = this.buildingAngleOriginals.Count > 0 || this.buildingGridOriginals.Count > 0;
             if (!anyOn && !anyCached)
@@ -1067,6 +1115,106 @@ namespace HeartopiaMod
         {
             float c = value < 1f ? 1f : (value > 8f ? 8f : value);
             return (int)c * 0.25f;
+        }
+
+        // Resolve a method on a Mono class and JIT-compile it to its native entry pointer.
+        private IntPtr ResolveBuildingMonoNative(IntPtr cls, string method, int argc)
+        {
+            IntPtr m = this.FindAuraMonoMethodOnHierarchy(cls, method, argc);
+            if (m == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+            if (buildingMonoCompileMethod == null)
+            {
+                IntPtr mod = this.GetAuraMonoModuleHandle();
+                if (mod != IntPtr.Zero)
+                {
+                    buildingMonoCompileMethod = this.GetAuraMonoExport<BuildingMonoCompileMethodDelegate>(mod, "mono_compile_method");
+                }
+            }
+            return buildingMonoCompileMethod != null ? buildingMonoCompileMethod(m) : IntPtr.Zero;
+        }
+
+        // Create the _IsAlignmentPosInArea detour once (lazy; retried until AuraMono is up and the
+        // class/method resolve) and ensure it is APPLIED. Apply/Undo (not an in-hook branch) is how we
+        // honour the toggle — see the field-block comment on why the hook must stay callback-free.
+        private void EnsureBuildingSurfacePatch()
+        {
+            try
+            {
+                if (buildingInAreaDetour != null)
+                {
+                    if (!buildingInAreaDetour.IsApplied)
+                    {
+                        buildingInAreaDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.buildingSurfacePatchTried)
+                {
+                    return; // creation already failed permanently
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return; // AuraMono not up yet — retry on a later frame
+                }
+
+                IntPtr cls = this.FindAuraMonoClassInImages(
+                    "XDTLevelAndEntity.Core.Craft", "Alignment",
+                    new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassInAllLoadedImages("Alignment", "XDTLevelAndEntity.Core.Craft");
+                }
+                if (cls == IntPtr.Zero)
+                {
+                    return; // image may not be loaded yet — retry later
+                }
+
+                IntPtr inAreaPtr = this.ResolveBuildingMonoNative(cls, "_IsAlignmentPosInArea", 3);
+                if (inAreaPtr == IntPtr.Zero)
+                {
+                    this.buildingSurfacePatchTried = true;
+                    this.BuildingLog("surface-patch: _IsAlignmentPosInArea(3) not resolved");
+                    return;
+                }
+
+                buildingInAreaHook = BuildingInAreaNative;
+                buildingInAreaDetour = new MonoMod.RuntimeDetour.NativeDetour(inAreaPtr, buildingInAreaHook);
+                this.buildingSurfacePatchTried = true;
+                this.BuildingLog("surface-patch: detour installed on Alignment._IsAlignmentPosInArea (applied)");
+            }
+            catch (Exception ex)
+            {
+                this.buildingSurfacePatchTried = true;
+                this.BuildingLog("surface-patch failed: " + ex.Message);
+            }
+        }
+
+        // Undo the detour (toggle off) — leaves the NativeDetour object reusable for a later Apply.
+        private void RemoveBuildingSurfacePatch()
+        {
+            try
+            {
+                if (buildingInAreaDetour != null && buildingInAreaDetour.IsApplied)
+                {
+                    buildingInAreaDetour.Undo();
+                    this.BuildingLog("surface-patch: detour undone (surface limit re-enforced)");
+                }
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("surface-patch undo failed: " + ex.Message);
+            }
+        }
+
+        // Detour body: the position always counts as inside the put-zone area. Callback-free constant
+        // (only installed/applied while the toggle is on). Ignores its args, so the value-type arg ABI
+        // is irrelevant — it just returns 1 in AL.
+        private static byte BuildingInAreaNative(IntPtr self, IntPtr worldPos, IntPtr quatRef, IntPtr placeBox)
+        {
+            return 1;
         }
     }
 }

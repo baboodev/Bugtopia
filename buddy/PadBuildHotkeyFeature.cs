@@ -277,36 +277,40 @@ namespace HeartopiaMod
 
         private bool TryPadBuildDelete(out string status)
         {
-            // Delete acts on the FOCUSED object, so it requires CraftState.Focus (not Free):
-            //   god mode  → InteractExecuteDelete → GodControl.Focus_Delete() — THROWS unless _state
-            //               == Focus (GodCraftMode.cs:1931), so we must gate on Focus or it crashes;
-            //   pad mode  → InteractExecutePickup → TpsControl.Focus_ConfirmDelete() — operates on the
-            //               currently selected build, which only exists in Focus.
-            // (Gating this on Free was the bug: in god mode the focused item sits at SubState=Focus(2),
-            //  so the hotkey was skipped with "sub state 2".)
+            // Delete acts on the focused/selected object, but the required CraftState differs by mode:
+            //   god mode → InteractExecuteDelete → GodControl.Focus_Delete() — THROWS unless _state ==
+            //              Focus (GodCraftMode.cs:1931); the focused item sits at SubState=Focus(2).
+            //   pad mode → InteractExecutePickup → TpsControl.Focus_ConfirmDelete() — packs the build
+            //              selected while roaming, which happens at SubState=Free(1).
+            // (Gating both on a single state is wrong: Free-only skipped god mode with "sub state 2",
+            //  Focus-only skipped pad mode with "sub state 1".)
             if (this.TryGetPadBuildManagedModule(out object managed))
             {
-                if (!this.IsPadBuildManagedFocus(managed, out status))
+                bool god = this.IsPadBuildManagedGodMode(managed);
+                bool stateOk = god
+                    ? this.IsPadBuildManagedFocus(managed, out status)
+                    : this.IsPadBuildManagedFree(managed, out status);
+                if (!stateOk)
                 {
                     return false;
                 }
 
-                MethodInfo method = this.IsPadBuildManagedGodMode(managed)
-                    ? this.padBuildManagedDeleteMethod
-                    : this.padBuildManagedPickupMethod;
+                MethodInfo method = god ? this.padBuildManagedDeleteMethod : this.padBuildManagedPickupMethod;
                 return this.InvokePadBuildManaged(managed, method, null, "delete", out status);
             }
 
             if (this.TryGetPadBuildAuraModule(out IntPtr aura))
             {
-                if (!this.IsPadBuildAuraFocus(aura, out status))
+                bool god = this.IsPadBuildAuraGodMode(aura);
+                bool stateOk = god
+                    ? this.IsPadBuildAuraFocus(aura, out status)
+                    : this.IsPadBuildAuraFree(aura, out status);
+                if (!stateOk)
                 {
                     return false;
                 }
 
-                IntPtr method = this.IsPadBuildAuraGodMode(aura)
-                    ? this.padBuildAuraDeleteMethod
-                    : this.padBuildAuraPickupMethod;
+                IntPtr method = god ? this.padBuildAuraDeleteMethod : this.padBuildAuraPickupMethod;
                 return this.InvokePadBuildAura(aura, method, isConfirm: false, "delete", out status);
             }
 
