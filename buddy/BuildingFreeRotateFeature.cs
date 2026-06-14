@@ -42,6 +42,35 @@ namespace HeartopiaMod
         private readonly System.Collections.Generic.Dictionary<IntPtr, int> buildingAngleOriginals = new System.Collections.Generic.Dictionary<IntPtr, int>();
         private readonly System.Collections.Generic.Dictionary<IntPtr, float> buildingGridOriginals = new System.Collections.Generic.Dictionary<IntPtr, float>();
 
+        // Cell-size patch. The grid toggle's precision field-write (above) can only reach 0.25 m,
+        // because CraftMath.PrecisionToCellSize floors the cell at Clamp(precision,1,8)*0.25. CraftMath
+        // has no managed interop stub (docs/TYPE_RESOLUTION.md), so Harmony can't see it — but the build
+        // logic runs on the embedded Mono runtime (proven: our AuraMono field-writes change placement).
+        // So we resolve the Mono method via AuraMono, take its JIT-compiled native entry
+        // (mono_compile_method, NOT the unmanaged thunk — see memory auramono-native-hook-and-settings),
+        // and install a MonoMod NativeDetour (Iced-based relocation, not a hand-rolled byte steal).
+        //
+        // The detour is installed once and left in place: PrecisionToCellSize is a pure function, so the
+        // hook fully reimplements it. When buildingFreeCellOverride == 0 it reproduces the original
+        // exactly (pass-through); when > 0 it returns (v,v,v), giving a true sub-0.25 m cell.
+        //
+        // ABI (Windows x64, Mono static valuetype return): a 12-byte Vector3 is returned via a hidden
+        // buffer pointer in the first integer slot (RCX), and `float precision` lands in XMM1. Hence the
+        // native delegate is (IntPtr retBuf, float precision) -> IntPtr (returns the buffer, as in RAX).
+        // The hook touches only the static override + System math — no Unity/Il2Cpp calls (GC/thread-safe).
+        private static float buildingFreeCellOverride;
+        private bool buildingCellPatchTried;
+        private static MonoMod.RuntimeDetour.NativeDetour buildingCellDetour;
+        private static PrecisionToCellSizeHookDelegate buildingCellHookDelegate; // keep alive (anti-GC)
+        private static BuildingMonoCompileMethodDelegate buildingMonoCompileMethod;
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr PrecisionToCellSizeHookDelegate(IntPtr retBuf, float precision);
+
+        // mono_compile_method returns the native code pointer; AuraFarm's shared delegate is declared
+        // void-return (it only forces JIT), so we declare our own IntPtr-returning variant here.
+        private delegate IntPtr BuildingMonoCompileMethodDelegate(IntPtr method);
+
         // AuraMono send cache. BuildMoveData/BuildTransformData/HomelandProtocolManager are NOT in
         // the managed interop (verified: move=False xf=False proto=False), so build + send via Mono.
         private static readonly string[] BuildOpImageNames =
@@ -716,6 +745,18 @@ namespace HeartopiaMod
 
         private void UpdateBuildingFreeSnapOverrides()
         {
+            // Drive the static cell-size override every frame (the Harmony prefix reads it). When the
+            // grid toggle is on, install the patch lazily and force the slider's cell; off ⇒ 0 (pass).
+            if (this.buildingFreeGridEnabled)
+            {
+                this.EnsureBuildingCellPatch();
+                buildingFreeCellOverride = Mathf.Clamp(this.buildingFreeGridCell, 0.01f, 0.25f);
+            }
+            else
+            {
+                buildingFreeCellOverride = 0f;
+            }
+
             bool anyOn = this.buildingFreeAngleEnabled || this.buildingFreeGridEnabled;
             bool anyCached = this.buildingAngleOriginals.Count > 0 || this.buildingGridOriginals.Count > 0;
             if (!anyOn && !anyCached)
@@ -811,8 +852,9 @@ namespace HeartopiaMod
                 {
                     return;
                 }
-                // cell = ToCellSize(precision) = Clamp(precision,1,8)*0.25 → precision = cell/0.25.
-                // Engine floors cell at 0.25 m (precision clamped ≥1), so values below 0.25 act as 0.25.
+                // Fallback when the CraftMath.PrecisionToCellSize patch isn't active: cell =
+                // ToCellSize(precision) = Clamp(precision,1,8)*0.25 → precision = cell/0.25. The engine
+                // floors cell at 0.25 m here; true sub-0.25 m comes from BuildingPrecisionToCellSizePrefix.
                 float precision = Mathf.Clamp(this.buildingFreeGridCell, 0.01f, 0.25f) / 0.25f;
                 if (!this.buildingGridOriginals.ContainsKey(putitemObj))
                 {
@@ -903,6 +945,128 @@ namespace HeartopiaMod
                 return false;
             }
             return true;
+        }
+
+        // Resolve CraftMath.PrecisionToCellSize(float) on the embedded Mono runtime and install a
+        // MonoMod NativeDetour onto its JIT-compiled entry. Lazy; retried until AuraMono is ready and
+        // the class/method resolve (transient misses do not burn buildingCellPatchTried).
+        private void EnsureBuildingCellPatch()
+        {
+            if (this.buildingCellPatchTried)
+            {
+                return;
+            }
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return; // AuraMono not up yet (e.g. not in-world) — retry on a later frame.
+                }
+
+                // CraftMath is compiled into the XDTDataAndProtocol image (namespace ≠ assembly).
+                IntPtr craftMath = this.FindAuraMonoClassInImages(
+                    "XDTLevelAndEntity.Core.Craft", "CraftMath",
+                    new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+                if (craftMath == IntPtr.Zero)
+                {
+                    craftMath = this.FindAuraMonoClassInAllLoadedImages("CraftMath", "XDTLevelAndEntity.Core.Craft");
+                }
+                if (craftMath == IntPtr.Zero)
+                {
+                    return; // image may not be loaded yet — retry later.
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(craftMath, "PrecisionToCellSize", 1);
+                if (method == IntPtr.Zero)
+                {
+                    this.buildingCellPatchTried = true; // class found but no such method — permanent.
+                    this.BuildingLog("cell-patch: PrecisionToCellSize(1 arg) not found on CraftMath");
+                    return;
+                }
+
+                // mono_compile_method → native code entry. Resolve our IntPtr-returning delegate once.
+                if (buildingMonoCompileMethod == null)
+                {
+                    IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                    if (monoModule != IntPtr.Zero)
+                    {
+                        buildingMonoCompileMethod = this.GetAuraMonoExport<BuildingMonoCompileMethodDelegate>(monoModule, "mono_compile_method");
+                    }
+                }
+                if (buildingMonoCompileMethod == null)
+                {
+                    this.buildingCellPatchTried = true;
+                    this.BuildingLog("cell-patch: mono_compile_method export unavailable");
+                    return;
+                }
+
+                IntPtr nativePtr = buildingMonoCompileMethod(method);
+                if (nativePtr == IntPtr.Zero)
+                {
+                    this.buildingCellPatchTried = true;
+                    this.BuildingLog("cell-patch: mono_compile_method returned null");
+                    return;
+                }
+
+                buildingCellHookDelegate = BuildingPrecisionToCellSizeNative; // anti-GC: keep alive
+                buildingCellDetour = new MonoMod.RuntimeDetour.NativeDetour(nativePtr, buildingCellHookDelegate);
+                this.buildingCellPatchTried = true;
+                this.BuildingLog("cell-patch: NativeDetour installed on CraftMath.PrecisionToCellSize @ 0x" + nativePtr.ToString("X") + " (sub-0.25 m grid enabled)");
+            }
+            catch (Exception ex)
+            {
+                this.buildingCellPatchTried = true; // don't loop on a hard failure (e.g. detour throw)
+                this.BuildingLog("cell-patch failed: " + ex.Message);
+            }
+        }
+
+        // Native detour body for Mono CraftMath.PrecisionToCellSize(float) -> Vector3.
+        // Windows x64 sret ABI: retBuf is the hidden return-buffer pointer, precision is the arg.
+        // When buildingFreeCellOverride > 0 we force (v,v,v); otherwise we reproduce the original
+        // formula EXACTLY so the game behaves identically while the detour stays installed.
+        // No Unity/Il2Cpp calls here — only the static field + System math (GC/thread-safe).
+        private static unsafe IntPtr BuildingPrecisionToCellSizeNative(IntPtr retBuf, float precision)
+        {
+            try
+            {
+                if (retBuf == IntPtr.Zero)
+                {
+                    return retBuf;
+                }
+                float x, y, z;
+                float v = buildingFreeCellOverride;
+                if (v > 0f)
+                {
+                    x = y = z = v;
+                }
+                else if (precision > 100f)
+                {
+                    int num = (int)Math.Round((double)precision, MidpointRounding.ToEven);
+                    x = BuildingToCellSize(num / 100);
+                    y = BuildingToCellSize(num % 100 / 10);
+                    z = BuildingToCellSize(num % 10);
+                }
+                else
+                {
+                    x = y = z = BuildingToCellSize(precision);
+                }
+                float* p = (float*)retBuf;
+                p[0] = x;
+                p[1] = y;
+                p[2] = z;
+            }
+            catch
+            {
+                // Never let a native callback throw across the Mono boundary.
+            }
+            return retBuf;
+        }
+
+        // Mirror of CraftMath's local ToCellSize: (int)Clamp(value,1,8) * 0.25f. System math only.
+        private static float BuildingToCellSize(float value)
+        {
+            float c = value < 1f ? 1f : (value > 8f ? 8f : value);
+            return (int)c * 0.25f;
         }
     }
 }

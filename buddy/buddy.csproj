@@ -46,6 +46,12 @@
     <Reference Include="0Harmony">
       <HintPath>$(HeartopiaDir)\MelonLoader\net6\0Harmony.dll</HintPath>
     </Reference>
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>$(HeartopiaDir)\MelonLoader\net6\MonoMod.RuntimeDetour.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.Utils">
+      <HintPath>$(HeartopiaDir)\MelonLoader\net6\MonoMod.Utils.dll</HintPath>
+    </Reference>
     <Reference Include="MelonLoader">
       <HintPath>$(HeartopiaDir)\MelonLoader\net6\MelonLoader.dll</HintPath>
     </Reference>
@@ -108,6 +114,12 @@
   <ItemGroup Condition="'$(Loader)' == 'BepInEx'">
     <Reference Include="0Harmony">
       <HintPath>$(HeartopiaDir)\BepInEx\core\0Harmony.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>$(HeartopiaDir)\BepInEx\core\MonoMod.RuntimeDetour.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.Utils">
+      <HintPath>$(HeartopiaDir)\BepInEx\core\MonoMod.Utils.dll</HintPath>
     </Reference>
     <Reference Include="BepInEx.Core">
       <HintPath>$(HeartopiaDir)\BepInEx\core\BepInEx.Core.dll</HintPath>
