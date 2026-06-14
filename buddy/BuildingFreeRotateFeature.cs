@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using UnityEngine;
 
 namespace HeartopiaMod
@@ -25,6 +26,21 @@ namespace HeartopiaMod
         private int buildingFreeRotateAngleY;       // desired absolute Y angle (degrees, 0..359)
         private int buildingFreeRotateStep = 15;    // +/- button step
         private string buildingFreeRotateStatus = "Focus an existing object in build mode, set Y, Apply.";
+
+        // Free-snap toggles. While on + an object focused, the focused BuildComponent's snap config
+        // is overridden to the finest step: angle = _buildBoxData.putDatas[0].rotateAngle (the 45/90
+        // step source, used by interactive rotate, alignment, and confirm-ReducePrecision), grid =
+        // _putitem.precision (cell = Clamp(precision,1,8)*0.25, min 0.25 m). Both are shared config
+        // ref-objects, so originals are cached per object and restored when the toggle turns off.
+        private int buildingFreeAngleStep = 1;     // user-set angle step (deg), 1..90
+        private float buildingFreeGridCell = 0.25f; // user-set cell size (m), 0.01..0.25
+        private bool buildingFreeAngleEnabled;
+        private bool buildingFreeGridEnabled;
+        private bool buildingFreeAnglePrev;
+        private bool buildingFreeGridPrev;
+        private float buildingFreeSnapNextApplyAt = -999f;
+        private readonly System.Collections.Generic.Dictionary<IntPtr, int> buildingAngleOriginals = new System.Collections.Generic.Dictionary<IntPtr, int>();
+        private readonly System.Collections.Generic.Dictionary<IntPtr, float> buildingGridOriginals = new System.Collections.Generic.Dictionary<IntPtr, float>();
 
         // AuraMono send cache. BuildMoveData/BuildTransformData/HomelandProtocolManager are NOT in
         // the managed interop (verified: move=False xf=False proto=False), so build + send via Mono.
@@ -123,8 +139,45 @@ namespace HeartopiaMod
 
             GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
             statusStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.9f);
-            GUI.Label(new Rect(left, y, 470f, 44f), "Status: " + this.buildingFreeRotateStatus, statusStyle);
-            y += 48f;
+            GUI.Label(new Rect(left, y, 470f, 32f), "Status: " + this.buildingFreeRotateStatus, statusStyle);
+            y += 38f;
+
+            // --- Free-snap toggles (apply to the focused object's config while on) -------------
+            GUIStyle subHeader = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold };
+            subHeader.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
+            GUI.Label(new Rect(left, y, 460f, 22f), "Free placement (no snap)", subHeader);
+            y += 26f;
+
+            bool prevAngle = this.buildingFreeAngleEnabled;
+            this.buildingFreeAngleEnabled = GUI.Toggle(new Rect(left, y, 460f, 22f), this.buildingFreeAngleEnabled,
+                "  Free angle (disables 45/90 snap)");
+            y += 24f;
+            GUI.Label(new Rect(left + 16f, y + 2f, 150f, 20f), "Angle step: " + this.buildingFreeAngleStep + "°", statusStyle);
+            this.buildingFreeAngleStep = Mathf.RoundToInt(
+                GUI.HorizontalSlider(new Rect(left + 170f, y + 6f, 280f, 18f), this.buildingFreeAngleStep, 1f, 90f));
+            y += 26f;
+
+            bool prevGrid = this.buildingFreeGridEnabled;
+            this.buildingFreeGridEnabled = GUI.Toggle(new Rect(left, y, 460f, 22f), this.buildingFreeGridEnabled,
+                "  Free grid (finest position snap)");
+            y += 24f;
+            GUI.Label(new Rect(left + 16f, y + 2f, 150f, 20f), "Cell: " + this.buildingFreeGridCell.ToString("0.00") + " m", statusStyle);
+            this.buildingFreeGridCell = Mathf.Round(
+                GUI.HorizontalSlider(new Rect(left + 170f, y + 6f, 280f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
+            y += 26f;
+
+            if (this.buildingFreeAngleEnabled != prevAngle || this.buildingFreeGridEnabled != prevGrid)
+            {
+                this.AddMenuNotification(
+                    "Free build: angle=" + (this.buildingFreeAngleEnabled ? "on" : "off") + " grid=" + (this.buildingFreeGridEnabled ? "on" : "off"),
+                    new Color(0.45f, 1f, 0.55f));
+            }
+
+            GUI.Label(new Rect(left, y, 470f, 30f),
+                "Applies to the object you have focused in build mode (config overridden while on, restored when off). " +
+                "The engine always snaps to some step, so these set the finest available.",
+                statusStyle);
+            y += 34f;
 
             return y + 20f;
         }
@@ -657,6 +710,199 @@ namespace HeartopiaMod
                 this.BuildingLog("send: " + status);
                 return false;
             }
+        }
+
+        // --- Free-snap toggles: override focused object's angle/grid config -----------------------
+
+        private void UpdateBuildingFreeSnapOverrides()
+        {
+            bool anyOn = this.buildingFreeAngleEnabled || this.buildingFreeGridEnabled;
+            bool anyCached = this.buildingAngleOriginals.Count > 0 || this.buildingGridOriginals.Count > 0;
+            if (!anyOn && !anyCached)
+            {
+                return;
+            }
+
+            // Restore-on-toggle-off (edge): when a toggle goes on→off, put the originals back.
+            if (this.buildingFreeAnglePrev && !this.buildingFreeAngleEnabled)
+            {
+                this.RestoreBuildingAngleOriginals();
+            }
+            if (this.buildingFreeGridPrev && !this.buildingFreeGridEnabled)
+            {
+                this.RestoreBuildingGridOriginals();
+            }
+            this.buildingFreeAnglePrev = this.buildingFreeAngleEnabled;
+            this.buildingFreeGridPrev = this.buildingFreeGridEnabled;
+
+            if (!this.buildingFreeAngleEnabled && !this.buildingFreeGridEnabled)
+            {
+                return;
+            }
+
+            // Throttle the focus resolve + apply (cheap, runs every frame otherwise).
+            float now = Time.unscaledTime;
+            if (now < this.buildingFreeSnapNextApplyAt)
+            {
+                return;
+            }
+            this.buildingFreeSnapNextApplyAt = now + 0.2f;
+
+            if (!this.TryGetBuildingFocusedElementQuiet(out IntPtr elementObj) || elementObj == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (this.buildingFreeAngleEnabled)
+            {
+                this.TryApplyBuildingFreeAngle(elementObj);
+            }
+            if (this.buildingFreeGridEnabled)
+            {
+                this.TryApplyBuildingFreeGrid(elementObj);
+            }
+        }
+
+        // BuildComponent._buildBoxData.putDatas[0] (BuildBoxData, a class) -> set rotateAngle.
+        private unsafe void TryApplyBuildingFreeAngle(IntPtr elementObj)
+        {
+            try
+            {
+                if (!this.TryGetMonoObjectMember(elementObj, "_buildBoxData", out IntPtr scriptDataObj) || scriptDataObj == IntPtr.Zero
+                    || !this.TryGetMonoObjectMember(scriptDataObj, "putDatas", out IntPtr arrObj) || arrObj == IntPtr.Zero
+                    || auraMonoArrayLength == null || auraMonoArrayAddrWithSize == null)
+                {
+                    return;
+                }
+                if (auraMonoArrayLength(arrObj).ToUInt64() == 0UL)
+                {
+                    return;
+                }
+                IntPtr slot = auraMonoArrayAddrWithSize(arrObj, IntPtr.Size, UIntPtr.Zero);
+                IntPtr boxDataObj = slot != IntPtr.Zero ? Marshal.ReadIntPtr(slot) : IntPtr.Zero;
+                if (boxDataObj == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                int step = Mathf.Clamp(this.buildingFreeAngleStep, 1, 90);
+                if (!this.buildingAngleOriginals.ContainsKey(boxDataObj))
+                {
+                    if (this.TryGetMonoInt32Member(boxDataObj, "rotateAngle", out int orig))
+                    {
+                        this.buildingAngleOriginals[boxDataObj] = orig;
+                        this.BuildingLog("free-angle: override rotateAngle " + orig + "->" + step);
+                    }
+                }
+                this.TrySetBuildingIntField(boxDataObj, "rotateAngle", step);
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("free-angle exc: " + ex.Message);
+            }
+        }
+
+        // BuildComponent._putitem (TablePutitem) -> set precision (cell size source).
+        private void TryApplyBuildingFreeGrid(IntPtr elementObj)
+        {
+            try
+            {
+                if (!this.TryGetMonoObjectMember(elementObj, "_putitem", out IntPtr putitemObj) || putitemObj == IntPtr.Zero)
+                {
+                    return;
+                }
+                // cell = ToCellSize(precision) = Clamp(precision,1,8)*0.25 → precision = cell/0.25.
+                // Engine floors cell at 0.25 m (precision clamped ≥1), so values below 0.25 act as 0.25.
+                float precision = Mathf.Clamp(this.buildingFreeGridCell, 0.01f, 0.25f) / 0.25f;
+                if (!this.buildingGridOriginals.ContainsKey(putitemObj))
+                {
+                    if (this.TryGetMonoSingleMember(putitemObj, "precision", out float orig))
+                    {
+                        this.buildingGridOriginals[putitemObj] = orig;
+                        this.BuildingLog("free-grid: override precision " + orig + "->" + precision + " (cell~" + this.buildingFreeGridCell + ")");
+                    }
+                }
+                this.TrySetBuildingFloatField(putitemObj, "precision", precision);
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("free-grid exc: " + ex.Message);
+            }
+        }
+
+        private void RestoreBuildingAngleOriginals()
+        {
+            foreach (System.Collections.Generic.KeyValuePair<IntPtr, int> kv in this.buildingAngleOriginals)
+            {
+                this.TrySetBuildingIntField(kv.Key, "rotateAngle", kv.Value);
+            }
+            this.BuildingLog("free-angle: restored " + this.buildingAngleOriginals.Count + " original(s)");
+            this.buildingAngleOriginals.Clear();
+        }
+
+        private void RestoreBuildingGridOriginals()
+        {
+            foreach (System.Collections.Generic.KeyValuePair<IntPtr, float> kv in this.buildingGridOriginals)
+            {
+                this.TrySetBuildingFloatField(kv.Key, "precision", kv.Value);
+            }
+            this.BuildingLog("free-grid: restored " + this.buildingGridOriginals.Count + " original(s)");
+            this.buildingGridOriginals.Clear();
+        }
+
+        private unsafe void TrySetBuildingIntField(IntPtr obj, string fieldName, int value)
+        {
+            if (obj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoClassGetFieldFromName == null || auraMonoFieldSetValue == null)
+            {
+                return;
+            }
+            IntPtr field = auraMonoClassGetFieldFromName(auraMonoObjectGetClass(obj), fieldName);
+            if (field != IntPtr.Zero)
+            {
+                int v = value;
+                auraMonoFieldSetValue(obj, field, (IntPtr)(&v));
+            }
+        }
+
+        private unsafe void TrySetBuildingFloatField(IntPtr obj, string fieldName, float value)
+        {
+            if (obj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoClassGetFieldFromName == null || auraMonoFieldSetValue == null)
+            {
+                return;
+            }
+            IntPtr field = auraMonoClassGetFieldFromName(auraMonoObjectGetClass(obj), fieldName);
+            if (field != IntPtr.Zero)
+            {
+                float v = value;
+                auraMonoFieldSetValue(obj, field, (IntPtr)(&v));
+            }
+        }
+
+        // Lightweight, non-logging resolve of the focused BuildComponent (element).
+        private bool TryGetBuildingFocusedElementQuiet(out IntPtr elementObj)
+        {
+            elementObj = IntPtr.Zero;
+            if (!this.TryGetPadBuildAuraModule(out IntPtr moduleObj))
+            {
+                return false;
+            }
+            if (!this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr craftBoxObj, "GetCraftBox") || craftBoxObj == IntPtr.Zero)
+            {
+                return false;
+            }
+            IntPtr buildObj;
+            if ((!this.TryInvokeAuraMonoZeroArg(craftBoxObj, out buildObj, "get_buildObject") || buildObj == IntPtr.Zero)
+                && (!this.TryGetMonoObjectMember(craftBoxObj, "buildObject", out buildObj) || buildObj == IntPtr.Zero))
+            {
+                return false;
+            }
+            if ((!this.TryGetMonoObjectMember(buildObj, "element", out elementObj) || elementObj == IntPtr.Zero)
+                && (!this.TryInvokeAuraMonoZeroArg(buildObj, out elementObj, "get_Element", "get_element") || elementObj == IntPtr.Zero))
+            {
+                elementObj = IntPtr.Zero;
+                return false;
+            }
+            return true;
         }
     }
 }

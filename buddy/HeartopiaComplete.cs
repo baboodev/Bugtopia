@@ -2471,6 +2471,7 @@ namespace HeartopiaMod
                 this.ProcessPadBuildHotkeysOnUpdate();
             }
 
+            this.UpdateBuildingFreeSnapOverrides();
             this.RunAntiAfkTick();
             if (this.antiAfkMouseDownClearAt > 0f && Time.unscaledTime >= this.antiAfkMouseDownClearAt)
             {
