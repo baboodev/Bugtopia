@@ -213,9 +213,34 @@ namespace HeartopiaMod
 
         private void FirePadBuildRotate()
         {
+            // The craft modes throttle every input to BuildSystemBaseMode.ThresholdTime (0.3 s) via a
+            // shared _inputTime in CheckInputThreshold, which caps our repeat far below 0.1 s. Reset
+            // _inputTime to 0 on the active mode right before each rotate so this one call always passes
+            // (the rotate itself then re-stamps _inputTime; we only ever bypass our own rotate cadence,
+            // leaving the throttle intact for every other input).
+            this.ResetPadBuildRotateThrottle();
+
             if (!this.TryPadBuildRotate(out string rotateStatus))
             {
                 this.PadBuildHotkeyLog("rotate skipped: " + rotateStatus);
+            }
+        }
+
+        // Zero _inputTime on the active craft mode (GodControl in god mode, TpsControl otherwise — the
+        // inactive one returns null) so the next CheckInputThreshold passes regardless of ThresholdTime.
+        private void ResetPadBuildRotateThrottle()
+        {
+            if (!this.TryGetPadBuildAuraModule(out IntPtr moduleObj) || moduleObj == IntPtr.Zero)
+            {
+                return;
+            }
+            if (this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr god, "get_GodControl") && god != IntPtr.Zero)
+            {
+                this.TrySetBuildingFloatField(god, "_inputTime", 0f);
+            }
+            if (this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr tps, "get_TpsControl") && tps != IntPtr.Zero)
+            {
+                this.TrySetBuildingFloatField(tps, "_inputTime", 0f);
             }
         }
 

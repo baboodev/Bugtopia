@@ -40,7 +40,7 @@ namespace HeartopiaMod
         private bool buildingMovePanelMouseOver;
         private float buildingMovePanelNextPollAt = -999f;
         private int buildingMovePanelSubState = -1;
-        private Rect buildingMovePanelRect = new Rect(14f, 150f, 360f, 132f);
+        private Rect buildingMovePanelRect = new Rect(14f, 150f, 360f, 190f);
         private Vector3 buildingMovePanelObjPos;
         private float buildingMovePanelObjYaw;
         private bool buildingMovePanelHasPos;
@@ -114,6 +114,23 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate byte AlignmentInAreaDelegate(IntPtr self, IntPtr worldPos, IntPtr quatRef, IntPtr placeBox);
 
+        // Range/height/area-limit bypass. The placing confirm shows UITipEvent{ tipId = (int)ErrorCode }
+        // for homeland-bounds failures — "Out of placement range" / "Current plane exceeds Home height
+        // limit" / "Target position exceeds the Restricted area" (ErrorCode.OutOfHomeLandXZ /
+        // OutOfHomeLandY / OutOfLayerHeight / AreaLocked), ALL returned by
+        // OutOfBoundsTesting.Test(in OutOfBoundsTestContext)->ErrorCode (AreaLocked comes from its
+        // InUnlockPartition check inside IsOutOfFieldZone). We detour that single static and force
+        // ErrorCode.Success → no tip is dispatched and the client range/height/area gate is lifted.
+        // Same callback-free constant + Apply/Undo pattern as the surface detour. ABI: static, `in` struct
+        // arg = pointer, enum return = int in RAX, so the native delegate is (IntPtr ctx) -> int → return 0.
+        private static bool buildingIgnoreRangeHeight;
+        private bool buildingRangePatchTried;
+        private static MonoMod.RuntimeDetour.NativeDetour buildingRangeDetour;
+        private static OutOfBoundsTestDelegate buildingRangeHook;            // anti-GC
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OutOfBoundsTestDelegate(IntPtr ctx);
+
         // AuraMono send cache. BuildMoveData/BuildTransformData/HomelandProtocolManager are NOT in
         // the managed interop (verified: move=False xf=False proto=False), so build + send via Mono.
         private static readonly string[] BuildOpImageNames =
@@ -145,7 +162,7 @@ namespace HeartopiaMod
 
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
             headerStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(left, y, 460f, 24f), "Free Placement", headerStyle);
+            GUI.Label(new Rect(left, y, 460f, 24f), this.L("Free Placement"), headerStyle);
             y += 30f;
 
             y = this.DrawFreePlacementControls(left, y);
@@ -163,21 +180,35 @@ namespace HeartopiaMod
             bool prevGrid = this.buildingFreeGridEnabled;
             bool prevSurface = buildingIgnoreSurfaceLimit;
 
+            bool prevRange = buildingIgnoreRangeHeight;
+            bool prevBypass = this.bypassOverlapEnabled;
+
             // Each control on one row: toggle + slider + value.
-            this.buildingFreeAngleEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeAngleEnabled, " Angle");
+            this.buildingFreeAngleEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeAngleEnabled, " " + this.L("Angle"));
             this.buildingFreeAngleStep = Mathf.RoundToInt(
                 GUI.HorizontalSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeAngleStep, 1f, 90f));
             GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeAngleStep + "°", val);
             y += 26f;
 
-            this.buildingFreeGridEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeGridEnabled, " Grid");
+            this.buildingFreeGridEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeGridEnabled, " " + this.L("Grid"));
             this.buildingFreeGridCell = Mathf.Round(
                 GUI.HorizontalSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
             GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeGridCell.ToString("0.00") + "m", val);
             y += 26f;
 
-            buildingIgnoreSurfaceLimit = GUI.Toggle(new Rect(left, y, 300f, 22f), buildingIgnoreSurfaceLimit, " No surface limit");
+            buildingIgnoreSurfaceLimit = GUI.Toggle(new Rect(left, y, 300f, 22f), buildingIgnoreSurfaceLimit, " " + this.L("No surface limit"));
             // Apply/undo of the detour is driven from UpdateBuildingFreeSnapOverrides (OnUpdate), not here.
+            y += 26f;
+
+            buildingIgnoreRangeHeight = GUI.Toggle(new Rect(left, y, 320f, 22f), buildingIgnoreRangeHeight, " " + this.L("No range/height limit"));
+            y += 26f;
+
+            this.bypassOverlapEnabled = GUI.Toggle(new Rect(left, y, 320f, 22f), this.bypassOverlapEnabled, " " + this.L("Bypass Overlap"));
+            HeartopiaComplete.bypassOverlapEnabledStatic = this.bypassOverlapEnabled;
+            if (this.bypassOverlapEnabled && !this.bypassOverlapPatched)
+            {
+                this.EnsureBypassPatched();
+            }
             y += 26f;
 
             if (this.buildingFreeAngleEnabled != prevAngle || this.buildingFreeGridEnabled != prevGrid)
@@ -191,6 +222,18 @@ namespace HeartopiaMod
                 this.AddMenuNotification(
                     "Surface limit " + (buildingIgnoreSurfaceLimit ? "off (place anywhere)" : "on"),
                     new Color(0.45f, 1f, 0.55f));
+            }
+            if (buildingIgnoreRangeHeight != prevRange)
+            {
+                this.AddMenuNotification(
+                    "Range/height limit " + (buildingIgnoreRangeHeight ? "off (place anywhere)" : "on"),
+                    new Color(0.45f, 1f, 0.55f));
+            }
+            if (this.bypassOverlapEnabled != prevBypass)
+            {
+                this.AddMenuNotification(
+                    "Bypass Overlap " + (this.bypassOverlapEnabled ? "Enabled" : "Disabled"),
+                    this.bypassOverlapEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
             }
 
             return y;
@@ -260,7 +303,7 @@ namespace HeartopiaMod
 
             GUIStyle title = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold };
             title.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(12f, 4f, w - 24f, 18f), "Free Placement", title);
+            GUI.Label(new Rect(12f, 4f, w - 24f, 18f), this.L("Free Placement"), title);
 
             // Live object coordinates (refreshed by UpdateBuildingMovePanelState).
             GUIStyle coord = new GUIStyle(GUI.skin.label) { fontSize = 11 };
@@ -268,7 +311,7 @@ namespace HeartopiaMod
             string coordText = this.buildingMovePanelHasPos
                 ? string.Format("X {0:0.00}  Y {1:0.00}  Z {2:0.00}  {3:0}°",
                     this.buildingMovePanelObjPos.x, this.buildingMovePanelObjPos.y, this.buildingMovePanelObjPos.z, this.buildingMovePanelObjYaw)
-                : "(no object)";
+                : "(" + this.L("no object") + ")";
             GUI.Label(new Rect(12f, 23f, w - 24f, 18f), coordText, coord);
 
             this.DrawFreePlacementControls(12f, 44f);
@@ -1011,6 +1054,15 @@ namespace HeartopiaMod
                 this.RemoveBuildingSurfacePatch();
             }
 
+            if (buildingIgnoreRangeHeight)
+            {
+                this.EnsureBuildingRangePatch();
+            }
+            else if (buildingRangeDetour != null)
+            {
+                this.RemoveBuildingRangePatch();
+            }
+
             bool anyOn = this.buildingFreeAngleEnabled || this.buildingFreeGridEnabled;
             bool anyCached = this.buildingAngleOriginals.Count > 0 || this.buildingGridOriginals.Count > 0;
             if (!anyOn && !anyCached)
@@ -1421,6 +1473,83 @@ namespace HeartopiaMod
         private static byte BuildingInAreaNative(IntPtr self, IntPtr worldPos, IntPtr quatRef, IntPtr placeBox)
         {
             return 1;
+        }
+
+        // Create the OutOfBoundsTesting.Test detour once and ensure it is APPLIED (toggle on). Same
+        // lazy/Apply pattern as the surface detour. Forces Success → range/height tips are suppressed.
+        private void EnsureBuildingRangePatch()
+        {
+            try
+            {
+                if (buildingRangeDetour != null)
+                {
+                    if (!buildingRangeDetour.IsApplied)
+                    {
+                        buildingRangeDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.buildingRangePatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+
+                IntPtr cls = this.FindAuraMonoClassInImages(
+                    "XDTLevelAndEntity.Core.Craft", "OutOfBoundsTesting",
+                    new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassInAllLoadedImages("OutOfBoundsTesting", "XDTLevelAndEntity.Core.Craft");
+                }
+                if (cls == IntPtr.Zero)
+                {
+                    return; // image not loaded yet — retry later
+                }
+
+                IntPtr testPtr = this.ResolveBuildingMonoNative(cls, "Test", 1);
+                if (testPtr == IntPtr.Zero)
+                {
+                    this.buildingRangePatchTried = true;
+                    this.BuildingLog("range-patch: OutOfBoundsTesting.Test(1) not resolved");
+                    return;
+                }
+
+                buildingRangeHook = BuildingOutOfBoundsTestNative;
+                buildingRangeDetour = new MonoMod.RuntimeDetour.NativeDetour(testPtr, buildingRangeHook);
+                this.buildingRangePatchTried = true;
+                this.BuildingLog("range-patch: detour installed on OutOfBoundsTesting.Test (applied)");
+            }
+            catch (Exception ex)
+            {
+                this.buildingRangePatchTried = true;
+                this.BuildingLog("range-patch failed: " + ex.Message);
+            }
+        }
+
+        private void RemoveBuildingRangePatch()
+        {
+            try
+            {
+                if (buildingRangeDetour != null && buildingRangeDetour.IsApplied)
+                {
+                    buildingRangeDetour.Undo();
+                    this.BuildingLog("range-patch: detour undone (range/height limit re-enforced)");
+                }
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("range-patch undo failed: " + ex.Message);
+            }
+        }
+
+        // ErrorCode.Success (0) — placement is always within homeland bounds / height while applied.
+        private static int BuildingOutOfBoundsTestNative(IntPtr ctx)
+        {
+            return 0;
         }
     }
 }
