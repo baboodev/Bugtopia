@@ -79,6 +79,8 @@ jobs:
 
           $required = @(
             "MelonLoader\net6\MelonLoader.dll",
+            "MelonLoader\net6\MonoMod.RuntimeDetour.dll",
+            "MelonLoader\net6\MonoMod.Utils.dll",
             "MelonLoader\Il2CppAssemblies\Assembly-CSharp.dll",
             "MelonLoader\Il2CppAssemblies\Il2CppClient.dll"
           )

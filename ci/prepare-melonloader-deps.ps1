@@ -19,7 +19,10 @@ $net6Dlls = @(
     "0Harmony.dll",
     "MelonLoader.dll",
     "Il2CppInterop.Common.dll",
-    "Il2CppInterop.Runtime.dll"
+    "Il2CppInterop.Runtime.dll",
+  # BuildingFreeRotateFeature.cs (NativeDetour on embedded Mono JIT entries)
+    "MonoMod.RuntimeDetour.dll",
+    "MonoMod.Utils.dll"
 )
 
 $interopDlls = @(
