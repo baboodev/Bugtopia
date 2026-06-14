@@ -277,12 +277,16 @@ namespace HeartopiaMod
 
         private bool TryPadBuildDelete(out string status)
         {
-            // Panel parity: god mode wrecks the focused item (InteractExecuteDelete →
-            // GodControl.Focus_Delete); Pad mode packs furniture back to the backpack
-            // (InteractExecutePickup), which is the furniture "delete".
+            // Delete acts on the FOCUSED object, so it requires CraftState.Focus (not Free):
+            //   god mode  → InteractExecuteDelete → GodControl.Focus_Delete() — THROWS unless _state
+            //               == Focus (GodCraftMode.cs:1931), so we must gate on Focus or it crashes;
+            //   pad mode  → InteractExecutePickup → TpsControl.Focus_ConfirmDelete() — operates on the
+            //               currently selected build, which only exists in Focus.
+            // (Gating this on Free was the bug: in god mode the focused item sits at SubState=Focus(2),
+            //  so the hotkey was skipped with "sub state 2".)
             if (this.TryGetPadBuildManagedModule(out object managed))
             {
-                if (!this.IsPadBuildManagedFree(managed, out status))
+                if (!this.IsPadBuildManagedFocus(managed, out status))
                 {
                     return false;
                 }
@@ -295,7 +299,7 @@ namespace HeartopiaMod
 
             if (this.TryGetPadBuildAuraModule(out IntPtr aura))
             {
-                if (!this.IsPadBuildAuraFree(aura, out status))
+                if (!this.IsPadBuildAuraFocus(aura, out status))
                 {
                     return false;
                 }
