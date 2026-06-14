@@ -116,6 +116,29 @@ namespace HeartopiaMod
             return Input.GetKeyDown(key);
         }
 
+        // Held (not just the down edge) — for key-repeat behaviour. Same guard/mouse handling.
+        private bool TryGetModHotkeyHeld(KeyCode key)
+        {
+            if (key == KeyCode.None)
+            {
+                return false;
+            }
+
+            this.EnsureInstrumentHotkeyGuardUpdated();
+            if (this.instrumentHotkeyBlockedKeys.Contains(key))
+            {
+                return false;
+            }
+
+            if (IsMouseKeyCode(key))
+            {
+                int button = MouseKeyCodeToButtonIndex(key);
+                return Input.GetMouseButton(button) || Input.GetKey(key);
+            }
+
+            return Input.GetKey(key);
+        }
+
         private bool IsInstrumentHotkeyConflict(KeyCode key)
         {
             if (key == KeyCode.None)

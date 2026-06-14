@@ -27,6 +27,24 @@ namespace HeartopiaMod
         private int buildingFreeRotateStep = 15;    // +/- button step
         private string buildingFreeRotateStatus = "Focus an existing object in build mode, set Y, Apply.";
 
+        // Free position: send an arbitrary local position to the server (BuildMoveData), bypassing the
+        // client placement gates entirely (622 surface-size / 755 area). Read current → nudge → Apply.
+        private float buildingFreePosX;
+        private float buildingFreePosY;
+        private float buildingFreePosZ;
+        private float buildingFreePosStep = 0.25f;
+        private string buildingFreePosStatus = "Focus an object, Read, nudge X/Y/Z, Apply.";
+
+        // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
+        private bool buildingMovePanelActive;
+        private bool buildingMovePanelMouseOver;
+        private float buildingMovePanelNextPollAt = -999f;
+        private int buildingMovePanelSubState = -1;
+        private Rect buildingMovePanelRect = new Rect(14f, 150f, 360f, 132f);
+        private Vector3 buildingMovePanelObjPos;
+        private float buildingMovePanelObjYaw;
+        private bool buildingMovePanelHasPos;
+
         // Free-snap toggles. While on + an object focused, the focused BuildComponent's snap config
         // is overridden to the finest step: angle = _buildBoxData.putDatas[0].rotateAngle (the 45/90
         // step source, used by interactive rotate, alignment, and confirm-ReducePrecision), grid =
@@ -127,102 +145,38 @@ namespace HeartopiaMod
 
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
             headerStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(left, y, 460f, 24f), "Free Rotate (arbitrary angle)", headerStyle);
-            y += 28f;
-
-            GUIStyle descStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
-            descStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.85f);
-            GUI.Label(new Rect(left, y, 470f, 64f),
-                "Rotates the focused homeland object to any 1° angle and sends it to the server, " +
-                "bypassing the 45/90 snap. Focus an existing object in build mode first (pad move / god click). " +
-                "The in-hand preview still re-snaps to 90° (engine), but the saved angle is correct — " +
-                "exit build mode / re-enter to see it applied.",
-                descStyle);
-            y += 66f;
-
-            // Target Y angle field + slider.
-            GUI.Label(new Rect(left, y, 90f, 22f), "Y angle (deg)");
-            string angleText = GUI.TextField(new Rect(left + 96f, y, 70f, 22f), this.buildingFreeRotateAngleY.ToString());
-            if (int.TryParse(angleText, out int parsedAngle))
-            {
-                this.buildingFreeRotateAngleY = ((parsedAngle % 360) + 360) % 360;
-            }
-            this.buildingFreeRotateAngleY = Mathf.RoundToInt(
-                GUI.HorizontalSlider(new Rect(left + 176f, y + 4f, 300f, 18f), this.buildingFreeRotateAngleY, 0f, 359f));
+            GUI.Label(new Rect(left, y, 460f, 24f), "Free Placement", headerStyle);
             y += 30f;
 
-            // Step buttons.
-            GUI.Label(new Rect(left, y + 4f, 40f, 22f), "Step");
-            string stepText = GUI.TextField(new Rect(left + 44f, y, 50f, 22f), this.buildingFreeRotateStep.ToString());
-            if (int.TryParse(stepText, out int parsedStep))
-            {
-                this.buildingFreeRotateStep = Mathf.Clamp(parsedStep, 1, 180);
-            }
-            if (GUI.Button(new Rect(left + 104f, y, 60f, 22f), "-step"))
-            {
-                this.buildingFreeRotateAngleY = ((this.buildingFreeRotateAngleY - this.buildingFreeRotateStep) % 360 + 360) % 360;
-            }
-            if (GUI.Button(new Rect(left + 168f, y, 60f, 22f), "+step"))
-            {
-                this.buildingFreeRotateAngleY = (this.buildingFreeRotateAngleY + this.buildingFreeRotateStep) % 360;
-            }
-            y += 32f;
+            y = this.DrawFreePlacementControls(left, y);
+            return y + 20f;
+        }
 
-            if (GUI.Button(new Rect(left, y, 230f, 34f), "Apply angle to focused object",
-                this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                bool ok = this.TryBuildingApplyFreeRotate(out string status);
-                this.buildingFreeRotateStatus = status;
-                this.AddMenuNotification(
-                    ok ? ("Rotate sent: Y=" + this.buildingFreeRotateAngleY + "°") : ("Rotate failed: " + status),
-                    ok ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.6f, 0.5f));
-            }
-            if (GUI.Button(new Rect(left + 240f, y, 110f, 34f), "Read current"))
-            {
-                if (this.TryBuildingReadFocusedAngle(out int currentY, out string status))
-                {
-                    this.buildingFreeRotateAngleY = ((currentY % 360) + 360) % 360;
-                    this.buildingFreeRotateStatus = "Current Y = " + currentY + "°";
-                }
-                else
-                {
-                    this.buildingFreeRotateStatus = status;
-                }
-            }
-            y += 42f;
-
-            GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
-            statusStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.9f);
-            GUI.Label(new Rect(left, y, 470f, 32f), "Status: " + this.buildingFreeRotateStatus, statusStyle);
-            y += 38f;
-
-            // --- Free-snap toggles (apply to the focused object's config while on) -------------
-            GUIStyle subHeader = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold };
-            subHeader.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(left, y, 460f, 22f), "Free placement (no snap)", subHeader);
-            y += 26f;
+        // Reusable Free Placement controls (free angle / free grid / ignore surface limit). Drawn in
+        // the Building tab and in the auto move-panel. Returns the new y.
+        private float DrawFreePlacementControls(float left, float y)
+        {
+            GUIStyle val = new GUIStyle(GUI.skin.label) { fontSize = 11 };
+            val.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.9f);
 
             bool prevAngle = this.buildingFreeAngleEnabled;
-            this.buildingFreeAngleEnabled = GUI.Toggle(new Rect(left, y, 460f, 22f), this.buildingFreeAngleEnabled,
-                "  Free angle (disables 45/90 snap)");
-            y += 24f;
-            GUI.Label(new Rect(left + 16f, y + 2f, 150f, 20f), "Angle step: " + this.buildingFreeAngleStep + "°", statusStyle);
-            this.buildingFreeAngleStep = Mathf.RoundToInt(
-                GUI.HorizontalSlider(new Rect(left + 170f, y + 6f, 280f, 18f), this.buildingFreeAngleStep, 1f, 90f));
-            y += 26f;
-
             bool prevGrid = this.buildingFreeGridEnabled;
-            this.buildingFreeGridEnabled = GUI.Toggle(new Rect(left, y, 460f, 22f), this.buildingFreeGridEnabled,
-                "  Free grid (finest position snap)");
-            y += 24f;
-            GUI.Label(new Rect(left + 16f, y + 2f, 150f, 20f), "Cell: " + this.buildingFreeGridCell.ToString("0.00") + " m", statusStyle);
-            this.buildingFreeGridCell = Mathf.Round(
-                GUI.HorizontalSlider(new Rect(left + 170f, y + 6f, 280f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
+            bool prevSurface = buildingIgnoreSurfaceLimit;
+
+            // Each control on one row: toggle + slider + value.
+            this.buildingFreeAngleEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeAngleEnabled, " Angle");
+            this.buildingFreeAngleStep = Mathf.RoundToInt(
+                GUI.HorizontalSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeAngleStep, 1f, 90f));
+            GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeAngleStep + "°", val);
             y += 26f;
 
-            bool prevSurface = buildingIgnoreSurfaceLimit;
-            buildingIgnoreSurfaceLimit = GUI.Toggle(new Rect(left, y, 460f, 22f), buildingIgnoreSurfaceLimit,
-                "  Ignore surface limit (place beyond a surface's edge)");
+            this.buildingFreeGridEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeGridEnabled, " Grid");
+            this.buildingFreeGridCell = Mathf.Round(
+                GUI.HorizontalSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
+            GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeGridCell.ToString("0.00") + "m", val);
+            y += 26f;
+
+            buildingIgnoreSurfaceLimit = GUI.Toggle(new Rect(left, y, 300f, 22f), buildingIgnoreSurfaceLimit, " No surface limit");
             // Apply/undo of the detour is driven from UpdateBuildingFreeSnapOverrides (OnUpdate), not here.
             y += 26f;
 
@@ -235,17 +189,156 @@ namespace HeartopiaMod
             if (buildingIgnoreSurfaceLimit != prevSurface)
             {
                 this.AddMenuNotification(
-                    "Surface limit " + (buildingIgnoreSurfaceLimit ? "ignored (place anywhere on/over surfaces)" : "enforced"),
+                    "Surface limit " + (buildingIgnoreSurfaceLimit ? "off (place anywhere)" : "on"),
                     new Color(0.45f, 1f, 0.55f));
             }
 
-            GUI.Label(new Rect(left, y, 470f, 30f),
-                "Applies to the object you have focused in build mode (config overridden while on, restored when off). " +
-                "The engine always snaps to some step, so these set the finest available.",
-                statusStyle);
-            y += 34f;
+            return y;
+        }
 
-            return y + 20f;
+        // Floating, draggable panel auto-shown while an object is focused/being moved (CraftState.Focus)
+        // and the main mod menu is closed — quick access to the Free Placement toggles in build/move
+        // mode. It's a real GUI.Window: themed background, GUI.DragWindow top strip, and the same
+        // GetUiScale() matrix as the main menu so it honours the mod UI-scale setting. Cursor-over is
+        // fed to the click blocker (UpdateGameUiClickBlockState) so its clicks never reach the game.
+        private void DrawBuildingMovePanel()
+        {
+            if (!this.buildingMovePanelActive || this.showMenu)
+            {
+                this.buildingMovePanelMouseOver = false;
+                return;
+            }
+
+            float scale = this.GetUiScale();
+            Matrix4x4 prevMatrix = GUI.matrix;
+            Color pc = GUI.color, pb = GUI.backgroundColor, pcc = GUI.contentColor;
+            try
+            {
+                GUI.color = Color.white;
+                GUI.backgroundColor = Color.white;
+                GUI.contentColor = Color.white;
+                GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
+                this.buildingMovePanelRect = GUI.Window(
+                    0x5B0B, this.buildingMovePanelRect, (GUI.WindowFunction)this.DrawBuildingMovePanelWindow,
+                    GUIContent.none, this.themeWindowStyle ?? GUI.skin.window);
+
+                // Keep it on-screen in logical (pre-scale) coords.
+                float maxX = Mathf.Max(0f, (Screen.width / Mathf.Max(scale, 0.001f)) - 80f);
+                float maxY = Mathf.Max(0f, (Screen.height / Mathf.Max(scale, 0.001f)) - 40f);
+                this.buildingMovePanelRect.x = Mathf.Clamp(this.buildingMovePanelRect.x, 0f, maxX);
+                this.buildingMovePanelRect.y = Mathf.Clamp(this.buildingMovePanelRect.y, 0f, maxY);
+            }
+            finally
+            {
+                GUI.matrix = prevMatrix;
+                GUI.color = pc;
+                GUI.backgroundColor = pb;
+                GUI.contentColor = pcc;
+            }
+
+            // Cursor-over (logical coords) → drives the click blocker, and consume the IMGUI event.
+            Vector2 sp = new Vector2(Input.mousePosition.x, (float)Screen.height - Input.mousePosition.y);
+            Vector2 lp = scale > 0.001f ? sp / scale : sp;
+            this.buildingMovePanelMouseOver = this.buildingMovePanelRect.Contains(lp);
+            if (this.buildingMovePanelMouseOver)
+            {
+                Event e = Event.current;
+                if (e != null && e.isMouse && e.type != EventType.Used)
+                {
+                    e.Use();
+                }
+            }
+        }
+
+        private void DrawBuildingMovePanelWindow(int id)
+        {
+            float w = this.buildingMovePanelRect.width;
+
+            // Solid themed background (GUI.Window's style alone renders nothing visible here).
+            Color basePanel = new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Max(this.uiPanelAlpha, 0.9f));
+            this.DrawRoundedPanel(new Rect(0f, 0f, w, this.buildingMovePanelRect.height), 10f, basePanel, Color.clear, 0f, Color.clear);
+
+            GUIStyle title = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold };
+            title.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
+            GUI.Label(new Rect(12f, 4f, w - 24f, 18f), "Free Placement", title);
+
+            // Live object coordinates (refreshed by UpdateBuildingMovePanelState).
+            GUIStyle coord = new GUIStyle(GUI.skin.label) { fontSize = 11 };
+            coord.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f);
+            string coordText = this.buildingMovePanelHasPos
+                ? string.Format("X {0:0.00}  Y {1:0.00}  Z {2:0.00}  {3:0}°",
+                    this.buildingMovePanelObjPos.x, this.buildingMovePanelObjPos.y, this.buildingMovePanelObjPos.z, this.buildingMovePanelObjYaw)
+                : "(no object)";
+            GUI.Label(new Rect(12f, 23f, w - 24f, 18f), coordText, coord);
+
+            this.DrawFreePlacementControls(12f, 44f);
+
+            // Top strip = drag handle (controls start at y=44, so this doesn't eat their clicks).
+            GUI.DragWindow(new Rect(0f, 0f, w, 22f));
+        }
+
+        // Poll the build module's CraftState (throttled) to drive the auto move-panel visibility, and
+        // while focused refresh the object's live local coordinates for the panel readout.
+        private void UpdateBuildingMovePanelState()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.buildingMovePanelNextPollAt)
+            {
+                return;
+            }
+            this.buildingMovePanelNextPollAt = now + 0.1f;
+
+            bool active = false;
+            if (this.TryGetPadBuildAuraModule(out IntPtr module) && module != IntPtr.Zero
+                && this.TryGetPadBuildAuraSubState(module, out int sub))
+            {
+                this.buildingMovePanelSubState = sub;
+                active = sub == 2; // CraftState.Focus — an object is focused / being moved
+            }
+            this.buildingMovePanelActive = active;
+
+            if (active && this.TryReadFocusedTransformQuiet(out Vector3 pos, out float yaw))
+            {
+                this.buildingMovePanelObjPos = pos;
+                this.buildingMovePanelObjYaw = yaw;
+                this.buildingMovePanelHasPos = true;
+            }
+            else
+            {
+                this.buildingMovePanelHasPos = false;
+            }
+        }
+
+        // Quiet (no logging) read of the focused object's local position + yaw, for the live panel
+        // readout. Resolves fresh each call (no pointers held across frames) — same chain as the
+        // focused-object resolver but without the diagnostic logging that would spam at poll rate.
+        private bool TryReadFocusedTransformQuiet(out Vector3 pos, out float yaw)
+        {
+            pos = Vector3.zero;
+            yaw = 0f;
+
+            if (!this.TryGetBuildingFocusedElementQuiet(out IntPtr elementObj) || elementObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr entityObj;
+            if ((!this.TryGetMonoObjectMember(elementObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                && (!this.TryInvokeAuraMonoZeroArg(elementObj, out entityObj, "get_entity") || entityObj == IntPtr.Zero))
+            {
+                return false;
+            }
+
+            if (!this.TryReadBuildingVector3Prop(entityObj, "localPosition", out pos))
+            {
+                return false;
+            }
+
+            if (this.TryReadBuildingQuaternionProp(entityObj, "localRotation", out Quaternion q))
+            {
+                yaw = q.eulerAngles.y;
+            }
+            return true;
         }
 
         // --- Plan B: read focused object, pack arbitrary angle, send BuildMoveData ---------------
@@ -308,6 +401,119 @@ namespace HeartopiaMod
             currentY = Mathf.RoundToInt(localEuler.y);
             status = "ok";
             return true;
+        }
+
+        // One position-axis row: "<label>" + value text field + -/+ nudge by buildingFreePosStep.
+        private float DrawBuildingPosAxis(float left, float y, string label, float value)
+        {
+            GUI.Label(new Rect(left, y + 2f, 16f, 22f), label);
+            string text = GUI.TextField(new Rect(left + 20f, y, 90f, 22f), value.ToString("0.###"));
+            if (float.TryParse(text, out float parsed))
+            {
+                value = parsed;
+            }
+            if (GUI.Button(new Rect(left + 116f, y, 40f, 22f), "-"))
+            {
+                value -= this.buildingFreePosStep;
+            }
+            if (GUI.Button(new Rect(left + 160f, y, 40f, 22f), "+"))
+            {
+                value += this.buildingFreePosStep;
+            }
+            return value;
+        }
+
+        // Plan B for position: keep the focused object's current angle, send an arbitrary local
+        // position to the server (BuildMoveData). Bypasses every client placement-surface gate.
+        private bool TryBuildingApplyFreePosition(out string status)
+        {
+            Vector3 target = new Vector3(this.buildingFreePosX, this.buildingFreePosY, this.buildingFreePosZ);
+            this.BuildingLog("apply-pos: begin target=" + target);
+
+            if (!this.TryGetBuildingFocusedObject(out IntPtr entityObj, out uint netId, out uint buildRootNetId, out string focusStatus))
+            {
+                status = focusStatus;
+                this.BuildingLog("apply-pos: focus failed: " + status);
+                return false;
+            }
+
+            if (!this.TryReadBuildingElementLocalTransform(entityObj, out _, out Vector3 localEuler, out string xfStatus))
+            {
+                status = xfStatus;
+                this.BuildingLog("apply-pos: xform failed: " + status);
+                return false;
+            }
+
+            int packedAngle = PackBuildingAngle(
+                Mathf.RoundToInt(localEuler.x),
+                Mathf.RoundToInt(localEuler.z),
+                Mathf.RoundToInt(localEuler.y));
+
+            if (!this.TrySendBuildingMove(netId, buildRootNetId, target, packedAngle, out status))
+            {
+                this.BuildingLog("apply-pos: send failed: " + status);
+                return false;
+            }
+
+            bool localOk = this.TryBuildingSetLocalPosition(entityObj, target);
+            status = "sent pos=" + target + (localOk ? " (applied)" : " (server only — exit/re-enter to see)");
+            this.BuildingLog("apply-pos: sent move netId=" + netId + " root=" + buildRootNetId + " pos=" + target + " localVisual=" + localOk);
+            return true;
+        }
+
+        private bool TryBuildingReadFocusedPosition(out Vector3 pos, out string status)
+        {
+            pos = Vector3.zero;
+            if (!this.TryGetBuildingFocusedObject(out IntPtr entityObj, out _, out _, out status))
+            {
+                return false;
+            }
+            if (!this.TryReadBuildingElementLocalTransform(entityObj, out pos, out _, out status))
+            {
+                return false;
+            }
+            status = "ok";
+            return true;
+        }
+
+        // Mirror the sent position on the local object immediately: Entity.set_localPosition(Vector3)
+        // drives transformComponent.hierarchy → the renderer (same pattern as set_localRotation).
+        private unsafe bool TryBuildingSetLocalPosition(IntPtr entityObj, Vector3 pos)
+        {
+            if (entityObj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                IntPtr entityClass = auraMonoObjectGetClass(entityObj);
+                IntPtr setMethod = this.FindAuraMonoMethodOnHierarchy(entityClass, "set_localPosition", 1);
+                if (setMethod == IntPtr.Zero)
+                {
+                    this.BuildingLog("local: set_localPosition not found");
+                    return false;
+                }
+
+                Vector3 p = pos;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&p);
+                auraMonoRuntimeInvoke(setMethod, entityObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    this.BuildingLog("local: set_localPosition exc");
+                    return false;
+                }
+
+                this.BuildingLog("local: set_localPosition pos=" + pos);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("local: set_localPosition exception: " + ex.Message);
+                return false;
+            }
         }
 
         // ToBuildingRotValue: (x<<20)|(z<<10)|y — integer degrees per axis, 10 bits each.

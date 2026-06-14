@@ -9,7 +9,8 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         private const bool PadBuildHotkeyLogsEnabled = MasterLogPadBuild;
-        private const float PadBuildRotateDebounceSeconds = 0.25f;
+        private const float PadBuildRotateInitialRepeatDelay = 0.6f;  // hold delay before auto-repeat
+        private const float PadBuildRotateRepeatInterval = 0.1f;      // auto-repeat cadence while held
         private const float PadBuildManagedResolveRetrySeconds = 5f;
         private const float PadBuildAuraResolveRetrySeconds = 5f;
         private const int PadBuildCraftStateFree = 1;  // CraftState.Free — pad roam, interact move/delete
@@ -107,7 +108,7 @@ namespace HeartopiaMod
             "AniRoot@ani@queueanimation/Bottom/skills@go/interact_wreck_stable@btn"
         };
 
-        private float padBuildRotateLastAt = -999f;
+        private float padBuildRotateRepeatAt = float.MaxValue;
 
         private void ProcessPadBuildHotkeysOnUpdate()
         {
@@ -127,12 +128,18 @@ namespace HeartopiaMod
                 }
             }
 
+            // Rotate: tap = one step. Hold = one step now, then after a 0.6 s delay repeat every 0.25 s.
             if (this.TryGetModHotkeyDown(this.keyPadRotate))
             {
-                if (!this.TryPadBuildRotate(out string rotateStatus))
-                {
-                    this.PadBuildHotkeyLog("rotate skipped: " + rotateStatus);
-                }
+                this.FirePadBuildRotate();
+                this.padBuildRotateRepeatAt = Time.unscaledTime + PadBuildRotateInitialRepeatDelay;
+            }
+            else if (this.keyPadRotate != KeyCode.None
+                && this.TryGetModHotkeyHeld(this.keyPadRotate)
+                && Time.unscaledTime >= this.padBuildRotateRepeatAt)
+            {
+                this.FirePadBuildRotate();
+                this.padBuildRotateRepeatAt = Time.unscaledTime + PadBuildRotateRepeatInterval;
             }
 
             if (this.TryGetModHotkeyDown(this.keyPadMove))
@@ -204,37 +211,32 @@ namespace HeartopiaMod
             return this.TryPadBuildCancelViaUi(out status);
         }
 
+        private void FirePadBuildRotate()
+        {
+            if (!this.TryPadBuildRotate(out string rotateStatus))
+            {
+                this.PadBuildHotkeyLog("rotate skipped: " + rotateStatus);
+            }
+        }
+
+        // Timing is driven by the key-repeat logic in ProcessPadBuildHotkeysOnUpdate, so no debounce here.
         private bool TryPadBuildRotate(out string status)
         {
             status = string.Empty;
-            float now = Time.unscaledTime;
-            if (now - this.padBuildRotateLastAt < PadBuildRotateDebounceSeconds)
-            {
-                return false;
-            }
 
-            bool ok;
             if (this.TryGetPadBuildManagedModule(out object managed))
             {
-                ok = this.IsPadBuildManagedFocus(managed, out status)
+                return this.IsPadBuildManagedFocus(managed, out status)
                     && this.InvokePadBuildManaged(managed, this.padBuildManagedRotateMethod, null, "rotate", out status);
             }
-            else if (this.TryGetPadBuildAuraModule(out IntPtr aura))
+
+            if (this.TryGetPadBuildAuraModule(out IntPtr aura))
             {
-                ok = this.IsPadBuildAuraFocus(aura, out status)
+                return this.IsPadBuildAuraFocus(aura, out status)
                     && this.InvokePadBuildAura(aura, this.padBuildAuraRotateMethod, isConfirm: false, "rotate", out status);
             }
-            else
-            {
-                ok = this.TryPadBuildRotateViaUi(out status);
-            }
 
-            if (ok)
-            {
-                this.padBuildRotateLastAt = now;
-            }
-
-            return ok;
+            return this.TryPadBuildRotateViaUi(out status);
         }
 
         private bool TryPadBuildMove(out string status)

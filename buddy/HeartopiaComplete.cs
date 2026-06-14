@@ -2472,6 +2472,7 @@ namespace HeartopiaMod
             }
 
             this.UpdateBuildingFreeSnapOverrides();
+            this.UpdateBuildingMovePanelState();
             this.RunAntiAfkTick();
             if (this.antiAfkMouseDownClearAt > 0f && Time.unscaledTime >= this.antiAfkMouseDownClearAt)
             {
@@ -2717,6 +2718,8 @@ namespace HeartopiaMod
                 this.DrawResourceVisualEspOverlay();
                 this.DrawVisualDebugEspOverlay();
             }
+
+            this.DrawBuildingMovePanel();
 
             bool flag = !this.showMenu;
             if (flag)
@@ -23296,7 +23299,14 @@ namespace HeartopiaMod
             // current cursor when the EventSystem was re-enabled on menu close.
             //
             // autoBuy needs real game-UI clicks, so it stays excluded.
-            bool shouldBlock = (this.showMenu || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
+            // Also block while the cursor is over the auto move-panel (so clicking its toggles / drag
+            // bar never leaks into the game world). blockInputReleaseUntil covers the release grace.
+            bool overMovePanel = this.buildingMovePanelActive && this.buildingMovePanelMouseOver;
+            bool shouldBlock = (this.showMenu || overMovePanel || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
+            if (overMovePanel)
+            {
+                this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
+            }
             this.EnsureModClickBlockerOverlay(shouldBlock);
         }
 
