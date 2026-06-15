@@ -5147,5 +5147,36 @@ namespace HeartopiaMod
             return false;
         }
 
+        private sealed class AutoSellBagItemEntry
+        {
+            public string SpriteName = string.Empty;
+            public string DisplayName = string.Empty;
+            public string MatchKey = string.Empty;
+            public uint NetId;
+            public int Count;
+            public int StackCount;
+            public int StaticId;
+            public int EntityType;
+            public int StarRate;
+            public int[] StarCounts = new int[6];
+            public bool FromBackpack;
+            public bool FromWarehouse;
+        }
+
+        private sealed class DirectBackpackRuntimeItem
+        {
+            public uint NetId;
+            public int StaticId;
+            public int EntityType;
+            public int Count;
+            public string Descriptor = "";
+            public object ManagedItem;
+            // MonoItem is only valid while MonoItemPin (pinned gchandle) roots it: the snapshot
+            // outlives the building tick, and SGen moves/collects unrooted objects — reading a
+            // stale MonoItem hit mono's "GC filler class" fatal assert (the recurring crash).
+            public IntPtr MonoItem;
+            public uint MonoItemPin;
+        }
+
     }
 }

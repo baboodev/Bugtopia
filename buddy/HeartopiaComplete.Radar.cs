@@ -4143,5 +4143,15 @@ namespace HeartopiaMod
             }
         }
 
+        private sealed class RadarMarkerMetadata
+        {
+            public string CanonicalLabel = string.Empty;
+            public string Icon = string.Empty;
+            public string SpecificIconKey = string.Empty;
+            public bool IsCooldown;
+            public Texture2D ResourceVisualEspIconTexture;
+            public float ResourceVisualEspNextIconResolveAt;
+        }
+
     }
 }

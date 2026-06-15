@@ -218,5 +218,16 @@ namespace HeartopiaMod
             }
         }
 
+        private enum LobbyJoinState
+        {
+            Idle,
+            OpenRoomPanel,
+            SelectFriendTab,
+            RefreshAndRetry,
+            ClickFriendJoin,
+            SelectMyTownTab,
+            ClickMyTownJoin
+        }
+
     }
 }

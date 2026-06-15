@@ -2973,5 +2973,58 @@ namespace HeartopiaMod
             return (float)num + 60f;
         }
 
+        // Token: 0x02000008 RID: 8
+        private class FarmLocation
+        {
+            // Token: 0x0600002E RID: 46 RVA: 0x00008437 File Offset: 0x00006637
+            public FarmLocation(string name, Vector3 position, string type)
+            {
+                this.Name = name;
+                this.Position = position;
+                this.Type = type;
+            }
+
+            // Token: 0x04000052 RID: 82
+            public string Name;
+
+            // Token: 0x04000053 RID: 83
+            public Vector3 Position;
+
+            // Token: 0x04000054 RID: 84
+            public string Type;
+        }
+
+        // Token: 0x02000009 RID: 9
+        private enum AutoFarmState
+        {
+            // Token: 0x04000056 RID: 86
+            Idle,
+            // Token: 0x04000057 RID: 87
+            ScanningForNodes,
+            // Token: 0x04000058 RID: 88
+            TeleportingToNode,
+            // Token: 0x04000059 RID: 89
+            Collecting,
+            // Token: 0x0400005A RID: 90
+            MovingToLocation,
+            // Token: 0x0400005B RID: 91
+            LoadingArea,
+            // Token: 0x0400005C RID: 92
+            WaitingForNodes,
+            // Token: 0x0400005D RID: 93
+            WaitingForPriorityArea
+        }
+
+        private enum TreeFarmState
+        {
+            Idle,
+            EquipAxe,
+            WaitAfterEquip,
+            TeleportToPoint,
+            WaitAfterTeleport,
+            ChopAtPoint,
+            WaitNextPoint
+        }
+
     }
 }

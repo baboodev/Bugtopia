@@ -10807,5 +10807,37 @@ namespace HeartopiaMod
             }
         }
 
+        private struct NetCookIngredientRequirement
+        {
+            public int StaticId;
+            public int CountPerDish;
+        }
+
+        private sealed class NetCookTargetContext
+        {
+            public uint CookerNetId;
+            public int CookerStaticId;
+            public int CookerType;
+            public ulong LevelObjectNetId;
+            public int Phase;
+            public int ContinuePulses;
+            public int SentCount;
+            public int LastStatus = -1;
+            public int IdleRetries;
+            public float LastStatusActionAt = -999f;
+            public float LastCookCommandAt = -999f;
+            public float NextActionAt;
+            public bool HasWorldPosition;
+            public Vector3 WorldPosition;
+        }
+
+        private sealed class NetCookRegisteredWorldCooker
+        {
+            public uint OwnerNetId;
+            public int ResourceId;
+            public int StaticId;
+            public int CookerType;
+        }
+
     }
 }

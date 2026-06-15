@@ -6287,5 +6287,34 @@ namespace HeartopiaMod
                 || (lower.Contains("max") && lower.Contains("photo"));
         }
 
+        private sealed class BirdFarmAuraCandidate
+        {
+            public uint NetId;
+            public int StaticId;
+            public float Distance;
+            public int BirdActionType;
+            public int BirdState;
+            public uint BirdStandNetId;
+            public bool IsPerchBird;
+        }
+
+        private sealed class BirdFarmAuraInspectCandidate
+        {
+            public IntPtr EntityObj;
+            public uint NetId;
+            public Vector3 Position;
+            public float Distance;
+        }
+
+        private sealed class BirdFarmAuraResolvedDetail
+        {
+            public int StaticId;
+            public int BirdActionType;
+            public int BirdState;
+            public uint BirdStandNetId;
+            public bool IsPerchBird;
+            public float ExpiresAt;
+        }
+
     }
 }

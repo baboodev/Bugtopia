@@ -978,5 +978,19 @@ namespace HeartopiaMod
             return entry.StarRate + "*";
         }
 
+        private sealed class TransferItemEntry
+        {
+            public string SpriteName = string.Empty;
+            public string DisplayName = string.Empty;
+            public string MatchKey = string.Empty;
+            public uint NetId;
+            public int Count;
+            public int StaticId;
+            public int EntityType;
+            public int StarRate;
+            public bool IsLocked;
+            public bool FromBackpack;
+        }
+
     }
 }

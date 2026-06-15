@@ -27,6 +27,9 @@ def is_member_decl(line, name):
     # must start with a modifier or a type word, not a statement
     if not re.match(r"^(public|private|internal|protected|static|unsafe|override|sealed|virtual|async|new|extern|partial|readonly|const|\[)", body):
         return False
+    # type decl: `... class|struct|enum|interface Name` (brace may be on next line)
+    if re.search(r"\b(class|struct|enum|interface)\s+" + re.escape(name) + r"\b", body):
+        return True
     # method: `... Name(`  ; field/prop: `... Name ` then = or ; or {
     return re.search(r"\b" + re.escape(name) + r"\s*[\(]", body) is not None \
         or re.search(r"\b" + re.escape(name) + r"\s*[;={]", body) is not None
@@ -63,6 +66,9 @@ def find_member_span(lines, idx):
         j += 1
     if not opened:
         return start, idx  # fallback: single line
+    # single-line balanced member (e.g. one-liner class/prop): braces close on the same line
+    if lines[j].count("{") > 0 and lines[j].count("{") == lines[j].count("}"):
+        return start, j
     # now brace-match: closing brace is first line == '        }' possibly with trailing
     k = j
     while k < len(lines):
@@ -80,7 +86,9 @@ def main():
     ap.add_argument("--src", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--names", required=True, help="file with one member name per line")
-    ap.add_argument("--header", required=True, help="file with usings+namespace+class open")
+    ap.add_argument("--header", help="file with usings+namespace+class open (new file mode)")
+    ap.add_argument("--append", action="store_true",
+                    help="append moved members into an existing --out partial file")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -133,16 +141,26 @@ def main():
             print("   ...")
         return
 
-    # build new file
-    with open(args.header, encoding="utf-8") as f:
-        header = f.read()
+    # build moved body
     moved_text = []
     for s, e, _ in moved_spans:
         moved_text.append("".join(lines[s:e + 1]))
         if not moved_text[-1].endswith("\n"):
             moved_text[-1] += "\n"
     body = "\n".join(moved_text)
-    out_content = header.replace("__BODY__", body)
+
+    if args.append:
+        # insert before the final class+namespace closing braces of an existing file
+        with open(args.out, encoding="utf-8-sig") as f:
+            existing = f.read()
+        marker = existing.rfind("\n    }\n}")
+        if marker == -1:
+            raise RuntimeError("could not find class/namespace close in " + args.out)
+        out_content = existing[:marker] + "\n" + body + existing[marker:]
+    else:
+        with open(args.header, encoding="utf-8") as f:
+            header = f.read()
+        out_content = header.replace("__BODY__", body)
     with open(args.out, "w", encoding="utf-8-sig", newline="") as f:
         f.write(out_content)
 

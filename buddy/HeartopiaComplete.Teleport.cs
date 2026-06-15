@@ -1998,5 +1998,12 @@ namespace HeartopiaMod
             }
         }
 
+        [Serializable]
+        public class CustomTeleportEntry
+        {
+            public string name;
+            public Vector3 position;
+        }
+
     }
 }

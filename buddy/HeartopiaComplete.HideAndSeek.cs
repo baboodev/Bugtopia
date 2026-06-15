@@ -442,5 +442,11 @@ namespace HeartopiaMod
             return false;
         }
 
+        private struct HideAndSeekMorphRadarSpot
+        {
+            public uint MarkerNetId;
+            public Vector3 Position;
+        }
+
     }
 }

@@ -221,6 +221,17 @@
     <Compile Include="HeartopiaComplete.WorldEntities.cs" />
     <Compile Include="HeartopiaComplete.Config.cs" />
     <Compile Include="HeartopiaComplete.Gui.cs" />
+    <Compile Include="HeartopiaComplete.Player.cs" />
+    <Compile Include="HeartopiaComplete.Interaction.cs" />
+    <Compile Include="HeartopiaComplete.InputSim.cs" />
+    <Compile Include="HeartopiaComplete.Tools.cs" />
+    <Compile Include="HeartopiaComplete.ManagedReflection.cs" />
+    <Compile Include="HeartopiaComplete.UiKitPrimitives.cs" />
+    <Compile Include="HeartopiaComplete.ConfigTypes.cs" />
+    <Compile Include="HeartopiaComplete.Win32.cs" />
+    <Compile Include="HeartopiaComplete.Localization.cs" />
+    <Compile Include="HeartopiaComplete.Patches.cs" />
+    <Compile Include="HeartopiaComplete.BagAutomation.cs" />
     <Compile Include="HeartopiaDebugEsp.cs" />
     <Compile Include="HeartopiaResourceVisualEsp.cs" />
     <Compile Include="HelperPaths.cs" />
