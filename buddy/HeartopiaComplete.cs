@@ -502,6 +502,7 @@ namespace HeartopiaMod
             public bool resourceVisualEspShowDistance = true;
             public bool resourceVisualEspShowConnector = true;
             public bool resourceVisualEspShowOffscreen = true;
+            public bool resourceVisualEspShowGroundRing = false;
             public float resourceVisualEspScale = 1f;
             public float resourceVisualEspOpacity = 0.92f;
             public int resourceVisualEspMaxMarkers = 120;
@@ -1311,6 +1312,7 @@ namespace HeartopiaMod
             data.resourceVisualEspShowDistance = this.resourceVisualEspShowDistance;
             data.resourceVisualEspShowConnector = this.resourceVisualEspShowConnector;
             data.resourceVisualEspShowOffscreen = this.resourceVisualEspShowOffscreen;
+            data.resourceVisualEspShowGroundRing = this.resourceVisualEspShowGroundRing;
             data.resourceVisualEspScale = this.resourceVisualEspScale;
             data.resourceVisualEspOpacity = this.resourceVisualEspOpacity;
             data.resourceVisualEspMaxMarkers = this.resourceVisualEspMaxMarkers;
@@ -1326,10 +1328,19 @@ namespace HeartopiaMod
             this.radarMarkerStyle = Mathf.Clamp(data.radarMarkerStyle, 0, 2);
             this.radarMaxDistance = Mathf.Clamp(data.radarMaxDistance <= 0f ? 75f : data.radarMaxDistance, 25f, 1000f);
             this.resourceVisualEspEnabled = data.resourceVisualEspEnabled;
-            this.resourceVisualEspStyle = Mathf.Clamp(data.resourceVisualEspStyle, 0, 2);
+            bool showGroundRing = data.resourceVisualEspShowGroundRing;
+            int visualEspStyle = data.resourceVisualEspStyle;
+            if (visualEspStyle == 3)
+            {
+                visualEspStyle = 0;
+                showGroundRing = true;
+            }
+
+            this.resourceVisualEspStyle = Mathf.Clamp(visualEspStyle, 0, 2);
             this.resourceVisualEspShowDistance = data.resourceVisualEspShowDistance;
             this.resourceVisualEspShowConnector = data.resourceVisualEspShowConnector;
             this.resourceVisualEspShowOffscreen = data.resourceVisualEspShowOffscreen;
+            this.resourceVisualEspShowGroundRing = showGroundRing;
             this.resourceVisualEspScale = Mathf.Clamp(data.resourceVisualEspScale <= 0f ? 1f : data.resourceVisualEspScale, 0.8f, 1.5f);
             this.resourceVisualEspOpacity = Mathf.Clamp(data.resourceVisualEspOpacity <= 0f ? 0.92f : data.resourceVisualEspOpacity, 0.35f, 1f);
             this.resourceVisualEspMaxMarkers = Mathf.Clamp(data.resourceVisualEspMaxMarkers <= 0 ? 120 : data.resourceVisualEspMaxMarkers, 20, 200);
@@ -2649,6 +2660,7 @@ namespace HeartopiaMod
                     this.lastScanTime = Time.unscaledTime;
                 }
                 this.UpdateMarkers();
+                this.UpdateRadarGroundRings();
                 if (this.isRadarActive)
                 {
                     this.CleanupExpiredCooldowns();
@@ -37433,12 +37445,14 @@ namespace HeartopiaMod
             bool prevShowDistance = this.resourceVisualEspShowDistance;
             bool prevShowConnector = this.resourceVisualEspShowConnector;
             bool prevShowOffscreen = this.resourceVisualEspShowOffscreen;
+            bool prevShowGroundRing = this.resourceVisualEspShowGroundRing;
             float toggleY = segmentY + 52f;
             float toggleWidth = (visualCard.width - 48f) * 0.5f;
             this.resourceVisualEspShowDistance = this.DrawSwitchToggle(new Rect(visualCard.x + 16f, toggleY, toggleWidth, 24f), this.resourceVisualEspShowDistance, "Show Distance");
             this.resourceVisualEspShowConnector = this.DrawSwitchToggle(new Rect(visualCard.x + 24f + toggleWidth, toggleY, toggleWidth, 24f), this.resourceVisualEspShowConnector, "Connector Lines");
             this.resourceVisualEspShowOffscreen = this.DrawSwitchToggle(new Rect(visualCard.x + 16f, toggleY + 30f, toggleWidth, 24f), this.resourceVisualEspShowOffscreen, "Offscreen Chips");
-            if (prevShowDistance != this.resourceVisualEspShowDistance || prevShowConnector != this.resourceVisualEspShowConnector || prevShowOffscreen != this.resourceVisualEspShowOffscreen)
+            this.resourceVisualEspShowGroundRing = this.DrawSwitchToggle(new Rect(visualCard.x + 24f + toggleWidth, toggleY + 30f, toggleWidth, 24f), this.resourceVisualEspShowGroundRing, "Ground Ring");
+            if (prevShowDistance != this.resourceVisualEspShowDistance || prevShowConnector != this.resourceVisualEspShowConnector || prevShowOffscreen != this.resourceVisualEspShowOffscreen || prevShowGroundRing != this.resourceVisualEspShowGroundRing)
             {
                 this.QueueRadarSettingsSave();
             }
@@ -37500,6 +37514,7 @@ namespace HeartopiaMod
             this.resourceVisualEspShowDistance = true;
             this.resourceVisualEspShowConnector = true;
             this.resourceVisualEspShowOffscreen = true;
+            this.resourceVisualEspShowGroundRing = false;
             this.resourceVisualEspScale = 1f;
             this.resourceVisualEspOpacity = 0.92f;
             this.resourceVisualEspMaxMarkers = 120;
@@ -39781,6 +39796,61 @@ namespace HeartopiaMod
             return lowerName.Contains("p_insect_insect") && lowerName.Contains("(clone)");
         }
 
+        private bool IsLocalPlayerSkeletonGameObject(GameObject obj)
+        {
+            if (obj == null)
+            {
+                return false;
+            }
+
+            string name = obj.name;
+            if (string.IsNullOrEmpty(name) || !name.Contains("p_player_skeleton"))
+            {
+                return false;
+            }
+
+            GameObject localPlayer = GetLocalPlayer();
+            if (localPlayer == null)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(obj, localPlayer))
+            {
+                return true;
+            }
+
+            if (obj.GetInstanceID() == localPlayer.GetInstanceID())
+            {
+                return true;
+            }
+
+            try
+            {
+                if (obj.transform != null && localPlayer.transform != null
+                    && obj.transform.GetInstanceID() == localPlayer.transform.GetInstanceID())
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if ((obj.transform.position - localPlayer.transform.position).sqrMagnitude < 0.04f)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
         private bool IsOtherPlayerSkeletonGameObject(GameObject obj)
         {
             if (obj == null || !obj.activeInHierarchy)
@@ -39788,14 +39858,33 @@ namespace HeartopiaMod
                 return false;
             }
 
-            GameObject localPlayer = GetLocalPlayer();
-            if (localPlayer != null && ReferenceEquals(obj, localPlayer))
+            if (this.IsLocalPlayerSkeletonGameObject(obj))
             {
                 return false;
             }
 
             string name = obj.name;
             return !string.IsNullOrEmpty(name) && name.Contains("p_player_skeleton");
+        }
+
+        private bool TryGetRadarMarkerTrackedTarget(GameObject marker, out GameObject target)
+        {
+            target = null;
+            if (marker == null)
+            {
+                return false;
+            }
+
+            foreach (KeyValuePair<GameObject, GameObject> mapping in this.markerToTarget)
+            {
+                if (mapping.Key != null && mapping.Key.name == marker.name)
+                {
+                    target = mapping.Value;
+                    return target != null;
+                }
+            }
+
+            return false;
         }
 
         private struct HideAndSeekMorphRadarSpot
@@ -45486,7 +45575,6 @@ namespace HeartopiaMod
             if (this.showOtherPlayersRadar && freshGOs != null)
             {
                 float maxPlayerRange = Mathf.Max(25f, this.radarMaxDistance);
-                GameObject localPlayer = GetLocalPlayer();
                 for (int p = 0; p < freshGOs.Length; p++)
                 {
                     try
@@ -45497,7 +45585,7 @@ namespace HeartopiaMod
                             continue;
                         }
 
-                        if (localPlayer != null && ReferenceEquals(candidate, localPlayer))
+                        if (this.IsLocalPlayerSkeletonGameObject(candidate))
                         {
                             continue;
                         }
@@ -46161,6 +46249,12 @@ namespace HeartopiaMod
                                 }
                                 bool flagOtherPlayer = gameObject2 != null && this.IsOtherPlayerSkeletonGameObject(gameObject2);
                                 if (flagOtherPlayer && !this.showOtherPlayersRadar)
+                                {
+                                    Object.Destroy(gameObject);
+                                    this.RemoveTrackedMarkerMapping(gameObject);
+                                    goto IL_505;
+                                }
+                                if (flagOtherPlayer && this.IsLocalPlayerSkeletonGameObject(gameObject2))
                                 {
                                     Object.Destroy(gameObject);
                                     this.RemoveTrackedMarkerMapping(gameObject);

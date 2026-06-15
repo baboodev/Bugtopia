@@ -25,6 +25,10 @@ namespace HeartopiaMod
         private bool resourceVisualEspShowDistance = true;
         private bool resourceVisualEspShowConnector = true;
         private bool resourceVisualEspShowOffscreen = true;
+        private bool resourceVisualEspShowGroundRing = false;
+        private const string RadarGroundRingChildName = "GroundRing";
+        private const int RadarGroundRingSegments = 48;
+        private readonly Vector3[] radarGroundRingPositions = new Vector3[RadarGroundRingSegments + 1];
         private float resourceVisualEspScale = 1f;
         private float resourceVisualEspOpacity = 0.92f;
         private int resourceVisualEspMaxMarkers = 120;
@@ -58,6 +62,13 @@ namespace HeartopiaMod
 
                 RadarMarkerMetadata metadata = this.GetMarkerMetadata(child.gameObject);
                 if (metadata == null || string.IsNullOrWhiteSpace(metadata.CanonicalLabel))
+                {
+                    continue;
+                }
+
+                if (string.Equals(metadata.CanonicalLabel, "Player", StringComparison.Ordinal)
+                    && this.TryGetRadarMarkerTrackedTarget(child.gameObject, out GameObject trackedPlayer)
+                    && this.IsLocalPlayerSkeletonGameObject(trackedPlayer))
                 {
                     continue;
                 }
@@ -143,6 +154,211 @@ namespace HeartopiaMod
 
             GUI.matrix = previousMatrix;
             GUI.color = previousColor;
+        }
+
+        private void UpdateRadarGroundRings()
+        {
+            if (!this.isRadarActive || this.radarContainer == null)
+            {
+                return;
+            }
+
+            if (!this.resourceVisualEspEnabled || !this.resourceVisualEspShowGroundRing)
+            {
+                for (int i = 0; i < this.radarContainer.transform.childCount; i++)
+                {
+                    Transform child = this.radarContainer.transform.GetChild(i);
+                    if (child != null)
+                    {
+                        this.RemoveRadarGroundRing(child.gameObject);
+                    }
+                }
+
+                return;
+            }
+
+            this.EnsureRadarMaterials();
+            if (this.radarLineMaterial == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.radarContainer.transform.childCount; i++)
+            {
+                Transform child = this.radarContainer.transform.GetChild(i);
+                if (child == null || child.gameObject == null)
+                {
+                    continue;
+                }
+
+                RadarMarkerMetadata metadata = this.GetMarkerMetadata(child.gameObject);
+                if (metadata == null || string.IsNullOrWhiteSpace(metadata.CanonicalLabel) || !this.IsResourceVisualEspLabel(metadata.CanonicalLabel))
+                {
+                    this.RemoveRadarGroundRing(child.gameObject);
+                    continue;
+                }
+
+                if (string.Equals(metadata.CanonicalLabel, "Player", StringComparison.Ordinal)
+                    && this.TryGetRadarMarkerTrackedTarget(child.gameObject, out GameObject trackedPlayer)
+                    && this.IsLocalPlayerSkeletonGameObject(trackedPlayer))
+                {
+                    this.RemoveRadarGroundRing(child.gameObject);
+                    continue;
+                }
+
+                this.EnsureRadarGroundRing(child.gameObject, metadata.CanonicalLabel, metadata.IsCooldown);
+            }
+        }
+
+        private float GetRadarGroundRingRadius(string label)
+        {
+            switch (label)
+            {
+                case "Tree":
+                case "Rare Tree":
+                case "Apple Tree":
+                case "Mandarin Tree":
+                    return 0.725f;
+                case "Meteor":
+                    return 0.8f;
+                default:
+                    return 0.425f;
+            }
+        }
+
+        private Vector3 GetRadarGroundRingCenter(Vector3 anchorPosition, string label)
+        {
+            bool isCharacter = string.Equals(label, "Player", StringComparison.Ordinal)
+                || string.Equals(label, "Morph", StringComparison.Ordinal);
+            float castStartY;
+            float maxDistance;
+            if (isCharacter)
+            {
+                float footDrop = string.Equals(label, "Player", StringComparison.Ordinal) ? 1.9f : 1.25f;
+                castStartY = anchorPosition.y - footDrop + 0.35f;
+                maxDistance = 5f;
+            }
+            else
+            {
+                castStartY = anchorPosition.y;
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    castStartY = Mathf.Max(anchorPosition.y, cam.transform.position.y) + 2f;
+                }
+                else
+                {
+                    castStartY += 2f;
+                }
+
+                maxDistance = 250f;
+            }
+
+            Vector3 origin = new Vector3(anchorPosition.x, castStartY, anchorPosition.z);
+            RaycastHit hit;
+            if (Physics.Raycast(origin, Vector3.down, out hit, maxDistance))
+            {
+                if (isCharacter && hit.collider != null)
+                {
+                    string colliderName = hit.collider.gameObject.name;
+                    if (!string.IsNullOrEmpty(colliderName) && colliderName.Contains("p_player_skeleton"))
+                    {
+                        Vector3 lowerOrigin = origin + Vector3.down * 0.5f;
+                        if (Physics.Raycast(lowerOrigin, Vector3.down, out hit, maxDistance))
+                        {
+                            return hit.point;
+                        }
+                    }
+                }
+
+                return hit.point;
+            }
+
+            if (isCharacter)
+            {
+                float footDrop = string.Equals(label, "Player", StringComparison.Ordinal) ? 1.9f : 1.25f;
+                return new Vector3(anchorPosition.x, anchorPosition.y - footDrop, anchorPosition.z);
+            }
+
+            return new Vector3(anchorPosition.x, anchorPosition.y, anchorPosition.z);
+        }
+
+        private void BuildRadarGroundRingPositions(Vector3 anchorPosition, float radius, string label)
+        {
+            Vector3 center = this.GetRadarGroundRingCenter(anchorPosition, label);
+            for (int segment = 0; segment <= RadarGroundRingSegments; segment++)
+            {
+                float angle = (float)segment / RadarGroundRingSegments * Mathf.PI * 2f;
+                this.radarGroundRingPositions[segment] = center + new Vector3(Mathf.Cos(angle) * radius, 0.02f, Mathf.Sin(angle) * radius);
+            }
+        }
+
+        private void EnsureRadarGroundRing(GameObject marker, string label, bool isCooldown)
+        {
+            if (marker == null)
+            {
+                return;
+            }
+
+            Transform ringTransform = marker.transform.Find(RadarGroundRingChildName);
+            LineRenderer circle;
+            if (ringTransform == null)
+            {
+                GameObject ringObject = new GameObject(RadarGroundRingChildName);
+                ringObject.transform.SetParent(marker.transform, false);
+                circle = ringObject.AddComponent<LineRenderer>();
+                circle.useWorldSpace = true;
+                circle.loop = true;
+                circle.material = this.radarLineMaterial;
+                circle.startWidth = 0.027f;
+                circle.endWidth = 0.027f;
+                circle.positionCount = RadarGroundRingSegments + 1;
+            }
+            else
+            {
+                circle = ringTransform.GetComponent<LineRenderer>();
+                if (circle == null)
+                {
+                    return;
+                }
+            }
+
+            Color accent = this.GetResourceVisualEspColor(label);
+            float alpha = this.resourceVisualEspOpacity * (isCooldown ? 0.45f : 0.85f);
+            accent.a = alpha;
+            circle.startColor = accent;
+            circle.endColor = accent;
+            if (circle.material != this.radarLineMaterial)
+            {
+                circle.material = this.radarLineMaterial;
+            }
+
+            float radius = this.GetRadarGroundRingRadius(label);
+            Vector3 anchorPosition = marker.transform.position;
+            if (this.TryGetRadarMarkerTrackedTarget(marker, out GameObject trackedTarget) && trackedTarget != null)
+            {
+                anchorPosition = trackedTarget.transform.position;
+            }
+
+            this.BuildRadarGroundRingPositions(anchorPosition, radius, label);
+            for (int segment = 0; segment <= RadarGroundRingSegments; segment++)
+            {
+                circle.SetPosition(segment, this.radarGroundRingPositions[segment]);
+            }
+        }
+
+        private void RemoveRadarGroundRing(GameObject marker)
+        {
+            if (marker == null)
+            {
+                return;
+            }
+
+            Transform ringTransform = marker.transform.Find(RadarGroundRingChildName);
+            if (ringTransform != null)
+            {
+                UnityEngine.Object.Destroy(ringTransform.gameObject);
+            }
         }
 
         private bool TryBuildResourceVisualEspItem(RadarMarkerMetadata metadata, Vector3 worldPosition, Vector3 cameraPosition, float maxDistance, Camera cam, out ResourceVisualEspItem item)
