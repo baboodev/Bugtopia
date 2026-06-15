@@ -226,66 +226,81 @@ namespace HeartopiaMod
             }
         }
 
-        private Vector3 GetRadarGroundRingCenter(Vector3 anchorPosition, string label)
+        private bool ShouldIgnoreRadarGroundRingHit(RaycastHit hit, GameObject trackedTarget)
+        {
+            if (hit.collider == null)
+            {
+                return true;
+            }
+
+            if (trackedTarget != null)
+            {
+                Transform hitTransform = hit.collider.transform;
+                Transform trackedTransform = trackedTarget.transform;
+                if (hitTransform != null && trackedTransform != null
+                    && (hitTransform == trackedTransform || hitTransform.IsChildOf(trackedTransform)))
+                {
+                    return true;
+                }
+            }
+
+            string colliderName = hit.collider.gameObject.name;
+            return !string.IsNullOrEmpty(colliderName) && colliderName.Contains("p_player_skeleton");
+        }
+
+        private Vector3 GetRadarGroundRingCenter(Vector3 anchorPosition, string label, GameObject trackedTarget)
         {
             bool isCharacter = string.Equals(label, "Player", StringComparison.Ordinal)
                 || string.Equals(label, "Morph", StringComparison.Ordinal);
-            float castStartY;
-            float maxDistance;
             if (isCharacter)
             {
-                float footDrop = string.Equals(label, "Player", StringComparison.Ordinal) ? 1.9f : 1.25f;
-                castStartY = anchorPosition.y - footDrop + 0.35f;
-                maxDistance = 5f;
-            }
-            else
-            {
-                castStartY = anchorPosition.y;
-                Camera cam = Camera.main;
-                if (cam != null)
+                Vector3 origin = new Vector3(anchorPosition.x, anchorPosition.y + 2.5f, anchorPosition.z);
+                RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 20f);
+                if (hits != null && hits.Length > 1)
                 {
-                    castStartY = Mathf.Max(anchorPosition.y, cam.transform.position.y) + 2f;
-                }
-                else
-                {
-                    castStartY += 2f;
+                    System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
                 }
 
-                maxDistance = 250f;
-            }
-
-            Vector3 origin = new Vector3(anchorPosition.x, castStartY, anchorPosition.z);
-            RaycastHit hit;
-            if (Physics.Raycast(origin, Vector3.down, out hit, maxDistance))
-            {
-                if (isCharacter && hit.collider != null)
+                if (hits != null)
                 {
-                    string colliderName = hit.collider.gameObject.name;
-                    if (!string.IsNullOrEmpty(colliderName) && colliderName.Contains("p_player_skeleton"))
+                    for (int i = 0; i < hits.Length; i++)
                     {
-                        Vector3 lowerOrigin = origin + Vector3.down * 0.5f;
-                        if (Physics.Raycast(lowerOrigin, Vector3.down, out hit, maxDistance))
+                        if (this.ShouldIgnoreRadarGroundRingHit(hits[i], trackedTarget))
                         {
-                            return hit.point;
+                            continue;
                         }
+
+                        return hits[i].point;
                     }
                 }
 
-                return hit.point;
+                return new Vector3(anchorPosition.x, anchorPosition.y, anchorPosition.z);
             }
 
-            if (isCharacter)
+            float castStartY = anchorPosition.y;
+            Camera cam = Camera.main;
+            if (cam != null)
             {
-                float footDrop = string.Equals(label, "Player", StringComparison.Ordinal) ? 1.9f : 1.25f;
-                return new Vector3(anchorPosition.x, anchorPosition.y - footDrop, anchorPosition.z);
+                castStartY = Mathf.Max(anchorPosition.y, cam.transform.position.y) + 2f;
+            }
+            else
+            {
+                castStartY += 2f;
+            }
+
+            Vector3 resourceOrigin = new Vector3(anchorPosition.x, castStartY, anchorPosition.z);
+            RaycastHit hit;
+            if (Physics.Raycast(resourceOrigin, Vector3.down, out hit, 250f))
+            {
+                return hit.point;
             }
 
             return new Vector3(anchorPosition.x, anchorPosition.y, anchorPosition.z);
         }
 
-        private void BuildRadarGroundRingPositions(Vector3 anchorPosition, float radius, string label)
+        private void BuildRadarGroundRingPositions(Vector3 anchorPosition, float radius, string label, GameObject trackedTarget)
         {
-            Vector3 center = this.GetRadarGroundRingCenter(anchorPosition, label);
+            Vector3 center = this.GetRadarGroundRingCenter(anchorPosition, label, trackedTarget);
             for (int segment = 0; segment <= RadarGroundRingSegments; segment++)
             {
                 float angle = (float)segment / RadarGroundRingSegments * Mathf.PI * 2f;
@@ -335,12 +350,14 @@ namespace HeartopiaMod
 
             float radius = this.GetRadarGroundRingRadius(label);
             Vector3 anchorPosition = marker.transform.position;
-            if (this.TryGetRadarMarkerTrackedTarget(marker, out GameObject trackedTarget) && trackedTarget != null)
+            GameObject trackedTarget = null;
+            if (this.TryGetRadarMarkerTrackedTarget(marker, out GameObject resolvedTarget) && resolvedTarget != null)
             {
+                trackedTarget = resolvedTarget;
                 anchorPosition = trackedTarget.transform.position;
             }
 
-            this.BuildRadarGroundRingPositions(anchorPosition, radius, label);
+            this.BuildRadarGroundRingPositions(anchorPosition, radius, label, trackedTarget);
             for (int segment = 0; segment <= RadarGroundRingSegments; segment++)
             {
                 circle.SetPosition(segment, this.radarGroundRingPositions[segment]);
