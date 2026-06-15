@@ -30,8 +30,9 @@ def is_member_decl(line, name):
     # type decl: `... class|struct|enum|interface Name` (brace may be on next line)
     if re.search(r"\b(class|struct|enum|interface)\s+" + re.escape(name) + r"\b", body):
         return True
-    # method: `... Name(`  ; field/prop: `... Name ` then = or ; or {
-    return re.search(r"\b" + re.escape(name) + r"\s*[\(]", body) is not None \
+    # method (incl. generic `Name<T>(`): `... Name(` or `... Name<`
+    # field/prop: `... Name ` then = or ; or {
+    return re.search(r"\b" + re.escape(name) + r"\s*[\(<]", body) is not None \
         or re.search(r"\b" + re.escape(name) + r"\s*[;={]", body) is not None
 
 
