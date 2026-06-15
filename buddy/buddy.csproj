@@ -195,6 +195,10 @@
     <Compile Include="CharacterRotationPatch.cs" />
     <Compile Include="MonoAssemblyDump.cs" />
     <Compile Include="HeartopiaComplete.cs" />
+    <Compile Include="HeartopiaComplete.Json.cs" />
+    <Compile Include="HeartopiaComplete.AuraMono.cs" />
+    <Compile Include="HeartopiaComplete.Reflection.cs" />
+    <Compile Include="HeartopiaComplete.UiKit.cs" />
     <Compile Include="HeartopiaDebugEsp.cs" />
     <Compile Include="HeartopiaResourceVisualEsp.cs" />
     <Compile Include="HelperPaths.cs" />
