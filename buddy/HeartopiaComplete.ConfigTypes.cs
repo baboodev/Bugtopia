@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -175,8 +175,6 @@ namespace HeartopiaMod
             public bool autoIceSkatingPreferNewMove = true;
             public bool fastBubbleGenEnabled;
             public float bubbleBubblesPerMinute;
-            public float snowClickInterval;
-            public float sculptIconClickInterval;
             public float cookingAutoSpeed;
             public float cookingWaitAtSpot;
             public float netCookInterval;

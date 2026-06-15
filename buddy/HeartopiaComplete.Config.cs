@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -188,8 +188,6 @@ namespace HeartopiaMod
             data.autoIceSkatingPreferNewMove = this.autoIceSkatingPreferNewMove;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
             data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
-            data.snowClickInterval = this.snowClickInterval;
-            data.sculptIconClickInterval = this.sculptIconClickInterval;
             data.cookingAutoSpeed = this.cookingAutoSpeed;
             data.cookingWaitAtSpot = this.cookingWaitAtSpot;
             data.netCookInterval = this.netCookInterval;
@@ -333,8 +331,6 @@ namespace HeartopiaMod
             this.autoIceSkatingPreferNewMove = data.autoIceSkatingPreferNewMove;
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
-            this.snowClickInterval = data.snowClickInterval;
-            this.sculptIconClickInterval = data.sculptIconClickInterval;
             this.cookingAutoSpeed = data.cookingAutoSpeed;
             this.cookingWaitAtSpot = data.cookingWaitAtSpot;
             this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
@@ -577,8 +573,6 @@ namespace HeartopiaMod
                         else if (line.Contains("autoIceSkatingEnabled")) this.autoIceSkatingEnabled = GetJsonInt(line, "\"autoIceSkatingEnabled\":") != 0;
                         else if (line.Contains("fastBubbleGenEnabled")) this.fastBubbleGenEnabled = GetJsonInt(line, "\"fastBubbleGenEnabled\":") != 0;
                         else if (line.Contains("bubbleBubblesPerMinute")) this.bubbleBubblesPerMinute = Mathf.Clamp(GetJsonFloat(line, "\"bubbleBubblesPerMinute\":"), 0f, 100f);
-                        else if (line.Contains("snowClickInterval")) this.snowClickInterval = GetJsonFloat(line, "\"snowClickInterval\":");
-                        else if (line.Contains("sculptIconClickInterval")) this.sculptIconClickInterval = GetJsonFloat(line, "\"sculptIconClickInterval\":");
             else if (line.Contains("cookingAutoSpeed")) this.cookingAutoSpeed = GetJsonFloat(line, "\"cookingAutoSpeed\":");
             else if (line.Contains("cookingWaitAtSpot")) this.cookingWaitAtSpot = GetJsonFloat(line, "\"cookingWaitAtSpot\":");
             else if (line.Contains("netCookInterval")) this.netCookInterval = GetJsonFloat(line, "\"netCookInterval\":");

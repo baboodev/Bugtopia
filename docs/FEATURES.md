@@ -288,17 +288,18 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 #### Auto Snow Sculpture
 
-- Configurable click interval (default 20 ms).
-- When `SnowSculpturePanel` is open and in **Round** state: invokes `OnPressDown` for all lit QTE buttons via AuraMono (`GetView<SnowSculpturePanel>` → `_lightButtons`). The game sends `ReportSculptingScore` on round end — the mod does **not** duplicate score packets while the panel path is active.
-- Fallback (no panel): `SnowSculptureProtocolManager.ReportSculptingScore` / `SendCommand` if managed types resolve.
-- Status box: round count + last API status line.
+- Fixed report interval **10 ms**.
+- **Self-starting, pure protocol (no interact / no `ExecuteHasTargetCommand`).** When no sculpture is active it resolves the snow base net id by, in order: (1) the cached base from a prior cycle this session, (2) the current interact target's level object → `ownerNetId` (when standing next to it), (3) a **50 m scan** of loaded entities — distance-filtered, then `EntityUtil.GetEntityResId` + `TableData.GetSnowbase(staticId)` to confirm it's a base, nearest wins. It then finds a snowball in the bag (`BackPackSystem.GetItemNetId(5100)`) and sends `PutSnowBall` + `StartSculpting`. A base needs exactly one snowball (`Idle→Prepared→Started`). Pure-protocol start does not open the panel or set the client `TargetNetId`, so the just-started base is treated as the active target **optimistically** and rounds begin; premature/redundant fills/starts are harmlessly rejected by the server. Base state is never read (avoids an unsafe struct-out component read). The old **Auto Click Icon** toggle (whose `ExecuteHasTargetCommand` spammed mono `icall.c` warnings) and the whole interact path were **removed**.
+- **Pure API, no UI/panel interaction.** Per interval it resolves the active snow base (`SnowSculptureStatus.TargetNetId` via AuraMono / player status) and sends a perfect-round score with `SnowSculptureProtocolManager.ReportSculptingScore(baseNetId, score)` (AuraMono first, managed `ReportSculptingScore` / `SendCommand` fallback). The QTE panel's `OnPressDown` / `_lightButtons` path was **removed**.
+- Round counter resets when the target base changes. After **20 rounds** (`SnowSculptureMaxRound`) it finalizes: `StopSculpting(baseNetId)` (`StopSnowSculptingNetworkCommand`) so the server computes the sculpture from the accumulated score, waits `SnowApiFinalizeDelaySeconds` (2 s) for `state==Idle && finishedStatidId!=0`, then `GatherSnowSculpture(baseNetId)` (`SnowSculptingTakeNetworkCommand`) to take it — after which it auto-disables and toasts. Both calls are AuraMono-first with managed fallback and are fire-and-forget. The on-screen `SnowSculpturePanel` is **not** closed by the mod (no UI interaction); it dismisses on its own timer.
+- Status box: round progress `n/20` + cumulative count + last API status line.
 
 #### Auto Click Icon
 
 - Configurable interval (default 50 ms).
 - Replaces UI clicks on the tracking interact icon with the game interact pipeline:
   1. Collect interact targets (`InteractSystem` via AuraMono + static helper).
-  2. `ConfirmExecuteHasTargetCommand` for snow commands **15** (start sculpt), **14** (put snowball), **16** (gather statue) — skip if confirm dialog required.
+  2. `ConfirmExecuteHasTargetCommand` for snow commands **15** (start sculpt) and **14** (put snowball) — skip if confirm dialog required. Gather (**16**) is intentionally excluded: Auto Snow owns the take (StopSculpting → GatherSnowSculpture via protocol), so running it here would be a redundant gather (and an extra mono `icall.c` burst).
   3. `PlayerInteraction.ExecuteHasTargetCommand(levelObjectId, commandId)` (managed + AuraMono).
 - Skips while the snow sculpture QTE panel is already open.
 - Decompiled reference: `InteractTrackCellModel.TriggerOnClickByView` → same `ExecuteHasTargetCommand` call.

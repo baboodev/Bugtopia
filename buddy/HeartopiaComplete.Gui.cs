@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -956,7 +956,7 @@ namespace HeartopiaMod
                 {
                     GUI.Box(new Rect(left, (float)num, 520f, 80f), "");
                     GUIStyle header = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.UpperLeft, fontSize = 12 };
-                    GUI.Label(new Rect(left + 10f, (float)num + 8f, 400f, 22f), $"Rounds: {this.snowClickCount}", header);
+                    GUI.Label(new Rect(left + 10f, (float)num + 8f, 400f, 22f), $"Round: {this.snowApiRoundCount}/20  (total {this.snowClickCount})", header);
                     GUI.Label(new Rect(left + 10f, (float)num + 30f, 400f, 22f), $"API: {this.snowSculptureLastActionStatus}", header);
                     num += 100;
                 }
@@ -964,28 +964,6 @@ namespace HeartopiaMod
                 {
                     num += 20;
                 }
-
-                GUI.Label(new Rect(left, (float)num, 360f, 20f), this.LF("Click Interval: {0:F0}ms", this.snowClickInterval * 1000f));
-                num += 22;
-                float prevSnow = this.snowClickInterval;
-                this.snowClickInterval = this.UI_DrawAccentSlider(new Rect(left, (float)num, 360f, 20f), this.snowClickInterval, 0.01f, 0.1f);
-                if (Math.Abs(this.snowClickInterval - prevSnow) > 0.000001f) { try { this.SaveKeybinds(false); } catch { } }
-                num += 34;
-
-                bool prevRapid = this.autoSculptureIconRapidEnabled;
-                this.autoSculptureIconRapidEnabled = this.DrawSwitchToggle(new Rect(left, (float)num, 360f, 26f), this.autoSculptureIconRapidEnabled, "Auto Click Icon");
-                if (this.autoSculptureIconRapidEnabled != prevRapid)
-                {
-                    this.AddMenuNotification($"Auto Click Icon {(this.autoSculptureIconRapidEnabled ? "Enabled" : "Disabled")}", this.autoSculptureIconRapidEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
-                    if (!this.autoSculptureIconRapidEnabled) this.lastSculptIconClickTime = 0f;
-                }
-                num += 30;
-                GUI.Label(new Rect(left, (float)num, 360f, 20f), this.LF("Interval: {0:F0}ms", this.sculptIconClickInterval * 1000f));
-                num += 22;
-                float prevSculpt = this.sculptIconClickInterval;
-                this.sculptIconClickInterval = this.UI_DrawAccentSlider(new Rect(left, (float)num, 360f, 20f), this.sculptIconClickInterval, 0.01f, 0.5f);
-                if (Math.Abs(this.sculptIconClickInterval - prevSculpt) > 0.000001f) { try { this.SaveKeybinds(false); } catch { } }
-                num += 34;
 
                 if (GUI.Button(new Rect(left, (float)num, 280f, 32f), this.L("Move snowballs to backpack"), this.themePrimaryButtonStyle ?? GUI.skin.button))
                 {
