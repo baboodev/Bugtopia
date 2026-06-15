@@ -11,7 +11,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | Product | Automation / utility mod for **Heartopia** (Unity, hybrid **IL2CPP + embedded Mono**) |
 | Output | Single assembly **`helper.dll`** |
 | Loaders | **MelonLoader** or **BepInEx IL2CPP** — one per build, never both in-game |
-| Core code | `partial class HeartopiaComplete` split across `buddy/*.cs` (~60k lines in main file) |
+| Core code | `partial class HeartopiaComplete` split **by domain** across ~39 `buddy/HeartopiaComplete*.cs` files (`HeartopiaComplete.cs` is now ~6k lines of lifecycle glue) |
 | Game access | Reflection, Harmony, `WebRequestUtility.SendCommand`, IL2CPP native API, **AuraMono** (`mono_runtime_invoke`) |
 | Hard rule | **No RVA / offset patching** — resolve types and methods at runtime |
 
@@ -44,8 +44,10 @@ Heartopia-Helper/
 ├── README.md
 ├── docs/                     ← canonical documentation
 ├── buddy/                    ← all mod source + buddy.csproj
-│   ├── HeartopiaComplete.cs  ← core UI, hooks, FindLoadedType, most features
-│   ├── AuraFarm.cs           ← partial: aura farm + AuraMono infrastructure
+│   ├── HeartopiaComplete.cs  ← lifecycle/OnUpdate glue (most logic now in the files below)
+│   ├── HeartopiaComplete.*.cs ← partials split by domain: NetCook, AutoSell, Radar,
+│   │                            Reflection, AuraMono, AuraMonoEngine, UiKit, Teleport, …
+│   ├── AuraFarm.cs           ← partial: aura gather/chop/mine feature
 │   ├── *Feature.cs           ← partials: bubble, pets, homeland, daily claims, …
 │   ├── *Farm.cs              ← static controllers: fishing, insect, bird
 │   ├── MelonLoaderPlugin.cs / BepInExPlugin.cs
@@ -275,15 +277,16 @@ See [FEATURES.md § Aura Farm](docs/FEATURES.md), [TECHNICAL.md § Aura Farm](do
 
 | Change type | Where |
 |-------------|--------|
-| New menu / small feature | New `*Feature.cs` `partial class HeartopiaComplete` |
+| New menu / small feature | New `*Feature.cs` or `HeartopiaComplete.<Domain>.cs` `partial class HeartopiaComplete` |
 | Large farm loop | `*Farm.cs` static class + tick from `HeartopiaComplete.OnUpdate` |
-| Aura / Mono shared infra | `AuraFarm.cs` (already hosts `EnsureAuraMonoApiReady`, exports) |
+| Aura / Mono **bridge** infra | `HeartopiaComplete.AuraMonoEngine.cs` (mono_* delegates, `EnsureAuraMonoApiReady`, GC pinning) |
+| Generic AuraMono helpers | `HeartopiaComplete.AuraMono.cs` (`TryInvokeAuraMono*`, `FindAuraMonoClass*`, field readers) |
 | Harmony patch | Dedicated `*Patch.cs` or feature file |
 
 ### Code style (project)
 
 - Match surrounding naming and patterns; minimal diff scope.
-- Cache resolved `Type` / `MethodInfo` / `IntPtr` — do not scan assemblies every frame. Class/method `IntPtr`s may stay raw (image lifetime); **object** `IntPtr`s cached across frames go through `AuraMonoObjectCache` (AuraFarm.cs).
+- Cache resolved `Type` / `MethodInfo` / `IntPtr` — do not scan assemblies every frame. Class/method `IntPtr`s may stay raw (image lifetime); **object** `IntPtr`s cached across frames go through `AuraMonoObjectCache` (HeartopiaComplete.AuraMonoEngine.cs).
 - New AuraMono invokes: prefer `TryAuraInvoke(method, obj, args, out result, out error)`; the `auraMonoRuntimeInvoke` delegate is also safe (bound to the central guard), the raw export is not.
 - Per-frame feature ticks: wrap in a `FeatureBreakerState` (ModLogger.cs) so a systematic failure cools down instead of spamming every frame.
 - Crash-hardening invariants are enforced by `ci/crash-hardening-lint.ps1` (runs in CI; run locally before pushing interop changes).
@@ -367,8 +370,10 @@ Full matrix: [DECOMPILED_SOURCE_MAP.md § 4](docs/DECOMPILED_SOURCE_MAP.md).
 
 | File | Responsibility |
 |------|----------------|
-| `HeartopiaComplete.cs` | `FindLoadedType`, UI, most features, `OnUpdate` |
-| `AuraFarm.cs` | Aura farm, AuraMono exports, mono class/method resolve |
+| `HeartopiaComplete.cs` | Lifecycle / `OnUpdate` glue, `MasterLog*` flags (most logic split into `HeartopiaComplete.*.cs`) |
+| `HeartopiaComplete.Reflection.cs` | `FindLoadedType`, Mono/Il2Cpp member access |
+| `HeartopiaComplete.AuraMonoEngine.cs` | AuraMono native bridge: `mono_*` delegates, `EnsureAuraMonoApiReady`, GC pinning |
+| `AuraFarm.cs` | Aura gather/chop/mine feature (interact pointers + gather invokers) |
 | `BubbleFeature.cs` | SendCommand patch, mono native hooks pattern |
 | `HomelandFarmFeature.cs` | Managed + AuraMono `GetComponents<T>` reference |
 | `DailyClaimsFeature.cs` | `EcsService.TryGet<T>` AuraMono inflation reference |

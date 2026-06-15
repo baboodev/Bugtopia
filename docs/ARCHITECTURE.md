@@ -351,7 +351,7 @@ flowchart TB
 |------|------|
 | `MelonLoaderPlugin.cs` | Forwards MelonLoader lifecycle to `HeartopiaComplete` |
 | `BepInExPlugin.cs` | Creates persistent `HeartopiaBehaviour`; sets `ModCoroutines.SetHost` |
-| `HeartopiaComplete.cs` | Main partial class — UI, teleport, radar, config, most game integration |
+| `HeartopiaComplete.cs` | Lifecycle / `OnUpdate` glue for the partial class; most logic split by domain into `HeartopiaComplete.*.cs` |
 | `ModLogger.cs` | Loader-agnostic logging |
 | `ModCoroutines.cs` | MelonCoroutines vs `MonoBehaviour.StartCoroutine` |
 | `HelperPaths.cs` | `%LocalLow%/HelperSettings/` via known folder GUID |
@@ -364,9 +364,10 @@ All merge into `public partial class HeartopiaComplete`:
 
 | File | ~Lines | Responsibility |
 |------|--------|----------------|
-| `HeartopiaComplete.cs` | 66958 | Core: UI, config, teleport, radar, net cook, auto sell, fishing helpers, type resolution, IL2CPP/AuraMono infrastructure |
+| `HeartopiaComplete.cs` | 6322 | Lifecycle / `OnUpdate` glue + `MasterLog*` flags. Logic split by domain across ~38 `HeartopiaComplete.*.cs` partials (NetCook, AutoSell, Radar, Reflection, AuraMono, AuraMonoEngine, UiKit, Teleport, Fishing, Bird, …) |
 | `HomelandFarmFeature.cs` | 20045 | Homeland farm: radius water/weed/harvest/fertilize, sow, AuraMono `GetComponents<T>` discovery |
-| `AuraFarm.cs` | 7435 | Aura gather/chop/mine, Mono API exports, resource protocol |
+| `AuraFarm.cs` | 6738 | Aura gather/chop/mine feature, resource protocol (the generic Mono bridge moved to `HeartopiaComplete.AuraMonoEngine.cs`) |
+| `HeartopiaComplete.AuraMonoEngine.cs` | 1197 | AuraMono native bridge: 53 `mono_*` P/Invoke delegates, `EnsureAuraMonoApiReady`/`AttachAuraMonoThread`, GC pinning, generic array/list/unbox primitives |
 | `PetFeedFeature.cs` | 4530 | Feed all pets, UI textures, AuraMono pet APIs |
 | `DailyClaimsFeature.cs` | 2719 | Daily activity / guides / mail / battle-pass claims |
 | `WildAnimalFeedFeature.cs` | 2573 | Trough feeding, table lookups |
@@ -493,7 +494,7 @@ flowchart LR
 
 - Farms **never** reference each other; they call **`HeartopiaComplete` host methods** for game access (equip tool, send commands, scan entities).
 - Features as partials access **private host state** directly (shared caches, config fields).
-- **`AuraFarm.cs`** owns Mono export delegates; other partials call `EnsureAuraMonoApiReady()` defined there.
+- **`HeartopiaComplete.AuraMonoEngine.cs`** owns the Mono bridge (export delegates, `EnsureAuraMonoApiReady()`, GC pinning); other partials call into it. `AuraFarm.cs` keeps only farm-specific interact pointers + gather invokers.
 - **Config** is centralized in `UnifiedConfigData` → `%LocalLow%/HelperSettings/Config.xml`.
 
 ### 4.5 Movement & teleport model
@@ -609,7 +610,7 @@ Used when **`EcsClient.dll` interop is missing** or generic `List<ItemNetPair>` 
 | `Player` move / jump methods | BunnyHopFeature | `OnJumpButton`, `SetJumpInput` pulse |
 | `TableData.GetGameTask` | DailyQuestSubmitFeature | Task metadata |
 
-**Aura assembly filtering** (`AuraFarm.cs`): prefer `Assembly-CSharp`, `Il2CppAssembly-CSharp`, `XDT`, `Game`; exclude Unity/System/Harmony/MelonLoader.
+**Aura assembly filtering** (`HeartopiaComplete.AuraMonoEngine.cs`, `FindAuraMonoClassAcrossLoadedAssemblies`): prefer `Assembly-CSharp`, `Il2CppAssembly-CSharp`, `XDT`, `Game`; exclude Unity/System/Harmony/MelonLoader.
 
 ### 5.6 Feature → access channel quick reference
 
@@ -649,7 +650,9 @@ Used when **`EcsClient.dll` interop is missing** or generic `List<ItemNetPair>` 
 buddy/
 ├── MelonLoaderPlugin.cs          # MelonLoader entry
 ├── BepInExPlugin.cs              # BepInEx entry + HeartopiaBehaviour
-├── HeartopiaComplete.cs          # Monolithic core (~58k lines)
+├── HeartopiaComplete.cs          # Lifecycle/OnUpdate glue (~6k lines)
+├── HeartopiaComplete.*.cs        # ~38 domain partials: NetCook, AutoSell, Radar,
+│                                 #   Reflection, AuraMono, AuraMonoEngine, UiKit, …
 ├── ModLogger.cs / ModCoroutines.cs / HelperPaths.cs
 ├── LocalizationManager.cs
 │

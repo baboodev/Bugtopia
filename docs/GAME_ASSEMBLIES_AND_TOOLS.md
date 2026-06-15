@@ -199,7 +199,7 @@ Output: `%USERPROFILE%\AppData\LocalLow\HelperSettings\DecryptedAssemblies\`.
 An **empty folder is the opt-in switch** — there is no hotkey:
 
 - **Folder exists and is empty** → the mod **auto-dumps once**, the first time the game's Mono
-  runtime becomes ready (hooked in `EnsureAuraMonoApiReady`, [AuraFarm.cs](../buddy/AuraFarm.cs)).
+  runtime becomes ready (hooked in `EnsureAuraMonoApiReady`, [HeartopiaComplete.AuraMonoEngine.cs](../buddy/HeartopiaComplete.AuraMonoEngine.cs)).
 - **Folder has files** (a previous dump) → **nothing runs** — clear it to re-dump.
 - **Folder absent** → **nothing is dumped and the folder is never created.**
 

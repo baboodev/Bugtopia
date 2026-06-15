@@ -395,9 +395,9 @@ When a feature logs `unavailable` / `null` / `count=0` unexpectedly:
 | File | Responsibility |
 |------|----------------|
 | `buddy/DailyClaimsFeature.cs` | EcsService.TryGet inflation, town guide list, mail/BP state probes |
-| `buddy/HeartopiaComplete.cs` | `FindLoadedType`, `FindAuraMonoClassByFullName`, `TryGetAuraMonoDataModuleInstance` |
+| `buddy/HeartopiaComplete.Reflection.cs` / `.AuraMono.cs` | `FindLoadedType`; `FindAuraMonoClassByFullName`, `TryGetAuraMonoDataModuleInstance` |
 | `buddy/HomelandFarmFeature.cs` | `ResolveHomelandFarmManagedType`, `TryHomelandFarmSendCommand`, interop load |
-| `buddy/AuraFarm.cs` | Mono exports, `TryUnboxMonoBoolean`, generic inflation primitives |
+| `buddy/HeartopiaComplete.AuraMonoEngine.cs` | Mono exports, `TryUnboxMonoBoolean`, generic inflation primitives |
 | `buddy/DailyQuestSubmitFeature.cs` | `List<ItemNetPair>` AuraMono create + fill pattern |
 | `buddy/WildAnimalGiftFeature.cs` | AuraMono-only protocol (`WildAnimalProtocolManager`) — no `EcsService` |
 | `buddy/PadBuildHotkeyFeature.cs` | Module-instance resolve reference: managed `TryGetManagedModule` → AuraMono `Managers.GetModule(Type)` → UI fallback |

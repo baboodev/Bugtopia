@@ -170,7 +170,7 @@ But on this BepInEx build **the managed `Entities` type and its `GetComponents` 
 
 ### Required Mono exports
 
-Bound in `AuraFarm.cs` (`ResolveAuraMonoRuntimeMethods`) via `GetAuraMonoExport<…>`:
+Bound in `HeartopiaComplete.AuraMonoEngine.cs` (`EnsureAuraMonoApiReady`) via `GetAuraMonoExport<…>`:
 
 | Export | Use |
 |--------|-----|
