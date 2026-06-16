@@ -43,6 +43,8 @@ namespace HeartopiaMod
         private float buildingFreeZApplied;
         private float buildingFreeX;             // world-X jog of the focused object (god mode)
         private float buildingFreeXApplied;
+        private float buildingPlaneHeight;       // god-mode build-plane height (SetPlaneHeight, 0..24)
+        private float buildingPlaneHeightApplied = -1f;
 
         // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
         private bool buildingMovePanelActive;
@@ -235,6 +237,28 @@ namespace HeartopiaMod
                 this.DrawBuildingAxisRow(left, y, "Z", -8f, 8f, new Vector3(0f, 0f, 1f), val,
                     ref this.buildingFreeZ, ref this.buildingFreeZApplied);
                 y += 26f;
+
+                // Build-plane height (SetPlaneHeight): raises the placement plane/camera for NEW objects.
+                // Fixed 0.5 m granularity — both the slider and the +/- buttons snap to multiples of 0.5.
+                const float planeStep = 0.5f;
+                GUI.Label(new Rect(left, y + 2f, 48f, 20f), this.L("Plane"), val);
+                this.buildingPlaneHeight = Mathf.Round(
+                    GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), this.buildingPlaneHeight, 0f, 24f) / planeStep) * planeStep;
+                GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), this.buildingPlaneHeight.ToString("0.0") + "m", val);
+                if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
+                {
+                    this.buildingPlaneHeight = Mathf.Clamp(this.buildingPlaneHeight - planeStep, 0f, 24f);
+                }
+                if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
+                {
+                    this.buildingPlaneHeight = Mathf.Clamp(this.buildingPlaneHeight + planeStep, 0f, 24f);
+                }
+                if (!Mathf.Approximately(this.buildingPlaneHeight, this.buildingPlaneHeightApplied))
+                {
+                    this.buildingPlaneHeightApplied = this.buildingPlaneHeight;
+                    this.TrySetBuildingPlaneHeight(this.buildingPlaneHeight);
+                }
+                y += 26f;
             }
 
             if (this.buildingFreeAngleEnabled != prevAngle || this.buildingFreeGridEnabled != prevGrid)
@@ -317,7 +341,7 @@ namespace HeartopiaMod
             }
 
             // Height fits the content: 5 toggles always + 3 X/Y/Z sliders only in god mode.
-            this.buildingMovePanelRect.height = this.buildingMovePanelGodMode ? 264f : 186f;
+            this.buildingMovePanelRect.height = this.buildingMovePanelGodMode ? 290f : 186f;
 
             float scale = this.GetUiScale();
             Matrix4x4 prevMatrix = GUI.matrix;
@@ -714,6 +738,58 @@ namespace HeartopiaMod
             }
             rootRot = worldRot * Quaternion.Inverse(localRot);
             return true;
+        }
+
+        // Raise the god-mode build plane: BuildModule.SetPlaneHeight(float offset, bool setCamera). The
+        // placing ray then hits the virtual plane at _basePlaneHeight+offset, so NEW objects place at
+        // that height. God-mode only. Value-type args passed as pointers to the unboxed value.
+        private unsafe bool TrySetBuildingPlaneHeight(float offset)
+        {
+            if (auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+            if (!this.TryGetPadBuildAuraModule(out IntPtr moduleObj) || moduleObj == IntPtr.Zero)
+            {
+                this.BuildingLog("plane: BuildModule unavailable");
+                return false;
+            }
+            if (!(this.TryGetMonoBoolMember(moduleObj, "InGodMode", out bool inGod) && inGod))
+            {
+                this.BuildingLog("plane: not god mode");
+                return false;
+            }
+
+            try
+            {
+                IntPtr cls = auraMonoObjectGetClass(moduleObj);
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "SetPlaneHeight", 2);
+                if (method == IntPtr.Zero)
+                {
+                    this.BuildingLog("plane: SetPlaneHeight(2) not found");
+                    return false;
+                }
+
+                float off = offset;
+                byte setCamera = 1;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&off);
+                args[1] = (IntPtr)(&setCamera);
+                auraMonoRuntimeInvoke(method, moduleObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    this.BuildingLog("plane: SetPlaneHeight exc");
+                    return false;
+                }
+                this.BuildingLog("plane: SetPlaneHeight(" + offset + ")");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("plane exception: " + ex.Message);
+                return false;
+            }
         }
 
         // Read a Vector3 instance field, add the delta vector, write it back. Returns false if not found.
