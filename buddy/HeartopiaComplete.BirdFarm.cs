@@ -1726,7 +1726,18 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out List<IntPtr> entityObjects, out string enumerateStatus))
+                // Prefer the direct-ECS bird component query (GetComponents<BirdComponent/
+                // BirdScannableComponent/PerchBirdComponent>): it touches only bird entities, so it
+                // avoids the crash-prone full entity-graph walk on dense/streaming fields and is far
+                // cheaper. Fall back to the legacy walk only when GetComponents is unavailable.
+                List<IntPtr> entityObjects;
+                string enumerateStatus;
+                bool birdEntitiesViaComponents = this.TryCollectBirdFarmAuraBirdEntities(out entityObjects, out enumerateStatus);
+                if (birdEntitiesViaComponents)
+                {
+                    BirdNetFarm.TraceCrashBreadcrumb("Scan via GetComponents birdEntities=" + entityObjects.Count);
+                }
+                else if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out entityObjects, out enumerateStatus))
                 {
                     BirdNetFarm.TraceCrashBreadcrumb("Scan enumerate failed: " + enumerateStatus);
                     this.cachedBirdFarmAuraNextScanAt = Time.unscaledTime + scanRefreshSeconds;
@@ -2158,6 +2169,69 @@ namespace HeartopiaMod
                 IsPerchBird = isPerchBird,
                 ExpiresAt = expiresAt
             };
+        }
+
+        // Direct-ECS bird discovery: enumerate bird component objects via Entities.GetComponents<T>
+        // (safe, no full entity-graph walk) and return their owner bird entities. Replaces the
+        // crash-prone TryEnumerateAuraMonoLoadedEntityObjects walk for the bird scan. Gated on
+        // GetComponents readiness: once ready, this is authoritative (returns true even with 0 birds,
+        // so the caller never falls back to the walk on a dense/bird-free field). Returns false only
+        // when GetComponents is unavailable on this build (then the caller uses the legacy walk).
+        private bool TryCollectBirdFarmAuraBirdEntities(out List<IntPtr> birdEntities, out string status)
+        {
+            birdEntities = null;
+            status = string.Empty;
+
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                status = "GetComponents not ready";
+                return false;
+            }
+
+            this.TryResolveAuraMonoBirdComponentClasses(out IntPtr birdComponentClass, out IntPtr birdScannableClass, out IntPtr perchBirdComponentClass, out _, out _);
+            if (birdComponentClass == IntPtr.Zero && birdScannableClass == IntPtr.Zero && perchBirdComponentClass == IntPtr.Zero)
+            {
+                status = "Bird component classes unavailable";
+                return false;
+            }
+
+            List<IntPtr> result = new List<IntPtr>(64);
+            HashSet<IntPtr> seen = new HashSet<IntPtr>();
+            IntPtr[] classes = { birdComponentClass, birdScannableClass, perchBirdComponentClass };
+            for (int c = 0; c < classes.Length; c++)
+            {
+                IntPtr cls = classes[c];
+                if (cls == IntPtr.Zero || !this.TryAuraMonoGetComponentObjects(cls, out List<IntPtr> components) || components == null)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr componentObj = components[i];
+                    if (componentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    // Owner bird entity is the component's back-reference.
+                    IntPtr entityObj = IntPtr.Zero;
+                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
+                    if (seen.Add(entityObj))
+                    {
+                        result.Add(entityObj);
+                    }
+                }
+            }
+
+            birdEntities = result;
+            status = "Bird entities via GetComponents=" + result.Count;
+            return true;
         }
 
         private bool TryGetBirdPhotoDetailsViaAuraMonoEntity(IntPtr entityObj, out int birdActionType, out int birdState, out uint birdStandNetId, out bool isPerchBird)
