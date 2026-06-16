@@ -56,6 +56,9 @@ namespace HeartopiaMod
         private readonly Dictionary<uint, uint> auraMeteorViewToParentCache = new Dictionary<uint, uint>(8);
         private readonly List<IntPtr> auraFarmComponentBuffer = new List<IntPtr>(16);
         private float auraNextMeteorParentScanAt = 0f;
+        // Cached mono class for the direct-ECS meteor-logic lookup (avoids the crash-prone
+        // entity-graph walk; CollectableMeteoriteLogicComponent is a ViewComponent).
+        private IntPtr auraMeteorLogicComponentClass = IntPtr.Zero;
         private string auraLastMeteorProbeKey = string.Empty;
         private float auraLastMeteorProbeAt = 0f;
         private float auraNextMeteorAxeEquipAt = 0f;
@@ -3611,6 +3614,68 @@ namespace HeartopiaMod
             return this.TryGetAuraMonoObjectPosition(entityObj, out position) && position != Vector3.zero;
         }
 
+        // Direct-ECS meteor-logic parent lookup: enumerate CollectableMeteoriteLogicComponent objects
+        // via Entities.GetComponents<T> (safe, no entity-graph walk) and match the one whose linked
+        // view entity == viewNetId, returning its owner (logic) entity netId.
+        private bool TryScanAuraMeteorLogicParentViaGetComponents(uint viewNetId, out uint logicNetId)
+        {
+            logicNetId = 0U;
+            if (viewNetId == 0U)
+            {
+                return false;
+            }
+
+            if (this.auraMeteorLogicComponentClass == IntPtr.Zero)
+            {
+                this.auraMeteorLogicComponentClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteLogicComponent");
+                if (this.auraMeteorLogicComponentClass == IntPtr.Zero)
+                {
+                    this.auraMeteorLogicComponentClass = this.FindAuraMonoClassByFullName(
+                        "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteLogicComponent");
+                }
+            }
+
+            if (this.auraMeteorLogicComponentClass == IntPtr.Zero
+                || !this.TryAuraMonoGetComponentObjects(this.auraMeteorLogicComponentClass, out List<IntPtr> logicComponents)
+                || logicComponents == null
+                || logicComponents.Count == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < logicComponents.Count; i++)
+            {
+                IntPtr logicComponentObj = logicComponents[i];
+                if (logicComponentObj == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out uint linkedViewNetId)
+                    || linkedViewNetId != viewNetId)
+                {
+                    continue;
+                }
+
+                // Owner (logic) entity is the component's back-reference.
+                IntPtr logicEntityObj = IntPtr.Zero;
+                if ((!this.TryGetMonoObjectMember(logicComponentObj, "entity", out logicEntityObj) || logicEntityObj == IntPtr.Zero)
+                    && (!this.TryGetMonoObjectMember(logicComponentObj, "_entity", out logicEntityObj) || logicEntityObj == IntPtr.Zero))
+                {
+                    continue;
+                }
+
+                if (this.TryGetAuraMonoEntityNetId(logicEntityObj, out logicNetId) && this.IsLikelyAuraEntityNetId(logicNetId))
+                {
+                    return true;
+                }
+            }
+
+            logicNetId = 0U;
+            return false;
+        }
+
         private bool TryScanAuraMeteorLogicParentForViewNetId(uint viewNetId, out uint logicNetId)
         {
             logicNetId = 0U;
@@ -3626,6 +3691,16 @@ namespace HeartopiaMod
             }
 
             this.auraNextMeteorParentScanAt = now + 0.35f;
+
+            // Primary: direct ECS query for meteor-logic components — no entity-graph walk
+            // (TryEnumerateAuraMonoLoadedEntityObjects dereferences arbitrary entity pointers and
+            // randomly AVs on dense/streaming fields). Falls back to the walk only if the query is
+            // unavailable on this build.
+            if (this.TryScanAuraMeteorLogicParentViaGetComponents(viewNetId, out logicNetId)
+                && this.IsLikelyAuraEntityNetId(logicNetId))
+            {
+                return true;
+            }
 
             List<IntPtr> entityObjects;
             string status;
