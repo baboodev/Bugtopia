@@ -416,6 +416,11 @@ namespace HeartopiaMod
         private bool homelandFarmTableDataReflectionResolved = false;
         private float homelandFarmNextRuntimeResolveAt = 0f;
         private const float HomelandFarmRuntimeResolveRetryIntervalSeconds = 0.5f;
+        private float homelandFarmNextSceneLoadFinishedProbeAt = 0f;
+        private bool homelandFarmCachedSceneLoadFinished = false;
+        private const float HomelandFarmSceneLoadFinishedProbeIntervalSeconds = 0.5f;
+        private IntPtr homelandFarmAuraClientHelperServiceClass = IntPtr.Zero;
+        private IntPtr homelandFarmAuraIsSceneLoadFinishedMethod = IntPtr.Zero;
         // Warmup diagnostics (visible via ModLogger, throttled so they don't spam).
         private bool homelandFarmWarmupStartedLogged = false;
         private bool homelandFarmWarmupReadyLogged = false;
@@ -1009,8 +1014,84 @@ namespace HeartopiaMod
             this.EnsureNoclipVehicleAuraMono(logIfPending: true);
         }
 
+        private bool IsHomelandFarmSceneLoadFinished()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.homelandFarmNextSceneLoadFinishedProbeAt)
+            {
+                return this.homelandFarmCachedSceneLoadFinished;
+            }
+
+            this.homelandFarmNextSceneLoadFinishedProbeAt = now + HomelandFarmSceneLoadFinishedProbeIntervalSeconds;
+            this.homelandFarmCachedSceneLoadFinished = this.TryQuerySceneLoadFinished();
+            return this.homelandFarmCachedSceneLoadFinished;
+        }
+
+        private bool TryQuerySceneLoadFinished()
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                if (this.homelandFarmAuraClientHelperServiceClass == IntPtr.Zero)
+                {
+                    this.homelandFarmAuraClientHelperServiceClass = this.FindAuraMonoClassByFullName("ClientSystem.Helper.ClientHelperService");
+                    if (this.homelandFarmAuraClientHelperServiceClass == IntPtr.Zero)
+                    {
+                        this.homelandFarmAuraClientHelperServiceClass = this.FindAuraMonoClassInImages(
+                            "ClientSystem.Helper",
+                            "ClientHelperService",
+                            new[] { "EcsSystem", "EcsSystem.dll" });
+                    }
+                }
+
+                if (this.homelandFarmAuraClientHelperServiceClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                if (this.homelandFarmAuraIsSceneLoadFinishedMethod == IntPtr.Zero)
+                {
+                    this.homelandFarmAuraIsSceneLoadFinishedMethod = this.FindAuraMonoMethodOnHierarchy(
+                        this.homelandFarmAuraClientHelperServiceClass,
+                        "IsSceneLoadFinished",
+                        0);
+                }
+
+                if (this.homelandFarmAuraIsSceneLoadFinishedMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr boxed = auraMonoRuntimeInvoke(
+                    this.homelandFarmAuraIsSceneLoadFinishedMethod,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    ref exc);
+                if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                return this.TryUnboxMonoBoolean(boxed, out bool finished) && finished;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         internal void UpdateHomelandFarmBackground()
         {
+            if (!this.IsHomelandFarmSceneLoadFinished())
+            {
+                return;
+            }
+
             if (this.auraFarmMethodsReady)
             {
                 // Already warmed up. Log the success exactly once so we can see when it happened.
@@ -19777,6 +19858,11 @@ namespace HeartopiaMod
         private void EnsureHomelandFarmWarmupStarted()
         {
             if (this.homelandFarmWarmupStarted)
+            {
+                return;
+            }
+
+            if (!this.IsHomelandFarmSceneLoadFinished())
             {
                 return;
             }
