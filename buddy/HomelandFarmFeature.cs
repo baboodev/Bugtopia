@@ -12047,7 +12047,7 @@ namespace HeartopiaMod
             return wetReadOk || friendWaterCountReadOk;
         }
 
-        private bool TryHomelandFarmTryReadCropBoxNeedsWater(object cropBoxData, out bool needsWater)
+        private bool TryHomelandFarmTryReadCropBoxNeedsWater(object cropBoxData, uint ownerId, out bool needsWater)
         {
             needsWater = true;
             if (!this.TryHomelandFarmTryReadCropBoxWaterState(
@@ -12067,8 +12067,12 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Pass the real ownerId so the visitor-water short-circuit only applies when we are
+            // actually VISITING. On our OWN field (ownerId == playerNetId) visiting is false, so we
+            // fall through to the owner-water logic below (needs water when the box isn't wet) —
+            // otherwise own dry crops with 0<friends<max get wrongly skipped as "fully watered".
             this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
-            if (this.TryHomelandFarmTryResolveVisitorWaterState(cropBoxData, 0U, playerNetId, isCropBox: true, out bool selfWatered, out bool selfWateredReadOk, out bool canAddVisitorWater))
+            if (this.TryHomelandFarmTryResolveVisitorWaterState(cropBoxData, ownerId, playerNetId, isCropBox: true, out bool selfWatered, out bool selfWateredReadOk, out bool canAddVisitorWater))
             {
                 if (selfWateredReadOk)
                 {
@@ -12807,7 +12811,7 @@ namespace HeartopiaMod
                     NetId = netId,
                     OwnerId = ownerId,
                     IsCropBox = true,
-                    NeedsWater = this.TryHomelandFarmTryReadCropBoxNeedsWater(cropBoxData, out bool needsWater)
+                    NeedsWater = this.TryHomelandFarmTryReadCropBoxNeedsWater(cropBoxData, ownerId, out bool needsWater)
                         ? needsWater
                         : true,
                     Position = position
