@@ -53,17 +53,20 @@ namespace HeartopiaMod
         private readonly Dictionary<uint, AuraTargetInfo> auraTargetInfoByOwnerId = new Dictionary<uint, AuraTargetInfo>();
         private readonly HashSet<uint> auraMeteorHitParentsThisTick = new HashSet<uint>(4);
         private readonly HashSet<uint> auraMeteorFreshOwnerBuffer = new HashSet<uint>(4);
-        private readonly Dictionary<uint, uint> auraMeteorViewToParentCache = new Dictionary<uint, uint>(8);
-        private readonly List<IntPtr> auraFarmComponentBuffer = new List<IntPtr>(16);
-        private float auraNextMeteorParentScanAt = 0f;
+        private readonly Dictionary<uint, AuraMeteorParentCacheEntry> auraMeteorViewToParentCache = new Dictionary<uint, AuraMeteorParentCacheEntry>(8);
+        private readonly Dictionary<uint, float> auraNextMeteorParentResolveAtByView = new Dictionary<uint, float>(8);
+        private Vector3 auraLastAuraFarmPlayerPosition = Vector3.zero;
+        private const float AuraMeteorParentCacheAnchorTolerance = AuraMeteorMatchRadius * 3f;
+        private const float AuraMeteorTeleportClearDistance = 40f;
         // Cached mono class for the direct-ECS meteor-logic lookup (avoids the crash-prone
         // entity-graph walk; CollectableMeteoriteLogicComponent is a ViewComponent).
         private IntPtr auraMeteorLogicComponentClass = IntPtr.Zero;
-        private string auraLastMeteorProbeKey = string.Empty;
-        private float auraLastMeteorProbeAt = 0f;
+        private IntPtr auraMeteorViewComponentClass = IntPtr.Zero;
         private float auraNextMeteorAxeEquipAt = 0f;
+        private float auraMeteorAxeEquipSuppressedUntil = 0f;
         private const int AuraMeteorAxeToolId = 1;
         private const float AuraMeteorAxeEquipInterval = 0.35f;
+        private const float AuraMeteorAxeEquipTeleportGrace = 1.75f;
         private readonly Dictionary<uint, float> auraNextAllowedByOwnerId = new Dictionary<uint, float>();
         private readonly List<uint> auraExpiredOwnerBuffer = new List<uint>(64);
         // Live meteor GameObject positions (p_rock_meteorite*), refreshed periodically. A registered target whose
@@ -214,6 +217,12 @@ namespace HeartopiaMod
             public Vector3 Position;
             public bool HasPosition;
             public string Source = string.Empty;
+        }
+
+        private struct AuraMeteorParentCacheEntry
+        {
+            public uint ParentNetId;
+            public Vector3 AnchorPosition;
         }
 
 
@@ -461,6 +470,9 @@ namespace HeartopiaMod
             this.auraMonoFallbackInfoCache.Clear();
             this.auraMeteorHitParentsThisTick.Clear();
             this.auraMeteorViewToParentCache.Clear();
+            this.auraNextMeteorParentResolveAtByView.Clear();
+            this.auraLastAuraFarmPlayerPosition = Vector3.zero;
+            this.auraMeteorAxeEquipSuppressedUntil = 0f;
             this.auraMeteorObjectPositions.Clear();
             this.auraNextMeteorObjectScanAt = 0f;
             this.auraTargetInfoByOwnerId.Clear();
@@ -469,6 +481,7 @@ namespace HeartopiaMod
             if (enabled)
             {
                 this.SetAutoCollectEnabled(false);
+                this.auraNextMeteorObjectScanAt = 0f;
                 bool ready = this.ResolveAuraFarmRuntimeMethods();
                 this.AddMenuNotification(ready ? "Aura Farm enabled" : "Aura Farm enabled, resolver incomplete", ready ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.75f, 0.45f));
                 if (AuraFarmDebugLogs)
@@ -536,6 +549,7 @@ namespace HeartopiaMod
             int bushPicks = 0;
 
             this.RefreshAuraMeteorObjectPositionsThrottled();
+            this.TryClearAuraMeteorCachesOnPlayerTeleport();
             this.auraMeteorHitParentsThisTick.Clear();
             if (this.IsPlayerNearLiveMeteor())
             {
@@ -557,8 +571,27 @@ namespace HeartopiaMod
 
                 bool sentAny = false;
                 AuraTargetInfo targetInfo = this.GetAuraTargetInfo(ownerNetId);
+                Vector3 targetAnchor = targetInfo != null && targetInfo.HasPosition ? targetInfo.Position : Vector3.zero;
                 uint resourceNetId = targetInfo != null && targetInfo.ResourceNetId != 0U ? targetInfo.ResourceNetId : ownerNetId;
                 AuraTargetKind targetKind = targetInfo != null && targetInfo.Kind != AuraTargetKind.Unknown ? targetInfo.Kind : this.GetAuraTargetKind(ownerNetId);
+
+                // AxeChecker shape on a live meteor rock — mine with HitStone, never PickBush while approaching.
+                bool isMeteor = this.IsAuraTargetMeteor(targetInfo, ownerNetId);
+                if (!isMeteor && targetAnchor != Vector3.zero && this.IsAuraPositionNearLiveMeteor(targetAnchor))
+                {
+                    isMeteor = true;
+                    targetKind = AuraTargetKind.Stone;
+                    if (targetInfo != null)
+                    {
+                        targetInfo.Kind = AuraTargetKind.Stone;
+                    }
+                }
+
+                if (!isMeteor && this.IsPlayerNearLiveMeteor() && targetAnchor != Vector3.zero)
+                {
+                    this.auraNextAllowedByOwnerId[ownerNetId] = now + 0.08f;
+                    continue;
+                }
 
                 if (!this.TryPrepareAuraTargetForCommand(ownerNetId, ref resourceNetId, ref targetKind))
                 {
@@ -566,30 +599,22 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                // Meteorites use HitStone on parentEntity.netId (PlayerAxeAttackStoneAction), not hand-pick.
-                bool isMeteor = this.IsAuraTargetMeteor(targetInfo, ownerNetId);
+                // Meteorites are mined with HitStone (PlayerAxeAttackStoneAction), not hand-pick.
+                if (!isMeteor)
+                {
+                    isMeteor = this.IsAuraTargetMeteor(targetInfo, ownerNetId);
+                }
                 bool sent;
                 if (isMeteor)
                 {
-                    uint hitNetId = 0U;
-                    if (!this.TryGetAuraMeteorHitNetId(targetInfo, ownerNetId, out hitNetId)
-                        || this.auraMeteorHitParentsThisTick.Contains(hitNetId))
+                    if (!this.IsLikelyAuraEntityNetId(resourceNetId))
                     {
-                        if (AuraFarmDebugLogs)
-                        {
-                            this.TryLogAuraMeteorEntityProbe(ownerNetId);
-                            IntPtr probeEntity;
-                            bool hasEntity = this.TryGetAuraMonoEntityObjectByNetId(ownerNetId, out probeEntity) && probeEntity != IntPtr.Zero;
-                            ModLogger.Msg("[AuraFarm] Meteor skip ownerNetId=" + ownerNetId
-                                + " hitNetId=" + hitNetId
-                                + " entitiesGet=" + hasEntity
-                                + (targetInfo != null
-                                    ? " levelResourceId=" + targetInfo.LevelResourceId
-                                        + " resourceNetId=" + targetInfo.ResourceNetId
-                                        + " source=" + targetInfo.Source
-                                    : string.Empty));
-                        }
+                        this.auraNextAllowedByOwnerId[ownerNetId] = now + Math.Max(0.12f, AuraPerTargetCooldown);
+                        continue;
+                    }
 
+                    if (this.auraMeteorHitParentsThisTick.Contains(resourceNetId))
+                    {
                         continue;
                     }
 
@@ -599,10 +624,17 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (AuraFarmDebugLogs)
+                    // PlayerAxeAttackStoneAction: CollectableMeteoriteViewComponent.parentEntity.netId (logic entity).
+                    uint hitNetId = 0U;
+                    if (!this.TryResolveAuraMeteorParentNetIdForHit(ownerNetId, out hitNetId, targetAnchor))
                     {
-                        ModLogger.Msg("[AuraFarm] Meteor HitStone parentNetId=" + hitNetId + " ownerNetId=" + ownerNetId
-                            + (targetInfo != null ? " levelResourceId=" + targetInfo.LevelResourceId : string.Empty));
+                        this.auraNextAllowedByOwnerId[ownerNetId] = now + Math.Max(0.12f, AuraPerTargetCooldown);
+                        continue;
+                    }
+
+                    if (this.auraMeteorHitParentsThisTick.Contains(hitNetId))
+                    {
+                        continue;
                     }
 
                     sent = this.InvokeAuraHitStone(hitNetId, false);
@@ -740,10 +772,6 @@ namespace HeartopiaMod
             {
             }
 
-            if (AuraFarmDebugLogs && this.auraMeteorObjectPositions.Count > 0)
-            {
-                ModLogger.Msg("[AuraFarm] Live meteor objects=" + this.auraMeteorObjectPositions.Count);
-            }
         }
 
         private bool IsAuraPositionNearLiveMeteor(Vector3 position)
@@ -767,6 +795,21 @@ namespace HeartopiaMod
             }
 
             AuraTargetInfo cachedInfo = this.GetAuraTargetInfo(ownerNetId);
+            if (this.IsAuraTargetMeteor(cachedInfo, ownerNetId))
+            {
+                if (targetKind == AuraTargetKind.Unknown)
+                {
+                    targetKind = AuraTargetKind.Stone;
+                }
+
+                if (resourceNetId == 0U)
+                {
+                    resourceNetId = ownerNetId;
+                }
+
+                return true;
+            }
+
             object entity = this.TryGetAuraOwnerEntity(ownerNetId);
             if (entity == null)
             {
@@ -2959,7 +3002,9 @@ namespace HeartopiaMod
             {
                 for (int i = 0; i < resourceMembers.Length; i++)
                 {
-                    if (this.TrySafeGetMonoUInt32ScalarMember(dataObj, resourceMembers[i], out resourceNetId) && this.IsLikelyAuraEntityNetId(resourceNetId))
+                    if ((this.TryGetMonoUInt32Member(dataObj, resourceMembers[i], out resourceNetId)
+                            || this.TrySafeGetMonoUInt32ScalarMember(dataObj, resourceMembers[i], out resourceNetId))
+                        && this.IsLikelyAuraEntityNetId(resourceNetId))
                     {
                         return true;
                     }
@@ -3018,57 +3063,6 @@ namespace HeartopiaMod
             return levelObjectId != 0UL;
         }
 
-        private bool TryGetAuraMeteorHitNetId(AuraTargetInfo targetInfo, uint ownerNetId, out uint hitNetId)
-        {
-            hitNetId = 0U;
-            if (!this.IsLikelyAuraEntityNetId(ownerNetId))
-            {
-                return false;
-            }
-
-            if (targetInfo != null)
-            {
-                if (this.IsLikelyAuraEntityNetId(targetInfo.LevelResourceId) && targetInfo.LevelResourceId != ownerNetId)
-                {
-                    hitNetId = targetInfo.LevelResourceId;
-                    return true;
-                }
-
-                if (this.IsLikelyAuraEntityNetId(targetInfo.ResourceNetId) && targetInfo.ResourceNetId != ownerNetId)
-                {
-                    hitNetId = targetInfo.ResourceNetId;
-                    return true;
-                }
-
-                if (targetInfo.TargetNetId != 0UL)
-                {
-                    if (this.TryResolveAuraTargetInfoFromLevelObjectId(targetInfo.TargetNetId, out AuraTargetInfo levelInfo)
-                        && levelInfo != null)
-                    {
-                        if (this.IsLikelyAuraEntityNetId(levelInfo.LevelResourceId) && levelInfo.LevelResourceId != ownerNetId)
-                        {
-                            hitNetId = levelInfo.LevelResourceId;
-                            return true;
-                        }
-
-                        if (this.IsLikelyAuraEntityNetId(levelInfo.ResourceNetId) && levelInfo.ResourceNetId != ownerNetId)
-                        {
-                            hitNetId = levelInfo.ResourceNetId;
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            if (this.TryResolveAuraMeteorParentNetId(ownerNetId, out hitNetId)
-                && this.IsLikelyAuraEntityNetId(hitNetId))
-            {
-                return true;
-            }
-
-            return false;
-        }
-
         private bool TryRegisterAuraTargetFromMonoLevelObjectShape(IntPtr shapeObj, HashSet<uint> output, string source)
         {
             if (shapeObj == IntPtr.Zero || output == null)
@@ -3101,6 +3095,10 @@ namespace HeartopiaMod
             Vector3 shapePosition;
             bool hasShapePosition = this.TryGetAuraMonoObjectPosition(shapeObj, out shapePosition);
             bool isMeteor = hasShapePosition && this.IsAuraPositionNearLiveMeteor(shapePosition);
+            if (hasShapePosition)
+            {
+                this.TryInvalidateAuraMeteorParentCacheForAnchor(ownerNetId, shapePosition);
+            }
             uint mapResourceNetId = 0U;
             bool hasMapResourceNetId = this.TryGetMonoLevelObjectResourceNetId(shapeObj, out mapResourceNetId);
             uint resourceNetId = ownerNetId;
@@ -3108,20 +3106,15 @@ namespace HeartopiaMod
             if (isMeteor)
             {
                 kind = AuraTargetKind.Stone;
-                if (hasMapResourceNetId && mapResourceNetId != ownerNetId)
+                if (this.TryGetAuraMeteorCachedParent(ownerNetId, shapePosition, out uint cachedParentNetId)
+                    && this.IsLikelyAuraEntityNetId(cachedParentNetId)
+                    && cachedParentNetId != ownerNetId)
                 {
-                    resourceNetId = mapResourceNetId;
+                    resourceNetId = cachedParentNetId;
                 }
-                else if (!this.TryResolveAuraMeteorParentNetId(ownerNetId, out resourceNetId) || resourceNetId == ownerNetId)
+                else
                 {
-                    resourceNetId = hasMapResourceNetId ? mapResourceNetId : ownerNetId;
-                }
-
-                if (AuraFarmDebugLogs)
-                {
-                    ModLogger.Msg("[AuraFarm] Meteor levelObject ownerNetId=" + ownerNetId
-                        + " resourceID=" + (hasMapResourceNetId ? mapResourceNetId.ToString() : "n/a")
-                        + " hitNetId=" + resourceNetId);
+                    resourceNetId = ownerNetId;
                 }
             }
 
@@ -3153,212 +3146,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryResolveAuraMeteorParentNetId(uint candidateNetId, out uint parentNetId)
-        {
-            parentNetId = 0U;
-            if (!this.IsLikelyAuraEntityNetId(candidateNetId))
-            {
-                return false;
-            }
-
-            if (this.auraMeteorViewToParentCache.TryGetValue(candidateNetId, out parentNetId)
-                && this.IsLikelyAuraEntityNetId(parentNetId)
-                && this.TryIsAuraLiveMeteorTarget(candidateNetId, this.GetAuraTargetInfo(candidateNetId)))
-            {
-                return true;
-            }
-
-            if (this.auraMeteorViewToParentCache.ContainsKey(candidateNetId))
-            {
-                this.auraMeteorViewToParentCache.Remove(candidateNetId);
-            }
-
-            if (this.TryResolveAuraMeteorHitNetId(candidateNetId, out parentNetId)
-                && this.IsLikelyAuraEntityNetId(parentNetId)
-                && parentNetId != candidateNetId)
-            {
-                this.auraMeteorViewToParentCache[candidateNetId] = parentNetId;
-                return true;
-            }
-
-            if (this.TryScanAuraMeteorLogicParentForViewNetId(candidateNetId, out parentNetId) && this.IsLikelyAuraEntityNetId(parentNetId))
-            {
-                this.auraMeteorViewToParentCache[candidateNetId] = parentNetId;
-                if (AuraFarmDebugLogs)
-                {
-                    ModLogger.Msg("[AuraFarm] Meteor logic parent scan viewNetId=" + candidateNetId + " parentNetId=" + parentNetId);
-                }
-                return true;
-            }
-
-            IntPtr viewEntityObj;
-            if (this.TryGetAuraMonoEntityObjectByNetId(candidateNetId, out viewEntityObj) && viewEntityObj != IntPtr.Zero)
-            {
-                if (this.TryResolveAuraMonoMeteorParentNetIdFromEntity(viewEntityObj, out parentNetId)
-                    && this.IsLikelyAuraEntityNetId(parentNetId))
-                {
-                    this.auraMeteorViewToParentCache[candidateNetId] = parentNetId;
-                    return true;
-                }
-            }
-
-            if (this.TryResolveAuraMeteorParentViaDataCenter(candidateNetId, out parentNetId) && this.IsLikelyAuraEntityNetId(parentNetId))
-            {
-                this.auraMeteorViewToParentCache[candidateNetId] = parentNetId;
-                return true;
-            }
-
-            parentNetId = 0U;
-            return false;
-        }
-
-        private bool TryResolveAuraMeteorParentViaDataCenter(uint candidateNetId, out uint parentNetId)
-        {
-            parentNetId = 0U;
-            if (!this.IsLikelyAuraEntityNetId(candidateNetId))
-            {
-                return false;
-            }
-
-            try
-            {
-                Type dataCenterType = this.FindTypeByName("XDTDataAndProtocol.ComponentsData.DataCenter", "XDTDataAndProtocol.ComponentsData", "DataCenter");
-                Type netIdType = this.FindTypeByName("EcsClient.XDT.Scene.Shared.Data.SharedData.NetId", "XDT.Scene.Shared.NetId", "NetId");
-                if (dataCenterType == null || netIdType == null)
-                {
-                    return false;
-                }
-
-                string[] componentTypeNames =
-                {
-                    "MeteoriteComponentData",
-                    "CollectableMeteoriteComponentData",
-                    "MapResourceComponentData"
-                };
-
-                MethodInfo tryGetMethodDef = null;
-                foreach (MethodInfo method in dataCenterType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (method == null || method.Name != "TryGetComponentData" || !method.IsGenericMethodDefinition)
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters = method.GetParameters();
-                    if (parameters.Length == 2 && parameters[0].ParameterType == netIdType)
-                    {
-                        tryGetMethodDef = method;
-                        break;
-                    }
-                }
-
-                if (tryGetMethodDef == null)
-                {
-                    return false;
-                }
-
-                object netIdArg = this.CreateNetCookNetIdArgument(netIdType, candidateNetId);
-                for (int i = 0; i < componentTypeNames.Length; i++)
-                {
-                    Type componentDataType = this.FindTypeByName(
-                        "XDTDataAndProtocol.ComponentsData." + componentTypeNames[i],
-                        "XDTDataAndProtocol.ComponentsData",
-                        componentTypeNames[i]);
-                    if (componentDataType == null)
-                    {
-                        continue;
-                    }
-
-                    object dataBox = Activator.CreateInstance(componentDataType);
-                    MethodInfo tryGetMethod = tryGetMethodDef.MakeGenericMethod(componentDataType);
-                    object[] args = new object[] { netIdArg, dataBox };
-                    if (!(tryGetMethod.Invoke(null, args) is bool found) || !found)
-                    {
-                        continue;
-                    }
-
-                    object componentData = args[1] ?? dataBox;
-                    if (componentData == null)
-                    {
-                        continue;
-                    }
-
-                    string[] netIdMembers = { "netId", "NetId", "ownerNetId", "OwnerNetId", "resourceNetId", "ResourceNetId", "entityNetId", "EntityNetId" };
-                    for (int m = 0; m < netIdMembers.Length; m++)
-                    {
-                        if (this.TryGetUIntMember(componentData, netIdMembers[m], out parentNetId)
-                            && this.IsLikelyAuraEntityNetId(parentNetId)
-                            && parentNetId != candidateNetId)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            parentNetId = 0U;
-            return false;
-        }
-
-        private bool TryCollectAuraMonoEntityComponents(IntPtr entityObj, List<IntPtr> output)
-        {
-            output.Clear();
-            if (entityObj == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            IntPtr componentsObj;
-            if (this.TryInvokeAuraMonoZeroArg(entityObj, out componentsObj, "GetAllComponents") && componentsObj != IntPtr.Zero
-                && this.TryEnumerateAuraMonoCollectionItems(componentsObj, output) && output.Count > 0)
-            {
-                return true;
-            }
-
-            IntPtr sortedComponentsObj;
-            if (this.TryGetMonoObjectMember(entityObj, "_sortedComponents", out sortedComponentsObj) && sortedComponentsObj != IntPtr.Zero
-                && this.TryEnumerateAuraMonoCollectionItems(sortedComponentsObj, output) && output.Count > 0)
-            {
-                return true;
-            }
-
-            output.Clear();
-            return false;
-        }
-
-        private bool TryAuraMonoComponentNameContains(IntPtr componentObj, string fragment)
-        {
-            if (componentObj == IntPtr.Zero || string.IsNullOrEmpty(fragment) || auraMonoObjectGetClass == null)
-            {
-                return false;
-            }
-
-            string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(componentObj));
-            return className.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private bool TryAuraMonoEntityHasMeteoriteLogicComponent(IntPtr entityObj)
-        {
-            this.auraFarmComponentBuffer.Clear();
-            if (!this.TryCollectAuraMonoEntityComponents(entityObj, this.auraFarmComponentBuffer))
-            {
-                return false;
-            }
-
-            for (int i = 0; i < this.auraFarmComponentBuffer.Count && i < 32; i++)
-            {
-                if (this.TryAuraMonoComponentNameContains(this.auraFarmComponentBuffer[i], "MeteoriteLogic"))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private bool TryReadAuraMeteorUIntLinkFromMember(IntPtr ownerObj, string memberName, out uint linkedNetId)
         {
             linkedNetId = 0U;
@@ -3377,7 +3164,7 @@ namespace HeartopiaMod
             IntPtr nestedObj;
             if (this.TryGetMonoObjectMember(ownerObj, memberName, out nestedObj) && nestedObj != IntPtr.Zero)
             {
-                if (this.TryGetAuraMonoEntityNetId(nestedObj, out linkedNetId) && this.IsLikelyAuraEntityNetId(linkedNetId))
+                if (this.TryReadAuraMonoEntityNetIdLoose(nestedObj, out linkedNetId) && this.IsLikelyAuraEntityNetId(linkedNetId))
                 {
                     return true;
                 }
@@ -3546,50 +3333,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private void TryLogAuraMeteorEntityProbe(uint ownerNetId)
-        {
-            if (!AuraFarmDebugLogs)
-            {
-                return;
-            }
-
-            float now = Time.unscaledTime;
-            string key = ownerNetId.ToString();
-            if (string.Equals(this.auraLastMeteorProbeKey, key, StringComparison.Ordinal) && now - this.auraLastMeteorProbeAt < 2f)
-            {
-                return;
-            }
-
-            this.auraLastMeteorProbeKey = key;
-            this.auraLastMeteorProbeAt = now;
-
-            IntPtr entityObj;
-            if (!this.TryGetAuraMonoEntityObjectByNetId(ownerNetId, out entityObj) || entityObj == IntPtr.Zero)
-            {
-                ModLogger.Msg("[AuraFarm] Meteor probe ownerNetId=" + ownerNetId + " entity=missing");
-                return;
-            }
-
-            this.auraFarmComponentBuffer.Clear();
-            int componentCount = this.TryCollectAuraMonoEntityComponents(entityObj, this.auraFarmComponentBuffer)
-                ? this.auraFarmComponentBuffer.Count
-                : 0;
-            string names = string.Empty;
-            int limit = Math.Min(componentCount, 8);
-            for (int i = 0; i < limit; i++)
-            {
-                if (this.auraFarmComponentBuffer[i] == IntPtr.Zero || auraMonoObjectGetClass == null)
-                {
-                    continue;
-                }
-
-                string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(this.auraFarmComponentBuffer[i]));
-                names = string.IsNullOrEmpty(names) ? className : names + "|" + className;
-            }
-
-            ModLogger.Msg("[AuraFarm] Meteor probe ownerNetId=" + ownerNetId + " components=" + componentCount + " names=" + names);
-        }
-
         private bool TryGetAuraMeteorAnchorPosition(uint entityNetId, out Vector3 position)
         {
             position = Vector3.zero;
@@ -3605,13 +3348,339 @@ namespace HeartopiaMod
                 return true;
             }
 
-            IntPtr entityObj;
-            if (!this.TryGetAuraMonoEntityObjectByNetId(entityNetId, out entityObj) || entityObj == IntPtr.Zero)
+            return false;
+        }
+
+        private bool TryReadAuraMonoEntityNetIdLoose(IntPtr entityObj, out uint netId)
+        {
+            netId = 0U;
+            if (entityObj == IntPtr.Zero)
             {
                 return false;
             }
 
-            return this.TryGetAuraMonoObjectPosition(entityObj, out position) && position != Vector3.zero;
+            if (this.TryGetAuraMonoEntityNetId(entityObj, out netId) && netId != 0U)
+            {
+                return true;
+            }
+
+            if (this.TryGetMonoUInt32Member(entityObj, "netId", out netId) && netId != 0U)
+            {
+                return true;
+            }
+
+            if (this.TryGetMonoUInt32Member(entityObj, "_netId", out netId) && netId != 0U)
+            {
+                return true;
+            }
+
+            if (this.TryGetMonoUInt32Member(entityObj, "NetId", out netId) && netId != 0U)
+            {
+                return true;
+            }
+
+            ulong rawNetId;
+            if (this.TryGetMonoUInt64Member(entityObj, "netId", out rawNetId) && rawNetId != 0UL && rawNetId <= uint.MaxValue)
+            {
+                netId = (uint)rawNetId;
+                return true;
+            }
+
+            netId = 0U;
+            return false;
+        }
+
+        private bool TryGetAuraMonoComponentOwnerEntity(IntPtr componentObj, out IntPtr entityObj)
+        {
+            entityObj = IntPtr.Zero;
+            if (componentObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            string[] entityMembers = { "entity", "_entity", "Entity", "_Entity" };
+            for (int i = 0; i < entityMembers.Length; i++)
+            {
+                if (this.TryGetMonoObjectMember(componentObj, entityMembers[i], out entityObj) && entityObj != IntPtr.Zero)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryAuraMeteorPositionMatchesAnchor(Vector3 anchor, Vector3 candidate, float radius)
+        {
+            if (anchor == Vector3.zero || candidate == Vector3.zero)
+            {
+                return false;
+            }
+
+            float radiusSqr = radius * radius;
+            return (candidate - anchor).sqrMagnitude <= radiusSqr;
+        }
+
+        private bool TryScanAuraMeteorLogicParentNearPosition(Vector3 anchor, uint hintNetId, out uint logicNetId)
+        {
+            logicNetId = 0U;
+            if (anchor == Vector3.zero)
+            {
+                return false;
+            }
+
+            IntPtr logicComponentClass;
+            if (!this.TryEnsureAuraMeteorLogicComponentClass(out logicComponentClass) || logicComponentClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryAuraMonoGetComponentObjects(logicComponentClass, out List<IntPtr> logicComponents)
+                || logicComponents == null
+                || logicComponents.Count == 0)
+            {
+                return false;
+            }
+
+            float bestDistSqr = float.MaxValue;
+            uint bestLogicNetId = 0U;
+            for (int i = 0; i < logicComponents.Count; i++)
+            {
+                IntPtr logicComponentObj = logicComponents[i];
+                if (logicComponentObj == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                IntPtr logicEntityObj;
+                if (!this.TryGetAuraMonoComponentOwnerEntity(logicComponentObj, out logicEntityObj) || logicEntityObj == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out uint linkedViewNetId))
+                {
+                    linkedViewNetId = 0U;
+                }
+
+                if (!this.TryReadAuraMonoEntityNetIdLoose(logicEntityObj, out uint candidateLogicNetId))
+                {
+                    candidateLogicNetId = 0U;
+                }
+
+                bool netHintMatch = hintNetId != 0U
+                    && (candidateLogicNetId == hintNetId || linkedViewNetId == hintNetId);
+                float distSqr = float.MaxValue;
+                if (this.TryGetAuraMonoEntityPosition(logicEntityObj, out Vector3 logicPosition) && logicPosition != Vector3.zero)
+                {
+                    distSqr = (logicPosition - anchor).sqrMagnitude;
+                }
+                else if (!netHintMatch)
+                {
+                    continue;
+                }
+                else
+                {
+                    distSqr = 0f;
+                }
+
+                if (!netHintMatch && distSqr > (AuraMeteorMatchRadius + 1.5f) * (AuraMeteorMatchRadius + 1.5f))
+                {
+                    continue;
+                }
+
+                if (netHintMatch)
+                {
+                    distSqr -= 100f;
+                }
+
+                if (candidateLogicNetId == 0U || distSqr >= bestDistSqr)
+                {
+                    continue;
+                }
+
+                bestDistSqr = distSqr;
+                bestLogicNetId = candidateLogicNetId;
+            }
+
+            if (bestLogicNetId == 0U)
+            {
+                return false;
+            }
+
+            logicNetId = bestLogicNetId;
+            return true;
+        }
+
+        private bool TryScanAuraMeteorParentViaViewNearPosition(Vector3 anchor, uint hintNetId, out uint parentNetId)
+        {
+            parentNetId = 0U;
+            if (anchor == Vector3.zero)
+            {
+                return false;
+            }
+
+            IntPtr viewComponentClass;
+            if (!this.TryEnsureAuraMeteorViewComponentClass(out viewComponentClass) || viewComponentClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryAuraMonoGetComponentObjects(viewComponentClass, out List<IntPtr> viewComponents)
+                || viewComponents == null
+                || viewComponents.Count == 0)
+            {
+                return false;
+            }
+
+            float bestDistSqr = float.MaxValue;
+            uint bestParentNetId = 0U;
+            for (int i = 0; i < viewComponents.Count; i++)
+            {
+                IntPtr viewComponentObj = viewComponents[i];
+                if (viewComponentObj == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                IntPtr viewEntityObj;
+                if (!this.TryGetAuraMonoComponentOwnerEntity(viewComponentObj, out viewEntityObj) || viewEntityObj == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                if (!this.TryReadAuraMonoEntityNetIdLoose(viewEntityObj, out uint linkedViewNetId))
+                {
+                    linkedViewNetId = 0U;
+                }
+
+                bool netHintMatch = hintNetId != 0U && linkedViewNetId == hintNetId;
+                if (!this.TryGetAuraMonoEntityPosition(viewEntityObj, out Vector3 viewPosition))
+                {
+                    if (!netHintMatch)
+                    {
+                        continue;
+                    }
+                }
+                else if (!netHintMatch
+                    && !this.TryAuraMeteorPositionMatchesAnchor(anchor, viewPosition, AuraMeteorMatchRadius + 1.5f))
+                {
+                    continue;
+                }
+
+                if (!this.TryReadAuraMeteorParentNetIdFromComponent(viewComponentObj, linkedViewNetId, out uint candidateParentNetId)
+                    || !this.IsLikelyAuraEntityNetId(candidateParentNetId)
+                    || candidateParentNetId == linkedViewNetId)
+                {
+                    continue;
+                }
+
+                float distSqr = viewPosition == Vector3.zero ? 0f : (viewPosition - anchor).sqrMagnitude;
+                if (netHintMatch)
+                {
+                    distSqr -= 100f;
+                }
+
+                if (distSqr >= bestDistSqr)
+                {
+                    continue;
+                }
+
+                bestDistSqr = distSqr;
+                bestParentNetId = candidateParentNetId;
+            }
+
+            if (bestParentNetId == 0U)
+            {
+                return false;
+            }
+
+            parentNetId = bestParentNetId;
+            return true;
+        }
+
+        private bool TryEnsureAuraMeteorLogicComponentClass(out IntPtr logicComponentClass)
+        {
+            if (this.auraMeteorLogicComponentClass == IntPtr.Zero)
+            {
+                string[] logicClassNames =
+                {
+                    "XDTLevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteLogicComponent",
+                    "XDTLevelAndEntity.GamePlay.Component.Gather.CollectableMeteoriteLogicComponent",
+                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteLogicComponent"
+                };
+                for (int i = 0; i < logicClassNames.Length && this.auraMeteorLogicComponentClass == IntPtr.Zero; i++)
+                {
+                    this.auraMeteorLogicComponentClass = this.FindAuraMonoClassByFullName(logicClassNames[i]);
+                }
+
+                if (this.auraMeteorLogicComponentClass == IntPtr.Zero)
+                {
+                    this.auraMeteorLogicComponentClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        "XDTLevelAndEntity.Gameplay.Component.Gather",
+                        "CollectableMeteoriteLogicComponent");
+                }
+
+                if (this.auraMeteorLogicComponentClass == IntPtr.Zero)
+                {
+                    this.auraMeteorLogicComponentClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        string.Empty,
+                        "CollectableMeteoriteLogicComponent");
+                }
+            }
+
+            logicComponentClass = this.auraMeteorLogicComponentClass;
+            return logicComponentClass != IntPtr.Zero;
+        }
+
+        private bool TryEnsureAuraMeteorViewComponentClass(out IntPtr viewComponentClass)
+        {
+            if (this.auraMeteorViewComponentClass == IntPtr.Zero)
+            {
+                string[] viewClassNames =
+                {
+                    "XDTLevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteViewComponent",
+                    "XDTLevelAndEntity.GamePlay.Component.Gather.CollectableMeteoriteViewComponent",
+                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteViewComponent"
+                };
+                for (int i = 0; i < viewClassNames.Length && this.auraMeteorViewComponentClass == IntPtr.Zero; i++)
+                {
+                    this.auraMeteorViewComponentClass = this.FindAuraMonoClassByFullName(viewClassNames[i]);
+                }
+
+                if (this.auraMeteorViewComponentClass == IntPtr.Zero)
+                {
+                    this.auraMeteorViewComponentClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        "XDTLevelAndEntity.Gameplay.Component.Gather",
+                        "CollectableMeteoriteViewComponent");
+                }
+
+                if (this.auraMeteorViewComponentClass == IntPtr.Zero)
+                {
+                    this.auraMeteorViewComponentClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        string.Empty,
+                        "CollectableMeteoriteViewComponent");
+                }
+            }
+
+            viewComponentClass = this.auraMeteorViewComponentClass;
+            return viewComponentClass != IntPtr.Zero;
+        }
+
+        // Fallback when only netId is known — managed interop only (no mono entity GetComponent/GetAllComponents).
+        private bool TryResolveAuraMeteorParentViaViewComponentDirect(uint viewNetId, out uint parentNetId)
+        {
+            parentNetId = 0U;
+            if (!this.IsLikelyAuraEntityNetId(viewNetId))
+            {
+                return false;
+            }
+
+            object managedEntity = this.TryGetAuraOwnerEntity(viewNetId);
+            return managedEntity != null
+                && this.TryResolveAuraMeteorParentFromManagedEntity(managedEntity, viewNetId, out parentNetId)
+                && this.IsLikelyAuraEntityNetId(parentNetId)
+                && parentNetId != viewNetId;
         }
 
         // Direct-ECS meteor-logic parent lookup: enumerate CollectableMeteoriteLogicComponent objects
@@ -3625,19 +3694,10 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.auraMeteorLogicComponentClass == IntPtr.Zero)
-            {
-                this.auraMeteorLogicComponentClass = this.FindAuraMonoClassByFullName(
-                    "XDTLevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteLogicComponent");
-                if (this.auraMeteorLogicComponentClass == IntPtr.Zero)
-                {
-                    this.auraMeteorLogicComponentClass = this.FindAuraMonoClassByFullName(
-                        "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Gather.CollectableMeteoriteLogicComponent");
-                }
-            }
-
-            if (this.auraMeteorLogicComponentClass == IntPtr.Zero
-                || !this.TryAuraMonoGetComponentObjects(this.auraMeteorLogicComponentClass, out List<IntPtr> logicComponents)
+            IntPtr logicComponentClass;
+            if (!this.TryEnsureAuraMeteorLogicComponentClass(out logicComponentClass)
+                || logicComponentClass == IntPtr.Zero
+                || !this.TryAuraMonoGetComponentObjects(logicComponentClass, out List<IntPtr> logicComponents)
                 || logicComponents == null
                 || logicComponents.Count == 0)
             {
@@ -3652,21 +3712,20 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out uint linkedViewNetId)
+                uint linkedViewNetId = 0U;
+                if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out linkedViewNetId)
                     || linkedViewNetId != viewNetId)
                 {
                     continue;
                 }
 
-                // Owner (logic) entity is the component's back-reference.
-                IntPtr logicEntityObj = IntPtr.Zero;
-                if ((!this.TryGetMonoObjectMember(logicComponentObj, "entity", out logicEntityObj) || logicEntityObj == IntPtr.Zero)
-                    && (!this.TryGetMonoObjectMember(logicComponentObj, "_entity", out logicEntityObj) || logicEntityObj == IntPtr.Zero))
+                IntPtr logicEntityObj;
+                if (!this.TryGetAuraMonoComponentOwnerEntity(logicComponentObj, out logicEntityObj) || logicEntityObj == IntPtr.Zero)
                 {
                     continue;
                 }
 
-                if (this.TryGetAuraMonoEntityNetId(logicEntityObj, out logicNetId) && this.IsLikelyAuraEntityNetId(logicNetId))
+                if (this.TryReadAuraMonoEntityNetIdLoose(logicEntityObj, out logicNetId) && this.IsLikelyAuraEntityNetId(logicNetId))
                 {
                     return true;
                 }
@@ -3676,103 +3735,130 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryScanAuraMeteorLogicParentForViewNetId(uint viewNetId, out uint logicNetId)
+        private bool TryScanAuraMeteorParentViaViewComponentGetComponents(uint viewNetId, out uint parentNetId)
         {
-            logicNetId = 0U;
+            parentNetId = 0U;
             if (!this.IsLikelyAuraEntityNetId(viewNetId))
             {
                 return false;
             }
 
-            float now = Time.unscaledTime;
-            if (now < this.auraNextMeteorParentScanAt && this.auraMeteorViewToParentCache.TryGetValue(viewNetId, out logicNetId))
-            {
-                return this.IsLikelyAuraEntityNetId(logicNetId);
-            }
-
-            this.auraNextMeteorParentScanAt = now + 0.35f;
-
-            // Primary: direct ECS query for meteor-logic components — no entity-graph walk
-            // (TryEnumerateAuraMonoLoadedEntityObjects dereferences arbitrary entity pointers and
-            // randomly AVs on dense/streaming fields). Falls back to the walk only if the query is
-            // unavailable on this build.
-            if (this.TryScanAuraMeteorLogicParentViaGetComponents(viewNetId, out logicNetId)
-                && this.IsLikelyAuraEntityNetId(logicNetId))
-            {
-                return true;
-            }
-
-            List<IntPtr> entityObjects;
-            string status;
-            if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out entityObjects, out status) || entityObjects == null || entityObjects.Count == 0)
+            IntPtr viewComponentClass;
+            if (!this.TryEnsureAuraMeteorViewComponentClass(out viewComponentClass) || viewComponentClass == IntPtr.Zero
+                || !this.TryAuraMonoGetComponentObjects(viewComponentClass, out List<IntPtr> viewComponents)
+                || viewComponents == null
+                || viewComponents.Count == 0)
             {
                 return false;
             }
 
-            int limit = Math.Min(entityObjects.Count, 512);
-            for (int i = 0; i < limit; i++)
+            for (int i = 0; i < viewComponents.Count; i++)
             {
-                IntPtr logicEntityObj = entityObjects[i];
-                if (logicEntityObj == IntPtr.Zero || !this.TryAuraMonoEntityHasMeteoriteLogicComponent(logicEntityObj))
+                IntPtr viewComponentObj = viewComponents[i];
+                if (viewComponentObj == IntPtr.Zero)
                 {
                     continue;
                 }
 
-                this.auraFarmComponentBuffer.Clear();
-                if (!this.TryCollectAuraMonoEntityComponents(logicEntityObj, this.auraFarmComponentBuffer))
+                IntPtr viewEntityObj;
+                if (!this.TryGetAuraMonoComponentOwnerEntity(viewComponentObj, out viewEntityObj) || viewEntityObj == IntPtr.Zero)
                 {
                     continue;
                 }
 
-                for (int c = 0; c < this.auraFarmComponentBuffer.Count && c < 32; c++)
+                if (!this.TryReadAuraMonoEntityNetIdLoose(viewEntityObj, out uint linkedViewNetId) || linkedViewNetId != viewNetId)
                 {
-                    IntPtr logicComponentObj = this.auraFarmComponentBuffer[c];
-                    if (logicComponentObj == IntPtr.Zero || !this.TryAuraMonoComponentNameContains(logicComponentObj, "MeteoriteLogic"))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    uint linkedViewNetId = 0U;
-                    if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out linkedViewNetId) || linkedViewNetId != viewNetId)
-                    {
-                        continue;
-                    }
-
-                    if (this.TryGetAuraMonoEntityNetId(logicEntityObj, out logicNetId) && this.IsLikelyAuraEntityNetId(logicNetId))
-                    {
-                        return true;
-                    }
+                if (this.TryReadAuraMeteorParentNetIdFromComponent(viewComponentObj, viewNetId, out parentNetId))
+                {
+                    return true;
                 }
             }
 
-            logicNetId = 0U;
+            parentNetId = 0U;
             return false;
         }
 
-        private bool TryResolveAuraMeteorHitNetId(uint candidateNetId, out uint hitNetId)
+        private bool TryResolveAuraMeteorParentNetIdForHit(uint ownerNetId, out uint parentNetId, Vector3 anchorOverride = default)
         {
-            hitNetId = 0U;
-            if (candidateNetId == 0U)
+            parentNetId = 0U;
+            if (!this.IsLikelyAuraEntityNetId(ownerNetId))
             {
                 return false;
             }
 
-            object entity = this.TryGetAuraOwnerEntity(candidateNetId);
-            if (entity != null
-                && this.TryResolveAuraMeteorParentFromManagedEntity(entity, candidateNetId, out hitNetId)
-                && this.IsLikelyAuraEntityNetId(hitNetId))
+            Vector3 cacheAnchor = anchorOverride != Vector3.zero ? anchorOverride : this.GetAuraMeteorAnchorForCacheLookup(ownerNetId);
+            if (this.TryGetAuraMeteorCachedParent(ownerNetId, cacheAnchor, out parentNetId)
+                && this.IsLikelyAuraEntityNetId(parentNetId))
             {
                 return true;
             }
 
-            if (this.TryResolveAuraMonoMeteorParentNetIdFromEntityNetId(candidateNetId, out hitNetId)
-                && this.IsLikelyAuraEntityNetId(hitNetId))
+            float now = Time.unscaledTime;
+            float nextAttempt;
+            if (this.auraNextMeteorParentResolveAtByView.TryGetValue(ownerNetId, out nextAttempt) && now < nextAttempt)
             {
-                return true;
+                return false;
             }
 
-            hitNetId = 0U;
-            return false;
+            Vector3 anchor = anchorOverride;
+            if (anchor == Vector3.zero)
+            {
+                AuraTargetInfo anchorInfo = this.GetAuraTargetInfo(ownerNetId);
+                if (anchorInfo != null && anchorInfo.HasPosition)
+                {
+                    anchor = anchorInfo.Position;
+                }
+            }
+
+            bool resolved = false;
+            if (anchor != Vector3.zero
+                && this.TryScanAuraMeteorLogicParentNearPosition(anchor, ownerNetId, out parentNetId)
+                && this.IsLikelyAuraEntityNetId(parentNetId))
+            {
+                resolved = true;
+            }
+            else if (anchor != Vector3.zero
+                && this.TryScanAuraMeteorParentViaViewNearPosition(anchor, ownerNetId, out parentNetId)
+                && this.IsLikelyAuraEntityNetId(parentNetId)
+                && parentNetId != ownerNetId)
+            {
+                resolved = true;
+            }
+            else if (this.TryScanAuraMeteorParentViaViewComponentGetComponents(ownerNetId, out parentNetId)
+                && this.IsLikelyAuraEntityNetId(parentNetId)
+                && parentNetId != ownerNetId)
+            {
+                resolved = true;
+            }
+            else if (this.TryScanAuraMeteorLogicParentViaGetComponents(ownerNetId, out parentNetId)
+                && this.IsLikelyAuraEntityNetId(parentNetId))
+            {
+                resolved = true;
+            }
+            else if (this.TryResolveAuraMeteorParentViaViewComponentDirect(ownerNetId, out parentNetId)
+                && this.IsLikelyAuraEntityNetId(parentNetId)
+                && parentNetId != ownerNetId)
+            {
+                resolved = true;
+            }
+
+            if (!resolved)
+            {
+                if (anchor != Vector3.zero)
+                {
+                    this.auraNextMeteorParentResolveAtByView[ownerNetId] = now + 0.4f;
+                }
+
+                parentNetId = 0U;
+                return false;
+            }
+
+            this.RememberAuraMeteorParentCache(ownerNetId, parentNetId, anchor);
+            this.auraNextMeteorParentResolveAtByView.Remove(ownerNetId);
+            return true;
         }
 
         private unsafe bool TryAuraMonoEntityGetComponent(IntPtr entityObj, IntPtr componentClassPtr, out IntPtr componentObj)
@@ -3877,66 +3963,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryResolveAuraMonoMeteorParentNetIdFromEntityNetId(uint entityNetId, out uint parentNetId)
-        {
-            parentNetId = 0U;
-            if (entityNetId == 0U)
-            {
-                return false;
-            }
-
-            IntPtr entityObj;
-            if (!this.TryGetAuraMonoEntityObjectByNetId(entityNetId, out entityObj) || entityObj == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            return this.TryResolveAuraMonoMeteorParentNetIdFromEntity(entityObj, out parentNetId);
-        }
-
-        private bool TryResolveAuraMonoMeteorParentNetIdFromEntity(IntPtr entityObj, out uint parentNetId)
-        {
-            parentNetId = 0U;
-            if (entityObj == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            uint selfNetId = 0U;
-            this.TryGetAuraMonoEntityNetId(entityObj, out selfNetId);
-
-            this.auraFarmComponentBuffer.Clear();
-            if (!this.TryCollectAuraMonoEntityComponents(entityObj, this.auraFarmComponentBuffer))
-            {
-                return false;
-            }
-
-            for (int i = 0; i < this.auraFarmComponentBuffer.Count && i < 48; i++)
-            {
-                IntPtr componentObj = this.auraFarmComponentBuffer[i];
-                if (componentObj == IntPtr.Zero)
-                {
-                    continue;
-                }
-
-                if (this.TryAuraMonoComponentNameContains(componentObj, "MeteoriteLogic")
-                    && selfNetId != 0U
-                    && this.IsLikelyAuraEntityNetId(selfNetId))
-                {
-                    parentNetId = selfNetId;
-                    return true;
-                }
-
-                if (this.TryReadAuraMeteorParentNetIdFromComponent(componentObj, selfNetId, out parentNetId))
-                {
-                    return true;
-                }
-            }
-
-            parentNetId = 0U;
-            return false;
-        }
-
         private bool TryIsAuraLiveMeteorTarget(uint ownerNetId, AuraTargetInfo targetInfo)
         {
             if (!this.IsLikelyAuraEntityNetId(ownerNetId))
@@ -3954,18 +3980,129 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.IsAuraPositionNearLiveMeteor(position))
+            return this.IsAuraPositionNearLiveMeteor(position);
+        }
+
+        private Vector3 GetAuraMeteorAnchorForCacheLookup(uint ownerNetId)
+        {
+            AuraTargetInfo info = this.GetAuraTargetInfo(ownerNetId);
+            if (info != null && info.HasPosition)
+            {
+                return info.Position;
+            }
+
+            return Vector3.zero;
+        }
+
+        private bool TryGetAuraMeteorCachedParent(uint viewNetId, Vector3 anchor, out uint parentNetId)
+        {
+            parentNetId = 0U;
+            AuraMeteorParentCacheEntry entry;
+            if (!this.auraMeteorViewToParentCache.TryGetValue(viewNetId, out entry))
             {
                 return false;
             }
 
-            IntPtr entityObj;
-            if (this.TryGetAuraMonoEntityObjectByNetId(ownerNetId, out entityObj) && entityObj != IntPtr.Zero)
+            if (anchor != Vector3.zero && entry.AnchorPosition != Vector3.zero)
             {
-                return true;
+                float toleranceSqr = AuraMeteorParentCacheAnchorTolerance * AuraMeteorParentCacheAnchorTolerance;
+                if ((entry.AnchorPosition - anchor).sqrMagnitude > toleranceSqr)
+                {
+                    this.auraMeteorViewToParentCache.Remove(viewNetId);
+                    this.auraNextMeteorParentResolveAtByView.Remove(viewNetId);
+                    return false;
+                }
             }
 
-            return this.TryGetAuraOwnerEntity(ownerNetId) != null;
+            parentNetId = entry.ParentNetId;
+            return this.IsLikelyAuraEntityNetId(parentNetId);
+        }
+
+        private void RememberAuraMeteorParentCache(uint viewNetId, uint parentNetId, Vector3 anchor)
+        {
+            if (viewNetId == 0U || parentNetId == 0U)
+            {
+                return;
+            }
+
+            this.auraMeteorViewToParentCache[viewNetId] = new AuraMeteorParentCacheEntry
+            {
+                ParentNetId = parentNetId,
+                AnchorPosition = anchor
+            };
+        }
+
+        private void TryInvalidateAuraMeteorParentCacheForAnchor(uint viewNetId, Vector3 anchor)
+        {
+            if (viewNetId == 0U || anchor == Vector3.zero)
+            {
+                return;
+            }
+
+            AuraMeteorParentCacheEntry entry;
+            if (!this.auraMeteorViewToParentCache.TryGetValue(viewNetId, out entry))
+            {
+                return;
+            }
+
+            if (entry.AnchorPosition == Vector3.zero)
+            {
+                return;
+            }
+
+            float toleranceSqr = AuraMeteorParentCacheAnchorTolerance * AuraMeteorParentCacheAnchorTolerance;
+            if ((entry.AnchorPosition - anchor).sqrMagnitude <= toleranceSqr)
+            {
+                return;
+            }
+
+            this.auraMeteorViewToParentCache.Remove(viewNetId);
+            this.auraNextMeteorParentResolveAtByView.Remove(viewNetId);
+            AuraTargetInfo info = this.GetAuraTargetInfo(viewNetId);
+            if (info != null)
+            {
+                info.ResourceNetId = viewNetId;
+                if (info.Kind == AuraTargetKind.Stone)
+                {
+                    info.Kind = AuraTargetKind.Unknown;
+                }
+            }
+        }
+
+        private void TryClearAuraMeteorCachesOnPlayerTeleport()
+        {
+            Vector3 playerPos = this.GetAuraFarmPlayerPosition();
+            if (playerPos == Vector3.zero)
+            {
+                return;
+            }
+
+            if (this.auraLastAuraFarmPlayerPosition != Vector3.zero)
+            {
+                float clearDistSqr = AuraMeteorTeleportClearDistance * AuraMeteorTeleportClearDistance;
+                if ((playerPos - this.auraLastAuraFarmPlayerPosition).sqrMagnitude > clearDistSqr)
+                {
+                    this.auraMeteorViewToParentCache.Clear();
+                    this.auraNextMeteorParentResolveAtByView.Clear();
+                    this.auraMeteorAxeEquipSuppressedUntil = Time.unscaledTime + AuraMeteorAxeEquipTeleportGrace;
+                    foreach (KeyValuePair<uint, AuraTargetInfo> pair in this.auraTargetInfoByOwnerId)
+                    {
+                        AuraTargetInfo info = pair.Value;
+                        if (info == null)
+                        {
+                            continue;
+                        }
+
+                        info.ResourceNetId = info.OwnerNetId;
+                        if (info.Kind == AuraTargetKind.Stone)
+                        {
+                            info.Kind = AuraTargetKind.Unknown;
+                        }
+                    }
+                }
+            }
+
+            this.auraLastAuraFarmPlayerPosition = playerPos;
         }
 
         private void InvalidateAuraMeteorCachesForOwner(uint ownerNetId)
@@ -3976,6 +4113,7 @@ namespace HeartopiaMod
             }
 
             this.auraMeteorViewToParentCache.Remove(ownerNetId);
+            this.auraNextMeteorParentResolveAtByView.Remove(ownerNetId);
             this.auraMonoFallbackInfoCache.Remove(ownerNetId);
             this.auraMonoFallbackTargetBuffer.Remove(ownerNetId);
             this.auraTargetInfoByOwnerId.Remove(ownerNetId);
@@ -4037,15 +4175,119 @@ namespace HeartopiaMod
             }
         }
 
+        private static bool IsAuraHandholdClassAxe(string handholdClassName)
+        {
+            if (string.IsNullOrEmpty(handholdClassName))
+            {
+                return false;
+            }
+
+            return handholdClassName.IndexOf("HandholdAxe", StringComparison.OrdinalIgnoreCase) >= 0
+                || handholdClassName.IndexOf("HandHoldAxe", StringComparison.OrdinalIgnoreCase) >= 0
+                || (handholdClassName.IndexOf("Axe", StringComparison.OrdinalIgnoreCase) >= 0
+                    && handholdClassName.IndexOf("Checker", StringComparison.OrdinalIgnoreCase) < 0);
+        }
+
+        private bool TryIsAuraMeteorAxeEquipped(out string status)
+        {
+            status = string.Empty;
+            int toolId;
+            if (this.TryGetCurrentToolInfo(out toolId, out _, out status) && toolId == AuraMeteorAxeToolId)
+            {
+                return true;
+            }
+
+            bool hasHandhold;
+            string handholdClassName;
+            if (this.TryGetAuraMonoPlayerHandholdState(out hasHandhold, out handholdClassName)
+                && IsAuraHandholdClassAxe(handholdClassName))
+            {
+                status = "axe handhold";
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryGetAuraMonoPlayerHandholdState(out bool hasHandhold, out string handholdClassName)
+        {
+            hasHandhold = false;
+            handholdClassName = string.Empty;
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null || this.auraMonoInteractGetPlayerMethodPtr == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr interactObj = this.GetAuraMonoInteractSystemInstance();
+            if (interactObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr playerObj = auraMonoRuntimeInvoke(this.auraMonoInteractGetPlayerMethodPtr, interactObj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || playerObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr equipObj;
+            if (!this.TryInvokeAuraMonoZeroArg(playerObj, out equipObj, "get_equipComponent", "GetEquipComponent") || equipObj == IntPtr.Zero)
+            {
+                return true;
+            }
+
+            IntPtr handholdObj;
+            if (!this.TryInvokeAuraMonoZeroArg(equipObj, out handholdObj, "get_handhold", "GetHandhold") || handholdObj == IntPtr.Zero)
+            {
+                return true;
+            }
+
+            hasHandhold = true;
+            handholdClassName = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(handholdObj));
+            return true;
+        }
+
         private bool TryEnsureAuraMeteorAxeEquipped()
         {
-            int toolId;
-            if (this.TryGetCurrentToolInfo(out toolId, out _, out _) && toolId == AuraMeteorAxeToolId)
+            string status;
+            if (this.TryIsAuraMeteorAxeEquipped(out status))
             {
                 return true;
             }
 
             float now = Time.unscaledTime;
+            if (now < this.auraMeteorAxeEquipSuppressedUntil)
+            {
+                return false;
+            }
+
+            bool hasHandhold;
+            string handholdClassName;
+            if (this.TryGetAuraMonoPlayerHandholdState(out hasHandhold, out handholdClassName))
+            {
+                if (hasHandhold)
+                {
+                    if (IsAuraHandholdClassAxe(handholdClassName) || string.IsNullOrEmpty(handholdClassName))
+                    {
+                        // SetHandhold(1) toggles — treat unreadable handhold as already equipped.
+                        return true;
+                    }
+                }
+                else if (!hasHandhold)
+                {
+                    if (now < this.auraNextMeteorAxeEquipAt)
+                    {
+                        return false;
+                    }
+
+                    this.auraNextMeteorAxeEquipAt = now + AuraMeteorAxeEquipInterval;
+                    this.EquipHandTool(AuraMeteorAxeToolId);
+                    return false;
+                }
+            }
+
             if (now < this.auraNextMeteorAxeEquipAt)
             {
                 return false;
@@ -4053,11 +4295,6 @@ namespace HeartopiaMod
 
             this.auraNextMeteorAxeEquipAt = now + AuraMeteorAxeEquipInterval;
             this.EquipHandTool(AuraMeteorAxeToolId);
-            if (AuraFarmDebugLogs)
-            {
-                ModLogger.Msg("[AuraFarm] Meteor auto-equip axe");
-            }
-
             return false;
         }
 

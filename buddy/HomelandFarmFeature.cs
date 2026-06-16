@@ -10180,7 +10180,9 @@ namespace HeartopiaMod
             return ok;
         }
 
-        private bool TryHomelandFarmIsAuraMonoGetComponentsReady(out string status)
+        // Shared inflate/invoke gate for any ViewComponent query (farm crops, meteor logic/view, bubble, …).
+        // Does NOT require homeland farm component classes — only Entities + generic infra.
+        private bool TryAuraMonoEntitiesGetComponentsInfraReady(out string status)
         {
             status = string.Empty;
             if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
@@ -10215,16 +10217,27 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!HomelandFarmAllowUnsafeAuraMonoGetComponents)
+            {
+                status = "AuraMono GetComponents disabled (unsafe on embedded mono).";
+                return false;
+            }
+
+            status = "AuraMono Entities.GetComponents infra ready.";
+            return true;
+        }
+
+        private bool TryHomelandFarmIsAuraMonoGetComponentsReady(out string status)
+        {
+            if (!this.TryAuraMonoEntitiesGetComponentsInfraReady(out status))
+            {
+                return false;
+            }
+
             if (!this.TryResolveAuraMonoFarmComponentClasses(out IntPtr plantClass, out IntPtr cropBoxClass, out IntPtr cropClass)
                 || (plantClass == IntPtr.Zero && cropBoxClass == IntPtr.Zero && cropClass == IntPtr.Zero))
             {
                 status = "AuraMono farm component classes unavailable.";
-                return false;
-            }
-
-            if (!HomelandFarmAllowUnsafeAuraMonoGetComponents)
-            {
-                status = "AuraMono GetComponents disabled (unsafe on embedded mono).";
                 return false;
             }
 
@@ -10586,7 +10599,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            if (!this.TryAuraMonoEntitiesGetComponentsInfraReady(out _))
             {
                 return false;
             }
