@@ -324,6 +324,31 @@ Only files listed in `buddy/buddy.csproj` `<Compile Include="...">` ship. Adding
 
 Log locations: [BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md).
 
+### Analyzing a crash dump (native AV → process exit)
+
+AuraMono mistakes (stale object `IntPtr`, bad generic `method_inst`, `ref`/value-type arg) crash the process with an **uncatchable native access violation** — nothing reaches the file log. The game runs on **CoreCLR** (BepInEx IL2CPP), so a Windows Error Reporting full dump (`*.dmp`, often multi-GB) can be opened with **`dotnet-dump`** (installed at `%USERPROFILE%\.dotnet\tools\dotnet-dump.exe`). This recovers the **managed** call chain into the interop P/Invoke, which is enough to identify the faulting feature/method.
+
+```powershell
+# 1. Find the faulting thread. WER dumps often have NO exception stream; instead look for the
+#    thread carrying System.ExecutionEngineException (CoreCLR's fatal-fault marker) — usually the
+#    STA (main Unity/BepInEx) thread.
+dotnet-dump analyze <dump.dmp> -c "clrthreads -live" -c "exit"
+
+# 2. Managed stack of that thread (DBG index from the first column, e.g. 0):
+dotnet-dump analyze <dump.dmp> -c "setthread 0" -c "clrstack" -c "exit"
+```
+
+The stack shows the mod frames (`HeartopiaMod.HeartopiaComplete.*`) down to the `IL_STUB_PInvoke` where the native mono call faulted — e.g. a crash in `TryEnumerateAuraMonoLoadedEntityObjects` → `TryGetMonoObjectMember` means the recursive entity-graph walk dereferenced a moved/stale pointer. Prefer the direct `Entities.GetComponents<T>` path over that walk (see [TYPE_RESOLUTION.md § AuraMono generic GetComponents](docs/TYPE_RESOLUTION.md)).
+
+**Quick triage without dotnet-dump** (no symbols, faulting module+offset / stack pointer scan) — repo scripts, PS 5.1, no WinDbg:
+
+```powershell
+tools/Read-MinidumpException.ps1 -DumpPath <dump.dmp>   # faulting module+offset (needs exception stream)
+tools/Read-MinidumpStack.ps1     -DumpPath <dump.dmp>   # module-pointer scan of crash thread stack
+```
+
+These rely on the dump having an **ExceptionStream**; WER full dumps frequently omit it (then use `dotnet-dump` as above).
+
 ---
 
 ## 12. Anti-patterns (do not)

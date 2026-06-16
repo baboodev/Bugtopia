@@ -10573,6 +10573,59 @@ namespace HeartopiaMod
             return added > 0;
         }
 
+        // Generic, reusable AuraMono Entities.GetComponents<T>: given a resolved component mono class,
+        // returns the live component object pointers directly — WITHOUT the crash-prone recursive
+        // entity-graph walk (TryEnumerateAuraMonoLoadedEntityObjects). Shares the exact inflate/invoke
+        // infrastructure the homeland-farm path proved out. The returned IntPtrs are valid only in the
+        // current synchronous scope; scalarize (netId/fields) before any coroutine yield.
+        private unsafe bool TryAuraMonoGetComponentObjects(IntPtr componentClass, out List<IntPtr> components)
+        {
+            components = null;
+            if (componentClass == IntPtr.Zero || !HomelandFarmAllowUnsafeAuraMonoGetComponents)
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmCreateAuraMonoComponentList(componentClass, out IntPtr listObj, out _)
+                || listObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmTryResolveInflatedAuraEntitiesGetComponentsMethod(componentClass, out IntPtr inflatedMethod)
+                || inflatedMethod == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // GetComponents<T>(ref List<T> outList): the ref parameter needs params[0] = List**.
+            IntPtr* listSlot = stackalloc IntPtr[1];
+            listSlot[0] = listObj;
+            IntPtr* invokeArgs = stackalloc IntPtr[1];
+            invokeArgs[0] = (IntPtr)listSlot;
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(inflatedMethod, IntPtr.Zero, (IntPtr)invokeArgs, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr resultList = listSlot[0] != IntPtr.Zero ? listSlot[0] : listObj;
+            List<IntPtr> items = new List<IntPtr>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(resultList, items) || items.Count == 0)
+            {
+                return false;
+            }
+
+            components = items;
+            return true;
+        }
+
         private bool TryHomelandFarmTryReadAuraMonoComponentNetId(IntPtr componentObj, out uint netId)
         {
             netId = 0U;

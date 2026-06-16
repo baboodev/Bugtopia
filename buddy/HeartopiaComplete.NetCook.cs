@@ -2146,18 +2146,15 @@ namespace HeartopiaMod
 
                 if (this.netCookTargets.Count < NetCookMaxCaptureTargets
                     && (forceBroadRefresh || useOwnerWindow || added > 0 || this.netCookTargets.Count < NetCookDeferredBroadRefreshTargetThreshold)
-                    && this.TryEnumerateAuraMonoLoadedEntityObjects(out List<IntPtr> entityObjects, out string enumerateStatus)
-                    && entityObjects.Count > 0)
+                    && this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus))
                 {
-                    // Raw entity pointers must not survive a yield (the GC can collect entities
-                    // between frames): scalarize the enumeration to netIds in this same frame,
-                    // then re-resolve each entity by netId inside the throttled loop below.
-                    List<uint> broadEntityNetIds = new List<uint>(entityObjects.Count);
-                    for (int entityIndex = 0; entityIndex < entityObjects.Count; entityIndex++)
+                    // Direct-ECS cook-build components instead of the crash-prone entity-graph walk.
+                    // Raw object pointers must not survive a yield: scalarize to owner entity netIds in
+                    // this same frame, then re-resolve each by netId inside the throttled loop below.
+                    List<uint> broadEntityNetIds = new List<uint>(cookBuildComponents.Count);
+                    for (int compIndex = 0; compIndex < cookBuildComponents.Count; compIndex++)
                     {
-                        IntPtr candidateEntityObj = entityObjects[entityIndex];
-                        if (candidateEntityObj != IntPtr.Zero
-                            && this.TryGetAuraMonoEntityNetId(candidateEntityObj, out uint candidateNetId)
+                        if (this.TryGetNetCookCookBuildOwnerNetId(cookBuildComponents[compIndex], out uint candidateNetId)
                             && candidateNetId != 0U)
                         {
                             broadEntityNetIds.Add(candidateNetId);
@@ -5843,6 +5840,112 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Direct ECS source for cook builds (stoves), replacing the crash-prone recursive entity-graph
+        // walk (TryEnumerateAuraMonoLoadedEntityObjects). CookBuildComponent is a ViewComponent in the
+        // Homeland namespace, so Entities.GetComponents<CookBuildComponent> enumerates every stove
+        // without dereferencing arbitrary entity pointers. See AGENTS.md / TYPE_RESOLUTION.md.
+        private IntPtr netCookCookBuildComponentAuraClass = IntPtr.Zero;
+
+        private bool TryResolveNetCookCookBuildComponentClassAuraMono(out IntPtr componentClass)
+        {
+            if (this.netCookCookBuildComponentAuraClass == IntPtr.Zero)
+            {
+                this.netCookCookBuildComponentAuraClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Gameplay.Component.Homeland.CookBuildComponent");
+                if (this.netCookCookBuildComponentAuraClass == IntPtr.Zero)
+                {
+                    this.netCookCookBuildComponentAuraClass = this.FindAuraMonoClassByFullName(
+                        "XDTLevelAndEntity.GamePlay.Component.Homeland.CookBuildComponent");
+                }
+            }
+
+            componentClass = this.netCookCookBuildComponentAuraClass;
+            return componentClass != IntPtr.Zero;
+        }
+
+        // Enumerate every CookBuildComponent object via the safe direct-ECS GetComponents path.
+        // Returned IntPtrs are valid only synchronously — scalarize before any coroutine yield.
+        private bool TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string status)
+        {
+            cookBuildComponents = null;
+            status = string.Empty;
+            if (!this.TryResolveNetCookCookBuildComponentClassAuraMono(out IntPtr cookBuildClass))
+            {
+                status = "CookBuildComponent class unavailable (AuraMono).";
+                return false;
+            }
+
+            if (!this.TryAuraMonoGetComponentObjects(cookBuildClass, out cookBuildComponents)
+                || cookBuildComponents == null
+                || cookBuildComponents.Count == 0)
+            {
+                status = "GetComponents<CookBuildComponent> returned no stoves.";
+                return false;
+            }
+
+            return true;
+        }
+
+        // Resolve the owner entity netId for a cook-build component (its `entity` back-reference).
+        private bool TryGetNetCookCookBuildOwnerNetId(IntPtr cookBuildComponentObj, out uint ownerNetId)
+        {
+            ownerNetId = 0U;
+            if (cookBuildComponentObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if ((this.TryGetMonoObjectMember(cookBuildComponentObj, "entity", out IntPtr entityObj) && entityObj != IntPtr.Zero)
+                || (this.TryGetMonoObjectMember(cookBuildComponentObj, "_entity", out entityObj) && entityObj != IntPtr.Zero))
+            {
+                return this.TryGetAuraMonoEntityNetId(entityObj, out ownerNetId) && ownerNetId != 0U;
+            }
+
+            return false;
+        }
+
+        // CookingComponent (the burner/pot, also a Homeland ViewComponent) — direct-ECS enumeration,
+        // replacing the per-entity resolve over the crash-prone entity-graph walk.
+        private IntPtr netCookCookingComponentAuraClass = IntPtr.Zero;
+
+        private bool TryResolveNetCookCookingComponentClassAuraMono(out IntPtr componentClass)
+        {
+            if (this.netCookCookingComponentAuraClass == IntPtr.Zero)
+            {
+                this.netCookCookingComponentAuraClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Gameplay.Component.Homeland.CookingComponent");
+                if (this.netCookCookingComponentAuraClass == IntPtr.Zero)
+                {
+                    this.netCookCookingComponentAuraClass = this.FindAuraMonoClassByFullName(
+                        "XDTLevelAndEntity.GamePlay.Component.Homeland.CookingComponent");
+                }
+            }
+
+            componentClass = this.netCookCookingComponentAuraClass;
+            return componentClass != IntPtr.Zero;
+        }
+
+        private bool TryEnumerateNetCookCookingComponentObjects(out List<IntPtr> cookingComponents, out string status)
+        {
+            cookingComponents = null;
+            status = string.Empty;
+            if (!this.TryResolveNetCookCookingComponentClassAuraMono(out IntPtr cookingClass))
+            {
+                status = "CookingComponent class unavailable (AuraMono).";
+                return false;
+            }
+
+            if (!this.TryAuraMonoGetComponentObjects(cookingClass, out cookingComponents)
+                || cookingComponents == null
+                || cookingComponents.Count == 0)
+            {
+                status = "GetComponents<CookingComponent> returned no burners.";
+                return false;
+            }
+
+            return true;
+        }
+
         private bool TryResolveNetCookContextsFromCookBuildComponents(List<NetCookTargetContext> targets, out string status)
         {
             status = "Cook-build component registry unavailable.";
@@ -5860,9 +5963,9 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out List<IntPtr> entityObjects, out string enumerateStatus) || entityObjects.Count <= 0)
+                if (!this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus))
                 {
-                    status = "Cook-build entity list unavailable: " + enumerateStatus;
+                    status = "Cook-build component list unavailable: " + enumerateStatus;
                     return false;
                 }
 
@@ -5874,31 +5977,40 @@ namespace HeartopiaMod
                 int inspectedCookBuilds = 0;
                 int inspectedBurners = 0;
 
-                for (int i = 0; i < entityObjects.Count; i++)
+                for (int i = 0; i < cookBuildComponents.Count; i++)
                 {
                     if (discoveredTargets.Count >= NetCookMaxCaptureTargets)
                     {
                         break;
                     }
 
-                    IntPtr ownerEntityObj = entityObjects[i];
-                    if (ownerEntityObj == IntPtr.Zero)
+                    IntPtr cookBuildComponentObj = cookBuildComponents[i];
+                    if (cookBuildComponentObj == IntPtr.Zero)
                     {
                         continue;
                     }
 
                     inspectedEntities++;
-                    if (!this.TryResolveNetCookBuildComponentAuraMono(ownerEntityObj, out IntPtr cookBuildComponentObj, out _))
-                    {
-                        continue;
-                    }
-
                     inspectedCookBuilds++;
 
-                    Vector3 ownerPosition;
-                    bool hasOwnerPosition = this.TryGetAuraMonoEntityPosition(ownerEntityObj, out ownerPosition)
-                        || this.TryExtractHomePositionMonoObject(ownerEntityObj, out ownerPosition)
-                        || this.TryExtractHomePositionMonoObject(cookBuildComponentObj, out ownerPosition);
+                    // Owner entity (world position / distance cull) is the component's back-reference.
+                    IntPtr ownerEntityObj = IntPtr.Zero;
+                    if (!this.TryGetMonoObjectMember(cookBuildComponentObj, "entity", out ownerEntityObj) || ownerEntityObj == IntPtr.Zero)
+                    {
+                        this.TryGetMonoObjectMember(cookBuildComponentObj, "_entity", out ownerEntityObj);
+                    }
+
+                    Vector3 ownerPosition = scanOrigin;
+                    bool hasOwnerPosition = false;
+                    if (ownerEntityObj != IntPtr.Zero)
+                    {
+                        hasOwnerPosition = this.TryGetAuraMonoEntityPosition(ownerEntityObj, out ownerPosition)
+                            || this.TryExtractHomePositionMonoObject(ownerEntityObj, out ownerPosition);
+                    }
+                    if (!hasOwnerPosition)
+                    {
+                        hasOwnerPosition = this.TryExtractHomePositionMonoObject(cookBuildComponentObj, out ownerPosition);
+                    }
                     if (hasOwnerPosition && Vector3.Distance(scanOrigin, ownerPosition) > maxScanDistance)
                     {
                         continue;
@@ -6822,9 +6934,9 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out List<IntPtr> entityObjects, out string enumerateStatus) || entityObjects.Count <= 0)
+                if (!this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus))
                 {
-                    status = "AuraMono loaded entity scan unavailable: " + enumerateStatus;
+                    status = "AuraMono cook build component scan unavailable: " + enumerateStatus;
                     return false;
                 }
 
@@ -6865,30 +6977,36 @@ namespace HeartopiaMod
                     }
                 }
 
-                for (int i = 0; i < entityObjects.Count; i++)
+                for (int i = 0; i < cookBuildComponents.Count; i++)
                 {
                     if (targets.Count >= NetCookMaxCaptureTargets)
                     {
                         break;
                     }
 
-                    IntPtr ownerEntityObj = entityObjects[i];
-                    if (ownerEntityObj == IntPtr.Zero)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryResolveNetCookBuildComponentAuraMono(ownerEntityObj, out IntPtr cookBuildComponentObj, out _))
+                    IntPtr cookBuildComponentObj = cookBuildComponents[i];
+                    if (cookBuildComponentObj == IntPtr.Zero)
                     {
                         continue;
                     }
 
                     inspectedCookBuilds++;
 
-                    Vector3 ownerPosition;
-                    if (!this.TryGetAuraMonoEntityPosition(ownerEntityObj, out ownerPosition)
-                        && !this.TryExtractHomePositionMonoObject(ownerEntityObj, out ownerPosition)
-                        && !this.TryExtractHomePositionMonoObject(cookBuildComponentObj, out ownerPosition))
+                    // Owner entity (position + owner netId) is the component's back-reference.
+                    IntPtr ownerEntityObj = IntPtr.Zero;
+                    if (!this.TryGetMonoObjectMember(cookBuildComponentObj, "entity", out ownerEntityObj) || ownerEntityObj == IntPtr.Zero)
+                    {
+                        this.TryGetMonoObjectMember(cookBuildComponentObj, "_entity", out ownerEntityObj);
+                    }
+
+                    Vector3 ownerPosition = scanOrigin;
+                    bool gotOwnerPosition = false;
+                    if (ownerEntityObj != IntPtr.Zero)
+                    {
+                        gotOwnerPosition = this.TryGetAuraMonoEntityPosition(ownerEntityObj, out ownerPosition)
+                            || this.TryExtractHomePositionMonoObject(ownerEntityObj, out ownerPosition);
+                    }
+                    if (!gotOwnerPosition && !this.TryExtractHomePositionMonoObject(cookBuildComponentObj, out ownerPosition))
                     {
                         ownerPosition = scanOrigin;
                     }
@@ -7074,30 +7192,41 @@ namespace HeartopiaMod
                     debugSamples);
                 added += ownerWindowAdded;
 
-                for (int i = 0; i < entityObjects.Count; i++)
+                if (!this.TryEnumerateNetCookCookingComponentObjects(out List<IntPtr> cookingComponents, out _))
+                {
+                    cookingComponents = new List<IntPtr>(0);
+                }
+
+                for (int i = 0; i < cookingComponents.Count; i++)
                 {
                     if (targets.Count >= NetCookMaxCaptureTargets)
                     {
                         break;
                     }
 
-                    IntPtr burnerEntityObj = entityObjects[i];
-                    if (burnerEntityObj == IntPtr.Zero)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryResolveNetCookCookingComponentAuraMono(burnerEntityObj, out IntPtr cookingComponentObj, out _))
+                    IntPtr cookingComponentObj = cookingComponents[i];
+                    if (cookingComponentObj == IntPtr.Zero)
                     {
                         continue;
                     }
 
                     directInspected++;
 
-                    Vector3 burnerPosition;
-                    if (!this.TryGetAuraMonoEntityPosition(burnerEntityObj, out burnerPosition)
-                        && !this.TryExtractHomePositionMonoObject(burnerEntityObj, out burnerPosition)
-                        && !this.TryExtractHomePositionMonoObject(cookingComponentObj, out burnerPosition))
+                    // Burner entity (position) is the cooking component's back-reference.
+                    IntPtr burnerEntityObj = IntPtr.Zero;
+                    if (!this.TryGetMonoObjectMember(cookingComponentObj, "entity", out burnerEntityObj) || burnerEntityObj == IntPtr.Zero)
+                    {
+                        this.TryGetMonoObjectMember(cookingComponentObj, "_entity", out burnerEntityObj);
+                    }
+
+                    Vector3 burnerPosition = scanOrigin;
+                    bool gotBurnerPosition = false;
+                    if (burnerEntityObj != IntPtr.Zero)
+                    {
+                        gotBurnerPosition = this.TryGetAuraMonoEntityPosition(burnerEntityObj, out burnerPosition)
+                            || this.TryExtractHomePositionMonoObject(burnerEntityObj, out burnerPosition);
+                    }
+                    if (!gotBurnerPosition && !this.TryExtractHomePositionMonoObject(cookingComponentObj, out burnerPosition))
                     {
                         burnerPosition = scanOrigin;
                     }
