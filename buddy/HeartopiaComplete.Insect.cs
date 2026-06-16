@@ -157,6 +157,14 @@ namespace HeartopiaMod
 
             try
             {
+                string componentsStatus;
+                if (this.TryGetLoadedInsectTargetsViaGetComponents(ids, positions, out componentsStatus))
+                {
+                    detectedCount = ids.Count;
+                    status = componentsStatus;
+                    return detectedCount > 0;
+                }
+
                 string auraStatus;
                 if (this.TryGetLoadedInsectTargetsAuraMono(ids, positions, out auraStatus))
                 {
@@ -255,6 +263,83 @@ namespace HeartopiaMod
                 this.InsectFarmNetLog("TryGetLoadedInsectTargets exception: " + ex);
                 return false;
             }
+        }
+
+        // Primary loaded-insect source: enumerate InsectComponent (a ViewComponent) directly via
+        // Entities.GetComponents<T>. Unlike the manager chains below, this does NOT depend on the
+        // sweep net being equipped (the `_insectManager.insects` path only exists while the net is
+        // held), so the teleport farm can find insects to hop to even before/without the net. No
+        // entity-graph walk involved. Falls through to the manager chains if the query yields nothing
+        // or is unavailable on this build.
+        private bool TryGetLoadedInsectTargetsViaGetComponents(List<uint> ids, List<Vector3> positions, out string status)
+        {
+            status = "Insect GetComponents unavailable";
+            ids.Clear();
+            positions.Clear();
+
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return false;
+            }
+
+            IntPtr insectClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.Insect.InsectComponent");
+            if (insectClass == IntPtr.Zero)
+            {
+                insectClass = this.FindAuraMonoClassByFullName("ScriptsRefactory.LevelAndEntity.Gameplay.Component.Insect.InsectComponent");
+            }
+
+            if (insectClass == IntPtr.Zero)
+            {
+                status = "InsectComponent class unavailable";
+                return false;
+            }
+
+            if (!this.TryAuraMonoGetComponentObjects(insectClass, out List<IntPtr> insectComponents) || insectComponents == null)
+            {
+                status = "No loaded insects (GetComponents)";
+                return false;
+            }
+
+            HashSet<uint> seen = new HashSet<uint>();
+            for (int i = 0; i < insectComponents.Count; i++)
+            {
+                IntPtr componentObj = insectComponents[i];
+                if (componentObj == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                // Owner insect entity is the component's back-reference.
+                IntPtr entityObj = IntPtr.Zero;
+                if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                    && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                {
+                    continue;
+                }
+
+                if (!this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U || !seen.Add(netId))
+                {
+                    continue;
+                }
+
+                Vector3 position;
+                if (!this.TryGetAuraMonoEntityPosition(entityObj, out position) || position == Vector3.zero)
+                {
+                    if (!this.TryGetEntityPositionByNetIdMono(netId, out position) && !this.TryGetEntityPositionByNetId(netId, out position))
+                    {
+                        continue;
+                    }
+                }
+
+                ids.Add(netId);
+                positions.Add(position);
+            }
+
+            status = ids.Count > 0
+                ? $"Loaded insect targets via GetComponents ({ids.Count})"
+                : "GetComponents found no loaded insects";
+            this.InsectFarmNetLog("Loaded insect scan via GetComponents<InsectComponent>: resolved=" + ids.Count);
+            return ids.Count > 0;
         }
 
         private bool TryGetLoadedInsectTargetsAuraMono(List<uint> ids, List<Vector3> positions, out string status)
