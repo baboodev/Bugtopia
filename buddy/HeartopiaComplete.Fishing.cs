@@ -355,10 +355,16 @@ namespace HeartopiaMod
             List<GameObject> candidates = new List<GameObject>(32);
             try
             {
-                GameObject[] allObjects = UnityEngine.Object.FindObjectsOfType<GameObject>();
-                for (int i = 0; i < allObjects.Length; i++)
+                // Prefer the narrowed scan: enumerate only FishComponent gameObjects (a handful)
+                // instead of every GameObject in the scene (thousands). Falls back to the full scan
+                // when the FishComponent type can't be resolved on this build. The per-object
+                // ShouldTrackFishShadowObject filter (prefab-name rarity, aquarium/decor exclusion)
+                // is applied identically either way, so targeting behaviour is unchanged.
+                GameObject[] sourceObjects = this.TryGetFishComponentShadowGameObjects()
+                    ?? UnityEngine.Object.FindObjectsOfType<GameObject>();
+                for (int i = 0; i < sourceObjects.Length; i++)
                 {
-                    GameObject obj = allObjects[i];
+                    GameObject obj = sourceObjects[i];
                     if (obj == null || !obj.activeInHierarchy)
                     {
                         continue;
@@ -377,6 +383,66 @@ namespace HeartopiaMod
             this.cachedFishShadowTargetObjects = candidates.ToArray();
             this.nextFishShadowTargetObjectScanAt = now + (this.cachedFishShadowTargetObjects.Length > 0 ? 0.35f : 0.9f);
             return this.cachedFishShadowTargetObjects;
+        }
+
+        // Returns the gameObjects of all live FishComponent instances, or null if the FishComponent
+        // type can't be resolved / the typed scan fails (caller then does the full GameObject scan).
+        private GameObject[] TryGetFishComponentShadowGameObjects()
+        {
+            if (!this.fishComponentIl2CppTypeResolved)
+            {
+                this.fishComponentIl2CppTypeResolved = true;
+                try
+                {
+                    this.cachedFishComponentIl2CppType =
+                        Il2CppType.GetType("XDTLevelAndEntity.Gameplay.Component.Fish.FishComponent")
+                        ?? Il2CppType.GetType("XDTLevelAndEntity.Gameplay.Component.Fish.FishShadowResHandle");
+                    this.AutoFishLog("FishComponent il2cpp type " + (this.cachedFishComponentIl2CppType != null ? "resolved" : "unavailable") + " for narrowed shadow scan.");
+                }
+                catch (Exception ex)
+                {
+                    this.cachedFishComponentIl2CppType = null;
+                    this.AutoFishLog("FishComponent il2cpp type resolve failed: " + ex.Message);
+                }
+            }
+
+            if (this.cachedFishComponentIl2CppType == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                Il2CppReferenceArray<UnityObject> found = UnityObject.FindObjectsOfType(this.cachedFishComponentIl2CppType);
+                if (found == null)
+                {
+                    return null;
+                }
+
+                List<GameObject> result = new List<GameObject>(found.Length);
+                for (int i = 0; i < found.Length; i++)
+                {
+                    UnityObject o = found[i];
+                    if (o == null)
+                    {
+                        continue;
+                    }
+
+                    Component component = o.TryCast<Component>();
+                    GameObject go = component != null ? component.gameObject : null;
+                    if (go != null)
+                    {
+                        result.Add(go);
+                    }
+                }
+
+                return result.ToArray();
+            }
+            catch (Exception ex)
+            {
+                this.AutoFishLog("FishComponent narrowed shadow scan failed: " + ex.Message);
+                return null;
+            }
         }
 
         private void LogFishShadowResolverMiss(string status)

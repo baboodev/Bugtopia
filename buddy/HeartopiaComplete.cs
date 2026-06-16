@@ -2073,6 +2073,10 @@ namespace HeartopiaMod
 
         private GameObject[] cachedFishShadowTargetObjects = null;
         private float nextFishShadowTargetObjectScanAt = -999f;
+        // Narrowed fish-shadow scan: enumerate only FishComponent instances instead of every scene
+        // GameObject. Resolved il2cpp type cached (null = fall back to the full GameObject scan).
+        private Il2CppSystem.Type cachedFishComponentIl2CppType = null;
+        private bool fishComponentIl2CppTypeResolved = false;
         private float nextFishShadowResolverMissLogAt = -999f;
         private string lastFishShadowResolverMissLogStatus = string.Empty;
         private readonly Dictionary<int, int> fishShadowPriorityByFishIdCache = new Dictionary<int, int>();
