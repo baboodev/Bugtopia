@@ -2352,6 +2352,7 @@ namespace HeartopiaMod
                 tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
                 tabs.Add(("Ice Skating", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
                 tabs.Add(("Building", () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
+                tabs.Add((this.L("extra.title"), () => this.newFeaturesSubTab == 6, () => this.SetNewFeaturesSubTab(6)));
             }
             else if (this.selectedTab == 4)
             {

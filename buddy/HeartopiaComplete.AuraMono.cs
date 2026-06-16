@@ -57,7 +57,7 @@ namespace HeartopiaMod
             return valueObj != IntPtr.Zero;
         }
 
-        private bool TryEnumerateAuraMonoCollectionItems(IntPtr collectionObj, List<IntPtr> output, List<uint> pins = null)
+        private bool TryEnumerateAuraMonoCollectionItems(IntPtr collectionObj, List<IntPtr> output, List<uint> pins = null, int maxItems = MaxAuraMonoCollectionItems)
         {
             if (collectionObj == IntPtr.Zero || output == null || auraMonoObjectGetClass == null)
             {
@@ -134,7 +134,7 @@ namespace HeartopiaMod
             bool isKeyedCollection = this.FindAuraMonoMethodOnHierarchy(collectionClass, "ContainsKey", 1) != IntPtr.Zero;
             if (!isKeyedCollection && getCountMethod != IntPtr.Zero && getItemMethod != IntPtr.Zero)
             {
-                int count = Math.Min(this.GetAuraMonoIntCount(collectionObj, getCountMethod), MaxAuraMonoCollectionItems);
+                int count = Math.Min(this.GetAuraMonoIntCount(collectionObj, getCountMethod), maxItems);
                 for (int i = 0; i < count; i++)
                 {
                     unsafe
@@ -207,7 +207,7 @@ namespace HeartopiaMod
 
                     bool moveNextThrew = false;
                     int safety = 0;
-                    while (safety < MaxAuraMonoCollectionItems)
+                    while (safety < maxItems)
                     {
                         exc = IntPtr.Zero;
                         IntPtr moved = auraMonoRuntimeInvoke(moveNextMethod, enumeratorObj, IntPtr.Zero, ref exc);
@@ -269,7 +269,7 @@ namespace HeartopiaMod
             {
                 if (this.TryGetMonoObjectMember(collectionObj, memberName, out IntPtr nested) && nested != IntPtr.Zero && nested != collectionObj)
                 {
-                    if (this.TryEnumerateAuraMonoCollectionItems(nested, output, pins))
+                    if (this.TryEnumerateAuraMonoCollectionItems(nested, output, pins, maxItems))
                     {
                         return output.Count > 0;
                     }
@@ -288,7 +288,7 @@ namespace HeartopiaMod
                 IntPtr nested = auraMonoRuntimeInvoke(methodPtr, collectionObj, IntPtr.Zero, ref exc);
                 if (exc == IntPtr.Zero && nested != IntPtr.Zero && nested != collectionObj)
                 {
-                    if (this.TryEnumerateAuraMonoCollectionItems(nested, output, pins))
+                    if (this.TryEnumerateAuraMonoCollectionItems(nested, output, pins, maxItems))
                     {
                         return output.Count > 0;
                     }
@@ -306,7 +306,7 @@ namespace HeartopiaMod
                     IntPtr getValueMethod = this.FindAuraMonoMethodOnHierarchy(nodeClass, "get_Value", 0);
                     IntPtr getNextMethod = this.FindAuraMonoMethodOnHierarchy(nodeClass, "get_Next", 0);
                     int safety = 0;
-                    while (nodeObj != IntPtr.Zero && getValueMethod != IntPtr.Zero && getNextMethod != IntPtr.Zero && safety < MaxAuraMonoCollectionItems)
+                    while (nodeObj != IntPtr.Zero && getValueMethod != IntPtr.Zero && getNextMethod != IntPtr.Zero && safety < maxItems)
                     {
                         exc = IntPtr.Zero;
                         IntPtr valueObj = auraMonoRuntimeInvoke(getValueMethod, nodeObj, IntPtr.Zero, ref exc);
