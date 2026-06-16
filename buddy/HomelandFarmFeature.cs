@@ -15,6 +15,7 @@ namespace HeartopiaMod
         private const float HomelandFarmDefaultWaterRadius = 30f;
         private const float HomelandFarmMinWaterRadius = 1f;
         private const float HomelandFarmMaxWaterRadius = 80f;
+        private const float HomelandFarmRadiusSaveDebounceSeconds = 0.5f; // delay after slider settles before saving
         private const int HomelandFarmBatchLimit = 18;
         private static readonly string[] HomelandFarmCropBoxLinkMembers =
         {
@@ -129,6 +130,11 @@ namespace HeartopiaMod
         private static readonly string[] HomelandFarmStorageNames = { "Backpack", "Warehouse" };
 
         private float homelandFarmWaterRadius = HomelandFarmDefaultWaterRadius;
+        // Debounced persistence of the radius slider: sliders fire every frame while dragging, so we
+        // save to config a short moment after the value settles instead of on every change.
+        private float homelandFarmWaterRadiusLastSeen = -1f;
+        private bool homelandFarmWaterRadiusSavePending = false;
+        private float homelandFarmWaterRadiusSaveAt = 0f;
         private string homelandFarmLastStatus = "homeland_farm.status_idle";
         private object homelandFarmCoroutine = null;
         private object homelandFarmWarmupCoroutine = null;
@@ -19871,6 +19877,24 @@ namespace HeartopiaMod
                 this.homelandFarmWaterRadius,
                 HomelandFarmMinWaterRadius,
                 HomelandFarmMaxWaterRadius));
+            // Persist the radius to config (debounced) when the slider value settles.
+            if (this.homelandFarmWaterRadiusLastSeen < 0f)
+            {
+                // First draw — adopt the loaded value without scheduling a save.
+                this.homelandFarmWaterRadiusLastSeen = this.homelandFarmWaterRadius;
+            }
+            else if (this.homelandFarmWaterRadius != this.homelandFarmWaterRadiusLastSeen)
+            {
+                this.homelandFarmWaterRadiusLastSeen = this.homelandFarmWaterRadius;
+                this.homelandFarmWaterRadiusSavePending = true;
+                this.homelandFarmWaterRadiusSaveAt = Time.realtimeSinceStartup + HomelandFarmRadiusSaveDebounceSeconds;
+            }
+
+            if (this.homelandFarmWaterRadiusSavePending && Time.realtimeSinceStartup >= this.homelandFarmWaterRadiusSaveAt)
+            {
+                this.homelandFarmWaterRadiusSavePending = false;
+                this.PersistHomelandFarmRadius();
+            }
             y += 82f;
 
             // 3. CROPS — scan + select the seed used by Sow / Auto farm.
@@ -20030,6 +20054,24 @@ namespace HeartopiaMod
             }
 
             ModLogger.Msg("[HomelandFarm] " + msg);
+        }
+
+        // Persist the farm radius to config. The radius lives in the Keybinds config section, which
+        // PopulateAllConfigSections already serializes; the slider just never triggered a save on its
+        // own, so changing only the radius was lost on restart. Quiet (no keybind-save notification).
+        private void PersistHomelandFarmRadius()
+        {
+            try
+            {
+                UnifiedConfigData data = this.LoadOrCreateUnifiedConfig();
+                this.PopulateAllConfigSections(data);
+                this.SaveUnifiedConfig(data);
+                this.HomelandFarmLog("Saved farm radius=" + this.homelandFarmWaterRadius.ToString("F0") + "m to config.");
+            }
+            catch (Exception ex)
+            {
+                this.HomelandFarmLog("Failed to save farm radius: " + ex.Message);
+            }
         }
 
         // Verbose per-call AuraMono GetComponents diagnostics (step1..step6 / step3a..3d). These
