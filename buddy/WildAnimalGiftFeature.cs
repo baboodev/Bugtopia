@@ -287,21 +287,29 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Primary: gift boxes are spawned with WildAnimalGiftComponentData (see
+            // WildAnimalProtocolManager.SpawnGift), so Entities.GetComponents<WildAnimalGiftComponent>
+            // returns every claimable gift directly — no full entity-graph walk and no 4096-entity
+            // truncation that previously made the claim scan miss gifts in dense towns. Falls back to
+            // the legacy walk only when the component query is unavailable on this build.
             List<IntPtr> entities;
             string enumerateStatus;
-            int previousCap = this.auraMonoEntityEnumerationCapOverride;
-            this.auraMonoEntityEnumerationCapOverride = WildAnimalGiftEntityScanCap;
-            try
+            if (!this.TryCollectWildAnimalGiftComponentEntities(out entities, out enumerateStatus))
             {
-                if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out entities, out enumerateStatus) || entities.Count <= 0)
+                int previousCap = this.auraMonoEntityEnumerationCapOverride;
+                this.auraMonoEntityEnumerationCapOverride = WildAnimalGiftEntityScanCap;
+                try
                 {
-                    status = enumerateStatus;
-                    return false;
+                    if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out entities, out enumerateStatus) || entities.Count <= 0)
+                    {
+                        status = enumerateStatus;
+                        return false;
+                    }
                 }
-            }
-            finally
-            {
-                this.auraMonoEntityEnumerationCapOverride = previousCap;
+                finally
+                {
+                    this.auraMonoEntityEnumerationCapOverride = previousCap;
+                }
             }
 
             int inspected = 0;
@@ -372,6 +380,66 @@ namespace HeartopiaMod
                 + " isGiftBox=" + (this.wildAnimalGiftAuraAnimalUtilIsGiftBoxMethod != IntPtr.Zero)
                 + " haveGiftEntity=" + (this.wildAnimalGiftAuraHaveGiftEntityMethod != IntPtr.Zero)
                 + " getGroup=" + (this.wildAnimalGiftAuraAnimalUtilGetGroupMethod != IntPtr.Zero) + "])";
+            return true;
+        }
+
+        // Returns the owner entities of all WildAnimalGiftComponent instances via the safe direct-ECS
+        // GetComponents path. Gated on GetComponents readiness: once ready it is authoritative (returns
+        // true even with 0 gifts, so the caller never falls back to the crash-prone / truncation-prone
+        // entity-graph walk). Returns false only when GetComponents is unavailable on this build.
+        private bool TryCollectWildAnimalGiftComponentEntities(out List<IntPtr> giftEntities, out string status)
+        {
+            giftEntities = null;
+            status = string.Empty;
+
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                status = "GetComponents not ready";
+                return false;
+            }
+
+            IntPtr giftClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.WildAnimal.WildAnimalGiftComponent");
+            if (giftClass == IntPtr.Zero)
+            {
+                giftClass = this.FindAuraMonoClassByFullName("ScriptsRefactory.LevelAndEntity.Gameplay.Component.WildAnimal.WildAnimalGiftComponent");
+            }
+
+            if (giftClass == IntPtr.Zero)
+            {
+                status = "WildAnimalGiftComponent class unavailable";
+                return false;
+            }
+
+            List<IntPtr> result = new List<IntPtr>(32);
+            if (this.TryAuraMonoGetComponentObjects(giftClass, out List<IntPtr> components) && components != null)
+            {
+                HashSet<IntPtr> seenObj = new HashSet<IntPtr>();
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr componentObj = components[i];
+                    if (componentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    // Gift-box entity is the component's back-reference.
+                    IntPtr entityObj = IntPtr.Zero;
+                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
+                    if (seenObj.Add(entityObj))
+                    {
+                        result.Add(entityObj);
+                    }
+                }
+            }
+
+            giftEntities = result;
+            status = "Gift components via GetComponents=" + result.Count;
+            this.WildAnimalGiftLog("Gift scan via GetComponents<WildAnimalGiftComponent>: entities=" + result.Count);
             return true;
         }
 
