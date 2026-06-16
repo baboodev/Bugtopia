@@ -89,7 +89,10 @@ namespace HeartopiaMod
             };
             labelStyle.normal.textColor = textColor;
 
-            Rect sectionRect = new Rect(left, y, width, 372f);
+            const float sectionHeaderH = 36f;
+            const float sectionPadBottom = 12f;
+            float sectionH = sectionHeaderH + rowH * 4 + (btnH + 4f) + sectionPadBottom;
+            Rect sectionRect = new Rect(left, y, width, sectionH);
             GUI.Box(sectionRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
             this.DrawCardOutline(sectionRect, 1f);
             GUI.Label(new Rect(sectionRect.x + 16f, sectionRect.y + 10f, 240f, 20f), this.L("DAILY CLAIMS"), labelStyle);
