@@ -6387,30 +6387,50 @@ namespace HeartopiaMod
                     cookBuildType = this.FindLoadedType(
                         "XDTLevelAndEntity.Gameplay.Component.Homeland.CookBuildComponent",
                         "CookBuildComponent");
+
+                    // These Homeland ECS components are AuraMono-only on this build, so the MANAGED
+                    // type is usually absent here -> the Harmony hooks below never install and the
+                    // registry stays empty. That's fine now (capture uses GetComponents<CookBuildComponent>),
+                    // but log it once so the hook's status is observable instead of silently dead.
+                    if (cookBuildType == null && !this.netCookCookBuildHookWarned)
+                    {
+                        this.netCookCookBuildHookWarned = true;
+                        this.NetCookHookLog("CookBuild registry hooks NOT installed: managed CookBuildComponent type unavailable via FindLoadedType (AuraMono-only build). Capture relies on GetComponents<CookBuildComponent> instead.");
+                    }
                 }
 
-                if (!this.netCookCookBuildSpawnPatched)
+                if (!this.netCookCookBuildSpawnPatched && cookBuildType != null)
                 {
-                    MethodInfo onSpawnedMethod = cookBuildType?.GetMethod("OnSpawned", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+                    MethodInfo onSpawnedMethod = cookBuildType.GetMethod("OnSpawned", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
                     MethodInfo postfixMethod = typeof(HeartopiaComplete).GetMethod(nameof(NetCookCookBuildOnSpawnedPostfix), BindingFlags.Static | BindingFlags.NonPublic);
                     if (onSpawnedMethod != null && postfixMethod != null)
                     {
                         HeartopiaComplete.harmonyInstance.Patch(onSpawnedMethod, null, new HarmonyMethod(postfixMethod), null, null, null);
                         this.netCookCookBuildSpawnPatched = true;
-                        this.NetCookLog("Patched CookBuildComponent.OnSpawned registry hook.");
+                        this.NetCookHookLog("Patched CookBuildComponent.OnSpawned registry hook.");
+                    }
+                    else if (!this.netCookCookBuildHookWarned)
+                    {
+                        this.netCookCookBuildHookWarned = true;
+                        this.NetCookHookLog("CookBuildComponent.OnSpawned hook NOT installed: onSpawnedMethod=" + (onSpawnedMethod != null) + " postfix=" + (postfixMethod != null) + ".");
                     }
                 }
 
-                if (!this.netCookCookBuildUpdatePatched)
+                if (!this.netCookCookBuildUpdatePatched && cookBuildType != null)
                 {
-                    MethodInfo onUpdatedMethod = cookBuildType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    MethodInfo onUpdatedMethod = cookBuildType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                         .FirstOrDefault(m => m.Name == "OnComponentUpdated" && m.GetParameters().Length == 1);
                     MethodInfo postfixMethod = typeof(HeartopiaComplete).GetMethod(nameof(NetCookCookBuildOnUpdatedPostfix), BindingFlags.Static | BindingFlags.NonPublic);
                     if (onUpdatedMethod != null && postfixMethod != null)
                     {
                         HeartopiaComplete.harmonyInstance.Patch(onUpdatedMethod, null, new HarmonyMethod(postfixMethod), null, null, null);
                         this.netCookCookBuildUpdatePatched = true;
-                        this.NetCookLog("Patched CookBuildComponent.OnComponentUpdated registry hook.");
+                        this.NetCookHookLog("Patched CookBuildComponent.OnComponentUpdated registry hook.");
+                    }
+                    else if (!this.netCookCookBuildHookWarned)
+                    {
+                        this.netCookCookBuildHookWarned = true;
+                        this.NetCookHookLog("CookBuildComponent.OnComponentUpdated hook NOT installed: onUpdatedMethod=" + (onUpdatedMethod != null) + " postfix=" + (postfixMethod != null) + ".");
                     }
                 }
             }
@@ -6427,12 +6447,36 @@ namespace HeartopiaMod
 
         private static void NetCookCookBuildOnSpawnedPostfix(object __instance)
         {
-            HeartopiaComplete.Instance?.RegisterNetCookCookBuildComponent(__instance);
+            HeartopiaComplete inst = HeartopiaComplete.Instance;
+            if (inst == null)
+            {
+                return;
+            }
+
+            inst.netCookCookBuildSpawnHookCount++;
+            if (inst.netCookCookBuildSpawnHookCount <= 3 || inst.netCookCookBuildSpawnHookCount % 50 == 0)
+            {
+                inst.NetCookHookLog("CookBuild OnSpawned hook fired (count=" + inst.netCookCookBuildSpawnHookCount + ").");
+            }
+
+            inst.RegisterNetCookCookBuildComponent(__instance);
         }
 
         private static void NetCookCookBuildOnUpdatedPostfix(object __instance)
         {
-            HeartopiaComplete.Instance?.RegisterNetCookCookBuildComponent(__instance);
+            HeartopiaComplete inst = HeartopiaComplete.Instance;
+            if (inst == null)
+            {
+                return;
+            }
+
+            inst.netCookCookBuildUpdateHookCount++;
+            if (inst.netCookCookBuildUpdateHookCount <= 3 || inst.netCookCookBuildUpdateHookCount % 50 == 0)
+            {
+                inst.NetCookHookLog("CookBuild OnComponentUpdated hook fired (count=" + inst.netCookCookBuildUpdateHookCount + ").");
+            }
+
+            inst.RegisterNetCookCookBuildComponent(__instance);
         }
 
         private void RegisterNetCookCookBuildComponent(object cookBuildComponent)
@@ -8846,6 +8890,20 @@ namespace HeartopiaMod
                 return;
             }
 
+            try
+            {
+                ModLogger.Msg("[NetCook] " + message);
+            }
+            catch
+            {
+            }
+        }
+
+        // Unconditional NetCook diagnostics (NOT gated by MasterLogNetCook): used for the
+        // registry-hook install status and hook-fire counts so they are observable without
+        // enabling the noisy full NetCook trace.
+        private void NetCookHookLog(string message)
+        {
             try
             {
                 ModLogger.Msg("[NetCook] " + message);
