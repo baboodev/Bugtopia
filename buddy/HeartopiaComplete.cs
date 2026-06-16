@@ -4534,7 +4534,6 @@ namespace HeartopiaMod
         private const float BubbleRadarMarkerSyncInterval = 0.75f;
         private const float BubbleRadarMaxDistance = 1000.0f;
         private const float BubbleRadarSceneMissingRetainMinDistance = 25.0f;
-        private const bool BubbleRadarUnsafeAuraMonoScanEnabled = false;
         private const string BubbleTrackedMarkerPrefix = "BubbleTrackedMarker_";
         private readonly Dictionary<uint, GameObject> trackedHideAndSeekMorphMarkers = new Dictionary<uint, GameObject>();
         private readonly Dictionary<uint, Vector3> hideAndSeekMorphTrackedPositions = new Dictionary<uint, Vector3>();

@@ -220,6 +220,35 @@ These are uncatchable by C# `try/catch` — a native access-violation kills the 
 
 `D:\…\mono\metadata\icall.c:1622:` (= `ves_icall_System_Array_GetValue`) lines appear in the **native console** during these scans and sometimes leak into the file log. They are **non-fatal** — the scan completes. They come from a value-array `Array.GetValue` path used elsewhere (dictionary-backed discovery, water batches) and are **not** the crash. Do not chase them when diagnosing an AV; look at the last breadcrumb step instead.
 
+### Reusable helper `TryAuraMonoGetComponentObjects` & cross-feature adoption
+
+The inflate/invoke core is factored into one reusable helper (in `HomelandFarmFeature.cs`, shares the lower-level `TryHomelandFarmIsAuraMonoGetComponentsReady` / `…CreateAuraMonoComponentList` / `…ResolveInflatedAuraEntitiesGetComponentsMethod`):
+
+```csharp
+// componentClass = FindAuraMonoClassByFullName("…SomeViewComponent")
+this.TryAuraMonoGetComponentObjects(componentClass, out List<IntPtr> components);
+// each component's owner entity = its `entity` (or `_entity`) back-reference:
+this.TryGetMonoObjectMember(componentObj, "entity", out IntPtr entityObj);
+```
+
+It returns the live component object pointers **without** the recursive entity-graph walk (`TryEnumerateAuraMonoLoadedEntityObjects`), which dereferences arbitrary mono entity pointers and **randomly native-AV-crashes on dense / visiting / streaming fields**. The IntPtrs are valid only in the current synchronous scope — scalarize (netId/fields) before any coroutine `yield`.
+
+**This is now the standard entity-discovery path.** Features migrated from the graph walk to `GetComponents<T>`:
+
+| Feature | Component(s) queried | Notes |
+|---------|----------------------|-------|
+| Homeland Farm | `CropBoxComponent`, `CropComponent`, `PlantComponent` | primary scan source (`ComponentRadius`) |
+| Mass Cook | `CookBuildComponent`, `CookingComponent` | capture + broad refresh + nearby scan |
+| Bird Farm | `BirdComponent`, `BirdScannableComponent`, `PerchBirdComponent` | gated on readiness → never walks once ready |
+| Wild Animal Gift | `WildAnimalGiftComponent` | also fixed the old 4096-entity truncation undercount |
+| Insect (loaded/teleport) | `InsectComponent` | net-independent loaded-insect list |
+| Bubble radar | `BubbleComponent` | replaced the disabled "unsafe" walk fallback |
+| Aura Farm | `CollectableMeteoriteLogicComponent` | **meteor parent lookup only** (walk kept as fallback) |
+
+**When GetComponents fits — and when it does NOT:** it returns *every* loaded instance of the type (whole-world), so it suits **"radius scan of all X"** features (bird, gift, insect, bubble, crops). It does **not** suit **"act on what my equipped tool is pointed at"** discovery — **Aura Farm gather** (AxeChecker/interact/cylinder, range-limited by the tool) and **fishing** (visual fish-shadow targeting by prefab name + aquarium exclusion + camera scoring) intentionally stay on their proximity/visual paths; replacing them would over-target the whole world or lose visual rarity data. (Fishing instead narrowed its managed `FindObjectsOfType<GameObject>()` scene scan to `FindObjectsOfType(<FishComponent>)`.)
+
+Still on the legacy walk (latent AV, convert when a component type fits): **Puzzle**, **PetFeed**, **SnowSculpture**. The shared `TryEnumerateAuraMonoLoadedEntityObjects` stays for them and as the fallback path in the migrated features.
+
 ---
 
 ## Resolving module instances (`Managers.GetModule`) — worked example: BuildModule

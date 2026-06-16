@@ -511,16 +511,11 @@ namespace HeartopiaMod
                         return true;
                     }
 
-                    string auraStatus = "Aura bubble scan disabled by safe mode";
-                    bool auraResolved = false;
-                    if (BubbleRadarUnsafeAuraMonoScanEnabled)
+                    bool auraResolved = this.TryGetAllSpawnedBubblePositionsAuraMonoSafe(positions, out string auraStatus);
+                    if (auraResolved)
                     {
-                        auraResolved = this.TryGetAllSpawnedBubblePositionsAuraMonoSafe(positions, out auraStatus);
-                        if (auraResolved)
-                        {
-                            status = "Aura bubble scan ready. " + auraStatus;
-                            return true;
-                        }
+                        status = "Aura bubble scan ready. " + auraStatus;
+                        return true;
                     }
 
                     bool auraCoolingDown = !string.IsNullOrEmpty(auraStatus)
@@ -599,16 +594,11 @@ namespace HeartopiaMod
                     return true;
                 }
 
-                string auraStatus = "Aura bubble scan disabled by safe mode";
-                bool auraResolved = false;
-                if (BubbleRadarUnsafeAuraMonoScanEnabled)
+                bool auraResolved = this.TryGetAllSpawnedBubblePositionsAuraMonoSafe(positions, out string auraStatus);
+                if (auraResolved)
                 {
-                    auraResolved = this.TryGetAllSpawnedBubblePositionsAuraMonoSafe(positions, out auraStatus);
-                    if (auraResolved)
-                    {
-                        status = "Bubble ECS scan failed: " + ex.GetType().Name + " | Aura bubble scan ready. " + auraStatus;
-                        return true;
-                    }
+                    status = "Bubble ECS scan failed: " + ex.GetType().Name + " | Aura bubble scan ready. " + auraStatus;
+                    return true;
                 }
 
                 bool auraCoolingDown = !string.IsNullOrEmpty(auraStatus)
@@ -717,24 +707,56 @@ namespace HeartopiaMod
 
             positions.Clear();
 
+            // Direct-ECS bubble source: enumerate BubbleComponent objects via Entities.GetComponents<T>
+            // (no entity-graph walk → no native AV) and read each bubble's radar marker + position from
+            // its owner entity. Safe replacement for the former TryEnumerateAuraMonoLoadedEntityObjects
+            // walk; covers AuraMono-only builds where the GM service and managed GetComponents both fail.
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                status = "Aura bubble scan unavailable: GetComponents not ready";
+                return false;
+            }
+
+            IntPtr bubbleClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.Bubble.BubbleComponent");
+            if (bubbleClass == IntPtr.Zero)
+            {
+                bubbleClass = this.FindAuraMonoClassByFullName("ScriptsRefactory.LevelAndEntity.Gameplay.Component.Bubble.BubbleComponent");
+            }
+
+            if (bubbleClass == IntPtr.Zero)
+            {
+                status = "Aura bubble scan unavailable: BubbleComponent class missing";
+                return false;
+            }
+
             try
             {
-                if (!this.TryEnumerateAuraMonoLoadedEntityObjects(out List<IntPtr> entityObjects, out string entityStatus) || entityObjects == null || entityObjects.Count == 0)
+                if (!this.TryAuraMonoGetComponentObjects(bubbleClass, out List<IntPtr> bubbleComponents) || bubbleComponents == null)
                 {
-                    status = "Aura entity enumeration unavailable: " + entityStatus;
+                    status = "Aura bubble scan: GetComponents<BubbleComponent> returned no bubbles";
                     return false;
                 }
 
                 int inspected = 0;
                 int bubbleMatches = 0;
-                foreach (IntPtr entityObj in entityObjects)
+                for (int i = 0; i < bubbleComponents.Count; i++)
                 {
-                    if (entityObj == IntPtr.Zero)
+                    IntPtr componentObj = bubbleComponents[i];
+                    if (componentObj == IntPtr.Zero)
                     {
                         continue;
                     }
 
                     inspected++;
+
+                    // Bubble entity is the component's back-reference.
+                    IntPtr entityObj = IntPtr.Zero;
+                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
                     if (!this.TryResolveAuraMonoBubbleEntityMarker(entityObj, out int markerId, out Vector3 bubblePos))
                     {
                         continue;
@@ -745,9 +767,9 @@ namespace HeartopiaMod
                 }
 
                 status = bubbleMatches > 0
-                    ? $"Aura bubble scan resolved {bubbleMatches}/{inspected} bubble(s)"
-                    : (inspected > 0 ? $"Aura bubble scan inspected {inspected} entities but found no bubbles" : "Aura bubble entity list empty");
-                this.BubbleRadarLog("Aura bubble scan complete. inspected=" + inspected + " resolved=" + bubbleMatches);
+                    ? $"Aura bubble scan resolved {bubbleMatches}/{inspected} bubble(s) via GetComponents"
+                    : (inspected > 0 ? $"Aura bubble scan inspected {inspected} bubble component(s) but resolved none" : "Aura bubble GetComponents empty");
+                this.BubbleRadarLog("Aura bubble scan via GetComponents<BubbleComponent>: inspected=" + inspected + " resolved=" + bubbleMatches);
                 return bubbleMatches > 0;
             }
             catch (Exception ex)

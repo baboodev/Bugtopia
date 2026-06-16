@@ -252,7 +252,8 @@ See [FEATURES.md § Aura Farm](docs/FEATURES.md), [TECHNICAL.md § Aura Farm](do
 | Goal | Approach | Notes |
 |------|----------|-------|
 | ECS entity by `netId` | `Entities.GetEntity` / `GetAnyEntity` (managed or AuraMono) | Preferred for components |
-| All components of type T | `Entities.GetComponents<T>` | Managed if available; else AuraMono generic inflate ([TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md)) |
+| All instances of a component type T (radius/whole-world scan) | `Entities.GetComponents<T>` | **Preferred over the entity-graph walk.** Managed if available; else AuraMono generic inflate via reusable `TryAuraMonoGetComponentObjects` ([TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md)). Used by farm/cook/bird/gift/insect/bubble. |
+| "What my equipped tool is pointed at" (NOT all-of-type) | `InteractSystem` / AxeChecker / SweepNetManager / visual GameObject scan | GetComponents does **not** fit here (would target the whole world) — aura-farm gather + fishing stay proximity/visual |
 | Sphere / cylinder overlap | `Entities.SphereQueryEntities`, interact cylinders | Aura farm; shape validation required |
 | Interact targets | `InteractSystem` select priority / `SelectPriorityInfo.shape` | Aura farm primary path |
 | Level object owner | `EntityHelper.GetLevelObjectOwner`, shape `ownerEntity.netId` | Link UI shape → entity |
@@ -363,6 +364,7 @@ These rely on the dump having an **ExceptionStream**; WER full dumps frequently 
 | Pass an out-param slot to `mono_runtime_invoke` for a value type wider than a pointer | mono writes the whole struct into the slot → stack corruption (crashed AutoSell scan); use `ContainsKey` + `get_Item` (boxed returns) |
 | Probe a dictionary with `get_Count` + `get_Item(0..n)` | Dictionary `get_Item` takes a KEY, not an index — exceptions per element / wrong items; use the enumerator path |
 | Invoke an inflated generic method without signature validation | Wrong `method_inst` AVs the process on invoke; check `AuraMonoMethodParamCountIs` first |
+| Walk all loaded entities (`TryEnumerateAuraMonoLoadedEntityObjects`) to find instances of one type | Dereferences arbitrary mono entity pointers → random native AV on dense/visiting/streaming fields. Use `Entities.GetComponents<T>` (reusable `TryAuraMonoGetComponentObjects`) for "all of type T" ([TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md#reusable-helper-tryauramonogetcomponentobjects--cross-feature-adoption)) |
 | Use `gameassembly-dumps` for `XDT*` gameplay | Wrong runtime — use `ilspy-dumps` |
 | Harmony on `FindLoadedType("XDTGame.UI.*")` | UI types often AuraMono-only |
 | Mono thunk hook on IL2CPP UI openers | Hook never fires in-game |
