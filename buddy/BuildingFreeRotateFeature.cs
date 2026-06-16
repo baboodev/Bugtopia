@@ -35,12 +35,22 @@ namespace HeartopiaMod
         private float buildingFreePosStep = 0.25f;
         private string buildingFreePosStatus = "Focus an object, Read, nudge X/Y/Z, Apply.";
 
+        // Floor height (god-mode build plane). SetPlaneHeight(offset) raises _standardHeight so placement
+        // floats at the chosen height above the field floor. Applied on change; god-mode only.
+        private float buildingFloorHeight;       // world-Y (height above floor) jog of the focused object
+        private float buildingFloorHeightApplied;
+        private float buildingFreeZ;             // world-Z jog of the focused object (god mode)
+        private float buildingFreeZApplied;
+        private float buildingFreeX;             // world-X jog of the focused object (god mode)
+        private float buildingFreeXApplied;
+
         // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
         private bool buildingMovePanelActive;
+        private bool buildingMovePanelGodMode;   // BuildModule.InGodMode (gates the X/Y/Z jog sliders)
         private bool buildingMovePanelMouseOver;
         private float buildingMovePanelNextPollAt = -999f;
         private int buildingMovePanelSubState = -1;
-        private Rect buildingMovePanelRect = new Rect(14f, 150f, 360f, 190f);
+        private Rect buildingMovePanelRect = new Rect(14f, 150f, 360f, 246f);
         private Vector3 buildingMovePanelObjPos;
         private float buildingMovePanelObjYaw;
         private bool buildingMovePanelHasPos;
@@ -211,6 +221,22 @@ namespace HeartopiaMod
             }
             y += 26f;
 
+            // X/Y/Z jog of the FOCUSED object — god-mode only (drives GodControl._dstPosition), so the
+            // sliders are hidden outside god mode. Y = height above floor (0..8); X/Z = world move
+            // (centred at 0). Each slider drives a delta applied via TryNudgeFocused.
+            if (this.buildingMovePanelGodMode)
+            {
+                this.DrawBuildingAxisRow(left, y, this.L("Height"), 0f, 8f, new Vector3(0f, 1f, 0f), val,
+                    ref this.buildingFloorHeight, ref this.buildingFloorHeightApplied);
+                y += 26f;
+                this.DrawBuildingAxisRow(left, y, "X", -8f, 8f, new Vector3(1f, 0f, 0f), val,
+                    ref this.buildingFreeX, ref this.buildingFreeXApplied);
+                y += 26f;
+                this.DrawBuildingAxisRow(left, y, "Z", -8f, 8f, new Vector3(0f, 0f, 1f), val,
+                    ref this.buildingFreeZ, ref this.buildingFreeZApplied);
+                y += 26f;
+            }
+
             if (this.buildingFreeAngleEnabled != prevAngle || this.buildingFreeGridEnabled != prevGrid)
             {
                 this.AddMenuNotification(
@@ -239,6 +265,44 @@ namespace HeartopiaMod
             return y;
         }
 
+        // One axis jog row: label + slider + value + [-]/[+] buttons. The buttons step by the grid Cell
+        // value; both slider and buttons drive a delta applied to the focused object along axisUnit.
+        private void DrawBuildingAxisRow(float left, float y, string label, float lo, float hi,
+            Vector3 axisUnit, GUIStyle style, ref float value, ref float applied)
+        {
+            float step = Mathf.Clamp(this.buildingFreeGridCell, 0.01f, 0.25f);
+            GUI.Label(new Rect(left, y + 2f, 48f, 20f), label, style);
+            value = Mathf.Round(
+                GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), value, lo, hi) * 100f) / 100f;
+            GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), value.ToString("0.00") + "m", style);
+            if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
+            {
+                value = Mathf.Clamp(Mathf.Round((value - step) * 100f) / 100f, lo, hi);
+            }
+            if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
+            {
+                value = Mathf.Clamp(Mathf.Round((value + step) * 100f) / 100f, lo, hi);
+            }
+            if (!Mathf.Approximately(value, applied))
+            {
+                float d = value - applied;
+                applied = value;
+                this.TryNudgeFocused(axisUnit * d);
+            }
+        }
+
+        // Reset the X/Y/Z jog sliders to 0 (value + applied) without moving the object. Called on the
+        // confirm hotkey so the next placement starts fresh.
+        private void ResetBuildingAxisSliders()
+        {
+            this.buildingFloorHeight = 0f;
+            this.buildingFloorHeightApplied = 0f;
+            this.buildingFreeX = 0f;
+            this.buildingFreeXApplied = 0f;
+            this.buildingFreeZ = 0f;
+            this.buildingFreeZApplied = 0f;
+        }
+
         // Floating, draggable panel auto-shown while an object is focused/being moved (CraftState.Focus)
         // and the main mod menu is closed — quick access to the Free Placement toggles in build/move
         // mode. It's a real GUI.Window: themed background, GUI.DragWindow top strip, and the same
@@ -251,6 +315,9 @@ namespace HeartopiaMod
                 this.buildingMovePanelMouseOver = false;
                 return;
             }
+
+            // Height fits the content: 5 toggles always + 3 X/Y/Z sliders only in god mode.
+            this.buildingMovePanelRect.height = this.buildingMovePanelGodMode ? 264f : 186f;
 
             float scale = this.GetUiScale();
             Matrix4x4 prevMatrix = GUI.matrix;
@@ -332,11 +399,14 @@ namespace HeartopiaMod
             this.buildingMovePanelNextPollAt = now + 0.1f;
 
             bool active = false;
-            if (this.TryGetPadBuildAuraModule(out IntPtr module) && module != IntPtr.Zero
-                && this.TryGetPadBuildAuraSubState(module, out int sub))
+            if (this.TryGetPadBuildAuraModule(out IntPtr module) && module != IntPtr.Zero)
             {
-                this.buildingMovePanelSubState = sub;
-                active = sub == 2; // CraftState.Focus — an object is focused / being moved
+                this.buildingMovePanelGodMode = this.TryGetMonoBoolMember(module, "InGodMode", out bool g) && g;
+                if (this.TryGetPadBuildAuraSubState(module, out int sub))
+                {
+                    this.buildingMovePanelSubState = sub;
+                    active = sub == 2; // CraftState.Focus — an object is focused / being moved
+                }
             }
             this.buildingMovePanelActive = active;
 
@@ -349,6 +419,13 @@ namespace HeartopiaMod
             else
             {
                 this.buildingMovePanelHasPos = false;
+                // Focus ended → reset the X/Y/Z jogs so the next focused object starts fresh.
+                this.buildingFloorHeight = 0f;
+                this.buildingFloorHeightApplied = 0f;
+                this.buildingFreeZ = 0f;
+                this.buildingFreeZApplied = 0f;
+                this.buildingFreeX = 0f;
+                this.buildingFreeXApplied = 0f;
             }
         }
 
@@ -557,6 +634,101 @@ namespace HeartopiaMod
                 this.BuildingLog("local: set_localPosition exception: " + ex.Message);
                 return false;
             }
+        }
+
+        // Move the FOCUSED object by `localDelta` metres along the field-root LOCAL axes (the same frame
+        // the panel coordinates are shown in). In god mode the focus tick lerps the object toward
+        // GodControl._dstPosition and does NOT recompute it while idle, so we add to _dstPosition and it
+        // stays (Focus_Confirm saves it). _dstPosition is WORLD-space and the field root is yaw-rotated
+        // vs world, so we rotate localDelta into world first (else X/Z come out swapped / diagonal).
+        private unsafe bool TryNudgeFocused(Vector3 localDelta)
+        {
+            if (localDelta == Vector3.zero)
+            {
+                return false;
+            }
+            if (auraMonoObjectGetClass == null || auraMonoClassGetFieldFromName == null
+                || auraMonoFieldGetValue == null || auraMonoFieldSetValue == null)
+            {
+                this.BuildingLog("nudge: AuraMono not ready");
+                return false;
+            }
+            if (!this.TryGetPadBuildAuraModule(out IntPtr moduleObj) || moduleObj == IntPtr.Zero)
+            {
+                this.BuildingLog("nudge: BuildModule unavailable");
+                return false;
+            }
+            bool god = this.TryGetMonoBoolMember(moduleObj, "InGodMode", out bool inGod) && inGod;
+            if (!god)
+            {
+                this.BuildingLog("nudge: not god mode (focused-object move is god-mode only)");
+                return false;
+            }
+            if (!this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr godCtrl, "get_GodControl") || godCtrl == IntPtr.Zero)
+            {
+                this.BuildingLog("nudge: GodControl unavailable");
+                return false;
+            }
+
+            // Convert the local-frame delta to world via the field root's rotation.
+            Vector3 worldDelta = localDelta;
+            if (this.TryGetFocusedFieldRootRotation(out Quaternion rootRot))
+            {
+                worldDelta = rootRot * localDelta;
+            }
+
+            try
+            {
+                IntPtr cls = auraMonoObjectGetClass(godCtrl);
+                bool ok = this.TryNudgeMonoVector3Field(godCtrl, cls, "_dstPosition", worldDelta);
+                this.TryNudgeMonoVector3Field(godCtrl, cls, "_rotatePosition", worldDelta); // keep rotate pivot aligned
+                this.BuildingLog(ok ? ("nudge: local " + localDelta + " -> world " + worldDelta) : "nudge: _dstPosition field not found");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("nudge exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Field-root world rotation = focused entity's worldRot * inverse(localRot). Maps the field's
+        // local axes (panel-coordinate frame) to world, so a per-axis slider moves the right axis.
+        private bool TryGetFocusedFieldRootRotation(out Quaternion rootRot)
+        {
+            rootRot = Quaternion.identity;
+            if (!this.TryGetBuildingFocusedElementQuiet(out IntPtr element) || element == IntPtr.Zero)
+            {
+                return false;
+            }
+            IntPtr entity;
+            if ((!this.TryGetMonoObjectMember(element, "entity", out entity) || entity == IntPtr.Zero)
+                && (!this.TryInvokeAuraMonoZeroArg(element, out entity, "get_entity") || entity == IntPtr.Zero))
+            {
+                return false;
+            }
+            if (!this.TryReadBuildingQuaternionProp(entity, "rotation", out Quaternion worldRot)
+                || !this.TryReadBuildingQuaternionProp(entity, "localRotation", out Quaternion localRot))
+            {
+                return false;
+            }
+            rootRot = worldRot * Quaternion.Inverse(localRot);
+            return true;
+        }
+
+        // Read a Vector3 instance field, add the delta vector, write it back. Returns false if not found.
+        private unsafe bool TryNudgeMonoVector3Field(IntPtr obj, IntPtr cls, string fieldName, Vector3 delta)
+        {
+            IntPtr field = auraMonoClassGetFieldFromName(cls, fieldName);
+            if (field == IntPtr.Zero)
+            {
+                return false;
+            }
+            Vector3 v = default(Vector3);
+            auraMonoFieldGetValue(obj, field, (IntPtr)(&v));
+            v += delta;
+            auraMonoFieldSetValue(obj, field, (IntPtr)(&v));
+            return true;
         }
 
         // ToBuildingRotValue: (x<<20)|(z<<10)|y — integer degrees per axis, 10 bits each.

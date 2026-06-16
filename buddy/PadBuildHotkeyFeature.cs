@@ -118,6 +118,7 @@ namespace HeartopiaMod
                 {
                     this.PadBuildHotkeyLog("confirm skipped: " + confirmStatus);
                 }
+                this.ResetBuildingAxisSliders(); // confirm → zero the X/Y/Z jog sliders
             }
 
             if (this.TryGetModHotkeyDown(this.keyPadCancel))
