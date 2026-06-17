@@ -350,6 +350,18 @@ tools/Read-MinidumpStack.ps1     -DumpPath <dump.dmp>   # module-pointer scan of
 
 These rely on the dump having an **ExceptionStream**; WER full dumps frequently omit it (then use `dotnet-dump` as above).
 
+### Fixing a stale-pointer AuraMono crash (the most common one)
+
+If `clrstack` ends in `TryGetMonoObjectMember` / `TryGetMono*Member` / `auraMonoObjectGetClass` → `IL_STUB_PInvoke` inside a loop that holds raw mono object `IntPtr`s (backpack items, ECS component objects, orders, scan results) — surfaced as `System.ExecutionEngineException` (`0x80131506`) or a mono FAILFAST assert (`mono_class_get_flags: unexpected GC filler class`, `sgen-scan-object.h`) — it is the **moving-GC stale-pointer** bug. The game's mono GC is **SGen (moving)**; a raw `MonoObject*` is not a root it can see, so any mono-side allocation between obtaining the pointer and dereferencing it (member reads box values, `mono_runtime_invoke`, `mono_string_new`, the next enumeration step) can move/collect the object → the held `IntPtr` is stale → AV. Tell-tale: it works for the first N items, then crashes once allocation pressure triggers a GC.
+
+Fix it exactly like this:
+
+1. **Enumerate with pins.** Pass a `List<uint> pins` to `TryEnumerateAuraMonoCollectionItems(collectionObj, items, pins)` — it `AuraMonoPinNew`s each element at collection time (pin index aligns with `items` index).
+2. **Free in `finally`.** Wrap the whole processing loop in `try { … } finally { FreeAuraMonoPins(pins); }`.
+3. **If a pointer outlives the method** (stored in a snapshot/cache), transfer ownership: copy the pin into the stored entry, set `pins[i] = 0U` so the `finally` skips it, and release it when the snapshot is cleared. Reference: `ResolveDirectBackpackRuntimeItems` / `ClearDirectBackpackRuntimeItems` (HeartopiaComplete.AutoSell.cs); helpers `AuraMonoPinNew` / `AuraMonoPin` / `FreeAuraMonoPins` in HeartopiaComplete.AuraMonoEngine.cs.
+
+**Do NOT** "fix" it with `mono_gc_disable` / `auraMonoGcDisable` — those exports are **absent on this build, so the wrappers are silent no-ops** and give zero protection. Pinning is the only mechanism. (Also never write a raw `MonoObject*` into a managed mono ref-field — no write barrier on this build — and never hold one across a coroutine `yield`; CI lint W1.)
+
 ---
 
 ## 12. Anti-patterns (do not)
@@ -361,6 +373,7 @@ These rely on the dump having an **ExceptionStream**; WER full dumps frequently 
 | Cache or pin **transient** character states (`GamePhotoMode`, equip states, UI panels) across frames | Not singletons — the game tears them down on tool/state change; a pin keeps a detached object alive → AV on field read. Re-resolve from `Character._states` (or equivalent) each tick; pointer valid only in sync scope |
 | Call `auraMonoRuntimeInvokeRaw` or re-resolve `mono_runtime_invoke` | Bypasses `InvokeAuraMonoChecked` (null guard, exc check, garbage-result suppression); use `auraMonoRuntimeInvoke` or `TryAuraInvoke`. CI lint E1/E2 |
 | Carry an object `IntPtr` across `yield return` in a coroutine | GC can collect it between frames; scalarize to netIds/strings before the first yield, or pin via `AuraMonoPin` in try/finally. CI lint W1 |
+| Enumerate mono objects into a bare `List<IntPtr>` then read members in a loop | SGen moves the still-held items as each member read allocates → AV mid-loop (`ExecutionEngineException`). Pass a `pins` list to `TryEnumerateAuraMonoCollectionItems` + `FreeAuraMonoPins` in finally (§11). `mono_gc_disable` is a **no-op on this build** — pinning is the only fix |
 | Pass an out-param slot to `mono_runtime_invoke` for a value type wider than a pointer | mono writes the whole struct into the slot → stack corruption (crashed AutoSell scan); use `ContainsKey` + `get_Item` (boxed returns) |
 | Probe a dictionary with `get_Count` + `get_Item(0..n)` | Dictionary `get_Item` takes a KEY, not an index — exceptions per element / wrong items; use the enumerator path |
 | Invoke an inflated generic method without signature validation | Wrong `method_inst` AVs the process on invoke; check `AuraMonoMethodParamCountIs` first |

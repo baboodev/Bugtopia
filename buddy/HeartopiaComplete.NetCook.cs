@@ -9501,36 +9501,51 @@ namespace HeartopiaMod
                     return;
                 }
 
+                // Pin every enumerated item the moment it is obtained: the member reads below box
+                // values (mono-side allocations) that can trigger a moving SGen collection and relocate
+                // the not-yet-processed items in this list, turning their IntPtrs stale -> native AV in
+                // auraMonoObjectGetClass (observed: ExecutionEngineException 0x80131506 on the OnGUI
+                // thread during Mass Cook). mono_gc_disable is not exported on this build, so per-item
+                // pinning is the only protection. Freed in finally.
                 List<IntPtr> items = new List<IntPtr>(128);
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items))
+                List<uint> itemPins = new List<uint>(128);
+                bool enumerated = this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins);
+                try
                 {
-                    return;
+                    if (!enumerated)
+                    {
+                        return;
+                    }
+
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        IntPtr itemObj = items[i];
+                        if (itemObj == IntPtr.Zero
+                            || (this.TryGetDirectBackpackItemIsLocked(itemObj, out bool isLocked) && isLocked)
+                            || !this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId)
+                            || staticId <= 0)
+                        {
+                            continue;
+                        }
+
+                        if (!this.TryGetDirectBackpackItemCount(itemObj, out int count) || count <= 0)
+                        {
+                            count = 1;
+                        }
+
+                        if (totalsByStaticId.TryGetValue(staticId, out int existing))
+                        {
+                            totalsByStaticId[staticId] = existing + count;
+                        }
+                        else
+                        {
+                            totalsByStaticId[staticId] = count;
+                        }
+                    }
                 }
-
-                for (int i = 0; i < items.Count; i++)
+                finally
                 {
-                    IntPtr itemObj = items[i];
-                    if (itemObj == IntPtr.Zero
-                        || (this.TryGetDirectBackpackItemIsLocked(itemObj, out bool isLocked) && isLocked)
-                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId)
-                        || staticId <= 0)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryGetDirectBackpackItemCount(itemObj, out int count) || count <= 0)
-                    {
-                        count = 1;
-                    }
-
-                    if (totalsByStaticId.TryGetValue(staticId, out int existing))
-                    {
-                        totalsByStaticId[staticId] = existing + count;
-                    }
-                    else
-                    {
-                        totalsByStaticId[staticId] = count;
-                    }
+                    FreeAuraMonoPins(itemPins);
                 }
             }
             catch

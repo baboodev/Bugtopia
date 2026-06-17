@@ -503,6 +503,9 @@ namespace HeartopiaMod
 
         public void OnInitializeMelon()
         {
+            // Install the native crash-dump handler first so a fatal AV during any later init step
+            // is still captured (the game's own crash handler otherwise eats it before WER runs).
+            CrashDumpHandler.Install();
             this.ApplyMasterConsoleVisibility();
             HeartopiaComplete.Instance = this;
             HeartopiaComplete.harmonyInstance = new HarmonyLib.Harmony("com.heartopia.teleport");

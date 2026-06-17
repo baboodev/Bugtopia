@@ -216,5 +216,5 @@ Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001 } -Max
 ## Related
 
 - [BUILD_AND_RUN.md](./BUILD_AND_RUN.md) — deploy, `LogOutput.log` location
-- [AGENTS.md](../AGENTS.md) — AuraMono crash patterns and anti-patterns
+- [AGENTS.md](../AGENTS.md) — AuraMono crash patterns and anti-patterns. Once you have the `clrstack`, **§11 "Fixing a stale-pointer AuraMono crash"** gives the exact fix (pin enumerated items + `FreeAuraMonoPins`; `mono_gc_disable` is a no-op on this build).
 - `tools/Read-MinidumpException.ps1`, `tools/Read-MinidumpStack.ps1` — native dump helpers
