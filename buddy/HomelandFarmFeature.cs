@@ -248,6 +248,10 @@ namespace HeartopiaMod
         private bool homelandFarmAuraCropPlantPointFieldsResolved = false;
         private IntPtr homelandFarmAuraLevelObjectManagerGetLevelObjectMethod = IntPtr.Zero;
         private int homelandFarmAuraLevelObjectManagerGetLevelObjectArgCount = 0;
+        // Pins the most recent level object returned by TryHomelandFarmTryInvokeAuraGetLevelObject so
+        // callers can dereference it (rect matrix / world pose) without SGen moving it mid-read; freed
+        // and replaced on the next resolve.
+        private uint homelandFarmAuraGetLevelObjectResultPin = 0U;
         private IntPtr homelandFarmAuraEntitiesFieldSystemGetterMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraFieldComponentSystemGetFieldMethod = IntPtr.Zero;
         private bool homelandFarmAuraSowCraftContextResolved = false;
@@ -17050,37 +17054,55 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Pin every entry and its dereferenced Value sub-object: the owner/flags/netId reads below
+            // allocate (boxing), so SGen could move the still-held raw pointers mid-loop -> mono FAILFAST
+            // in FindAuraMonoFieldOnHierarchy. mono_gc_disable is a no-op on this build. This returns only
+            // scalars, so nothing escapes; all pins are freed in finally.
             List<IntPtr> entries = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries) || entries.Count <= 0)
+            List<uint> pins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries, pins) || entries.Count <= 0)
             {
+                FreeAuraMonoPins(pins);
                 return false;
             }
 
             int bestScore = -1;
             ulong bestNetId = 0UL;
             int bestSlot = -1;
-            for (int i = 0; i < entries.Count; i++)
+            try
             {
-                if (!this.TryHomelandFarmTryReadAuraDictionaryLevelObjectEntry(entries[i], out ulong dictionaryKey, out IntPtr levelObjectObj))
+                for (int i = 0; i < entries.Count; i++)
                 {
-                    continue;
-                }
+                    if (!this.TryHomelandFarmTryReadAuraDictionaryLevelObjectEntry(entries[i], out ulong dictionaryKey, out IntPtr levelObjectObj))
+                    {
+                        continue;
+                    }
 
-                if (!this.TryHomelandFarmTryReadAuraLevelObjectOwnerNetId(levelObjectObj, dictionaryKey, out uint ownerNetId)
-                    || ownerNetId != planterNetId)
-                {
-                    continue;
-                }
+                    if (levelObjectObj != entries[i] && levelObjectObj != IntPtr.Zero)
+                    {
+                        pins.Add(AuraMonoPinNew(levelObjectObj));
+                    }
 
-                bool flagsReadOk = this.TryHomelandFarmTryReadAuraLevelObjectPutZoneFlags(levelObjectObj, out int flags);
-                int score = HomelandFarmScoreSowPutZoneFlags(flags, flagsReadOk);
-                ulong candidateNetId = dictionaryKey;
-                if (candidateNetId == 0UL && this.TryGetAuraLevelObjectNetId(levelObjectObj, out ulong netIdFromObject))
-                {
-                    candidateNetId = netIdFromObject;
-                }
+                    if (!this.TryHomelandFarmTryReadAuraLevelObjectOwnerNetId(levelObjectObj, dictionaryKey, out uint ownerNetId)
+                        || ownerNetId != planterNetId)
+                    {
+                        continue;
+                    }
 
-                HomelandFarmTryUpdateBestSowPutZoneCandidate(candidateNetId, score, ref bestScore, ref bestNetId, ref bestSlot);
+                    bool flagsReadOk = this.TryHomelandFarmTryReadAuraLevelObjectPutZoneFlags(levelObjectObj, out int flags);
+                    int score = HomelandFarmScoreSowPutZoneFlags(flags, flagsReadOk);
+                    ulong candidateNetId = dictionaryKey;
+                    if (candidateNetId == 0UL && this.TryGetAuraLevelObjectNetId(levelObjectObj, out ulong netIdFromObject))
+                    {
+                        candidateNetId = netIdFromObject;
+                    }
+
+                    HomelandFarmTryUpdateBestSowPutZoneCandidate(candidateNetId, score, ref bestScore, ref bestNetId, ref bestSlot);
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
             }
 
             if (bestNetId == 0UL)
@@ -17306,27 +17328,41 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Pin every dictionary entry: reading entry.Key/.Value below allocates (boxing /
+            // FindAuraMonoFieldOnHierarchy), so a moving SGen collection could relocate the still-held
+            // entries mid-loop -> mono FAILFAST in FindAuraMonoFieldOnHierarchy (observed: auto-sow
+            // occupancy scan, 0xC0000409 in mono-2.0-sgen.dll). mono_gc_disable is a no-op here; the
+            // matched result pointer that escapes is re-pinned by the caller (InvokeAuraGetLevelObject).
             List<IntPtr> entries = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries) || entries.Count <= 0)
+            List<uint> pins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries, pins) || entries.Count <= 0)
             {
+                FreeAuraMonoPins(pins);
                 return false;
             }
 
-            for (int i = 0; i < entries.Count; i++)
+            try
             {
-                if (!this.TryHomelandFarmTryReadAuraDictionaryLevelObjectEntry(
-                        entries[i],
-                        out ulong dictionaryKey,
-                        out IntPtr candidateObj)
-                    || candidateObj == IntPtr.Zero
-                    || dictionaryKey != levelObjectNetId)
+                for (int i = 0; i < entries.Count; i++)
                 {
-                    continue;
-                }
+                    if (!this.TryHomelandFarmTryReadAuraDictionaryLevelObjectEntry(
+                            entries[i],
+                            out ulong dictionaryKey,
+                            out IntPtr candidateObj)
+                        || candidateObj == IntPtr.Zero
+                        || dictionaryKey != levelObjectNetId)
+                    {
+                        continue;
+                    }
 
-                levelObjectObj = candidateObj;
-                status = "Dictionary lookup ok netId=" + levelObjectNetId + ".";
-                return true;
+                    levelObjectObj = candidateObj;
+                    status = "Dictionary lookup ok netId=" + levelObjectNetId + ".";
+                    return true;
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
             }
 
             status = "Dictionary miss netId=" + levelObjectNetId + ".";
@@ -17343,9 +17379,17 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Release the previously-pinned result and re-pin whatever we return: callers dereference
+            // the returned level object (rect matrix / world pose) after this method returns, and SGen
+            // can move it mid-read on this build (mono_gc_disable is a no-op). The pin keeps it fixed
+            // until the next resolve, by which point the caller is done with it.
+            AuraMonoPinFree(this.homelandFarmAuraGetLevelObjectResultPin);
+            this.homelandFarmAuraGetLevelObjectResultPin = 0U;
+
             if (this.TryHomelandFarmTryLookupAuraLevelObjectByNetId(levelObjectNetId, out levelObjectObj, out status)
                 && levelObjectObj != IntPtr.Zero)
             {
+                this.homelandFarmAuraGetLevelObjectResultPin = AuraMonoPinNew(levelObjectObj);
                 return true;
             }
 
@@ -17386,6 +17430,7 @@ namespace HeartopiaMod
                 return false;
             }
 
+            this.homelandFarmAuraGetLevelObjectResultPin = AuraMonoPinNew(levelObjectObj);
             status = "GetLevelObject(uint,int) ok netId=" + levelObjectNetId + ".";
             return true;
         }
