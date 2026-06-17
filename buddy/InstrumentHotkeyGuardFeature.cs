@@ -344,12 +344,19 @@ namespace HeartopiaMod
             auraMonoGcDisable?.Invoke();
             try
             {
+                // Must allow the Managers._serviceDic fallback: on this build UIManager.get_Instance
+                // returns null via AuraMono, so the serviceDic enumeration is the ONLY path that
+                // actually resolves the UI manager (it's what made detection "confirmed working"
+                // originally). Disabling it here — as the "Crash fix" commit did — silently broke the
+                // guard whenever no other feature had already warmed cachedAuraMonoUiManagerObj. The
+                // heavy enumeration that the flag was meant to avoid now runs at most once per world
+                // (then the pinned cache serves every later resolve), and the guard's own TTL +
+                // miss-cooldown + GC guard already bound how often a cold lookup can fire.
                 if (!this.TryGetAuraMonoUiView(
                         "XDTGame.UI.Panel.InstrumentPanel",
                         "InstrumentPanel",
                         out IntPtr panelObj,
-                        out _,
-                        allowServiceDicFallback: false)
+                        out _)
                     || panelObj == IntPtr.Zero)
                 {
                     return false;
