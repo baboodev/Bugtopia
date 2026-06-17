@@ -242,16 +242,21 @@ namespace HeartopiaMod
                 // Fixed 0.5 m granularity — both the slider and the +/- buttons snap to multiples of 0.5.
                 const float planeStep = 0.5f;
                 GUI.Label(new Rect(left, y + 2f, 48f, 20f), this.L("Plane"), val);
-                this.buildingPlaneHeight = Mathf.Round(
-                    GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), this.buildingPlaneHeight, 0f, 24f) / planeStep) * planeStep;
+                float pClamped = Mathf.Round(Mathf.Clamp(this.buildingPlaneHeight, 0f, 24f) / planeStep) * planeStep;
+                float pSlider = Mathf.Round(
+                    GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), pClamped, 0f, 24f) / planeStep) * planeStep;
+                if (!Mathf.Approximately(pSlider, pClamped))
+                {
+                    this.buildingPlaneHeight = pSlider; // user dragged the slider (in-range)
+                }
                 GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), this.buildingPlaneHeight.ToString("0.0") + "m", val);
                 if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
                 {
-                    this.buildingPlaneHeight = Mathf.Clamp(this.buildingPlaneHeight - planeStep, 0f, 24f);
+                    this.buildingPlaneHeight -= planeStep; // unclamped — may go beyond the slider
                 }
                 if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
                 {
-                    this.buildingPlaneHeight = Mathf.Clamp(this.buildingPlaneHeight + planeStep, 0f, 24f);
+                    this.buildingPlaneHeight += planeStep;
                 }
                 if (!Mathf.Approximately(this.buildingPlaneHeight, this.buildingPlaneHeightApplied))
                 {
@@ -296,16 +301,23 @@ namespace HeartopiaMod
         {
             float step = Mathf.Clamp(this.buildingFreeGridCell, 0.01f, 0.25f);
             GUI.Label(new Rect(left, y + 2f, 48f, 20f), label, style);
-            value = Mathf.Round(
-                GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), value, lo, hi) * 100f) / 100f;
+            // Feed the slider a clamped value (handle pins at the edge) but only adopt its output when the
+            // user actually drags it — so the +/- buttons can push the value beyond [lo,hi] and it sticks.
+            float clamped = Mathf.Round(Mathf.Clamp(value, lo, hi) * 100f) / 100f;
+            float sliderOut = Mathf.Round(
+                GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, lo, hi) * 100f) / 100f;
+            if (!Mathf.Approximately(sliderOut, clamped))
+            {
+                value = sliderOut;
+            }
             GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), value.ToString("0.00") + "m", style);
             if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
             {
-                value = Mathf.Clamp(Mathf.Round((value - step) * 100f) / 100f, lo, hi);
+                value = Mathf.Round((value - step) * 100f) / 100f; // unclamped — may go beyond the slider
             }
             if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
             {
-                value = Mathf.Clamp(Mathf.Round((value + step) * 100f) / 100f, lo, hi);
+                value = Mathf.Round((value + step) * 100f) / 100f;
             }
             if (!Mathf.Approximately(value, applied))
             {
