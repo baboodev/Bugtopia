@@ -3655,45 +3655,67 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Pin every dictionary entry the moment it is enumerated, plus each entry's Value sub-object
+            // before reading members off it. The member reads below box values (mono-side allocations)
+            // that can trigger a moving SGen collection and relocate the still-held raw pointers mid-loop
+            // -> native AV in auraMonoObjectGetClass (observed: first Farm-tab warmup scan crashed at
+            // TryGetMonoObjectMember(entry,"Value") -> ExecutionEngineException / coreclr+0x1D1FDD).
+            // mono_gc_disable is a no-op on this build, so pinning is the only protection. Freed in finally.
             List<IntPtr> entries = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries) || entries.Count <= 0)
+            List<uint> pins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries, pins) || entries.Count <= 0)
             {
+                FreeAuraMonoPins(pins);
                 return false;
             }
 
             this.homelandFarmAuraLevelObjectPositionCache.Clear();
             this.homelandFarmAuraLevelObjectOwnerByNetId.Clear();
-            for (int i = 0; i < entries.Count; i++)
+            try
             {
-                try
+                for (int i = 0; i < entries.Count; i++)
                 {
-                    IntPtr entry = entries[i];
-                    if (entry == IntPtr.Zero)
+                    try
                     {
-                        continue;
-                    }
+                        IntPtr entry = entries[i];
+                        if (entry == IntPtr.Zero)
+                        {
+                            continue;
+                        }
 
-                    IntPtr levelObjectObj = IntPtr.Zero;
-                    if ((!this.TryGetMonoObjectMember(entry, "Value", out levelObjectObj) || levelObjectObj == IntPtr.Zero)
-                        && (!this.TryGetMonoObjectMember(entry, "value", out levelObjectObj) || levelObjectObj == IntPtr.Zero)
-                        && (!this.TryGetMonoObjectMember(entry, "_value", out levelObjectObj) || levelObjectObj == IntPtr.Zero))
+                        IntPtr levelObjectObj = IntPtr.Zero;
+                        if ((!this.TryGetMonoObjectMember(entry, "Value", out levelObjectObj) || levelObjectObj == IntPtr.Zero)
+                            && (!this.TryGetMonoObjectMember(entry, "value", out levelObjectObj) || levelObjectObj == IntPtr.Zero)
+                            && (!this.TryGetMonoObjectMember(entry, "_value", out levelObjectObj) || levelObjectObj == IntPtr.Zero))
+                        {
+                            levelObjectObj = entry;
+                        }
+
+                        // The Value sub-object is dereferenced across several member reads below; pin it
+                        // too (the entry pin does not cover a distinct child object).
+                        if (levelObjectObj != entry && levelObjectObj != IntPtr.Zero)
+                        {
+                            pins.Add(AuraMonoPinNew(levelObjectObj));
+                        }
+
+                        uint entityNetId = 0U;
+                        if (!this.TryHomelandFarmTryGetLevelObjectScanNetId(levelObjectObj, entry, out entityNetId) || entityNetId == 0U)
+                        {
+                            continue;
+                        }
+
+                        this.TryHomelandFarmRememberLevelObjectPosition(entityNetId, levelObjectObj);
+                        this.TryHomelandFarmRememberLevelObjectOwnerFromLevelObject(levelObjectObj, entityNetId);
+                    }
+                    catch (Exception ex)
                     {
-                        levelObjectObj = entry;
+                        this.HomelandFarmLog("LevelObject position cache entry failed: " + ex.Message);
                     }
-
-                    uint entityNetId = 0U;
-                    if (!this.TryHomelandFarmTryGetLevelObjectScanNetId(levelObjectObj, entry, out entityNetId) || entityNetId == 0U)
-                    {
-                        continue;
-                    }
-
-                    this.TryHomelandFarmRememberLevelObjectPosition(entityNetId, levelObjectObj);
-                    this.TryHomelandFarmRememberLevelObjectOwnerFromLevelObject(levelObjectObj, entityNetId);
                 }
-                catch (Exception ex)
-                {
-                    this.HomelandFarmLog("LevelObject position cache entry failed: " + ex.Message);
-                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
             }
 
             this.homelandFarmAuraLevelObjectPositionCacheAt = now;
