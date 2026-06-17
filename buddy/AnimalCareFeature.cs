@@ -77,6 +77,23 @@ namespace HeartopiaMod
             }
             y += 42f;
 
+            const string analogMoveLabel = "Analog Move (gamepad stick)";
+            bool prevAnalogMoveBridge = this.analogMoveBridgeEnabled;
+            float analogMoveToggleHeight = this.GetSwitchToggleHeight(360f, analogMoveLabel, 25f);
+            this.analogMoveBridgeEnabled = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, analogMoveToggleHeight), this.analogMoveBridgeEnabled, analogMoveLabel, 25f);
+            if (this.analogMoveBridgeEnabled != prevAnalogMoveBridge)
+            {
+                if (!this.analogMoveBridgeEnabled)
+                {
+                    this.ReleaseMovementBridgeIfInjecting();
+                }
+
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            y += analogMoveToggleHeight + 6f;
+            GUI.Label(new Rect(left, y, 460f, 20f), "Drives the character from the gamepad left stick (and WASD).");
+            y += 26f;
+
             return y + 20f;
         }
 

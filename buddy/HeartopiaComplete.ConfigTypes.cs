@@ -167,6 +167,7 @@ namespace HeartopiaMod
             public float cameraFOV;
             public bool hideJumpButtonEnabled;
             public bool bunnyHopEnabled;
+            public bool analogMoveBridgeEnabled;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             public bool autoIceSkatingOnlyX2Ultimate = true;

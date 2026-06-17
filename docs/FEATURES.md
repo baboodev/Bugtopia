@@ -62,6 +62,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Homeland Farm | Crop-box farming: auto farm, water/weed/harvest/sow/fertilize in radius, seed/fertilizer selection |
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |
 | Extras | Ice skating: network "Perfect Ice Skating" sequences (`IceSkatingSequenceFeature`) + real-time **Auto Ice Skating** bot (`AutoIceSkatingFeature`) |
+| Extra | Open Craft panel; **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`) |
 
 Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pets): **[BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md)**.
 
@@ -671,6 +672,34 @@ All controls and the hotkey are **persisted** in the keybind config (`KeybindCon
 **Debug logging.** `MasterLogAutoIceSkating` (top of `HeartopiaComplete.cs`, default `false`). When enabled, every trigger and every ultimate skip logs the full property dump of the action(s) — `id type dur score bonus new prefScore energy prefEnergy iconTip pair ult` — and selection logs list each candidate the same way, so you can see exactly how moves differ (duration, score, bonuses) and why an ultimate was skipped (`below-min` / `ok`).
 
 **Crash-hardening.** `GameSkateMode.ChallengeInfo` is a **struct** (`ChallengeData`) read raw into a stack buffer via `mono_field_get_value`. `mono_field_get_offset` is boxed-relative (includes the 16-byte object header), so the Aura path subtracts `2 * IntPtr.Size` for `UsedActions` / `Timestamp` / `Duration`; a missing subtraction read `Timestamp` as a fake pointer and hard-crashed mono at challenge start. Pointers read from the raw buffer are also alignment/`>= 0x10000` checked before any `mono_object_get_class` (native AVs are uncatchable). See `memory/auramono-struct-field-offsets.md`.
+
+---
+
+## New Features — Extra (Analog Move)
+
+**Tab:** New Features → Extra. **Source:** `MovementInputFeature.cs`.
+
+### Analog Move (gamepad stick)
+
+Drives the local character from an analog axis "as if from the joystick", without teleport/noclip.
+Heartopia is mobile-first: movement runs through the new **Input System** `Move` action
+(`InputEvent.Move == 0`), **not** legacy `Input.GetAxis`. A connected gamepad's stick is **not bound**
+in the action map, so the native stick does nothing — and legacy `Input.GetAxis("Horizontal"/"Vertical")`
+returns 0 under "Input System (New)". This bridge fixes that.
+
+- **Source:** Xbox left stick read directly via **Win32 XInput** (`XInputGetState`, `xinput1_4.dll` →
+  `xinput9_1_0.dll` fallback; left-thumb radial deadzone 7849/32767, normalized 0..1). WASD/arrows also
+  drive it. Raw joystick space (x = right, y = forward) — the game applies the camera-relative transform.
+- **Injection:** the resolved axis is fed into `LocalPlayerComponent.OnLeftJoystickPerformed(Vector2)`
+  (deterministic — the player's own tick consumes its `_joystickQueue` → `SetMoveJoystick` → real
+  velocity + server sync). Fallback: `MonoInputManager.SendMoveValueToControl(Vector2)`.
+- **Merge / safety:** yields to the on-screen touch joystick; respects the mod's menu movement block
+  (`ShouldBlockGameplayInput` / the game's `IsInputDisabled(Move)`); per-frame tick guarded by a
+  `FeatureBreakerState`. Movement uses the genuine move component at legitimate speed, so it passes the
+  server `MovementAntiCheating` checks and leaves no `InputCheatManager` touch trace.
+
+Pipeline details: **[TECHNICAL.md § Analog movement bridge](./TECHNICAL.md)**; resolver facts in
+`memory/analog-move-injection.md`.
 
 ---
 

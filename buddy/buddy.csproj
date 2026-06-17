@@ -193,6 +193,7 @@
     <Compile Include="BepInExPlugin.cs" />
     <Compile Include="BirdNetFarm.cs" />
     <Compile Include="CrashDumpHandler.cs" />
+    <Compile Include="MovementInputFeature.cs" />
     <Compile Include="CharacterRotationPatch.cs" />
     <Compile Include="MonoAssemblyDump.cs" />
     <Compile Include="HeartopiaComplete.cs" />

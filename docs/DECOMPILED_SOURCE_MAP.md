@@ -845,6 +845,17 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Access:** **A**
 - **Dump:** player components under `Gameplay/Component/Player/`
 
+#### `MovementInputFeature` (Analog Move bridge)
+- **Game types:** `MonoInputManager.SendMoveValueToControl(Vector2)` (`XDTGameSystem`),
+  `LocalPlayerComponent.OnLeftJoystickPerformed(Vector2)` / `OnLeftJoystickCanceled()`,
+  `PlayerMoveComponent.SetMoveJoystick` / `_joystick`, `CameraComponent.ToCameraSpaceJoystick`,
+  `InputEvent.Move == 0` (`ScriptsRefactory.BaseService.Input`)
+- **Access:** **A** (AuraMono inject) + **W** (Win32 **XInput** `XInputGetState` for the gamepad stick —
+  the stick is unbound in the new Input System, legacy `Input.GetAxis` returns 0)
+- **Dump:** `Gameplay/Component/Player/{LocalPlayerComponent,PlayerMoveComponent,CameraComponent}.cs`,
+  `XDTGameSystem/MonoInputManager.cs`, `XDTGameUI/.../JoyStickBase.cs`
+- **Notes:** raw joystick-space axis (game applies camera yaw); see **[TECHNICAL.md § Analog movement bridge](./TECHNICAL.md)**, `memory/analog-move-injection.md`
+
 #### `LodSettingsFeature` / `HideJumpButtonFeature`
 - **Access:** **R** / **H** on Unity or UI types (minimal game namespace)
 
@@ -938,6 +949,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 | NPC teleport | TableData.TableNpcs | HC | A + R + N |
 | Noclip / TP | Unity CharacterController, Transform | *Patch.cs | I + H |
 | Bunny hop | Player move/state components | BunnyHopFeature.cs | A |
+| Analog move (gamepad) | MonoInputManager.SendMoveValueToControl, LocalPlayerComponent.OnLeftJoystickPerformed, PlayerMoveComponent.SetMoveJoystick, CameraComponent.ToCameraSpaceJoystick | MovementInputFeature.cs | A + W (XInput) |
 | Auto repair / eat | ToolSystem, BackPackSystem, EcsService | HC | R + A |
 | Warehouse bypass | BagPanel UI hierarchy | WarehouseBypassFeature.cs | W + A |
 

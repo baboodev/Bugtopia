@@ -480,6 +480,8 @@ namespace HeartopiaMod
                     this.cachedJumpButtonGo = null;
                     this.bunnyHopEnabled = false;
                     this.ResetBunnyHopState();
+                    this.analogMoveBridgeEnabled = false;
+                    this.ReleaseMovementBridgeIfInjecting();
                     this.birdVacuumEnabled = false;
                     this.antiAfkEnabled = false;
                     this.antiAfkMouseDownClearAt = 0f;

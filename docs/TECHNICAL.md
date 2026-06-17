@@ -198,6 +198,39 @@ public static int cameraOverrideFramesRemaining;
 
 Noclip uses the same override path with continuous position updates from WASD logic in `OnUpdate`.
 
+### Analog movement bridge (`MovementInputFeature.cs`)
+
+Unlike teleport/noclip (which override the transform), this injects an **analog move axis** so the
+character walks "as from the joystick", through the genuine move component. Pipeline (decompiled):
+
+```
+gamepad stick / WASD  →  raw joystick-space Vector2 (x=right, y=forward, |v| 0..1)
+  →  LocalPlayerComponent.OnLeftJoystickPerformed(axis)        [primary, deterministic]
+       or MonoInputManager.SendMoveValueToControl(axis)        [fallback, InputSystem virtual control]
+  →  _joystickQueue → _TickProcessJoystick:
+        moveDir = cameraComponent.ToCameraSpaceJoystick(axis)   ← camera yaw applied by the GAME
+  →  PlayerMoveComponent.SetMoveJoystick(joystick, moveDir)
+  →  SendSignal(StandMoveInput)                                 ← real velocity + server sync
+```
+
+Key points:
+
+- **Raw axis only** — the mod must NOT pre-rotate; `ToCameraSpaceJoystick` (yaw-only) does the
+  camera-relative transform downstream. (Contrast noclip, which builds its own world vector.)
+- **Gamepad gotcha:** movement is driven by the new **Input System** action map (`InputEvent.Move == 0`),
+  where the controller stick is unbound, so native stick movement does nothing, and legacy
+  `Input.GetAxis("Horizontal"/"Vertical")` returns 0 under "Input System (New)". The stick is therefore
+  read directly via **Win32 XInput** (`XInputGetState`, `xinput1_4.dll` → `xinput9_1_0.dll`, radial
+  deadzone 7849/32767). The gamepad is **not** treated as "physical input to yield to" (only the
+  on-screen touch joystick is) — otherwise the bridge would refuse to inject the very stick it reads.
+- **AuraMono resolution:** `MonoInputManager` via `TryGetAuraMonoManagerFromServiceDic("MonoInputManager")`;
+  player via `TryGetAuraMonoLocalPlayerObject`. Methods cached as class-`IntPtr`, manager object via
+  `AuraMonoObjectCache`; `Vector2` args passed by pointer through `auraMonoRuntimeInvoke`.
+- **Gating:** respects `ShouldBlockGameplayInput()` / `menuMoveInputDisabled` (the same `IsInputDisabled(Move)`
+  state `UpdateMenuMovementInputBlock` toggles); per-frame tick wrapped in a `FeatureBreakerState`.
+- **Anti-cheat:** legitimate speed via the real move component (passes server `MovementAntiCheating`); the
+  inject path leaves no `InputCheatManager` touch trace. See `memory/analog-move-injection.md`.
+
 ### Win32 input
 
 For bag automation and some interactions, the mod uses:
