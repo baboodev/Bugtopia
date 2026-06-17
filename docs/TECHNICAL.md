@@ -226,6 +226,11 @@ Key points:
 - **AuraMono resolution:** `MonoInputManager` via `TryGetAuraMonoManagerFromServiceDic("MonoInputManager")`;
   player via `TryGetAuraMonoLocalPlayerObject`. Methods cached as class-`IntPtr`, manager object via
   `AuraMonoObjectCache`; `Vector2` args passed by pointer through `auraMonoRuntimeInvoke`.
+- **Vehicles:** while driving, movement runs through the **vehicle controller**, not the player move
+  component — so the axis is routed to `SelfVehicleController.OnLeftJoystickPerformed` (sets
+  `_inputData.moveAxis`) instead. The driven controller is resolved via NoclipFeature's
+  `TryGetSelfEntityVehicleComponentMono` → `controller`; method IntPtrs are re-resolved if the controller
+  class changes. On foot this returns false and the player path is used.
 - **Gating:** respects `ShouldBlockGameplayInput()` / `menuMoveInputDisabled` (the same `IsInputDisabled(Move)`
   state `UpdateMenuMovementInputBlock` toggles); per-frame tick wrapped in a `FeatureBreakerState`.
 - **Anti-cheat:** legitimate speed via the real move component (passes server `MovementAntiCheating`); the

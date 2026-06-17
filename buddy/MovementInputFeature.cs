@@ -44,6 +44,9 @@ namespace HeartopiaMod
         private IntPtr movementSendMoveValueMethod;
         private IntPtr movementOnLeftJoyMethod;
         private IntPtr movementOnLeftJoyCancelMethod;
+        private IntPtr movementVehicleControllerClass;
+        private IntPtr movementVehicleOnLeftJoyMethod;
+        private IntPtr movementVehicleOnLeftJoyCancelMethod;
         private bool movementWasInjecting;
         private bool movementBridgeInjectLogged;
         private FeatureBreakerState movementBridgeBreaker;
@@ -183,6 +186,13 @@ namespace HeartopiaMod
                 axis /= magnitude;
             }
 
+            // While driving, movement goes through the vehicle controller, not the player move
+            // component — route the axis to SelfVehicleController.OnLeftJoystickPerformed instead.
+            if (this.TryInjectVehicleMoveAxis(axis, release: false))
+            {
+                return true;
+            }
+
             // Deterministic path first: enqueue straight into LocalPlayerComponent's joystick queue,
             // which its own tick consumes every frame → SetMoveJoystick → real movement + sync.
             if (this.movementOnLeftJoyMethod != IntPtr.Zero
@@ -214,6 +224,8 @@ namespace HeartopiaMod
 
             bool any = false;
 
+            any |= this.TryInjectVehicleMoveAxis(Vector2.zero, release: true);
+
             if (this.movementSendMoveValueMethod != IntPtr.Zero
                 && this.cachedMovementInputManagerObj.TryGet(out IntPtr managerObj)
                 && managerObj != IntPtr.Zero)
@@ -229,6 +241,61 @@ namespace HeartopiaMod
             }
 
             return any;
+        }
+
+        // Route the axis to the driven vehicle's controller (SelfVehicleController implements
+        // ILeftJoystick; OnLeftJoystickPerformed sets _inputData.moveAxis, which its update consumes).
+        // Returns false when the player is not the driver, so callers fall back to the player path.
+        private bool TryInjectVehicleMoveAxis(Vector2 axis, bool release)
+        {
+            if (!this.TryGetDrivingVehicleControllerObject(out IntPtr controllerObj) || controllerObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr controllerClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(controllerObj) : IntPtr.Zero;
+            if (controllerClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // Method IntPtrs are tied to the controller's MonoClass — re-resolve if it ever changes
+            // (e.g. a different vehicle type) so we never invoke a method against the wrong class.
+            if (controllerClass != this.movementVehicleControllerClass)
+            {
+                this.movementVehicleControllerClass = controllerClass;
+                this.movementVehicleOnLeftJoyMethod = this.FindAuraMonoMethodOnHierarchy(controllerClass, "OnLeftJoystickPerformed", 1);
+                this.movementVehicleOnLeftJoyCancelMethod = this.FindAuraMonoMethodOnHierarchy(controllerClass, "OnLeftJoystickCanceled", 0);
+            }
+
+            if (release)
+            {
+                if (this.movementVehicleOnLeftJoyCancelMethod != IntPtr.Zero)
+                {
+                    return this.TryInvokeMovementZeroArg(this.movementVehicleOnLeftJoyCancelMethod, controllerObj);
+                }
+
+                return this.movementVehicleOnLeftJoyMethod != IntPtr.Zero
+                    && this.TryInvokeMovementVector2(this.movementVehicleOnLeftJoyMethod, controllerObj, Vector2.zero);
+            }
+
+            return this.movementVehicleOnLeftJoyMethod != IntPtr.Zero
+                && this.TryInvokeMovementVector2(this.movementVehicleOnLeftJoyMethod, controllerObj, axis);
+        }
+
+        // The controller of the vehicle the local player is currently DRIVING (not riding as a
+        // passenger). Reuses NoclipFeature's Aura-Mono vehicle resolution.
+        private bool TryGetDrivingVehicleControllerObject(out IntPtr controllerObj)
+        {
+            controllerObj = IntPtr.Zero;
+
+            IntPtr vehicleComponentObj = this.TryGetSelfEntityVehicleComponentMono();
+            if (vehicleComponentObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return this.TryGetMonoObjectMember(vehicleComponentObj, "controller", out controllerObj) && controllerObj != IntPtr.Zero;
         }
 
         // Mod's own input source → raw joystick-space analog axis (NOT camera-transformed; the
