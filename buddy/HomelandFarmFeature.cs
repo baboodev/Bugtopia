@@ -23,6 +23,10 @@ namespace HeartopiaMod
             "plantNetId", "PlantNetId"
         };
         private const float HomelandFarmCropBoxWorldMatchRadius = 0.35f;
+        // Slightly wider gate for the injective occupancy backup pass: catches an on-box crop whose
+        // position jittered just past the tight match radius, while still well under the 1m crop-box
+        // grid spacing so a mature ground plant near the grid cannot claim a box it does not occupy.
+        private const float HomelandFarmCropBoxOccupancyMatchRadius = 0.6f;
         // Cast batch = cells per watering action. Read from TableData.TableModes[mode].num where
         // mode = HobbyProtocolManager.TryGetHobbySkillParam(HobbySkillEnum.Water)[0].
         // Skill levels: 1 (default), 3, 6, 9. Match to player's current skill.
@@ -18321,6 +18325,16 @@ namespace HeartopiaMod
                 || this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out _, out _, "PlantItemData");
         }
 
+        // One crop's claim on a box during injective occupancy assignment.
+        private struct HomelandFarmCropOccupancyCandidate
+        {
+            public uint ExactBoxNetId;
+            public int Tier;
+            public Vector3 CropPos;
+            public bool HasPos;
+            public bool Resolved;
+        }
+
         // Crop plants are separate entities from crop boxes; link fields on CropBoxItemData are often
         // empty even when a crop is growing. Match CropItemData / PlantItemData entities to boxes by
         // sow field cell, planter anchors, or world proximity.
@@ -18365,7 +18379,15 @@ namespace HeartopiaMod
                 }
             }
 
-            float worldMatchRadiusSq = HomelandFarmCropBoxWorldMatchRadius * HomelandFarmCropBoxWorldMatchRadius;
+            // Collect every crop that occupies a box (demand), each with its best EXACT (cell-key)
+            // box and world position. Assignment below is injective: every crop claims a DISTINCT
+            // box, so the occupied count can never fall below the crop count. Previously two crops
+            // could collapse onto one box (HashSet) or one freshly-sown crop landing just outside
+            // the 0.35m / 3D-cell tolerance matched nothing -> its box stayed flagged empty -> sow
+            // targeted a planted box and the server rejected the whole command (MaxPlantCountLimit).
+            // The direct CropBoxItemData-link signal is already applied by the pre-pass in
+            // TryHomelandFarmBuildOccupiedCropBoxNetIds, so it is intentionally not repeated here.
+            List<HomelandFarmCropOccupancyCandidate> demand = new List<HomelandFarmCropOccupancyCandidate>();
             foreach (uint cropNetId in scanNetIds)
             {
                 if (cropNetId == 0U || cropBoxNetIds.Contains(cropNetId))
@@ -18384,71 +18406,168 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (this.TryHomelandFarmTryFindCropBoxNetIdForCrop(cropNetId, out uint linkedBoxNetId)
-                    && linkedBoxNetId != 0U
-                    && cropBoxNetIds.Contains(linkedBoxNetId))
-                {
-                    occupiedOut.Add(linkedBoxNetId);
-                    continue;
-                }
-
+                uint exactBox = 0U;
+                int tier = int.MaxValue;
                 if (this.TryHomelandFarmResolveEntityFieldLocalPosition(cropNetId, out Vector3 cropFieldLocal))
                 {
                     string cropCellKey = HomelandFarmFieldCellKey(cropFieldLocal);
                     if (boxBySowFieldCell.TryGetValue(cropCellKey, out uint sowMatchedBoxNetId) && sowMatchedBoxNetId != 0U)
                     {
-                        occupiedOut.Add(sowMatchedBoxNetId);
-                        continue;
+                        exactBox = sowMatchedBoxNetId;
+                        tier = 1;
                     }
-
-                    if (boxByFieldCell.TryGetValue(cropCellKey, out uint matchedBoxNetId) && matchedBoxNetId != 0U)
+                    else if (boxByFieldCell.TryGetValue(cropCellKey, out uint matchedBoxNetId) && matchedBoxNetId != 0U)
                     {
-                        occupiedOut.Add(matchedBoxNetId);
-                        continue;
+                        exactBox = matchedBoxNetId;
+                        tier = 2;
                     }
                 }
 
-                if (!this.TryHomelandFarmResolveFarmEntityPosition(cropNetId, out Vector3 cropPos) || cropPos == Vector3.zero)
-                {
-                    continue;
-                }
+                bool hasPos = this.TryHomelandFarmResolveFarmEntityPosition(cropNetId, out Vector3 cropPos)
+                    && cropPos != Vector3.zero;
 
-                bool matched = false;
-                foreach (KeyValuePair<uint, Vector3> boxEntry in boxAnchorWorldPos)
+                demand.Add(new HomelandFarmCropOccupancyCandidate
                 {
-                    Vector3 delta = boxEntry.Value - cropPos;
-                    delta.y = 0f;
-                    if (delta.sqrMagnitude <= worldMatchRadiusSq)
-                    {
-                        occupiedOut.Add(boxEntry.Key);
-                        matched = true;
-                        break;
-                    }
-                }
+                    ExactBoxNetId = exactBox,
+                    Tier = tier,
+                    CropPos = cropPos,
+                    HasPos = hasPos,
+                    Resolved = false,
+                });
+            }
 
-                if (matched)
+            // Pass 1: claim exact (cell-key) matches first, in confidence order. A cell maps to a
+            // single box, so a crop with an exact box is accounted for even if that box was already
+            // marked occupied by the link pre-pass (same logical box, no double counting).
+            int exactCount = 0;
+            demand.Sort((a, b) => a.Tier.CompareTo(b.Tier));
+            for (int i = 0; i < demand.Count; i++)
+            {
+                HomelandFarmCropOccupancyCandidate c = demand[i];
+                if (c.ExactBoxNetId != 0U)
                 {
-                    continue;
-                }
-
-                foreach (KeyValuePair<uint, Vector3> boxEntry in boxWorldPos)
-                {
-                    Vector3 delta = boxEntry.Value - cropPos;
-                    delta.y = 0f;
-                    if (delta.sqrMagnitude <= worldMatchRadiusSq)
-                    {
-                        occupiedOut.Add(boxEntry.Key);
-                        break;
-                    }
+                    occupiedOut.Add(c.ExactBoxNetId);
+                    c.Resolved = true;
+                    demand[i] = c;
+                    exactCount++;
                 }
             }
+
+            // Pass 2: each still-unresolved candidate claims the nearest UNCLAIMED box, but ONLY when
+            // it sits within HomelandFarmCropBoxOccupancyMatchRadius of one (injective backup for a
+            // crop whose cell-key was off). The radius gate is essential: the scan demand also carries
+            // mature ground plants (flowers/trees) that are NOT in crop boxes; without it pass 2 would
+            // hand them the remaining empty boxes and report the field full. Binding the tightest fits
+            // first keeps each claim the closest free box. No unbounded last-resort: an entity far from
+            // every box is not on a box.
+            demand.Sort((a, b) =>
+                HomelandFarmNearestBoxDistanceSq(a, boxAnchorWorldPos, boxWorldPos)
+                    .CompareTo(HomelandFarmNearestBoxDistanceSq(b, boxAnchorWorldPos, boxWorldPos)));
+            int fuzzyCount = 0;
+            for (int i = 0; i < demand.Count; i++)
+            {
+                HomelandFarmCropOccupancyCandidate c = demand[i];
+                if (c.Resolved)
+                {
+                    continue;
+                }
+
+                uint nearestBox = 0U;
+                if (c.HasPos)
+                {
+                    float bestSq = HomelandFarmCropBoxOccupancyMatchRadius * HomelandFarmCropBoxOccupancyMatchRadius;
+                    foreach (KeyValuePair<uint, Vector3> boxEntry in boxAnchorWorldPos)
+                    {
+                        if (occupiedOut.Contains(boxEntry.Key))
+                        {
+                            continue;
+                        }
+
+                        Vector3 delta = boxEntry.Value - c.CropPos;
+                        delta.y = 0f;
+                        float sq = delta.sqrMagnitude;
+                        if (sq < bestSq)
+                        {
+                            bestSq = sq;
+                            nearestBox = boxEntry.Key;
+                        }
+                    }
+
+                    foreach (KeyValuePair<uint, Vector3> boxEntry in boxWorldPos)
+                    {
+                        if (occupiedOut.Contains(boxEntry.Key))
+                        {
+                            continue;
+                        }
+
+                        Vector3 delta = boxEntry.Value - c.CropPos;
+                        delta.y = 0f;
+                        float sq = delta.sqrMagnitude;
+                        if (sq < bestSq)
+                        {
+                            bestSq = sq;
+                            nearestBox = boxEntry.Key;
+                        }
+                    }
+                }
+
+                if (nearestBox != 0U)
+                {
+                    occupiedOut.Add(nearestBox);
+                    fuzzyCount++;
+                }
+            }
+
+            this.HomelandFarmLog("Occupancy assign: crops=" + demand.Count + " exact=" + exactCount
+                + " fuzzy=" + fuzzyCount + " occupied=" + occupiedOut.Count + "/" + cropBoxNetIds.Count + ".");
+        }
+
+        // Smallest planar distance from a crop candidate to any crop box (claimed or not); used only
+        // to order the injective pass so the tightest-fitting crops bind their box first.
+        private static float HomelandFarmNearestBoxDistanceSq(
+            HomelandFarmCropOccupancyCandidate candidate,
+            Dictionary<uint, Vector3> boxAnchorWorldPos,
+            Dictionary<uint, Vector3> boxWorldPos)
+        {
+            if (candidate.Resolved || !candidate.HasPos)
+            {
+                return float.MaxValue;
+            }
+
+            float bestSq = float.MaxValue;
+            foreach (Vector3 boxPos in boxAnchorWorldPos.Values)
+            {
+                Vector3 delta = boxPos - candidate.CropPos;
+                delta.y = 0f;
+                float sq = delta.sqrMagnitude;
+                if (sq < bestSq)
+                {
+                    bestSq = sq;
+                }
+            }
+
+            foreach (Vector3 boxPos in boxWorldPos.Values)
+            {
+                Vector3 delta = boxPos - candidate.CropPos;
+                delta.y = 0f;
+                float sq = delta.sqrMagnitude;
+                if (sq < bestSq)
+                {
+                    bestSq = sq;
+                }
+            }
+
+            return bestSq;
         }
 
         private static string HomelandFarmFieldCellKey(Vector3 fieldLocalPos)
         {
+            // XZ-only: crop boxes sit on a constant field-local y plane, but freshly-sown crop
+            // entities report y inconsistently (0.0 / 0.06 / 0.12). Including y made such a crop
+            // miss its box's cell and fall through to the tight world-proximity match, leaving the
+            // box wrongly flagged empty -> sow targeted a planted box -> server rejected the batch.
             Vector3 cell = HomelandFarmReduceCraftPrecision(fieldLocalPos);
             return cell.x.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "|"
-                + cell.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + "|"
                 + cell.z.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
         }
 
