@@ -70,7 +70,7 @@ namespace HeartopiaMod
         // cheaper to harvest+re-sow them together on the next wake.
         private const long HomelandFarmAutoPostHarvestResowThresholdSeconds = 5L;
         private const int HomelandFarmMaxTotalWaterLevel = 5;
-        // Max guest GUID entries in waterGuids/friends; at capacity the server rejects visitor water.
+        // Max GUID entries in waterGuids/friends; server rejects visitor water at capacity.
         private const int HomelandFarmMaxVisitorWaterSlots = 5;
         private const int HomelandFarmDefaultPlantWaterMode = 0;
         private const int HomelandFarmMaxSpatialLevelObjectEntries = 1024;
@@ -12071,91 +12071,149 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryHomelandFarmTryResolveVisitorWaterState(
-            object componentData,
-            uint ownerId,
-            uint playerNetId,
-            bool isCropBox,
-            out bool selfWatered,
-            out bool selfWateredReadOk,
-            out bool canAddVisitorWater)
+        private bool TryHomelandFarmPlayerIsFieldOwner(uint ownerId)
         {
-            return this.TryHomelandFarmTryResolveVisitorWaterState(
-                componentData,
-                ownerId,
-                playerNetId,
-                isCropBox,
-                Guid.Empty,
-                false,
-                out selfWatered,
-                out selfWateredReadOk,
-                out canAddVisitorWater);
-        }
-
-        private bool TryHomelandFarmTryResolveVisitorWaterState(
-            object componentData,
-            uint ownerId,
-            uint playerNetId,
-            bool isCropBox,
-            Guid cachedSelfGuid,
-            bool cachedSelfGuidReadOk,
-            out bool selfWatered,
-            out bool selfWateredReadOk,
-            out bool canAddVisitorWater)
-        {
-            selfWatered = false;
-            selfWateredReadOk = false;
-            canAddVisitorWater = false;
-            bool visiting = playerNetId != 0U && (ownerId == 0U || ownerId != playerNetId);
-            if (!visiting)
+            this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
+            if (playerNetId == 0U)
             {
                 return false;
             }
+
+            if (ownerId != 0U && ownerId == playerNetId)
+            {
+                return true;
+            }
+
+            return this.TryHomelandFarmIsOnOwnFarmField(playerNetId);
+        }
+
+        private bool TryHomelandFarmTryResolvePlayerWaterEligibility(
+            object componentData,
+            bool isCropBox,
+            int totalWaterLevel,
+            bool totalWaterLevelReadOk,
+            int friendWaterCount,
+            bool friendWaterCountReadOk,
+            bool ownerWatered,
+            bool ownerWateredReadOk,
+            uint ownerId,
+            out bool selfInWaterList,
+            out bool selfHasWatered,
+            out bool selfGuidReadOk,
+            out bool canWater)
+        {
+            return this.TryHomelandFarmTryResolvePlayerWaterEligibility(
+                componentData,
+                isCropBox,
+                totalWaterLevel,
+                totalWaterLevelReadOk,
+                friendWaterCount,
+                friendWaterCountReadOk,
+                ownerWatered,
+                ownerWateredReadOk,
+                ownerId,
+                Guid.Empty,
+                false,
+                out selfInWaterList,
+                out selfHasWatered,
+                out selfGuidReadOk,
+                out canWater);
+        }
+
+        private bool TryHomelandFarmTryResolvePlayerWaterEligibility(
+            object componentData,
+            bool isCropBox,
+            int totalWaterLevel,
+            bool totalWaterLevelReadOk,
+            int friendWaterCount,
+            bool friendWaterCountReadOk,
+            bool ownerWatered,
+            bool ownerWateredReadOk,
+            uint ownerId,
+            Guid cachedSelfGuid,
+            bool cachedSelfGuidReadOk,
+            out bool selfInWaterList,
+            out bool selfHasWatered,
+            out bool selfGuidReadOk,
+            out bool canWater)
+        {
+            selfInWaterList = false;
+            selfHasWatered = false;
+            selfGuidReadOk = false;
+            canWater = false;
 
             string[] listMembers = isCropBox
                 ? new[] { "waterGuids", "WaterGuids", "_waterGuids" }
                 : new[] { "friends", "Friends", "_friends" };
 
             Guid selfGuid = cachedSelfGuid;
-            selfWateredReadOk = cachedSelfGuidReadOk;
-            if (!selfWateredReadOk)
+            selfGuidReadOk = cachedSelfGuidReadOk;
+            if (!selfGuidReadOk)
             {
-                selfWateredReadOk = this.TryHomelandFarmTryReadSelfPlayerGuid(out selfGuid, out bool readOk) && readOk && selfGuid != Guid.Empty;
+                selfGuidReadOk = this.TryHomelandFarmTryReadSelfPlayerGuid(out selfGuid, out bool readOk) && readOk && selfGuid != Guid.Empty;
             }
 
-            if (selfWateredReadOk)
+            if (!selfGuidReadOk)
             {
-                selfWatered = this.TryHomelandFarmComponentListContainsGuid(componentData, selfGuid, listMembers);
-                int friendWaterCount = 0;
-                bool friendWaterCountReadOk = false;
-                if (isCropBox)
-                {
-                    this.TryHomelandFarmTryReadComponentListCount(
-                        componentData,
-                        out friendWaterCount,
-                        out friendWaterCountReadOk,
-                        "waterGuids",
-                        "WaterGuids",
-                        "_waterGuids");
-                }
-                else
-                {
-                    this.TryHomelandFarmTryReadComponentListCount(
-                        componentData,
-                        out friendWaterCount,
-                        out friendWaterCountReadOk,
-                        "friends",
-                        "Friends",
-                        "_friends");
-                }
+                return false;
+            }
 
+            selfInWaterList = this.TryHomelandFarmComponentListContainsGuid(componentData, selfGuid, listMembers);
+            bool playerIsFieldOwner = this.TryHomelandFarmPlayerIsFieldOwner(ownerId);
+            if (playerIsFieldOwner)
+            {
+                selfHasWatered = selfInWaterList
+                    || (ownerWateredReadOk && ownerWatered);
+                bool belowMaxLevel = !totalWaterLevelReadOk || totalWaterLevel < HomelandFarmMaxTotalWaterLevel;
+                canWater = !selfHasWatered && belowMaxLevel;
+            }
+            else
+            {
+                selfHasWatered = selfInWaterList;
                 bool hasVisitorSlot = !friendWaterCountReadOk
                     || friendWaterCount < HomelandFarmMaxVisitorWaterSlots;
-                canAddVisitorWater = !selfWatered && hasVisitorSlot;
-                return true;
+                canWater = !selfInWaterList && hasVisitorSlot;
             }
 
             return true;
+        }
+
+        private bool TryHomelandFarmTryResolveNeedsWaterFromEligibility(
+            object componentData,
+            bool isCropBox,
+            int totalWaterLevel,
+            bool totalWaterLevelReadOk,
+            int friendWaterCount,
+            bool friendWaterCountReadOk,
+            bool ownerWatered,
+            bool ownerWateredReadOk,
+            uint ownerId,
+            out bool needsWater)
+        {
+            needsWater = true;
+            if (this.TryHomelandFarmTryResolvePlayerWaterEligibility(
+                    componentData,
+                    isCropBox,
+                    totalWaterLevel,
+                    totalWaterLevelReadOk,
+                    friendWaterCount,
+                    friendWaterCountReadOk,
+                    ownerWatered,
+                    ownerWateredReadOk,
+                    ownerId,
+                    out _,
+                    out _,
+                    out bool selfGuidReadOk,
+                    out bool canWater))
+            {
+                if (selfGuidReadOk)
+                {
+                    needsWater = canWater;
+                    return true;
+                }
+            }
+
+            return !totalWaterLevelReadOk;
         }
 
         private bool TryHomelandFarmTryReadCropBoxWaterState(
@@ -12250,50 +12308,22 @@ namespace HeartopiaMod
                 return false;
             }
 
-            // Pass the real ownerId so the visitor-water short-circuit only applies when we are
-            // actually VISITING. On our OWN field (ownerId == playerNetId) visiting is false, so we
-            // fall through to the owner-water logic below (needs water when the box isn't wet) —
-            // otherwise own dry crops with 0<friends<max get wrongly skipped as "fully watered".
-            this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
-            if (this.TryHomelandFarmTryResolveVisitorWaterState(cropBoxData, ownerId, playerNetId, isCropBox: true, out bool selfWatered, out bool selfWateredReadOk, out bool canAddVisitorWater))
-            {
-                if (selfWateredReadOk)
-                {
-                    needsWater = canAddVisitorWater;
-                    return true;
-                }
-            }
-
-            if (wetReadOk && friendWaterCountReadOk && isWet && friendWaterCount > 0)
-            {
-                if (selfWateredReadOk)
-                {
-                    needsWater = canAddVisitorWater;
-                    return true;
-                }
-
-                needsWater = true;
-                return true;
-            }
-
-            if (wetReadOk && friendWaterCountReadOk)
-            {
-                needsWater = !isWet || friendWaterCount == 0;
-            }
-            else if (wetReadOk)
-            {
-                needsWater = !isWet;
-                if (isWet && !friendWaterCountReadOk)
-                {
-                    needsWater = true;
-                }
-            }
-            else
-            {
-                needsWater = friendWaterCount == 0;
-            }
-
-            return true;
+            int totalWaterLevel = HomelandFarmComputeCropTotalWaterLevel(
+                wetReadOk && isWet,
+                friendWaterCountReadOk ? friendWaterCount : 0);
+            bool totalWaterLevelReadOk = wetReadOk || friendWaterCountReadOk;
+            bool ownerWatered = wetReadOk && isWet;
+            return this.TryHomelandFarmTryResolveNeedsWaterFromEligibility(
+                cropBoxData,
+                isCropBox: true,
+                totalWaterLevel,
+                totalWaterLevelReadOk,
+                friendWaterCountReadOk ? friendWaterCount : 0,
+                friendWaterCountReadOk,
+                ownerWatered,
+                wetReadOk,
+                ownerId,
+                out needsWater);
         }
 
         private bool TryHomelandFarmTryReadPlantWaterState(
@@ -12402,57 +12432,30 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!masterWaterReadOk && !weatherWaterReadOk && !friendWaterCountReadOk)
+            {
+                needsWater = true;
+                return false;
+            }
+
+            int totalWaterLevel = HomelandFarmComputePlantWaterLevel(
+                masterWaterReadOk && masterWater,
+                weatherWaterReadOk && weatherWater,
+                friendWaterCountReadOk ? friendWaterCount : 0);
+            bool totalWaterLevelReadOk = masterWaterReadOk || weatherWaterReadOk || friendWaterCountReadOk;
             bool ownerWatered = (masterWaterReadOk && masterWater) || (weatherWaterReadOk && weatherWater);
-            this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
-            bool onOwnField = this.TryHomelandFarmIsOnOwnFarmField(playerNetId);
-            bool visiting = !onOwnField && playerNetId != 0U && (ownerId == 0U || ownerId != playerNetId);
-            if (visiting)
-            {
-                if (this.TryHomelandFarmTryResolveVisitorWaterState(plantData, ownerId, playerNetId, isCropBox: false, out bool selfWatered, out bool selfWateredReadOk, out bool canAddVisitorWater))
-                {
-                    if (selfWateredReadOk)
-                    {
-                        needsWater = canAddVisitorWater;
-                        return true;
-                    }
-
-                    needsWater = true;
-                    return true;
-                }
-            }
-
-            if (!ownerWatered)
-            {
-                needsWater = true;
-                return true;
-            }
-
-            if (this.TryHomelandFarmTryResolveVisitorWaterState(plantData, ownerId, playerNetId, isCropBox: false, out bool selfWateredAfterOwner, out bool selfWateredReadOkAfterOwner, out bool canAddVisitorWaterAfterOwner))
-            {
-                if (selfWateredReadOkAfterOwner)
-                {
-                    needsWater = canAddVisitorWaterAfterOwner;
-                    return true;
-                }
-
-                needsWater = true;
-                return true;
-            }
-
-            if (selfWateredReadOkAfterOwner && selfWateredAfterOwner)
-            {
-                needsWater = false;
-                return true;
-            }
-
-            if (friendWaterCountReadOk && friendWaterCount == 0)
-            {
-                needsWater = ownerId != 0U && playerNetId != 0U && ownerId != playerNetId;
-                return true;
-            }
-
-            needsWater = false;
-            return true;
+            bool ownerWateredReadOk = masterWaterReadOk || weatherWaterReadOk;
+            return this.TryHomelandFarmTryResolveNeedsWaterFromEligibility(
+                plantData,
+                isCropBox: false,
+                totalWaterLevel,
+                totalWaterLevelReadOk,
+                friendWaterCountReadOk ? friendWaterCount : 0,
+                friendWaterCountReadOk,
+                ownerWatered,
+                ownerWateredReadOk,
+                ownerId,
+                out needsWater);
         }
 
         private static string HomelandFarmFormatDiagnosticValue(bool readOk, bool value)
@@ -12465,29 +12468,9 @@ namespace HeartopiaMod
             return readOk ? value.ToString() : "?";
         }
 
-        private static string HomelandFarmFormatDiagnosticCanAddVisitorWater(bool selfWateredReadOk, bool canAddVisitorWater)
+        private static string HomelandFarmFormatDiagnosticCanWater(bool selfGuidReadOk, bool canWater)
         {
-            return selfWateredReadOk ? canAddVisitorWater.ToString() : "?";
-        }
-
-        private static string HomelandFarmFormatDiagnosticSelfWater(bool onOwnField, bool ownerWateredReadOk, bool ownerWatered, bool visitorSelfWateredReadOk, bool visitorSelfWatered)
-        {
-            if (onOwnField)
-            {
-                return HomelandFarmFormatDiagnosticValue(ownerWateredReadOk, ownerWatered);
-            }
-
-            return HomelandFarmFormatDiagnosticValue(visitorSelfWateredReadOk, visitorSelfWatered);
-        }
-
-        private static string HomelandFarmFormatDiagnosticCanAddVisitorWater(bool onOwnField, bool selfWateredReadOk, bool canAddVisitorWater)
-        {
-            if (onOwnField)
-            {
-                return "owner";
-            }
-
-            return HomelandFarmFormatDiagnosticCanAddVisitorWater(selfWateredReadOk, canAddVisitorWater);
+            return selfGuidReadOk ? canWater.ToString() : "?";
         }
 
         private static string HomelandFarmFormatAtMaxWater(bool totalWaterLevelReadOk, int totalWaterLevel)
@@ -12619,7 +12602,6 @@ namespace HeartopiaMod
             int skippedNoFarmData = 0;
             this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
             this.TryHomelandFarmTryReadSelfPlayerGuid(out Guid selfPlayerGuid, out bool selfPlayerGuidReadOk);
-            bool onOwnField = this.TryHomelandFarmIsOnOwnFarmField(playerNetId);
             this.HomelandFarmLog(
                 "=== Water diagnostics radius=" + radius.ToString("F1")
                 + "m playerPos=" + playerPos
@@ -12712,16 +12694,23 @@ namespace HeartopiaMod
                             out int friendWaterCount,
                             out bool friendWaterCountReadOk);
                         int totalWaterLevel = HomelandFarmComputeCropTotalWaterLevel(ownerWateredReadOk && ownerWatered, friendWaterCountReadOk ? friendWaterCount : 0);
-                        this.TryHomelandFarmTryResolveVisitorWaterState(
+                        bool totalWaterLevelReadOk = ownerWateredReadOk || friendWaterCountReadOk;
+                        this.TryHomelandFarmTryResolvePlayerWaterEligibility(
                             cropBoxData,
-                            ownerId,
-                            playerNetId,
                             isCropBox: true,
+                            totalWaterLevel,
+                            totalWaterLevelReadOk,
+                            friendWaterCount,
+                            friendWaterCountReadOk,
+                            ownerWatered,
+                            ownerWateredReadOk,
+                            ownerId,
                             selfPlayerGuid,
                             selfPlayerGuidReadOk,
-                            out bool selfWatered,
-                            out bool selfWateredReadOk,
-                            out bool canAddVisitorWater);
+                            out bool selfInWaterList,
+                            out bool selfHasWatered,
+                            out bool selfGuidReadOk,
+                            out bool canWater);
                         diagnosticLines.Add(
                             "[Diag] cropBox netId=" + waterNetId
                             + " owner=" + ownerId
@@ -12729,9 +12718,10 @@ namespace HeartopiaMod
                             + " ownerWatered=" + HomelandFarmFormatDiagnosticValue(ownerWateredReadOk, ownerWatered)
                             + " friendWaterCount=" + HomelandFarmFormatDiagnosticValue(friendWaterCountReadOk, friendWaterCount)
                             + " totalWaterLevel=" + totalWaterLevel
-                            + " atMaxWater=" + HomelandFarmFormatAtMaxWater(ownerWateredReadOk || friendWaterCountReadOk, totalWaterLevel)
-                            + " selfWatered=" + HomelandFarmFormatDiagnosticSelfWater(onOwnField, ownerWateredReadOk, ownerWatered, selfWateredReadOk, selfWatered)
-                            + " canAddVisitorWater=" + HomelandFarmFormatDiagnosticCanAddVisitorWater(onOwnField, selfWateredReadOk, canAddVisitorWater));
+                            + " atMaxWater=" + HomelandFarmFormatAtMaxWater(totalWaterLevelReadOk, totalWaterLevel)
+                            + " selfInWaterList=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfInWaterList)
+                            + " selfWatered=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfHasWatered)
+                            + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater));
                         continue;
                     }
 
@@ -12753,16 +12743,29 @@ namespace HeartopiaMod
                             out bool stageReadOk);
                         bool plantOwnerWatered = (masterWaterReadOk && masterWater) || (weatherWaterReadOk && weatherWater);
                         bool plantOwnerWateredReadOk = masterWaterReadOk || weatherWaterReadOk;
-                        this.TryHomelandFarmTryResolveVisitorWaterState(
+                        int plantTotalWaterLevel = waterLevelReadOk
+                            ? waterLevel
+                            : HomelandFarmComputePlantWaterLevel(
+                                plantOwnerWateredReadOk && masterWater,
+                                weatherWaterReadOk && weatherWater,
+                                friendWaterCountReadOk ? friendWaterCount : 0);
+                        bool plantTotalWaterLevelReadOk = waterLevelReadOk || plantOwnerWateredReadOk || friendWaterCountReadOk;
+                        this.TryHomelandFarmTryResolvePlayerWaterEligibility(
                             plantData,
-                            ownerId,
-                            playerNetId,
                             isCropBox: false,
+                            plantTotalWaterLevel,
+                            plantTotalWaterLevelReadOk,
+                            friendWaterCount,
+                            friendWaterCountReadOk,
+                            plantOwnerWatered,
+                            plantOwnerWateredReadOk,
+                            ownerId,
                             selfPlayerGuid,
                             selfPlayerGuidReadOk,
-                            out bool selfWatered,
-                            out bool selfWateredReadOk,
-                            out bool canAddVisitorWater);
+                            out bool selfInWaterList,
+                            out bool selfHasWatered,
+                            out bool selfGuidReadOk,
+                            out bool canWater);
                         diagnosticLines.Add(
                             "[Diag] plant netId=" + waterNetId
                             + " owner=" + ownerId
@@ -12771,10 +12774,11 @@ namespace HeartopiaMod
                             + " ownerWatered=" + HomelandFarmFormatDiagnosticValue(masterWaterReadOk, masterWater)
                             + " weatherWater=" + HomelandFarmFormatDiagnosticValue(weatherWaterReadOk, weatherWater)
                             + " friendWaterCount=" + HomelandFarmFormatDiagnosticValue(friendWaterCountReadOk, friendWaterCount)
-                            + " totalWaterLevel=" + HomelandFarmFormatDiagnosticValue(waterLevelReadOk, waterLevel)
-                            + " atMaxWater=" + HomelandFarmFormatAtMaxWater(waterLevelReadOk, waterLevel)
-                            + " selfWatered=" + HomelandFarmFormatDiagnosticSelfWater(onOwnField, plantOwnerWateredReadOk, plantOwnerWatered, selfWateredReadOk, selfWatered)
-                            + " canAddVisitorWater=" + HomelandFarmFormatDiagnosticCanAddVisitorWater(onOwnField, selfWateredReadOk, canAddVisitorWater));
+                            + " totalWaterLevel=" + HomelandFarmFormatDiagnosticValue(plantTotalWaterLevelReadOk, plantTotalWaterLevel)
+                            + " atMaxWater=" + HomelandFarmFormatAtMaxWater(plantTotalWaterLevelReadOk, plantTotalWaterLevel)
+                            + " selfInWaterList=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfInWaterList)
+                            + " selfWatered=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfHasWatered)
+                            + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater));
                         continue;
                     }
 
@@ -12833,16 +12837,23 @@ namespace HeartopiaMod
                         out int friendWaterCount,
                         out bool friendWaterCountReadOk);
                     int totalWaterLevel = HomelandFarmComputeCropTotalWaterLevel(ownerWateredReadOk && ownerWatered, friendWaterCountReadOk ? friendWaterCount : 0);
-                    this.TryHomelandFarmTryResolveVisitorWaterState(
+                    bool totalWaterLevelReadOk = ownerWateredReadOk || friendWaterCountReadOk;
+                    this.TryHomelandFarmTryResolvePlayerWaterEligibility(
                         legacyCropBoxData,
-                        legacyOwnerId,
-                        playerNetId,
                         isCropBox: true,
+                        totalWaterLevel,
+                        totalWaterLevelReadOk,
+                        friendWaterCount,
+                        friendWaterCountReadOk,
+                        ownerWatered,
+                        ownerWateredReadOk,
+                        legacyOwnerId,
                         selfPlayerGuid,
                         selfPlayerGuidReadOk,
-                        out bool selfWatered,
-                        out bool selfWateredReadOk,
-                        out bool canAddVisitorWater);
+                        out bool selfInWaterList,
+                        out bool selfHasWatered,
+                        out bool selfGuidReadOk,
+                        out bool canWater);
                     diagnosticLines.Add(
                         "[Diag] cropBox netId=" + legacyWaterNetId
                         + " owner=" + legacyOwnerId
@@ -12850,9 +12861,10 @@ namespace HeartopiaMod
                         + " ownerWatered=" + HomelandFarmFormatDiagnosticValue(ownerWateredReadOk, ownerWatered)
                         + " friendWaterCount=" + HomelandFarmFormatDiagnosticValue(friendWaterCountReadOk, friendWaterCount)
                         + " totalWaterLevel=" + totalWaterLevel
-                        + " atMaxWater=" + HomelandFarmFormatAtMaxWater(ownerWateredReadOk || friendWaterCountReadOk, totalWaterLevel)
-                        + " selfWatered=" + HomelandFarmFormatDiagnosticSelfWater(onOwnField, ownerWateredReadOk, ownerWatered, selfWateredReadOk, selfWatered)
-                        + " canAddVisitorWater=" + HomelandFarmFormatDiagnosticCanAddVisitorWater(onOwnField, selfWateredReadOk, canAddVisitorWater));
+                        + " atMaxWater=" + HomelandFarmFormatAtMaxWater(totalWaterLevelReadOk, totalWaterLevel)
+                        + " selfInWaterList=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfInWaterList)
+                        + " selfWatered=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfHasWatered)
+                        + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater));
                     continue;
                 }
 
@@ -12873,16 +12885,29 @@ namespace HeartopiaMod
                         out bool stageReadOk);
                     bool plantOwnerWatered = (masterWaterReadOk && masterWater) || (weatherWaterReadOk && weatherWater);
                     bool plantOwnerWateredReadOk = masterWaterReadOk || weatherWaterReadOk;
-                    this.TryHomelandFarmTryResolveVisitorWaterState(
+                    int plantTotalWaterLevel = waterLevelReadOk
+                        ? waterLevel
+                        : HomelandFarmComputePlantWaterLevel(
+                            plantOwnerWateredReadOk && masterWater,
+                            weatherWaterReadOk && weatherWater,
+                            friendWaterCountReadOk ? friendWaterCount : 0);
+                    bool plantTotalWaterLevelReadOk = waterLevelReadOk || plantOwnerWateredReadOk || friendWaterCountReadOk;
+                    this.TryHomelandFarmTryResolvePlayerWaterEligibility(
                         legacyPlantData,
-                        legacyOwnerId,
-                        playerNetId,
                         isCropBox: false,
+                        plantTotalWaterLevel,
+                        plantTotalWaterLevelReadOk,
+                        friendWaterCount,
+                        friendWaterCountReadOk,
+                        plantOwnerWatered,
+                        plantOwnerWateredReadOk,
+                        legacyOwnerId,
                         selfPlayerGuid,
                         selfPlayerGuidReadOk,
-                        out bool selfWatered,
-                        out bool selfWateredReadOk,
-                        out bool canAddVisitorWater);
+                        out bool selfInWaterList,
+                        out bool selfHasWatered,
+                        out bool selfGuidReadOk,
+                        out bool canWater);
                     diagnosticLines.Add(
                         "[Diag] plant netId=" + legacyWaterNetId
                         + " owner=" + legacyOwnerId
@@ -12891,10 +12916,11 @@ namespace HeartopiaMod
                         + " ownerWatered=" + HomelandFarmFormatDiagnosticValue(masterWaterReadOk, masterWater)
                         + " weatherWater=" + HomelandFarmFormatDiagnosticValue(weatherWaterReadOk, weatherWater)
                         + " friendWaterCount=" + HomelandFarmFormatDiagnosticValue(friendWaterCountReadOk, friendWaterCount)
-                        + " totalWaterLevel=" + HomelandFarmFormatDiagnosticValue(waterLevelReadOk, waterLevel)
-                        + " atMaxWater=" + HomelandFarmFormatAtMaxWater(waterLevelReadOk, waterLevel)
-                        + " selfWatered=" + HomelandFarmFormatDiagnosticSelfWater(onOwnField, plantOwnerWateredReadOk, plantOwnerWatered, selfWateredReadOk, selfWatered)
-                        + " canAddVisitorWater=" + HomelandFarmFormatDiagnosticCanAddVisitorWater(onOwnField, selfWateredReadOk, canAddVisitorWater));
+                        + " totalWaterLevel=" + HomelandFarmFormatDiagnosticValue(plantTotalWaterLevelReadOk, plantTotalWaterLevel)
+                        + " atMaxWater=" + HomelandFarmFormatAtMaxWater(plantTotalWaterLevelReadOk, plantTotalWaterLevel)
+                        + " selfInWaterList=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfInWaterList)
+                        + " selfWatered=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfHasWatered)
+                        + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater));
                     continue;
                 }
 
