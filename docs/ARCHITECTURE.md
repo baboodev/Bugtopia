@@ -513,7 +513,7 @@ Flow: set transform + override flag → `CharacterControllerPatch` steers `Move`
 |------|---------|
 | `%LocalLow%/HelperSettings/Config.xml` | Unified XML config (keybinds, theme, radar, patrols, bird farm) |
 | `%LocalLow%/HelperSettings/Cache/` | Radar species icon index |
-| `%LocalLow%/HelperSettings/MonoDump/` | Optional Mono PE dumps for ILSpy (dev only) |
+| `%LocalLow%/HelperSettings/DecryptedAssemblies/` | Primary Mono PE dumps for ILSpy / `ilspy-dumps/` (dev only) |
 | `{Game}/UserData/helper.log` | BepInEx mod log append |
 
 Legacy JSON files migrated once via `HelperPaths.TryMigrateLegacyUserData`.
@@ -791,7 +791,8 @@ Bag tab UI
 |----------|---------|
 | `<Game>/BepInEx/interop/` or `MelonLoader/Il2CppAssemblies/` | Live interop stubs |
 | `%LocalLow%/xd/Heartopia/DotnetAssemblies/` | XDENCODE blobs — research only, not interop |
-| `%LocalLow%/HelperSettings/MonoDump/` | PE Mono dumps — ILSpy offline |
+| `%LocalLow%/HelperSettings/DecryptedAssemblies/` | Primary Mono PE dumps for ILSpy / `ilspy-dumps/` (dev only) |
+| `%LocalLow%/HelperSettings/MonoDump/` | Legacy Mono PE dumps (same use as above if present) |
 | `ilspy-dumps/` in repo workspace | Mono decompilation reference (gitignored) |
 | `gameassembly-dumps/` in repo workspace | IL2CPP decompilation reference (gitignored) |
 | `tools/cpp2il_out/` | Il2CppDumper artifacts (gitignored) |
@@ -809,6 +810,6 @@ When adding a feature:
 
 When the game patches:
 
-1. Refresh `ilspy-dumps/` from MonoDump and `gameassembly-dumps/` from Il2CppDumper + ilspycmd (see [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md)).
+1. Refresh `ilspy-dumps/` from `DecryptedAssemblies/` (built-in dumper + per-assembly `ilspycmd`) and `gameassembly-dumps/` from Il2CppDumper + ilspycmd (see [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md)).
 2. Regenerate interop; diff critical types (`ItemNetPair`, `WebRequestUtility`, gather commands).
 3. Run private-town smoke test per farm feature.

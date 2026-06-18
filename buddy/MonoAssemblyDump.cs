@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection.Metadata;
@@ -22,8 +23,8 @@ namespace HeartopiaMod
     /// native read guarded by VirtualQuery so a bad pointer can never crash the process).
     ///
     /// Output: <c>LocalLow/HelperSettings/DecryptedAssemblies/</c>. The folder's existence is an
-    /// opt-in switch: present → auto-dump once when the Mono runtime is ready; absent → do nothing
-    /// and never create it.
+    /// opt-in switch: present → auto-dump when the Mono runtime is ready (into an empty folder),
+    /// then a second pass 60 s later for lazily loaded modules; absent → do nothing and never create it.
     /// </summary>
     internal static class MonoAssemblyDump
     {
@@ -142,6 +143,8 @@ namespace HeartopiaMod
 
         private static int _rawDataOffset = -1; // discovered MonoImage->raw_data byte offset (raw_data_len at +8)
         private static bool _autoDumpDone;
+        private static bool _retryScheduled;
+        private const float RetryDelaySeconds = 60f;
 
         /// <summary>
         /// Auto-dump trigger, fired once when the game's Mono runtime/AuraFarm API first becomes ready.
@@ -156,26 +159,68 @@ namespace HeartopiaMod
 
             _autoDumpDone = true;
 
-            if (!Enabled)
+            if (!Directory.Exists(OutputDir))
             {
-                ModLogger.Msg("[MonoDump] auto-dump skipped: DecryptedAssemblies folder is missing or not empty "
-                    + "(dump runs only into an empty folder; clear it to re-dump).");
+                ModLogger.Msg("[MonoDump] auto-dump skipped: DecryptedAssemblies folder is missing.");
                 return;
+            }
+
+            if (Enabled)
+            {
+                try
+                {
+                    int n = DumpLoadedNow();
+                    ModLogger.Msg("[MonoDump] auto-dump after runtime ready: " + n.ToString() + " game module(s).");
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Warning("[MonoDump] auto-dump error: " + ex.Message);
+                }
+            }
+            else
+            {
+                ModLogger.Msg("[MonoDump] initial dump skipped: folder not empty (clear to re-dump all).");
+            }
+
+            ScheduleDelayedRetry();
+        }
+
+        private static void ScheduleDelayedRetry()
+        {
+            if (_retryScheduled || !Directory.Exists(OutputDir))
+            {
+                return;
+            }
+
+            _retryScheduled = true;
+            ModCoroutines.Start(DelayedRetryRoutine());
+        }
+
+        private static IEnumerator DelayedRetryRoutine()
+        {
+            yield return new UnityEngine.WaitForSeconds(RetryDelaySeconds);
+
+            if (!Directory.Exists(OutputDir))
+            {
+                yield break;
             }
 
             try
             {
-                int n = DumpLoadedNow();
-                ModLogger.Msg("[MonoDump] auto-dump after runtime ready: " + n.ToString() + " game module(s).");
+                int n = DumpLoadedNow(onlyMissing: true);
+                ModLogger.Msg(n > 0
+                    ? "[MonoDump] delayed retry (" + RetryDelaySeconds.ToString("0") + "s): "
+                        + n.ToString() + " additional game module(s)."
+                    : "[MonoDump] delayed retry (" + RetryDelaySeconds.ToString("0") + "s): no new game modules.");
             }
             catch (Exception ex)
             {
-                ModLogger.Warning("[MonoDump] auto-dump error: " + ex.Message);
+                ModLogger.Warning("[MonoDump] delayed retry error: " + ex.Message);
             }
         }
 
         /// <summary>Walk every loaded Mono assembly and dump the decrypted PE of each game module.</summary>
-        private static int DumpLoadedNow()
+        private static int DumpLoadedNow(bool onlyMissing = false)
         {
             string outDir = OutputDir;
 
@@ -253,7 +298,7 @@ namespace HeartopiaMod
                     int patched = DeobfuscateIl(pe, image, name);
                     totalPatched += patched;
 
-                    if (WritePe(outDir, name, pe))
+                    if (WritePe(outDir, name, pe, onlyMissing))
                     {
                         wrote++;
                     }
@@ -670,7 +715,7 @@ namespace HeartopiaMod
             return false;
         }
 
-        private static bool WritePe(string outDir, string name, byte[] pe)
+        private static bool WritePe(string outDir, string name, byte[] pe, bool skipExisting = false)
         {
             // Opt-in gate: write only when the folder exists; never create it implicitly.
             if (!Directory.Exists(outDir))
@@ -694,9 +739,15 @@ namespace HeartopiaMod
                 fileName = fileName.Replace(c, '_');
             }
 
+            string path = Path.Combine(outDir, fileName);
+            if (skipExisting && File.Exists(path))
+            {
+                return false;
+            }
+
             try
             {
-                File.WriteAllBytes(Path.Combine(outDir, fileName), pe);
+                File.WriteAllBytes(path, pe);
                 ModLogger.Msg("[MonoDump] saved " + fileName + " (" + pe.Length.ToString() + " bytes)");
                 return true;
             }

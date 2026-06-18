@@ -71,7 +71,8 @@ Replace `<Game>` with your Heartopia install (Steam, TapTap, etc.). Replace `<Us
 | `<Game>/BepInEx/plugins/helper.dll` | Mod deploy target | — |
 | `<User>/AppData/LocalLow/HelperSettings/` | Mod config (`Config.xml`) | Not game assemblies |
 | `<User>/AppData/LocalLow/xd/Heartopia/DotnetAssemblies/` | **Game dump** (optional, often XDENCODE) | Research only; see [DotnetAssemblies dumps](#dotnetassemblies-dumps-locallow) |
-| `<User>/AppData/LocalLow/HelperSettings/MonoDump/` | **Mono PE dump** (mod settings tree) | **ILSpy/dnSpy** — best offline copy of game Mono modules; see [MonoDump](#monodump-helpersettings) |
+| `<User>/AppData/LocalLow/HelperSettings/DecryptedAssemblies/` | **Mono PE dump** (mod built-in dumper) | **Primary** offline Mono source — decrypted PE + IL deobfuscation; see [Decrypting DotnetAssemblies](#decrypting-dotnetassemblies-at-runtime-built-in-dumper) |
+| `<User>/AppData/LocalLow/HelperSettings/MonoDump/` | Legacy / manual Mono PE dump | Same role as `DecryptedAssemblies` if present; prefer the built-in dumper |
 | Repo `ilspy-dumps/` (if present) | Decompiled C# from **embedded Mono** modules | Full method bodies; gameplay / protocol research |
 | Repo `gameassembly-dumps/` (if present) | Decompiled C# from **IL2CPP** (`GameAssembly.dll`) | Type signatures + native RVAs; launcher / bootstrap / `GameApp` research |
 | Repo `tools/cpp2il_out/` (if present) | Il2CppDumper raw output (`DummyDll`, `dump.cs`, `script.json`) | Regenerate `gameassembly-dumps/`; Ghidra/IDA scripts |
@@ -198,27 +199,93 @@ Output: `%USERPROFILE%\AppData\LocalLow\HelperSettings\DecryptedAssemblies\`.
 
 An **empty folder is the opt-in switch** — there is no hotkey:
 
-- **Folder exists and is empty** → the mod **auto-dumps once**, the first time the game's Mono
-  runtime becomes ready (hooked in `EnsureAuraMonoApiReady`, [HeartopiaComplete.AuraMonoEngine.cs](../buddy/HeartopiaComplete.AuraMonoEngine.cs)).
-- **Folder has files** (a previous dump) → **nothing runs** — clear it to re-dump.
+- **Folder exists and is empty** → the mod **auto-dumps** when the game's Mono runtime becomes ready (hooked in `EnsureAuraMonoApiReady`, [HeartopiaComplete.AuraMonoEngine.cs](../buddy/HeartopiaComplete.AuraMonoEngine.cs)).
+- **~60 s later** → a **second pass** writes any **lazily loaded** modules not present at first dump (for example `Plugins.dll`). Only missing files are added; existing PEs are not overwritten.
+- **Folder has files** (a previous dump) → the **initial** pass is skipped — clear the folder to re-dump from scratch. The delayed retry still runs if the folder exists.
 - **Folder absent** → **nothing is dumped and the folder is never created.**
 
-To enable: create the empty `DecryptedAssemblies` folder, then enter the world. Look for
-`[MonoDump] auto-dump after runtime ready: N game module(s)` and `[MonoDump] saved …` in
-`BepInEx\LogOutput.log`. Validate a result with `[Reflection.AssemblyName]::GetAssemblyName(path)` —
-it should report e.g. `EcsClient, Version=1.0.0.0`. Decompile the dumped PEs in ILSpy / dnSpy.
+To enable: create the empty `DecryptedAssemblies` folder, enter the world, wait at least one minute. Look for `[MonoDump] auto-dump after runtime ready: N game module(s)`, `[MonoDump] delayed retry (60s): …`, and `[MonoDump] saved …` in `BepInEx\LogOutput.log`. Validate a result with `[Reflection.AssemblyName]::GetAssemblyName(path)` — it should report e.g. `EcsClient, Version=1.0.0.0`.
+
+Expected game modules (15 on current builds): `EcsClient`, `EcsSystem`, `EngineWrapper`, `MonoShared`, `MonoUniTask`, `MsgPackFormatters`, `Plugins`, `ScriptBridge`, `XDKWPerf`, `XDTBaseService`, `XDTDataAndProtocol`, `XDTGameSystem`, `XDTGameUI`, `XDTLevelAndEntity`, `XDTViewBase`.
 
 ---
 
-## MonoDump (HelperSettings)
+## Decompiling Mono PE to `ilspy-dumps/`
 
-If the mod (or a debug build) writes Mono module dumps, they often land under:
+Turn decrypted PEs into the repo's offline C# tree with [ilspycmd](https://www.nuget.org/packages/ilspycmd).
+
+### Prerequisites
+
+- [**.NET SDK 6+**](https://dotnet.microsoft.com/download)
+- Global ILSpy CLI: `dotnet tool install -g ilspycmd`
+- Input PEs from **`DecryptedAssemblies/`** (recommended) or legacy `MonoDump/` — same format
+
+### Output layout (important)
+
+**One `ilspycmd` invocation per assembly**, each with its **own** `-o` subfolder under `ilspy-dumps/`:
+
+```text
+ilspy-dumps/
+├── EcsClient/          ← ilspycmd -o ilspy-dumps/EcsClient EcsClient.dll
+│   ├── EcsClient.csproj
+│   ├── XDT.Scene.Shared.Modules.Backpack/ItemNetPair.cs
+│   └── …
+├── XDTLevelAndEntity/
+│   ├── XDTLevelAndEntity.csproj
+│   ├── XDTLevelAndEntity.BaseSystem.EntitiesManager/Entities.cs
+│   └── …
+└── … (one top-level folder per game module)
+```
+
+Namespace segments appear as **dot-separated folder names** (ILSpy project mode), not nested `XDT/Scene/Shared/…` path segments.
+
+**Do not** pass every DLL to the same `-o ilspy-dumps` — that merges all assemblies into one flat namespace tree and breaks the layout docs and grep workflows expect.
+
+### Commands (Windows PowerShell)
+
+```powershell
+$Src  = "$env:USERPROFILE\AppData\LocalLow\HelperSettings\DecryptedAssemblies"
+$Repo = "C:\path\to\Heartopia-Helper"   # workspace root
+$Out  = "$Repo\ilspy-dumps"
+
+New-Item -ItemType Directory -Force -Path $Out | Out-Null
+
+foreach ($dll in Get-ChildItem "$Src\*.dll" | Sort-Object Name) {
+    $asm = [IO.Path]::GetFileNameWithoutExtension($dll.Name)
+    Write-Host "Decompiling $asm ..."
+    ilspycmd -p -o "$Out\$asm" $dll.FullName
+}
+```
+
+Optional — compare with a previous tree after a game patch (file list + content hash per assembly):
+
+```powershell
+# Produces tools/ilspy-diff-summary.json (added / removed / changed .cs per assembly)
+# Run a small compare script or diff ilspy-dumps-old vs ilspy-dumps manually.
+```
+
+### IL2CPP tree (separate command)
+
+Mono `ilspy-dumps/` and IL2CPP `gameassembly-dumps/` are **different inputs**. For `GameAssembly.dll` use Il2CppDumper → `ilspycmd` on `DummyDll/` — see [GameAssembly decompilation](#gameassembly-decompilation-il2cpp) below.
+
+### Practical workflow after a game patch
+
+1. Clear `%LocalLow%/HelperSettings/DecryptedAssemblies/`, launch game, enter world, wait **≥ 60 s**.
+2. Run the **per-assembly** `ilspycmd` loop above into repo `ilspy-dumps/`.
+3. Regenerate **BepInEx/MelonLoader interop** from the game install ([below](#generating-bepinex--melonloader-interop-correct-method)).
+4. Diff critical types (`ItemNetPair`, `WebRequestUtility`, feature-specific commands) against the previous `ilspy-dumps/`.
+
+---
+
+## MonoDump (HelperSettings, legacy)
+
+Older workflows (or manual copies) may use:
 
 ```text
 %USERPROFILE%\AppData\LocalLow\HelperSettings\MonoDump\
 ```
 
-Example files: `EcsClient.dll`, `XDTDataAndProtocol.dll`, `XDTLevelAndEntity.dll`, `XDTGameSystem.dll`, …
+**Prefer `DecryptedAssemblies/`** — same PE format, but produced by the shipping mod with IL body deobfuscation and the 60 s lazy-load retry. If you only have `MonoDump/`, decompile it with the **same per-assembly `ilspycmd` commands** as in [Decompiling Mono PE to `ilspy-dumps/`](#decompiling-mono-pe-to-ilspy-dumps).
 
 ### Format (differs from `xd/Heartopia/DotnetAssemblies`)
 
@@ -244,9 +311,10 @@ These are **real managed assemblies** from the game’s **embedded Mono** side (
 
 ### Practical workflow
 
-1. Decompile `MonoDump/EcsClient.dll` in ILSpy → copy full type names into `FindLoadedType` / docs.
-2. Regenerate **BepInEx interop** from the game install for actual mod runtime.
-3. Keep MonoDump version aligned with the **same game patch** as your interop and `helper.dll`.
+1. Dump PEs to `DecryptedAssemblies/` (or use legacy `MonoDump/`).
+2. Decompile **each** DLL into `ilspy-dumps/<AssemblyName>/` with `ilspycmd -p` (see [Decompiling Mono PE to `ilspy-dumps/`](#decompiling-mono-pe-to-ilspy-dumps)) → copy full type names into `FindLoadedType` / docs.
+3. Regenerate **BepInEx interop** from the game install for actual mod runtime.
+4. Keep dump version aligned with the **same game patch** as your interop and `helper.dll`.
 
 ---
 
@@ -261,7 +329,7 @@ BepInEx/MelonLoader interop stubs.
 
 | Output | Source | Method bodies? | Best for |
 |--------|--------|----------------|----------|
-| **`ilspy-dumps/`** | Mono PE (`MonoDump` / mod dumper) | **Yes** — normal C# | Gameplay, ECS commands, UI, protocols |
+| **`ilspy-dumps/`** | Mono PE (`DecryptedAssemblies` / mod dumper) | **Yes** — normal C# | Gameplay, ECS commands, UI, protocols |
 | **`gameassembly-dumps/`** | IL2CPP metadata + `GameAssembly.dll` | **No** — stubs with `[Address(RVA=…)]` | Bootstrap, launcher, `GameApp`, native-only APIs |
 | **`tools/cpp2il_out/dump.cs`** | Same IL2CPP input | Signatures only (single file) | Quick grep across all IL2CPP types |
 | **`tools/cpp2il_out/script.json`** | Il2CppDumper | N/A (offsets) | Ghidra / IDA with `ghidra.py` / `ida.py` |
@@ -372,7 +440,7 @@ Il2CppDumper + ilspycmd is the supported path in this repo.
 1. Re-run Il2CppDumper + ilspycmd (same commands).
 2. Diff `GameApp`, `Client`, and any assembly names referenced in mod logs.
 3. Regenerate BepInEx/MelonLoader interop separately ([below](#generating-bepinex--melonloader-interop-correct-method)).
-4. Re-dump Mono modules (`MonoDump` / `ilspy-dumps/`) if Aura or protocol types changed.
+4. Re-dump Mono modules to `DecryptedAssemblies/` and regenerate `ilspy-dumps/` (per-assembly `ilspycmd`) if Aura or protocol types changed.
 
 ---
 
@@ -440,7 +508,8 @@ Missing file does **not** block the build.
 | `gameassembly-dumps/` in repo | IL2CPP bootstrap, `GameApp`, launcher, native API RVAs |
 | `tools/cpp2il_out/dump.cs` | Single-file grep across all IL2CPP types |
 | `DotnetAssemblies/EcsClient.dll` | **Not** directly — XDENCODE; use IL2CPP or MonoDump PE instead |
-| `HelperSettings/MonoDump/EcsClient.dll` | **Yes** — normal PE; same names as AuraMono `EcsClient` image |
+| `HelperSettings/DecryptedAssemblies/EcsClient.dll` | **Yes** — normal PE; primary offline Mono source |
+| `HelperSettings/MonoDump/EcsClient.dll` | **Yes** — same format if present (legacy path) |
 
 ---
 

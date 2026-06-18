@@ -406,7 +406,7 @@ When a feature logs `unavailable` / `null` / `count=0` unexpectedly:
 
 ## 14. After a game patch
 
-1. Regenerate `ilspy-dumps/` if assemblies changed.
+1. Regenerate `ilspy-dumps/` from `DecryptedAssemblies/` — see [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md#decompiling-mono-pe-to-ilspy-dumps).
 2. Re-open affected UI panel `.cs` — verify interface/method names.
 3. Check `EcsInjectOfClient.cs` for renamed services.
 4. Rebuild interop (`BUILD_AND_RUN.md`), rebuild mod.

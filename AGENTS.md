@@ -179,7 +179,7 @@ ilspy-dumps/<AssemblyRoot>/<ProjectName>/.../Namespace/ClassName.cs
 4. For ECS state, find **component** under `XDTLevelAndEntity.Gameplay.Component.*`.
 5. Cross-check [DECOMPILED_SOURCE_MAP.md](docs/DECOMPILED_SOURCE_MAP.md) matrix (feature → types → mod file).
 
-If `ilspy-dumps/` is missing locally: generate from `%LocalLow%/HelperSettings/MonoDump/` or game `DotnetAssemblies` — see [GAME_ASSEMBLIES_AND_TOOLS.md](docs/GAME_ASSEMBLIES_AND_TOOLS.md).
+If `ilspy-dumps/` is missing locally: dump to `%LocalLow%/HelperSettings/DecryptedAssemblies/` (empty folder opt-in, wait ≥60 s in-world), then decompile per assembly with `ilspycmd` — see [GAME_ASSEMBLIES_AND_TOOLS.md](docs/GAME_ASSEMBLIES_AND_TOOLS.md#decompiling-mono-pe-to-ilspy-dumps).
 
 ---
 

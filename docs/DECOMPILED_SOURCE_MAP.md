@@ -79,17 +79,21 @@ Folder is in `.gitignore`; local copy of **Mono-side** game assembly decompilati
 
 ### 1.3 Typical path nesting (`ilspy-dumps/`)
 
+Each game module is decompiled into its **own top-level folder** (one `ilspycmd -p -o ilspy-dumps/<AssemblyName>` per DLL). Namespace segments are **dot-separated directories** inside that folder:
+
 ```
-ilspy-dumps/<AssemblyRoot>/<ProjectName>/.../Namespace/ClassName.cs
+ilspy-dumps/<AssemblyRoot>/<Namespace.With.Dots>/ClassName.cs
 ```
 
 Examples:
 
 ```
-ilspy-dumps/XDTLevelAndEntity/XDTLevelAndEntity/BaseSystem/EntitiesManager/Entities.cs
-ilspy-dumps/EcsClient/XDT/Scene/Shared/Modules/Backpack/ItemNetPair.cs
-ilspy-dumps/XDTDataAndProtocol/XDTDataAndProtocol/ProtocolService/WebRequestUtility.cs
+ilspy-dumps/XDTLevelAndEntity/XDTLevelAndEntity.BaseSystem.EntitiesManager/Entities.cs
+ilspy-dumps/EcsClient/XDT.Scene.Shared.Modules.Backpack/ItemNetPair.cs
+ilspy-dumps/XDTDataAndProtocol/XDTDataAndProtocol.ProtocolService/WebRequestUtility.cs
 ```
+
+Regeneration commands: [GAME_ASSEMBLIES_AND_TOOLS.md § Decompiling Mono PE to ilspy-dumps](./GAME_ASSEMBLIES_AND_TOOLS.md#decompiling-mono-pe-to-ilspy-dumps).
 
 ### 1.4 Namespace duplication (`ScriptsRefactory`)
 
