@@ -67,13 +67,20 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe bool TryOpenAuraPanelByTypeName(string fullTypeName, string successStatus)
+        private bool TryOpenAuraPanelByTypeName(string fullTypeName, string successStatus)
         {
             if (this.TryOpenPanelByResolvedTypeName(fullTypeName, null, successStatus))
             {
                 return true;
             }
 
+            return this.TryOpenAuraPanelByTypeNameViaMono(fullTypeName, successStatus);
+        }
+
+        // AuraMono-only UIManager.OpenView(Type, null-Intent). Split out of TryOpenAuraPanelByTypeName so
+        // callers that already attempted the managed path (or want the Mono path only) can reuse it.
+        private unsafe bool TryOpenAuraPanelByTypeNameViaMono(string fullTypeName, string successStatus)
+        {
             try
             {
                 if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
@@ -86,10 +93,12 @@ namespace HeartopiaMod
                 IntPtr uiManagerClass = this.FindAuraMonoClassByFullName("XDTGame.Core.UIManager");
                 if (uiManagerClass == IntPtr.Zero)
                 {
+                    // UIManager is XDTGame.Core.UIManager but compiled into the XDTGameUI assembly
+                    // (namespace != assembly); probe XDTGameUI first, then other likely images.
                     uiManagerClass = this.FindAuraMonoClassInImages(
                         "XDTGame.Core",
                         "UIManager",
-                        new string[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" });
+                        new string[] { "XDTGameUI", "XDTGameUI.dll", "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" });
                 }
                 if (uiManagerClass == IntPtr.Zero)
                 {

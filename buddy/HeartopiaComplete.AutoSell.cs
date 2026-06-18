@@ -380,6 +380,14 @@ namespace HeartopiaMod
             }
             num += 44;
 
+            // Opens the game's player-inventory sell UI (ItemSellPanel) for manual multi-select selling.
+            if (this.DrawPrimaryActionButton(new Rect(left, (float)num, 200f, 32f), "OPEN SELL PANEL"))
+            {
+                this.StartShopQuickSellOpenPanel();
+            }
+            GUI.Label(new Rect(left + 210f, (float)num + 7f, panelWidth - 210f, 22f), this.shopQuickSellStatus ?? "Idle.", tinyStyle);
+            num += 40;
+
             if (this.autoSellScanSourceDropdownOpen)
             {
                 float panelHeight = this.autoSellScanSourceLabels.Length * 30f + 8f;

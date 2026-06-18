@@ -1425,30 +1425,6 @@ namespace HeartopiaMod
                 GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 18f), this.shopBuyAllStatus, bodyStyle);
                 num += 22;
 
-                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "DUMP SHOP RESEARCH"))
-                {
-                    this.StartShopResearchDump();
-                }
-                num += 40;
-                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 36f), this.shopDumpStatus ?? "Idle.", bodyStyle);
-                num += 40;
-
-                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "DUMP ALL ITEMS"))
-                {
-                    this.StartTableEntityDump();
-                }
-                num += 40;
-                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 36f), this.itemDumpStatus ?? "Idle.", bodyStyle);
-                num += 40;
-
-                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "DUMP SHOP ITEM IDS"))
-                {
-                    this.StartShopItemIdDump();
-                }
-                num += 40;
-                GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 36f), this.shopItemDumpStatus ?? "Idle.", bodyStyle);
-                num += 40;
-
                 GUI.Label(new Rect(forceLeft, (float)num, forceWidth, 20f), "QuickBuyItem (store / slot / item)", bodyStyle);
                 num += 22;
                 this.shopQuickBuyStoreIdInput = GUI.TextField(new Rect(forceLeft, (float)num, 90f, 28f), this.shopQuickBuyStoreIdInput ?? string.Empty, 8);

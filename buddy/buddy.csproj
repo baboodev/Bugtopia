@@ -273,6 +273,7 @@
     <Compile Include="FaceShopBuyAllFeature.cs" />
     <Compile Include="ShopDumpFeature.cs" />
     <Compile Include="ShopQuickBuyFeature.cs" />
+    <Compile Include="ShopQuickSellFeature.cs" />
     <Compile Include="ItemDumpFeature.cs" />
     <Compile Include="TransformPositionPatch.cs" />
     <Compile Include="TransformRotationPatch.cs" />
