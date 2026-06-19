@@ -42,6 +42,8 @@ namespace HeartopiaMod
         private IntPtr noclipAuraGetPassengerVehicleMethod;
         private IntPtr noclipAuraGetPassengerSeatMethod;
         private IntPtr noclipAuraWorldPlaceToMethod;
+        private IntPtr noclipAuraWorldFaceToMethod;
+        private IntPtr noclipAuraSetPositionAndRotationMethod;
         private IntPtr noclipAuraForceDisplacementMethod;
         private IntPtr noclipAuraResetVirtualInputMethod;
         private AuraMonoObjectCache noclipAuraMonoInputManagerObj;
@@ -107,15 +109,34 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.noclipAuraWorldPlaceToMethod == IntPtr.Zero)
+            IntPtr vehicleMoveComponentClass = IntPtr.Zero;
+            if (this.noclipAuraWorldPlaceToMethod == IntPtr.Zero
+                || this.noclipAuraWorldFaceToMethod == IntPtr.Zero
+                || this.noclipAuraSetPositionAndRotationMethod == IntPtr.Zero)
             {
-                IntPtr moveComponentClass = this.ResolveNoclipAuraClass(
+                vehicleMoveComponentClass = this.ResolveNoclipAuraClass(
                     NoclipAuraVehicleMoveComponentFullNames,
                     "VehicleMoveComponent",
                     "XDTLevelAndEntity.Gameplay.Component.Vehicle");
-                if (moveComponentClass != IntPtr.Zero)
+                if (vehicleMoveComponentClass != IntPtr.Zero)
                 {
-                    this.noclipAuraWorldPlaceToMethod = this.FindAuraMonoMethodOnHierarchy(moveComponentClass, "WorldPlaceTo", 1);
+                    if (this.noclipAuraWorldPlaceToMethod == IntPtr.Zero)
+                    {
+                        this.noclipAuraWorldPlaceToMethod = this.FindAuraMonoMethodOnHierarchy(vehicleMoveComponentClass, "WorldPlaceTo", 1);
+                    }
+
+                    if (this.noclipAuraWorldFaceToMethod == IntPtr.Zero)
+                    {
+                        this.noclipAuraWorldFaceToMethod = this.FindAuraMonoMethodOnHierarchy(vehicleMoveComponentClass, "WorldFaceTo", 1);
+                    }
+
+                    if (this.noclipAuraSetPositionAndRotationMethod == IntPtr.Zero)
+                    {
+                        this.noclipAuraSetPositionAndRotationMethod = this.FindAuraMonoMethodOnHierarchy(
+                            vehicleMoveComponentClass,
+                            "SetPositionAndRotation",
+                            3);
+                    }
                 }
             }
 
@@ -251,6 +272,7 @@ namespace HeartopiaMod
         private void ClearNoclipVehicleOverride()
         {
             NoclipFeature.OverrideVehiclePosition = false;
+            HeartopiaComplete.OverridePlayerRotation = false;
 
             this.cachedNoclipVehicleComponentObj.TryGet(out IntPtr vehicleComponentObj);
             this.cachedNoclipVehicleControllerObj.TryGet(out IntPtr vehicleControllerObj);
@@ -320,6 +342,7 @@ namespace HeartopiaMod
                 NoclipFeature.OverrideVehiclePosition = true;
                 NoclipFeature.OverrideVehicleTarget = targetPosition;
                 this.ApplyNoclipVehicleWorldPlace(vehicleComponentObj, targetPosition);
+                this.ApplyNoclipMovementFacing(moveDirection, onVehicle: true, vehicleComponentObj, targetPosition);
                 return;
             }
 
@@ -338,6 +361,11 @@ namespace HeartopiaMod
                 Vector3 newPosition = player.transform.position + playerMoveDirection * playerSpeed * Time.deltaTime;
                 HeartopiaComplete.OverridePlayerPosition = true;
                 HeartopiaComplete.OverridePosition = newPosition;
+                this.ApplyNoclipMovementFacing(playerMoveDirection, onVehicle: false, IntPtr.Zero, newPosition);
+            }
+            else
+            {
+                HeartopiaComplete.OverridePlayerRotation = false;
             }
         }
 
@@ -361,7 +389,9 @@ namespace HeartopiaMod
             }
 
             this.ActivateNoclipVehicleDrivingOverride(vehicleComponentObj, vehicleControllerObj);
+            Vector3 vehicleMoveDirection = this.BuildNoclipMoveDirection();
             this.ApplyNoclipVehicleWorldPlace(vehicleComponentObj, NoclipFeature.OverrideVehicleTarget);
+            this.ApplyNoclipMovementFacing(vehicleMoveDirection, onVehicle: true, vehicleComponentObj, NoclipFeature.OverrideVehicleTarget);
         }
 
         private void ActivateNoclipVehicleDrivingOverride(IntPtr vehicleComponentObj, IntPtr vehicleControllerObj)
@@ -378,6 +408,190 @@ namespace HeartopiaMod
             this.SetNoclipVehicleForceDisplacement(vehicleComponentObj, false);
             this.TrySetNoclipVehicleControllerStopMove(vehicleControllerObj, false);
             this.TryInvokeNoclipVehicleResetVirtualInput(vehicleComponentObj);
+        }
+
+        private bool TryGetNoclipFlatMoveDirection(Vector3 moveDirection, out Vector3 flatDir)
+        {
+            flatDir = moveDirection;
+            flatDir.y = 0f;
+            return flatDir.sqrMagnitude >= 0.04f;
+        }
+
+        private void ApplyNoclipMovementFacing(Vector3 moveDirection, bool onVehicle, IntPtr vehicleComponentObj, Vector3 anchorPosition)
+        {
+            if (!this.TryGetNoclipFlatMoveDirection(moveDirection, out Vector3 flatDir))
+            {
+                if (!onVehicle)
+                {
+                    HeartopiaComplete.OverridePlayerRotation = false;
+                }
+
+                return;
+            }
+
+            flatDir.Normalize();
+            Quaternion faceRot = Quaternion.LookRotation(flatDir, Vector3.up);
+            Vector3 eulerAngles = new Vector3(0f, faceRot.eulerAngles.y, 0f);
+
+            if (onVehicle)
+            {
+                this.ApplyNoclipVehicleFacing(vehicleComponentObj, anchorPosition, faceRot, flatDir);
+                return;
+            }
+
+            this.EnsureRotationOverridePatched();
+            HeartopiaComplete.PlayerOverrideRot = faceRot;
+            HeartopiaComplete.OverridePlayerRotation = true;
+
+            GameObject skeleton = HeartopiaComplete.GetLocalPlayer();
+            if (this.TrySyncNoclipPlayerFacingMono(anchorPosition, eulerAngles, faceRot, flatDir))
+            {
+                return;
+            }
+
+            if (skeleton != null)
+            {
+                skeleton.transform.rotation = faceRot;
+            }
+        }
+
+        private unsafe bool TrySyncNoclipPlayerFacingMono(Vector3 playerPos, Vector3 eulerAngles, Quaternion faceRot, Vector3 flatDir)
+        {
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            IntPtr playerObj = IntPtr.Zero;
+            if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj) || playerObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr playerClass = auraMonoObjectGetClass(playerObj);
+            IntPtr transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 4);
+            if (transferMethod == IntPtr.Zero)
+            {
+                transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 2);
+            }
+
+            if (transferMethod != IntPtr.Zero)
+            {
+                int transferArgCount = this.TryGetAuraMonoMethodParamCount(transferMethod);
+                IntPtr exc = IntPtr.Zero;
+                if (transferArgCount >= 4)
+                {
+                    Vector3 posValue = playerPos;
+                    Vector3 eulerValue = eulerAngles;
+                    uint parentNetId = 0U;
+                    bool checkCollision = false;
+                    IntPtr* transferArgs = stackalloc IntPtr[4];
+                    transferArgs[0] = (IntPtr)(&posValue);
+                    transferArgs[1] = (IntPtr)(&eulerValue);
+                    transferArgs[2] = (IntPtr)(&parentNetId);
+                    transferArgs[3] = (IntPtr)(&checkCollision);
+                    auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
+                }
+                else
+                {
+                    Vector3 posValue = playerPos;
+                    Vector3 eulerValue = eulerAngles;
+                    IntPtr* transferArgs = stackalloc IntPtr[2];
+                    transferArgs[0] = (IntPtr)(&posValue);
+                    transferArgs[1] = (IntPtr)(&eulerValue);
+                    auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
+                }
+
+                if (exc == IntPtr.Zero)
+                {
+                    return true;
+                }
+            }
+
+            if (!this.TryGetBunnyHopMonoMoveComponent(playerObj, out IntPtr moveObj) || moveObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr moveClass = auraMonoObjectGetClass(moveObj);
+            IntPtr worldFaceMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "WorldFaceTo", 1);
+            if (worldFaceMethod == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            Quaternion rotValue = faceRot;
+            IntPtr exc2 = IntPtr.Zero;
+            IntPtr* faceArgs = stackalloc IntPtr[1];
+            faceArgs[0] = (IntPtr)(&rotValue);
+            auraMonoRuntimeInvoke(worldFaceMethod, moveObj, (IntPtr)faceArgs, ref exc2);
+            if (exc2 != IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr setPosRotMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetPositionAndRotation", 3);
+            if (setPosRotMethod != IntPtr.Zero)
+            {
+                Vector3 posValue = playerPos;
+                Quaternion rotArg = faceRot;
+                bool worldSpace = true;
+                IntPtr* setArgs = stackalloc IntPtr[3];
+                setArgs[0] = (IntPtr)(&posValue);
+                setArgs[1] = (IntPtr)(&rotArg);
+                setArgs[2] = (IntPtr)(&worldSpace);
+                exc2 = IntPtr.Zero;
+                auraMonoRuntimeInvoke(setPosRotMethod, moveObj, (IntPtr)setArgs, ref exc2);
+            }
+
+            Vector2 forward2D = new Vector2(flatDir.x, flatDir.z);
+            this.TrySetMonoVector2Member(moveObj, "_Forward", forward2D);
+            this.TrySetMonoVector2Member(moveObj, "Forward", forward2D);
+            return true;
+        }
+
+        private unsafe void ApplyNoclipVehicleFacing(IntPtr vehicleComponentObj, Vector3 targetPosition, Quaternion faceRot, Vector3 flatDir)
+        {
+            if (vehicleComponentObj == IntPtr.Zero
+                || !this.EnsureNoclipVehicleAuraMono()
+                || auraMonoRuntimeInvoke == null)
+            {
+                return;
+            }
+
+            if (!this.TryGetMonoObjectMember(vehicleComponentObj, "MoveComponent", out IntPtr moveComponentObj) || moveComponentObj == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (this.noclipAuraWorldFaceToMethod != IntPtr.Zero)
+            {
+                Quaternion rotValue = faceRot;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* faceArgs = stackalloc IntPtr[1];
+                faceArgs[0] = (IntPtr)(&rotValue);
+                auraMonoRuntimeInvoke(this.noclipAuraWorldFaceToMethod, moveComponentObj, (IntPtr)faceArgs, ref exc);
+            }
+
+            if (this.noclipAuraSetPositionAndRotationMethod != IntPtr.Zero)
+            {
+                Vector3 posValue = targetPosition;
+                Quaternion rotArg = faceRot;
+                bool worldSpace = true;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* setArgs = stackalloc IntPtr[3];
+                setArgs[0] = (IntPtr)(&posValue);
+                setArgs[1] = (IntPtr)(&rotArg);
+                setArgs[2] = (IntPtr)(&worldSpace);
+                auraMonoRuntimeInvoke(this.noclipAuraSetPositionAndRotationMethod, moveComponentObj, (IntPtr)setArgs, ref exc);
+            }
+
+            Vector2 forward2D = new Vector2(flatDir.x, flatDir.z);
+            this.TrySetMonoVector2Member(moveComponentObj, "_Forward", forward2D);
+            this.TrySetMonoVector2Member(moveComponentObj, "Forward", forward2D);
         }
 
         private Vector3 BuildNoclipMoveDirection()

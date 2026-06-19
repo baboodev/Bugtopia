@@ -616,7 +616,7 @@ namespace HeartopiaMod
                 this.rotationOverridePatchLastNeededAt = hotPatchNow;
             }
             // Player rotation override.
-            if (HeartopiaComplete.OverridePlayerRotation || this.playerRotationFramesRemaining > 0)
+            if (HeartopiaComplete.OverridePlayerRotation || this.playerRotationFramesRemaining > 0 || this.noclipEnabled)
             {
                 this.EnsureRotationOverridePatched();
                 this.rotationOverridePatchLastNeededAt = hotPatchNow;
