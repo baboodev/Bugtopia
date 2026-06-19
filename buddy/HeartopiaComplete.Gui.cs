@@ -34,6 +34,7 @@ namespace HeartopiaMod
         // Token: 0x06000006 RID: 6 RVA: 0x000027FC File Offset: 0x000009FC
         public void OnGUI()
         {
+            Breadcrumbs.Tick("OnGUI");
             GUI.color = Color.white;
             GUI.backgroundColor = Color.white;
             GUI.contentColor = Color.white;

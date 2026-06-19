@@ -10676,6 +10676,8 @@ namespace HeartopiaMod
                 return false;
             }
 
+            Breadcrumbs.Drop("HomelandFarm.scan", label);
+
             if (this.homelandFarmAuraGetComponentsFailedComponentClasses.Contains(componentClass))
             {
                 this.HomelandFarmVerboseLog(label + " AuraMono GetComponents: class previously failed, skipping.");

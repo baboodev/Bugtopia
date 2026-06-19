@@ -753,6 +753,7 @@ namespace HeartopiaMod
             }
 
             this.nextAutoSellAt = Time.unscaledTime + Mathf.Clamp(this.autoSellInterval, 1f, 120f);
+            Breadcrumbs.Drop("AutoSell.scan");
             if (string.IsNullOrWhiteSpace(this.GetActiveAutoSellMatchKey()) || this.GetActiveAutoSellMatchKey().Length < 2)
             {
                 this.autoSellStatus = "Waiting for item selection";
@@ -774,6 +775,7 @@ namespace HeartopiaMod
 
         private bool ExecuteDirectAutoSell(bool fromAuto)
         {
+            Breadcrumbs.Drop("AutoSell.execute", fromAuto ? "auto" : "manual");
             if (!this.IsAutoSellWorldReady())
             {
                 this.autoSellStatus = "Waiting for world";
@@ -2753,6 +2755,7 @@ namespace HeartopiaMod
 
         private bool TryInvokeQuickSellManaged(Dictionary<uint, int> itemsToSell, int currencyTypeId = 0)
         {
+            Breadcrumbs.Drop("AutoSell.quicksell.managed", "n=" + (itemsToSell?.Count ?? 0) + " cur=" + currencyTypeId);
             try
             {
                 Type recycleType = this.FindLoadedType(
@@ -2841,6 +2844,8 @@ namespace HeartopiaMod
                 {
                     return false;
                 }
+
+                Breadcrumbs.Drop("AutoSell.quicksell.aura", "n=" + itemsToSell.Count + " cur=" + currencyTypeId);
 
                 if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
                 {

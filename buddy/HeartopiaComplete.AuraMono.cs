@@ -64,6 +64,10 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Prime suspect for the no-dump crashes: enumerating a live game collection that can be
+            // mutated/reallocated mid-walk. Tick (throttled) so the trail shows if death was here.
+            Breadcrumbs.Tick("AuraMono.enumerate");
+
             void AddEnumeratedItem(IntPtr itemPtr)
             {
                 output.Add(itemPtr);

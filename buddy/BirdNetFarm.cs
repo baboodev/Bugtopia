@@ -86,9 +86,12 @@ namespace HeartopiaMod
                 return;
             }
 
+            Breadcrumbs.Drop("bf.setenabled.begin", value.ToString());
             if (value && !enabled)
             {
+                Breadcrumbs.Drop("bf.capturetool.begin");
                 CapturePreviousTool(host);
+                Breadcrumbs.Drop("bf.capturetool.ok");
             }
 
             enabled = value;
@@ -103,7 +106,9 @@ namespace HeartopiaMod
             scannerEquipRequestActive = false;
             nextScannerEquipAttemptAt = -999f;
             consecutiveServerRejectTicks = 0;
+            Breadcrumbs.Drop("bf.clearstate.begin");
             host?.ClearBirdFarmRuntimeState();
+            Breadcrumbs.Drop("bf.clearstate.ok");
             nextCrashHeartbeatAt = enabled ? Time.unscaledTime + 30f : -999f;
             nextSlowTickLogAt = -999f;
             nextRuntimeRecycleAt = enabled ? Time.unscaledTime + RuntimeRecycleSeconds : -999f;
@@ -482,6 +487,7 @@ namespace HeartopiaMod
 
             if (enabled)
             {
+                Breadcrumbs.Tick("BirdFarm.update");
                 try { host.TryEnsureBirdFarmMaxPhotoPatch(); } catch { }
             }
 

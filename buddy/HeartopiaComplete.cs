@@ -105,7 +105,7 @@ namespace HeartopiaMod
 #endif
         internal const bool MasterLogAuraFarm = false;
         internal const bool MasterLogBirdFarm = false;
-        internal const bool MasterLogBirdFarmCrashTrace = false;
+        internal const bool MasterLogBirdFarmCrashTrace = true;
         internal const bool MasterLogInsectFarm = false;
         internal const bool MasterLogAutoFish = false;
         internal const bool MasterLogAutoFarm = false;
@@ -506,6 +506,8 @@ namespace HeartopiaMod
             // Install the native crash-dump handler first so a fatal AV during any later init step
             // is still captured (the game's own crash handler otherwise eats it before WER runs).
             CrashDumpHandler.Install();
+            // Breadcrumb trail: pinpoints the running operation when a crash leaves no dump/log.
+            Breadcrumbs.Init();
             this.ApplyMasterConsoleVisibility();
             HeartopiaComplete.Instance = this;
             HeartopiaComplete.harmonyInstance = new HarmonyLib.Harmony("com.heartopia.teleport");
@@ -594,6 +596,7 @@ namespace HeartopiaMod
         // Token: 0x06000005 RID: 5 RVA: 0x000024C0 File Offset: 0x000006C0
         public void OnUpdate()
         {
+            Breadcrumbs.Tick("OnUpdate");
             // World-epoch poll: invalidates AuraMono object caches after a scene/world change.
             this.UpdateAuraMonoWorldEpoch();
             // Lazily install the hot-path patches only while a feature that needs them is active.
@@ -638,6 +641,7 @@ namespace HeartopiaMod
                 this.inputSimPatchLastNeededAt = hotPatchNow;
             }
             this.MaybeUnpatchIdleHotPathPatches(hotPatchNow);
+            Breadcrumbs.Drop("ou.patched");
 
             if (BirdNetFarm.IsEnabled)
             {
@@ -659,6 +663,7 @@ namespace HeartopiaMod
             this.ProcessPendingAutoSellListRescan();
             this.UpdatePetPlayAutomation();
             this.UpdateGameUiClickBlockState();
+            Breadcrumbs.Drop("ou.uiblock");
             this.UpdateMouseLookState();
             this.UpdateCameraToggleInteractClick();
             float instantFps = (Time.unscaledDeltaTime > 0.0001f) ? (1f / Time.unscaledDeltaTime) : this.fpsBypassObservedFps;
@@ -753,6 +758,7 @@ namespace HeartopiaMod
                 this.TryCaptureSideMouseKeybindOnUpdate();
             }
             
+            Breadcrumbs.Drop("ou.beforehotkeys");
             // Check for keybinds (Only if not currently rebinding and not just assigned)
             if (string.IsNullOrEmpty(this.keyBindingActive) && Time.unscaledTime - this.keyBindAssignedAt >= 0.2f)
             {
@@ -786,7 +792,9 @@ namespace HeartopiaMod
                 }
                 if (this.TryGetModHotkeyDown(this.keyAutoBirdFarm))
                 {
+                    Breadcrumbs.Drop("hotkey.autobirdfarm.toggle");
                     BirdNetFarm.ToggleEnabled(this);
+                    Breadcrumbs.Drop("hotkey.autobirdfarm.done", BirdNetFarm.IsEnabled ? "enabled" : "disabled");
                     bool birdFarmEnabled = BirdNetFarm.IsEnabled;
                     this.AddMenuNotification($"Auto Bird Farm {(birdFarmEnabled ? "Enabled" : "Disabled")}", birdFarmEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }

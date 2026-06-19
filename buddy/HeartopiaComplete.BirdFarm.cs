@@ -4159,6 +4159,7 @@ namespace HeartopiaMod
         private bool TryInvokeBirdPhotoProtocol(int staticId, uint birdNetId, int birdActionType, uint birdStandNetId, bool perfectPhotoEnabled, out string status)
         {
             status = "Bird protocol unavailable";
+            Breadcrumbs.Drop("BirdFarm.photo", "net=" + birdNetId + " static=" + staticId + " stand=" + birdStandNetId);
 
             if (birdNetId == 0U || staticId <= 0)
             {
@@ -5091,6 +5092,7 @@ namespace HeartopiaMod
         private bool TryInvokeAuraMonoBirdPhotoProtocol(int staticId, uint birdNetId, int birdActionType, uint birdStandNetId, bool perfectPhotoEnabled, out string status)
         {
             status = "Protocol unavailable";
+            Breadcrumbs.Drop("BirdFarm.photo.aura", "net=" + birdNetId + " static=" + staticId + " stand=" + birdStandNetId);
 
             try
             {
@@ -6066,6 +6068,7 @@ namespace HeartopiaMod
         // Token: 0x06000020 RID: 32 RVA: 0x000061FC File Offset: 0x000043FC
         private void VacuumBirds()
         {
+            Breadcrumbs.Tick("BirdFarm.vacuum");
             GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (!flag)

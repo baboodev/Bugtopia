@@ -1638,6 +1638,7 @@ namespace HeartopiaMod
         // Token: 0x06000025 RID: 37 RVA: 0x00006E00 File Offset: 0x00005000
         private void TeleportToLocation(Vector3 targetPos)
         {
+            Breadcrumbs.Drop("Teleport", targetPos.ToString("F1"));
             GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (flag)
