@@ -2,9 +2,10 @@
 # docs/plans/2026-06-12-crash-hardening-plan.md (phase 4).
 #
 # ERRORS (fail the build):
-#   E1: auraMonoRuntimeInvokeRaw referenced outside AuraFarm.cs - the raw export bypasses
-#       InvokeAuraMonoChecked (null-method guard, exc check, garbage-result suppression).
-#   E2: "mono_runtime_invoke" re-resolved outside AuraFarm.cs - same bypass via a new delegate.
+#   E1: auraMonoRuntimeInvokeRaw referenced outside the engine home (HeartopiaComplete.AuraMonoEngine.cs
+#       or AuraFarm.cs) - the raw export bypasses InvokeAuraMonoChecked (null-method guard, exc check,
+#       garbage-result suppression).
+#   E2: "mono_runtime_invoke" re-resolved outside the engine home - same bypass via a new delegate.
 #   E3: a cross-frame MonoObject* cache declared as a raw IntPtr field (name ending in Obj/obj) -
 #       bdwgc collects the object once the game drops its last reference; use AuraMonoObjectCache.
 #
@@ -29,7 +30,11 @@ $files = Get-ChildItem $buddyDir -Filter *.cs -Recurse |
     Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }
 
 foreach ($f in $files) {
-    $isAuraFarm = $f.Name -eq "AuraFarm.cs"
+    # The AuraMono native bridge lives in HeartopiaComplete.AuraMonoEngine.cs (the
+    # mono_runtime_invoke binding + InvokeAuraMonoChecked guard) and AuraFarm.cs still
+    # calls the raw invoke from its gather paths. Both are the legitimate home for the
+    # raw export; everything else must go through the guarded auraMonoRuntimeInvoke.
+    $isEngineHome = $f.Name -eq "AuraFarm.cs" -or $f.Name -eq "HeartopiaComplete.AuraMonoEngine.cs"
     $lines = Get-Content $f.FullName
 
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -37,11 +42,11 @@ foreach ($f in $files) {
         if ($line -match '^\s*//') { continue }
         $loc = "$($f.Name):$($i + 1)"
 
-        if (-not $isAuraFarm -and $line -match 'auraMonoRuntimeInvokeRaw') {
+        if (-not $isEngineHome -and $line -match 'auraMonoRuntimeInvokeRaw') {
             $lintErrors.Add("E1 $loc - auraMonoRuntimeInvokeRaw bypasses the invoke guard; use auraMonoRuntimeInvoke or TryAuraInvoke.")
         }
-        if (-not $isAuraFarm -and $line -match '"mono_runtime_invoke"') {
-            $lintErrors.Add("E2 $loc - do not re-resolve mono_runtime_invoke; the only binding lives in AuraFarm.cs behind InvokeAuraMonoChecked.")
+        if (-not $isEngineHome -and $line -match '"mono_runtime_invoke"') {
+            $lintErrors.Add("E2 $loc - do not re-resolve mono_runtime_invoke; the only binding lives in HeartopiaComplete.AuraMonoEngine.cs behind InvokeAuraMonoChecked.")
         }
         if ($line -match 'private\s+(static\s+)?IntPtr\s+(\w*(?:Obj|obj))\s*(=\s*IntPtr\.Zero\s*)?;') {
             $fieldName = $Matches[2]
