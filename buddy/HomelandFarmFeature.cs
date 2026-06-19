@@ -166,6 +166,8 @@ namespace HeartopiaMod
         private readonly List<HomelandFarmInventoryItem> homelandFarmScannedFertilizers = new List<HomelandFarmInventoryItem>();
         private int homelandFarmSelectedSeedIndex = 0;
         private int homelandFarmSelectedFertilizerIndex = 0;
+        private bool homelandFarmAutoFertilizeEnabled = false;
+        private int homelandFarmAutoFertilizeLastCount = 0;
         private float homelandFarmSeedsCacheTime = 0f;
         private float homelandFarmFertilizersCacheTime = 0f;
 
@@ -14681,7 +14683,9 @@ namespace HeartopiaMod
             int totalSown = 0;
             int totalWeeded = 0;
             int totalHarvested = 0;
+            int totalFertilized = 0;
             bool seedsExhausted = false;
+            bool autoFertilizePending = false;
             int seedStaticId = 0;
             bool needDiscovery = true;   // discover current crops first (so we never sow occupied planters)
             bool discoveryDelay = false; // wait before discovery only after an actual sow
@@ -14735,6 +14739,21 @@ namespace HeartopiaMod
                         }
 
                         this.RebuildHomelandFarmAutoCropCache();
+                        if (autoFertilizePending)
+                        {
+                            autoFertilizePending = false;
+                            if (this.homelandFarmAutoFertilizeEnabled)
+                            {
+                                this.homelandFarmLastStatus = "Auto: fertilizing...";
+                                IEnumerator fertilizePass = this.HomelandFarmAutoFertilizePassRoutine();
+                                while (fertilizePass.MoveNext())
+                                {
+                                    yield return fertilizePass.Current;
+                                }
+
+                                totalFertilized += this.homelandFarmAutoFertilizeLastCount;
+                            }
+                        }
                     }
 
                     // 2. Directed poll of cached crops: weed flagged, harvest ripe (drop from cache),
@@ -14869,8 +14888,10 @@ namespace HeartopiaMod
                                 nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoSowCooldownSeconds;
                                 needDiscovery = true;
                                 discoveryDelay = true; // server needs a beat to create the new crops
+                                autoFertilizePending = this.homelandFarmAutoFertilizeEnabled;
                                 this.HomelandFarmLog("Auto: sowed " + this.homelandFarmAutoSowCount
-                                    + " free planter(s); re-discovering.");
+                                    + " free planter(s); re-discovering"
+                                    + (autoFertilizePending ? " + fertilize." : "."));
                                 continue; // pick up the new crops before the next decision
                             }
 
@@ -14939,9 +14960,11 @@ namespace HeartopiaMod
                 }
 
                 this.homelandFarmLastStatus = "Auto farm complete — sown " + totalSown + ", weeded " + totalWeeded
-                    + ", harvested " + totalHarvested + ".";
+                    + ", harvested " + totalHarvested
+                    + (totalFertilized > 0 ? ", fertilized " + totalFertilized : string.Empty) + ".";
                 this.AddMenuNotification(this.homelandFarmLastStatus, new Color(0.45f, 1f, 0.55f));
-                this.HomelandFarmLog("Auto farm complete sown=" + totalSown + " weeded=" + totalWeeded + " harvested=" + totalHarvested);
+                this.HomelandFarmLog("Auto farm complete sown=" + totalSown + " weeded=" + totalWeeded + " harvested=" + totalHarvested
+                    + " fertilized=" + totalFertilized);
             }
             finally
             {
@@ -15015,6 +15038,169 @@ namespace HeartopiaMod
             }
 
             this.homelandFarmAutoSowCount = sowedPoints;
+        }
+
+        private bool TryHomelandFarmGetSelectedFertilizer(out HomelandFarmInventoryItem fertilizer)
+        {
+            fertilizer = null;
+            if (this.homelandFarmScannedFertilizers.Count == 0)
+            {
+                this.RefreshHomelandFarmFertilizers();
+            }
+
+            if (this.homelandFarmScannedFertilizers.Count == 0)
+            {
+                return false;
+            }
+
+            int fertIndex = Mathf.Clamp(this.homelandFarmSelectedFertilizerIndex, 0, this.homelandFarmScannedFertilizers.Count - 1);
+            fertilizer = this.homelandFarmScannedFertilizers[fertIndex];
+            return fertilizer != null && fertilizer.StaticId > 0;
+        }
+
+        private IEnumerator HomelandFarmAutoFertilizePassRoutine()
+        {
+            this.homelandFarmAutoFertilizeLastCount = 0;
+            if (!this.homelandFarmAutoFertilizeEnabled || !this.TryHomelandFarmGetSelectedFertilizer(out HomelandFarmInventoryItem fertilizer))
+            {
+                yield break;
+            }
+
+            HashSet<uint> scanNetIds = new HashSet<uint>();
+            if (this.TryGetHomelandFarmScanCenter(out Vector3 scanCenter))
+            {
+                this.TryHomelandFarmCollectFarmEntityNetIds(
+                    scanNetIds,
+                    out _,
+                    scanCenter,
+                    this.homelandFarmWaterRadius + 2f,
+                    useAutoFarmCollectShortcuts: true);
+            }
+
+            yield return null;
+
+            List<uint> ownCrops = this.ScanHomelandFarmCropsByRadius(
+                cropData => cropData != null,
+                "Auto fertilize crops",
+                requireOwn: true,
+                preCollectedNetIds: scanNetIds,
+                logScanSummary: true,
+                includePlantData: false,
+                useAutoFarmCollectShortcuts: true,
+                useCapturedScanCenter: true);
+            int maxTargets = Math.Max(1, fertilizer.Count);
+            List<uint> targets = this.BuildHomelandFarmFertilizeTargets(
+                ownCrops,
+                fertilizer.StaticId,
+                scanNetIds,
+                maxTargets);
+            if (targets.Count == 0)
+            {
+                this.HomelandFarmLog("Auto fertilize: no fertilizable crops for " + fertilizer.Label + ".");
+                yield break;
+            }
+
+            IEnumerator applyRoutine = this.HomelandFarmFertilizeTargetsRoutine(fertilizer, targets, scanNetIds, silent: true);
+            while (applyRoutine.MoveNext())
+            {
+                yield return applyRoutine.Current;
+            }
+
+            this.homelandFarmAutoFertilizeLastCount = this.homelandFarmLastFertilizeAppliedCount;
+            this.HomelandFarmLog("Auto fertilize applied=" + this.homelandFarmAutoFertilizeLastCount + "/" + targets.Count + ".");
+        }
+
+        private int homelandFarmLastFertilizeAppliedCount = 0;
+
+        private IEnumerator HomelandFarmFertilizeTargetsRoutine(
+            HomelandFarmInventoryItem fertilizer,
+            List<uint> targets,
+            HashSet<uint> scanNetIds,
+            bool silent)
+        {
+            this.homelandFarmLastFertilizeAppliedCount = 0;
+            if (fertilizer == null || fertilizer.StaticId <= 0 || targets == null || targets.Count == 0)
+            {
+                yield break;
+            }
+
+            int fertilized = 0;
+            int batchCount = 0;
+            int failCount = 0;
+
+            if (fertilizer.NetId != 0U)
+            {
+                if (!this.TryHomelandFarmEquipHandhold(fertilizer.NetId, out string equipStatus))
+                {
+                    this.homelandFarmLastStatus = "Equip fertilizer failed: " + equipStatus;
+                    this.HomelandFarmLog(this.homelandFarmLastStatus);
+                    if (!silent)
+                    {
+                        this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
+                    }
+
+                    yield break;
+                }
+
+                yield return null;
+            }
+            else
+            {
+                this.HomelandFarmLog("Fertilize warning: fertilizer backpack netId missing; server may reject.");
+            }
+
+            int fertilizeBatchSize = Mathf.Clamp(this.TryHomelandFarmGetFertilizerCastCellCount(), 1, HomelandFarmBatchLimit);
+            this.HomelandFarmLog("Fertilize batch size=" + fertilizeBatchSize + " (TableMode.num for equipped fertilizer mode)");
+
+            for (int offset = 0; offset < targets.Count; offset += fertilizeBatchSize)
+            {
+                int batchSize = Math.Min(fertilizeBatchSize, targets.Count - offset);
+                List<uint> batch = targets.GetRange(offset, batchSize);
+                Dictionary<uint, HomelandFarmCropFertilizeSnapshot> beforeSnapshots =
+                    this.TryHomelandFarmSnapshotCropFertilizeStates(batch);
+
+                this.HomelandFarmLog("Fertilize netIds=" + string.Join(",", batch.ToArray()));
+
+                if (this.TryHomelandFarmSendFertilizeAddManure(batch, out string manureStatus))
+                {
+                    this.HomelandFarmLog("Fertilize AddManure: " + manureStatus);
+                }
+                else
+                {
+                    this.HomelandFarmLog("Fertilize AddManure failed: " + manureStatus);
+                }
+
+                yield return new WaitForSecondsRealtime(HomelandFarmCommandDelaySeconds);
+
+                int applied = this.CountHomelandFarmFertilizeApplied(
+                    batch,
+                    beforeSnapshots,
+                    fertilizer.StaticId,
+                    scanNetIds,
+                    out string verifyDetail);
+                if (applied > 0)
+                {
+                    fertilized += applied;
+                    batchCount++;
+                    this.HomelandFarmLog("Fertilize batch ok applied=" + applied + "/" + batch.Count + " " + verifyDetail);
+                }
+                else
+                {
+                    failCount++;
+                    this.HomelandFarmLog("Fertilize batch fail count=" + batch.Count + " verify=" + verifyDetail);
+                }
+            }
+
+            this.homelandFarmLastFertilizeAppliedCount = fertilized;
+            this.homelandFarmLastStatus = "Fertilized " + fertilized + "/" + targets.Count + " crop(s) in " + batchCount + " batch(es)"
+                + (failCount > 0 ? ", " + failCount + " failed" : string.Empty) + ".";
+            if (!silent)
+            {
+                Color notifyColor = fertilized > 0
+                    ? new Color(0.45f, 1f, 0.55f)
+                    : new Color(1f, 0.55f, 0.45f);
+                this.AddMenuNotification("Fertilize: " + fertilized + "/" + targets.Count, notifyColor);
+            }
         }
 
         private bool TryBeginHomelandFarmAction(bool silent, out string blockReason, bool allowVisitingFarmArea = false)
@@ -19652,9 +19838,6 @@ namespace HeartopiaMod
         {
             yield return null;
 
-            int fertilized = 0;
-            int batchCount = 0;
-            int failCount = 0;
             try
             {
                 if (this.homelandFarmScannedFertilizers.Count == 0)
@@ -19765,80 +19948,10 @@ namespace HeartopiaMod
                     yield break;
                 }
 
-                if (fertilizer.NetId != 0U)
+                IEnumerator applyRoutine = this.HomelandFarmFertilizeTargetsRoutine(fertilizer, targets, scanNetIds, silent);
+                while (applyRoutine.MoveNext())
                 {
-                    if (!this.TryHomelandFarmEquipHandhold(fertilizer.NetId, out string equipStatus))
-                    {
-                        this.homelandFarmLastStatus = "Equip fertilizer failed: " + equipStatus;
-                        this.HomelandFarmLog(this.homelandFarmLastStatus);
-                        if (!silent)
-                        {
-                            this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
-                        }
-
-                        yield break;
-                    }
-
-                    yield return null;
-                }
-                else
-                {
-                    this.HomelandFarmLog("Fertilize warning: fertilizer backpack netId missing; server may reject.");
-                }
-
-                // Fertilize uses the direct AddManure command path (no casting animation). The
-                // batch size is the equipped fertilizer's per-command cell cap (server rejects a
-                // larger ManuredNetworkCommand).
-                int fertilizeBatchSize = Mathf.Clamp(this.TryHomelandFarmGetFertilizerCastCellCount(), 1, HomelandFarmBatchLimit);
-                this.HomelandFarmLog("Fertilize batch size=" + fertilizeBatchSize + " (TableMode.num for equipped fertilizer mode)");
-
-                for (int offset = 0; offset < targets.Count; offset += fertilizeBatchSize)
-                {
-                    int batchSize = Math.Min(fertilizeBatchSize, targets.Count - offset);
-                    List<uint> batch = targets.GetRange(offset, batchSize);
-                    Dictionary<uint, HomelandFarmCropFertilizeSnapshot> beforeSnapshots =
-                        this.TryHomelandFarmSnapshotCropFertilizeStates(batch);
-
-                    this.HomelandFarmLog("Fertilize netIds=" + string.Join(",", batch.ToArray()));
-
-                    if (this.TryHomelandFarmSendFertilizeAddManure(batch, out string manureStatus))
-                    {
-                        this.HomelandFarmLog("Fertilize AddManure: " + manureStatus);
-                    }
-                    else
-                    {
-                        this.HomelandFarmLog("Fertilize AddManure failed: " + manureStatus);
-                    }
-
-                    yield return new WaitForSecondsRealtime(HomelandFarmCommandDelaySeconds);
-
-                    int applied = this.CountHomelandFarmFertilizeApplied(
-                        batch,
-                        beforeSnapshots,
-                        fertilizer.StaticId,
-                        scanNetIds,
-                        out string verifyDetail);
-                    if (applied > 0)
-                    {
-                        fertilized += applied;
-                        batchCount++;
-                        this.HomelandFarmLog("Fertilize batch ok applied=" + applied + "/" + batch.Count + " " + verifyDetail);
-                    }
-                    else
-                    {
-                        failCount++;
-                        this.HomelandFarmLog("Fertilize batch fail count=" + batch.Count + " verify=" + verifyDetail);
-                    }
-                }
-
-                this.homelandFarmLastStatus = "Fertilized " + fertilized + "/" + targets.Count + " crop(s) in " + batchCount + " batch(es)"
-                    + (failCount > 0 ? ", " + failCount + " failed" : string.Empty) + ".";
-                if (!silent)
-                {
-                    Color notifyColor = fertilized > 0
-                        ? new Color(0.45f, 1f, 0.55f)
-                        : new Color(1f, 0.55f, 0.45f);
-                    this.AddMenuNotification("Fertilize: " + fertilized + "/" + targets.Count, notifyColor);
+                    yield return applyRoutine.Current;
                 }
             }
             finally
@@ -20175,7 +20288,7 @@ namespace HeartopiaMod
             bool farmInteractive = !busy && this.IsHomelandFarmWarmupReady();
 
             // 1. AUTO FARMING — capture planters, then loop sow -> weed -> harvest.
-            Rect autoRect = new Rect(left, y, width, 150f);
+            Rect autoRect = new Rect(left, y, width, 176f);
             GUI.Box(autoRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
             this.DrawCardOutline(autoRect, 1f);
             GUI.Label(new Rect(autoRect.x + 16f, autoRect.y + 12f, 300f, 20f), this.L("homeland_farm.auto_section"), labelStyle);
@@ -20197,6 +20310,26 @@ namespace HeartopiaMod
 
             GUI.Label(new Rect(autoRect.x + 16f, autoY, width - 32f, 18f), this.L("homeland_farm.auto_hint"), sectionStyle);
             autoY += 24f;
+
+            if (this.homelandFarmScannedFertilizers.Count == 0)
+            {
+                this.RefreshHomelandFarmFertilizers();
+            }
+
+            bool hasSelectedFertilizer = this.TryHomelandFarmGetSelectedFertilizer(out _);
+            GUI.enabled = farmInteractive && !this.homelandFarmAutoRunning && hasSelectedFertilizer;
+            bool autoFertilize = GUI.Toggle(
+                new Rect(autoRect.x + 16f, autoY, width - 32f, 22f),
+                this.homelandFarmAutoFertilizeEnabled,
+                " " + this.L("homeland_farm.auto_fertilize"));
+            if (hasSelectedFertilizer && autoFertilize != this.homelandFarmAutoFertilizeEnabled)
+            {
+                this.homelandFarmAutoFertilizeEnabled = autoFertilize;
+                this.PersistHomelandFarmAutoFertilizeSetting();
+            }
+
+            GUI.enabled = true;
+            autoY += 28f;
 
             if (this.homelandFarmAutoRunning)
             {
@@ -20220,7 +20353,7 @@ namespace HeartopiaMod
                 GUI.enabled = true;
             }
 
-            y += 162f;
+            y += 188f;
 
             // 2. FARM RADIUS — single slider drives every radius-based action below.
             GUIStyle valueLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, alignment = TextAnchor.MiddleRight };
@@ -20424,6 +20557,21 @@ namespace HeartopiaMod
         // Persist the farm radius to config. The radius lives in the Keybinds config section, which
         // PopulateAllConfigSections already serializes; the slider just never triggered a save on its
         // own, so changing only the radius was lost on restart. Quiet (no keybind-save notification).
+        private void PersistHomelandFarmAutoFertilizeSetting()
+        {
+            try
+            {
+                UnifiedConfigData data = this.LoadOrCreateUnifiedConfig();
+                this.PopulateAllConfigSections(data);
+                this.SaveUnifiedConfig(data);
+                this.HomelandFarmLog("Saved auto fertilize=" + this.homelandFarmAutoFertilizeEnabled + " to config.");
+            }
+            catch (Exception ex)
+            {
+                this.HomelandFarmLog("Failed to save auto fertilize setting: " + ex.Message);
+            }
+        }
+
         private void PersistHomelandFarmRadius()
         {
             try

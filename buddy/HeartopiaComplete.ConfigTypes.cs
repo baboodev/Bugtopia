@@ -185,6 +185,7 @@ namespace HeartopiaMod
             public bool netCookUseAllIngredients;
             public int netCookCookQuantity;
             public float homelandFarmWaterRadius;
+            public bool homelandFarmAutoFertilizeEnabled;
             public float autoFishScanTimeout = -1f;
             public float autoFishTeleportDelay = -1f;
             public float autoFishFishShadowDetectRange = -1f;
