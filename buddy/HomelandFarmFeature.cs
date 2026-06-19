@@ -12162,8 +12162,9 @@ namespace HeartopiaMod
             bool playerIsFieldOwner = this.TryHomelandFarmPlayerIsFieldOwner(ownerId);
             if (playerIsFieldOwner)
             {
-                selfHasWatered = selfInWaterList
-                    || (ownerWateredReadOk && ownerWatered);
+                // Owner primary water is isWet/masterWater, not waterGuids/friends — GUID may
+                // appear in the list while isWet is still false (stale/partial sync).
+                selfHasWatered = ownerWateredReadOk && ownerWatered;
                 bool belowMaxLevel = !totalWaterLevelReadOk || totalWaterLevel < HomelandFarmMaxTotalWaterLevel;
                 canWater = !selfHasWatered && belowMaxLevel;
             }
