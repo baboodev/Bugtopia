@@ -325,7 +325,14 @@ namespace HeartopiaMod
                 return resolved;
             }
 
-            this.DailyQuestSubmitAuraGcDisable();
+            // mono_gc_disable is absent on this sgen (moving) build, so the old GC-suspend guard was a
+            // no-op. Pin every raw order pointer instead so the moving GC cannot relocate/collect it
+            // mid-resolve (the native-AV-partway-through-the-order-list class of crash).
+            List<uint> orderPins = new List<uint>(orders.Count);
+            for (int i = 0; i < orders.Count; i++)
+            {
+                orderPins.Add(AuraMonoPinNew(orders[i]));
+            }
             try
             {
                 this.DailyQuestSubmitLogOrderSnapshot(orders);
@@ -346,34 +353,10 @@ namespace HeartopiaMod
             }
             finally
             {
-                this.DailyQuestSubmitAuraGcEnable();
+                FreeAuraMonoPins(orderPins);
             }
 
             return resolved;
-        }
-
-        // Suspend/resume the mono GC so raw order pointers held during the synchronous resolve pass are
-        // not collected/moved mid-sequence. Paired in a finally. No-op if the export is unavailable.
-        private void DailyQuestSubmitAuraGcDisable()
-        {
-            try
-            {
-                auraMonoGcDisable?.Invoke();
-            }
-            catch
-            {
-            }
-        }
-
-        private void DailyQuestSubmitAuraGcEnable()
-        {
-            try
-            {
-                auraMonoGcEnable?.Invoke();
-            }
-            catch
-            {
-            }
         }
 
         private bool TrySubmitDailyQuestCheapestItemsAura(

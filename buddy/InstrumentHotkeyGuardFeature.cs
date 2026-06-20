@@ -339,48 +339,38 @@ namespace HeartopiaMod
             instrumentType = 0;
             keyOption = MusicKeyOptionMode15a;
 
-            // Resolve everything under a GC guard so the game's mono GC can't collect/move the
-            // raw panel pointer mid-read (no-op if the export is missing on this build).
-            auraMonoGcDisable?.Invoke();
+            // Must allow the Managers._serviceDic fallback: on this build UIManager.get_Instance
+            // returns null via AuraMono, so the serviceDic enumeration is the ONLY path that
+            // actually resolves the UI manager (it's what made detection "confirmed working"
+            // originally). Disabling it here — as the "Crash fix" commit did — silently broke the
+            // guard whenever no other feature had already warmed cachedAuraMonoUiManagerObj. The
+            // heavy enumeration that the flag was meant to avoid now runs at most once per world
+            // (then the pinned cache serves every later resolve), and the guard's own TTL +
+            // miss-cooldown already bound how often a cold lookup can fire.
+            if (!this.TryGetAuraMonoUiView(
+                    "XDTGame.UI.Panel.InstrumentPanel",
+                    "InstrumentPanel",
+                    out IntPtr panelObj,
+                    out _)
+                || panelObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // mono_gc_disable does not exist on this sgen (moving) build — a GC-suspend guard is
+            // impossible — so pin panelObj across the field reads. The moving GC can otherwise
+            // relocate/collect it between resolve and read -> native AV (the no-crashlog crash this
+            // guard was meant to prevent; surfaced reliably under a debugger).
+            uint panelPin = AuraMonoPinNew(panelObj);
             try
             {
-                // Must allow the Managers._serviceDic fallback: on this build UIManager.get_Instance
-                // returns null via AuraMono, so the serviceDic enumeration is the ONLY path that
-                // actually resolves the UI manager (it's what made detection "confirmed working"
-                // originally). Disabling it here — as the "Crash fix" commit did — silently broke the
-                // guard whenever no other feature had already warmed cachedAuraMonoUiManagerObj. The
-                // heavy enumeration that the flag was meant to avoid now runs at most once per world
-                // (then the pinned cache serves every later resolve), and the guard's own TTL +
-                // miss-cooldown + GC guard already bound how often a cold lookup can fire.
-                if (!this.TryGetAuraMonoUiView(
-                        "XDTGame.UI.Panel.InstrumentPanel",
-                        "InstrumentPanel",
-                        out IntPtr panelObj,
-                        out _)
-                    || panelObj == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                // mono_gc_disable is a no-op on this build, so the GC guard above does NOT actually
-                // protect panelObj. Pin it explicitly across the field reads — the game's mono GC can
-                // otherwise collect/move it between resolve and read -> native AV (surfaced reliably
-                // under a debugger; this is the post-tool-fix Auto Bird Farm crash site).
-                uint panelPin = AuraMonoPinNew(panelObj);
-                try
-                {
-                    instrumentType = (int)this.TryReadAuraMonoUIntField(panelObj, "_instrumentType", "instrumentType");
-                    keyOption = (int)this.TryReadAuraMonoUIntField(panelObj, "_nowKeyOption", "nowKeyOption");
-                    return true;
-                }
-                finally
-                {
-                    AuraMonoPinFree(panelPin);
-                }
+                instrumentType = (int)this.TryReadAuraMonoUIntField(panelObj, "_instrumentType", "instrumentType");
+                keyOption = (int)this.TryReadAuraMonoUIntField(panelObj, "_nowKeyOption", "nowKeyOption");
+                return true;
             }
             finally
             {
-                auraMonoGcEnable?.Invoke();
+                AuraMonoPinFree(panelPin);
             }
         }
 

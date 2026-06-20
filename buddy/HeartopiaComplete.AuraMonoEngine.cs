@@ -127,9 +127,6 @@ namespace HeartopiaMod
         private delegate uint MonoClassGetRankDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void MonoGcVoidDelegate();
-
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate uint MonoGcHandleNewDelegate(IntPtr obj, [MarshalAs(UnmanagedType.Bool)] bool pinned);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -257,10 +254,6 @@ namespace HeartopiaMod
         private static MonoClassGetParentDelegate auraMonoClassGetParent;
 
         private static MonoClassGetRankDelegate auraMonoClassGetRank;
-
-        private static MonoGcVoidDelegate auraMonoGcDisable;
-
-        private static MonoGcVoidDelegate auraMonoGcEnable;
 
         private static MonoGcHandleNewDelegate auraMonoGcHandleNew;
 
@@ -845,8 +838,6 @@ namespace HeartopiaMod
             auraMonoTypeGetObject = this.GetAuraMonoExport<MonoTypeGetObjectDelegate>(monoModule, "mono_type_get_object");
             auraMonoClassGetParent = this.GetAuraMonoExport<MonoClassGetParentDelegate>(monoModule, "mono_class_get_parent");
             auraMonoClassGetRank = this.GetAuraMonoExport<MonoClassGetRankDelegate>(monoModule, "mono_class_get_rank");
-            auraMonoGcDisable = this.GetAuraMonoExport<MonoGcVoidDelegate>(monoModule, "mono_gc_disable");
-            auraMonoGcEnable = this.GetAuraMonoExport<MonoGcVoidDelegate>(monoModule, "mono_gc_enable");
             auraMonoGcHandleNew = this.GetAuraMonoExport<MonoGcHandleNewDelegate>(monoModule, "mono_gchandle_new");
             auraMonoGcHandleGetTarget = this.GetAuraMonoExport<MonoGcHandleGetTargetDelegate>(monoModule, "mono_gchandle_get_target");
             auraMonoGcHandleFree = this.GetAuraMonoExport<MonoGcHandleFreeDelegate>(monoModule, "mono_gchandle_free");

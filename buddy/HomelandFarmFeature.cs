@@ -19809,30 +19809,6 @@ namespace HeartopiaMod
             return this.TryHomelandFarmResolveBoxFieldPlacement(netId, out putZoneId, out fieldLocalPos, out _);
         }
 
-        // Suspend the mono GC so raw object pointers held during per-box native sow resolution are
-        // not collected/moved mid-sequence (cause of the random sow-all native AV). Paired with
-        // HomelandFarmAuraGcEnable in a finally. No-op if the export is unavailable.
-        private void HomelandFarmAuraGcDisable()
-        {
-            try
-            {
-                auraMonoGcDisable?.Invoke();
-            }
-            catch
-            {
-            }
-        }
-
-        private void HomelandFarmAuraGcEnable()
-        {
-            try
-            {
-                auraMonoGcEnable?.Invoke();
-            }
-            catch
-            {
-            }
-        }
 
         // Coroutine: resolves empty planter slots, yielding every HomelandFarmSowSlotsPerFrame boxes
         // so the per-box AuraMono resolution is spread across frames (prevents the native crash on
@@ -19943,37 +19919,28 @@ namespace HeartopiaMod
 
             this.EnsureHomelandFarmScannerTypes();
 
-            // Best-effort GC suspension for the per-box resolution. The crash-prone per-box
-            // GetLevelObject/rectMatrix calls were removed (put-zone is deterministic, world pose
-            // comes from the cached entity position), so this is now only cheap insurance for the
-            // remaining GetAllComponents reads. No-op where mono_gc_disable is unavailable.
-            this.HomelandFarmAuraGcDisable();
-            try
+            // Former mono_gc_disable guard removed: it is a no-op on this sgen build, and this loop
+            // holds only netIds (value types) across its yields — never a raw mono pointer. The
+            // per-box raw reads happen inside the resolvers below; that is where pinning belongs.
+            foreach (uint netId in cropBoxNetIds)
             {
-                foreach (uint netId in cropBoxNetIds)
+                if (plantPoints.Count >= maxSlots)
                 {
-                    if (plantPoints.Count >= maxSlots)
-                    {
-                        break;
-                    }
-
-                    if (this.TryHomelandFarmIsEmptyCropPlanter(netId, playerNetId, occupiedCropBoxNetIds)
-                        && this.TryHomelandFarmAppendEmptyPlanterPoint(netId, usedLevelObjectNetIds, plantPoints, maxSlots, ref statusNote))
-                    {
-                        emptyBoxCount++;
-                    }
-
-                    // Spread per-box AuraMono resolution across frames.
-                    if (++sinceYield >= HomelandFarmSowSlotsPerFrame)
-                    {
-                        sinceYield = 0;
-                        yield return null;
-                    }
+                    break;
                 }
-            }
-            finally
-            {
-                this.HomelandFarmAuraGcEnable();
+
+                if (this.TryHomelandFarmIsEmptyCropPlanter(netId, playerNetId, occupiedCropBoxNetIds)
+                    && this.TryHomelandFarmAppendEmptyPlanterPoint(netId, usedLevelObjectNetIds, plantPoints, maxSlots, ref statusNote))
+                {
+                    emptyBoxCount++;
+                }
+
+                // Spread per-box AuraMono resolution across frames.
+                if (++sinceYield >= HomelandFarmSowSlotsPerFrame)
+                {
+                    sinceYield = 0;
+                    yield return null;
+                }
             }
 
             if (plantPoints.Count == 0)
