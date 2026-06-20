@@ -362,9 +362,21 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                instrumentType = (int)this.TryReadAuraMonoUIntField(panelObj, "_instrumentType", "instrumentType");
-                keyOption = (int)this.TryReadAuraMonoUIntField(panelObj, "_nowKeyOption", "nowKeyOption");
-                return true;
+                // mono_gc_disable is a no-op on this build, so the GC guard above does NOT actually
+                // protect panelObj. Pin it explicitly across the field reads — the game's mono GC can
+                // otherwise collect/move it between resolve and read -> native AV (surfaced reliably
+                // under a debugger; this is the post-tool-fix Auto Bird Farm crash site).
+                uint panelPin = AuraMonoPinNew(panelObj);
+                try
+                {
+                    instrumentType = (int)this.TryReadAuraMonoUIntField(panelObj, "_instrumentType", "instrumentType");
+                    keyOption = (int)this.TryReadAuraMonoUIntField(panelObj, "_nowKeyOption", "nowKeyOption");
+                    return true;
+                }
+                finally
+                {
+                    AuraMonoPinFree(panelPin);
+                }
             }
             finally
             {
