@@ -267,6 +267,7 @@ namespace HeartopiaMod
         private IntPtr homelandFarmAuraPlantWaterPlantMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraPlantWaterPlant2Method = IntPtr.Zero;
         private IntPtr homelandFarmAuraPlantCollectSeedMethod = IntPtr.Zero;
+        private IntPtr homelandFarmAuraPlantPickPlantMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraDataCenterClass = IntPtr.Zero;
         private IntPtr homelandFarmAuraEntitiesClass = IntPtr.Zero;
         private IntPtr homelandFarmAuraLevelObjectManagerClass = IntPtr.Zero;
@@ -360,6 +361,7 @@ namespace HeartopiaMod
         private bool homelandFarmNetworkCommandTypesResolved = false;
         private Type homelandFarmWaterPlantNetworkCommandType = null;
         private Type homelandFarmPickPlantCrossedSeedNetworkCommandType = null;
+        private Type homelandFarmPickPlantNetworkCommandType = null;
         private Type homelandFarmNetIdType = null;
 
         private MethodInfo homelandFarmDataCenterTryGetComponentDataMethodDef = null;
@@ -373,6 +375,7 @@ namespace HeartopiaMod
         private MethodInfo homelandFarmCharacterEquipHandholdMethod = null;
         private MethodInfo homelandFarmPlantWaterPlantMethod = null;
         private MethodInfo homelandFarmPlantCollectSeedMethod = null;
+        private MethodInfo homelandFarmPlantPickPlantMethod = null;
 
         private Type homelandFarmPlayerDataCenterType = null;
         private Type homelandFarmLocalPlayerComponentType = null;
@@ -1641,6 +1644,10 @@ namespace HeartopiaMod
                 "PickPlantCrossedSeedNetworkCommand",
                 "XDT.Scene.Shared.Modules.Plant.PickPlantCrossedSeedNetworkCommand",
                 "EcsClient.XDT.Scene.Shared.Modules.Plant.PickPlantCrossedSeedNetworkCommand");
+            this.homelandFarmPickPlantNetworkCommandType = this.ResolveHomelandFarmManagedType(
+                "PickPlantNetworkCommand",
+                "XDT.Scene.Shared.Modules.Plant.PickPlantNetworkCommand",
+                "EcsClient.XDT.Scene.Shared.Modules.Plant.PickPlantNetworkCommand");
             this.homelandFarmNetIdType = this.ResolveHomelandFarmManagedType(
                 "NetId",
                 "EcsClient.XDT.Scene.Shared.Data.SharedData.NetId",
@@ -1690,6 +1697,7 @@ namespace HeartopiaMod
             }
             this.homelandFarmPlantWaterPlantMethod = this.GetMethodByNameAndParamCountQuiet(this.homelandFarmPlantProtocolManagerType, "WaterPlant", 3);
             this.homelandFarmPlantCollectSeedMethod = this.GetMethodByNameAndParamCountQuiet(this.homelandFarmPlantProtocolManagerType, "SendCollectSeedCommand", 1);
+            this.homelandFarmPlantPickPlantMethod = this.GetMethodByNameAndParamCountQuiet(this.homelandFarmPlantProtocolManagerType, "PickPlant", 1);
 
             List<string> missingMethods = new List<string>();
             if (this.homelandFarmDataCenterTryGetComponentDataMethodDef == null) missingMethods.Add("DataCenter.TryGetComponentData");
@@ -1811,6 +1819,11 @@ namespace HeartopiaMod
                 if (this.homelandFarmAuraPlantCollectSeedMethod == IntPtr.Zero)
                 {
                     this.homelandFarmAuraPlantCollectSeedMethod = this.FindAuraMonoMethodOnHierarchy(plantProtocolClass, "SendCollectSeedCommand", 1);
+                }
+
+                if (this.homelandFarmAuraPlantPickPlantMethod == IntPtr.Zero)
+                {
+                    this.homelandFarmAuraPlantPickPlantMethod = this.FindAuraMonoMethodOnHierarchy(plantProtocolClass, "PickPlant", 1);
                 }
             }
 
@@ -3391,8 +3404,47 @@ namespace HeartopiaMod
 
         private List<uint> ScanHomelandFarmCollectablePlantSeedsByRadius()
         {
+            return this.ScanHomelandFarmPlantsByRadius(
+                (plantData, _) => this.TryHomelandFarmReadComponentBool(
+                    plantData,
+                    out bool hasCrossedSeed,
+                    "hasCrossedSeed",
+                    "_hasCrossedSeed",
+                    "HasCrossedSeed") && hasCrossedSeed,
+                "Collectable plant seeds");
+        }
+
+        private List<uint> ScanHomelandFarmPickablePlantsByRadius(bool requireOutOfSeason)
+        {
+            return this.ScanHomelandFarmPlantsByRadius(
+                (plantData, netId) =>
+                {
+                    if (!this.TryHomelandFarmReadComponentInt(plantData, out int stage, "stage", "Stage") || stage != 4)
+                    {
+                        return false;
+                    }
+
+                    if (this.TryHomelandFarmReadComponentBool(plantData, out bool isPick, "isPick", "_isPick", "IsPick") && isPick)
+                    {
+                        return false;
+                    }
+
+                    if (!requireOutOfSeason)
+                    {
+                        return true;
+                    }
+
+                    IntPtr entityObj = IntPtr.Zero;
+                    this.TryGetAuraMonoEntityObjectByNetId(netId, out entityObj);
+                    return this.TryHomelandFarmTryReadPlantCheckIfOutOfSeason(netId, entityObj, out bool outOfSeason) && outOfSeason;
+                },
+                requireOutOfSeason ? "Dormant plants" : "Mature plants");
+        }
+
+        private List<uint> ScanHomelandFarmPlantsByRadius(Func<object, uint, bool> acceptPlant, string logLabel)
+        {
             List<uint> result = new List<uint>();
-            if (!this.EnsureHomelandFarmReflectionReady())
+            if (!this.EnsureHomelandFarmReflectionReady() || acceptPlant == null)
             {
                 return result;
             }
@@ -3418,12 +3470,8 @@ namespace HeartopiaMod
             foreach (uint netId in netIds)
             {
                 if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object plantData, out _, "PlantItemData")
-                    || plantData == null)
-                {
-                    continue;
-                }
-
-                if (!this.TryHomelandFarmReadComponentBool(plantData, out bool hasCrossedSeed, "hasCrossedSeed", "_hasCrossedSeed", "HasCrossedSeed") || !hasCrossedSeed)
+                    || plantData == null
+                    || !acceptPlant(plantData, netId))
                 {
                     continue;
                 }
@@ -3439,7 +3487,7 @@ namespace HeartopiaMod
                 result.Add(netId);
             }
 
-            this.HomelandFarmLog("Collectable plant seeds (radius " + radius.ToString("F0") + "): " + result.Count);
+            this.HomelandFarmLog(logLabel + " (radius " + radius.ToString("F0") + "): " + result.Count);
             return result;
         }
 
@@ -4049,6 +4097,41 @@ namespace HeartopiaMod
 
             if (this.TryResolveHomelandFarmAuraProtocol(out _)
                 && this.TryHomelandFarmInvokeAuraUintProtocol(this.homelandFarmAuraPlantCollectSeedMethod, plantNetId, "CollectPlantSeed", out status))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryHomelandFarmPickFlower(uint plantNetId, out string status)
+        {
+            status = "Pick flower unavailable.";
+            if (plantNetId == 0U || !this.EnsureHomelandFarmReflectionReady())
+            {
+                status = plantNetId == 0U ? "Plant netId missing." : this.homelandFarmReflectionUnavailableStatus;
+                return false;
+            }
+
+            if (this.homelandFarmManagedReflectionReady && this.homelandFarmPlantPickPlantMethod != null
+                && this.TryHomelandFarmInvokeStaticUintProtocol(
+                    this.homelandFarmPlantPickPlantMethod,
+                    plantNetId,
+                    this.homelandFarmPickPlantNetworkCommandType,
+                    command =>
+                    {
+                        object cmd = command;
+                        return this.TrySetFieldValue(this.homelandFarmPickPlantNetworkCommandType, ref cmd, "plantNetId", plantNetId)
+                            || this.TrySetFieldValue(this.homelandFarmPickPlantNetworkCommandType, ref cmd, "netId", plantNetId);
+                    },
+                    "PickFlower",
+                    out status))
+            {
+                return true;
+            }
+
+            if (this.TryResolveHomelandFarmAuraProtocol(out _)
+                && this.TryHomelandFarmInvokeAuraUintProtocol(this.homelandFarmAuraPlantPickPlantMethod, plantNetId, "PickFlower", out status))
             {
                 return true;
             }
@@ -12481,6 +12564,538 @@ namespace HeartopiaMod
             return totalWaterLevelReadOk ? (totalWaterLevel >= HomelandFarmMaxTotalWaterLevel).ToString() : "?";
         }
 
+        private string HomelandFarmFormatPlantExtraDiagnostics(uint plantNetId, IntPtr entityObj, object plantData)
+        {
+            bool dormancyReadOk = this.TryHomelandFarmTryReadPlantCheckIfOutOfSeason(plantNetId, entityObj, out bool isDormant);
+            bool crossedSeedReadOk = this.TryHomelandFarmReadComponentBool(
+                plantData,
+                out bool hasCrossedSeed,
+                "hasCrossedSeed",
+                "_hasCrossedSeed",
+                "HasCrossedSeed");
+            bool isPickReadOk = this.TryHomelandFarmReadComponentBool(
+                plantData,
+                out bool isPick,
+                "isPick",
+                "_isPick",
+                "IsPick");
+            return " dormancy=" + HomelandFarmFormatDiagnosticValue(dormancyReadOk, isDormant)
+                + " hasCrossedSeed=" + HomelandFarmFormatDiagnosticValue(crossedSeedReadOk, hasCrossedSeed)
+                + " isPick=" + HomelandFarmFormatDiagnosticValue(isPickReadOk, isPick);
+        }
+
+        // Same predicate as red sprinkler highlight: FurnitureBaseComponent.OnInteractionSelected →
+        // PlantComponent.CheckIfOutOfSeason() (TableFlowerplant.seasonTime vs ITimeService.GetGameTimeMs).
+        private bool TryHomelandFarmTryReadPlantCheckIfOutOfSeason(uint plantNetId, IntPtr entityObj, out bool outOfSeason)
+        {
+            outOfSeason = false;
+            if (plantNetId == 0U && entityObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (entityObj == IntPtr.Zero && plantNetId != 0U)
+            {
+                this.TryGetAuraMonoEntityObjectByNetId(plantNetId, out entityObj);
+            }
+
+            if (this.EnsureAuraMonoApiReady() && this.AttachAuraMonoThread()
+                && entityObj != IntPtr.Zero
+                && this.TryHomelandFarmTryInvokePlantCheckIfOutOfSeasonOnEntity(entityObj, out outOfSeason))
+            {
+                return true;
+            }
+
+            if (this.TryHomelandFarmTryReadFlowerStaticIdForOutOfSeason(entityObj, plantNetId, out int staticId)
+                && this.TryHomelandFarmTryReplicatePlantCheckIfOutOfSeason(staticId, out outOfSeason))
+            {
+                return true;
+            }
+
+            return this.TryHomelandFarmTryReadPlantCheckIfOutOfSeasonManaged(plantNetId, out outOfSeason);
+        }
+
+        private bool TryHomelandFarmTryInvokePlantCheckIfOutOfSeasonOnEntity(IntPtr entityObj, out bool outOfSeason)
+        {
+            outOfSeason = false;
+            if (entityObj == IntPtr.Zero || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            this.HomelandFarmResolveFarmComponentClassesInternal(logResults: false);
+            if (this.homelandFarmAuraPlantComponentClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(entityObj, out IntPtr componentsObj, "GetAllComponents") || componentsObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            List<IntPtr> components = new List<IntPtr>(8);
+            List<uint> pins = new List<uint>(8);
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components, pins))
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr componentObj = components[i];
+                    if (componentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    IntPtr componentClass = auraMonoObjectGetClass(componentObj);
+                    if (componentClass == IntPtr.Zero
+                        || !this.IsAuraMonoClassAssignableTo(componentClass, this.homelandFarmAuraPlantComponentClass))
+                    {
+                        continue;
+                    }
+
+                    IntPtr method = this.FindAuraMonoMethodOnHierarchy(componentClass, "CheckIfOutOfSeason", 0);
+                    if (method == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    IntPtr exc = IntPtr.Zero;
+                    IntPtr boxed = auraMonoRuntimeInvoke(method, componentObj, IntPtr.Zero, ref exc);
+                    if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    return this.TryUnboxMonoBoolean(boxed, out outOfSeason);
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+
+            return false;
+        }
+
+        private bool TryHomelandFarmTryReadPlantCheckIfOutOfSeasonManaged(uint plantNetId, out bool outOfSeason)
+        {
+            outOfSeason = false;
+            if (plantNetId == 0U)
+            {
+                return false;
+            }
+
+            if (this.homelandFarmPlantComponentType == null)
+            {
+                this.homelandFarmPlantComponentType = this.ResolveHomelandFarmManagedType(
+                    "PlantComponent",
+                    "XDTLevelAndEntity.Gameplay.Component.Homeland.PlantComponent",
+                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Homeland.PlantComponent");
+            }
+
+            if (this.homelandFarmPlantComponentType == null)
+            {
+                return false;
+            }
+
+            MethodInfo checkMethod = this.homelandFarmPlantComponentType.GetMethod(
+                "CheckIfOutOfSeason",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                Type.EmptyTypes,
+                null);
+            if (checkMethod == null)
+            {
+                return false;
+            }
+
+            if (this.homelandFarmEntitiesType != null)
+            {
+                MethodInfo getEntityMethod = this.homelandFarmEntitiesType.GetMethod(
+                    "GetEntity",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null,
+                    new[] { typeof(uint) },
+                    null);
+                if (getEntityMethod != null)
+                {
+                    try
+                    {
+                        object entity = getEntityMethod.Invoke(null, new object[] { plantNetId });
+                        if (entity != null
+                            && this.TryHomelandFarmGetComponent(entity, this.homelandFarmPlantComponentType, out object plantComponent)
+                            && plantComponent != null)
+                        {
+                            object result = checkMethod.Invoke(plantComponent, null);
+                            if (result is bool value)
+                            {
+                                outOfSeason = value;
+                                return true;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryHomelandFarmTryReadFlowerStaticIdForOutOfSeason(IntPtr entityObj, uint plantNetId, out int staticId)
+        {
+            staticId = 0;
+            if (plantNetId != 0U
+                && this.TryHomelandFarmGetComponentData(
+                    this.homelandFarmLevelEntityComponentDataType,
+                    plantNetId,
+                    out object levelEntityData,
+                    out _,
+                    "LevelEntityComponentData")
+                && this.TryHomelandFarmReadComponentInt(
+                    levelEntityData,
+                    out staticId,
+                    "staticId",
+                    "_staticId",
+                    "StaticId")
+                && staticId > 0)
+            {
+                return true;
+            }
+
+            if (entityObj == IntPtr.Zero || !this.EnsureAuraMonoApiReady() || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(entityObj, out IntPtr componentsObj, "GetAllComponents") || componentsObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            List<IntPtr> components = new List<IntPtr>(8);
+            List<uint> pins = new List<uint>(8);
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components, pins))
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr componentObj = components[i];
+                    if (componentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    IntPtr dataHandle = this.TryHomelandFarmResolveAuraComponentDataHandle(componentObj);
+                    if (dataHandle == IntPtr.Zero)
+                    {
+                        dataHandle = componentObj;
+                    }
+
+                    if (this.TryGetMonoInt32Member(dataHandle, "staticId", out staticId) && staticId > 0)
+                    {
+                        return true;
+                    }
+
+                    if (this.TryGetMonoInt32Member(dataHandle, "StaticId", out staticId) && staticId > 0)
+                    {
+                        return true;
+                    }
+
+                    if (this.TryInvokeAuraMonoZeroArgInt(componentObj, out staticId, "get_StaticId", "GetStaticId") && staticId > 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+
+            return false;
+        }
+
+        private bool TryHomelandFarmTryReplicatePlantCheckIfOutOfSeason(int flowerStaticId, out bool outOfSeason)
+        {
+            outOfSeason = false;
+            if (flowerStaticId <= 0)
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmTryGetFlowerSeasonEndTime(flowerStaticId, out DateTime seasonEnd))
+            {
+                return false;
+            }
+
+            if (seasonEnd == DateTime.MaxValue)
+            {
+                outOfSeason = false;
+                return true;
+            }
+
+            if (!this.TryHomelandFarmTryGetCurrentGameTime(out DateTime gameTime))
+            {
+                return false;
+            }
+
+            outOfSeason = gameTime > seasonEnd;
+            return true;
+        }
+
+        private unsafe bool TryHomelandFarmTryGetCurrentGameTime(out DateTime gameTime)
+        {
+            gameTime = default;
+            if (this.EnsureAuraMonoApiReady() && this.AttachAuraMonoThread() && auraMonoRuntimeInvoke != null)
+            {
+                IntPtr cls = this.FindHomelandFarmAuraClass(
+                    "XDTDataAndProtocol.ProtocolService.GameTimeUtility",
+                    "XDTDataAndProtocol.ProtocolService",
+                    "GameTimeUtility");
+                IntPtr method = cls != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(cls, "GetCurrentGameTimeMs", 0)
+                    : IntPtr.Zero;
+                if (method != IntPtr.Zero)
+                {
+                    IntPtr exc = IntPtr.Zero;
+                    IntPtr boxed = auraMonoRuntimeInvoke(method, IntPtr.Zero, IntPtr.Zero, ref exc);
+                    if (exc == IntPtr.Zero && boxed != IntPtr.Zero && auraMonoObjectUnbox != null)
+                    {
+                        IntPtr raw = auraMonoObjectUnbox(boxed);
+                        if (raw != IntPtr.Zero)
+                        {
+                            gameTime = new DateTime(*(long*)raw);
+                            if (gameTime != default)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            try
+            {
+                Type gameTimeUtilityType = this.FindLoadedType(
+                    "XDTDataAndProtocol.ProtocolService.GameTimeUtility",
+                    "GameTimeUtility");
+                MethodInfo getTimeMethod = gameTimeUtilityType?.GetMethod(
+                    "GetCurrentGameTimeMs",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    Type.EmptyTypes,
+                    null);
+                if (getTimeMethod != null)
+                {
+                    object result = getTimeMethod.Invoke(null, null);
+                    if (result is DateTime managedTime && managedTime != default)
+                    {
+                        gameTime = managedTime;
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private bool TryHomelandFarmTryGetFlowerSeasonEndTime(int flowerStaticId, out DateTime seasonEnd)
+        {
+            seasonEnd = DateTime.MaxValue;
+            if (flowerStaticId <= 0)
+            {
+                return false;
+            }
+
+            if (this.EnsureHomelandFarmTableDataReflection())
+            {
+                MethodInfo getFlowerplant = this.homelandFarmTableDataType?.GetMethod(
+                    "GetFlowerplant",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(int) },
+                    null);
+                if (getFlowerplant != null)
+                {
+                    try
+                    {
+                        object row = getFlowerplant.Invoke(null, new object[] { flowerStaticId });
+                        if (row != null && this.TryHomelandFarmTryReadSeasonEndFromTableRow(row, out seasonEnd))
+                        {
+                            return true;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return this.TryHomelandFarmTryGetFlowerSeasonEndTimeAuraMono(flowerStaticId, out seasonEnd);
+        }
+
+        private unsafe bool TryHomelandFarmTryGetFlowerSeasonEndTimeAuraMono(int flowerStaticId, out DateTime seasonEnd)
+        {
+            seasonEnd = DateTime.MaxValue;
+            if (flowerStaticId <= 0 || !this.EnsureAuraMonoApiReady() || auraMonoClassFromName == null || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr ecsImage = this.FindAuraMonoImage(new[] { "EcsClient", "EcsClient.dll" });
+            if (ecsImage == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr tableDataClass = auraMonoClassFromName(ecsImage, string.Empty, "TableData");
+            if (tableDataClass == IntPtr.Zero)
+            {
+                tableDataClass = auraMonoClassFromName(ecsImage, "EcsClient", "TableData");
+            }
+
+            if (tableDataClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr getFlowerplantMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetFlowerplant", 1);
+            if (getFlowerplantMethod == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&flowerStaticId);
+            IntPtr rowObj = auraMonoRuntimeInvoke(getFlowerplantMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return this.TryHomelandFarmTryReadFlowerSeasonEndFromAuraRow(rowObj, out seasonEnd);
+        }
+
+        private bool TryHomelandFarmTryReadSeasonEndFromTableRow(object row, out DateTime seasonEnd)
+        {
+            seasonEnd = DateTime.MaxValue;
+            if (row == null)
+            {
+                return false;
+            }
+
+            object seasonTime = this.TryGetManagedMemberValue(row, "seasonTime") ?? this.TryGetManagedMemberValue(row, "SeasonTime");
+            if (seasonTime == null)
+            {
+                return true;
+            }
+
+            object dateField = this.TryGetManagedMemberValue(seasonTime, "date") ?? this.TryGetManagedMemberValue(seasonTime, "Date");
+            if (!(dateField is Array dateArray) || dateArray.Length == 0)
+            {
+                return true;
+            }
+
+            object first = dateArray.GetValue(0);
+            if (first == null)
+            {
+                return false;
+            }
+
+            object endValue = this.TryGetManagedMemberValue(first, "endTime") ?? this.TryGetManagedMemberValue(first, "EndTime");
+            if (endValue is DateTime endTime)
+            {
+                seasonEnd = endTime;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryHomelandFarmTryReadFlowerSeasonEndFromAuraRow(IntPtr rowObj, out DateTime seasonEnd)
+        {
+            seasonEnd = DateTime.MaxValue;
+            if (rowObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(rowObj, "seasonTime", out IntPtr seasonTimeObj) || seasonTimeObj == IntPtr.Zero)
+            {
+                this.TryGetMonoObjectMember(rowObj, "SeasonTime", out seasonTimeObj);
+            }
+
+            if (seasonTimeObj == IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (!this.TryGetMonoObjectMember(seasonTimeObj, "date", out IntPtr dateArrayObj) || dateArrayObj == IntPtr.Zero)
+            {
+                this.TryGetMonoObjectMember(seasonTimeObj, "Date", out dateArrayObj);
+            }
+
+            if (dateArrayObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            List<IntPtr> dateItems = new List<IntPtr>(1);
+            List<uint> pins = new List<uint>(1);
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(dateArrayObj, dateItems, pins) || dateItems.Count == 0)
+                {
+                    return false;
+                }
+
+                return this.TryHomelandFarmTryReadAuraDateTimeMember(dateItems[0], "endTime", out seasonEnd)
+                    || this.TryHomelandFarmTryReadAuraDateTimeMember(dateItems[0], "EndTime", out seasonEnd);
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        private unsafe bool TryHomelandFarmTryReadAuraDateTimeMember(IntPtr obj, string memberName, out DateTime value)
+        {
+            value = default;
+            if (obj == IntPtr.Zero || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(obj, memberName, out IntPtr boxed) || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            value = new DateTime(*(long*)raw);
+            return true;
+        }
+
         private bool TryHomelandFarmTryReadLevelObjectEntityNetId(IntPtr levelObjectObj, out uint entityNetId)
         {
             entityNetId = 0U;
@@ -12781,7 +13396,8 @@ namespace HeartopiaMod
                             + " atMaxWater=" + HomelandFarmFormatAtMaxWater(plantTotalWaterLevelReadOk, plantTotalWaterLevel)
                             + " selfInWaterList=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfInWaterList)
                             + " selfWatered=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfHasWatered)
-                            + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater));
+                            + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater)
+                            + this.HomelandFarmFormatPlantExtraDiagnostics(waterNetId, entityObj, plantData));
                         continue;
                     }
 
@@ -12911,6 +13527,7 @@ namespace HeartopiaMod
                         out bool selfHasWatered,
                         out bool selfGuidReadOk,
                         out bool canWater);
+                    this.TryGetAuraMonoEntityObjectByNetId(legacyWaterNetId, out IntPtr legacyEntityObj);
                     diagnosticLines.Add(
                         "[Diag] plant netId=" + legacyWaterNetId
                         + " owner=" + legacyOwnerId
@@ -12923,7 +13540,8 @@ namespace HeartopiaMod
                         + " atMaxWater=" + HomelandFarmFormatAtMaxWater(plantTotalWaterLevelReadOk, plantTotalWaterLevel)
                         + " selfInWaterList=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfInWaterList)
                         + " selfWatered=" + HomelandFarmFormatDiagnosticValue(selfGuidReadOk, selfHasWatered)
-                        + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater));
+                        + " canWater=" + HomelandFarmFormatDiagnosticCanWater(selfGuidReadOk, canWater)
+                        + this.HomelandFarmFormatPlantExtraDiagnostics(legacyWaterNetId, legacyEntityObj, legacyPlantData));
                     continue;
                 }
 
@@ -15311,6 +15929,20 @@ namespace HeartopiaMod
             this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmCollectPlantSeedsRoutine(silent));
         }
 
+        private void StartHomelandFarmPickFlowers(bool dormantOnly, bool silent)
+        {
+            if (!this.TryBeginHomelandFarmAction(silent, out _, allowVisitingFarmArea: true))
+            {
+                return;
+            }
+
+            this.HomelandFarmLog("Start pick flowers in radius dormantOnly=" + dormantOnly);
+            this.homelandFarmLastStatus = dormantOnly
+                ? "Collecting dormant plants in radius..."
+                : "Collecting flowers in radius...";
+            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmPickFlowersRoutine(dormantOnly, silent));
+        }
+
         private void StartHomelandFarmWeedAll(bool silent)
         {
             if (!this.TryBeginHomelandFarmAction(silent, out _, allowVisitingFarmArea: true))
@@ -15753,6 +16385,72 @@ namespace HeartopiaMod
                         ? new Color(0.45f, 1f, 0.55f)
                         : new Color(1f, 0.55f, 0.45f);
                     this.AddMenuNotification("Plant seeds: " + collected + "/" + plantNetIds.Count, notifyColor);
+                }
+            }
+            finally
+            {
+                this.homelandFarmCoroutine = null;
+                this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
+            }
+        }
+
+        private IEnumerator HomelandFarmPickFlowersRoutine(bool dormantOnly, bool silent)
+        {
+            yield return null;
+
+            string emptyStatus = dormantOnly ? "No dormant plants in radius." : "No mature flowers in radius.";
+            string notifyLabel = dormantOnly ? "Dormant plants" : "Flowers";
+            string logTag = dormantOnly ? "dormant" : "flower";
+
+            try
+            {
+                List<uint> plantNetIds = this.ScanHomelandFarmPickablePlantsByRadius(dormantOnly);
+                if (plantNetIds.Count == 0)
+                {
+                    this.homelandFarmLastStatus = emptyStatus;
+                    if (!silent)
+                    {
+                        this.AddMenuNotification(emptyStatus, new Color(0.45f, 0.88f, 1f));
+                    }
+
+                    yield break;
+                }
+
+                int collected = 0;
+                int failed = 0;
+                for (int i = 0; i < plantNetIds.Count; i++)
+                {
+                    uint plantNetId = plantNetIds[i];
+                    if (this.TryHomelandFarmPickFlower(plantNetId, out string pickStatus))
+                    {
+                        collected++;
+                        this.HomelandFarmLog("Pick " + logTag + " ok netId=" + plantNetId + " " + pickStatus);
+                    }
+                    else
+                    {
+                        failed++;
+                        this.HomelandFarmLog("Pick " + logTag + " fail netId=" + plantNetId + " " + pickStatus);
+                    }
+
+                    if (HomelandFarmHarvestDelaySeconds > 0f)
+                    {
+                        yield return new WaitForSecondsRealtime(HomelandFarmHarvestDelaySeconds);
+                    }
+                    else if ((i + 1) % HomelandFarmHarvestFramePaceBatch == 0)
+                    {
+                        yield return null;
+                    }
+                }
+
+                string noun = dormantOnly ? "dormant plant(s)" : "flower(s)";
+                this.homelandFarmLastStatus = "Collected " + collected + "/" + plantNetIds.Count + " " + noun
+                    + (failed > 0 ? ", " + failed + " failed" : string.Empty) + ".";
+                if (!silent)
+                {
+                    Color notifyColor = collected > 0
+                        ? new Color(0.45f, 1f, 0.55f)
+                        : new Color(1f, 0.55f, 0.45f);
+                    this.AddMenuNotification(notifyLabel + ": " + collected + "/" + plantNetIds.Count, notifyColor);
                 }
             }
             finally
@@ -20470,7 +21168,7 @@ namespace HeartopiaMod
             y += 172f;
 
             // 5. ACTION BUTTONS — use the radius + selected seed/fertilizer above.
-            Rect opsRect = new Rect(left, y, width, 196f);
+            Rect opsRect = new Rect(left, y, width, 272f);
             GUI.Box(opsRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
             this.DrawCardOutline(opsRect, 1f);
             GUI.Label(new Rect(opsRect.x + 16f, opsRect.y + 12f, 300f, 20f), this.L("homeland_farm.operations_section"), labelStyle);
@@ -20505,9 +21203,20 @@ namespace HeartopiaMod
             }
 
             rowY += buttonH + buttonGapY;
-            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.sow"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.collect_dormant"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.StartHomelandFarmPickFlowers(dormantOnly: true, silent: false);
+            }
+
+            if (GUI.Button(new Rect(col2, rowY, buttonW, buttonH), this.L("homeland_farm.sow"), this.themePrimaryButtonStyle ?? GUI.skin.button))
             {
                 this.StartHomelandFarmSowAll(silent: false);
+            }
+
+            rowY += buttonH + buttonGapY;
+            if (GUI.Button(new Rect(col1, rowY, buttonW, buttonH), this.L("homeland_farm.collect_flowers"), this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.StartHomelandFarmPickFlowers(dormantOnly: false, silent: false);
             }
 
             if (GUI.Button(new Rect(col2, rowY, buttonW, buttonH), this.L("homeland_farm.fertilize"), this.themePrimaryButtonStyle ?? GUI.skin.button))
@@ -20522,7 +21231,7 @@ namespace HeartopiaMod
             }
 
             GUI.enabled = true;
-            y += 208f;
+            y += 284f;
 
             Rect statusRect = new Rect(left, y, width, 52f);
             GUI.Box(statusRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
