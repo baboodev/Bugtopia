@@ -22,7 +22,7 @@ namespace HeartopiaMod
     internal static class Breadcrumbs
     {
         // Bump on every diagnostic deploy so the running build is verifiable from the log header.
-        private const string BuildTag = "2026-06-20T09 setenabled-steps";
+        private const string BuildTag = "2026-06-20T10 toolobj-pin-FIX";
         private const int RingSize = 160;
         private const long ThrottleMs = 250;
 

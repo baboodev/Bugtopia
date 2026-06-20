@@ -901,28 +901,41 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                bool hasDurability = this.TryGetMonoIntMember(toolObj, "durability", out durability)
-                    || this.TryGetMonoIntMember(toolObj, "_durability", out durability)
-                    || this.TryGetMonoIntMember(toolObj, "Durability", out durability);
-                bool hasMaxDurability = this.TryGetMonoIntMember(toolObj, "maxDurability", out maxDurability)
-                    || this.TryGetMonoIntMember(toolObj, "_maxDurability", out maxDurability)
-                    || this.TryGetMonoIntMember(toolObj, "MaxDurability", out maxDurability);
-                if (!hasDurability || !hasMaxDurability)
+                // Pin the freshly-invoked tool object across the field reads. It is not cached/pinned
+                // otherwise, so bdwgc can move/collect it between the invoke and these reads — a window
+                // wide enough under a debugger to fault (the Auto Bird Farm enable crash, via
+                // CapturePreviousTool -> TryGetCurrentToolInfo). Pin immediately (no managed alloc in
+                // between), free in finally.
+                uint toolPin = AuraMonoPinNew(toolObj);
+                try
                 {
-                    status = "AuraMono ToolSystem fields unreadable: " + this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(toolObj));
-                    return false;
-                }
+                    bool hasDurability = this.TryGetMonoIntMember(toolObj, "durability", out durability)
+                        || this.TryGetMonoIntMember(toolObj, "_durability", out durability)
+                        || this.TryGetMonoIntMember(toolObj, "Durability", out durability);
+                    bool hasMaxDurability = this.TryGetMonoIntMember(toolObj, "maxDurability", out maxDurability)
+                        || this.TryGetMonoIntMember(toolObj, "_maxDurability", out maxDurability)
+                        || this.TryGetMonoIntMember(toolObj, "MaxDurability", out maxDurability);
+                    if (!hasDurability || !hasMaxDurability)
+                    {
+                        status = "AuraMono ToolSystem fields unreadable: " + this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(toolObj));
+                        return false;
+                    }
 
-                if (!this.TryGetMonoIntMember(toolObj, "Id", out toolId)
-                    && !this.TryGetMonoIntMember(toolObj, "id", out toolId)
-                    && !this.TryGetMonoIntMember(toolObj, "toolId", out toolId)
-                    && !this.TryGetMonoIntMember(toolObj, "staticId", out toolId))
+                    if (!this.TryGetMonoIntMember(toolObj, "Id", out toolId)
+                        && !this.TryGetMonoIntMember(toolObj, "id", out toolId)
+                        && !this.TryGetMonoIntMember(toolObj, "toolId", out toolId)
+                        && !this.TryGetMonoIntMember(toolObj, "staticId", out toolId))
+                    {
+                        toolId = -5;
+                    }
+
+                    status = "AuraMono ToolSystem OK: " + this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(toolObj));
+                    return maxDurability > 0;
+                }
+                finally
                 {
-                    toolId = -5;
+                    AuraMonoPinFree(toolPin);
                 }
-
-                status = "AuraMono ToolSystem OK: " + this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(toolObj));
-                return maxDurability > 0;
             }
             catch (Exception ex)
             {

@@ -471,7 +471,17 @@ namespace HeartopiaMod
                     return;
                 }
                 this.handle = AuraMonoPinNew(obj);
-                this.raw = this.handle != 0 ? IntPtr.Zero : obj;
+                if (this.handle == 0)
+                {
+                    // Pinning failed: do NOT fall back to caching an unpinned raw pointer. bdwgc can
+                    // move/collect the object out from under us, and a later invoke/field-read on the
+                    // stale pointer is a native AV. Leave the cache empty so the caller re-resolves a
+                    // fresh object instead.
+                    this.raw = IntPtr.Zero;
+                    this.epoch = 0;
+                    return;
+                }
+                this.raw = IntPtr.Zero;
                 this.epoch = auraMonoWorldEpoch;
             }
 
