@@ -963,17 +963,13 @@ namespace HeartopiaMod
             previousToolId = 0;
             previousToolRestorePending = false;
 
-            if (host == null || !host.TryGetCurrentToolInfo(out int toolId, out _, out _))
-            {
-                return;
-            }
-
-            previousToolId = toolId;
-            previousToolRestorePending = toolId != 0 && toolId != 4;
-            if (previousToolRestorePending)
-            {
-                Log("Captured previous toolId=" + previousToolId);
-            }
+            // NOTE: deliberately does NOT read the current tool here. Enabling Auto Bird Farm runs on
+            // the hotkey frame, and TryGetCurrentToolInfo can trigger a cold AuraMono ToolSystem module
+            // resolve — a heavy enumeration of live mono game objects that races the game's GC and
+            // native-AVs when an object is freed mid-walk (reliably under a debugger, the no-crashlog
+            // crash localized to bf.capturetool.begin). The "restore previous tool after bird farm"
+            // convenience is dropped to keep enabling crash-safe; RestorePreviousTool falls back to the
+            // bird-scanner tool status when nothing was captured.
         }
 
         private static void RestorePreviousTool(HeartopiaComplete host)
