@@ -871,19 +871,32 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = viewTypeObj;
-                viewObj = auraMonoRuntimeInvoke(getViewMethod, uiManagerObj, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero || viewObj == IntPtr.Zero)
+                // viewTypeObj is a freshly-created System.Type mono object, not cached/pinned. There is
+                // no mono_gc_disable on this sgen (moving) build, so the GC can relocate/collect it
+                // between creation and the GetView invoke that consumes it -> native AV. This periodic
+                // GetView poll (e.g. the instrument hotkey guard, every TTL) is exactly the real,
+                // no-ProcDump "occasional crash while AFK" the breadcrumbs localized here. Pin it.
+                uint viewTypePin = AuraMonoPinNew(viewTypeObj);
+                try
                 {
-                    status = "UIManager.GetView(" + viewLabel + ") returned null.";
-                    viewObj = IntPtr.Zero;
-                    return false;
-                }
+                    IntPtr exc = IntPtr.Zero;
+                    IntPtr* args = stackalloc IntPtr[1];
+                    args[0] = viewTypeObj;
+                    viewObj = auraMonoRuntimeInvoke(getViewMethod, uiManagerObj, (IntPtr)args, ref exc);
+                    if (exc != IntPtr.Zero || viewObj == IntPtr.Zero)
+                    {
+                        status = "UIManager.GetView(" + viewLabel + ") returned null.";
+                        viewObj = IntPtr.Zero;
+                        return false;
+                    }
 
-                status = viewLabel + " ready.";
-                return true;
+                    status = viewLabel + " ready.";
+                    return true;
+                }
+                finally
+                {
+                    AuraMonoPinFree(viewTypePin);
+                }
             }
             catch (Exception ex)
             {
