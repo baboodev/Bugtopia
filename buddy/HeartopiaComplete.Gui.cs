@@ -485,8 +485,6 @@ namespace HeartopiaMod
                     this.ReleaseMovementBridgeIfInjecting();
                     this.birdVacuumEnabled = false;
                     this.antiAfkEnabled = false;
-                    this.antiAfkMouseDownClearAt = 0f;
-                    this.antiAfkMouseHoldClearAt = 0f;
                     this.StopAutoCookInternal("Disabled");
                     this.isAutoEating = false;
                     this.autoSellEnabled = false;
@@ -1860,8 +1858,6 @@ namespace HeartopiaMod
                 {
                     this.antiAfkEnabled = newAntiAfk;
                     this.lastAntiAfkPulseAt = Time.unscaledTime;
-                    this.antiAfkMouseDownClearAt = 0f;
-                    this.antiAfkMouseHoldClearAt = 0f;
                     this.SaveKeybinds(false);
                     this.AddMenuNotification($"Anti AFK {(this.antiAfkEnabled ? "Enabled" : "Disabled")}", this.antiAfkEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
@@ -1871,7 +1867,7 @@ namespace HeartopiaMod
                 {
                     GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("AFK Click Interval: {0:F0}s", this.antiAfkInterval));
                     num += 22;
-                    float newAfkInterval = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.antiAfkInterval, 5f, 120f);
+                    float newAfkInterval = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.antiAfkInterval, 5f, 9f);
                     if (Math.Abs(newAfkInterval - this.antiAfkInterval) > 0.01f)
                     {
                         this.antiAfkInterval = newAfkInterval;

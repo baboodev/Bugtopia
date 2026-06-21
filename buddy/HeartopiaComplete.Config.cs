@@ -393,7 +393,7 @@ namespace HeartopiaMod
             this.antiAfkEnabled = data.antiAfkEnabled;
             this.mouseLookEnabled = data.mouseLookEnabled;
             this.showMouseLookCrosshair = data.showMouseLookCrosshair || !data.mouseLookEnabled;
-            this.antiAfkInterval = Mathf.Clamp(data.antiAfkInterval, 5f, 120f);
+            this.antiAfkInterval = Mathf.Clamp(data.antiAfkInterval, 5f, 9f);
             this.autoRepairType = Mathf.Clamp(data.autoRepairType, 0, this.autoRepairOptions.Length - 1);
             this.autoRepairUseTarget = Mathf.Clamp(data.autoRepairUseTarget > 0 ? data.autoRepairUseTarget : 2, 1, 3);
             this.autoEatFoodType = Mathf.Clamp(data.autoEatFoodType, 0, this.autoEatFoodOptions.Length - 1);
@@ -619,7 +619,7 @@ namespace HeartopiaMod
                         else if (line.Contains("antiAfkEnabled")) this.antiAfkEnabled = GetJsonInt(line, "\"antiAfkEnabled\":") != 0;
                         else if (line.Contains("mouseLookEnabled")) this.mouseLookEnabled = GetJsonInt(line, "\"mouseLookEnabled\":") != 0;
                         else if (line.Contains("showMouseLookCrosshair")) this.showMouseLookCrosshair = GetJsonInt(line, "\"showMouseLookCrosshair\":") != 0;
-                        else if (line.Contains("antiAfkInterval")) this.antiAfkInterval = Mathf.Clamp(GetJsonFloat(line, "\"antiAfkInterval\":"), 5f, 120f);
+                        else if (line.Contains("antiAfkInterval")) this.antiAfkInterval = Mathf.Clamp(GetJsonFloat(line, "\"antiAfkInterval\":"), 5f, 9f);
                         else if (line.Contains("autoRepairType")) this.autoRepairType = Mathf.Clamp(GetJsonInt(line, "\"autoRepairType\":"), 0, this.autoRepairOptions.Length - 1);
                         else if (line.Contains("autoRepairUseTarget")) this.autoRepairUseTarget = Mathf.Clamp(GetJsonInt(line, "\"autoRepairUseTarget\":"), 1, 3);
                         else if (line.Contains("autoRepairTriggerPercent")) this.autoRepairTriggerPercent = Mathf.Clamp(GetJsonInt(line, "\"autoRepairTriggerPercent\":"), 1, 100);

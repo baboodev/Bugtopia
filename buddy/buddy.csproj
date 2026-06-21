@@ -226,6 +226,7 @@
     <Compile Include="HeartopiaComplete.Gui.cs" />
     <Compile Include="HeartopiaComplete.Player.cs" />
     <Compile Include="HeartopiaComplete.Interaction.cs" />
+    <Compile Include="HeartopiaComplete.AntiAfk.cs" />
     <Compile Include="HeartopiaComplete.InputSim.cs" />
     <Compile Include="HeartopiaComplete.Tools.cs" />
     <Compile Include="HeartopiaComplete.ManagedReflection.cs" />

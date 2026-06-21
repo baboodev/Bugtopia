@@ -216,10 +216,8 @@ namespace HeartopiaMod
         private Quaternion mouseLookDefaultCameraRot = Quaternion.identity;
         private float mouseLookDefaultCameraFov = 60f;
         private float nextCameraToggleInteractAt = 0f;
-        private float antiAfkInterval = 25f;
+        private float antiAfkInterval = 9f;
         private float lastAntiAfkPulseAt = -999f;
-        private float antiAfkMouseDownClearAt = 0f;
-        private float antiAfkMouseHoldClearAt = 0f;
 
         // --- AUTO REPAIR VARIABLES ---
         private int autoRepairType = 0; // 0 = Repair Kit, 1 = Crafty Repair Kit
@@ -1005,8 +1003,6 @@ namespace HeartopiaMod
                 {
                     this.antiAfkEnabled = !this.antiAfkEnabled;
                     this.lastAntiAfkPulseAt = Time.unscaledTime;
-                    this.antiAfkMouseDownClearAt = 0f;
-                    this.antiAfkMouseHoldClearAt = 0f;
                     this.SaveKeybinds(false);
                     this.AddMenuNotification($"Anti AFK {(this.antiAfkEnabled ? "Enabled" : "Disabled")}", this.antiAfkEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
@@ -1131,14 +1127,6 @@ namespace HeartopiaMod
             this.UpdateBuildingFreeSnapOverrides();
             this.UpdateBuildingMovePanelState();
             this.RunAntiAfkTick();
-            if (this.antiAfkMouseDownClearAt > 0f && Time.unscaledTime >= this.antiAfkMouseDownClearAt)
-            {
-                this.antiAfkMouseDownClearAt = 0f;
-            }
-            if (this.antiAfkMouseHoldClearAt > 0f && Time.unscaledTime >= this.antiAfkMouseHoldClearAt)
-            {
-                this.antiAfkMouseHoldClearAt = 0f;
-            }
 
             // Check live durability / energy panel triggers on separate lightweight schedules.
             float autoEatRepairNow = Time.unscaledTime;
@@ -3497,19 +3485,6 @@ namespace HeartopiaMod
         // Directly simulate an interact (F) press and try to click in-game interact buttons
 
 
-
-
-        private void RunAntiAfkTick()
-        {
-            if (!this.antiAfkEnabled) return;
-            if (this.showMenu) return;
-            if (Time.unscaledTime - this.lastAntiAfkPulseAt < Mathf.Max(5f, this.antiAfkInterval)) return;
-
-            this.lastAntiAfkPulseAt = Time.unscaledTime;
-            this.TryExecuteUiPointerClick(new Vector2((float)Screen.width / 2f, (float)Screen.height * 0.92f));
-            this.antiAfkMouseDownClearAt = Time.unscaledTime + 0.05f;
-            this.antiAfkMouseHoldClearAt = Time.unscaledTime + 0.12f;
-        }
 
 
         // Cached local player lookup to avoid expensive per-frame scans.
