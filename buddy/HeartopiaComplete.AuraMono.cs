@@ -68,6 +68,14 @@ namespace HeartopiaMod
             // mutated/reallocated mid-walk. Tick (throttled) so the trail shows if death was here.
             Breadcrumbs.Tick("AuraMono.enumerate");
 
+            // Pin the collection object for the entire walk. The get_Item / GetEnumerator / MoveNext
+            // invokes below dereference collectionObj repeatedly, and there is no mono_gc_disable on
+            // this sgen (moving) build, so the GC can relocate/collect it mid-walk -> native AV. This
+            // is the recurring AuraMono.enumerate no-crashlog death (incl. "show pet favorite food").
+            uint collectionPin = AuraMonoPinNew(collectionObj);
+            try
+            {
+
             void AddEnumeratedItem(IntPtr itemPtr)
             {
                 output.Add(itemPtr);
@@ -332,6 +340,11 @@ namespace HeartopiaMod
             }
 
             return output.Count > 0;
+            }
+            finally
+            {
+                AuraMonoPinFree(collectionPin);
+            }
         }
 
         private string GetAuraMonoClassDisplayName(IntPtr classPtr)
