@@ -45,6 +45,12 @@ namespace HeartopiaMod
         private float buildingFreeXApplied;
         private float buildingPlaneHeight;       // god-mode build-plane height (SetPlaneHeight, 0..24)
         private float buildingPlaneHeightApplied = -1f;
+        private float buildingRotX;              // free rotation jog around the field-local axes (god mode)
+        private float buildingRotXApplied;
+        private float buildingRotY;
+        private float buildingRotYApplied;
+        private float buildingRotZ;
+        private float buildingRotZApplied;
 
         // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
         private bool buildingMovePanelActive;
@@ -264,6 +270,18 @@ namespace HeartopiaMod
                     this.TrySetBuildingPlaneHeight(this.buildingPlaneHeight);
                 }
                 y += 26f;
+
+                // Free rotation jog around the field-local axes (beyond the standard yaw-only rotate).
+                // Needs Free angle ON to keep arbitrary degrees through confirm (else snapped to 45/90).
+                this.DrawBuildingRotRow(left, y, "rX", new Vector3(1f, 0f, 0f), val,
+                    ref this.buildingRotX, ref this.buildingRotXApplied);
+                y += 26f;
+                this.DrawBuildingRotRow(left, y, "rY", new Vector3(0f, 1f, 0f), val,
+                    ref this.buildingRotY, ref this.buildingRotYApplied);
+                y += 26f;
+                this.DrawBuildingRotRow(left, y, "rZ", new Vector3(0f, 0f, 1f), val,
+                    ref this.buildingRotZ, ref this.buildingRotZApplied);
+                y += 26f;
             }
 
             if (this.buildingFreeAngleEnabled != prevAngle || this.buildingFreeGridEnabled != prevGrid)
@@ -327,7 +345,96 @@ namespace HeartopiaMod
             }
         }
 
-        // Reset the X/Y/Z jog sliders to 0 (value + applied) without moving the object. Called on the
+        // One rotation jog row: label + slider (deg) + value + [-]/[+] (15°). Rotates the focused object
+        // around the field-local `localAxis` by the slider/button delta.
+        private void DrawBuildingRotRow(float left, float y, string label,
+            Vector3 localAxis, GUIStyle style, ref float value, ref float applied)
+        {
+            const float rotStep = 15f;
+            GUI.Label(new Rect(left, y + 2f, 48f, 20f), label, style);
+            float clamped = Mathf.Round(Mathf.Clamp(value, -180f, 180f));
+            float sliderOut = Mathf.Round(
+                GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, -180f, 180f));
+            if (!Mathf.Approximately(sliderOut, clamped))
+            {
+                value = sliderOut;
+            }
+            GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), value.ToString("0") + "°", style);
+            if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
+            {
+                value -= rotStep; // unclamped — may go beyond the slider
+            }
+            if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
+            {
+                value += rotStep;
+            }
+            if (!Mathf.Approximately(value, applied))
+            {
+                float d = value - applied;
+                applied = value;
+                this.TryRotateFocused(localAxis, d);
+            }
+        }
+
+        // Rotate the FOCUSED object by deltaDeg around the field-local axis. Writes GodControl._dstRotation
+        // (the focus tick slerps to it and confirm packs all 3 euler axes — ToBuildingRotValue). localAxis
+        // is mapped to world via the field-root rotation so the axes match the panel coordinate frame.
+        private unsafe bool TryRotateFocused(Vector3 localAxis, float deltaDeg)
+        {
+            if (Mathf.Approximately(deltaDeg, 0f))
+            {
+                return false;
+            }
+            if (auraMonoObjectGetClass == null || auraMonoClassGetFieldFromName == null
+                || auraMonoFieldGetValue == null || auraMonoFieldSetValue == null)
+            {
+                return false;
+            }
+            if (!this.TryGetPadBuildAuraModule(out IntPtr moduleObj) || moduleObj == IntPtr.Zero)
+            {
+                return false;
+            }
+            if (!(this.TryGetMonoBoolMember(moduleObj, "InGodMode", out bool inGod) && inGod))
+            {
+                this.BuildingLog("rot: not god mode");
+                return false;
+            }
+            if (!this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr godCtrl, "get_GodControl") || godCtrl == IntPtr.Zero)
+            {
+                this.BuildingLog("rot: GodControl unavailable");
+                return false;
+            }
+
+            Vector3 worldAxis = localAxis;
+            if (this.TryGetFocusedFieldRootRotation(out Quaternion rootRot))
+            {
+                worldAxis = rootRot * localAxis;
+            }
+
+            try
+            {
+                IntPtr cls = auraMonoObjectGetClass(godCtrl);
+                IntPtr field = auraMonoClassGetFieldFromName(cls, "_dstRotation");
+                if (field == IntPtr.Zero)
+                {
+                    this.BuildingLog("rot: _dstRotation field not found");
+                    return false;
+                }
+                Quaternion q = Quaternion.identity;
+                auraMonoFieldGetValue(godCtrl, field, (IntPtr)(&q));
+                q = Quaternion.AngleAxis(deltaDeg, worldAxis) * q;
+                auraMonoFieldSetValue(godCtrl, field, (IntPtr)(&q));
+                this.BuildingLog("rot: _dstRotation += " + deltaDeg + "° around " + localAxis);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("rot exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Reset the X/Y/Z position + rotation jog sliders to 0 without moving the object. Called on the
         // confirm hotkey so the next placement starts fresh.
         private void ResetBuildingAxisSliders()
         {
@@ -337,6 +444,12 @@ namespace HeartopiaMod
             this.buildingFreeXApplied = 0f;
             this.buildingFreeZ = 0f;
             this.buildingFreeZApplied = 0f;
+            this.buildingRotX = 0f;
+            this.buildingRotXApplied = 0f;
+            this.buildingRotY = 0f;
+            this.buildingRotYApplied = 0f;
+            this.buildingRotZ = 0f;
+            this.buildingRotZApplied = 0f;
         }
 
         // Floating, draggable panel auto-shown while an object is focused/being moved (CraftState.Focus)
@@ -353,7 +466,7 @@ namespace HeartopiaMod
             }
 
             // Height fits the content: 5 toggles always + 3 X/Y/Z sliders only in god mode.
-            this.buildingMovePanelRect.height = this.buildingMovePanelGodMode ? 290f : 186f;
+            this.buildingMovePanelRect.height = this.buildingMovePanelGodMode ? 368f : 186f;
 
             float scale = this.GetUiScale();
             Matrix4x4 prevMatrix = GUI.matrix;
@@ -455,13 +568,7 @@ namespace HeartopiaMod
             else
             {
                 this.buildingMovePanelHasPos = false;
-                // Focus ended → reset the X/Y/Z jogs so the next focused object starts fresh.
-                this.buildingFloorHeight = 0f;
-                this.buildingFloorHeightApplied = 0f;
-                this.buildingFreeZ = 0f;
-                this.buildingFreeZApplied = 0f;
-                this.buildingFreeX = 0f;
-                this.buildingFreeXApplied = 0f;
+                this.ResetBuildingAxisSliders(); // focus ended → next object starts fresh
             }
         }
 
