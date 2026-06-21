@@ -52,6 +52,11 @@ namespace HeartopiaMod
         private float buildingRotZ;
         private float buildingRotZApplied;
 
+        // God-mode camera WASD pan. BuildModule._buildCamera (BuildFreeCamera).Move(Vector2) pans the
+        // camera in the XZ plane along the flattened forward/right (the same path mouse-drag uses).
+        private IntPtr godCamMoveMethod = IntPtr.Zero;
+        private const float GodCameraMoveSpeed = 500f; // pan units/sec (fps-independent via deltaTime)
+
         // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
         private bool buildingMovePanelActive;
         private bool buildingMovePanelGodMode;   // BuildModule.InGodMode (gates the X/Y/Z jog sliders)
@@ -430,6 +435,68 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.BuildingLog("rot exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // WASD pans the god-mode camera in the XZ plane (mirrors the mouse drag-pan). Only acts in god
+        // mode and when no keys are held it does no AuraMono work. Gated off while the mod menu is open.
+        private void ProcessGodCameraMoveOnUpdate()
+        {
+            if (this.showMenu)
+            {
+                return;
+            }
+            float x = 0f, ydir = 0f;
+            if (Input.GetKey(KeyCode.W)) ydir -= 1f; // forward
+            if (Input.GetKey(KeyCode.S)) ydir += 1f; // back
+            if (Input.GetKey(KeyCode.A)) x += 1f;    // left
+            if (Input.GetKey(KeyCode.D)) x -= 1f;    // right
+            if (x == 0f && ydir == 0f)
+            {
+                return;
+            }
+            this.TryGodCameraMove(new Vector2(x, ydir) * (GodCameraMoveSpeed * Time.unscaledDeltaTime));
+        }
+
+        private unsafe bool TryGodCameraMove(Vector2 delta)
+        {
+            if (auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+            if (!this.TryGetPadBuildAuraModule(out IntPtr module) || module == IntPtr.Zero)
+            {
+                return false;
+            }
+            if (!(this.TryGetMonoBoolMember(module, "InGodMode", out bool g) && g))
+            {
+                return false; // build free camera only exists in god mode
+            }
+            if (!this.TryGetMonoObjectMember(module, "_buildCamera", out IntPtr cam) || cam == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (this.godCamMoveMethod == IntPtr.Zero)
+                {
+                    this.godCamMoveMethod = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(cam), "Move", 1);
+                }
+                if (this.godCamMoveMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+                Vector2 d = delta;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&d);
+                auraMonoRuntimeInvoke(this.godCamMoveMethod, cam, (IntPtr)args, ref exc);
+                return exc == IntPtr.Zero;
+            }
+            catch
+            {
                 return false;
             }
         }
