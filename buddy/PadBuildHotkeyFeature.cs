@@ -15,6 +15,8 @@ namespace HeartopiaMod
         private const float PadBuildAuraResolveRetrySeconds = 5f;
         private const int PadBuildCraftStateFree = 1;  // CraftState.Free — pad roam, interact move/delete
         private const int PadBuildCraftStateFocus = 2; // CraftState.Focus — placing confirm/cancel/rotate
+        private const int PadBuildCraftStateEditBrush = 3;     // CraftState.EditBrush — paint/brush apply
+        private const int PadBuildCraftStateEditPaintPick = 6; // CraftState.EditPaintPick — colour pick
 
         // BuildModule resolution, three tiers (docs/TYPE_RESOLUTION.md):
         //  1. Managed reflection — FindLoadedType + TryGetManagedModule (Managers.GetModule(Type)).
@@ -69,6 +71,7 @@ namespace HeartopiaMod
         private IntPtr padBuildAuraMoveMethod = IntPtr.Zero;
         private IntPtr padBuildAuraPickupMethod = IntPtr.Zero;
         private IntPtr padBuildAuraDeleteMethod = IntPtr.Zero;
+        private IntPtr padBuildAuraBrushMethod = IntPtr.Zero; // InteractExecuteBrush(bool) — paint apply
         private float nextPadBuildAuraResolveAt = -999f;
 
         private static readonly string[] PadBuildPanelRootPaths =
@@ -176,12 +179,30 @@ namespace HeartopiaMod
 
             if (this.TryGetPadBuildAuraModule(out IntPtr aura))
             {
-                if (!this.IsPadBuildAuraFocus(aura, out status))
+                if (!this.TryGetPadBuildAuraSubState(aura, out int sub))
                 {
+                    status = "sub state unavailable";
                     return false;
                 }
 
-                return this.InvokePadBuildAura(aura, this.padBuildAuraConfirmMethod, isConfirm: true, "confirm", out status);
+                // Focus → ConfirmPlacing; paint/brush state → InteractExecuteBrush (apply the stroke,
+                // which is what the on-screen confirm does in paint mode).
+                if (sub == PadBuildCraftStateFocus)
+                {
+                    return this.InvokePadBuildAura(aura, this.padBuildAuraConfirmMethod, isConfirm: true, "confirm", out status);
+                }
+                if (sub == PadBuildCraftStateEditBrush || sub == PadBuildCraftStateEditPaintPick)
+                {
+                    if (this.padBuildAuraBrushMethod == IntPtr.Zero)
+                    {
+                        status = "brush method unavailable";
+                        return false;
+                    }
+                    return this.InvokePadBuildAura(aura, this.padBuildAuraBrushMethod, isConfirm: true, "brush", out status);
+                }
+
+                status = "sub state " + sub;
+                return false;
             }
 
             return this.TryPadBuildConfirmViaUi(out status);
@@ -567,6 +588,7 @@ namespace HeartopiaMod
                     this.padBuildAuraMoveMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecuteMove", 0);
                     this.padBuildAuraPickupMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecutePickup", 0);
                     this.padBuildAuraDeleteMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecuteDelete", 0);
+                    this.padBuildAuraBrushMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecuteBrush", 1);
                 }
 
                 if (this.padBuildAuraConfirmMethod == IntPtr.Zero || this.padBuildAuraCancelMethod == IntPtr.Zero
