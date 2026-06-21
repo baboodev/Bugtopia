@@ -392,11 +392,44 @@ Enables clicking matching slots without manual item ID entry.
 
 ---
 
+## Hotkey guards (`InstrumentHotkeyGuardFeature.cs`)
+
+Every mod hotkey is read through the central chokepoint `TryGetModHotkeyDown` /
+`TryGetModHotkeyHeld`, so guards that suppress hotkeys live here once and apply everywhere.
+
+**Instrument guard** — when an instrument panel is open, the keys bound to that instrument's note
+layout are removed from `Input.GetKeyDown` so playing a song doesn't trigger mod features. Resolved
+via a throttled `UIManager.GetView` poll (managed first, AuraMono fallback); detail in
+[GAME_EVENTS.md](./GAME_EVENTS.md).
+
+**Text-input guard** — when a game text field is focused (chat, rename, search, mail, …), every mod
+hotkey is swallowed *except* the menu toggle (`keyToggleMenu`), so typed letters never fire
+features and the menu can still be closed. Detection is pure Unity-side and build-independent:
+
+```
+EventSystem.current.currentSelectedGameObject
+  → GetComponent<UnityEngine.UI.InputField>()
+  → .isFocused
+```
+
+The game's input widgets are all legacy uGUI `InputField`s driven by the `EventSystem` (see ilspy
+`HudChatWidget` / `InputFieldLimitWidget`), so this single check covers them all — no AuraMono, no
+game-UI types that drift between patches, no native-AV exposure. The result is cached per frame
+(`Time.frameCount`) so the ~50 keybind checks per frame dedupe to one `EventSystem` lookup. Checking
+the `InputField` component *and* `isFocused` (not merely "something is selected") avoids false
+blocks when a button/toggle holds selection. Exposed as the static
+`IsModHotkeyBlockedByTextInput()` alongside `IsModHotkeyBlockedByInstrument(KeyCode)`.
+
+If a TMP (`TMPro.TMP_InputField`) field ever appears in-game, extend `ResolveGameTextInputFocused`
+with a second component check — currently unused because all observed fields are legacy uGUI.
+
+---
+
 ## Pad Build Hotkeys (`PadBuildHotkeyFeature.cs`)
 
 Keyboard control of the building pad: confirm / cancel / rotate / move / delete, all rebindable
 (default `None`), processed in `ProcessPadBuildHotkeysOnUpdate` from `OnUpdate` via
-`TryGetModHotkeyDown` (respects the instrument hotkey guard and rebind capture).
+`TryGetModHotkeyDown` (respects the instrument + text-input hotkey guards and rebind capture).
 
 **Action mapping (panel parity, gated on `BuildModule.SubState == CraftState.Focus`):**
 

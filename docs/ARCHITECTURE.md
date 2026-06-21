@@ -388,7 +388,7 @@ All merge into `public partial class HeartopiaComplete`:
 | `HeartopiaResourceVisualEsp.cs` | 587 | On-screen resource ESP |
 | `BirdPhotoSubmitFeature.cs` | 504 | Bird photo submit helper |
 | `ShopQuickBuyFeature.cs` | 441 | Shop quick-buy |
-| `InstrumentHotkeyGuardFeature.cs` | 428 | Blocks mod hotkeys while an instrument panel is open (throttled `GetView` poll) |
+| `InstrumentHotkeyGuardFeature.cs` | 428 | Central mod-hotkey gate: blocks instrument keys while an instrument panel is open (throttled `GetView` poll) and blocks all hotkeys except the menu toggle while a game text field is focused (`EventSystem` + `InputField.isFocused`) |
 | `HeartopiaDebugEsp.cs` | 319 | Internal debug overlays |
 | `BunnyHopFeature.cs` | small | Jump via AuraMono player state |
 | `HideJumpButtonFeature.cs` | small | UI tweak |

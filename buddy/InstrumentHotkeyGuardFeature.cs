@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 namespace HeartopiaMod
 {
@@ -78,10 +80,23 @@ namespace HeartopiaMod
         private MethodInfo uiManagerGetViewMethod;
         private PropertyInfo uiManagerInstanceProperty;
 
+        // Per-frame cache for "is a game text input field focused". Like the instrument guard,
+        // the ~50 keybind checks per frame dedupe to one EventSystem lookup.
+        private int textInputFocusFrame = -1;
+        private bool textInputFocusedCached;
+
         public static bool IsModHotkeyBlockedByInstrument(KeyCode key)
         {
             HeartopiaComplete instance = HeartopiaComplete.Instance;
             return instance != null && instance.IsInstrumentHotkeyConflict(key);
+        }
+
+        // True when the game has a focused text input field (chat, rename, search, …). Used to
+        // block every mod hotkey except the menu toggle so typed letters don't trigger features.
+        public static bool IsModHotkeyBlockedByTextInput()
+        {
+            HeartopiaComplete instance = HeartopiaComplete.Instance;
+            return instance != null && instance.IsGameTextInputFocused();
         }
 
         private static bool IsMouseKeyCode(KeyCode key)
@@ -103,6 +118,14 @@ namespace HeartopiaMod
 
             this.EnsureInstrumentHotkeyGuardUpdated();
             if (this.instrumentHotkeyBlockedKeys.Contains(key))
+            {
+                return false;
+            }
+
+            // While a game text field is focused, swallow every hotkey except the menu toggle so
+            // typed characters don't fire features. The menu key stays live so the user can still
+            // open/close the mod menu.
+            if (key != this.keyToggleMenu && this.IsGameTextInputFocused())
             {
                 return false;
             }
@@ -130,6 +153,11 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (key != this.keyToggleMenu && this.IsGameTextInputFocused())
+            {
+                return false;
+            }
+
             if (IsMouseKeyCode(key))
             {
                 int button = MouseKeyCodeToButtonIndex(key);
@@ -148,6 +176,50 @@ namespace HeartopiaMod
 
             this.EnsureInstrumentHotkeyGuardUpdated();
             return this.instrumentHotkeyBlockedKeys.Contains(key);
+        }
+
+        // Detects an open + focused game text field purely from the Unity side (EventSystem +
+        // UnityEngine.UI.InputField.isFocused). Build-independent and crash-free: no AuraMono / no
+        // game UI types that drift between patches. The game's input widgets (chat, the text-limit
+        // widget used for naming/search, …) are all legacy uGUI InputFields driven by the
+        // EventSystem (see ilspy HudChatWidget / InputFieldLimitWidget), so this covers them all.
+        private bool IsGameTextInputFocused()
+        {
+            if (this.textInputFocusFrame == Time.frameCount)
+            {
+                return this.textInputFocusedCached;
+            }
+
+            this.textInputFocusFrame = Time.frameCount;
+            this.textInputFocusedCached = this.ResolveGameTextInputFocused();
+            return this.textInputFocusedCached;
+        }
+
+        private bool ResolveGameTextInputFocused()
+        {
+            try
+            {
+                EventSystem eventSystem = EventSystem.current;
+                if (eventSystem == null)
+                {
+                    return false;
+                }
+
+                // currentSelectedGameObject can also hold a selected button/toggle, so we must
+                // confirm it carries an InputField that is actually focused — not just "selected".
+                GameObject selected = eventSystem.currentSelectedGameObject;
+                if (selected == null)
+                {
+                    return false;
+                }
+
+                InputField inputField = selected.GetComponent<InputField>();
+                return inputField != null && inputField.isFocused;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void EnsureInstrumentHotkeyGuardUpdated()

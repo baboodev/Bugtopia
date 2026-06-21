@@ -103,6 +103,13 @@ Quick-equip (when bound):
 
 - Axe, insect net, fishing rod, sprinkler, bird scanner, building pad
 
+### Hotkey suppression while typing
+
+Whenever a game text field is focused (chat, renaming, search boxes, mail, …) **all mod hotkeys are
+disabled except the menu toggle** — so typing a message never accidentally triggers a feature, and
+you can still open/close the mod menu. Instrument note-keys are likewise suppressed while an
+instrument panel is open. Both are automatic, no configuration needed (`InstrumentHotkeyGuardFeature.cs`).
+
 ### Pad build hotkeys (`PadBuildHotkeyFeature.cs`)
 
 Keyboard control of the building pad without touching the on-screen `BuildStatusPanel` buttons. Five rebindable keys (Settings → Keybinds, default unbound):
