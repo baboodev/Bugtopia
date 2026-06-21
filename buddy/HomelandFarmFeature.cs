@@ -17321,45 +17321,59 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> items = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, items))
+                // Pin the enumerated item pointers: the read loop below dereferences each itemObj
+                // (TryGetDirectBackpackItem* -> FindAuraMonoFieldOnHierarchy), and with no
+                // mono_gc_disable on this sgen (moving) build the GC can relocate/collect an item
+                // between enumeration and read -> native AV (the homeland seed-scan crash). Free in
+                // finally.
+                List<uint> itemPins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, items, itemPins))
                 {
+                    FreeAuraMonoPins(itemPins);
                     continue;
                 }
 
-                for (int i = 0; i < items.Count; i++)
+                try
                 {
-                    IntPtr itemObj = items[i];
-                    if (itemObj == IntPtr.Zero)
+                    for (int i = 0; i < items.Count; i++)
                     {
-                        continue;
-                    }
+                        IntPtr itemObj = items[i];
+                        if (itemObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
 
-                    if (!this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId)
-                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
-                        || !this.TryGetDirectBackpackItemCount(itemObj, out int count)
-                        || staticId <= 0
-                        || netId == 0U
-                        || count <= 0
-                        || !seenNetIds.Add(netId))
-                    {
-                        continue;
-                    }
+                        if (!this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId)
+                            || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
+                            || !this.TryGetDirectBackpackItemCount(itemObj, out int count)
+                            || staticId <= 0
+                            || netId == 0U
+                            || count <= 0
+                            || !seenNetIds.Add(netId))
+                        {
+                            continue;
+                        }
 
-                    int itemEntityType = 0;
-                    this.TryGetDirectBackpackItemEntityType(itemObj, out itemEntityType);
-                    if (!accept(staticId, itemEntityType))
-                    {
-                        continue;
-                    }
+                        int itemEntityType = 0;
+                        this.TryGetDirectBackpackItemEntityType(itemObj, out itemEntityType);
+                        if (!accept(staticId, itemEntityType))
+                        {
+                            continue;
+                        }
 
-                    output.Add(new HomelandFarmInventoryItem
-                    {
-                        StaticId = staticId,
-                        NetId = netId,
-                        Count = count,
-                        Label = this.TryHomelandFarmFormatAuraInventoryItemLabel(itemObj, staticId, count, netId)
-                    });
-                    added = true;
+                        output.Add(new HomelandFarmInventoryItem
+                        {
+                            StaticId = staticId,
+                            NetId = netId,
+                            Count = count,
+                            Label = this.TryHomelandFarmFormatAuraInventoryItemLabel(itemObj, staticId, count, netId)
+                        });
+                        added = true;
+                    }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(itemPins);
                 }
             }
 
