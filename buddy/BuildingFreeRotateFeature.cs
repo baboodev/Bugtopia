@@ -55,7 +55,9 @@ namespace HeartopiaMod
         // God-mode camera WASD pan. BuildModule._buildCamera (BuildFreeCamera).Move(Vector2) pans the
         // camera in the XZ plane along the flattened forward/right (the same path mouse-drag uses).
         private IntPtr godCamMoveMethod = IntPtr.Zero;
-        private const float GodCameraMoveSpeed = 500f; // pan units/sec (fps-independent via deltaTime)
+        private IntPtr godCamMoveDirectMethod = IntPtr.Zero; // BuildFreeCamera._Move(Vector3) — raw position set
+        private const float GodCameraMoveSpeed = 500f;       // horizontal pan units/sec (game-scaled inside Move)
+        private const float GodCameraVerticalSpeed = 6f;     // Space/Ctrl vertical, world units/sec
 
         // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
         private bool buildingMovePanelActive;
@@ -452,11 +454,68 @@ namespace HeartopiaMod
             if (Input.GetKey(KeyCode.S)) ydir += 1f; // back
             if (Input.GetKey(KeyCode.A)) x += 1f;    // left
             if (Input.GetKey(KeyCode.D)) x -= 1f;    // right
-            if (x == 0f && ydir == 0f)
+            if (x != 0f || ydir != 0f)
             {
-                return;
+                this.TryGodCameraMove(new Vector2(x, ydir) * (GodCameraMoveSpeed * Time.unscaledDeltaTime));
             }
-            this.TryGodCameraMove(new Vector2(x, ydir) * (GodCameraMoveSpeed * Time.unscaledDeltaTime));
+
+            float dy = 0f;
+            if (Input.GetKey(KeyCode.Space)) dy += 1f;                                       // up
+            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) dy -= 1f; // down
+            if (dy != 0f)
+            {
+                this.TryGodCameraVertical(dy * GodCameraVerticalSpeed * Time.unscaledDeltaTime);
+            }
+        }
+
+        // Move the god camera vertically by dy world units (Space up / Ctrl down). Writes the camera
+        // group position via BuildFreeCamera._Move (the canonical setter); the camera Update leaves an
+        // Idle/zero-velocity position untouched, so it holds.
+        private unsafe bool TryGodCameraVertical(float dy)
+        {
+            if (auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+            if (!this.TryGetPadBuildAuraModule(out IntPtr module) || module == IntPtr.Zero)
+            {
+                return false;
+            }
+            if (!(this.TryGetMonoBoolMember(module, "InGodMode", out bool g) && g))
+            {
+                return false;
+            }
+            if (!this.TryGetMonoObjectMember(module, "_buildCamera", out IntPtr cam) || cam == IntPtr.Zero
+                || !this.TryGetMonoObjectMember(cam, "_freeCameraGroup", out IntPtr group) || group == IntPtr.Zero)
+            {
+                return false;
+            }
+            if (!this.TryReadBuildingVector3Prop(group, "position", out Vector3 pos))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (this.godCamMoveDirectMethod == IntPtr.Zero)
+                {
+                    this.godCamMoveDirectMethod = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(cam), "_Move", 1);
+                }
+                if (this.godCamMoveDirectMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+                Vector3 newPos = new Vector3(pos.x, pos.y + dy, pos.z);
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&newPos);
+                auraMonoRuntimeInvoke(this.godCamMoveDirectMethod, cam, (IntPtr)args, ref exc);
+                return exc == IntPtr.Zero;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private unsafe bool TryGodCameraMove(Vector2 delta)
