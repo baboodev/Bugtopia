@@ -517,8 +517,14 @@ namespace HeartopiaMod
                         }
 
                         List<IntPtr> colorEntries = new List<IntPtr>();
-                        if (!this.TryEnumerateAuraMonoCollectionItems(colorDataResult, colorEntries))
+                        // Pin the dict entries (read by TryGetMonoDictionaryEntryValue) for the loop, and
+                        // each color-data value across its unlock-field read below. No mono_gc_disable on
+                        // this sgen (moving) build, so an unpinned entry/value is relocated/collected
+                        // mid-read -> native AV (the FaceShop coin-scan crash).
+                        List<uint> colorPins = new List<uint>();
+                        if (!this.TryEnumerateAuraMonoCollectionItems(colorDataResult, colorEntries, colorPins))
                         {
+                            FreeAuraMonoPins(colorPins);
                             continue;
                         }
 
@@ -530,7 +536,10 @@ namespace HeartopiaMod
                                 colorData = colorEntries[c];
                             }
 
-                            if (!this.TryReadAuraColorDataUnlock(colorData, out int colorId) || colorId != skinId)
+                            uint colorDataPin = AuraMonoPinNew(colorData);
+                            bool unlocked = this.TryReadAuraColorDataUnlock(colorData, out int colorId);
+                            AuraMonoPinFree(colorDataPin);
+                            if (!unlocked || colorId != skinId)
                             {
                                 continue;
                             }
@@ -551,6 +560,8 @@ namespace HeartopiaMod
                             });
                             break;
                         }
+
+                        FreeAuraMonoPins(colorPins);
                     }
                 }
             }
