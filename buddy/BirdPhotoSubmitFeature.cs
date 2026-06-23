@@ -153,8 +153,9 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryEnumerateDailyQuestStorageItemsAura(out List<IntPtr> items, out string itemsStatus))
+            if (!this.TryEnumerateDailyQuestStorageItemsAura(out List<IntPtr> items, out List<uint> itemPins, out string itemsStatus))
             {
+                FreeAuraMonoPins(itemPins);
                 status = itemsStatus;
                 return false;
             }
@@ -197,6 +198,8 @@ namespace HeartopiaMod
                 pairs.Add(new BirdPhotoSubmitPair { ItemNetId = netId, Num = take });
                 remaining -= take;
             }
+
+            FreeAuraMonoPins(itemPins);
 
             if (pairs.Count == 0)
             {

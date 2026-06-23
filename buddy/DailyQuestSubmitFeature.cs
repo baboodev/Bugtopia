@@ -497,12 +497,18 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryEnumerateDailyQuestStorageItemsAura(out List<IntPtr> storageItems, out string itemsStatus))
+            if (!this.TryEnumerateDailyQuestStorageItemsAura(out List<IntPtr> storageItems, out List<uint> itemPins, out string itemsStatus))
             {
+                FreeAuraMonoPins(itemPins);
                 status = itemsStatus;
                 return false;
             }
 
+            // storageItems are raw mono pointers read field-by-field below (and re-read in the
+            // diagnostics call); keep them pinned for the whole method so the moving sgen GC can't
+            // relocate/collect one mid-read -> native AV. Free in finally on every exit.
+            try
+            {
             IntPtr backPackClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(backPackSystemObj) : IntPtr.Zero;
             IntPtr checkSubmitMethod = backPackClass != IntPtr.Zero
                 ? this.FindAuraMonoMethodOnHierarchy(backPackClass, "CheckSubmitItem", 2)
@@ -642,6 +648,11 @@ namespace HeartopiaMod
             this.DailyQuestMergeSubmitPairsByNetId(pairs);
             status = "pairs=" + pairs.Count;
             return pairs.Count > 0;
+            }
+            finally
+            {
+                FreeAuraMonoPins(itemPins);
+            }
         }
 
         private void DailyQuestMergeSubmitPairsByNetId(List<DailyQuestSubmitNetPair> pairs)
@@ -854,9 +865,13 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe bool TryEnumerateDailyQuestStorageItemsAura(out List<IntPtr> items, out string status)
+        // The returned `items` are RAW mono pointers the caller reads field-by-field; the caller MUST
+        // FreeAuraMonoPins(itemPins) once done (and even on a false return) — without the pins the
+        // moving sgen GC relocates/collects them mid-read -> native AV.
+        private unsafe bool TryEnumerateDailyQuestStorageItemsAura(out List<IntPtr> items, out List<uint> itemPins, out string status)
         {
             items = new List<IntPtr>();
+            itemPins = new List<uint>();
             status = string.Empty;
             HashSet<uint> seenNetIds = new HashSet<uint>();
 
@@ -895,6 +910,7 @@ namespace HeartopiaMod
                             backPackSystemObj,
                             storageType,
                             items,
+                            itemPins,
                             seenNetIds,
                             out int appended))
                     {
@@ -913,7 +929,7 @@ namespace HeartopiaMod
             }
             else
             {
-                if (!this.TryAppendDailyQuestStorageItemsAura(getAllItemMethod, backPackSystemObj, 0, items, seenNetIds, out backpackCount))
+                if (!this.TryAppendDailyQuestStorageItemsAura(getAllItemMethod, backPackSystemObj, 0, items, itemPins, seenNetIds, out backpackCount))
                 {
                     status = "backpack read failed";
                     return false;
@@ -935,6 +951,7 @@ namespace HeartopiaMod
             IntPtr backPackSystemObj,
             int storageType,
             List<IntPtr> items,
+            List<uint> itemPins,
             HashSet<uint> seenNetIds,
             out int appended)
         {
@@ -964,7 +981,11 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> storageItems = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, storageItems) || storageItems.Count == 0)
+            // Pin every enumerated item. The raw pointers added to `items` flow up to the caller and are
+            // read field-by-field there (and again in the loop below); on this sgen (moving) GC, with no
+            // mono_gc_disable, an unpinned item is relocated/collected before the read -> native AV. The
+            // pins live in itemPins, freed by the caller once it is done with `items`.
+            if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, storageItems, itemPins) || storageItems.Count == 0)
             {
                 return false;
             }
