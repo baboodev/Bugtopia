@@ -207,6 +207,7 @@
     <Compile Include="HeartopiaComplete.AutoEatRepair.cs" />
     <Compile Include="HeartopiaComplete.BirdFarm.cs" />
     <Compile Include="HeartopiaComplete.Radar.cs" />
+    <Compile Include="HeartopiaComplete.MapSpots.cs" />
     <Compile Include="HeartopiaComplete.Teleport.cs" />
     <Compile Include="HeartopiaComplete.Transfer.cs" />
     <Compile Include="HeartopiaComplete.CameraInput.cs" />

@@ -37,7 +37,7 @@ namespace HeartopiaMod
 
         private void DrawResourceVisualEspOverlay()
         {
-            if (!this.resourceVisualEspEnabled || !this.isRadarActive || this.radarContainer == null)
+            if (this.radarDisplayMode != 0 || !this.resourceVisualEspEnabled || !this.isRadarActive || this.radarContainer == null)
             {
                 return;
             }
@@ -163,7 +163,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (!this.resourceVisualEspEnabled || !this.resourceVisualEspShowGroundRing)
+            if (this.radarDisplayMode != 0 || !this.resourceVisualEspEnabled || !this.resourceVisualEspShowGroundRing)
             {
                 for (int i = 0; i < this.radarContainer.transform.childCount; i++)
                 {

@@ -201,7 +201,7 @@ An **empty folder is the opt-in switch** — there is no hotkey:
 
 - **Folder exists and is empty** → the mod **auto-dumps** when the game's Mono runtime becomes ready (hooked in `EnsureAuraMonoApiReady`, [HeartopiaComplete.AuraMonoEngine.cs](../buddy/HeartopiaComplete.AuraMonoEngine.cs)).
 - **~60 s later** → a **second pass** writes any **lazily loaded** modules not present at first dump (for example `Plugins.dll`). Only missing files are added; existing PEs are not overwritten.
-- **Folder has files** (a previous dump) → the **initial** pass is skipped — clear the folder to re-dump from scratch. The delayed retry still runs if the folder exists.
+- **Folder has files** (a previous dump) → **no dump** — clear the folder to re-dump from scratch (initial pass + 60 s retry).
 - **Folder absent** → **nothing is dumped and the folder is never created.**
 
 To enable: create the empty `DecryptedAssemblies` folder, enter the world, wait at least one minute. Look for `[MonoDump] auto-dump after runtime ready: N game module(s)`, `[MonoDump] delayed retry (60s): …`, and `[MonoDump] saved …` in `BepInEx\LogOutput.log`. Validate a result with `[Reflection.AssemblyName]::GetAssemblyName(path)` — it should report e.g. `EcsClient, Version=1.0.0.0`.

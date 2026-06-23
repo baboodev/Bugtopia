@@ -277,6 +277,8 @@ namespace HeartopiaMod
         {
             public int radarMarkerStyle;
             public float radarMaxDistance = 75f;
+            public int radarDisplayMode = 0; // 0 = ESP overlay, 1 = in-game map spots
+            public int radarGameTrackLimit = 5; // Game mode: max nearest resources tracked on the map
             public bool resourceVisualEspEnabled = true;
             public int resourceVisualEspStyle = 0;
             public bool resourceVisualEspShowDistance = true;

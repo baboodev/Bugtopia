@@ -1301,6 +1301,7 @@ namespace HeartopiaMod
                     this.CleanupExpiredCooldowns();
                 }
             }
+            this.ProcessGameMapSpotsOnUpdate();
             bool flag10 = this.autoFarmActive;
             if (flag10)
             {
@@ -3350,6 +3351,7 @@ namespace HeartopiaMod
 
         private void Cleanup()
         {
+            this.ClearInjectedGameMapSpots();
             bool flag = this.radarContainer != null;
             if (flag)
             {
@@ -5718,6 +5720,9 @@ namespace HeartopiaMod
 
         // Token: 0x04000029 RID: 41
         public bool isRadarActive = false;
+
+        // Resource display routing: 0 = ESP screen overlay, 1 = in-game map spots ("Game" mode).
+        private int radarDisplayMode = 0;
 
         // Token: 0x0400002A RID: 42
         private bool showMushroomRadar = false;

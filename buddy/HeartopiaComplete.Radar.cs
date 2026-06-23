@@ -35,6 +35,8 @@ namespace HeartopiaMod
         {
             data.radarMarkerStyle = this.radarMarkerStyle;
             data.radarMaxDistance = this.radarMaxDistance;
+            data.radarDisplayMode = this.radarDisplayMode;
+            data.radarGameTrackLimit = this.radarGameTrackLimit;
             data.resourceVisualEspEnabled = this.resourceVisualEspEnabled;
             data.resourceVisualEspStyle = this.resourceVisualEspStyle;
             data.resourceVisualEspShowDistance = this.resourceVisualEspShowDistance;
@@ -55,6 +57,8 @@ namespace HeartopiaMod
             if (data == null) return;
             this.radarMarkerStyle = Mathf.Clamp(data.radarMarkerStyle, 0, 2);
             this.radarMaxDistance = Mathf.Clamp(data.radarMaxDistance <= 0f ? 75f : data.radarMaxDistance, 25f, 1000f);
+            this.radarDisplayMode = Mathf.Clamp(data.radarDisplayMode, 0, 1);
+            this.radarGameTrackLimit = Mathf.Clamp(data.radarGameTrackLimit <= 0 ? 5 : data.radarGameTrackLimit, 1, 30);
             this.resourceVisualEspEnabled = data.resourceVisualEspEnabled;
             bool showGroundRing = data.resourceVisualEspShowGroundRing;
             int visualEspStyle = data.resourceVisualEspStyle;
@@ -948,6 +952,42 @@ namespace HeartopiaMod
             }
             num += 128;
 
+            // Resource display routing: ESP screen overlay vs in-game map spots.
+            GUI.Label(new Rect((float)panelX + 16f, (float)num + 6f, 200f, 18f), this.L("Resource Display"), subStyle);
+            float modeSegGap = 10f;
+            float modeSegWidth = (panelWidth - 32f - modeSegGap) / 2f;
+            if (this.DrawRadarStyleSegmentButton(new Rect((float)panelX + 16f, (float)num + 26f, modeSegWidth, 30f), this.L("ESP Overlay"), this.radarDisplayMode == 0))
+            {
+                if (this.radarDisplayMode != 0)
+                {
+                    this.radarDisplayMode = 0;
+                    this.OnRadarDisplayModeChanged();
+                    this.QueueRadarSettingsSave();
+                }
+            }
+            if (this.DrawRadarStyleSegmentButton(new Rect((float)panelX + 16f + modeSegWidth + modeSegGap, (float)num + 26f, modeSegWidth, 30f), this.L("Game Map"), this.radarDisplayMode == 1))
+            {
+                if (this.radarDisplayMode != 1)
+                {
+                    this.radarDisplayMode = 1;
+                    this.OnRadarDisplayModeChanged();
+                    this.QueueRadarSettingsSave();
+                }
+            }
+            num += 64;
+
+            if (this.radarDisplayMode == 1)
+            {
+                GUI.Label(new Rect((float)panelX + 16f, (float)num, 240f, 20f), this.LF("Map Markers (nearest): {0}", this.radarGameTrackLimit.ToString()), subStyle);
+                int prevTrackLimit = this.radarGameTrackLimit;
+                this.radarGameTrackLimit = Mathf.Clamp(Mathf.RoundToInt(this.DrawAccentSlider(new Rect((float)panelX + 190f, (float)num + 1f, panelWidth - 206f, 20f), (float)this.radarGameTrackLimit, 1f, 30f)), 1, 30);
+                if (prevTrackLimit != this.radarGameTrackLimit)
+                {
+                    this.QueueRadarSettingsSave();
+                }
+                num += 30;
+            }
+
             Rect visualCard = new Rect(panelX, num, panelWidth, 332f);
             GUI.Box(visualCard, "", this.themePanelStyle ?? GUI.skin.box);
             this.DrawCardOutline(visualCard, 1f);
@@ -1051,6 +1091,8 @@ namespace HeartopiaMod
         private void ResetRadarSettingsToDefaults()
         {
             this.radarMaxDistance = 75f;
+            this.radarDisplayMode = 0;
+            this.radarGameTrackLimit = 5;
             this.resourceVisualEspEnabled = true;
             this.resourceVisualEspStyle = 0;
             this.resourceVisualEspShowDistance = true;
