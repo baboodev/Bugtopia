@@ -176,13 +176,13 @@ namespace HeartopiaMod
                 {
                     ModLogger.Warning("[MonoDump] auto-dump error: " + ex.Message);
                 }
+
+                ScheduleDelayedRetry();
             }
             else
             {
                 ModLogger.Msg("[MonoDump] initial dump skipped: folder not empty (clear to re-dump all).");
             }
-
-            ScheduleDelayedRetry();
         }
 
         private static void ScheduleDelayedRetry()
