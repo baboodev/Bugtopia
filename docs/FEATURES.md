@@ -467,6 +467,20 @@ Overlay drawn on top of game view for radar markers:
 
 Uses embedded tree icons for some marker types.
 
+### Game map display ("Game" mode)
+
+Native in-game markers instead of (or alongside) the ESP overlay — see [RADAR_GAME_MAP.md](RADAR_GAME_MAP.md).
+
+| Setting | Description |
+|---------|-------------|
+| ESP Overlay / Game Map | Route selected resources to the screen overlay or to the native map |
+| Map Markers (nearest) | Cap on how many nearest resources are tracked (1–30, default 5) |
+| Show on big map | Also place markers on the big map (default **off**; on adds the game's tracked rectangle frame) |
+
+- Per-resource native icons (timber/stone/bamboo/fruit/mushroom), rare tiers (e.g. Rare Timber), players' native pin, Bird/Fish/Insect category icons.
+- Shows on the minimap + in-world tracking pointers; big map is opt-in.
+- Cooldown/depleted resources are hidden (authoritative via `CollectableObjectComponent.inCold`).
+
 ### Priority locations
 
 Weighted preference for specific forage types when multiple markers compete (fiddlehead, tall mustard, burdock, mustard greens).

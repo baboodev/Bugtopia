@@ -5723,6 +5723,9 @@ namespace HeartopiaMod
 
         // Resource display routing: 0 = ESP screen overlay, 1 = in-game map spots ("Game" mode).
         private int radarDisplayMode = 0;
+        // Game mode: also place markers on the BIG map (Collectable spots). Off by default (adds the game's
+        // "tracked" rectangle frame to each marker); the minimap markers are unaffected by this.
+        private bool radarBigMapSpots = false;
 
         // Token: 0x0400002A RID: 42
         private bool showMushroomRadar = false;

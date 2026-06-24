@@ -37,6 +37,7 @@ namespace HeartopiaMod
             data.radarMaxDistance = this.radarMaxDistance;
             data.radarDisplayMode = this.radarDisplayMode;
             data.radarGameTrackLimit = this.radarGameTrackLimit;
+            data.radarBigMapSpots = this.radarBigMapSpots;
             data.resourceVisualEspEnabled = this.resourceVisualEspEnabled;
             data.resourceVisualEspStyle = this.resourceVisualEspStyle;
             data.resourceVisualEspShowDistance = this.resourceVisualEspShowDistance;
@@ -59,6 +60,7 @@ namespace HeartopiaMod
             this.radarMaxDistance = Mathf.Clamp(data.radarMaxDistance <= 0f ? 75f : data.radarMaxDistance, 25f, 1000f);
             this.radarDisplayMode = Mathf.Clamp(data.radarDisplayMode, 0, 1);
             this.radarGameTrackLimit = Mathf.Clamp(data.radarGameTrackLimit <= 0 ? 5 : data.radarGameTrackLimit, 1, 30);
+            this.radarBigMapSpots = data.radarBigMapSpots;
             this.resourceVisualEspEnabled = data.resourceVisualEspEnabled;
             bool showGroundRing = data.resourceVisualEspShowGroundRing;
             int visualEspStyle = data.resourceVisualEspStyle;
@@ -985,7 +987,16 @@ namespace HeartopiaMod
                 {
                     this.QueueRadarSettingsSave();
                 }
-                num += 30;
+                num += 36;
+
+                GUI.Label(new Rect((float)panelX + 16f, (float)num + 6f, 200f, 20f), this.L("Show on big map"), subStyle);
+                if (this.DrawRadarStyleSegmentButton(new Rect((float)panelX + 190f, (float)num, panelWidth - 206f, 30f),
+                    this.radarBigMapSpots ? this.L("On") : this.L("Off"), this.radarBigMapSpots))
+                {
+                    this.radarBigMapSpots = !this.radarBigMapSpots;
+                    this.QueueRadarSettingsSave();
+                }
+                num += 36;
             }
 
             Rect visualCard = new Rect(panelX, num, panelWidth, 332f);
@@ -1093,6 +1104,7 @@ namespace HeartopiaMod
             this.radarMaxDistance = 75f;
             this.radarDisplayMode = 0;
             this.radarGameTrackLimit = 5;
+            this.radarBigMapSpots = false;
             this.resourceVisualEspEnabled = true;
             this.resourceVisualEspStyle = 0;
             this.resourceVisualEspShowDistance = true;

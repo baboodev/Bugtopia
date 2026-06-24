@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
+using UnityEngine.U2D;
 
 namespace HeartopiaMod
 {
@@ -32,6 +35,10 @@ namespace HeartopiaMod
         // icon (ui_item_normal_{prefab}). StaticId must be the resource ENTITY's static id (EntityUtil
         // .GetEntityResId), NOT the produce itemTypeID. This is how we get true per-resource icons.
         private const byte MapTrackTypeFurniture = 14;
+        // MapResource -> AtlasEnum.Collectable, SpriteName = ui_dynamic_collectable_{StaticId}. For our
+        // produce drop-item ids (timber/stone/fruit) that sprite EXISTS, and unlike Furniture this track
+        // type matches a Collectable map-spot (IsSameType) so it also drives the BIG map per-position.
+        private const byte MapTrackTypeMapResource = 8;
         private const byte MapTrackReasonLocal = 1;
         // Match a tracked marker to a live collectable entity within this XZ distance (m).
         private const float MapResMatchRadiusSqr = 9f;
@@ -71,6 +78,34 @@ namespace HeartopiaMod
         // radar label ("Rare Tree", "Stone"...) maps to one resource TYPE with one icon, so once ANY marker
         // of that label resolves, every marker of that label reuses the icon — no live entity needed.
         private readonly Dictionary<string, int> mapTrackLabelIcon = new Dictionary<string, int>(32);
+        // Labels whose icon came from the produce/dropGroup path (drop-item id) -> has a
+        // ui_dynamic_collectable_{id} sprite -> eligible for MapResource track + big-map spot. Entity-
+        // fallback labels (mushrooms) are absent here and stay on Furniture (minimap only).
+        private readonly HashSet<string> mapTrackLabelProduce = new HashSet<string>();
+        private readonly HashSet<string> mapTrackResolveDiag = new HashSet<string>(); // log icon resolution once per label
+
+        // Big map (MapPanel) renders MapSpotData spots, not tracks. Inject per-position Collectable spots via
+        // MapSpotProtocolManager.AddSpot, keyed by a UNIQUE usageId (low bits of the marker token). The spot
+        // borrows its icon from the matching MapResource track (TargetNetId == usageId, StaticId == item id),
+        // so each location shows the real ui_dynamic_collectable_{itemId} icon.
+        private const int SpotEnumCollectable = 5;
+        private const int SpotReasonAuto = 0;
+        private const int GameSceneIdStarTown = 1;
+        private IntPtr mapSpotAddMethod = IntPtr.Zero;
+        private IntPtr mapSpotRemoveMethod = IntPtr.Zero;
+        private bool mapSpotMethodsTried;
+        private readonly Dictionary<int, Vector3> mapBigSpotInjected = new Dictionary<int, Vector3>(16);
+        private readonly Dictionary<int, Vector3> mapBigSpotDesired = new Dictionary<int, Vector3>(16);
+        private readonly List<int> mapBigSpotRemoveBuffer = new List<int>(16);
+        // One-shot diagnostic: dump every sprite name in the packed collectable SpriteAtlas, so we can see
+        // whether any mushroom sprite exists there (the .ab file list can't enumerate packed atlas contents).
+        private bool mapAtlasDumped;
+        private int mapAtlasDumpTries;
+        private float mapAtlasNextTryAt;
+        // Collectable atlas item-name -> collectable id (built from the live atlas). Lets us resolve a
+        // resource whose produce path fails (mushrooms: produceId=0, entity id 130005 has no sprite) to its
+        // real collectable id by matching the radar label (= the item name, e.g. "Shiitake" -> 48002).
+        private readonly Dictionary<string, int> mapAtlasNameToId = new Dictionary<string, int>(64);
 
         // Live collectable entities: world position + resource ENTITY static id (for the real item icon).
         private IntPtr mapResCollectableClass = IntPtr.Zero;
@@ -111,6 +146,7 @@ namespace HeartopiaMod
         private IntPtr mapResDropDictGetter = IntPtr.Zero;   // static get_TableRandomDropsAndLowerUpperLimitsByDropGroup
         private IntPtr mapResDropDictGetItem = IntPtr.Zero;  // Dictionary.get_Item(string)
         private IntPtr mapResGetQualityMethod = IntPtr.Zero; // RewardUtility.GetQuality(RewardType,int,int)
+        private IntPtr mapResGetEntityMethod = IntPtr.Zero;  // TableData.GetEntity(int,bool) -> TableEntity (.name)
         private int mapResDropGroupDiagCount;
         private int mapResGroupVerboseCount;
         private int mapTrackMatchDiagCount;
@@ -438,6 +474,7 @@ namespace HeartopiaMod
             this.mapTrackDesired.Clear();
             this.mapTrackDesiredType.Clear();
             this.mapTrackDesiredStaticId.Clear();
+            this.mapBigSpotDesired.Clear();
             for (int i = 0; i < this.mapTrackCandidates.Count && this.mapTrackDesired.Count < limit; i++)
             {
                 MapTrackCandidate cand = this.mapTrackCandidates[i];
@@ -460,16 +497,49 @@ namespace HeartopiaMod
                     }
                     if (didMatch)
                     {
-                        int iconItemId = this.TryGetProduceItemId(resProduceId, out int produceItemId) ? produceItemId : resStaticId;
+                        // Resolve the collectable-atlas icon id. Priority:
+                        //  1) produce drop-item id (materials: timber/stone/fruit) — already in the atlas.
+                        //  2) atlas item-name == radar label (mushrooms: produceId=0, entity id 130005 has no
+                        //     sprite, but "Shiitake" -> 48002 which IS in the atlas).
+                        //  3) entity static id fallback (NormalItem only, minimap via Furniture).
+                        bool fromProduce = this.TryGetProduceItemId(resProduceId, out int produceItemId);
+                        bool useMapResource;
+                        int iconItemId;
+                        string how;
+                        if (fromProduce && produceItemId > 0)
+                        {
+                            iconItemId = produceItemId; useMapResource = true; how = "produce";
+                        }
+                        else if (this.TryResolveCollectableIdByLabel(cand.Label, out int collId))
+                        {
+                            iconItemId = collId; useMapResource = true; how = "atlasName";
+                        }
+                        else
+                        {
+                            iconItemId = resStaticId; useMapResource = false; how = "entity";
+                        }
                         if (iconItemId > 0)
                         {
-                            type = MapTrackTypeFurniture;
+                            type = useMapResource ? MapTrackTypeMapResource : MapTrackTypeFurniture;
                             staticId = iconItemId;
                             matched++;
                             if (!string.IsNullOrEmpty(cand.Label))
                             {
                                 this.mapTrackLabelIcon[cand.Label] = iconItemId; // remember icon for this resource type
+                                if (useMapResource) this.mapTrackLabelProduce.Add(cand.Label);
+                                else this.mapTrackLabelProduce.Remove(cand.Label);
                             }
+                            if (!string.IsNullOrEmpty(cand.Label) && this.mapTrackResolveDiag.Add(cand.Label + "|" + how))
+                            {
+                                ModLogger.Msg("[MapSpots] resolve '" + cand.Label + "' produceId=" + resProduceId
+                                    + " via=" + how + " itemId=" + iconItemId
+                                    + " entityStaticId=" + resStaticId + " type=" + (type == MapTrackTypeMapResource ? "MapResource" : "Furniture"));
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(cand.Label) && this.mapTrackResolveDiag.Add(cand.Label))
+                        {
+                            ModLogger.Msg("[MapSpots] resolve '" + cand.Label + "' produceId=" + resProduceId
+                                + " fromProduce=" + fromProduce + " itemId=0 entityStaticId=" + resStaticId + " -> NO ICON (flag)");
                         }
                     }
                     else if (!string.IsNullOrEmpty(cand.Label)
@@ -477,7 +547,7 @@ namespace HeartopiaMod
                     {
                         // No live entity here (distant / streamed out), but we've resolved this resource type
                         // before -> reuse its icon so far markers aren't stuck on the placeholder flag.
-                        type = MapTrackTypeFurniture;
+                        type = this.mapTrackLabelProduce.Contains(cand.Label) ? MapTrackTypeMapResource : MapTrackTypeFurniture;
                         staticId = cachedIcon;
                         matched++;
                     }
@@ -495,6 +565,16 @@ namespace HeartopiaMod
                 this.mapTrackDesired[cand.Token] = cand.Position;
                 this.mapTrackDesiredType[cand.Token] = type;
                 this.mapTrackDesiredStaticId[cand.Token] = staticId;
+
+                // Big map: a MapResource marker (drop-item icon) gets a per-position Collectable map-spot,
+                // keyed by a UNIQUE usageId (low bits of the token). The spot borrows its icon from the
+                // matching MapResource track (StaticId=itemId, TargetNetId=usageId), so it shows the real
+                // item icon per location instead of one-per-type.
+                if (this.radarBigMapSpots && type == MapTrackTypeMapResource && staticId > 0)
+                {
+                    int spotUsageId = unchecked((int)(uint)(cand.Token & 0xFFFFFFFFUL));
+                    this.mapBigSpotDesired[spotUsageId] = cand.Position;
+                }
             }
 
             // Remove tracks no longer desired.
@@ -544,7 +624,11 @@ namespace HeartopiaMod
                     }
                 }
 
-                if (this.DispatchStartTrack(entry.Key, entry.Value, trackType, staticId))
+                // MapResource markers carry TargetNetId = the big-map spot's usageId (low bits of the token)
+                // so the Collectable spot matches this track and borrows its per-resource icon.
+                uint targetNet = (trackType == MapTrackTypeMapResource)
+                    ? unchecked((uint)(entry.Key & 0xFFFFFFFFUL)) : 0u;
+                if (this.DispatchStartTrack(entry.Key, entry.Value, trackType, staticId, targetNet))
                 {
                     this.mapTrackInjected[entry.Key] = entry.Value;
                     this.mapTrackInjectedType[entry.Key] = trackType;
@@ -565,6 +649,9 @@ namespace HeartopiaMod
                     + " collectables=" + this.mapResEntities.Count + " matched=" + matched
                     + " addOk=" + addOk + " addFail=" + addFail + " removed=" + removed + " removeFail=" + removeFail);
             }
+
+            // Big-map markers (Collectable spots) from the same resolved item ids.
+            this.SyncBigMapSpots();
         }
 
         // Scan live collectable entities; store world position + resource ENTITY static id
@@ -814,6 +901,7 @@ namespace HeartopiaMod
                 return; // retry next scan
             }
             this.mapResProduceTried = true;
+            this.mapResGetEntityMethod = this.FindAuraMonoMethodOnHierarchy(cls, "GetEntity", 2); // TableData.GetEntity(int,bool)
             // Signature is GetMapResourceProduce(int id, bool needException = false) = 2 params.
             this.mapResGetProduceMethod = this.FindAuraMonoMethodOnHierarchy(cls, "GetMapResourceProduce", 2);
             if (this.mapResGetProduceMethod == IntPtr.Zero)
@@ -1083,6 +1171,295 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Match a radar label (= item name, e.g. "Shiitake") to a collectable-atlas id, using the live atlas
+        // name->id map. Exact (case-insensitive) first, then a conservative prefix match ("Oyster" ->
+        // "Oyster Mushroom"); the lowest-id non-"Bizarre" variant is preferred at build time.
+        private bool TryResolveCollectableIdByLabel(string label, out int collId)
+        {
+            collId = 0;
+            if (string.IsNullOrEmpty(label) || this.mapAtlasNameToId.Count == 0)
+            {
+                return false;
+            }
+            string key = label.Trim().ToLowerInvariant();
+            if (this.mapAtlasNameToId.TryGetValue(key, out collId))
+            {
+                return true;
+            }
+            int bestLen = int.MaxValue;
+            foreach (KeyValuePair<string, int> kv in this.mapAtlasNameToId)
+            {
+                bool related = kv.Key.StartsWith(key + " ", StringComparison.Ordinal)
+                    || key.StartsWith(kv.Key + " ", StringComparison.Ordinal);
+                if (related && kv.Key.Length < bestLen)
+                {
+                    bestLen = kv.Key.Length;
+                    collId = kv.Value;
+                }
+            }
+            return collId > 0;
+        }
+
+        // TableData.GetEntity(id).name -> item display name (diagnostic, to identify collectable ids).
+        private unsafe bool TryGetItemName(int id, out string name)
+        {
+            name = null;
+            if (this.mapResGetEntityMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+            int pid = id;
+            byte needException = 0;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&pid);
+            args[1] = (IntPtr)(&needException);
+            IntPtr exc = IntPtr.Zero;
+            IntPtr entityObj = auraMonoRuntimeInvoke(this.mapResGetEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || entityObj == IntPtr.Zero)
+            {
+                return false;
+            }
+            if (!this.TryGetMonoObjectMember(entityObj, "name", out IntPtr strObj) || strObj == IntPtr.Zero)
+            {
+                return false;
+            }
+            return this.TryReadMonoString(strObj, out name);
+        }
+
+        // Resolve MapSpotProtocolManager.AddSpot / RemoveSpot (static, value-type args) for big-map spots.
+        private void EnsureMapSpotMethods()
+        {
+            if (this.mapSpotMethodsTried)
+            {
+                return;
+            }
+            if (auraMonoRuntimeInvoke == null)
+            {
+                return;
+            }
+            IntPtr cls = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.MapSpot.MapSpotProtocolManager");
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassInImages("XDTDataAndProtocol.ProtocolService.MapSpot",
+                    "MapSpotProtocolManager", new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+            }
+            if (cls == IntPtr.Zero)
+            {
+                return; // retry next scan (image may not be loaded yet)
+            }
+            this.mapSpotMethodsTried = true;
+            this.mapSpotAddMethod = this.FindAuraMonoMethodOnHierarchy(cls, "AddSpot", 5);
+            this.mapSpotRemoveMethod = this.FindAuraMonoMethodOnHierarchy(cls, "RemoveSpot", 4);
+            ModLogger.Msg("[MapSpots] MapSpotProtocolManager AddSpot=" + (this.mapSpotAddMethod != IntPtr.Zero)
+                + " RemoveSpot=" + (this.mapSpotRemoveMethod != IntPtr.Zero));
+        }
+
+        // AddSpot(SpotEnum category, int useId, Vector3 position, SpotReason reason, GameSceneId gameSceneId).
+        private unsafe bool AddBigMapSpot(int useId, Vector3 pos)
+        {
+            if (this.mapSpotAddMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+            int category = SpotEnumCollectable, reason = SpotReasonAuto, scene = GameSceneIdStarTown, id = useId;
+            Vector3 p = pos;
+            IntPtr* args = stackalloc IntPtr[5];
+            args[0] = (IntPtr)(&category);
+            args[1] = (IntPtr)(&id);
+            args[2] = (IntPtr)(&p);       // Vector3 by value -> pointer to the struct
+            args[3] = (IntPtr)(&reason);
+            args[4] = (IntPtr)(&scene);
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(this.mapSpotAddMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            return exc == IntPtr.Zero;
+        }
+
+        // RemoveSpot(SpotEnum category, int useId, SpotReason reason, GameSceneId gameSceneId).
+        private unsafe bool RemoveBigMapSpot(int useId)
+        {
+            if (this.mapSpotRemoveMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+            int category = SpotEnumCollectable, reason = SpotReasonAuto, scene = GameSceneIdStarTown, id = useId;
+            IntPtr* args = stackalloc IntPtr[4];
+            args[0] = (IntPtr)(&category);
+            args[1] = (IntPtr)(&id);
+            args[2] = (IntPtr)(&reason);
+            args[3] = (IntPtr)(&scene);
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(this.mapSpotRemoveMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            return exc == IntPtr.Zero;
+        }
+
+        // Reconcile injected big-map Collectable spots against the desired set (keyed by drop-item id).
+        private void SyncBigMapSpots()
+        {
+            this.EnsureMapSpotMethods();
+            if (this.mapSpotAddMethod == IntPtr.Zero)
+            {
+                return;
+            }
+
+            this.mapBigSpotRemoveBuffer.Clear();
+            foreach (KeyValuePair<int, Vector3> kv in this.mapBigSpotInjected)
+            {
+                if (!this.mapBigSpotDesired.ContainsKey(kv.Key))
+                {
+                    this.mapBigSpotRemoveBuffer.Add(kv.Key);
+                }
+            }
+            int added = 0, removed = 0;
+            for (int i = 0; i < this.mapBigSpotRemoveBuffer.Count; i++)
+            {
+                int id = this.mapBigSpotRemoveBuffer[i];
+                this.RemoveBigMapSpot(id);
+                this.mapBigSpotInjected.Remove(id);
+                removed++;
+            }
+            foreach (KeyValuePair<int, Vector3> kv in this.mapBigSpotDesired)
+            {
+                bool isNew = !this.mapBigSpotInjected.TryGetValue(kv.Key, out Vector3 prev);
+                if (!isNew && (kv.Value - prev).sqrMagnitude <= MapTrackMoveThresholdSqr)
+                {
+                    continue;
+                }
+                if (this.AddBigMapSpot(kv.Key, kv.Value))
+                {
+                    this.mapBigSpotInjected[kv.Key] = kv.Value;
+                    if (isNew) added++;
+                }
+            }
+            if (this.mapTrackDiagSyncs < 6 && (added > 0 || removed > 0))
+            {
+                ModLogger.Msg("[MapSpots] big-map spots: desired=" + this.mapBigSpotDesired.Count
+                    + " injected=" + this.mapBigSpotInjected.Count + " added=" + added + " removed=" + removed);
+            }
+
+            this.TryDumpCollectableAtlasOnce();
+        }
+
+        // Enumerate the packed collectable SpriteAtlas to build the item-name -> collectable-id map (and log
+        // it once). The atlas only loads when a collectable icon is actually rendered (big map open / a
+        // MapResource marker shown), which can be well after startup, so retry (throttled) until it appears.
+        private void TryDumpCollectableAtlasOnce()
+        {
+            if (this.mapAtlasDumped)
+            {
+                return;
+            }
+            float now = Time.unscaledTime;
+            if (now < this.mapAtlasNextTryAt)
+            {
+                return;
+            }
+            this.mapAtlasNextTryAt = now + 2f;
+            bool firstTry = this.mapAtlasDumpTries == 0;
+            this.mapAtlasDumpTries++;
+            try
+            {
+                Il2CppArrayBase<SpriteAtlas> atlases = Resources.FindObjectsOfTypeAll<SpriteAtlas>();
+                if (atlases == null)
+                {
+                    return;
+                }
+                SpriteAtlas atlas = null;
+                for (int i = 0; i < atlases.Length; i++)
+                {
+                    SpriteAtlas a = atlases[i];
+                    if (a == null)
+                    {
+                        continue;
+                    }
+                    string an = a.name ?? string.Empty;
+                    if (firstTry)
+                    {
+                        ModLogger.Msg("[AtlasDump] SpriteAtlas '" + an + "' spriteCount=" + a.spriteCount);
+                    }
+                    if (an.IndexOf("collectable", StringComparison.OrdinalIgnoreCase) >= 0 && a.spriteCount > 0)
+                    {
+                        atlas = a;
+                        break;
+                    }
+                }
+                if (atlas == null)
+                {
+                    if (firstTry)
+                    {
+                        ModLogger.Msg("[AtlasDump] collectable atlas not loaded yet; retrying (open the big map / show resource markers)...");
+                    }
+                    return;
+                }
+                {
+                    string aname = atlas.name ?? string.Empty;
+                    int count = atlas.spriteCount;
+                    Il2CppReferenceArray<Sprite> sprites = new Il2CppReferenceArray<Sprite>(count);
+                    int got = atlas.GetSprites(sprites);
+                    var sb = new StringBuilder();
+                    int logged = 0;
+                    for (int s = 0; s < got; s++)
+                    {
+                        Sprite sp = sprites[s];
+                        if (sp == null) continue;
+                        string sn = sp.name ?? string.Empty;
+                        if (sn.EndsWith("(Clone)", StringComparison.Ordinal))
+                        {
+                            sn = sn.Substring(0, sn.Length - "(Clone)".Length);
+                        }
+                        // Resolve the numeric id -> item name so we can identify which id is the mushroom.
+                        const string pfx = "ui_dynamic_collectable_";
+                        string label = sn;
+                        if (sn.StartsWith(pfx, StringComparison.Ordinal)
+                            && int.TryParse(sn.Substring(pfx.Length), out int cid)
+                            && this.TryGetItemName(cid, out string nm) && !string.IsNullOrEmpty(nm))
+                        {
+                            label = cid + "=" + nm;
+                            // Build name -> collectable id (prefer the lowest id so non-"Bizarre" variants win).
+                            string key = nm.Trim().ToLowerInvariant();
+                            if (!this.mapAtlasNameToId.TryGetValue(key, out int existing) || cid < existing)
+                            {
+                                this.mapAtlasNameToId[key] = cid;
+                            }
+                        }
+                        sb.Append(label).Append(" | ");
+                        logged++;
+                        if (sb.Length > 900)
+                        {
+                            ModLogger.Msg("[AtlasDump]   " + sb.ToString());
+                            sb.Clear();
+                        }
+                        UnityEngine.Object.Destroy(sp); // GetSprites returns clones
+                    }
+                    if (sb.Length > 0)
+                    {
+                        ModLogger.Msg("[AtlasDump]   " + sb.ToString());
+                    }
+                    ModLogger.Msg("[AtlasDump] '" + aname + "' dumped " + logged + " sprite names; nameMap="
+                        + this.mapAtlasNameToId.Count);
+                    this.mapAtlasDumped = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                this.mapAtlasDumped = true; // don't spam on failure
+                ModLogger.Msg("[AtlasDump] failed: " + ex.Message);
+            }
+        }
+
+        private void ClearInjectedBigMapSpots()
+        {
+            if (this.mapBigSpotInjected.Count == 0 || this.mapSpotRemoveMethod == IntPtr.Zero)
+            {
+                this.mapBigSpotInjected.Clear();
+                return;
+            }
+            foreach (KeyValuePair<int, Vector3> kv in this.mapBigSpotInjected)
+            {
+                this.RemoveBigMapSpot(kv.Key);
+            }
+            this.mapBigSpotInjected.Clear();
+        }
+
         private int GetGameMapSpotUsageId(GameObject marker, string label, Vector3 pos)
         {
             // Tracked, persistent targets (players/birds/insects/meteors) keep a stable id across radar
@@ -1103,7 +1480,7 @@ namespace HeartopiaMod
             return hash != 0 ? hash : 1;
         }
 
-        private unsafe bool DispatchStartTrack(ulong token, Vector3 position, byte trackType, int staticId)
+        private unsafe bool DispatchStartTrack(ulong token, Vector3 position, byte trackType, int staticId, uint targetNetId = 0u)
         {
             if (this.mapTrackDispatchStartMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
             {
@@ -1117,7 +1494,7 @@ namespace HeartopiaMod
             posPtr[1] = position.y;
             posPtr[2] = position.z;
             *(ulong*)(buf + this.offTdToken) = token;
-            *(uint*)(buf + this.offTdTargetNetId) = 0u;
+            *(uint*)(buf + this.offTdTargetNetId) = targetNetId;
             *(int*)(buf + this.offTdStaticId) = staticId;
             *(buf + this.offTdTrackType) = trackType;
             *(buf + this.offTdTrackReason) = MapTrackReasonLocal;
@@ -1150,10 +1527,12 @@ namespace HeartopiaMod
         // Kept name so OnUpdate / Cleanup wiring is unchanged.
         private void ClearInjectedGameMapSpots()
         {
-            if (this.mapTrackInjected.Count == 0)
+            if (this.mapTrackInjected.Count == 0 && this.mapBigSpotInjected.Count == 0)
             {
                 return;
             }
+            this.AttachAuraMonoThread();
+            this.ClearInjectedBigMapSpots();
 
             int total = this.mapTrackInjected.Count, removed = 0, removeFail = 0;
             if (this.mapTrackDispatchStopMethod != IntPtr.Zero && auraMonoRuntimeInvoke != null && this.AttachAuraMonoThread())
