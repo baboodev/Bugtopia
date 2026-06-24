@@ -237,10 +237,18 @@ namespace HeartopiaMod
             return false;
         }
 
+        // Accepted entity pointers are pinned here so they survive the moving sgen GC after the scan
+        // returns, until the caller finishes reading them (netId / position). Released at the start of
+        // the next scan: by then the previous caller has consumed its entities. This is per-scan
+        // (button / throttled), not per-frame, so the pin churn is fine.
+        private readonly List<uint> _loadedEntityScanPins = new List<uint>();
+
         private bool TryEnumerateAuraMonoLoadedEntityObjects(out List<IntPtr> entityObjects, out string status)
         {
             entityObjects = new List<IntPtr>();
             status = "Aura mono entities unavailable";
+
+            FreeAuraMonoPins(this._loadedEntityScanPins);
 
             try
             {
@@ -469,29 +477,40 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> items = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(collectionObj, items) || items.Count == 0)
+            // Pin enumerated items for the loop below: each item is read field-by-field (LooksLike /
+            // recursion) and the moving sgen GC would otherwise relocate it mid-read -> native AV.
+            List<uint> itemPins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(collectionObj, items, itemPins) || items.Count == 0)
             {
+                FreeAuraMonoPins(itemPins);
                 this.BirdFarmNetLog($"Aura mono entity collection {label}: no items via direct enumeration; probing nested storage");
                 return this.TryCollectAuraMonoEntityObjectsFromCollectionFallback(collectionObj, label, output, seenEntityPtrs, seenTraversalPtrs);
             }
 
             this.BirdFarmNetLog($"Aura mono entity collection {label}: items={items.Count}");
             bool found = false;
-            for (int i = 0; i < items.Count; i++)
+            try
             {
-                IntPtr item = items[i];
-                if (item == IntPtr.Zero || item == collectionObj)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    continue;
-                }
+                    IntPtr item = items[i];
+                    if (item == IntPtr.Zero || item == collectionObj)
+                    {
+                        continue;
+                    }
 
-                if (this.TryAddAuraMonoEntityObject(item, output, seenEntityPtrs))
-                {
-                    found = true;
-                    continue;
-                }
+                    if (this.TryAddAuraMonoEntityObject(item, output, seenEntityPtrs))
+                    {
+                        found = true;
+                        continue;
+                    }
 
-                found = this.TryCollectAuraMonoEntityObjectsFromUnknownContainer(item, output, seenEntityPtrs, seenTraversalPtrs, 1) || found;
+                    found = this.TryCollectAuraMonoEntityObjectsFromUnknownContainer(item, output, seenEntityPtrs, seenTraversalPtrs, 1) || found;
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(itemPins);
             }
 
             return found;
@@ -608,25 +627,36 @@ namespace HeartopiaMod
 
             bool found = false;
             List<IntPtr> items = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(worldsCollectionObj, items) || items.Count == 0)
+            // Pin enumerated items: each is traversed/read below; unpinned the moving sgen GC could
+            // relocate it between enumeration and the recursive read -> native AV.
+            List<uint> itemPins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(worldsCollectionObj, items, itemPins) || items.Count == 0)
             {
+                FreeAuraMonoPins(itemPins);
                 return false;
             }
 
             // Verbose logging disabled to reduce GC pressure
             // this.BirdFarmNetLog($"Aura mono entity world collection {label}: items={items.Count}");
-            for (int i = 0; i < items.Count; i++)
+            try
             {
-                IntPtr item = items[i];
-                if (item == IntPtr.Zero || item == worldsCollectionObj)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    continue;
-                }
+                    IntPtr item = items[i];
+                    if (item == IntPtr.Zero || item == worldsCollectionObj)
+                    {
+                        continue;
+                    }
 
-                // Verbose logging disabled to reduce GC pressure
-                // this.BirdFarmNetLog($"Aura mono entity world collection {label}[{i}] -> 0x{item.ToInt64():X}");
-                found = this.TryCollectAuraMonoEntityObjectsFromEntitySource(item, output, seenEntityPtrs, seenSourcePtrs, seenTraversalPtrs, depth + 1) || found;
-                found = this.TryCollectAuraMonoEntityObjectsFromUnknownContainer(item, output, seenEntityPtrs, seenTraversalPtrs, 1) || found;
+                    // Verbose logging disabled to reduce GC pressure
+                    // this.BirdFarmNetLog($"Aura mono entity world collection {label}[{i}] -> 0x{item.ToInt64():X}");
+                    found = this.TryCollectAuraMonoEntityObjectsFromEntitySource(item, output, seenEntityPtrs, seenSourcePtrs, seenTraversalPtrs, depth + 1) || found;
+                    found = this.TryCollectAuraMonoEntityObjectsFromUnknownContainer(item, output, seenEntityPtrs, seenTraversalPtrs, 1) || found;
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(itemPins);
             }
 
             return found;
@@ -667,12 +697,25 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> items = new List<IntPtr>();
-            if (this.TryEnumerateAuraMonoCollectionItems(containerObj, items))
+            // Pin enumerated items across the recursive reads below (moving sgen GC stale-pointer guard).
+            List<uint> itemPins = new List<uint>();
+            if (this.TryEnumerateAuraMonoCollectionItems(containerObj, items, itemPins))
             {
-                for (int i = 0; i < items.Count; i++)
+                try
                 {
-                    found = this.TryCollectAuraMonoEntityObjectsFromUnknownContainer(items[i], output, seenEntityPtrs, seenTraversalPtrs, depth + 1) || found;
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        found = this.TryCollectAuraMonoEntityObjectsFromUnknownContainer(items[i], output, seenEntityPtrs, seenTraversalPtrs, depth + 1) || found;
+                    }
                 }
+                finally
+                {
+                    FreeAuraMonoPins(itemPins);
+                }
+            }
+            else
+            {
+                FreeAuraMonoPins(itemPins);
             }
 
             foreach (string methodName in new string[] { "get_entity", "GetEntity", "get_owner", "GetOwner", "get_target", "GetTarget", "get_Value", "get_Key", "get_Source", "GetSource" })
@@ -719,6 +762,14 @@ namespace HeartopiaMod
             }
 
             output.Add(candidateObj);
+            // Keep this entity pinned past the scan: the caller reads its fields after we return, and
+            // the moving sgen GC would otherwise relocate/collect it (no mono_gc_disable on this build).
+            // candidateObj is valid right now (its source items list is pinned during enumeration).
+            uint entityPin = AuraMonoPinNew(candidateObj);
+            if (entityPin != 0U)
+            {
+                this._loadedEntityScanPins.Add(entityPin);
+            }
             return true;
         }
 
