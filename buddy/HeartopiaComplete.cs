@@ -1124,6 +1124,7 @@ namespace HeartopiaMod
                 this.ProcessPadBuildHotkeysOnUpdate();
             }
 
+            Breadcrumbs.Drop("ou.afterhotkeys");
             this.UpdateBuildingFreeSnapOverrides();
             this.UpdateBuildingMovePanelState();
             this.ProcessGodCameraMoveOnUpdate();
@@ -1348,6 +1349,7 @@ namespace HeartopiaMod
             }
 
             this.UpdateVisualDebugEsp();
+            Breadcrumbs.Drop("ou.end");
         }
 
 

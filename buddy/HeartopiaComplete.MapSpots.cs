@@ -690,8 +690,14 @@ namespace HeartopiaMod
             this.EnsureProduceMethod();
 
             this.mapResEntities.Clear();
-            if (!this.TryAuraMonoGetComponentObjects(this.mapResCollectableClass, out List<IntPtr> components) || components == null)
+            // Pin the enumerated components, and each derived entity below, across their field reads:
+            // GetEntityResId boxes its int return -> allocation -> the moving sgen GC may relocate an
+            // unpinned component/entity mid-loop, and reading (or invoking on) a moved object crashes
+            // hard (often with no WER dump). compPins is released once the loop is done.
+            List<uint> compPins = new List<uint>();
+            if (!this.TryAuraMonoGetComponentObjects(this.mapResCollectableClass, out List<IntPtr> components, compPins) || components == null)
             {
+                FreeAuraMonoPins(compPins);
                 if (!this.mapResDiagLogged)
                 {
                     this.mapResDiagLogged = true;
@@ -709,48 +715,67 @@ namespace HeartopiaMod
             int rawCount = components.Count;
             int withEntity = 0, withPos = 0;
             uint sampleNetId = 0; int sampleItemTypeId = 0, sampleResId = 0, sampleStaticId = 0; bool sampled = false;
-            for (int i = 0; i < components.Count; i++)
+            try
             {
-                IntPtr comp = components[i];
-                if (comp == IntPtr.Zero)
+                for (int i = 0; i < components.Count; i++)
                 {
-                    continue;
-                }
-                if (!this.TryGetMonoObjectMember(comp, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
-                {
-                    continue;
-                }
-                withEntity++;
-                Vector3 pos;
-                if (!this.TryGetMonoVector3Member(entityObj, "position", out pos))
-                {
-                    continue;
-                }
-                withPos++;
+                    IntPtr comp = components[i];
+                    if (comp == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+                    if (!this.TryGetMonoObjectMember(comp, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+                    withEntity++;
 
-                // EntityUtil.GetEntityResId(entity) -> StaticEntityData.resourceID = the entity static id
-                // that GetIconName decodes into the real prefab/item icon.
-                int staticId = 0;
-                this.TryGetCollectableStaticIdViaAura(entityObj, out staticId);
-                this.TryGetMonoInt32Member(comp, "itemTypeID", out int produceId);
-                // Authoritative depletion state straight from the live entity (the radar's own cooldown
-                // tracking is local-only and misses resources already depleted by others / before login).
-                bool onCooldown = this.TryGetMonoBoolMember(comp, "inCold", out bool inCold) && inCold;
+                    // entity is a distinct object from comp (comp is pinned via compPins, but the entity
+                    // is not) and we read it several times + invoke GetEntityResId on it -> pin it for
+                    // the duration of these reads against the moving sgen GC.
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        Vector3 pos;
+                        if (!this.TryGetMonoVector3Member(entityObj, "position", out pos))
+                        {
+                            continue;
+                        }
+                        withPos++;
 
-                if (!sampled)
-                {
-                    sampled = true;
-                    this.TryGetMonoUInt32Member(entityObj, "netId", out sampleNetId);
-                    sampleStaticId = staticId;
-                    sampleItemTypeId = produceId;
-                    sampleResId = this.mapResGetResIdMethods.Count;
-                }
+                        // EntityUtil.GetEntityResId(entity) -> StaticEntityData.resourceID = the entity static id
+                        // that GetIconName decodes into the real prefab/item icon.
+                        int staticId = 0;
+                        this.TryGetCollectableStaticIdViaAura(entityObj, out staticId);
+                        this.TryGetMonoInt32Member(comp, "itemTypeID", out int produceId);
+                        // Authoritative depletion state straight from the live entity (the radar's own cooldown
+                        // tracking is local-only and misses resources already depleted by others / before login).
+                        bool onCooldown = this.TryGetMonoBoolMember(comp, "inCold", out bool inCold) && inCold;
 
-                if (staticId <= 0 && produceId <= 0)
-                {
-                    continue;
+                        if (!sampled)
+                        {
+                            sampled = true;
+                            this.TryGetMonoUInt32Member(entityObj, "netId", out sampleNetId);
+                            sampleStaticId = staticId;
+                            sampleItemTypeId = produceId;
+                            sampleResId = this.mapResGetResIdMethods.Count;
+                        }
+
+                        if (staticId <= 0 && produceId <= 0)
+                        {
+                            continue;
+                        }
+                        this.mapResEntities.Add(new MapResEntity { Position = pos, StaticId = staticId, ProduceId = produceId, OnCooldown = onCooldown });
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
                 }
-                this.mapResEntities.Add(new MapResEntity { Position = pos, StaticId = staticId, ProduceId = produceId, OnCooldown = onCooldown });
+            }
+            finally
+            {
+                FreeAuraMonoPins(compPins);
             }
 
             if (!this.mapResDiagLogged && rawCount > 0)

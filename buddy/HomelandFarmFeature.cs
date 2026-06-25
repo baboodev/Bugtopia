@@ -10789,7 +10789,10 @@ namespace HeartopiaMod
         // entity-graph walk (TryEnumerateAuraMonoLoadedEntityObjects). Shares the exact inflate/invoke
         // infrastructure the homeland-farm path proved out. The returned IntPtrs are valid only in the
         // current synchronous scope; scalarize (netId/fields) before any coroutine yield.
-        private unsafe bool TryAuraMonoGetComponentObjects(IntPtr componentClass, out List<IntPtr> components)
+        // pins (optional): when supplied, the enumerated component pointers are pinned into it so the
+        // caller can read each component's fields safely across the moving sgen GC. The caller must
+        // FreeAuraMonoPins(pins) once done. Callers that scalarize instantly may pass null.
+        private unsafe bool TryAuraMonoGetComponentObjects(IntPtr componentClass, out List<IntPtr> components, List<uint> pins = null)
         {
             components = null;
             if (componentClass == IntPtr.Zero || !HomelandFarmAllowUnsafeAuraMonoGetComponents)
@@ -10828,7 +10831,7 @@ namespace HeartopiaMod
 
             IntPtr resultList = listSlot[0] != IntPtr.Zero ? listSlot[0] : listObj;
             List<IntPtr> items = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(resultList, items) || items.Count == 0)
+            if (!this.TryEnumerateAuraMonoCollectionItems(resultList, items, pins) || items.Count == 0)
             {
                 return false;
             }
