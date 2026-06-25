@@ -10,7 +10,14 @@ namespace HeartopiaMod
         private static bool enabled = false;
         private static bool instantCatchEnabled = false;
         private static float nextInstantCatchAt = -999f;
+        // Per-cast instant-catch diagnostics.
+        private static int instantCatchCastSeq = 0;
+        private static bool instantCatchBiteLogged = false;
+        private static bool instantCatchResultLogged = false;
+        private static float instantCatchBiteAt = -1f;
         private const float InstantCatchInterval = 0.1f;
+        // EXPERIMENT: cast the buoy this far beyond the fish (away from the player).
+        private const float CastBeyondFishOffset = 0.2f;
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";
@@ -369,7 +376,7 @@ namespace HeartopiaMod
             }
             num += 30;
 
-            bool nextInstant = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), instantCatchEnabled, "Instant Catch (no move)");
+            bool nextInstant = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), instantCatchEnabled, "Instant Catch");
             if (nextInstant != instantCatchEnabled)
             {
                 SetInstantCatchEnabled(nextInstant);
@@ -493,10 +500,39 @@ namespace HeartopiaMod
                         sessionStartedAt = now;
                     }
 
-                    // Instant Catch: re-report the buoy geometry with a collapsed successLength so
-                    // the battle resolves immediately. We keep re-sending through Waiting/Idle AND
-                    // Battle so the game's own real-successLength send (on bite) cannot overwrite
-                    // ours for more than one tick. The auto-pull logic still drives PullRod.
+                    // --- Per-cast diagnostics: bite + result timing (one line each per cast) ---
+                    if (instantCatchEnabled)
+                    {
+                        // Real bites show state Waiting/Battle; a stale baitingFishNetId in Idle (left
+                        // over from a previous session after a toggle) is NOT a bite — exclude it.
+                        bool isBattle = string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase)
+                            || (baitingFishNetId != 0U && string.Equals(fishState, "Waiting", StringComparison.OrdinalIgnoreCase));
+                        if (!instantCatchBiteLogged && isBattle)
+                        {
+                            instantCatchBiteLogged = true;
+                            instantCatchBiteAt = now;
+                            float dt = host.InstantCatchCastAt > 0f ? now - host.InstantCatchCastAt : -1f;
+                            host.InstantCatchDiag("cast#" + instantCatchCastSeq + " BITE after " + dt.ToString("F2")
+                                + "s state=" + fishState + " baitNetId=" + baitingFishNetId
+                                + " pull=" + pullStrength.ToString("F2") + " tension=" + rodDurability.ToString("F2"));
+                        }
+
+                        bool isResult = string.Equals(fishState, "FishingOnHook", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(fishState, "BattleFailSlack", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(fishState, "FishingFail", StringComparison.OrdinalIgnoreCase);
+                        if (!instantCatchResultLogged && isResult)
+                        {
+                            instantCatchResultLogged = true;
+                            float dtCast = host.InstantCatchCastAt > 0f ? now - host.InstantCatchCastAt : -1f;
+                            float dtBite = instantCatchBiteAt > 0f ? now - instantCatchBiteAt : -1f;
+                            host.InstantCatchDiag("cast#" + instantCatchCastSeq + " RESULT=" + fishState
+                                + " after " + dtCast.ToString("F2") + "s from cast, "
+                                + dtBite.ToString("F2") + "s from bite");
+                        }
+                    }
+
+                    // Instant Catch: echo the buoy's real position with a collapsed successLength so the
+                    // battle resolves immediately once the fish bites. The buoy is never moved.
                     if (instantCatchEnabled
                         && now >= nextInstantCatchAt
                         && (string.Equals(fishState, "Waiting", StringComparison.OrdinalIgnoreCase)
@@ -504,14 +540,15 @@ namespace HeartopiaMod
                             || string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase)))
                     {
                         nextInstantCatchAt = now + InstantCatchInterval;
-                        // Track the live fish position while waiting (the shadow keeps swimming after
-                        // the cast); hold the buoy steady once the fight has started.
-                        bool trackFishPosition = !string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase);
-                        if (host.TryArmFishingInstantCatch(currentTargetPos, currentTargetNetId, trackFishPosition, out string instantStatus))
+
+                        string buoyStatus = "n/a";
+                        if (host.TryArmFishingInstantCatch(out buoyStatus))
                         {
-                            lastTargetStatus = "Instant catch: " + instantStatus;
+                            lastTargetStatus = "Instant catch: " + buoyStatus;
                         }
-                        Log("Instant catch tick state=" + fishState + " track=" + trackFishPosition + " status=" + instantStatus);
+
+                        Log("Instant catch tick state=" + fishState
+                            + " buoy=" + buoyStatus + " baitNetId=" + baitingFishNetId);
                     }
 
                     bool looksLikeBattleProxy =
@@ -963,7 +1000,9 @@ namespace HeartopiaMod
                 lastTargetStatus = $"netId={targetNetId} dist={(targetDistance > 0f ? targetDistance.ToString("F1") : "unknown")}m found={detectedCount}";
                 Log("Fish shadow target resolved: " + lastTargetStatus + " pos=" + targetPos);
 
-                if (host.TryEnterFishingAtTarget(targetPos, out string enterStatus))
+                // EXPERIMENT: cast the buoy slightly beyond the fish (away from the player) to give the
+                // battle win-geometry a margin baked in at bite time.
+                if (host.TryEnterFishingWithOffset(targetPos, CastBeyondFishOffset, out Vector3 castTarget, out string enterStatus))
                 {
                     lastStatus = "Cast sent to fish shadow";
                     lastTargetStatus = $"netId={targetNetId} dist={(targetDistance > 0f ? targetDistance.ToString("F1") : "unknown")}m";
@@ -978,6 +1017,20 @@ namespace HeartopiaMod
                     lastRequestedPressed = false;
                     nextPressUpdateAt = now + 0.15f;
                     nextActionAt = now + AfterCastPollDelay;
+
+                    // Per-cast diagnostics: start a new cast window.
+                    instantCatchCastSeq++;
+                    instantCatchBiteLogged = false;
+                    instantCatchResultLogged = false;
+                    instantCatchBiteAt = -1f;
+                    host.InstantCatchCastSeq = instantCatchCastSeq;
+                    host.InstantCatchCastAt = now;
+                    host.InstantCatchDiag("=== CAST #" + instantCatchCastSeq + " ==="
+                        + " fish=" + targetPos
+                        + " castTarget=" + castTarget + " offset=" + CastBeyondFishOffset.ToString("F2") + "m"
+                        + " dist=" + (targetDistance > 0f ? targetDistance.ToString("F1") : "?") + "m"
+                        + " netId=" + targetNetId + " enter=" + enterStatus);
+
                     Log("EnterFishing succeeded. status=" + enterStatus + " targetNetId=" + targetNetId);
                     return;
                 }

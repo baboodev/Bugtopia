@@ -1390,6 +1390,32 @@ namespace HeartopiaMod
             return true;
         }
 
+        // EXPERIMENT: cast the buoy a small distance BEYOND the fish, away from the player, so that at
+        // bite time the fish (mouth) sits closer to the player than the buoy — giving the battle's
+        // Distance(mouth,player) < Distance(buoy,player) condition a non-zero margin baked into the
+        // buoy LANDING (latched at bite), without breaking the approach. Returns the actual cast target
+        // so the caller can log it for analysis.
+        public bool TryEnterFishingWithOffset(Vector3 fishPos, float offsetBeyond, out Vector3 castTarget, out string status)
+        {
+            castTarget = fishPos;
+
+            GameObject playerRoot = HeartopiaComplete.GetLocalPlayer() ?? this.FindPlayerRoot();
+            if (playerRoot != null && offsetBeyond != 0f)
+            {
+                Vector3 playerPos = playerRoot.transform.position;
+                Vector3 flat = fishPos - playerPos;
+                flat.y = 0f;
+                if (flat.sqrMagnitude > 0.0001f)
+                {
+                    flat.Normalize();
+                    castTarget = fishPos + flat * offsetBeyond; // beyond the fish, away from the player
+                    castTarget.y = fishPos.y;
+                }
+            }
+
+            return this.TryEnterFishingAtTarget(castTarget, out status);
+        }
+
         public bool TryEnterFishingAtTarget(Vector3 targetPos, out string status)
         {
             status = "GameplayApi unavailable";
@@ -2336,6 +2362,23 @@ namespace HeartopiaMod
         private float nextInstantCatchSendLogAt = -999f;
         private float nextInstantCatchLogAt = -999f;
 
+        // Per-cast diagnostics: AutoFishingFarm bumps the sequence and timestamp on every cast so each
+        // throw's log lines can be told apart and timed (cast -> bite -> result).
+        public int InstantCatchCastSeq;
+        public float InstantCatchCastAt;
+
+        // Unthrottled diagnostic log (for infrequent cast/bite/result events) — visible when
+        // MasterLogInstantCatch is on, unlike the throttled InstantCatchLog used for per-tick sends.
+        public void InstantCatchDiag(string message)
+        {
+            if (!MasterLogInstantCatch || string.IsNullOrEmpty(message))
+            {
+                return;
+            }
+
+            ModLogger.Msg("[InstantCatch] " + message);
+        }
+
         private void InstantCatchLog(string message, bool force = false)
         {
             if (!MasterLogInstantCatch || string.IsNullOrEmpty(message))
@@ -2353,7 +2396,91 @@ namespace HeartopiaMod
             ModLogger.Msg("[InstantCatch] " + message);
         }
 
-        public unsafe bool TryArmFishingInstantCatch(Vector3 fishTargetPos, uint fishNetId, bool trackFishPosition, out string status)
+        private static bool IsFiniteVector(Vector3 v)
+        {
+            return !float.IsNaN(v.x) && !float.IsInfinity(v.x)
+                && !float.IsNaN(v.y) && !float.IsInfinity(v.y)
+                && !float.IsNaN(v.z) && !float.IsInfinity(v.z);
+        }
+
+        // Reads the buoy's current world position via the equipped rod:
+        // InteractSystem.GetPlayer() -> equipComponent.handhold (HandHoldFishingRod) ->
+        // GetFloatPosition() == floatComponent.entity.position. All AuraMono.
+        private unsafe bool TryGetFishingBuoyPositionMono(out Vector3 buoyPos, out string status)
+        {
+            buoyPos = Vector3.zero;
+            status = "buoy position unavailable";
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null || auraMonoObjectGetClass == null)
+            {
+                status = "mono runtime unavailable";
+                return false;
+            }
+
+            IntPtr interactObj = this.GetAuraMonoInteractSystemInstance();
+            if (interactObj == IntPtr.Zero || this.auraMonoInteractGetPlayerMethodPtr == IntPtr.Zero)
+            {
+                status = "interact/system unavailable";
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr playerObj = auraMonoRuntimeInvoke(this.auraMonoInteractGetPlayerMethodPtr, interactObj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || playerObj == IntPtr.Zero)
+            {
+                status = "player unavailable";
+                return false;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(playerObj, out IntPtr equipObj, "get_equipComponent", "GetEquipComponent") || equipObj == IntPtr.Zero)
+            {
+                status = "equipComponent unavailable";
+                return false;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(equipObj, out IntPtr handholdObj, "get_handhold", "GetHandhold") || handholdObj == IntPtr.Zero)
+            {
+                status = "handhold unavailable";
+                return false;
+            }
+
+            IntPtr handholdClass = auraMonoObjectGetClass(handholdObj);
+            string handholdClassName = this.GetAuraMonoClassDisplayName(handholdClass);
+            if (string.IsNullOrEmpty(handholdClassName) || handholdClassName.IndexOf("FishingRod", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                status = "handhold is not fishing rod (" + handholdClassName + ")";
+                return false;
+            }
+
+            IntPtr getFloatPosMethod = this.FindAuraMonoMethodOnHierarchy(handholdClass, "GetFloatPosition", 0);
+            if (getFloatPosMethod == IntPtr.Zero)
+            {
+                status = "GetFloatPosition method missing on " + handholdClassName;
+                return false;
+            }
+
+            exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(getFloatPosMethod, handholdObj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                status = "GetFloatPosition invoke failed";
+                return false;
+            }
+
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                status = "GetFloatPosition unbox failed";
+                return false;
+            }
+
+            buoyPos = *(Vector3*)raw;
+            status = "ok " + buoyPos;
+            return true;
+        }
+
+        public unsafe bool TryArmFishingInstantCatch(out string status)
         {
             status = "Instant catch unavailable";
 
@@ -2406,7 +2533,7 @@ namespace HeartopiaMod
                 //    floatNetId is reliable in PlayerFloatData; direction/basePosition are NOT
                 //    mirrored locally (they come back zero), so we must NOT reuse them — sending a
                 //    zero direction corrupts the server's buoy and the battle never resolves.
-                if (!this.TryReadFishingFloatData(out uint floatNetId, out _, out float failLength, out _, out string floatStatus))
+                if (!this.TryReadFishingFloatData(out uint floatNetId, out _, out _, out _, out string floatStatus))
                 {
                     status = "Instant catch float data unavailable: " + floatStatus;
                     this.InstantCatchLog("floatData: " + floatStatus);
@@ -2420,27 +2547,28 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                // Resolve where to report the buoy. While waiting for the bite the fish shadow keeps
-                // swimming, so the buoy that landed on its old spot would be "in empty water". We
-                // therefore re-report the buoy onto the fish's CURRENT position (looked up live by
-                // its netId), which keeps the bite trigger glued to the moving fish. During the
-                // battle the fish is already hooked and thrashing, so we fall back to the buoy's own
-                // entity position to avoid dragging it around mid-fight. Player position stays real
-                // so the reported geometry is self-consistent.
-                Vector3 buoyPos = Vector3.zero;
+                // Use the buoy's REAL world position (HandHoldFishingRod.GetFloatPosition() ->
+                // floatComponent.entity.position). We deliberately do NOT move the buoy: it can only
+                // legitimately sit within the rod's throw range of the player, so dragging it onto a
+                // distant fish is either rejected by the server (bite never fires) or lands it in
+                // empty water that the fish then ignores. By echoing the buoy's own position we keep
+                // it exactly where the game placed it; the fish reaches it via the normal server-side
+                // approach, and we only collapse successLength so the resulting battle is instant.
+                Vector3 buoyPos;
                 string buoySource;
-                if (trackFishPosition && fishNetId != 0U && this.TryGetEntityPositionByNetId(fishNetId, out buoyPos) && buoyPos != Vector3.zero)
+                if (this.TryGetFishingBuoyPositionMono(out buoyPos, out string buoyStatus) && buoyPos != Vector3.zero)
                 {
-                    buoySource = "live-fish netId=" + fishNetId;
+                    buoySource = "real-buoy GetFloatPosition";
                 }
                 else if (this.TryGetEntityPositionByNetId(floatNetId, out buoyPos) && buoyPos != Vector3.zero)
                 {
-                    buoySource = "buoy-entity netId=" + floatNetId;
+                    buoySource = "buoy-entity netId=" + floatNetId + " (GetFloatPosition failed: " + buoyStatus + ")";
                 }
                 else
                 {
-                    buoyPos = fishTargetPos;
-                    buoySource = "captured-target (entity lookups failed)";
+                    status = "Instant catch buoy position unavailable: " + buoyStatus;
+                    this.InstantCatchLog("buoyPos: " + buoyStatus + " (entity fallback also failed); skipping send to avoid moving the buoy");
+                    return false;
                 }
 
                 if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos) || playerPos == Vector3.zero)
@@ -2471,10 +2599,22 @@ namespace HeartopiaMod
 
                 // Collapse successLength to a small negative so Distance(mouth, buoy) >= successLength
                 // is satisfied as soon as the pull begins (the proven "above fish" case sends
-                // num2 - fishCatchDistance, which is negative when the player is over the buoy). Keep
-                // a generous failureLength so the fish cannot "escape" first.
+                // num2 - fishCatchDistance, which is negative when the player is over the buoy).
                 const float collapsedSuccessLength = -2f;
-                float spoofedFailureLength = failLength > 1f ? failLength : 12f;
+
+                // failureLength must be a SANE fixed value. The self-player PlayerFloatData.failLength
+                // read is garbage (observed 35.6, 60.9, even float.MaxValue) — forwarding MaxValue
+                // makes the server reject the buoy update and the bite never fires. A fixed generous
+                // distance keeps the fish from "escaping" without poisoning the command.
+                const float spoofedFailureLength = 30f;
+
+                // Guard against any NaN/Inf creeping into the reported geometry.
+                if (!IsFiniteVector(buoyPos) || !IsFiniteVector(direction))
+                {
+                    status = "Instant catch aborted: non-finite geometry buoy=" + buoyPos + " dir=" + direction;
+                    this.InstantCatchLog(status);
+                    return false;
+                }
 
                 IntPtr exc = IntPtr.Zero;
                 uint netIdValue = floatNetId;
@@ -2496,14 +2636,18 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                float buoyFlatDist = new Vector2(buoyPos.x - playerPos.x, buoyPos.z - playerPos.z).magnitude;
                 status = $"InstantCatch buoyNetId={floatNetId} success={collapsedSuccessLength:F2} fail={spoofedFailureLength:F1}";
                 float now = Time.unscaledTime;
                 if (now >= this.nextInstantCatchSendLogAt)
                 {
                     this.nextInstantCatchSendLogAt = now + 1f;
-                    this.InstantCatchLog("sent UpdateFloatPosition buoyNetId=" + floatNetId
+                    float sinceCast = this.InstantCatchCastAt > 0f ? now - this.InstantCatchCastAt : -1f;
+                    this.InstantCatchLog("cast#" + this.InstantCatchCastSeq + " t=" + sinceCast.ToString("F2") + "s"
+                        + " sent UpdateFloatPosition buoyNetId=" + floatNetId
                         + " src=" + buoySource
-                        + " buoyPos=" + buoyPos + " playerPos=" + playerPos + " dir=" + direction
+                        + " buoyPos=" + buoyPos + " playerPos=" + playerPos
+                        + " buoyDist=" + buoyFlatDist.ToString("F1") + "m dir=" + direction
                         + " success=" + collapsedSuccessLength.ToString("F2")
                         + " fail=" + spoofedFailureLength.ToString("F1"), true);
                 }
