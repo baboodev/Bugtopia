@@ -2358,6 +2358,11 @@ namespace HeartopiaMod
         // so other players see no movement. All resolution goes through AuraMono.
         private IntPtr cachedFishingProtocolManagerClass;
         private IntPtr cachedFishingUpdateFloatPositionMethod;
+        // Reliable-channel buoy update (managed reflection on WebRequestUtility.SendCommand<T>).
+        private Type cachedBuoyUpdateCommandType;
+        private MethodInfo cachedReliableSendCommandMethod;
+        private object cachedReliableChannelValue;
+        private bool reliableBuoyResolveLogged;
         private bool fishingInstantCatchResolveLogged;
         private float nextInstantCatchSendLogAt = -999f;
         private float nextInstantCatchLogAt = -999f;
@@ -2478,6 +2483,103 @@ namespace HeartopiaMod
             buoyPos = *(Vector3*)raw;
             status = "ok " + buoyPos;
             return true;
+        }
+
+        // Resolves WebRequestUtility.SendCommand<T>, the UpdateRodBuoyPositionNetworkCommand type, and
+        // the Reliable ChannelType via managed reflection (same path SnowSculptureFeature uses). Cached.
+        private bool TryEnsureReliableBuoyApi()
+        {
+            if (this.cachedBuoyUpdateCommandType != null
+                && this.cachedReliableSendCommandMethod != null
+                && this.cachedReliableChannelValue != null)
+            {
+                return true;
+            }
+
+            if (this.cachedBuoyUpdateCommandType == null)
+            {
+                this.cachedBuoyUpdateCommandType = this.FindLoadedType(
+                    "XDT.Scene.Shared.GamePlay.Fishing.UpdateRodBuoyPositionNetworkCommand",
+                    "Il2CppXDT.Scene.Shared.GamePlay.Fishing.UpdateRodBuoyPositionNetworkCommand",
+                    "UpdateRodBuoyPositionNetworkCommand");
+            }
+
+            if (this.cachedReliableSendCommandMethod == null || this.cachedReliableChannelValue == null)
+            {
+                Type webRequestType = this.FindLoadedType(
+                    "XDTDataAndProtocol.ProtocolService.WebRequestUtility",
+                    "Il2CppXDTDataAndProtocol.ProtocolService.WebRequestUtility",
+                    "WebRequestUtility");
+                Type channelType = this.FindLoadedType(
+                    "XD.GameGerm.Network.ChannelType",
+                    "Il2CppXD.GameGerm.Network.ChannelType",
+                    "ChannelType");
+                if (webRequestType != null && channelType != null)
+                {
+                    foreach (MethodInfo method in webRequestType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                    {
+                        if (method.Name == "SendCommand" && method.IsGenericMethodDefinition && method.GetParameters().Length == 3)
+                        {
+                            this.cachedReliableSendCommandMethod = method;
+                            this.cachedReliableChannelValue = Enum.Parse(channelType, "Reliable");
+                            break;
+                        }
+                    }
+                }
+            }
+
+            bool ok = this.cachedBuoyUpdateCommandType != null
+                && this.cachedReliableSendCommandMethod != null
+                && this.cachedReliableChannelValue != null;
+            if (!this.reliableBuoyResolveLogged)
+            {
+                this.reliableBuoyResolveLogged = true;
+                this.InstantCatchLog("reliable resolve: cmdType=" + (this.cachedBuoyUpdateCommandType != null)
+                    + " sendCommand=" + (this.cachedReliableSendCommandMethod != null)
+                    + " channel=" + (this.cachedReliableChannelValue != null)
+                    + " => " + (ok ? "RELIABLE" : "fallback Unreliable"), true);
+            }
+
+            return ok;
+        }
+
+        // Sends UpdateRodBuoyPositionNetworkCommand on the Reliable channel via WebRequestUtility.
+        private bool TrySendBuoyUpdateReliable(uint floatNetId, Vector3 buoyPos, Vector3 direction, float successLength, float failureLength, out string status)
+        {
+            status = "reliable buoy unavailable";
+
+            if (!this.TryEnsureReliableBuoyApi())
+            {
+                status = "reliable types unresolved";
+                return false;
+            }
+
+            try
+            {
+                object cmd = Activator.CreateInstance(this.cachedBuoyUpdateCommandType);
+                if (cmd == null)
+                {
+                    status = "reliable cmd alloc failed";
+                    return false;
+                }
+
+                this.TrySetFieldValue(this.cachedBuoyUpdateCommandType, ref cmd, "BuoyNetId", floatNetId);
+                this.TrySetFieldValue(this.cachedBuoyUpdateCommandType, ref cmd, "BuoyPos", buoyPos);
+                this.TrySetFieldValue(this.cachedBuoyUpdateCommandType, ref cmd, "Direction", direction);
+                this.TrySetFieldValue(this.cachedBuoyUpdateCommandType, ref cmd, "SuccessLength", successLength);
+                this.TrySetFieldValue(this.cachedBuoyUpdateCommandType, ref cmd, "FailureLength", failureLength);
+
+                MethodInfo closed = this.cachedReliableSendCommandMethod.MakeGenericMethod(this.cachedBuoyUpdateCommandType);
+                closed.Invoke(null, new object[] { cmd, true, this.cachedReliableChannelValue });
+                status = "reliable sent";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "reliable send failed: " + ex.Message;
+                this.InstantCatchLog("reliable send exception: " + ex.Message);
+                return false;
+            }
         }
 
         public unsafe bool TryArmFishingInstantCatch(out string status)
@@ -2616,24 +2718,40 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                IntPtr exc = IntPtr.Zero;
-                uint netIdValue = floatNetId;
-                Vector3 buoyValue = buoyPos;
-                Vector3 dirValue = direction;
-                float successValue = collapsedSuccessLength;
-                float failureValue = spoofedFailureLength;
-                IntPtr* args = stackalloc IntPtr[5];
-                args[0] = (IntPtr)(&netIdValue);
-                args[1] = (IntPtr)(&buoyValue);
-                args[2] = (IntPtr)(&dirValue);
-                args[3] = (IntPtr)(&successValue);
-                args[4] = (IntPtr)(&failureValue);
-                auraMonoRuntimeInvoke(this.cachedFishingUpdateFloatPositionMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
+                // Send on the RELIABLE channel. The game's FishingProtocolManager.UpdateFloatPosition
+                // (and its one-time NotifyFloatInWater) use ChannelType.Unreliable, so our successLength
+                // override can be dropped/reordered vs the game's real value — leaving the server with
+                // the long real successLength right when the fish bites, which makes that catch slow
+                // (non-deterministic: the same fish is instant on another cast). Sending the buoy update
+                // reliably guarantees our -2 lands and stays last. Fall back to the Mono (Unreliable)
+                // UpdateFloatPosition if the reliable command type can't be resolved on this build.
+                if (this.TrySendBuoyUpdateReliable(floatNetId, buoyPos, direction, collapsedSuccessLength, spoofedFailureLength, out string channelStatus))
                 {
-                    status = "Instant catch UpdateFloatPosition exception";
-                    this.InstantCatchLog("invoke: UpdateFloatPosition raised exception ptr=0x" + exc.ToInt64().ToString("X"));
-                    return false;
+                    buoySource += " [reliable]";
+                }
+                else
+                {
+                    IntPtr exc = IntPtr.Zero;
+                    uint netIdValue = floatNetId;
+                    Vector3 buoyValue = buoyPos;
+                    Vector3 dirValue = direction;
+                    float successValue = collapsedSuccessLength;
+                    float failureValue = spoofedFailureLength;
+                    IntPtr* args = stackalloc IntPtr[5];
+                    args[0] = (IntPtr)(&netIdValue);
+                    args[1] = (IntPtr)(&buoyValue);
+                    args[2] = (IntPtr)(&dirValue);
+                    args[3] = (IntPtr)(&successValue);
+                    args[4] = (IntPtr)(&failureValue);
+                    auraMonoRuntimeInvoke(this.cachedFishingUpdateFloatPositionMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                    if (exc != IntPtr.Zero)
+                    {
+                        status = "Instant catch UpdateFloatPosition exception";
+                        this.InstantCatchLog("invoke: UpdateFloatPosition raised exception ptr=0x" + exc.ToInt64().ToString("X"));
+                        return false;
+                    }
+
+                    buoySource += " [unreliable:" + channelStatus + "]";
                 }
 
                 float buoyFlatDist = new Vector2(buoyPos.x - playerPos.x, buoyPos.z - playerPos.z).magnitude;

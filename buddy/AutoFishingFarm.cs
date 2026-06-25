@@ -1000,9 +1000,7 @@ namespace HeartopiaMod
                 lastTargetStatus = $"netId={targetNetId} dist={(targetDistance > 0f ? targetDistance.ToString("F1") : "unknown")}m found={detectedCount}";
                 Log("Fish shadow target resolved: " + lastTargetStatus + " pos=" + targetPos);
 
-                // EXPERIMENT: cast the buoy slightly beyond the fish (away from the player) to give the
-                // battle win-geometry a margin baked in at bite time.
-                if (host.TryEnterFishingWithOffset(targetPos, CastBeyondFishOffset, out Vector3 castTarget, out string enterStatus))
+                if (host.TryEnterFishingAtTarget(targetPos, out string enterStatus))
                 {
                     lastStatus = "Cast sent to fish shadow";
                     lastTargetStatus = $"netId={targetNetId} dist={(targetDistance > 0f ? targetDistance.ToString("F1") : "unknown")}m";
@@ -1026,8 +1024,7 @@ namespace HeartopiaMod
                     host.InstantCatchCastSeq = instantCatchCastSeq;
                     host.InstantCatchCastAt = now;
                     host.InstantCatchDiag("=== CAST #" + instantCatchCastSeq + " ==="
-                        + " fish=" + targetPos
-                        + " castTarget=" + castTarget + " offset=" + CastBeyondFishOffset.ToString("F2") + "m"
+                        + " target=" + targetPos
                         + " dist=" + (targetDistance > 0f ? targetDistance.ToString("F1") : "?") + "m"
                         + " netId=" + targetNetId + " enter=" + enterStatus);
 
