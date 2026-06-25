@@ -108,6 +108,7 @@ namespace HeartopiaMod
         internal const bool MasterLogBirdFarmCrashTrace = true;
         internal const bool MasterLogInsectFarm = false;
         internal const bool MasterLogAutoFish = false;
+        internal const bool MasterLogInstantCatch = true;
         internal const bool MasterLogAutoFarm = false;
         private const bool MasterLogAutoEatRepair = false;
         private const bool MasterLogNpcTeleport = false;

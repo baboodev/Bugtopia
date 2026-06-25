@@ -202,6 +202,7 @@ namespace HeartopiaMod
             data.autoFishScanTimeout = -1f;
             data.autoFishTeleportDelay = -1f;
             data.autoFishFishShadowDetectRange = AutoFishingFarm.GetDetectRange();
+            data.autoFishInstantCatch = AutoFishingFarm.GetInstantCatchEnabled();
             data.autoFishReelMaxDuration = -1f;
             data.autoFishReelHoldDuration = -1f;
             data.autoFishReelPauseDuration = -1f;
@@ -363,6 +364,7 @@ namespace HeartopiaMod
             {
                 AutoFishingFarm.SetDetectRange(data.autoFishFishShadowDetectRange);
             }
+            AutoFishingFarm.SetInstantCatchEnabled(data.autoFishInstantCatch);
             if (data.insectBatchSize > 0)
             {
                 InsectNetFarm.SetBatchSize(data.insectBatchSize);
@@ -589,6 +591,7 @@ namespace HeartopiaMod
             else if (line.Contains("autoFishScanTimeout")) this.saved_autoFishScanTimeout = GetJsonFloat(line, "\"autoFishScanTimeout\":");
                         else if (line.Contains("autoFishTeleportDelay")) this.saved_autoFishTeleportDelay = GetJsonFloat(line, "\"autoFishTeleportDelay\":");
                         else if (line.Contains("autoFishFishShadowDetectRange")) AutoFishingFarm.SetDetectRange(GetJsonFloat(line, "\"autoFishFishShadowDetectRange\":"));
+                        else if (line.Contains("autoFishInstantCatch")) AutoFishingFarm.SetInstantCatchEnabled(GetJsonInt(line, "\"autoFishInstantCatch\":") != 0);
                         else if (line.Contains("autoFishReelMaxDuration")) this.saved_autoFishReelMaxDuration = GetJsonFloat(line, "\"autoFishReelMaxDuration\":");
                         else if (line.Contains("autoFishReelHoldDuration")) this.saved_autoFishReelHoldDuration = GetJsonFloat(line, "\"autoFishReelHoldDuration\":");
                         else if (line.Contains("autoFishReelPauseDuration")) this.saved_autoFishReelPauseDuration = GetJsonFloat(line, "\"autoFishReelPauseDuration\":");

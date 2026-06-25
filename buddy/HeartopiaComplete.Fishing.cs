@@ -2320,6 +2320,249 @@ namespace HeartopiaMod
             }
         }
 
+        // --- Instant Catch (position-report spoof) ---------------------------------------
+        // The server gates the bite/battle on the buoy geometry the client reports, not on a
+        // separate "fishing position" channel. PlayerStateFishing.FloatInWater() computes
+        //   successLength = horizontal(player, buoy) - fishCatchDistance
+        // and ships it via FishingProtocolManager.NotifyFloatInWater / UpdateFloatPosition. When
+        // the avatar stands directly above the fish that distance collapses to ~0 and the catch
+        // resolves instantly. Instead of moving the avatar (which broadcasts to every other
+        // client and trips movement anti-cheat / Themis), we re-send UpdateFloatPosition for the
+        // SAME buoy with a collapsed successLength. The player entity position is never touched,
+        // so other players see no movement. All resolution goes through AuraMono.
+        private IntPtr cachedFishingProtocolManagerClass;
+        private IntPtr cachedFishingUpdateFloatPositionMethod;
+        private bool fishingInstantCatchResolveLogged;
+        private float nextInstantCatchSendLogAt = -999f;
+        private float nextInstantCatchLogAt = -999f;
+
+        private void InstantCatchLog(string message, bool force = false)
+        {
+            if (!MasterLogInstantCatch || string.IsNullOrEmpty(message))
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (!force && now < this.nextInstantCatchLogAt)
+            {
+                return;
+            }
+
+            this.nextInstantCatchLogAt = now + 1f;
+            ModLogger.Msg("[InstantCatch] " + message);
+        }
+
+        public unsafe bool TryArmFishingInstantCatch(Vector3 fishTargetPos, uint fishNetId, bool trackFishPosition, out string status)
+        {
+            status = "Instant catch unavailable";
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    status = "Instant catch mono runtime unavailable";
+                    this.InstantCatchLog("resolve: mono runtime unavailable (EnsureAuraMonoApiReady/AttachAuraMonoThread/invoke ptr).");
+                    return false;
+                }
+
+                // 1) Resolve XDTDataAndProtocol.ProtocolService.Fishing.FishingProtocolManager (cached).
+                if (this.cachedFishingProtocolManagerClass == IntPtr.Zero)
+                {
+                    this.cachedFishingProtocolManagerClass = this.FindAuraMonoClassByFullName(
+                        "XDTDataAndProtocol.ProtocolService.Fishing.FishingProtocolManager");
+                    this.InstantCatchLog("resolve: FishingProtocolManager class "
+                        + (this.cachedFishingProtocolManagerClass != IntPtr.Zero
+                            ? "ok ptr=0x" + this.cachedFishingProtocolManagerClass.ToInt64().ToString("X")
+                                + " name=" + this.GetAuraMonoClassDisplayName(this.cachedFishingProtocolManagerClass)
+                            : "MISSING (FindAuraMonoClassByFullName returned Zero)"));
+                }
+
+                if (this.cachedFishingProtocolManagerClass == IntPtr.Zero)
+                {
+                    status = "Instant catch protocol class unavailable";
+                    return false;
+                }
+
+                // 2) Resolve UpdateFloatPosition(uint floatNetId, Vector3 buoyPos, Vector3 direction,
+                //    float successLength, float failureLength) -> arity 5 (cached).
+                if (this.cachedFishingUpdateFloatPositionMethod == IntPtr.Zero)
+                {
+                    this.cachedFishingUpdateFloatPositionMethod = this.FindAuraMonoMethodOnHierarchy(
+                        this.cachedFishingProtocolManagerClass, "UpdateFloatPosition", 5);
+                    this.InstantCatchLog("resolve: UpdateFloatPosition(arity=5) "
+                        + (this.cachedFishingUpdateFloatPositionMethod != IntPtr.Zero
+                            ? "ok ptr=0x" + this.cachedFishingUpdateFloatPositionMethod.ToInt64().ToString("X")
+                            : "MISSING (FindAuraMonoMethodOnHierarchy returned Zero)"));
+                }
+
+                if (this.cachedFishingUpdateFloatPositionMethod == IntPtr.Zero)
+                {
+                    status = "Instant catch UpdateFloatPosition unavailable";
+                    return false;
+                }
+
+                // 3) Read the active buoy netId off the self player. On the self player only
+                //    floatNetId is reliable in PlayerFloatData; direction/basePosition are NOT
+                //    mirrored locally (they come back zero), so we must NOT reuse them — sending a
+                //    zero direction corrupts the server's buoy and the battle never resolves.
+                if (!this.TryReadFishingFloatData(out uint floatNetId, out _, out float failLength, out _, out string floatStatus))
+                {
+                    status = "Instant catch float data unavailable: " + floatStatus;
+                    this.InstantCatchLog("floatData: " + floatStatus);
+                    return false;
+                }
+
+                if (floatNetId == 0U)
+                {
+                    status = "Instant catch buoy not active yet (floatNetId=0)";
+                    this.InstantCatchLog("floatData: buoy not active yet (floatNetId=0); " + floatStatus);
+                    return false;
+                }
+
+                // Resolve where to report the buoy. While waiting for the bite the fish shadow keeps
+                // swimming, so the buoy that landed on its old spot would be "in empty water". We
+                // therefore re-report the buoy onto the fish's CURRENT position (looked up live by
+                // its netId), which keeps the bite trigger glued to the moving fish. During the
+                // battle the fish is already hooked and thrashing, so we fall back to the buoy's own
+                // entity position to avoid dragging it around mid-fight. Player position stays real
+                // so the reported geometry is self-consistent.
+                Vector3 buoyPos = Vector3.zero;
+                string buoySource;
+                if (trackFishPosition && fishNetId != 0U && this.TryGetEntityPositionByNetId(fishNetId, out buoyPos) && buoyPos != Vector3.zero)
+                {
+                    buoySource = "live-fish netId=" + fishNetId;
+                }
+                else if (this.TryGetEntityPositionByNetId(floatNetId, out buoyPos) && buoyPos != Vector3.zero)
+                {
+                    buoySource = "buoy-entity netId=" + floatNetId;
+                }
+                else
+                {
+                    buoyPos = fishTargetPos;
+                    buoySource = "captured-target (entity lookups failed)";
+                }
+
+                if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos) || playerPos == Vector3.zero)
+                {
+                    playerPos = buoyPos;
+                }
+
+                // Direction = player - buoy (matches PlayerStateFishing.FloatInWater). Keep the real
+                // horizontal heading; guard the degenerate near-zero case so the server always has a
+                // usable vector.
+                Vector3 direction = playerPos - buoyPos;
+                if (direction.sqrMagnitude < 0.0004f)
+                {
+                    GameObject playerRoot = this.FindPlayerRoot();
+                    direction = playerRoot != null ? playerRoot.transform.forward : Vector3.forward;
+                    direction.y = 0f;
+                    if (direction.sqrMagnitude < 0.0004f)
+                    {
+                        direction = Vector3.forward;
+                    }
+                }
+
+                if (!this.fishingInstantCatchResolveLogged)
+                {
+                    this.fishingInstantCatchResolveLogged = true;
+                    this.InstantCatchLog("resolve complete: class+UpdateFloatPosition resolved; first floatData " + floatStatus, true);
+                }
+
+                // Collapse successLength to a small negative so Distance(mouth, buoy) >= successLength
+                // is satisfied as soon as the pull begins (the proven "above fish" case sends
+                // num2 - fishCatchDistance, which is negative when the player is over the buoy). Keep
+                // a generous failureLength so the fish cannot "escape" first.
+                const float collapsedSuccessLength = -2f;
+                float spoofedFailureLength = failLength > 1f ? failLength : 12f;
+
+                IntPtr exc = IntPtr.Zero;
+                uint netIdValue = floatNetId;
+                Vector3 buoyValue = buoyPos;
+                Vector3 dirValue = direction;
+                float successValue = collapsedSuccessLength;
+                float failureValue = spoofedFailureLength;
+                IntPtr* args = stackalloc IntPtr[5];
+                args[0] = (IntPtr)(&netIdValue);
+                args[1] = (IntPtr)(&buoyValue);
+                args[2] = (IntPtr)(&dirValue);
+                args[3] = (IntPtr)(&successValue);
+                args[4] = (IntPtr)(&failureValue);
+                auraMonoRuntimeInvoke(this.cachedFishingUpdateFloatPositionMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "Instant catch UpdateFloatPosition exception";
+                    this.InstantCatchLog("invoke: UpdateFloatPosition raised exception ptr=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                status = $"InstantCatch buoyNetId={floatNetId} success={collapsedSuccessLength:F2} fail={spoofedFailureLength:F1}";
+                float now = Time.unscaledTime;
+                if (now >= this.nextInstantCatchSendLogAt)
+                {
+                    this.nextInstantCatchSendLogAt = now + 1f;
+                    this.InstantCatchLog("sent UpdateFloatPosition buoyNetId=" + floatNetId
+                        + " src=" + buoySource
+                        + " buoyPos=" + buoyPos + " playerPos=" + playerPos + " dir=" + direction
+                        + " success=" + collapsedSuccessLength.ToString("F2")
+                        + " fail=" + spoofedFailureLength.ToString("F1"), true);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "Instant catch failed: " + ex.Message;
+                this.InstantCatchLog("exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Reads PlayerFloatData off the local fishing player via AuraMono. _floatData is a struct
+        // field on PlayerDataComponent; TryGetMonoObjectMember boxes it, so the value-type fields
+        // read back through the standard helpers without manual offset math.
+        private bool TryReadFishingFloatData(out uint floatNetId, out Vector3 direction, out float failLength, out Vector3 basePos, out string status)
+        {
+            floatNetId = 0U;
+            direction = Vector3.zero;
+            failLength = 0f;
+            basePos = Vector3.zero;
+            status = "player unavailable";
+
+            IntPtr playerObj = IntPtr.Zero;
+            if (!this.TryGetFishingPlayerMonoObject(out playerObj, out _, out _) || playerObj == IntPtr.Zero)
+            {
+                if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj) || playerObj == IntPtr.Zero)
+                {
+                    status = "player object unavailable (fishing + local fallback both null)";
+                    return false;
+                }
+            }
+
+            // BasePlayerComponent.dataComponent { get; private set; } -> resolves via get_dataComponent.
+            if (!this.TryGetMonoObjectMember(playerObj, "dataComponent", out IntPtr dataComponentObj) || dataComponentObj == IntPtr.Zero)
+            {
+                status = "dataComponent member unavailable on " + this.GetAuraMonoClassDisplayName(
+                    auraMonoObjectGetClass != null ? auraMonoObjectGetClass(playerObj) : IntPtr.Zero);
+                return false;
+            }
+
+            // PlayerDataComponent._floatData (boxed struct) -> PlayerFloatData.
+            if (!this.TryGetMonoObjectMember(dataComponentObj, "_floatData", out IntPtr floatDataObj) || floatDataObj == IntPtr.Zero)
+            {
+                status = "_floatData field unavailable on " + this.GetAuraMonoClassDisplayName(
+                    auraMonoObjectGetClass != null ? auraMonoObjectGetClass(dataComponentObj) : IntPtr.Zero);
+                return false;
+            }
+
+            this.TryGetMonoUInt32Member(floatDataObj, "floatNetId", out floatNetId);
+            this.TryGetMonoVector3Member(floatDataObj, "direction", out direction);
+            this.TryGetMonoSingleMember(floatDataObj, "failLength", out failLength);
+            this.TryGetMonoVector3Member(floatDataObj, "basePosition", out basePos);
+            status = "ok netId=" + floatNetId + " dir=" + direction + " fail=" + failLength.ToString("F1") + " base=" + basePos;
+            return true;
+        }
+
         private unsafe bool TrySetFishingStateButtonPressedMono(bool pressed, out string status)
         {
             status = "Fishing state button mono unavailable";

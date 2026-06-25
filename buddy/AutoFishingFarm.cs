@@ -8,6 +8,9 @@ namespace HeartopiaMod
         private const bool debugLoggingEnabled = HeartopiaComplete.MasterLogAutoFish;
 
         private static bool enabled = false;
+        private static bool instantCatchEnabled = false;
+        private static float nextInstantCatchAt = -999f;
+        private const float InstantCatchInterval = 0.1f;
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";
@@ -59,6 +62,18 @@ namespace HeartopiaMod
         public static string GetLastTargetStatus() => GetDisplayTargetStatus(lastTargetStatus);
         public static float GetDetectRange() => fishShadowDetectRange;
         public static void SetDetectRange(float value) => fishShadowDetectRange = Mathf.Clamp(value, 1f, 200f);
+        public static bool GetInstantCatchEnabled() => instantCatchEnabled;
+        public static void SetInstantCatchEnabled(bool value)
+        {
+            if (instantCatchEnabled == value)
+            {
+                return;
+            }
+
+            instantCatchEnabled = value;
+            nextInstantCatchAt = -999f;
+            Log("Instant Catch " + (value ? "enabled" : "disabled"));
+        }
 
         private static string GetDisplayStatus(string raw)
         {
@@ -354,6 +369,17 @@ namespace HeartopiaMod
             }
             num += 30;
 
+            bool nextInstant = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), instantCatchEnabled, "Instant Catch (no move)");
+            if (nextInstant != instantCatchEnabled)
+            {
+                SetInstantCatchEnabled(nextInstant);
+                host.UI_AddMenuNotification(
+                    "Instant Catch " + (nextInstant ? "Enabled" : "Disabled"),
+                    nextInstant ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                try { host.UI_SaveKeybinds(false); } catch { }
+            }
+            num += 30;
+
             GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Status: {0}", GetLastStatus()), small);
             num += 24;
             GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Tool: {0}", GetLastToolStatus()), small);
@@ -465,6 +491,27 @@ namespace HeartopiaMod
                     if (sessionStartedAt <= 0f)
                     {
                         sessionStartedAt = now;
+                    }
+
+                    // Instant Catch: re-report the buoy geometry with a collapsed successLength so
+                    // the battle resolves immediately. We keep re-sending through Waiting/Idle AND
+                    // Battle so the game's own real-successLength send (on bite) cannot overwrite
+                    // ours for more than one tick. The auto-pull logic still drives PullRod.
+                    if (instantCatchEnabled
+                        && now >= nextInstantCatchAt
+                        && (string.Equals(fishState, "Waiting", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(fishState, "Idle", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        nextInstantCatchAt = now + InstantCatchInterval;
+                        // Track the live fish position while waiting (the shadow keeps swimming after
+                        // the cast); hold the buoy steady once the fight has started.
+                        bool trackFishPosition = !string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase);
+                        if (host.TryArmFishingInstantCatch(currentTargetPos, currentTargetNetId, trackFishPosition, out string instantStatus))
+                        {
+                            lastTargetStatus = "Instant catch: " + instantStatus;
+                        }
+                        Log("Instant catch tick state=" + fishState + " track=" + trackFishPosition + " status=" + instantStatus);
                     }
 
                     bool looksLikeBattleProxy =

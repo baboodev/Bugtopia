@@ -189,6 +189,7 @@ namespace HeartopiaMod
             public float autoFishScanTimeout = -1f;
             public float autoFishTeleportDelay = -1f;
             public float autoFishFishShadowDetectRange = -1f;
+            public bool autoFishInstantCatch = false;
             public float autoFishReelMaxDuration = -1f;
             public float autoFishReelHoldDuration = -1f;
             public float autoFishReelPauseDuration = -1f;
