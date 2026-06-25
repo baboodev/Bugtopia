@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -537,24 +537,33 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> items = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items) || items.Count == 0)
+                List<uint> itemPins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins) || items.Count == 0)
                 {
+                    FreeAuraMonoPins(itemPins);
                     return false;
                 }
 
-                foreach (IntPtr itemObj in items)
+                try
                 {
-                    if (itemObj == IntPtr.Zero)
+                    foreach (IntPtr itemObj in items)
                     {
-                        continue;
-                    }
+                        if (itemObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
 
-                    if (this.TryGetDirectBackpackItemNetId(itemObj, out uint candidateNetId)
-                        && candidateNetId == targetNetId)
-                    {
-                        this.TryGetDirectBackpackItemCount(itemObj, out count);
-                        return true;
+                        if (this.TryGetDirectBackpackItemNetId(itemObj, out uint candidateNetId)
+                            && candidateNetId == targetNetId)
+                        {
+                            this.TryGetDirectBackpackItemCount(itemObj, out count);
+                            return true;
+                        }
                     }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(itemPins);
                 }
             }
             catch
@@ -696,29 +705,38 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> items = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items) || items.Count == 0)
+                List<uint> itemPins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins) || items.Count == 0)
                 {
+                    FreeAuraMonoPins(itemPins);
                     return false;
                 }
 
-                foreach (IntPtr itemObj in items)
+                try
                 {
-                    if (itemObj == IntPtr.Zero
-                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int candidateStaticId)
-                        || candidateStaticId != staticId
-                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint candidateNetId)
-                        || candidateNetId == 0U)
+                    foreach (IntPtr itemObj in items)
                     {
-                        continue;
-                    }
+                        if (itemObj == IntPtr.Zero
+                            || !this.TryGetDirectBackpackItemStaticId(itemObj, out int candidateStaticId)
+                            || candidateStaticId != staticId
+                            || !this.TryGetDirectBackpackItemNetId(itemObj, out uint candidateNetId)
+                            || candidateNetId == 0U)
+                        {
+                            continue;
+                        }
 
-                    netId = candidateNetId;
-                    this.lastDirectBackpackMatchedNetId = candidateNetId;
-                    this.lastDirectBackpackMatchedStaticId = candidateStaticId;
-                    this.TryGetDirectBackpackItemEntityType(itemObj, out this.lastDirectBackpackMatchedEntityType);
-                    this.TryGetDirectBackpackItemCount(itemObj, out this.lastDirectBackpackMatchedCount);
-                    this.AutoEatRepairLog("[UseBait] AuraMono match netId=" + candidateNetId + " staticId=" + candidateStaticId + " count=" + this.lastDirectBackpackMatchedCount);
-                    return true;
+                        netId = candidateNetId;
+                        this.lastDirectBackpackMatchedNetId = candidateNetId;
+                        this.lastDirectBackpackMatchedStaticId = candidateStaticId;
+                        this.TryGetDirectBackpackItemEntityType(itemObj, out this.lastDirectBackpackMatchedEntityType);
+                        this.TryGetDirectBackpackItemCount(itemObj, out this.lastDirectBackpackMatchedCount);
+                        this.AutoEatRepairLog("[UseBait] AuraMono match netId=" + candidateNetId + " staticId=" + candidateStaticId + " count=" + this.lastDirectBackpackMatchedCount);
+                        return true;
+                    }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(itemPins);
                 }
             }
             catch
@@ -1456,50 +1474,59 @@ namespace HeartopiaMod
                     }
 
                     List<IntPtr> items = new List<IntPtr>();
-                    if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items) || items.Count == 0)
+                    List<uint> itemPins = new List<uint>();
+                    if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins) || items.Count == 0)
                     {
+                        FreeAuraMonoPins(itemPins);
                         continue;
                     }
                     sawItems = true;
 
-                    foreach (IntPtr itemObj in items)
+                    try
                     {
-                        if (itemObj == IntPtr.Zero)
+                        foreach (IntPtr itemObj in items)
                         {
-                            continue;
-                        }
-                        inspected++;
-                        if (!this.TryGetDirectBackpackItemNetId(itemObj, out uint netId) || netId == 0U)
-                        {
-                            continue;
-                        }
-
-                        string descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
-                        if (!this.AutoSellDescriptorMatches(descriptor, normalizedKey))
-                        {
-                            continue;
-                        }
-
-                        int count = 1;
-                        int staticId = 0;
-                        this.TryGetDirectBackpackItemCount(itemObj, out count);
-                        this.TryGetDirectBackpackItemStaticId(itemObj, out staticId);
-                        if (!this.AutoSellMonoItemStarMatches(itemObj, netId, descriptor, count, out int starRate))
-                        {
-                            skippedStarFilter++;
-                            if (skippedSamples.Count < 6)
+                            if (itemObj == IntPtr.Zero)
                             {
-                                string photoId = this.GetDirectBackpackItemPhotoId(itemObj);
-                                int step = this.GetDirectBackpackItemStep(itemObj);
-                                skippedSamples.Add("skip star=" + starRate + " step=" + step + (string.IsNullOrWhiteSpace(photoId) ? "" : " photo=" + photoId) + " " + descriptor);
+                                continue;
                             }
-                            continue;
-                        }
+                            inspected++;
+                            if (!this.TryGetDirectBackpackItemNetId(itemObj, out uint netId) || netId == 0U)
+                            {
+                                continue;
+                            }
 
-                        this.MergeAutoSellBagCount(bagCountsByNetId, netId, count);
-                        this.RememberAutoSellCollectedStaticId(netId, staticId);
-                        reserveGroupsByNetId[netId] = this.GetAutoSellReserveGroupKey(descriptor, starRate);
-                        sellDetailsByNetId[netId] = (starRate > 0 ? starRate + "* " : "") + descriptor;
+                            string descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
+                            if (!this.AutoSellDescriptorMatches(descriptor, normalizedKey))
+                            {
+                                continue;
+                            }
+
+                            int count = 1;
+                            int staticId = 0;
+                            this.TryGetDirectBackpackItemCount(itemObj, out count);
+                            this.TryGetDirectBackpackItemStaticId(itemObj, out staticId);
+                            if (!this.AutoSellMonoItemStarMatches(itemObj, netId, descriptor, count, out int starRate))
+                            {
+                                skippedStarFilter++;
+                                if (skippedSamples.Count < 6)
+                                {
+                                    string photoId = this.GetDirectBackpackItemPhotoId(itemObj);
+                                    int step = this.GetDirectBackpackItemStep(itemObj);
+                                    skippedSamples.Add("skip star=" + starRate + " step=" + step + (string.IsNullOrWhiteSpace(photoId) ? "" : " photo=" + photoId) + " " + descriptor);
+                                }
+                                continue;
+                            }
+
+                            this.MergeAutoSellBagCount(bagCountsByNetId, netId, count);
+                            this.RememberAutoSellCollectedStaticId(netId, staticId);
+                            reserveGroupsByNetId[netId] = this.GetAutoSellReserveGroupKey(descriptor, starRate);
+                            sellDetailsByNetId[netId] = (starRate > 0 ? starRate + "* " : "") + descriptor;
+                        }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(itemPins);
                     }
                 }
 
@@ -2189,23 +2216,32 @@ namespace HeartopiaMod
                     }
 
                     List<IntPtr> items = new List<IntPtr>();
-                    if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items))
+                    List<uint> itemPins = new List<uint>();
+                    if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins))
                     {
+                        FreeAuraMonoPins(itemPins);
                         continue;
                     }
 
-                    for (int i = 0; i < items.Count; i++)
+                    try
                     {
-                        IntPtr itemObj = items[i];
-                        if (itemObj == IntPtr.Zero || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId) || netId != targetNetId)
+                        for (int i = 0; i < items.Count; i++)
                         {
-                            continue;
-                        }
+                            IntPtr itemObj = items[i];
+                            if (itemObj == IntPtr.Zero || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId) || netId != targetNetId)
+                            {
+                                continue;
+                            }
 
-                        if (this.TryGetDirectBackpackItemStaticId(itemObj, out staticId) && staticId > 0)
-                        {
-                            return true;
+                            if (this.TryGetDirectBackpackItemStaticId(itemObj, out staticId) && staticId > 0)
+                            {
+                                return true;
+                            }
                         }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(itemPins);
                     }
                 }
             }
@@ -2395,73 +2431,82 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> items = new List<IntPtr>(256);
-                if (!this.TryEnumerateAuraMonoCollectionItems(tableObj, items) || items.Count == 0)
+                List<uint> itemPins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(tableObj, items, itemPins) || items.Count == 0)
                 {
+                    FreeAuraMonoPins(itemPins);
                     continue;
                 }
 
-                for (int j = 0; j < items.Count; j++)
+                try
                 {
-                    IntPtr itemObj = items[j];
-                    if (itemObj == IntPtr.Zero)
+                    for (int j = 0; j < items.Count; j++)
                     {
-                        continue;
-                    }
+                        IntPtr itemObj = items[j];
+                        if (itemObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
 
-                    IntPtr valueObj = itemObj;
-                    IntPtr keyObj = IntPtr.Zero;
-                    if (this.TryGetMonoObjectMember(itemObj, "Value", out IntPtr boxedValue) && boxedValue != IntPtr.Zero)
-                    {
-                        valueObj = boxedValue;
-                    }
-                    else if (this.TryGetMonoObjectMember(itemObj, "value", out boxedValue) && boxedValue != IntPtr.Zero)
-                    {
-                        valueObj = boxedValue;
-                    }
+                        IntPtr valueObj = itemObj;
+                        IntPtr keyObj = IntPtr.Zero;
+                        if (this.TryGetMonoObjectMember(itemObj, "Value", out IntPtr boxedValue) && boxedValue != IntPtr.Zero)
+                        {
+                            valueObj = boxedValue;
+                        }
+                        else if (this.TryGetMonoObjectMember(itemObj, "value", out boxedValue) && boxedValue != IntPtr.Zero)
+                        {
+                            valueObj = boxedValue;
+                        }
 
-                    int rowPeriodId = 0;
-                    if (this.TryGetMonoObjectMember(itemObj, "Key", out keyObj) && keyObj != IntPtr.Zero)
-                    {
-                        this.TryGetMonoInt32Member(keyObj, "m_value", out rowPeriodId);
+                        int rowPeriodId = 0;
+                        if (this.TryGetMonoObjectMember(itemObj, "Key", out keyObj) && keyObj != IntPtr.Zero)
+                        {
+                            this.TryGetMonoInt32Member(keyObj, "m_value", out rowPeriodId);
+                            if (rowPeriodId <= 0)
+                            {
+                                this.TryGetMonoIntMember(keyObj, "m_value", out rowPeriodId);
+                            }
+                        }
+
                         if (rowPeriodId <= 0)
                         {
-                            this.TryGetMonoIntMember(keyObj, "m_value", out rowPeriodId);
+                            this.TryGetMonoInt32Member(valueObj, "id", out rowPeriodId);
+                            if (rowPeriodId <= 0)
+                            {
+                                this.TryGetMonoIntMember(valueObj, "id", out rowPeriodId);
+                            }
+                            if (rowPeriodId <= 0)
+                            {
+                                this.TryGetMonoInt32Member(valueObj, "periodId", out rowPeriodId);
+                            }
+                            if (rowPeriodId <= 0)
+                            {
+                                this.TryGetMonoIntMember(valueObj, "periodId", out rowPeriodId);
+                            }
                         }
-                    }
 
-                    if (rowPeriodId <= 0)
-                    {
-                        this.TryGetMonoInt32Member(valueObj, "id", out rowPeriodId);
-                        if (rowPeriodId <= 0)
+                        if (rowPeriodId != periodId)
                         {
-                            this.TryGetMonoIntMember(valueObj, "id", out rowPeriodId);
+                            continue;
                         }
-                        if (rowPeriodId <= 0)
+
+                        this.TryGetMonoInt32Member(valueObj, "currency", out currencyId);
+                        if (currencyId <= 0)
                         {
-                            this.TryGetMonoInt32Member(valueObj, "periodId", out rowPeriodId);
+                            this.TryGetMonoIntMember(valueObj, "currency", out currencyId);
                         }
-                        if (rowPeriodId <= 0)
+
+                        if (currencyId > 0)
                         {
-                            this.TryGetMonoIntMember(valueObj, "periodId", out rowPeriodId);
+                            status = "staticTable field=" + staticFieldNames[i] + " periodId=" + periodId;
+                            return true;
                         }
                     }
-
-                    if (rowPeriodId != periodId)
-                    {
-                        continue;
-                    }
-
-                    this.TryGetMonoInt32Member(valueObj, "currency", out currencyId);
-                    if (currencyId <= 0)
-                    {
-                        this.TryGetMonoIntMember(valueObj, "currency", out currencyId);
-                    }
-
-                    if (currencyId > 0)
-                    {
-                        status = "staticTable field=" + staticFieldNames[i] + " periodId=" + periodId;
-                        return true;
-                    }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(itemPins);
                 }
             }
 
@@ -3214,8 +3259,10 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> items = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items) || items.Count == 0)
+                List<uint> itemPins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins) || items.Count == 0)
                 {
+                    FreeAuraMonoPins(itemPins);
                     this.AutoEatRepairLog("[DirectBackpackMono] Backpack item list empty/unreadable.");
                     return false;
                 }
@@ -3224,49 +3271,56 @@ namespace HeartopiaMod
                 string normalizedKey = normalizedLookupKey;
                 int inspected = 0;
                 int sampleCount = 0;
-                foreach (IntPtr itemObj in items)
+                try
                 {
-                    if (itemObj == IntPtr.Zero)
+                    foreach (IntPtr itemObj in items)
                     {
-                        continue;
+                        if (itemObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        inspected++;
+                        if (!this.TryGetDirectBackpackItemNetId(itemObj, out uint candidateNetId) || candidateNetId == 0U)
+                        {
+                            continue;
+                        }
+
+                        string descriptor = this.GetDirectBackpackItemDescriptor(itemObj).ToLowerInvariant();
+                        if (string.IsNullOrEmpty(descriptor))
+                        {
+                            continue;
+                        }
+                        if (sampleCount < 6)
+                        {
+                            sampleCount++;
+                            this.AutoEatRepairLog("[DirectBackpackMono] Item sample " + sampleCount + ": netId=" + candidateNetId + " descriptor=" + descriptor);
+                        }
+
+                        bool matches = anyFood
+                            ? (descriptor.Contains("food_") || descriptor.Contains("p_food") || descriptor.Contains("ui_item_normal_p_food"))
+                            : (!string.IsNullOrEmpty(normalizedKey) && descriptor.Contains(normalizedKey));
+
+                        if (matches)
+                        {
+                            netId = candidateNetId;
+                            this.lastDirectBackpackMatchedNetId = netId;
+                            this.TryGetDirectBackpackItemStaticId(itemObj, out this.lastDirectBackpackMatchedStaticId);
+                            this.TryGetDirectBackpackItemEntityType(itemObj, out this.lastDirectBackpackMatchedEntityType);
+                            this.TryGetDirectBackpackItemCount(itemObj, out this.lastDirectBackpackMatchedCount);
+                            this.AutoEatRepairLog("[DirectBackpackMono] Matched item netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + " count=" + this.lastDirectBackpackMatchedCount + " descriptor=" + descriptor);
+                            this.lastDirectBackpackLookupKey = string.Empty;
+                            this.nextDirectBackpackLookupRetryAt = -999f;
+                            return true;
+                        }
                     }
 
-                    inspected++;
-                    if (!this.TryGetDirectBackpackItemNetId(itemObj, out uint candidateNetId) || candidateNetId == 0U)
-                    {
-                        continue;
-                    }
-
-                    string descriptor = this.GetDirectBackpackItemDescriptor(itemObj).ToLowerInvariant();
-                    if (string.IsNullOrEmpty(descriptor))
-                    {
-                        continue;
-                    }
-                    if (sampleCount < 6)
-                    {
-                        sampleCount++;
-                        this.AutoEatRepairLog("[DirectBackpackMono] Item sample " + sampleCount + ": netId=" + candidateNetId + " descriptor=" + descriptor);
-                    }
-
-                    bool matches = anyFood
-                        ? (descriptor.Contains("food_") || descriptor.Contains("p_food") || descriptor.Contains("ui_item_normal_p_food"))
-                        : (!string.IsNullOrEmpty(normalizedKey) && descriptor.Contains(normalizedKey));
-
-                    if (matches)
-                    {
-                        netId = candidateNetId;
-                        this.lastDirectBackpackMatchedNetId = netId;
-                        this.TryGetDirectBackpackItemStaticId(itemObj, out this.lastDirectBackpackMatchedStaticId);
-                        this.TryGetDirectBackpackItemEntityType(itemObj, out this.lastDirectBackpackMatchedEntityType);
-                        this.TryGetDirectBackpackItemCount(itemObj, out this.lastDirectBackpackMatchedCount);
-                        this.AutoEatRepairLog("[DirectBackpackMono] Matched item netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + " count=" + this.lastDirectBackpackMatchedCount + " descriptor=" + descriptor);
-                        this.lastDirectBackpackLookupKey = string.Empty;
-                        this.nextDirectBackpackLookupRetryAt = -999f;
-                        return true;
-                    }
+                    this.AutoEatRepairLog("[DirectBackpackMono] No match. inspected=" + inspected + " key=" + normalizedKey);
                 }
-
-                this.AutoEatRepairLog("[DirectBackpackMono] No match. inspected=" + inspected + " key=" + normalizedKey);
+                finally
+                {
+                    FreeAuraMonoPins(itemPins);
+                }
             }
             catch (Exception ex)
             {
@@ -3620,14 +3674,22 @@ namespace HeartopiaMod
             if (this.TryInvokeAuraMonoZeroArg(itemObj, out IntPtr itemsObj, "GetItems", "get_Items") && itemsObj != IntPtr.Zero && itemsObj != itemObj)
             {
                 List<IntPtr> nestedItems = new List<IntPtr>();
-                if (this.TryEnumerateAuraMonoCollectionItems(itemsObj, nestedItems))
+                List<uint> nestedPins = new List<uint>();
+                if (this.TryEnumerateAuraMonoCollectionItems(itemsObj, nestedItems, nestedPins))
                 {
-                    foreach (IntPtr nestedItem in nestedItems)
+                    try
                     {
-                        if (this.TryGetDirectBackpackItemStarRate(nestedItem, out starRate, depth + 1))
+                        foreach (IntPtr nestedItem in nestedItems)
                         {
-                            return true;
+                            if (this.TryGetDirectBackpackItemStarRate(nestedItem, out starRate, depth + 1))
+                            {
+                                return true;
+                            }
                         }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(nestedPins);
                     }
                 }
             }
@@ -4722,47 +4784,56 @@ namespace HeartopiaMod
                     }
 
                     List<IntPtr> backpackItems = new List<IntPtr>();
-                    if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, backpackItems))
+                    List<uint> itemPins = new List<uint>();
+                    if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, backpackItems, itemPins))
                     {
+                        FreeAuraMonoPins(itemPins);
                         continue;
                     }
 
-                    foreach (IntPtr itemObj in backpackItems)
+                    try
                     {
-                        inspected++;
-                        if (itemObj == IntPtr.Zero || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId) || netId == 0U)
+                        foreach (IntPtr itemObj in backpackItems)
                         {
-                            continue;
-                        }
+                            inspected++;
+                            if (itemObj == IntPtr.Zero || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId) || netId == 0U)
+                            {
+                                continue;
+                            }
 
-                        int count = 1;
-                        int staticId = 0;
-                        int entityType = 0;
-                        int starRate = 0;
-                        this.TryGetDirectBackpackItemCount(itemObj, out count);
-                        this.TryGetDirectBackpackItemStaticId(itemObj, out staticId);
-                        this.TryGetDirectBackpackItemEntityType(itemObj, out entityType);
-                        if (!this.TryGetAutoSellQualityComponentStar(netId, out starRate))
-                        {
-                            this.TryGetDirectBackpackItemStarRate(itemObj, out starRate);
-                        }
-                        string descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
-                        if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-                        {
-                            if (this.TryGetAutoSellCachedUiStar(descriptor, count, out int uiStar))
+                            int count = 1;
+                            int staticId = 0;
+                            int entityType = 0;
+                            int starRate = 0;
+                            this.TryGetDirectBackpackItemCount(itemObj, out count);
+                            this.TryGetDirectBackpackItemStaticId(itemObj, out staticId);
+                            this.TryGetDirectBackpackItemEntityType(itemObj, out entityType);
+                            if (!this.TryGetAutoSellQualityComponentStar(netId, out starRate))
                             {
-                                starRate = uiStar;
+                                this.TryGetDirectBackpackItemStarRate(itemObj, out starRate);
                             }
-                        }
-                        if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-                        {
-                            int step = this.GetDirectBackpackItemStep(itemObj);
-                            if (step >= 1 && step <= 5)
+                            string descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
+                            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
                             {
-                                starRate = step;
+                                if (this.TryGetAutoSellCachedUiStar(descriptor, count, out int uiStar))
+                                {
+                                    starRate = uiStar;
+                                }
                             }
+                            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
+                            {
+                                int step = this.GetDirectBackpackItemStep(itemObj);
+                                if (step >= 1 && step <= 5)
+                                {
+                                    starRate = step;
+                                }
+                            }
+                            this.AddOrMergeAutoSellBackpackEntry(items, byKey, descriptor, netId, count, staticId, entityType, starRate, fromBackpack);
                         }
-                        this.AddOrMergeAutoSellBackpackEntry(items, byKey, descriptor, netId, count, staticId, entityType, starRate, fromBackpack);
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(itemPins);
                     }
                 }
             }
