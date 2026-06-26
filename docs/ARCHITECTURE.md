@@ -165,9 +165,10 @@ public static int SendCommand<T>(T command, bool needAuthed = true, ChannelType 
 
 Mod pattern:
 
-1. Resolve command struct type (often in `XDT.Scene.Shared.Modules.*` / `EcsClient`).
-2. Resolve `WebRequestUtility` + `ChannelType`.
-3. `GetMethods` → static generic `SendCommand` (3 params) → `MakeGenericMethod` → `Invoke`.
+1. Resolve command struct type (decompiles from **`EcsClient.dll`** — `XDT.Scene.Shared.Modules.*` / `GamePlay.*`).
+2. Resolve `WebRequestUtility` + `ChannelType` (**`XDTDataAndProtocol.dll`**).
+3. **If types are in AppDomain:** `MakeGenericMethod` → `Invoke` (or `TryHomelandFarmSendCommand`).
+4. **If managed resolution fails (common on BepInEx):** AuraMono — invoke `*ProtocolManager` static wrapper **or** inflate `WebRequestUtility.SendCommand<T>`. See [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § `SendCommand` decision table; reference: Instant Catch in `HeartopiaComplete.Fishing.cs`.
 
 Specialized managers (static facades wrapping commands):
 

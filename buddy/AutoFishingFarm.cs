@@ -16,8 +16,6 @@ namespace HeartopiaMod
         private static bool instantCatchResultLogged = false;
         private static float instantCatchBiteAt = -1f;
         private const float InstantCatchInterval = 0.1f;
-        // EXPERIMENT: cast the buoy this far beyond the fish (away from the player).
-        private const float CastBeyondFishOffset = 0.2f;
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";

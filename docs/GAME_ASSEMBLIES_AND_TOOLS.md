@@ -102,9 +102,11 @@ Daily quest preload (optional disk load):
 
 ### 3. Network commands (`WebRequestUtility.SendCommand<T>`)
 
-- Resolve command **struct** type (often `XDT.Scene.Shared.Modules.*` in EcsClient/Client).
-- Resolve `WebRequestUtility` + `ChannelType` from `XDTDataAndProtocol`.
-- `MakeGenericMethod` + `Invoke` — see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § Integration strategies.
+- Command **structs** decompile from **`EcsClient.dll`** (`XDT.Scene.Shared.Modules.*`, `XDT.Scene.Shared.GamePlay.*`). Namespace on the type does **not** include an `EcsClient.` prefix; use that string only as an optional `ResolveHomelandFarmManagedType` alias when the assembly is loaded.
+- **`WebRequestUtility`** decompiles from **`XDTDataAndProtocol.dll`**.
+- Both are **embedded Mono** — often missing from interop `AppDomain`. See [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § Integration strategies → `SendCommand` (managed vs AuraMono decision table).
+- **Managed** (when interop load succeeds): `ResolveHomelandFarmManagedType` + `EnsureHomelandFarmSendCommandResolver` + `TryHomelandFarmSendCommand` — see `HomelandFarmFeature.cs`.
+- **AuraMono** (when managed fails): inflate `WebRequestUtility.SendCommand<T>` or invoke a `*ProtocolManager` static wrapper — see `DrawUploadFeature.cs`, `HeartopiaComplete.Fishing.cs` (Instant Catch / Reliable buoy).
 
 ### 4. AuraMono (embedded Mono API)
 

@@ -31,6 +31,9 @@ unavailable" for draw commands. We originate draw actions by calling the Mono
 `WebRequestUtility` internally). The palette is the exception: `drawing_lut` is a **Unity** texture,
 reachable from the IL2CPP side.
 
+General decision table (managed vs AuraMono `SendCommand`, Reliable channel, fishing Instant Catch):
+[TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § Integration strategies → `WebRequestUtility.SendCommand`.
+
 ---
 
 ## 2. Palette (LUT)

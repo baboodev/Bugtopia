@@ -261,13 +261,26 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 #### `WebRequestUtility`
 - **Dump:** `XDTDataAndProtocol/.../ProtocolService/WebRequestUtility.cs`
 - **Namespace:** `XDTDataAndProtocol.ProtocolService`
-- **Features:** Bubble spawn, bird photo, net cook commands, generic network actions
-- **Access:** **R** + **H** + **S**
-- **How:**
-  1. `FindLoadedType("XDTDataAndProtocol.ProtocolService.WebRequestUtility", "Il2CppXDTDataAndProtocol...")`
-  2. Find static generic `SendCommand` (3 parameters) → `MakeGenericMethod(commandType)` → `Invoke`
-  3. **Harmony prefix** on generic `SendCommand` — rewrite command struct fields (bubble location) without world component types
-- **Files:** `BubbleFeature.cs`, `HC` (bird, net cook)
+- **Runtime:** **embedded Mono only** — absent from IL2CPP interop on most builds
+- **Features:** Bubble spawn, bird photo, net cook, homeland farm commands, **fishing Instant Catch (Reliable buoy)**
+- **Access:** **R** (when AppDomain has type) + **H** + **S** (managed) + **A** (AuraMono inflate `SendCommand<T>` or protocol-manager invoke)
+- **How (managed — when types load):**
+  1. `FindHomelandFarmRuntimeType("WebRequestUtility", "XDTDataAndProtocol.ProtocolService")` or `ResolveHomelandFarmManagedType`
+  2. Static generic `SendCommand` (3 parameters, include `NonPublic`) → `MakeGenericMethod(commandType)` → `Invoke`
+- **How (AuraMono — default for Mono-only sessions):**
+  1. `FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.WebRequestUtility")`
+  2. Inflate `SendCommand<T>` with command class from **EcsClient** image — see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § Instant Catch
+  3. Or call `*ProtocolManager` static method that wraps `SendCommand` internally (`DrawUploadFeature`, `FishingProtocolManager.UpdateFloatPosition`)
+- **Harmony:** prefix on generic `SendCommand` — bubble location rewrite (`BubbleFeature.cs`)
+- **Files:** `BubbleFeature.cs`, `HomelandFarmFeature.cs`, `HeartopiaComplete.Fishing.cs`, `DrawUploadFeature.cs`
+
+#### `UpdateRodBuoyPositionNetworkCommand` (fishing buoy geometry)
+- **Dump:** `EcsClient/.../XDT.Scene.Shared.GamePlay.Fishing/UpdateRodBuoyPositionNetworkCommand.cs`
+- **Runtime:** struct in **EcsClient** Mono image — **not** resolvable via `FindLoadedType` alone
+- **Features:** Instant Catch — re-send buoy geometry with collapsed `SuccessLength` on **Reliable** channel
+- **Access:** **A** — `FindAuraMonoClassByFullName("XDT.Scene.Shared.GamePlay.Fishing.UpdateRodBuoyPositionNetworkCommand")` + AuraMono `SendCommand` inflate
+- **Related:** `FishingProtocolManager.UpdateFloatPosition` / `NotifyFloatInWater` (same command, **Unreliable** — game default)
+- **File:** `HeartopiaComplete.Fishing.cs`
 
 #### `ChannelType`
 - **Dump:** `XD.GameGerm.Network` (often in Client/EcsSystem assemblies)
@@ -421,6 +434,16 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Game targets:** fishing UI button / motion state — resolved via **A** on player/fishing state objects
 - **How:** `TrySetFishingPressedMono` → `TrySetFishingStateButtonPressedMono` — AuraMono bool pulse; **not** Harmony Input patches
 - **File:** `HC` (~line 20000+), `AutoFishingFarm.cs`
+
+#### `FishingProtocolManager` / Instant Catch
+- **Dump:** `XDTDataAndProtocol/.../ProtocolService/Fishing/FishingProtocolManager.cs`
+- **Features:** Cancel fishing (AuraMono); **Instant Catch** buoy geometry spoof
+- **Access:** **A**
+- **How:**
+  - `UpdateFloatPosition` → `UpdateRodBuoyPositionNetworkCommand` via `SendCommand` (**Unreliable**) — used as fallback in `TryArmFishingInstantCatch`
+  - Reliable path: AuraMono inflate `WebRequestUtility.SendCommand<UpdateRodBuoyPositionNetworkCommand>` with `ChannelType.Reliable` — see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § 2b
+  - Buoy position: `HandHoldFishingRod.GetFloatPosition()` (AuraMono on equipped handhold); player geometry from local position + `direction = player - buoy`
+- **Files:** `HeartopiaComplete.Fishing.cs`, `AutoFishingFarm.cs` (`autoFishInstantCatch` config)
 
 #### `ToolSystem`
 - **Dump:** `XDTGameSystem/GameplaySystem/Tool/ToolSystem.cs`
@@ -931,7 +954,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 | Feature | Key game types | Mod file(s) | Dominant access |
 |---------|----------------|-------------|-----------------|
 | Aura farm | ResourceProtocolManager, InteractSystem, Entities, EntityHelper, HandholdCylinderChecker, CollectableMeteorite*, MeteoriteLogic, gather components | AuraFarm.cs | R + A |
-| Auto fishing | HandHoldFishingRod, FishingSubState, ToolSystem, fish shadow GOs | AutoFishingFarm.cs, HC | R + A + G |
+| Auto fishing | HandHoldFishingRod, FishingSubState, ToolSystem, fish shadow GOs, FishingProtocolManager, UpdateRodBuoyPositionNetworkCommand (Instant Catch) | AutoFishingFarm.cs, HC | R + A + G |
 | Insect farm | LevelInscetManager, InsectProtocolManager, ServerInsectComponent | InsectNetFarm.cs, HC | R + A + G |
 | Bird farm | BirdScannableComponent, TakingBirdPhotoCommand, BirdProtocolManager, ScannerStatusPanel | BirdNetFarm.cs, HC | R + A + S |
 | Bubble | WebRequestUtility, Create*Bubble*Command, ActivityEvent/Bubble protocol | BubbleFeature.cs | H + S + A |

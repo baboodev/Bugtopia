@@ -276,6 +276,13 @@ Reflection / Il2Cpp calls on `HeartopiaComplete` (representative):
 - `RestorePreviousTool` on disable.
 - Retry equip every 3.25 s if rod missing.
 
+### Instant Catch (optional toggle)
+
+- Menu toggle + config key `autoFishInstantCatch`.
+- Does **not** move the player. Re-sends buoy geometry to the server with collapsed `successLength` so the battle resolves quickly once the fish bites.
+- Type resolution: **AuraMono** `WebRequestUtility.SendCommand<UpdateRodBuoyPositionNetworkCommand>` on **Reliable** channel (managed `FindLoadedType` fails — see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § 2b).
+- Implementation: `HeartopiaComplete.Fishing.cs` (`TryArmFishingInstantCatch`), tick from `AutoFishingFarm.cs`. Verbose log: `[InstantCatch]` (`MasterLogInstantCatch`).
+
 ---
 
 ## Aura Farm (`AuraFarm.cs` partial)

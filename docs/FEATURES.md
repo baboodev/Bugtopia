@@ -224,6 +224,7 @@ Behavior:
 4. Casts, waits for bite, handles hook and **reel minigame** via `TrySetFishingPressed` (not legacy Input patches).
 5. Tension-aware reel: emergency release below 0.15, resume pull above 0.35.
 6. State machine with grace timers for stale states, post-catch recast, lost bait recovery.
+7. **Instant Catch** (optional): spoof buoy `successLength` via AuraMono Reliable `SendCommand` — no avatar teleport. See [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § 2b.
 
 UI displays user-friendly status:
 

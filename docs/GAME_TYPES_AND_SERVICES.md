@@ -272,9 +272,9 @@ Example managers:
 
 Note the typo **`OperationActivityProtocolMananger`** (missing **e**) — must match dump exactly.
 
-### 7.2 `SendCommand` fallback
+### 7.2 `SendCommand` fallback (managed)
 
-When protocol types are missing from interop, create command structs and send:
+When protocol types **are loaded** into `AppDomain` (interop / `TryEnsureHomelandFarmInteropAssembliesLoaded`), create command structs and send:
 
 ```csharp
 TryHomelandFarmSendCommand(commandType, cmd => {
@@ -283,7 +283,20 @@ TryHomelandFarmSendCommand(commandType, cmd => {
 }, out status);
 ```
 
-Command types live under `XDT.Scene.Shared.Modules.*` in **`EcsClient.dll`**. Always add `EcsClient.` prefixed alias.
+Command types decompile from **`EcsClient.dll`** under `XDT.Scene.Shared.Modules.*` (or `GamePlay.*`). Pass `EcsClient.` as an extra alias in `ResolveHomelandFarmManagedType`, not as the type's real namespace.
+
+### 7.3 `SendCommand` when managed resolution fails (AuraMono)
+
+On the current BepInEx build, `WebRequestUtility` and most `*NetworkCommand` structs are **Mono-only** — `FindLoadedType` / `ResolveHomelandFarmManagedType` often return `null` in-world. Symptom: logs like `reliable types unresolved (UpdateRodBuoyPositionNetworkCommand unresolved)`.
+
+**Fix:** use AuraMono, not more `FindLoadedType` aliases alone.
+
+| Approach | Use when |
+|----------|----------|
+| Invoke `*ProtocolManager` static method | Manager exists and channel matches (e.g. `DrawBoardProtoManager.DrawingOperation`) |
+| Inflate `WebRequestUtility.SendCommand<T>` | Need a specific `ChannelType` or no manager wrapper (e.g. **Instant Catch** — Reliable buoy vs game's Unreliable `UpdateFloatPosition`) |
+
+Canonical write-up: [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § `WebRequestUtility.SendCommand` + § 2b (fishing). Reference implementation: `HeartopiaComplete.Fishing.cs` → `TryEnsureInstantCatchAuraBuoySend`, `TrySendBuoyUpdateReliable`.
 
 ---
 

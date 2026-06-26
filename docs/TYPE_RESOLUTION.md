@@ -405,16 +405,53 @@ Requires a stable method signature. IL2CPP generic/instance methods may need exa
 
 ### 2. `WebRequestUtility.SendCommand<T>` (network commands)
 
-**Flow:**
+**Important:** `WebRequestUtility` and most `*NetworkCommand` structs live in **embedded Mono** (`XDTDataAndProtocol.dll`, `EcsClient.dll` images). They are **not** in IL2CPP `GameAssembly` and are often **absent from the BepInEx interop `AppDomain`**. Plain `FindLoadedType("XDT.Scene.Shared…SomeNetworkCommand")` frequently returns `null` even in-world — same class of problem as [DRAW_TECHNICAL.md](./DRAW_TECHNICAL.md) documents for draw upload.
 
-1. Resolve command struct: `FindLoadedType("XDT.Scene.Shared.Modules….SomeNetworkCommand", "SomeNetworkCommand")`.
-2. Resolve `WebRequestUtility` and `ChannelType`.
-3. `GetMethods` → find static generic `SendCommand` with **3 parameters**.
-4. `MakeGenericMethod(commandType)` and `Invoke(null, new object[] { commandInstance, reliable, channel })`.
+#### Decision table (pick one path)
+
+| Need | Path | When it works |
+|------|------|----------------|
+| Server action with a **protocol-manager wrapper** | **AuraMono** static invoke on `*ProtocolManager` (manager builds the command and calls `WebRequestUtility` internally) | Always in-world once AuraMono is ready. **Preferred** when the manager method exists and uses the right channel. Reference: `DrawUploadFeature.cs`, `FishingProtocolManager.UpdateFloatPosition` (Unreliable — see instant catch below). |
+| Server action with a **specific `ChannelType`** (e.g. Reliable while the manager hardcodes Unreliable) | **AuraMono** inflate + invoke `WebRequestUtility.SendCommand<T>` | When managed `Type` resolution fails. Reference: **Instant Catch** in `HeartopiaComplete.Fishing.cs` (`TryEnsureInstantCatchAuraBuoySend` / `TrySendBuoyUpdateReliable`). |
+| Managed `SendCommand` via reflection | `ResolveHomelandFarmManagedType` + `EnsureHomelandFarmSendCommandResolver` + `TryHomelandFarmSendCommand` | Only when command struct + `WebRequestUtility` are actually loaded into `AppDomain` (interop load succeeded — farm/cook/bird paths on some builds). |
+
+Do **not** assume `EcsClient.` prefix alone fixes managed resolution — the assembly must be **loaded**, not just named correctly in a string.
+
+#### Managed flow (when types are in AppDomain)
+
+1. Resolve command struct via `ResolveHomelandFarmManagedType(shortName, "XDT.Scene.Shared.Modules….SomeNetworkCommand", "EcsClient.XDT.Scene.Shared.Modules….SomeNetworkCommand")` — command bodies decompile from **`EcsClient.dll`** (`ilspy-dumps/EcsClient/…`), namespace usually `XDT.Scene.Shared.Modules.*` or `XDT.Scene.Shared.GamePlay.*` **without** an `EcsClient.` prefix on the type itself.
+2. Resolve `WebRequestUtility` via `FindHomelandFarmRuntimeType("WebRequestUtility", "XDTDataAndProtocol.ProtocolService")` (includes `NonPublic` `SendCommand` scan).
+3. Resolve `ChannelType` (`XD.GameGerm.Network.ChannelType`); fallback `Reliable = 1` if enum missing (see `HomelandFarmFeature.EnsureHomelandFarmSendCommandResolver`).
+4. `MakeGenericMethod(commandType)` → `Invoke(null, new object[] { commandInstance, needAuthed, channel })`.
+
+#### AuraMono `SendCommand<T>` flow (Mono-only types — **Instant Catch pattern**)
+
+Use when managed resolution logs `unresolved` / `reliable types unresolved` but AuraMono protocol classes resolve fine.
+
+1. `FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.WebRequestUtility")`.
+2. `FindAuraMonoClassByFullName("XDT.Scene.Shared.GamePlay.Fishing.UpdateRodBuoyPositionNetworkCommand")` — if zero, `FindAuraMonoClassAcrossLoadedAssemblies("XDT.Scene.Shared.GamePlay.Fishing", "UpdateRodBuoyPositionNetworkCommand")`. Image: **`EcsClient`**.
+3. `FindAuraMonoMethodOnHierarchy(webRequestClass, "SendCommand", 3)` → inflate with `mono_class_get_type` + `mono_metadata_get_generic_inst` + `mono_class_inflate_generic_method` (same pattern as `DailyClaimsFeature` / `HomelandFarmFeature` generic inflate).
+4. Build the command **struct** with `mono_object_new` + `auraMonoFieldSetValue` on fields (`BuoyNetId`, `BuoyPos`, `Direction`, `SuccessLength`, `FailureLength`).
+5. Static invoke inflated `SendCommand` with `(struct unboxed ptr, needAuthed: true, channel: Reliable)`. `FishingProtocolManager.UpdateFloatPosition` hardcodes `ChannelType.Unreliable`; Instant Catch needs Reliable so the spoofed `successLength` is not dropped at bite time.
+
+Copy field names and namespaces from `ilspy-dumps/XDTDataAndProtocol/.../Fishing/FishingProtocolManager.cs` — e.g. `UpdateFloatPosition` sends `UpdateRodBuoyPositionNetworkCommand`.
+
+#### Other SendCommand patterns
 
 **Bubble spawn (preferred path):** Harmony **prefix** on the generic `SendCommand` definition rewrites `location` on bubble create commands — does not require `BubbleComponent` or `ActivityEventProtocolManager` types.
 
-Same pattern: bird photo (`TakingBirdPhotoCommand`), net cook prepare commands, `GetBubbleAward`, etc.
+Same managed pattern when types load: bird photo (`TakingBirdPhotoCommand`), net cook prepare commands, `GetBubbleAward`, homeland farm water/manure commands, etc.
+
+### 2b. Worked example — fishing Instant Catch (Mono-only reliable buoy)
+
+| Game type | Dump / image | Mod resolution |
+|-----------|--------------|----------------|
+| `FishingProtocolManager` | `XDTDataAndProtocol` / `ProtocolService/Fishing/` | `FindAuraMonoClassByFullName` → `UpdateFloatPosition` (Unreliable fallback) |
+| `UpdateRodBuoyPositionNetworkCommand` | `EcsClient` / `XDT.Scene.Shared.GamePlay.Fishing` | AuraMono class + field offsets; **not** `FindLoadedType` |
+| `WebRequestUtility.SendCommand<T>` | `XDTDataAndProtocol` | AuraMono generic inflate; `ChannelType.Reliable` (= `1` on current build) |
+| `HandHoldFishingRod.GetFloatPosition` | `XDTLevelAndEntity` | AuraMono on equipped handhold — real buoy position for geometry echo |
+
+Files: `HeartopiaComplete.Fishing.cs` (`TryArmFishingInstantCatch`, `TrySendBuoyUpdateReliable`), `AutoFishingFarm.cs` (toggle + tick). Log tag: `[InstantCatch]`.
 
 ### 3. Reflection invoke (no Harmony)
 
