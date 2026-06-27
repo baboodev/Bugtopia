@@ -31,6 +31,8 @@ namespace HeartopiaMod
         // mode = HobbyProtocolManager.TryGetHobbySkillParam(HobbySkillEnum.Water)[0].
         // Skill levels: 1 (default), 3, 6, 9. Match to player's current skill.
         private const int HomelandFarmCastBatchDefault = 9;
+        // EcsClient.XDT.Scene.Shared.Modules.Hobby.HobbySkillEnum.Water
+        private const int HomelandFarmHobbySkillWaterEnumValue = 10604;
         // Crop-box sow put-zone slot: levelObjectNetId = (slot << 32) | planterNetId. Crop boxes use
         // slot 2 (craft raycast put-zone), per HOMELAND_SOW_ALIGNMENT.md.
         private const int HomelandFarmCropBoxCraftPutZoneSlot = 2;
@@ -3821,57 +3823,139 @@ namespace HeartopiaMod
             return output.Count > before;
         }
 
-        private int TryHomelandFarmGetSprinklerCellCount()
+        private unsafe bool TryHomelandFarmTryReadAuraMonoFloatArrayFirst(IntPtr arrayObj, out float value)
         {
-            // Reads TableData.TableModes[mode].num where mode comes from HandHoldSprinkler.mode
-            // (driven by HobbyProtocolManager hobby skill "Water"). Skill levels map to 1/3/6/9 cells.
-            // The server rejects the whole water command if it exceeds the player's skill capacity.
+            value = 0f;
+            if (arrayObj == IntPtr.Zero
+                || auraMonoArrayLength == null
+                || auraMonoArrayAddrWithSize == null
+                || !this.IsAuraMonoArrayObject(arrayObj))
+            {
+                return false;
+            }
+
             try
             {
-                if (this.TryGetManagedSelfPlayerObject(out object playerObj, out _) && playerObj != null)
+                if (auraMonoArrayLength(arrayObj).ToUInt64() < 1UL)
                 {
-                    Type sprinklerType = this.FindLoadedType(
-                        "HandHoldSprinkler",
-                        "Il2CppXDTLevelAndEntity.Gameplay.Component.Equip.HandHoldSprinkler",
-                        "XDTLevelAndEntity.Gameplay.Component.Equip.HandHoldSprinkler");
-
-                    if (sprinklerType != null
-                        && this.TryInvokeMethodByName(playerObj, "GetComponent", out object sprinkler, new object[] { sprinklerType })
-                        && sprinkler != null
-                        && this.TryGetObjectMember(sprinkler, "mode", out object modeObj) && modeObj != null)
-                    {
-                        int modeVal = Convert.ToInt32(modeObj);
-                        Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                        FieldInfo modesField = tableDataType?.GetField("TableModes",
-                            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                        object modesDict = modesField?.GetValue(null);
-                        if (modesDict != null)
-                        {
-                            MethodInfo tryGetValue = modesDict.GetType().GetMethod("TryGetValue");
-                            if (tryGetValue != null)
-                            {
-                                object[] args = new object[] { modeVal, null };
-                                bool found = (bool)(tryGetValue.Invoke(modesDict, args) ?? false);
-                                if (found && args[1] != null
-                                    && this.TryGetObjectMember(args[1], "num", out object numObj) && numObj != null)
-                                {
-                                    int cellNum = Convert.ToInt32(numObj);
-                                    if (cellNum > 0)
-                                    {
-                                        this.HomelandFarmLog("Sprinkler cell count from TableMode[" + modeVal + "].num=" + cellNum);
-                                        return cellNum;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    return false;
                 }
+
+                IntPtr arrayBase = auraMonoArrayAddrWithSize(arrayObj, 4, UIntPtr.Zero);
+                if (arrayBase == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                value = BitConverter.Int32BitsToSingle(Marshal.ReadInt32(arrayBase, 0));
+                return true;
             }
-            catch (Exception ex)
+            catch
             {
-                this.HomelandFarmLog("Sprinkler cell count read failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private unsafe bool TryHomelandFarmTryGetWaterSkillTableMode(out int mode)
+        {
+            mode = 0;
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null)
+            {
+                return false;
             }
 
+            IntPtr hobbyProtocolClass = this.FindAuraMonoClassByFullName(
+                "XDTDataAndProtocol.ProtocolService.Hobby.HobbyProtocolManager");
+            if (hobbyProtocolClass == IntPtr.Zero)
+            {
+                hobbyProtocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                    "XDTDataAndProtocol.ProtocolService.Hobby",
+                    "HobbyProtocolManager");
+            }
+
+            if (hobbyProtocolClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr method = this.FindAuraMonoMethodOnHierarchy(hobbyProtocolClass, "TryGetHobbySkillParam", 2);
+            if (method == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            int enumValue = HomelandFarmHobbySkillWaterEnumValue;
+            IntPtr outArrayObj = IntPtr.Zero;
+            IntPtr* invokeArgs = stackalloc IntPtr[2];
+            invokeArgs[0] = (IntPtr)(&enumValue);
+            invokeArgs[1] = (IntPtr)(&outArrayObj);
+
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)invokeArgs, ref exc);
+            if (exc != IntPtr.Zero
+                || outArrayObj == IntPtr.Zero
+                || !this.TryHomelandFarmTryReadAuraMonoFloatArrayFirst(outArrayObj, out float firstValue))
+            {
+                return false;
+            }
+
+            mode = Convert.ToInt32(firstValue);
+            return mode > 0;
+        }
+
+        private bool TryHomelandFarmTryReadTableModeRowCellCount(IntPtr modeRowObj, out int cellCount)
+        {
+            cellCount = 0;
+            if (modeRowObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return (this.TryGetMonoInt32Member(modeRowObj, "num", out cellCount)
+                    || this.TryGetMonoInt32Member(modeRowObj, "Num", out cellCount)
+                    || this.TryGetMonoInt32Member(modeRowObj, "_num", out cellCount))
+                && cellCount > 0;
+        }
+
+        private bool TryHomelandFarmTryGetTableModeCellCount(int mode, out int cellCount)
+        {
+            cellCount = 0;
+            if (mode <= 0
+                || !this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            if (!this.TryGetAutoSellAuraMonoTableDataClass(out IntPtr tableDataClass, out _)
+                || tableDataClass == IntPtr.Zero
+                || !this.TryGetAuraMonoStaticObjectField(tableDataClass, "TableModes", out IntPtr modesDict)
+                || modesDict == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return this.TryInvokeAuraMonoIntArg(modesDict, mode, out IntPtr modeRowObj, "get_Item", "GetItem")
+                && this.TryHomelandFarmTryReadTableModeRowCellCount(modeRowObj, out cellCount);
+        }
+
+        private int TryHomelandFarmGetSprinklerCellCount()
+        {
+            if (!this.TryHomelandFarmTryGetWaterSkillTableMode(out int mode))
+            {
+                this.HomelandFarmLog("Sprinkler cell count: water skill mode unavailable; default=" + HomelandFarmCastBatchDefault);
+                return HomelandFarmCastBatchDefault;
+            }
+
+            if (this.TryHomelandFarmTryGetTableModeCellCount(mode, out int cellCount))
+            {
+                this.HomelandFarmLog("Sprinkler cell count: TableMode[" + mode + "].num=" + cellCount);
+                return cellCount;
+            }
+
+            this.HomelandFarmLog("Sprinkler cell count: TableMode lookup failed for mode=" + mode + "; default=" + HomelandFarmCastBatchDefault);
             return HomelandFarmCastBatchDefault;
         }
 
@@ -6240,60 +6324,17 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryHomelandFarmTryGetTableModeCellCount(int mode, out int cellCount)
-        {
-            cellCount = 0;
-            if (mode <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                FieldInfo modesField = tableDataType?.GetField(
-                    "TableModes",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                object modesDict = modesField?.GetValue(null);
-                if (modesDict != null)
-                {
-                    MethodInfo tryGetValue = modesDict.GetType().GetMethod("TryGetValue");
-                    if (tryGetValue != null)
-                    {
-                        object[] args = new object[] { mode, null };
-                        if ((bool)(tryGetValue.Invoke(modesDict, args) ?? false)
-                            && args[1] != null
-                            && this.TryGetObjectMember(args[1], "num", out object numObj)
-                            && numObj != null)
-                        {
-                            cellCount = Convert.ToInt32(numObj);
-                            return cellCount > 0;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
         private int TryHomelandFarmGetFertilizerCastCellCount()
         {
             this.TryHomelandFarmTryGetEquippedFertilizerMode(out int mode);
             if (this.TryHomelandFarmTryGetTableModeCellCount(mode, out int cellCount) && cellCount > 0)
             {
-                this.HomelandFarmLog("Fertilizer cast cell count from TableMode[" + mode + "].num=" + cellCount);
+                this.HomelandFarmLog("Fertilizer cast cell count: TableMode[" + mode + "].num=" + cellCount);
                 return cellCount;
             }
 
-            // TableData unavailable on this build (managed reflection missing) -> the mode-based
-            // lookup fails and we used to return 1 (fertilize one crop at a time). Fall back to the
-            // player's hobby/water cell capacity (same cell pattern as the fertilize cast) so
-            // fertilize batches like water/sow.
             cellCount = this.TryHomelandFarmGetSprinklerCellCount();
-            this.HomelandFarmLog("Fertilizer cast cell count fallback mode=" + mode + " cells=" + cellCount);
+            this.HomelandFarmLog("Fertilizer cast cell count fallback cells=" + cellCount);
             return Math.Max(1, cellCount);
         }
 
@@ -6351,36 +6392,37 @@ namespace HeartopiaMod
         private bool TryHomelandFarmTryGetEquippedFertilizerMode(out int mode)
         {
             mode = 1;
-            try
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null)
             {
-                object playerObj = null;
-                if (this.homelandFarmEntityUtilGetSelfPlayerMethod != null)
-                {
-                    playerObj = this.homelandFarmEntityUtilGetSelfPlayerMethod.Invoke(null, null);
-                }
-
-                if (playerObj == null && this.TryGetManagedSelfPlayerObject(out object managedPlayer, out _))
-                {
-                    playerObj = managedPlayer;
-                }
-
-                if (playerObj != null
-                    && this.TryGetObjectMember(playerObj, "equipComponent", out object equipObj)
-                    && equipObj != null
-                    && this.TryGetObjectMember(equipObj, "handhold", out object handholdObj)
-                    && handholdObj != null
-                    && this.TryReadManagedInt32Member(handholdObj, "mode", out int handholdMode)
-                    && handholdMode > 0)
-                {
-                    mode = handholdMode;
-                    return true;
-                }
-            }
-            catch
-            {
+                return false;
             }
 
-            return false;
+            IntPtr interactObj = this.GetAuraMonoInteractSystemInstance();
+            if (interactObj == IntPtr.Zero || this.auraMonoInteractGetPlayerMethodPtr == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr playerObj = auraMonoRuntimeInvoke(this.auraMonoInteractGetPlayerMethodPtr, interactObj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || playerObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(playerObj, out IntPtr equipObj, "get_equipComponent", "GetEquipComponent")
+                || equipObj == IntPtr.Zero
+                || !this.TryInvokeAuraMonoZeroArg(equipObj, out IntPtr handholdObj, "get_handhold", "GetHandhold")
+                || handholdObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return (this.TryGetMonoInt32Member(handholdObj, "mode", out mode)
+                    || this.TryGetMonoInt32Member(handholdObj, "Mode", out mode))
+                && mode > 0;
         }
 
         private bool TryHomelandFarmInvokeCropSeedingInterop(uint seedNetId, List<object> plantPoints, out string status)
