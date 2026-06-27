@@ -499,6 +499,18 @@ namespace HeartopiaMod
             return ApplyRadialDeadzone(new Vector2(state.Gamepad.sThumbLX, state.Gamepad.sThumbLY));
         }
 
+        private static bool TryReadXInputGamepad(out XINPUT_GAMEPAD gamepad)
+        {
+            gamepad = default;
+            if (!TryGetFirstConnectedPad(out XINPUT_STATE state, out _))
+            {
+                return false;
+            }
+
+            gamepad = state.Gamepad;
+            return true;
+        }
+
         private static Vector2 ApplyRadialDeadzone(Vector2 raw)
         {
             float magnitude = raw.magnitude;

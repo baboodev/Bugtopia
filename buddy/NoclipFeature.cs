@@ -594,41 +594,78 @@ namespace HeartopiaMod
             this.TrySetMonoVector2Member(moveComponentObj, "Forward", forward2D);
         }
 
+        private const ushort XInputButtonA = 0x1000;
+        private const ushort XInputButtonB = 0x2000;
+        private const ushort XInputButtonLeftShoulder = 0x0100;
+        private const ushort XInputButtonRightShoulder = 0x0200;
+        private const byte XInputTriggerPressThreshold = 30;
+
         private Vector3 BuildNoclipMoveDirection()
         {
             Vector3 moveDirection = Vector3.zero;
+            Vector2 planarAxis = this.ReadUnityMovementAxes();
+            float planarDeadzoneSq = MovementBridgeDeadzone * MovementBridgeDeadzone;
             Camera mainCamera = Camera.main;
-            if (mainCamera != null)
+            if (planarAxis.sqrMagnitude >= planarDeadzoneSq)
             {
-                Vector3 cameraForward = mainCamera.transform.forward;
-                Vector3 cameraRight = mainCamera.transform.right;
-                cameraForward.y = 0f;
-                cameraRight.y = 0f;
-                cameraForward.Normalize();
-                cameraRight.Normalize();
-
-                if (Input.GetKey(KeyCode.W)) moveDirection += cameraForward;
-                if (Input.GetKey(KeyCode.S)) moveDirection -= cameraForward;
-                if (Input.GetKey(KeyCode.A)) moveDirection -= cameraRight;
-                if (Input.GetKey(KeyCode.D)) moveDirection += cameraRight;
-            }
-            else
-            {
-                if (Input.GetKey(KeyCode.W)) moveDirection += Vector3.forward;
-                if (Input.GetKey(KeyCode.S)) moveDirection += Vector3.back;
-                if (Input.GetKey(KeyCode.A)) moveDirection += Vector3.left;
-                if (Input.GetKey(KeyCode.D)) moveDirection += Vector3.right;
+                if (mainCamera != null)
+                {
+                    Vector3 cameraForward = mainCamera.transform.forward;
+                    Vector3 cameraRight = mainCamera.transform.right;
+                    cameraForward.y = 0f;
+                    cameraRight.y = 0f;
+                    cameraForward.Normalize();
+                    cameraRight.Normalize();
+                    moveDirection += cameraForward * planarAxis.y + cameraRight * planarAxis.x;
+                }
+                else
+                {
+                    moveDirection += new Vector3(planarAxis.x, 0f, planarAxis.y);
+                }
             }
 
-            if (Input.GetKey(KeyCode.Space)) moveDirection += Vector3.up;
-            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) moveDirection -= Vector3.up;
+            if (Input.GetKey(KeyCode.Space))
+            {
+                moveDirection += Vector3.up;
+            }
+
+            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+            {
+                moveDirection -= Vector3.up;
+            }
+
+            if (TryReadXInputGamepad(out XINPUT_GAMEPAD gamepad))
+            {
+                if ((gamepad.wButtons & XInputButtonA) != 0 || gamepad.bRightTrigger >= XInputTriggerPressThreshold)
+                {
+                    moveDirection += Vector3.up;
+                }
+
+                if ((gamepad.wButtons & XInputButtonB) != 0 || gamepad.bLeftTrigger >= XInputTriggerPressThreshold)
+                {
+                    moveDirection -= Vector3.up;
+                }
+            }
+
             return moveDirection;
+        }
+
+        private bool IsNoclipBoostInputHeld()
+        {
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+            {
+                return true;
+            }
+
+            return TryReadXInputGamepad(out XINPUT_GAMEPAD gamepad)
+                && ((gamepad.wButtons & XInputButtonLeftShoulder) != 0
+                    || (gamepad.wButtons & XInputButtonRightShoulder) != 0);
         }
 
         private float GetNoclipSpeed(bool onVehicle)
         {
             float currentSpeed = this.noclipSpeed;
-            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+            if (this.IsNoclipBoostInputHeld())
             {
                 currentSpeed *= this.noclipBoostMultiplier;
             }
