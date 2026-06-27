@@ -44,11 +44,16 @@ namespace HeartopiaMod
         private IntPtr movementSendMoveValueMethod;
         private IntPtr movementOnLeftJoyMethod;
         private IntPtr movementOnLeftJoyCancelMethod;
+        private IntPtr movementCameraToJoyMethod;
+        private IntPtr movementSetMoveJoystickMethod;
+        private IntPtr movementJoystickQueueClearMethod;
         private IntPtr movementVehicleControllerClass;
         private IntPtr movementVehicleOnLeftJoyMethod;
         private IntPtr movementVehicleOnLeftJoyCancelMethod;
         private bool movementWasInjecting;
         private bool movementBridgeInjectLogged;
+        private bool movementBridgeHasHeldAxis;
+        private Vector2 movementBridgeHeldAxis;
         private FeatureBreakerState movementBridgeBreaker;
 
         // Resolve and cache the MonoInputManager (primary) + LocalPlayerComponent joystick methods
@@ -172,7 +177,8 @@ namespace HeartopiaMod
         }
 
         // Inject an analog move axis. axis is RAW joystick space, magnitude clamped to 0..1; the
-        // game applies the camera-relative transform. Prefers the SendMoveValueToControl path.
+        // game applies the camera-relative transform. Prefers a direct SetMoveJoystick path that
+        // bypasses LocalPlayerComponent._joystickQueue (one dequeue per player tick → input lag).
         private bool TrySetGameMoveAxis(Vector2 axis)
         {
             if (!this.TryEnsureMovementInputRuntime())
@@ -193,8 +199,12 @@ namespace HeartopiaMod
                 return true;
             }
 
-            // Deterministic path first: enqueue straight into LocalPlayerComponent's joystick queue,
-            // which its own tick consumes every frame → SetMoveJoystick → real movement + sync.
+            if (this.TryInjectDirectPlayerMoveAxis(axis, release: false))
+            {
+                return true;
+            }
+
+            // Legacy fallbacks (enqueue into _joystickQueue — can lag if used every Update frame).
             if (this.movementOnLeftJoyMethod != IntPtr.Zero
                 && this.TryGetAuraMonoLocalPlayerObject(out IntPtr playerObj)
                 && playerObj != IntPtr.Zero
@@ -203,7 +213,6 @@ namespace HeartopiaMod
                 return true;
             }
 
-            // Fallback: feed the Input System virtual "Move" control (honors IsInputDisabled(Move)).
             if (this.movementSendMoveValueMethod != IntPtr.Zero
                 && this.cachedMovementInputManagerObj.TryGet(out IntPtr managerObj)
                 && managerObj != IntPtr.Zero)
@@ -225,6 +234,7 @@ namespace HeartopiaMod
             bool any = false;
 
             any |= this.TryInjectVehicleMoveAxis(Vector2.zero, release: true);
+            any |= this.TryInjectDirectPlayerMoveAxis(Vector2.zero, release: true);
 
             if (this.movementSendMoveValueMethod != IntPtr.Zero
                 && this.cachedMovementInputManagerObj.TryGet(out IntPtr managerObj)
@@ -382,13 +392,26 @@ namespace HeartopiaMod
                 }
 
                 Vector2 axis = this.ReadUnityMovementAxes();
-                if (axis.sqrMagnitude < MovementBridgeDeadzone * MovementBridgeDeadzone)
+                float activeDeadzoneSq = MovementBridgeDeadzone * MovementBridgeDeadzone;
+                float releaseDeadzone = MovementBridgeDeadzone * 0.65f;
+                float releaseDeadzoneSq = releaseDeadzone * releaseDeadzone;
+                if (axis.sqrMagnitude >= activeDeadzoneSq)
                 {
+                    this.movementBridgeHeldAxis = axis;
+                    this.movementBridgeHasHeldAxis = true;
+                }
+                else if (this.movementBridgeHasHeldAxis && axis.sqrMagnitude >= releaseDeadzoneSq)
+                {
+                    this.movementBridgeHeldAxis = axis;
+                }
+                else
+                {
+                    this.movementBridgeHasHeldAxis = false;
                     this.ReleaseMovementBridgeIfInjecting();
                     return;
                 }
 
-                if (this.TrySetGameMoveAxis(axis))
+                if (this.TrySetGameMoveAxis(this.movementBridgeHeldAxis))
                 {
                     this.movementWasInjecting = true;
                     if (!this.movementBridgeInjectLogged)
@@ -413,8 +436,160 @@ namespace HeartopiaMod
                 return;
             }
 
+            this.movementBridgeHasHeldAxis = false;
             this.TryClearGameMoveAxis();
             this.movementWasInjecting = false;
+        }
+
+        private bool TryEnsureDirectPlayerMoveMethods(IntPtr playerObj, out IntPtr cameraObj, out IntPtr moveObj)
+        {
+            cameraObj = IntPtr.Zero;
+            moveObj = IntPtr.Zero;
+            if (playerObj == IntPtr.Zero
+                || !this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            if ((!this.TryGetMonoObjectMember(playerObj, "cameraComponent", out cameraObj) || cameraObj == IntPtr.Zero)
+                && (!this.TryGetMonoObjectMember(playerObj, "_cameraComponent", out cameraObj) || cameraObj == IntPtr.Zero))
+            {
+                return false;
+            }
+
+            if (!this.TryGetBunnyHopMonoMoveComponent(playerObj, out moveObj) || moveObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr cameraClass = auraMonoObjectGetClass(cameraObj);
+            IntPtr moveClass = auraMonoObjectGetClass(moveObj);
+            if (cameraClass == IntPtr.Zero || moveClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (this.movementCameraToJoyMethod == IntPtr.Zero)
+            {
+                this.movementCameraToJoyMethod = this.FindAuraMonoMethodOnHierarchy(cameraClass, "ToCameraSpaceJoystick", 1);
+            }
+
+            if (this.movementSetMoveJoystickMethod == IntPtr.Zero)
+            {
+                this.movementSetMoveJoystickMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetMoveJoystick", 2);
+                if (this.movementSetMoveJoystickMethod == IntPtr.Zero)
+                {
+                    this.movementSetMoveJoystickMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetMoveJoystick", 3);
+                }
+            }
+
+            return this.movementCameraToJoyMethod != IntPtr.Zero && this.movementSetMoveJoystickMethod != IntPtr.Zero;
+        }
+
+        private unsafe bool TryClearMovementJoystickQueue(IntPtr playerObj)
+        {
+            if (playerObj == IntPtr.Zero
+                || auraMonoObjectGetClass == null
+                || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(playerObj, "_joystickQueue", out IntPtr queueObj) || queueObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (this.movementJoystickQueueClearMethod == IntPtr.Zero)
+            {
+                IntPtr queueClass = auraMonoObjectGetClass(queueObj);
+                if (queueClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                this.movementJoystickQueueClearMethod = this.FindAuraMonoMethodOnHierarchy(queueClass, "Clear", 0);
+            }
+
+            if (this.movementJoystickQueueClearMethod == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(this.movementJoystickQueueClearMethod, queueObj, IntPtr.Zero, ref exc);
+            return exc == IntPtr.Zero;
+        }
+
+        private unsafe bool TryInjectDirectPlayerMoveAxis(Vector2 axis, bool release)
+        {
+            if (!this.TryGetAuraMonoLocalPlayerObject(out IntPtr playerObj) || playerObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryEnsureDirectPlayerMoveMethods(playerObj, out IntPtr cameraObj, out IntPtr moveObj))
+            {
+                return false;
+            }
+
+            this.TryClearMovementJoystickQueue(playerObj);
+
+            Vector2 joystick = release ? Vector2.zero : axis;
+            Vector2 moveDir = Vector2.zero;
+            if (joystick.sqrMagnitude > 0f)
+            {
+                IntPtr exc = IntPtr.Zero;
+                Vector2 joyValue = joystick;
+                IntPtr* toCameraArgs = stackalloc IntPtr[1];
+                toCameraArgs[0] = (IntPtr)(&joyValue);
+                IntPtr moveDirObj = auraMonoRuntimeInvoke(this.movementCameraToJoyMethod, cameraObj, (IntPtr)toCameraArgs, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                if (moveDirObj != IntPtr.Zero && auraMonoObjectUnbox != null)
+                {
+                    IntPtr raw = auraMonoObjectUnbox(moveDirObj);
+                    if (raw != IntPtr.Zero)
+                    {
+                        moveDir = *(Vector2*)raw;
+                    }
+                }
+                else
+                {
+                    moveDir = this.BuildCameraRelativeMove(joystick);
+                }
+            }
+
+            int setArgCount = this.TryGetAuraMonoMethodParamCount(this.movementSetMoveJoystickMethod);
+            IntPtr exc2 = IntPtr.Zero;
+            if (setArgCount >= 3)
+            {
+                Vector2 joyArg = joystick;
+                Vector2 moveArg = moveDir;
+                Vector3 move3DArg = Vector3.zero;
+                IntPtr* setArgs = stackalloc IntPtr[3];
+                setArgs[0] = (IntPtr)(&joyArg);
+                setArgs[1] = (IntPtr)(&moveArg);
+                setArgs[2] = (IntPtr)(&move3DArg);
+                auraMonoRuntimeInvoke(this.movementSetMoveJoystickMethod, moveObj, (IntPtr)setArgs, ref exc2);
+            }
+            else
+            {
+                Vector2 joyArg = joystick;
+                Vector2 moveArg = moveDir;
+                IntPtr* setArgs = stackalloc IntPtr[2];
+                setArgs[0] = (IntPtr)(&joyArg);
+                setArgs[1] = (IntPtr)(&moveArg);
+                auraMonoRuntimeInvoke(this.movementSetMoveJoystickMethod, moveObj, (IntPtr)setArgs, ref exc2);
+            }
+
+            return exc2 == IntPtr.Zero;
         }
 
         // ── XInput (Xbox controller) direct read ───────────────────────────
