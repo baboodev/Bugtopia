@@ -2344,6 +2344,15 @@ namespace HeartopiaMod
         private float nextInstantCatchSendLogAt = -999f;
         private float nextInstantCatchLogAt = -999f;
 
+        // EXPERIMENT — "far anchor at activation": for a brief window around the buoy LANDING (the buoy
+        // consistently settles ~1.7-2.0s after cast), report a FAR buoy position so the server latches a
+        // far battle anchor, then revert to the real buoy. With a far anchor, the battle win condition
+        // Distance(mouth,player) < Distance(buoy,player) is met without reeling (helps "fighting" fish).
+        private const float InstantCatchFarAnchorDist = 50f;
+        private const float InstantCatchFarWinStart = 1.5f;
+        private const float InstantCatchFarWinEnd = 1.9f;
+        private int instantCatchFarLogSeq = -1;
+
         // Per-cast diagnostics: AutoFishingFarm bumps the sequence and timestamp on every cast so each
         // throw's log lines can be told apart and timed (cast -> bite -> result).
         public int InstantCatchCastSeq;
@@ -2751,6 +2760,40 @@ namespace HeartopiaMod
                 if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos) || playerPos == Vector3.zero)
                 {
                     playerPos = buoyPos;
+                }
+
+                // "Far anchor at activation": during the brief landing window, replace the reported buoy
+                // with a point far beyond it (away from the player) so the server's latched battle anchor
+                // is far. Outside the window we report the real buoy (so the fish still bites normally).
+                float sinceCastFar = this.InstantCatchCastAt > 0f ? Time.unscaledTime - this.InstantCatchCastAt : -1f;
+                if (sinceCastFar >= InstantCatchFarWinStart && sinceCastFar <= InstantCatchFarWinEnd)
+                {
+                    Vector3 flat = new Vector3(buoyPos.x - playerPos.x, 0f, buoyPos.z - playerPos.z);
+                    float flatMag = flat.magnitude;
+                    Vector3 heading;
+                    if (flatMag > 0.05f)
+                    {
+                        heading = flat / flatMag;
+                    }
+                    else
+                    {
+                        GameObject pr = this.FindPlayerRoot();
+                        heading = pr != null ? pr.transform.forward : Vector3.forward;
+                        heading.y = 0f;
+                        heading = heading.sqrMagnitude < 0.0004f ? Vector3.forward : heading.normalized;
+                    }
+
+                    Vector3 farBuoy = playerPos + heading * (flatMag + InstantCatchFarAnchorDist);
+                    farBuoy.y = buoyPos.y;
+                    buoyPos = farBuoy;
+                    buoySource += " [FAR-anchor]";
+
+                    if (this.instantCatchFarLogSeq != this.InstantCatchCastSeq)
+                    {
+                        this.instantCatchFarLogSeq = this.InstantCatchCastSeq;
+                        this.InstantCatchDiag("cast#" + this.InstantCatchCastSeq + " FAR-anchor window @t=" + sinceCastFar.ToString("F2")
+                            + "s buoy-> " + buoyPos + " (dist " + (flatMag + InstantCatchFarAnchorDist).ToString("F0") + "m)");
+                    }
                 }
 
                 Vector3 direction = playerPos - buoyPos;
