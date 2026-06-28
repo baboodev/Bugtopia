@@ -6324,20 +6324,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private int TryHomelandFarmGetFertilizerCastCellCount()
-        {
-            this.TryHomelandFarmTryGetEquippedFertilizerMode(out int mode);
-            if (this.TryHomelandFarmTryGetTableModeCellCount(mode, out int cellCount) && cellCount > 0)
-            {
-                this.HomelandFarmLog("Fertilizer cast cell count: TableMode[" + mode + "].num=" + cellCount);
-                return cellCount;
-            }
-
-            cellCount = this.TryHomelandFarmGetSprinklerCellCount();
-            this.HomelandFarmLog("Fertilizer cast cell count fallback cells=" + cellCount);
-            return Math.Max(1, cellCount);
-        }
-
         private List<uint> BuildHomelandFarmFertilizeTargets(
             List<uint> cropCandidates,
             int fertilizerStaticId,
@@ -6387,42 +6373,6 @@ namespace HeartopiaMod
             }
 
             return result;
-        }
-
-        private bool TryHomelandFarmTryGetEquippedFertilizerMode(out int mode)
-        {
-            mode = 1;
-            if (!this.EnsureAuraMonoApiReady()
-                || !this.AttachAuraMonoThread()
-                || auraMonoRuntimeInvoke == null)
-            {
-                return false;
-            }
-
-            IntPtr interactObj = this.GetAuraMonoInteractSystemInstance();
-            if (interactObj == IntPtr.Zero || this.auraMonoInteractGetPlayerMethodPtr == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            IntPtr playerObj = auraMonoRuntimeInvoke(this.auraMonoInteractGetPlayerMethodPtr, interactObj, IntPtr.Zero, ref exc);
-            if (exc != IntPtr.Zero || playerObj == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            if (!this.TryInvokeAuraMonoZeroArg(playerObj, out IntPtr equipObj, "get_equipComponent", "GetEquipComponent")
-                || equipObj == IntPtr.Zero
-                || !this.TryInvokeAuraMonoZeroArg(equipObj, out IntPtr handholdObj, "get_handhold", "GetHandhold")
-                || handholdObj == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            return (this.TryGetMonoInt32Member(handholdObj, "mode", out mode)
-                    || this.TryGetMonoInt32Member(handholdObj, "Mode", out mode))
-                && mode > 0;
         }
 
         private bool TryHomelandFarmInvokeCropSeedingInterop(uint seedNetId, List<object> plantPoints, out string status)
@@ -15847,8 +15797,8 @@ namespace HeartopiaMod
                 this.HomelandFarmLog("Fertilize warning: fertilizer backpack netId missing; server may reject.");
             }
 
-            int fertilizeBatchSize = Mathf.Clamp(this.TryHomelandFarmGetFertilizerCastCellCount(), 1, HomelandFarmBatchLimit);
-            this.HomelandFarmLog("Fertilize batch size=" + fertilizeBatchSize + " (TableMode.num for equipped fertilizer mode)");
+            int fertilizeBatchSize = Mathf.Clamp(this.TryHomelandFarmGetSprinklerCellCount(), 1, HomelandFarmBatchLimit);
+            this.HomelandFarmLog("Fertilize batch size=" + fertilizeBatchSize + " (hobby skill cell count)");
 
             for (int offset = 0; offset < targets.Count; offset += fertilizeBatchSize)
             {
