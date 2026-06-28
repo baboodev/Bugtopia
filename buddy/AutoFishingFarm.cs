@@ -21,11 +21,12 @@ namespace HeartopiaMod
         // close fish. This fires (before the gate) using state cached from the last tick. The rate is
         // user-tunable (Hz) — higher = surer win but more reliable traffic.
         private const float InstantCatchSendHzMin = 5f;
-        private const float InstantCatchSendHzMax = 60f;
+        private const float InstantCatchSendHzMax = 240f;
         private const float InstantCatchSendHzDefault = 50f;
         private static float instantCatchSendHz = InstantCatchSendHzDefault;
         private static float nextHighFreqInstantAt = -999f;
         private static bool instantCatchActiveCached = false;
+        private static int instantCatchSendCount = 0;
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";
@@ -450,7 +451,10 @@ namespace HeartopiaMod
                 if (instantCatchEnabled && instantCatchActiveCached && now >= nextHighFreqInstantAt)
                 {
                     nextHighFreqInstantAt = now + (1f / instantCatchSendHz);
-                    host.TryArmFishingInstantCatch(out _);
+                    if (host.TryArmFishingInstantCatch(out _))
+                    {
+                        instantCatchSendCount++;
+                    }
                 }
 
                 if (now < nextActionAt)
@@ -558,9 +562,11 @@ namespace HeartopiaMod
                             instantCatchResultLogged = true;
                             float dtCast = host.InstantCatchCastAt > 0f ? now - host.InstantCatchCastAt : -1f;
                             float dtBite = instantCatchBiteAt > 0f ? now - instantCatchBiteAt : -1f;
+                            float effHz = dtCast > 0.01f ? instantCatchSendCount / dtCast : 0f;
                             host.InstantCatchDiag("cast#" + instantCatchCastSeq + " RESULT=" + fishState
                                 + " after " + dtCast.ToString("F2") + "s from cast, "
-                                + dtBite.ToString("F2") + "s from bite");
+                                + dtBite.ToString("F2") + "s from bite"
+                                + " | sends=" + instantCatchSendCount + " (~" + effHz.ToString("F0") + " Hz)");
                         }
                     }
 
@@ -1063,6 +1069,7 @@ namespace HeartopiaMod
                     // Start the high-frequency buoy resend immediately so -2 is established before the bite.
                     instantCatchActiveCached = instantCatchEnabled;
                     nextHighFreqInstantAt = -999f;
+                    instantCatchSendCount = 0;
                     host.InstantCatchDiag("=== CAST #" + instantCatchCastSeq + " ==="
                         + " target=" + targetPos
                         + " dist=" + (targetDistance > 0f ? targetDistance.ToString("F1") : "?") + "m"
