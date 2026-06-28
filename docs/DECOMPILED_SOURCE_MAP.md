@@ -753,6 +753,12 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Features:** Mass cook at stoves
 - **Access:** **A**, **R**
 - **Methods:** `PrepareCooking(cookerNetId, recipeId, materials...)` — AuraMono primary
+- **Recipe ingredient model** (`CookingRecipeDetail` / `MaterialSlot` / `GetMaterialSlotData`):
+  - `TableCookingRecipe.ingredients` is a flat `int[]`, **one entry per required unit** (no per-slot count); `materialSlots.Length == ingredients.Length`, and `CookPanel` renders one slot per entry.
+  - Entry **≥ 100** → `SlotType.Specific`, `slot.materialId` = concrete item id. Entry **< 100** → `SlotType.MaterialType`, `slot.materialType = (FoodMaterialType)id` with `materialId == 0` (the **"any &lt;category&gt;"** slot, e.g. "any fish").
+  - `FoodMaterialType`: Vegetable=0, Fruit=1, AquaticProducts=2, Meat=3, Fish=4, Dairy=5.
+  - Category match = `CookingSystem.CheckFoodTypeSatisfied(itemStaticId, type)` → `TableData.GetIngredients(id).foodMaterial.Contains((int)type) && canBeCooked` (`TableIngredients { id, int[] foodMaterial, bool canBeCooked }`).
+  - Mod move/max-quantity (`HeartopiaComplete.NetCook.cs`): `NetCookIngredientRequirement{IsCategory,MaterialType}`, `BuildNetCookDemands`, `NetCookItemMatchesCategory` (cached `CheckFoodTypeSatisfied` via AuraMono). Earlier code keyed only on `materialId`, so category slots (id 0) were dropped → "any fish" never moved and category-repeated units undercounted.
 
 #### `PrepareCookingNetworkCommand`
 - **Dump:** `XDT.Scene.Shared.Modules.Cooking/`

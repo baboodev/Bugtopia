@@ -4926,6 +4926,9 @@ namespace HeartopiaMod
         private const bool NetCookUseMagicSpice = false;
         private const int NetCookBackpackStorageType = 1;
         private const int NetCookWarehouseStorageType = 2;
+        // Recipe ingredient ids < 100 are FoodMaterialType category slots (e.g. "any fish"); >= 100 are
+        // concrete items. Mirrors CookingSystem.GetMaterialSlotData on this build.
+        private const int NetCookSpecificMaterialThreshold = 100;
         private const float NetCookMaxRefreshIntervalSeconds = 0.5f;
         private const float NetCookPostMoveMaterialRetrySeconds = 3f;
         private const float NetCookPostMoveMaterialRetryIntervalSeconds = 0.12f;
@@ -4973,6 +4976,9 @@ namespace HeartopiaMod
         private float nextNetCookRecipeCacheRetryAt = 0f;
         private readonly List<uint> netCookMaterialNetIds = new List<uint>(16);
         private readonly Dictionary<int, List<NetCookIngredientRequirement>> netCookRecipeRequirementsCache = new Dictionary<int, List<NetCookIngredientRequirement>>(64);
+        // (itemStaticId, foodMaterialType) -> does the item satisfy that cooking category. Resolved via
+        // CookingSystem.CheckFoodTypeSatisfied (table-backed, static per level) so cache liberally.
+        private readonly Dictionary<long, bool> netCookFoodTypeMatchCache = new Dictionary<long, bool>(256);
         private readonly List<NetCookTargetContext> netCookTargets = new List<NetCookTargetContext>(16);
         private readonly Dictionary<string, NetCookTargetContext> netCookRegisteredTargets = new Dictionary<string, NetCookTargetContext>(32);
         private readonly Dictionary<uint, NetCookRegisteredWorldCooker> netCookRegisteredWorldCookers = new Dictionary<uint, NetCookRegisteredWorldCooker>(64);

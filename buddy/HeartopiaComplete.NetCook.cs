@@ -9241,6 +9241,138 @@ namespace HeartopiaMod
             this.netCookMaxCookQuantity = maxQuantity;
         }
 
+        // Collapse the per-slot requirement list into per-dish demand counts, keyed separately for
+        // concrete items (specificPerDish: itemStaticId -> units) and FoodMaterialType categories
+        // (categoryPerDish: materialType -> units). Each material slot contributes one unit, so a recipe
+        // listing the same ingredient three times needs three units per dish.
+        private void BuildNetCookDemands(List<NetCookIngredientRequirement> requirements, out Dictionary<int, int> specificPerDish, out Dictionary<int, int> categoryPerDish)
+        {
+            specificPerDish = new Dictionary<int, int>();
+            categoryPerDish = new Dictionary<int, int>();
+            if (requirements == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < requirements.Count; i++)
+            {
+                NetCookIngredientRequirement requirement = requirements[i];
+                int perDish = requirement.CountPerDish > 0 ? requirement.CountPerDish : 1;
+                if (requirement.IsCategory)
+                {
+                    if (requirement.MaterialType < 0)
+                    {
+                        continue;
+                    }
+
+                    categoryPerDish.TryGetValue(requirement.MaterialType, out int existing);
+                    categoryPerDish[requirement.MaterialType] = existing + perDish;
+                }
+                else
+                {
+                    if (requirement.StaticId <= 0)
+                    {
+                        continue;
+                    }
+
+                    specificPerDish.TryGetValue(requirement.StaticId, out int existing);
+                    specificPerDish[requirement.StaticId] = existing + perDish;
+                }
+            }
+        }
+
+        // Does an inventory item satisfy a "any <category>" cooking slot. Mirrors
+        // CookingSystem.CheckFoodTypeSatisfied (TableIngredients.foodMaterial contains the type && canBeCooked).
+        private bool NetCookItemMatchesCategory(int itemStaticId, int materialType)
+        {
+            if (itemStaticId <= 0 || materialType < 0)
+            {
+                return false;
+            }
+
+            long key = ((long)itemStaticId << 8) | (uint)(materialType & 0xFF);
+            if (this.netCookFoodTypeMatchCache.TryGetValue(key, out bool cached))
+            {
+                return cached;
+            }
+
+            bool result = this.TryCheckNetCookFoodTypeSatisfied(itemStaticId, materialType, out bool satisfied) && satisfied;
+            this.netCookFoodTypeMatchCache[key] = result;
+            return result;
+        }
+
+        private unsafe bool TryCheckNetCookFoodTypeSatisfied(int itemStaticId, int materialType, out bool satisfied)
+        {
+            satisfied = false;
+            try
+            {
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Cooking.CookingSystem", out IntPtr cookingSystemObj)
+                    || cookingSystemObj == IntPtr.Zero
+                    || auraMonoObjectGetClass == null
+                    || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                IntPtr cookingSystemClass = auraMonoObjectGetClass(cookingSystemObj);
+                if (cookingSystemClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "CheckFoodTypeSatisfied", 2);
+                if (method == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                int materialId = itemStaticId;
+                int foodType = materialType;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&materialId);
+                args[1] = (IntPtr)(&foodType);
+                IntPtr boxed = auraMonoRuntimeInvoke(method, cookingSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                return this.TryUnboxMonoBoolean(boxed, out satisfied);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Available count toward a category demand: sum of every item matching the category, excluding
+        // items that are themselves a specific demand of the same recipe (so a specific fish item is not
+        // double-counted as also satisfying an "any fish" slot).
+        private int CountNetCookCategoryAvailability(Dictionary<int, int> totalsByStaticId, int materialType, HashSet<int> excludeStaticIds)
+        {
+            if (totalsByStaticId == null)
+            {
+                return 0;
+            }
+
+            int total = 0;
+            foreach (KeyValuePair<int, int> item in totalsByStaticId)
+            {
+                if (item.Value <= 0 || (excludeStaticIds != null && excludeStaticIds.Contains(item.Key)))
+                {
+                    continue;
+                }
+
+                if (this.NetCookItemMatchesCategory(item.Key, materialType))
+                {
+                    total += item.Value;
+                }
+            }
+
+            return total;
+        }
+
         private bool TryComputeNetCookMaxQuantity(int recipeId, bool includeWarehouse, out int maxQuantity)
         {
             maxQuantity = 0;
@@ -9266,46 +9398,42 @@ namespace HeartopiaMod
                 this.AggregateNetCookIngredientCounts(NetCookWarehouseStorageType, totalsByStaticId);
             }
 
-            Dictionary<int, int> requiredPerDish = new Dictionary<int, int>();
-            for (int i = 0; i < requirements.Count; i++)
-            {
-                NetCookIngredientRequirement requirement = requirements[i];
-                if (requirement.StaticId <= 0 || requirement.CountPerDish <= 0)
-                {
-                    continue;
-                }
-
-                if (requiredPerDish.TryGetValue(requirement.StaticId, out int existing))
-                {
-                    requiredPerDish[requirement.StaticId] = existing + requirement.CountPerDish;
-                }
-                else
-                {
-                    requiredPerDish[requirement.StaticId] = requirement.CountPerDish;
-                }
-            }
-
-            if (requiredPerDish.Count == 0)
+            this.BuildNetCookDemands(requirements, out Dictionary<int, int> specificPerDish, out Dictionary<int, int> categoryPerDish);
+            if (specificPerDish.Count == 0 && categoryPerDish.Count == 0)
             {
                 return false;
             }
 
+            HashSet<int> specificItemIds = new HashSet<int>(specificPerDish.Keys);
             bool hasLimit = false;
-            foreach (KeyValuePair<int, int> pair in requiredPerDish)
+            int limit = 0;
+
+            void ApplyLimit(int possible)
             {
-                totalsByStaticId.TryGetValue(pair.Key, out int available);
-                int possible = available / Math.Max(1, pair.Value);
                 if (!hasLimit)
                 {
-                    maxQuantity = possible;
+                    limit = possible;
                     hasLimit = true;
                 }
                 else
                 {
-                    maxQuantity = Math.Min(maxQuantity, possible);
+                    limit = Math.Min(limit, possible);
                 }
             }
 
+            foreach (KeyValuePair<int, int> pair in specificPerDish)
+            {
+                totalsByStaticId.TryGetValue(pair.Key, out int available);
+                ApplyLimit(available / Math.Max(1, pair.Value));
+            }
+
+            foreach (KeyValuePair<int, int> pair in categoryPerDish)
+            {
+                int available = this.CountNetCookCategoryAvailability(totalsByStaticId, pair.Key, specificItemIds);
+                ApplyLimit(available / Math.Max(1, pair.Value));
+            }
+
+            maxQuantity = limit;
             return hasLimit;
         }
 
@@ -9530,15 +9658,26 @@ namespace HeartopiaMod
             IntPtr slotsObj = IntPtr.Zero;
             if (this.TryGetMonoObjectMember(detailObj, "materialSlots", out slotsObj) && slotsObj != IntPtr.Zero)
             {
+                // Pin each slot: the per-slot member reads below box values (mono allocations) that can
+                // trigger a moving SGen collection and relocate the not-yet-read slot pointers -> a stale
+                // IntPtr would silently read garbage (dropping requirements) or AV. Freed in finally.
                 List<IntPtr> slotItems = new List<IntPtr>(16);
-                if (this.TryEnumerateAuraMonoCollectionItems(slotsObj, slotItems))
+                List<uint> slotPins = new List<uint>(16);
+                if (this.TryEnumerateAuraMonoCollectionItems(slotsObj, slotItems, slotPins))
                 {
-                    for (int i = 0; i < slotItems.Count; i++)
+                    try
                     {
-                        if (this.TryReadNetCookMaterialSlotRequirementMono(slotItems[i], out NetCookIngredientRequirement requirement))
+                        for (int i = 0; i < slotItems.Count; i++)
                         {
-                            requirements.Add(requirement);
+                            if (this.TryReadNetCookMaterialSlotRequirementMono(slotItems[i], out NetCookIngredientRequirement requirement))
+                            {
+                                requirements.Add(requirement);
+                            }
                         }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(slotPins);
                     }
                 }
             }
@@ -9583,27 +9722,6 @@ namespace HeartopiaMod
                 return false;
             }
 
-            int staticId = 0;
-            string[] staticIdFields = { "staticId", "materialStaticId", "itemStaticId", "entityStaticId", "materialId", "StaticId", "MaterialStaticId" };
-            for (int i = 0; i < staticIdFields.Length; i++)
-            {
-                if (this.TryReadManagedInt32Member(slot, staticIdFields[i], out staticId) && staticId > 0)
-                {
-                    break;
-                }
-            }
-
-            if (staticId <= 0)
-            {
-                object nested = this.TryGetManagedMemberValue(slot, "material");
-                if (nested != null && nested != slot)
-                {
-                    return this.TryReadNetCookMaterialSlotRequirementManaged(nested, out requirement);
-                }
-
-                return false;
-            }
-
             int countPerDish = 1;
             string[] countFields = { "needNum", "needCount", "count", "materialCount", "num", "NeedNum", "Count" };
             for (int i = 0; i < countFields.Length; i++)
@@ -9615,8 +9733,55 @@ namespace HeartopiaMod
                 }
             }
 
-            requirement = new NetCookIngredientRequirement { StaticId = staticId, CountPerDish = countPerDish };
-            return true;
+            int staticId = 0;
+            string[] staticIdFields = { "staticId", "materialStaticId", "itemStaticId", "entityStaticId", "materialId", "StaticId", "MaterialStaticId" };
+            for (int i = 0; i < staticIdFields.Length; i++)
+            {
+                if (this.TryReadManagedInt32Member(slot, staticIdFields[i], out staticId) && staticId > 0)
+                {
+                    break;
+                }
+            }
+
+            // materialId >= 100 is a concrete (Specific) item; < 100 is a FoodMaterialType category slot
+            // (game-side GetMaterialSlotData split). Category slots keep materialId 0 and only set materialType.
+            if (staticId >= NetCookSpecificMaterialThreshold)
+            {
+                requirement = new NetCookIngredientRequirement { StaticId = staticId, CountPerDish = countPerDish, IsCategory = false };
+                return true;
+            }
+
+            if (this.TryReadNetCookSlotCategoryManaged(slot, out int materialType))
+            {
+                requirement = new NetCookIngredientRequirement { StaticId = 0, CountPerDish = countPerDish, IsCategory = true, MaterialType = materialType };
+                return true;
+            }
+
+            object nested = this.TryGetManagedMemberValue(slot, "material");
+            if (nested != null && nested != slot)
+            {
+                return this.TryReadNetCookMaterialSlotRequirementManaged(nested, out requirement);
+            }
+
+            return false;
+        }
+
+        private bool TryReadNetCookSlotCategoryManaged(object slot, out int materialType)
+        {
+            materialType = -1;
+            if (slot == null)
+            {
+                return false;
+            }
+
+            // SlotType: MaterialType = 0, Specific = 1. When the field is present, only treat MaterialType slots
+            // as categories; if absent, fall back to reading materialType directly.
+            if (this.TryReadManagedInt32Member(slot, "slotType", out int slotType) && slotType != 0)
+            {
+                return false;
+            }
+
+            return this.TryReadManagedInt32Member(slot, "materialType", out materialType) && materialType >= 0;
         }
 
         private bool TryReadNetCookMaterialSlotRequirementMono(IntPtr slotObj, out NetCookIngredientRequirement requirement)
@@ -9624,26 +9789,6 @@ namespace HeartopiaMod
             requirement = default;
             if (slotObj == IntPtr.Zero)
             {
-                return false;
-            }
-
-            int staticId = 0;
-            string[] staticIdFields = { "staticId", "materialStaticId", "itemStaticId", "entityStaticId", "materialId", "StaticId", "MaterialStaticId" };
-            for (int i = 0; i < staticIdFields.Length; i++)
-            {
-                if (this.TryGetMonoIntMember(slotObj, staticIdFields[i], out staticId) && staticId > 0)
-                {
-                    break;
-                }
-            }
-
-            if (staticId <= 0)
-            {
-                if (this.TryGetMonoObjectMember(slotObj, "material", out IntPtr nestedObj) && nestedObj != IntPtr.Zero)
-                {
-                    return this.TryReadNetCookMaterialSlotRequirementMono(nestedObj, out requirement);
-                }
-
                 return false;
             }
 
@@ -9658,8 +9803,53 @@ namespace HeartopiaMod
                 }
             }
 
-            requirement = new NetCookIngredientRequirement { StaticId = staticId, CountPerDish = countPerDish };
-            return true;
+            int staticId = 0;
+            string[] staticIdFields = { "staticId", "materialStaticId", "itemStaticId", "entityStaticId", "materialId", "StaticId", "MaterialStaticId" };
+            for (int i = 0; i < staticIdFields.Length; i++)
+            {
+                if (this.TryGetMonoIntMember(slotObj, staticIdFields[i], out staticId) && staticId > 0)
+                {
+                    break;
+                }
+            }
+
+            // materialId >= 100 is a concrete (Specific) item; < 100 is a FoodMaterialType category slot
+            // (game-side GetMaterialSlotData split). Category slots keep materialId 0 and only set materialType.
+            if (staticId >= NetCookSpecificMaterialThreshold)
+            {
+                requirement = new NetCookIngredientRequirement { StaticId = staticId, CountPerDish = countPerDish, IsCategory = false };
+                return true;
+            }
+
+            if (this.TryReadNetCookSlotCategoryMono(slotObj, out int materialType))
+            {
+                requirement = new NetCookIngredientRequirement { StaticId = 0, CountPerDish = countPerDish, IsCategory = true, MaterialType = materialType };
+                return true;
+            }
+
+            if (this.TryGetMonoObjectMember(slotObj, "material", out IntPtr nestedObj) && nestedObj != IntPtr.Zero)
+            {
+                return this.TryReadNetCookMaterialSlotRequirementMono(nestedObj, out requirement);
+            }
+
+            return false;
+        }
+
+        private bool TryReadNetCookSlotCategoryMono(IntPtr slotObj, out int materialType)
+        {
+            materialType = -1;
+            if (slotObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // SlotType: MaterialType = 0, Specific = 1. When present, only MaterialType slots are categories.
+            if (this.TryGetMonoIntMember(slotObj, "slotType", out int slotType) && slotType != 0)
+            {
+                return false;
+            }
+
+            return this.TryGetMonoIntMember(slotObj, "materialType", out materialType) && materialType >= 0;
         }
 
         private void AggregateNetCookIngredientCounts(int storageType, Dictionary<int, int> totalsByStaticId)
@@ -9921,35 +10111,18 @@ namespace HeartopiaMod
                 return false;
             }
 
-            Dictionary<int, int> requiredPerDish = new Dictionary<int, int>();
-            HashSet<int> requiredStaticIds = new HashSet<int>();
-            for (int i = 0; i < requirements.Count; i++)
-            {
-                NetCookIngredientRequirement requirement = requirements[i];
-                if (requirement.StaticId <= 0 || requirement.CountPerDish <= 0)
-                {
-                    continue;
-                }
-
-                requiredStaticIds.Add(requirement.StaticId);
-                if (requiredPerDish.TryGetValue(requirement.StaticId, out int existing))
-                {
-                    requiredPerDish[requirement.StaticId] = existing + requirement.CountPerDish;
-                }
-                else
-                {
-                    requiredPerDish[requirement.StaticId] = requirement.CountPerDish;
-                }
-            }
-
-            if (requiredStaticIds.Count == 0)
+            this.BuildNetCookDemands(requirements, out Dictionary<int, int> specificPerDish, out Dictionary<int, int> categoryPerDish);
+            if (specificPerDish.Count == 0 && categoryPerDish.Count == 0)
             {
                 status = "Recipe requirements unavailable.";
                 return false;
             }
 
+            HashSet<int> specificItemIds = new HashSet<int>(specificPerDish.Keys);
+            List<int> categoryTypes = new List<int>(categoryPerDish.Keys);
+
             Dictionary<int, List<KeyValuePair<uint, int>>> stacksByStaticId = new Dictionary<int, List<KeyValuePair<uint, int>>>();
-            if (!this.TryCollectNetCookWarehouseStacks(stacksByStaticId, requiredStaticIds, out status))
+            if (!this.TryCollectNetCookWarehouseStacks(stacksByStaticId, specificItemIds, categoryTypes, out status))
             {
                 return false;
             }
@@ -9957,12 +10130,25 @@ namespace HeartopiaMod
             Dictionary<int, int> bagTotalsByStaticId = new Dictionary<int, int>();
             this.AggregateNetCookIngredientCounts(NetCookBackpackStorageType, bagTotalsByStaticId);
 
+            // Remaining count still available per warehouse stack, so a single stack is not allocated twice
+            // across multiple demands (matters once category demands draw from shared item pools).
+            Dictionary<uint, int> remainingByNetId = new Dictionary<uint, int>();
+            foreach (KeyValuePair<int, List<KeyValuePair<uint, int>>> kvp in stacksByStaticId)
+            {
+                for (int i = 0; i < kvp.Value.Count; i++)
+                {
+                    remainingByNetId[kvp.Value[i].Key] = kvp.Value[i].Value;
+                }
+            }
+
             int batches = Math.Max(1, cookQuantity);
             bool anyMoveDeficit = false;
-            foreach (KeyValuePair<int, int> requirement in requiredPerDish)
+
+            // Specific demands: every unit must be the exact item.
+            foreach (KeyValuePair<int, int> demand in specificPerDish)
             {
-                int neededTotal = batches * requirement.Value;
-                bagTotalsByStaticId.TryGetValue(requirement.Key, out int inBag);
+                int neededTotal = batches * demand.Value;
+                bagTotalsByStaticId.TryGetValue(demand.Key, out int inBag);
                 int remaining = Math.Max(0, neededTotal - inBag);
                 if (remaining <= 0)
                 {
@@ -9970,24 +10156,39 @@ namespace HeartopiaMod
                 }
 
                 anyMoveDeficit = true;
-                if (!stacksByStaticId.TryGetValue(requirement.Key, out List<KeyValuePair<uint, int>> stacks) || stacks == null || stacks.Count == 0)
+                if (stacksByStaticId.TryGetValue(demand.Key, out List<KeyValuePair<uint, int>> stacks))
+                {
+                    AllocateNetCookMoveFromStacks(stacks, remainingByNetId, moveMap, ref remaining);
+                }
+            }
+
+            // Category demands: any matching item satisfies a unit. Count what the bag already holds
+            // (excluding items reserved for specific demands), then pull the deficit from any matching
+            // warehouse stacks.
+            foreach (KeyValuePair<int, int> demand in categoryPerDish)
+            {
+                int neededTotal = batches * demand.Value;
+                int inBag = this.CountNetCookCategoryAvailability(bagTotalsByStaticId, demand.Key, specificItemIds);
+                int remaining = Math.Max(0, neededTotal - inBag);
+                if (remaining <= 0)
                 {
                     continue;
                 }
 
-                stacks.Sort((a, b) => a.Value.CompareTo(b.Value));
-                for (int i = 0; i < stacks.Count && remaining > 0; i++)
+                anyMoveDeficit = true;
+                foreach (KeyValuePair<int, List<KeyValuePair<uint, int>>> kvp in stacksByStaticId)
                 {
-                    uint netId = stacks[i].Key;
-                    int stackCount = stacks[i].Value;
-                    int take = Math.Min(remaining, stackCount);
-                    if (take <= 0)
+                    if (remaining <= 0)
+                    {
+                        break;
+                    }
+
+                    if (specificItemIds.Contains(kvp.Key) || !this.NetCookItemMatchesCategory(kvp.Key, demand.Key))
                     {
                         continue;
                     }
 
-                    moveMap[netId] = take;
-                    remaining -= take;
+                    AllocateNetCookMoveFromStacks(kvp.Value, remainingByNetId, moveMap, ref remaining);
                 }
             }
 
@@ -10001,10 +10202,43 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe bool TryCollectNetCookWarehouseStacks(Dictionary<int, List<KeyValuePair<uint, int>>> stacksByStaticId, HashSet<int> requiredStaticIds, out string status)
+        // Pull up to `remaining` units from the given warehouse stacks (smallest first), tracking per-stack
+        // remaining so the same netId is never over-allocated and accumulating into moveMap additively.
+        private static void AllocateNetCookMoveFromStacks(List<KeyValuePair<uint, int>> stacks, Dictionary<uint, int> remainingByNetId, Dictionary<uint, int> moveMap, ref int remaining)
+        {
+            if (stacks == null || stacks.Count == 0 || remaining <= 0)
+            {
+                return;
+            }
+
+            stacks.Sort((a, b) => a.Value.CompareTo(b.Value));
+            for (int i = 0; i < stacks.Count && remaining > 0; i++)
+            {
+                uint netId = stacks[i].Key;
+                if (!remainingByNetId.TryGetValue(netId, out int available) || available <= 0)
+                {
+                    continue;
+                }
+
+                int take = Math.Min(remaining, available);
+                if (take <= 0)
+                {
+                    continue;
+                }
+
+                moveMap.TryGetValue(netId, out int existing);
+                moveMap[netId] = existing + take;
+                remainingByNetId[netId] = available - take;
+                remaining -= take;
+            }
+        }
+
+        private unsafe bool TryCollectNetCookWarehouseStacks(Dictionary<int, List<KeyValuePair<uint, int>>> stacksByStaticId, HashSet<int> requiredStaticIds, List<int> requiredCategories, out string status)
         {
             status = string.Empty;
-            if (stacksByStaticId == null || requiredStaticIds == null || requiredStaticIds.Count == 0)
+            bool hasSpecific = requiredStaticIds != null && requiredStaticIds.Count > 0;
+            bool hasCategory = requiredCategories != null && requiredCategories.Count > 0;
+            if (stacksByStaticId == null || (!hasSpecific && !hasCategory))
             {
                 status = "Warehouse scan unavailable.";
                 return false;
@@ -10069,8 +10303,25 @@ namespace HeartopiaMod
                         || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
                         || netId == 0U
                         || (this.TryGetDirectBackpackItemIsLocked(itemObj, out bool isLocked) && isLocked)
-                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId)
-                        || !requiredStaticIds.Contains(staticId))
+                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId))
+                    {
+                        continue;
+                    }
+
+                    bool wanted = hasSpecific && requiredStaticIds.Contains(staticId);
+                    if (!wanted && hasCategory)
+                    {
+                        for (int c = 0; c < requiredCategories.Count; c++)
+                        {
+                            if (this.NetCookItemMatchesCategory(staticId, requiredCategories[c]))
+                            {
+                                wanted = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!wanted)
                     {
                         continue;
                     }
@@ -11239,8 +11490,14 @@ namespace HeartopiaMod
 
         private struct NetCookIngredientRequirement
         {
+            // Specific ingredient (concrete item) when IsCategory == false: StaticId is the item id.
+            // Category ingredient (e.g. "any fish") when IsCategory == true: MaterialType is the
+            // FoodMaterialType value and StaticId is 0 — any backpack item whose TableIngredients
+            // foodMaterial contains MaterialType (and canBeCooked) satisfies the slot.
             public int StaticId;
             public int CountPerDish;
+            public bool IsCategory;
+            public int MaterialType;
         }
 
         private sealed class NetCookTargetContext

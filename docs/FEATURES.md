@@ -412,6 +412,7 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#auto-sell-detail).
 - Scans radius for cook targets; optional mini-game-only mode.
 - Config: interval, scan radius, wait at spot, cooking speed.
 - Coroutine warmup on mod init (`NetCookCoroutineWarmupRoutine`).
+- **Ingredient model (Move Ingredients / max-quantity):** a recipe is a flat list of material slots, **one slot = one unit** (a recipe needing 3 wheat has 3 slots). A slot is either a **specific item** (ingredient id ≥ 100) or an **"any &lt;category&gt;" slot** (id &lt; 100 = a `FoodMaterialType`, e.g. "any fish" = `Fish`). Category slots carry `materialId == 0` and only set `materialType`. Requirements track `IsCategory`/`MaterialType`; `BuildNetCookDemands` aggregates per-dish counts (specific items vs categories), and warehouse move + max-quantity match category slots via `NetCookItemMatchesCategory` → `CookingSystem.CheckFoodTypeSatisfied` (cached). Cooking itself relies on the game's `AutoFill` to fill slots from the bag, so the mod only needs to move enough matching items. See [cooking ingredient details](DECOMPILED_SOURCE_MAP.md#312-cooking-net-cook--mass-cook).
 
 ### Puzzle (`PuzzleNetFeature`)
 
