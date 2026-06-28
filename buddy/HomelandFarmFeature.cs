@@ -10784,8 +10784,13 @@ namespace HeartopiaMod
             IntPtr resultList = listSlot[0] != IntPtr.Zero ? listSlot[0] : listObj;
             this.HomelandFarmVerboseLog(label + " ViaAuraMono step5: invoke OK, enumerating list=0x" + resultList.ToInt64().ToString("X") + ".");
             List<IntPtr> components = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(resultList, components) || components.Count == 0)
+            // Pin the enumerated components across the netId reads below: GetNetId boxes its return ->
+            // allocation -> the moving sgen GC can relocate an unpinned component mid-loop, and reading
+            // a moved object crashes hard (the water+weed radius-scan no-dump crash). Freed in finally.
+            List<uint> componentPins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(resultList, components, componentPins) || components.Count == 0)
             {
+                FreeAuraMonoPins(componentPins);
                 this.HomelandFarmVerboseLog(label + " ViaAuraMono: list empty (0 components).");
                 return false;
             }
@@ -10793,29 +10798,36 @@ namespace HeartopiaMod
             this.HomelandFarmVerboseLog(label + " ViaAuraMono step6: list has " + components.Count + " component(s), reading netIds.");
 
             int added = 0;
-            for (int i = 0; i < components.Count; i++)
+            try
             {
-                IntPtr componentObj = components[i];
-                if (componentObj == IntPtr.Zero)
+                for (int i = 0; i < components.Count; i++)
                 {
-                    continue;
-                }
-
-                if (!this.TryHomelandFarmTryReadAuraMonoComponentNetId(componentObj, out uint netId) || netId == 0U)
-                {
-                    continue;
-                }
-
-                if (output.Add(netId))
-                {
-                    added++;
-                    if (isCropBox)
+                    IntPtr componentObj = components[i];
+                    if (componentObj == IntPtr.Zero)
                     {
-                        this.homelandFarmLastScanCropBoxNetIds.Add(netId);
+                        continue;
                     }
 
-                    this.TryHomelandFarmRegisterDiscoveredFarmTarget(netId, isCropBox);
+                    if (!this.TryHomelandFarmTryReadAuraMonoComponentNetId(componentObj, out uint netId) || netId == 0U)
+                    {
+                        continue;
+                    }
+
+                    if (output.Add(netId))
+                    {
+                        added++;
+                        if (isCropBox)
+                        {
+                            this.homelandFarmLastScanCropBoxNetIds.Add(netId);
+                        }
+
+                        this.TryHomelandFarmRegisterDiscoveredFarmTarget(netId, isCropBox);
+                    }
                 }
+            }
+            finally
+            {
+                FreeAuraMonoPins(componentPins);
             }
 
             if (added > 0)
