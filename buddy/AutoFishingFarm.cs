@@ -16,6 +16,16 @@ namespace HeartopiaMod
         private static bool instantCatchResultLogged = false;
         private static float instantCatchBiteAt = -1f;
         private const float InstantCatchInterval = 0.1f;
+        // High-frequency buoy resend: the decision loop is gated (~0.15s), but our successLength=-2 must
+        // be the server's value within ~1 frame of the bite/buoy-activation to win the latch race for
+        // close fish. This fires (before the gate) using state cached from the last tick. The rate is
+        // user-tunable (Hz) — higher = surer win but more reliable traffic.
+        private const float InstantCatchSendHzMin = 5f;
+        private const float InstantCatchSendHzMax = 60f;
+        private const float InstantCatchSendHzDefault = 50f;
+        private static float instantCatchSendHz = InstantCatchSendHzDefault;
+        private static float nextHighFreqInstantAt = -999f;
+        private static bool instantCatchActiveCached = false;
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";
@@ -67,6 +77,8 @@ namespace HeartopiaMod
         public static string GetLastTargetStatus() => GetDisplayTargetStatus(lastTargetStatus);
         public static float GetDetectRange() => fishShadowDetectRange;
         public static void SetDetectRange(float value) => fishShadowDetectRange = Mathf.Clamp(value, 1f, 200f);
+        public static float GetInstantCatchSendHz() => instantCatchSendHz;
+        public static void SetInstantCatchSendHz(float value) => instantCatchSendHz = Mathf.Clamp(value, InstantCatchSendHzMin, InstantCatchSendHzMax);
         public static bool GetInstantCatchEnabled() => instantCatchEnabled;
         public static void SetInstantCatchEnabled(bool value)
         {
@@ -310,6 +322,7 @@ namespace HeartopiaMod
             rodEquipRequestActive = false;
             nextRodEquipAttemptAt = -999f;
             nextActionAt = -999f;
+            instantCatchActiveCached = false;
             sessionStartedAt = -999f;
             waitingSinceAt = -999f;
             hookedSinceAt = -999f;
@@ -385,6 +398,20 @@ namespace HeartopiaMod
             }
             num += 30;
 
+            if (instantCatchEnabled)
+            {
+                GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Send Rate: {0:F0} Hz", instantCatchSendHz), small);
+                num += 22;
+                float prevHz = instantCatchSendHz;
+                instantCatchSendHz = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), instantCatchSendHz, InstantCatchSendHzMin, InstantCatchSendHzMax));
+                if (Math.Abs(instantCatchSendHz - prevHz) > 0.0001f)
+                {
+                    Log("Instant catch send rate changed to " + instantCatchSendHz.ToString("F0") + " Hz");
+                    try { host.UI_SaveKeybinds(false); } catch { }
+                }
+                num += 30;
+            }
+
             GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Status: {0}", GetLastStatus()), small);
             num += 24;
             GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Tool: {0}", GetLastToolStatus()), small);
@@ -417,6 +444,15 @@ namespace HeartopiaMod
             float now = Time.unscaledTime;
             try
             {
+                // High-frequency buoy resend — runs EVERY frame (not gated by nextActionAt), so the
+                // collapsed successLength is refreshed within ~1 frame of the bite/buoy-activation.
+                // Uses the active flag cached by the decision loop; harmlessly no-ops if not fishing.
+                if (instantCatchEnabled && instantCatchActiveCached && now >= nextHighFreqInstantAt)
+                {
+                    nextHighFreqInstantAt = now + (1f / instantCatchSendHz);
+                    host.TryArmFishingInstantCatch(out _);
+                }
+
                 if (now < nextActionAt)
                 {
                     return;
@@ -511,8 +547,7 @@ namespace HeartopiaMod
                             instantCatchBiteAt = now;
                             float dt = host.InstantCatchCastAt > 0f ? now - host.InstantCatchCastAt : -1f;
                             host.InstantCatchDiag("cast#" + instantCatchCastSeq + " BITE after " + dt.ToString("F2")
-                                + "s state=" + fishState + " baitNetId=" + baitingFishNetId
-                                + " pull=" + pullStrength.ToString("F2") + " tension=" + rodDurability.ToString("F2"));
+                                + "s state=" + fishState + " baitNetId=" + baitingFishNetId);
                         }
 
                         bool isResult = string.Equals(fishState, "FishingOnHook", StringComparison.OrdinalIgnoreCase)
@@ -530,12 +565,15 @@ namespace HeartopiaMod
                     }
 
                     // Instant Catch: echo the buoy's real position with a collapsed successLength so the
-                    // battle resolves immediately once the fish bites. The buoy is never moved.
-                    if (instantCatchEnabled
-                        && now >= nextInstantCatchAt
+                    // battle resolves immediately once the fish bites. The buoy is never moved. The
+                    // actual sends are driven every frame by the high-frequency path above; here we just
+                    // cache the "active" flag it uses and emit the throttled status/diag line.
+                    bool instantActive = instantCatchEnabled
                         && (string.Equals(fishState, "Waiting", StringComparison.OrdinalIgnoreCase)
                             || string.Equals(fishState, "Idle", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase)))
+                            || string.Equals(fishState, "Battle", StringComparison.OrdinalIgnoreCase));
+                    instantCatchActiveCached = instantActive;
+                    if (instantActive && now >= nextInstantCatchAt)
                     {
                         nextInstantCatchAt = now + InstantCatchInterval;
 
@@ -938,6 +976,7 @@ namespace HeartopiaMod
                     return;
                 }
 
+                instantCatchActiveCached = false;
                 waitingSinceAt = -999f;
                 hookedSinceAt = -999f;
                 lastHookedStateAt = -999f;
@@ -1021,6 +1060,9 @@ namespace HeartopiaMod
                     instantCatchBiteAt = -1f;
                     host.InstantCatchCastSeq = instantCatchCastSeq;
                     host.InstantCatchCastAt = now;
+                    // Start the high-frequency buoy resend immediately so -2 is established before the bite.
+                    instantCatchActiveCached = instantCatchEnabled;
+                    nextHighFreqInstantAt = -999f;
                     host.InstantCatchDiag("=== CAST #" + instantCatchCastSeq + " ==="
                         + " target=" + targetPos
                         + " dist=" + (targetDistance > 0f ? targetDistance.ToString("F1") : "?") + "m"
@@ -1051,6 +1093,7 @@ namespace HeartopiaMod
             previousToolId = 0;
             previousToolRestorePending = false;
             nextActionAt = -999f;
+            instantCatchActiveCached = false;
             sessionStartedAt = -999f;
             waitingSinceAt = -999f;
             hookedSinceAt = -999f;

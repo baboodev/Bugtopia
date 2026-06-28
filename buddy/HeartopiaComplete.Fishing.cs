@@ -289,7 +289,9 @@ namespace HeartopiaMod
                     }
 
                     Vector3 candidatePos = candidate.transform.position;
-                    float candidateDistance = Vector3.Distance(playerPos, candidatePos);
+                    // Cylinder check: horizontal (XZ) distance only, ignore Y — the fish/player height
+                    // gap shouldn't shrink the reachable radius (e.g. on a boat or raised ground).
+                    float candidateDistance = new Vector2(candidatePos.x - playerPos.x, candidatePos.z - playerPos.z).magnitude;
                     if (scanRange > 0f && candidateDistance > scanRange)
                     {
                         continue;
@@ -2788,8 +2790,8 @@ namespace HeartopiaMod
                 buoySource += " [reliable]";
 
                 float buoyFlatDist = new Vector2(buoyPos.x - playerPos.x, buoyPos.z - playerPos.z).magnitude;
-                status = $"InstantCatch buoyNetId={floatNetId} success={collapsedSuccessLength:F2} fail={spoofedFailureLength:F1}";
                 float now = Time.unscaledTime;
+                status = $"InstantCatch buoyNetId={floatNetId} success={collapsedSuccessLength:F2} fail={spoofedFailureLength:F1}";
                 if (now >= this.nextInstantCatchSendLogAt)
                 {
                     this.nextInstantCatchSendLogAt = now + 1f;
