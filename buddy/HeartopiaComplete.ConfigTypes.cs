@@ -122,6 +122,7 @@ namespace HeartopiaMod
             public int keyAutoIceSkating;
             public int keyAutoEat;
             public int keyUseBait;
+            public int keyUseAttractor;
             public int keyAntiAfk;
             public int keyBypassOverlap;
             public int keyBirdVacuum;

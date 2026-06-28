@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -2007,6 +2007,23 @@ namespace HeartopiaMod
             }
         }
 
+        private void TryUseAttractorFromBagWithNotification()
+        {
+            if (Time.unscaledTime < this.nextUseAttractorAllowedAt)
+            {
+                return;
+            }
+
+            if (this.TryUseAttractorFromBag())
+            {
+                this.AddMenuNotification(this.L("Attractor used"), new Color(0.45f, 1f, 0.55f));
+            }
+            else
+            {
+                this.AddMenuNotification(this.L("No attractor found in bag"), new Color(1f, 0.65f, 0.45f));
+            }
+        }
+
         private bool TryUseBaitFromBag()
         {
             try
@@ -2035,6 +2052,38 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.AutoEatRepairLog("[UseBait] Exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryUseAttractorFromBag()
+        {
+            try
+            {
+                if (Time.unscaledTime < this.nextUseAttractorAllowedAt)
+                {
+                    return false;
+                }
+
+                if (!this.TryFindDirectBackpackItemByStaticId(AttractorStaticId, out uint netId) || netId == 0U)
+                {
+                    this.AutoEatRepairLog("[UseAttractor] Backpack attractor not found for staticId=" + AttractorStaticId);
+                    return false;
+                }
+
+                this.AutoEatRepairLog("[UseAttractor] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending FishingLureBall function.");
+                if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncFishingLureBall, netId))
+                {
+                    this.AutoEatRepairLog("[UseAttractor] ExecuteBackpackItemFunc failed for netId=" + netId);
+                    return false;
+                }
+
+                this.nextUseAttractorAllowedAt = Time.unscaledTime + UseAttractorCooldownSeconds;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.AutoEatRepairLog("[UseAttractor] Exception: " + ex.Message);
                 return false;
             }
         }

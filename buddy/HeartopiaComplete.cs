@@ -56,6 +56,7 @@ namespace HeartopiaMod
         private KeyCode keyAutoIceSkating = KeyCode.None;
         private KeyCode keyAutoEat = KeyCode.None;
         private KeyCode keyUseBait = KeyCode.None;
+        private KeyCode keyUseAttractor = KeyCode.None;
         private KeyCode keyAntiAfk = KeyCode.None;
         private KeyCode keyBypassOverlap = KeyCode.None;
         private KeyCode keyBirdVacuum = KeyCode.None;
@@ -330,9 +331,13 @@ namespace HeartopiaMod
         private const int DIRECT_EAT_STEP_USE = 100;
         private const int DIRECT_EAT_STEP_DELAY = 101;
         private const int BaitStaticId = 20511;
+        private const int AttractorStaticId = 20551;
         private const int BackpackFuncChumBait = 103;
+        private const int BackpackFuncFishingLureBall = 108;
         private float nextUseBaitAllowedAt = -999f;
+        private float nextUseAttractorAllowedAt = -999f;
         private const float UseBaitCooldownSeconds = 1f;
+        private const float UseAttractorCooldownSeconds = 1f;
         // Resource-farm: pause when auto-repair triggered (seconds)
         private float resourceAutoRepairPauseSeconds = 20f;
         private float resourceRepairPauseUntil = 0f;
@@ -968,6 +973,10 @@ namespace HeartopiaMod
                 if (this.TryGetModHotkeyDown(this.keyUseBait))
                 {
                     this.TryUseBaitFromBagWithNotification();
+                }
+                if (this.TryGetModHotkeyDown(this.keyUseAttractor))
+                {
+                    this.TryUseAttractorFromBagWithNotification();
                 }
                 if (this.TryGetModHotkeyDown(this.keyCameraToggle))
                 {

@@ -135,6 +135,7 @@ namespace HeartopiaMod
             data.keyAutoIceSkating = (int)this.keyAutoIceSkating;
             data.keyAutoEat = (int)this.keyAutoEat;
             data.keyUseBait = (int)this.keyUseBait;
+            data.keyUseAttractor = (int)this.keyUseAttractor;
             data.keyAntiAfk = (int)this.keyAntiAfk;
             data.keyBypassOverlap = (int)this.keyBypassOverlap;
             data.keyBirdVacuum = (int)this.keyBirdVacuum;
@@ -281,6 +282,7 @@ namespace HeartopiaMod
             this.keyAutoIceSkating = (KeyCode)data.keyAutoIceSkating;
             this.keyAutoEat = (KeyCode)data.keyAutoEat;
             this.keyUseBait = (KeyCode)data.keyUseBait;
+            this.keyUseAttractor = (KeyCode)data.keyUseAttractor;
             this.keyAntiAfk = (KeyCode)data.keyAntiAfk;
             this.keyBypassOverlap = (KeyCode)data.keyBypassOverlap;
             this.keyBirdVacuum = (KeyCode)data.keyBirdVacuum;
@@ -612,6 +614,7 @@ namespace HeartopiaMod
                         else if (line.Contains("insectScanTimeout")) InsectNetFarm.SetScanRange(GetJsonFloat(line, "\"insectScanTimeout\":"));
                         else if (line.Contains("keyAutoEat")) this.keyAutoEat = (KeyCode)GetJsonInt(line, "\"keyAutoEat\":");
                         else if (line.Contains("keyUseBait")) this.keyUseBait = (KeyCode)GetJsonInt(line, "\"keyUseBait\":");
+                        else if (line.Contains("keyUseAttractor")) this.keyUseAttractor = (KeyCode)GetJsonInt(line, "\"keyUseAttractor\":");
                         else if (line.Contains("keyAntiAfk")) this.keyAntiAfk = (KeyCode)GetJsonInt(line, "\"keyAntiAfk\":");
                         else if (line.Contains("keyBypassOverlap")) this.keyBypassOverlap = (KeyCode)GetJsonInt(line, "\"keyBypassOverlap\":");
                         else if (line.Contains("keyBirdVacuum")) this.keyBirdVacuum = (KeyCode)GetJsonInt(line, "\"keyBirdVacuum\":");
@@ -798,7 +801,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Inspect Move", ref this.keyInspectMove);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 19, subHeaderStyle, accent, panelFill, panelLine);
+            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 20, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Foraging", ref this.keyAutoForaging);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Aura Farm", ref this.keyAuraFarm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Water + Weed Radius", ref this.keyWaterWeedRadius);
@@ -818,6 +821,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Repair", ref this.keyAutoRepair);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Eat", ref this.keyAutoEat);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Use Bait", ref this.keyUseBait);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Use Attractor", ref this.keyUseAttractor);
             num += 14;
 
             this.BeginKeybindSection(ref num, left, contentWidth, "PLAYER", 6, subHeaderStyle, accent, panelFill, panelLine);
@@ -870,6 +874,7 @@ namespace HeartopiaMod
                 this.keyJoinMyTown = KeyCode.None;
                 this.keyAutoEat = KeyCode.None;
                 this.keyUseBait = KeyCode.None;
+                this.keyUseAttractor = KeyCode.None;
                 this.keyAntiAfk = KeyCode.None;
                 this.autoSnowHotkey = KeyCode.None;
                 this.keyBypassOverlap = KeyCode.None;
@@ -1404,6 +1409,7 @@ namespace HeartopiaMod
                 case "Join My Town": this.keyJoinMyTown = newKey; break;
                 case "Auto Eat": this.keyAutoEat = newKey; break;
                 case "Use Bait": this.keyUseBait = newKey; break;
+                case "Use Attractor": this.keyUseAttractor = newKey; break;
                 case "Anti AFK": this.keyAntiAfk = newKey; break;
                 case "Bypass Overlap": this.keyBypassOverlap = newKey; break;
                 case "Bird Vacuum": this.keyBirdVacuum = newKey; break;
