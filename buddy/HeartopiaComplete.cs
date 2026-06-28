@@ -4946,6 +4946,8 @@ namespace HeartopiaMod
         private uint netCookCookerNetId = 0U;
         private ulong netCookLevelObjectNetId = 0UL;
         private int netCookSentCount = 0;
+        private int netCookCompletedDishCount = 0;
+        private int netCookCommittedDishCount = 0;
         private string netCookStatus = "Capture a cooker target first.";
         private bool netCookCaptureInProgress = false;
         private object netCookCaptureCoroutine = null;

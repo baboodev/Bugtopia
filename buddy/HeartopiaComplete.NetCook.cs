@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -245,11 +245,6 @@ namespace HeartopiaMod
                 if (nextNetCookUseAllIngredients != previousNetCookUseAllIngredients)
                 {
                     this.netCookUseAllIngredients = nextNetCookUseAllIngredients;
-                    if (this.netCookUseAllIngredients)
-                    {
-                        this.netCookCookQuantity = 1;
-                        this.netCookCookQuantityInput = "1";
-                    }
                     this.nextNetCookMaxRefreshAt = 0f;
                     try { this.SaveKeybinds(false); } catch { }
                 }
@@ -257,32 +252,23 @@ namespace HeartopiaMod
 
                 this.RefreshNetCookMaxCookQuantity();
                 string maxLabel = this.netCookMaxCookQuantity > 0
-                    ? ("Max: " + this.netCookMaxCookQuantity)
-                    : "Max: —";
+                    ? ("Ingredients max: " + this.netCookMaxCookQuantity)
+                    : "Ingredients max: —";
 
-                if (!this.netCookUseAllIngredients)
-                {
-                    GUI.Label(new Rect(left, (float)num, controlWidth * 0.42f, 18f), "QUANTITY", smallLabelStyle);
-                    GUI.Label(new Rect(left + controlWidth * 0.58f, (float)num, controlWidth * 0.42f, 18f), maxLabel, valueLabelStyle);
-                    num += 20;
+                GUI.Label(new Rect(left, (float)num, controlWidth * 0.42f, 18f), "DISH LIMIT (0 = unlimited)", smallLabelStyle);
+                GUI.Label(new Rect(left + controlWidth * 0.58f, (float)num, controlWidth * 0.42f, 18f), maxLabel, valueLabelStyle);
+                num += 20;
 
-                    Rect qtyRect = new Rect(left, (float)num, controlWidth * 0.42f, 32f);
-                    GUI.Box(qtyRect, "", this.themeTopTabStyle ?? this.themePanelStyle ?? GUI.skin.box);
-                    this.DrawCardOutline(qtyRect, 1f);
-                    string nextQtyInput = GUI.TextField(new Rect(qtyRect.x + 10f, qtyRect.y + 5f, qtyRect.width - 20f, 22f), this.netCookCookQuantityInput ?? "1", 6);
-                    if (!string.Equals(nextQtyInput, this.netCookCookQuantityInput, StringComparison.Ordinal))
-                    {
-                        this.netCookCookQuantityInput = nextQtyInput;
-                        this.SyncNetCookCookQuantityFromInput();
-                        try { this.SaveKeybinds(false); } catch { }
-                    }
-                    num += 42;
-                }
-                else
+                Rect qtyRect = new Rect(left, (float)num, controlWidth * 0.42f, 32f);
+                GUI.Box(qtyRect, "", this.themeTopTabStyle ?? this.themePanelStyle ?? GUI.skin.box);
+                this.DrawCardOutline(qtyRect, 1f);
+                string nextQtyInput = GUI.TextField(new Rect(qtyRect.x + 10f, qtyRect.y + 5f, qtyRect.width - 20f, 22f), this.netCookCookQuantityInput ?? "1", 6);
+                if (!string.Equals(nextQtyInput, this.netCookCookQuantityInput, StringComparison.Ordinal))
                 {
-                    GUI.Label(new Rect(left, (float)num, controlWidth, 18f), maxLabel, valueLabelStyle);
-                    num += 24;
+                    this.netCookCookQuantityInput = nextQtyInput;
+                    this.SyncNetCookCookQuantityFromInput();
                 }
+                num += 42;
             }
 
             string netCookButtonText = this.netCookEnabled
@@ -432,9 +418,7 @@ namespace HeartopiaMod
             {
                 this.SyncNetCookCookQuantityFromInput();
                 this.RefreshNetCookMaxCookQuantity(true);
-                int moveCookQuantity = this.netCookUseAllIngredients
-                    ? Math.Max(1, this.netCookMaxCookQuantity)
-                    : this.netCookCookQuantity;
+                int moveCookQuantity = this.GetNetCookWarehouseMoveBatchCount();
                 if (!this.TryMoveNetCookIngredientsFromWarehouse(this.netCookUseAllIngredients, moveCookQuantity, out string moveStatus))
                 {
                     this.netCookStatus = moveStatus;
@@ -483,8 +467,11 @@ namespace HeartopiaMod
             this.netCookEnabled = true;
             this.netCookDrainAfterIngredientsRunOut = false;
             this.netCookDrainReason = null;
+            this.netCookCompletedDishCount = 0;
+            this.netCookCommittedDishCount = 0;
             float now = Time.unscaledTime;
             this.PrimeNetCookTargetsForStart(now);
+            this.SeedNetCookCommittedDishCountFromActiveTargets();
             this.netCookMaterialNetIds.Clear();
             this.netCookMaterialNetIds.AddRange(previewMaterials);
             this.netCookStatus = "Net mass cook running on " + this.netCookTargets.Count + " stove(s).";
@@ -940,6 +927,34 @@ namespace HeartopiaMod
 
                 if (target.Phase == 0)
                 {
+                    if (this.IsNetCookCookQuantityCommitFull())
+                    {
+                        if (!this.netCookDrainAfterIngredientsRunOut)
+                        {
+                            this.BeginNetCookDrain(this.FormatNetCookQuantityDrainReason());
+                        }
+
+                        if (this.TryGetNetCookTargetCookingStatus(target, out int limitCookingStatus, out _, out _, out _)
+                            && limitCookingStatus == 0)
+                        {
+                            this.netCookTargets.RemoveAt(i);
+                            i--;
+                            if (processedTargets >= NetCookMaxActionsPerTick)
+                            {
+                                break;
+                            }
+                            continue;
+                        }
+
+                        target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
+                        this.netCookTargets[i] = target;
+                        if (processedTargets >= NetCookMaxActionsPerTick)
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+
                     if (!this.TryBuildNetCookMaterials(this.netCookRecipeId, out List<uint> freshMaterials, out string materialStatus))
                     {
                         this.BeginNetCookDrain(this.FormatNetCookIngredientDrainReason(materialStatus));
@@ -958,6 +973,7 @@ namespace HeartopiaMod
 
                     if (this.TryInvokeNetCookPrepare(this.netCookRecipeId, this.netCookMaterialNetIds))
                     {
+                        this.RecordNetCookPrepareCommitted();
                         target.Phase = 1;
                         target.ContinuePulses = 0;
                         target.IdleRetries = 0;
@@ -1082,6 +1098,7 @@ namespace HeartopiaMod
                                 target.LastCookCommandAt = -999f;
                                 target.SentCount++;
                                 this.netCookSentCount++;
+                                this.RecordNetCookCompletedDish();
                                 target.NextActionAt = now + Mathf.Max(NetCookCollectRestartDelaySeconds, interval * 0.2f);
                                 readyTargets++;
                             }
@@ -1123,7 +1140,7 @@ namespace HeartopiaMod
                 }
                 else
                 {
-                    this.netCookStatus = "Net mass cook active: " + this.netCookTargets.Count + " stove(s), sent " + this.netCookSentCount + ".";
+                    this.netCookStatus = this.FormatNetCookActiveStatus();
                 }
             }
         }
@@ -1391,6 +1408,101 @@ namespace HeartopiaMod
             this.NetCookLog(this.netCookDrainReason + " Draining active stoves before stop.");
         }
 
+        private bool HasNetCookCookQuantityLimit()
+        {
+            return this.netCookCookQuantity > 0;
+        }
+
+        private bool IsNetCookCookQuantityCommitFull()
+        {
+            return this.HasNetCookCookQuantityLimit()
+                && this.netCookCommittedDishCount >= this.netCookCookQuantity;
+        }
+
+        private bool IsNetCookTargetOccupiedWithDish(NetCookTargetContext target)
+        {
+            if (target == null)
+            {
+                return false;
+            }
+
+            if (target.Phase == 1 || target.Phase == 3)
+            {
+                return true;
+            }
+
+            return target.LastStatus >= 1 && target.LastStatus <= 6;
+        }
+
+        private void SeedNetCookCommittedDishCountFromActiveTargets()
+        {
+            this.netCookCommittedDishCount = 0;
+            if (!this.HasNetCookCookQuantityLimit())
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                if (this.IsNetCookTargetOccupiedWithDish(this.netCookTargets[i]))
+                {
+                    this.netCookCommittedDishCount++;
+                }
+            }
+
+            if (this.IsNetCookCookQuantityCommitFull())
+            {
+                this.BeginNetCookDrain(this.FormatNetCookQuantityDrainReason());
+            }
+        }
+
+        private void RecordNetCookPrepareCommitted()
+        {
+            if (!this.HasNetCookCookQuantityLimit())
+            {
+                return;
+            }
+
+            this.netCookCommittedDishCount++;
+            if (this.IsNetCookCookQuantityCommitFull())
+            {
+                this.BeginNetCookDrain(this.FormatNetCookQuantityDrainReason());
+            }
+        }
+
+        private string FormatNetCookQuantityDrainReason()
+        {
+            return "Cook quantity limit reached (" + this.netCookCookQuantity + ").";
+        }
+
+        private void RecordNetCookCompletedDish()
+        {
+            this.netCookCompletedDishCount++;
+        }
+
+        private int GetNetCookWarehouseMoveBatchCount()
+        {
+            if (this.netCookUseAllIngredients)
+            {
+                return Math.Max(1, this.netCookMaxCookQuantity);
+            }
+
+            if (!this.HasNetCookCookQuantityLimit())
+            {
+                return Math.Max(1, this.netCookMaxCookQuantity);
+            }
+
+            return this.netCookCookQuantity;
+        }
+
+        private string FormatNetCookActiveStatus()
+        {
+            string cookedLabel = this.HasNetCookCookQuantityLimit()
+                ? ("cooked " + this.netCookCompletedDishCount + "/" + this.netCookCookQuantity)
+                : ("cooked " + this.netCookCompletedDishCount);
+            return "Net mass cook active: " + this.netCookTargets.Count + " stove(s), " + cookedLabel + ".";
+        }
+
         private string FormatNetCookIngredientDrainReason(string materialStatus)
         {
             string recipeLabel = this.GetNetCookSelectedRecipeLabel();
@@ -1550,6 +1662,7 @@ namespace HeartopiaMod
                     target.LastStatusActionAt = now;
                     target.SentCount++;
                     this.netCookSentCount++;
+                    this.RecordNetCookCompletedDish();
                     target.NextActionAt = now + 0.75f;
                     this.netCookTargets[targetIndex] = target;
                     return true;
@@ -8977,18 +9090,19 @@ namespace HeartopiaMod
 
         private void SyncNetCookCookQuantityFromInput()
         {
-            if (!int.TryParse(this.netCookCookQuantityInput, out int parsed) || parsed < 1)
+            if (!int.TryParse(this.netCookCookQuantityInput, out int parsed) || parsed < 0)
             {
                 parsed = 1;
             }
 
-            if (this.netCookMaxCookQuantity > 0)
-            {
-                parsed = Mathf.Clamp(parsed, 1, this.netCookMaxCookQuantity);
-            }
-
             this.netCookCookQuantity = parsed;
             this.netCookCookQuantityInput = this.netCookCookQuantity.ToString();
+        }
+
+        private void ResetNetCookDishLimitToDefault()
+        {
+            this.netCookCookQuantity = 1;
+            this.netCookCookQuantityInput = "1";
         }
 
         private void RefreshNetCookMaxCookQuantity(bool force = false)
@@ -9013,11 +9127,6 @@ namespace HeartopiaMod
             }
 
             this.netCookMaxCookQuantity = maxQuantity;
-            if (!this.netCookUseAllIngredients && this.netCookMaxCookQuantity > 0 && this.netCookCookQuantity > this.netCookMaxCookQuantity)
-            {
-                this.netCookCookQuantity = this.netCookMaxCookQuantity;
-                this.netCookCookQuantityInput = this.netCookCookQuantity.ToString();
-            }
         }
 
         private bool TryComputeNetCookMaxQuantity(int recipeId, bool includeWarehouse, out int maxQuantity)

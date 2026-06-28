@@ -196,7 +196,7 @@ namespace HeartopiaMod
             data.netCookMiniGameOnly = this.netCookMiniGameOnly;
             data.netCookMoveIngredients = this.netCookMoveIngredients;
             data.netCookUseAllIngredients = this.netCookUseAllIngredients;
-            data.netCookCookQuantity = this.netCookCookQuantity;
+            data.netCookCookQuantity = 1;
             data.homelandFarmWaterRadius = this.homelandFarmWaterRadius;
             data.homelandFarmAutoFertilizeEnabled = this.homelandFarmAutoFertilizeEnabled;
             data.autoFishScanTimeout = -1f;
@@ -342,8 +342,7 @@ namespace HeartopiaMod
             this.netCookMiniGameOnly = data.netCookMiniGameOnly;
             this.netCookMoveIngredients = data.netCookMoveIngredients;
             this.netCookUseAllIngredients = data.netCookUseAllIngredients;
-            this.netCookCookQuantity = Mathf.Max(1, data.netCookCookQuantity);
-            this.netCookCookQuantityInput = this.netCookCookQuantity.ToString();
+            this.ResetNetCookDishLimitToDefault();
             this.homelandFarmWaterRadius = Mathf.Clamp(data.homelandFarmWaterRadius > 0f ? data.homelandFarmWaterRadius : HomelandFarmDefaultWaterRadius, HomelandFarmMinWaterRadius, HomelandFarmMaxWaterRadius);
             this.homelandFarmAutoFertilizeEnabled = data.homelandFarmAutoFertilizeEnabled;
             this.saved_autoFishScanTimeout = data.autoFishScanTimeout;
@@ -587,7 +586,6 @@ namespace HeartopiaMod
             else if (line.Contains("netCookMiniGameOnly")) this.netCookMiniGameOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMiniGameOnly\":") != 0;
             else if (line.Contains("netCookMoveIngredients")) this.netCookMoveIngredients = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMoveIngredients\":") != 0;
             else if (line.Contains("netCookUseAllIngredients")) this.netCookUseAllIngredients = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookUseAllIngredients\":") != 0;
-            else if (line.Contains("netCookCookQuantity")) this.netCookCookQuantity = Mathf.Max(1, GetJsonInt(line, "\"netCookCookQuantity\":"));
             else if (line.Contains("autoFishScanTimeout")) this.saved_autoFishScanTimeout = GetJsonFloat(line, "\"autoFishScanTimeout\":");
                         else if (line.Contains("autoFishTeleportDelay")) this.saved_autoFishTeleportDelay = GetJsonFloat(line, "\"autoFishTeleportDelay\":");
                         else if (line.Contains("autoFishFishShadowDetectRange")) AutoFishingFarm.SetDetectRange(GetJsonFloat(line, "\"autoFishFishShadowDetectRange\":"));
@@ -634,6 +632,7 @@ namespace HeartopiaMod
                         else if (line.Contains("collectBurdock")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectBurdock\":") != 0);
                         else if (line.Contains("collectMustardGreens")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectMustardGreens\":") != 0);
                     }
+                    this.ResetNetCookDishLimitToDefault();
                     this.SyncLodOverrideAfterConfigLoad();
                     ModLogger.Msg("Keybinds Loaded.");
                     this.AddMenuNotification("Keybinds loaded", new Color(0.55f, 0.88f, 1f));
