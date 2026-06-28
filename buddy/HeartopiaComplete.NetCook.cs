@@ -9643,7 +9643,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryBuildNetCookWarehouseMoveMap(requirements, useAll, cookQuantity, out Dictionary<uint, int> moveMap, out string buildStatus))
+            if (!this.TryBuildNetCookWarehouseMoveMap(requirements, cookQuantity, out Dictionary<uint, int> moveMap, out string buildStatus))
             {
                 status = buildStatus;
                 return false;
@@ -9651,7 +9651,9 @@ namespace HeartopiaMod
 
             if (moveMap.Count == 0)
             {
-                status = "No matching ingredients in warehouse.";
+                status = string.IsNullOrWhiteSpace(buildStatus)
+                    ? "Bag already has required ingredients."
+                    : buildStatus;
                 return true;
             }
 
@@ -9688,7 +9690,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe bool TryBuildNetCookWarehouseMoveMap(List<NetCookIngredientRequirement> requirements, bool useAll, int cookQuantity, out Dictionary<uint, int> moveMap, out string status)
+        private unsafe bool TryBuildNetCookWarehouseMoveMap(List<NetCookIngredientRequirement> requirements, int cookQuantity, out Dictionary<uint, int> moveMap, out string status)
         {
             moveMap = new Dictionary<uint, int>();
             status = string.Empty;
@@ -9731,30 +9733,28 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (useAll)
-            {
-                foreach (KeyValuePair<int, List<KeyValuePair<uint, int>>> pair in stacksByStaticId)
-                {
-                    List<KeyValuePair<uint, int>> stacks = pair.Value;
-                    for (int i = 0; i < stacks.Count; i++)
-                    {
-                        moveMap[stacks[i].Key] = stacks[i].Value;
-                    }
-                }
-
-                return true;
-            }
+            Dictionary<int, int> bagTotalsByStaticId = new Dictionary<int, int>();
+            this.AggregateNetCookIngredientCounts(NetCookBackpackStorageType, bagTotalsByStaticId);
 
             int batches = Math.Max(1, cookQuantity);
+            bool anyMoveDeficit = false;
             foreach (KeyValuePair<int, int> requirement in requiredPerDish)
             {
+                int neededTotal = batches * requirement.Value;
+                bagTotalsByStaticId.TryGetValue(requirement.Key, out int inBag);
+                int remaining = Math.Max(0, neededTotal - inBag);
+                if (remaining <= 0)
+                {
+                    continue;
+                }
+
+                anyMoveDeficit = true;
                 if (!stacksByStaticId.TryGetValue(requirement.Key, out List<KeyValuePair<uint, int>> stacks) || stacks == null || stacks.Count == 0)
                 {
                     continue;
                 }
 
                 stacks.Sort((a, b) => a.Value.CompareTo(b.Value));
-                int remaining = batches * requirement.Value;
                 for (int i = 0; i < stacks.Count && remaining > 0; i++)
                 {
                     uint netId = stacks[i].Key;
@@ -9768,6 +9768,13 @@ namespace HeartopiaMod
                     moveMap[netId] = take;
                     remaining -= take;
                 }
+            }
+
+            if (moveMap.Count == 0)
+            {
+                status = anyMoveDeficit
+                    ? "No matching ingredients in warehouse."
+                    : "Bag already has required ingredients.";
             }
 
             return true;
