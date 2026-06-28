@@ -2258,12 +2258,16 @@ namespace HeartopiaMod
                 }
 
                 if (this.netCookTargets.Count < NetCookMaxCaptureTargets
-                    && (forceBroadRefresh || useOwnerWindow || added > 0 || this.netCookTargets.Count < NetCookDeferredBroadRefreshTargetThreshold)
-                    && this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus))
+                    && (forceBroadRefresh || useOwnerWindow || added > 0 || this.netCookTargets.Count < NetCookDeferredBroadRefreshTargetThreshold))
                 {
+                    List<uint> cookBuildPins = new List<uint>();
+                    if (this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus, cookBuildPins))
+                    {
                     // Direct-ECS cook-build components instead of the crash-prone entity-graph walk.
                     // Raw object pointers must not survive a yield: scalarize to owner entity netIds in
                     // this same frame, then re-resolve each by netId inside the throttled loop below.
+                    try
+                    {
                     List<uint> broadEntityNetIds = new List<uint>(cookBuildComponents.Count);
                     for (int compIndex = 0; compIndex < cookBuildComponents.Count; compIndex++)
                     {
@@ -2381,6 +2385,16 @@ namespace HeartopiaMod
                             broadAdded += addedForOwner;
                             added += addedForOwner;
                         }
+                    }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(cookBuildPins);
+                    }
+                    }
+                    else
+                    {
+                        FreeAuraMonoPins(cookBuildPins);
                     }
                 }
                 else if (NetCookScanDebugLogsEnabled)
@@ -3596,13 +3610,17 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> recipeItems = new List<IntPtr>(256);
-                if (!this.TryEnumerateAuraMonoCollectionItems(recipeListObj, recipeItems) || recipeItems.Count <= 0)
+                List<uint> recipePins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(recipeListObj, recipeItems, recipePins) || recipeItems.Count <= 0)
                 {
+                    FreeAuraMonoPins(recipePins);
                     this.NetCookLog("CookingSystem AuraMono GetAllRecipes enumeration returned 0 recipes.");
                     return false;
                 }
 
                 List<(int recipeId, string recipeName, int sortOrder)> runtimeRecipes = new List<(int, string, int)>(recipeItems.Count);
+                try
+                {
                 for (int i = 0; i < recipeItems.Count; i++)
                 {
                     IntPtr recipeObj = recipeItems[i];
@@ -3685,6 +3703,11 @@ namespace HeartopiaMod
                 {
                     var recipe = runtimeRecipes[i];
                     this.netCookRecipeEntries.Add(new KeyValuePair<int, string>(recipe.recipeId, recipe.recipeName));
+                }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(recipePins);
                 }
 
                 this.netCookRecipeCacheCookerStaticId = this.netCookCookerStaticId;
@@ -3816,12 +3839,16 @@ namespace HeartopiaMod
                 Dictionary<int, string> namesById = new Dictionary<int, string>(unlockedSet.Count);
 
                 List<IntPtr> recipeItems = new List<IntPtr>(512);
-                if (!this.TryEnumerateAuraMonoCollectionItems(tableCookingRecipesObj, recipeItems) || recipeItems.Count == 0)
+                List<uint> recipePins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(tableCookingRecipesObj, recipeItems, recipePins) || recipeItems.Count == 0)
                 {
+                    FreeAuraMonoPins(recipePins);
                     this.NetCookLog("Unlocked recipe mono scan failed: TableCookingRecipes enumeration unavailable.");
                     return false;
                 }
 
+                try
+                {
                 for (int i = 0; i < recipeItems.Count; i++)
                 {
                     if (!this.TryReadNetCookRecipeTableEntryMono(recipeItems[i], unlockedSet, out int recipeId, out int cookerType, out int sortOrder))
@@ -3834,8 +3861,11 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> entityItems = new List<IntPtr>(2048);
-                if (this.TryEnumerateAuraMonoCollectionItems(tableEntitysObj, entityItems))
+                List<uint> entityPins = new List<uint>();
+                if (this.TryEnumerateAuraMonoCollectionItems(tableEntitysObj, entityItems, entityPins))
                 {
+                    try
+                    {
                     for (int i = 0; i < entityItems.Count; i++)
                     {
                         if (!this.TryReadNetCookEntityTableEntryMono(entityItems[i], unlockedSet, tableDataClass, out int entityId, out string entityName))
@@ -3848,6 +3878,16 @@ namespace HeartopiaMod
                             namesById[entityId] = entityName.Trim();
                         }
                     }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(entityPins);
+                    }
+                }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(recipePins);
                 }
 
                 List<(int recipeId, string recipeName, int sortOrder)> unlockedRecipes = new List<(int, string, int)>(unlockedRecipeIds.Count);
@@ -3962,8 +4002,10 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> recipeItems = new List<IntPtr>(256);
-                if (!this.TryEnumerateAuraMonoCollectionItems(recipeListObj, recipeItems) || recipeItems.Count == 0)
+                List<uint> recipePins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(recipeListObj, recipeItems, recipePins) || recipeItems.Count == 0)
                 {
+                    FreeAuraMonoPins(recipePins);
                     this.NetCookLog("Unlocked recipe mono scan failed: CookingSystem.GetAllRecipes enumeration unavailable.");
                     return false;
                 }
@@ -3983,6 +4025,8 @@ namespace HeartopiaMod
 
                 HashSet<int> unlockedSet = new HashSet<int>(unlockedRecipeIds);
                 List<(int recipeId, string recipeName, int sortOrder)> unlockedRecipes = new List<(int, string, int)>(recipeItems.Count);
+                try
+                {
                 for (int i = 0; i < recipeItems.Count; i++)
                 {
                     IntPtr recipeObj = recipeItems[i];
@@ -4048,6 +4092,11 @@ namespace HeartopiaMod
                 {
                     var recipe = unlockedRecipes[i];
                     this.netCookRecipeEntries.Add(new KeyValuePair<int, string>(recipe.recipeId, recipe.recipeName));
+                }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(recipePins);
                 }
 
                 this.netCookRecipeCacheCookerStaticId = this.netCookCookerStaticId;
@@ -4513,8 +4562,10 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> recipeComponents = new List<IntPtr>(256);
-                if (!this.TryEnumerateAuraMonoCollectionItems(recipeCacheObj, recipeComponents))
+                List<uint> recipePins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(recipeCacheObj, recipeComponents, recipePins))
                 {
+                    FreeAuraMonoPins(recipePins);
                     status = "CookingSystem recipe cache enumeration failed.";
                     return false;
                 }
@@ -4522,6 +4573,8 @@ namespace HeartopiaMod
                 this.NetCookLog("CookingSystem cache recipes=" + recipeComponents.Count);
 
                 HashSet<int> uniqueIds = new HashSet<int>();
+                try
+                {
                 for (int i = 0; i < recipeComponents.Count; i++)
                 {
                     IntPtr recipeComponentObj = recipeComponents[i];
@@ -4546,6 +4599,11 @@ namespace HeartopiaMod
                     {
                         recipeIds.Add(recipeId);
                     }
+                }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(recipePins);
                 }
 
                 status = "CookingSystem cache ready.";
@@ -5831,8 +5889,10 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> burnerEntries = new List<IntPtr>(8);
-            if (!this.TryEnumerateAuraMonoCollectionItems(burnerMapObj, burnerEntries) || burnerEntries.Count <= 0)
+            List<uint> burnerPins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(burnerMapObj, burnerEntries, burnerPins) || burnerEntries.Count <= 0)
             {
+                FreeAuraMonoPins(burnerPins);
                 return 0;
             }
 
@@ -5847,6 +5907,8 @@ namespace HeartopiaMod
 
             int added = 0;
             float maxScanDistance = Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
+            try
+            {
             for (int i = 0; i < burnerEntries.Count && targets.Count < NetCookMaxCaptureTargets; i++)
             {
                 IntPtr entryObj = burnerEntries[i];
@@ -5909,6 +5971,11 @@ namespace HeartopiaMod
                     WorldPosition = worldPosition
                 });
                 added++;
+            }
+            }
+            finally
+            {
+                FreeAuraMonoPins(burnerPins);
             }
 
             return added;
@@ -5978,7 +6045,7 @@ namespace HeartopiaMod
 
         // Enumerate every CookBuildComponent object via the safe direct-ECS GetComponents path.
         // Returned IntPtrs are valid only synchronously — scalarize before any coroutine yield.
-        private bool TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string status)
+        private bool TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string status, List<uint> componentPins = null)
         {
             cookBuildComponents = null;
             status = string.Empty;
@@ -5988,7 +6055,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryAuraMonoGetComponentObjects(cookBuildClass, out cookBuildComponents)
+            if (!this.TryAuraMonoGetComponentObjects(cookBuildClass, out cookBuildComponents, componentPins)
                 || cookBuildComponents == null
                 || cookBuildComponents.Count == 0)
             {
@@ -6038,7 +6105,7 @@ namespace HeartopiaMod
             return componentClass != IntPtr.Zero;
         }
 
-        private bool TryEnumerateNetCookCookingComponentObjects(out List<IntPtr> cookingComponents, out string status)
+        private bool TryEnumerateNetCookCookingComponentObjects(out List<IntPtr> cookingComponents, out string status, List<uint> componentPins = null)
         {
             cookingComponents = null;
             status = string.Empty;
@@ -6048,7 +6115,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryAuraMonoGetComponentObjects(cookingClass, out cookingComponents)
+            if (!this.TryAuraMonoGetComponentObjects(cookingClass, out cookingComponents, componentPins)
                 || cookingComponents == null
                 || cookingComponents.Count == 0)
             {
@@ -6076,8 +6143,10 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus))
+                List<uint> cookBuildPins = new List<uint>();
+                if (!this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus, cookBuildPins))
                 {
+                    FreeAuraMonoPins(cookBuildPins);
                     status = "Cook-build component list unavailable: " + enumerateStatus;
                     return false;
                 }
@@ -6090,6 +6159,8 @@ namespace HeartopiaMod
                 int inspectedCookBuilds = 0;
                 int inspectedBurners = 0;
 
+                try
+                {
                 for (int i = 0; i < cookBuildComponents.Count; i++)
                 {
                     if (discoveredTargets.Count >= NetCookMaxCaptureTargets)
@@ -6160,11 +6231,15 @@ namespace HeartopiaMod
                     }
 
                     List<IntPtr> burnerEntries = new List<IntPtr>(8);
-                    if (!this.TryEnumerateAuraMonoCollectionItems(burnerMapObj, burnerEntries) || burnerEntries.Count <= 0)
+                    List<uint> burnerPins = new List<uint>();
+                    if (!this.TryEnumerateAuraMonoCollectionItems(burnerMapObj, burnerEntries, burnerPins) || burnerEntries.Count <= 0)
                     {
+                        FreeAuraMonoPins(burnerPins);
                         continue;
                     }
 
+                    try
+                    {
                     for (int entryIndex = 0; entryIndex < burnerEntries.Count; entryIndex++)
                     {
                         if (discoveredTargets.Count >= NetCookMaxCaptureTargets)
@@ -6228,6 +6303,11 @@ namespace HeartopiaMod
                             WorldPosition = ownerPosition
                         });
                     }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(burnerPins);
+                    }
                 }
 
                 if (discoveredTargets.Count <= 0)
@@ -6280,6 +6360,11 @@ namespace HeartopiaMod
                 this.NetCookLog(status);
                 this.LogNetCookTargetSummary(targets);
                 return true;
+                }
+                finally
+                {
+                    FreeAuraMonoPins(cookBuildPins);
+                }
             }
             catch (Exception ex)
             {
@@ -7091,8 +7176,10 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus))
+                List<uint> cookBuildPins = new List<uint>();
+                if (!this.TryEnumerateNetCookCookBuildComponentObjects(out List<IntPtr> cookBuildComponents, out string enumerateStatus, cookBuildPins))
                 {
+                    FreeAuraMonoPins(cookBuildPins);
                     status = "AuraMono cook build component scan unavailable: " + enumerateStatus;
                     return false;
                 }
@@ -7108,6 +7195,8 @@ namespace HeartopiaMod
                 int added = 0;
                 List<string> debugSamples = NetCookScanDebugLogsEnabled ? new List<string>(NetCookScanDebugSampleLimit) : null;
                 HashSet<uint> ownerSeedNetIds = new HashSet<uint>();
+                try
+                {
                 for (int targetIndex = 0; targetIndex < targets.Count; targetIndex++)
                 {
                     uint ownerNetId = ExtractNetCookOwnerNetId(targets[targetIndex].LevelObjectNetId);
@@ -7209,8 +7298,11 @@ namespace HeartopiaMod
                     }
 
                     List<IntPtr> burnerEntries = new List<IntPtr>(8);
-                    if (burnerMapObj != IntPtr.Zero && this.TryEnumerateAuraMonoCollectionItems(burnerMapObj, burnerEntries) && burnerEntries.Count > 0)
+                    List<uint> burnerPins = new List<uint>();
+                    if (burnerMapObj != IntPtr.Zero && this.TryEnumerateAuraMonoCollectionItems(burnerMapObj, burnerEntries, burnerPins) && burnerEntries.Count > 0)
                     {
+                        try
+                        {
                         for (int entryIndex = 0; entryIndex < burnerEntries.Count; entryIndex++)
                         {
                             if (targets.Count >= NetCookMaxCaptureTargets)
@@ -7313,6 +7405,15 @@ namespace HeartopiaMod
                             AddNetCookScanDebugSample(debugSamples, "burnerMap accepted owner=" + ownerCookBuildNetId + " burner=" + burnerCookerNetId + " levelObject=" + levelObjectNetId + " static=" + targetStaticId + " type=" + targetCookerType + " dist=" + Vector3.Distance(scanOrigin, ownerPosition).ToString("F1"));
                             added++;
                         }
+                        }
+                        finally
+                        {
+                            FreeAuraMonoPins(burnerPins);
+                        }
+                    }
+                    else
+                    {
+                        FreeAuraMonoPins(burnerPins);
                     }
 
                     int synthesizedForCookBuild = this.TryAddSynthesizedNetCookBurnerTargets(
@@ -7349,11 +7450,11 @@ namespace HeartopiaMod
                     debugSamples);
                 added += ownerWindowAdded;
 
-                if (!this.TryEnumerateNetCookCookingComponentObjects(out List<IntPtr> cookingComponents, out _))
+                List<uint> cookingPins = new List<uint>();
+                if (this.TryEnumerateNetCookCookingComponentObjects(out List<IntPtr> cookingComponents, out _, cookingPins))
                 {
-                    cookingComponents = new List<IntPtr>(0);
-                }
-
+                try
+                {
                 for (int i = 0; i < cookingComponents.Count; i++)
                 {
                     if (targets.Count >= NetCookMaxCaptureTargets)
@@ -7483,6 +7584,12 @@ namespace HeartopiaMod
                     directAdded++;
                     added++;
                 }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(cookingPins);
+                }
+                }
 
                 status = "AuraMono cook build entity scan inspected=" + inspectedCookBuilds + " added=" + added + " synthesized=" + synthesizedAdded + " ownerWindowAdded=" + ownerWindowAdded + " directInspected=" + directInspected + " directAdded=" + directAdded + " skippedOwnerLevelObjectId=" + skippedOwnerLevelObjectId + " skippedDuplicateCooker=" + skippedDuplicateCooker + " skippedDifferentCooker=" + skippedDifferentCooker + " targetTotal=" + targets.Count + ".";
                 this.NetCookLog(status);
@@ -7492,6 +7599,11 @@ namespace HeartopiaMod
                     this.NetCookLog("Scan debug ownerSeeds=" + ownerSeedNetIds.Count + " ownerSeedRange=" + ownerSeedRange + " desiredStatic=" + desiredCookerStaticId + " desiredType=" + desiredCookerType + " samples=" + debugSamples.Count + "/" + NetCookScanDebugSampleLimit + " [" + string.Join(" | ", debugSamples.ToArray()) + "]");
                 }
                 return added > 0;
+                }
+                finally
+                {
+                    FreeAuraMonoPins(cookBuildPins);
+                }
             }
             catch (Exception ex)
             {
