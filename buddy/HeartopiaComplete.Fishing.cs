@@ -243,12 +243,13 @@ namespace HeartopiaMod
                 || this.TryGetObjectMember(obj, "_invalidTargetFXProxy", out marker);
         }
 
-        public bool TryFindNearestFishShadowTarget(float scanRange, out uint netId, out Vector3 position, out float distance, out int detectedCount, out string status)
+        public bool TryFindNearestFishShadowTarget(float scanRange, out uint netId, out Vector3 position, out float distance, out int detectedCount, out int inRangeCount, out string status)
         {
             netId = 0U;
             position = Vector3.zero;
             distance = 0f;
             detectedCount = 0;
+            inRangeCount = 0;
             status = "No active fish shadows";
 
             try
@@ -279,20 +280,25 @@ namespace HeartopiaMod
                     }
 
                     detectedCount++;
-                    if (this.TryGetFishShadowOccupancy(candidate, out uint occupiedBuoyNetId, out uint occupiedPlayerNetId, out string occupiedState)
-                        && (occupiedBuoyNetId != 0U
-                            || occupiedPlayerNetId != 0U
-                            || string.Equals(occupiedState, "Battle", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(occupiedState, "FindBuoyWaiting", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        continue;
-                    }
 
                     Vector3 candidatePos = candidate.transform.position;
                     // Cylinder check: horizontal (XZ) distance only, ignore Y — the fish/player height
                     // gap shouldn't shrink the reachable radius (e.g. on a boat or raised ground).
                     float candidateDistance = new Vector2(candidatePos.x - playerPos.x, candidatePos.z - playerPos.z).magnitude;
                     if (scanRange > 0f && candidateDistance > scanRange)
+                    {
+                        continue;
+                    }
+
+                    // Raw count of fish shadows within the radius, regardless of occupancy — used by
+                    // the auto-bait "no fish nearby" gate (a fish being battled still counts as present).
+                    inRangeCount++;
+
+                    if (this.TryGetFishShadowOccupancy(candidate, out uint occupiedBuoyNetId, out uint occupiedPlayerNetId, out string occupiedState)
+                        && (occupiedBuoyNetId != 0U
+                            || occupiedPlayerNetId != 0U
+                            || string.Equals(occupiedState, "Battle", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(occupiedState, "FindBuoyWaiting", StringComparison.OrdinalIgnoreCase)))
                     {
                         continue;
                     }

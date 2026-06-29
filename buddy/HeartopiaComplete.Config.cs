@@ -205,6 +205,10 @@ namespace HeartopiaMod
             data.autoFishFishShadowDetectRange = AutoFishingFarm.GetDetectRange();
             data.autoFishInstantCatchSendHz = AutoFishingFarm.GetInstantCatchSendHz();
             data.autoFishInstantCatch = AutoFishingFarm.GetInstantCatchEnabled();
+            data.autoFishAutoBaitEnabled = AutoFishingFarm.GetAutoBaitEnabled();
+            data.autoFishAutoBaitChoice = AutoFishingFarm.GetAutoBaitChoice();
+            data.autoFishAutoBaitMax = AutoFishingFarm.GetAutoBaitMaxCount();
+            data.autoFishAutoBaitNoFishSeconds = AutoFishingFarm.GetAutoBaitNoFishSeconds();
             data.autoFishReelMaxDuration = -1f;
             data.autoFishReelHoldDuration = -1f;
             data.autoFishReelPauseDuration = -1f;
@@ -371,6 +375,17 @@ namespace HeartopiaMod
             {
                 AutoFishingFarm.SetInstantCatchSendHz(data.autoFishInstantCatchSendHz);
             }
+            // Auto Bait: apply choice/max/window BEFORE enabling so the live counter refills to the saved max.
+            AutoFishingFarm.SetAutoBaitChoice(data.autoFishAutoBaitChoice);
+            if (data.autoFishAutoBaitMax >= 0)
+            {
+                AutoFishingFarm.SetAutoBaitMaxCount(data.autoFishAutoBaitMax);
+            }
+            if (data.autoFishAutoBaitNoFishSeconds > 0f)
+            {
+                AutoFishingFarm.SetAutoBaitNoFishSeconds(data.autoFishAutoBaitNoFishSeconds);
+            }
+            AutoFishingFarm.SetAutoBaitEnabled(data.autoFishAutoBaitEnabled);
             if (data.insectBatchSize > 0)
             {
                 InsectNetFarm.SetBatchSize(data.insectBatchSize);
@@ -598,6 +613,10 @@ namespace HeartopiaMod
                         else if (line.Contains("autoFishInstantCatchSendHz")) AutoFishingFarm.SetInstantCatchSendHz(GetJsonFloat(line, "\"autoFishInstantCatchSendHz\":"));
                         else if (line.Contains("autoFishFishShadowDetectRange")) AutoFishingFarm.SetDetectRange(GetJsonFloat(line, "\"autoFishFishShadowDetectRange\":"));
                         else if (line.Contains("autoFishInstantCatch")) AutoFishingFarm.SetInstantCatchEnabled(GetJsonInt(line, "\"autoFishInstantCatch\":") != 0);
+                        else if (line.Contains("autoFishAutoBaitNoFishSeconds")) AutoFishingFarm.SetAutoBaitNoFishSeconds(GetJsonFloat(line, "\"autoFishAutoBaitNoFishSeconds\":"));
+                        else if (line.Contains("autoFishAutoBaitChoice")) AutoFishingFarm.SetAutoBaitChoice(GetJsonInt(line, "\"autoFishAutoBaitChoice\":"));
+                        else if (line.Contains("autoFishAutoBaitMax")) AutoFishingFarm.SetAutoBaitMaxCount(GetJsonInt(line, "\"autoFishAutoBaitMax\":"));
+                        else if (line.Contains("autoFishAutoBaitEnabled")) AutoFishingFarm.SetAutoBaitEnabled(GetJsonInt(line, "\"autoFishAutoBaitEnabled\":") != 0);
                         else if (line.Contains("autoFishReelMaxDuration")) this.saved_autoFishReelMaxDuration = GetJsonFloat(line, "\"autoFishReelMaxDuration\":");
                         else if (line.Contains("autoFishReelHoldDuration")) this.saved_autoFishReelHoldDuration = GetJsonFloat(line, "\"autoFishReelHoldDuration\":");
                         else if (line.Contains("autoFishReelPauseDuration")) this.saved_autoFishReelPauseDuration = GetJsonFloat(line, "\"autoFishReelPauseDuration\":");

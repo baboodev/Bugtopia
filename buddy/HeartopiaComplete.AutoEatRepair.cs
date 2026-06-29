@@ -2024,6 +2024,14 @@ namespace HeartopiaMod
             }
         }
 
+        // Routes the auto-fishing "Auto Bait" feature to the chosen item (Bait vs Attractor),
+        // reusing the same backpack item-function path as the manual Use Bait / Use Attractor hotkeys.
+        public bool TryThrowFishBaitForAuto(bool useBait, out string kind)
+        {
+            kind = useBait ? "bait" : "attractor";
+            return useBait ? this.TryUseBaitFromBag() : this.TryUseAttractorFromBag();
+        }
+
         private bool TryUseBaitFromBag()
         {
             try

@@ -27,6 +27,23 @@ namespace HeartopiaMod
         private static float nextHighFreqInstantAt = -999f;
         private static bool instantCatchActiveCached = false;
         private static int instantCatchSendCount = 0;
+
+        // --- Auto Bait: throw a bait/attractor when no fish has been in scan range for N seconds ---
+        public enum AutoBaitChoice { Bait = 0, Attractor = 1 }
+        private const float AutoBaitNoFishSecondsMin = 3f;
+        private const float AutoBaitNoFishSecondsMax = 60f;
+        private const float AutoBaitNoFishSecondsDefault = 10f;
+        private const int AutoBaitMaxCountDefault = 10;
+        private const float AutoBaitMinCooldown = 8f;   // bridge the 1-3s server spawn latency after a throw
+        private const float AutoBaitFailBackoff = 5f;   // item not in bag — don't spam attempts
+        private static bool autoBaitEnabled = false;
+        private static AutoBaitChoice autoBaitChoice = AutoBaitChoice.Attractor;
+        private static int autoBaitMaxCount = AutoBaitMaxCountDefault;
+        private static float autoBaitNoFishSeconds = AutoBaitNoFishSecondsDefault;
+        private static int autoBaitRemaining = AutoBaitMaxCountDefault;
+        private static float noFishSinceAt = -1f;
+        private static float nextAutoBaitAt = -999f;
+
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";
@@ -80,6 +97,95 @@ namespace HeartopiaMod
         public static void SetDetectRange(float value) => fishShadowDetectRange = Mathf.Clamp(value, 1f, 200f);
         public static float GetInstantCatchSendHz() => instantCatchSendHz;
         public static void SetInstantCatchSendHz(float value) => instantCatchSendHz = Mathf.Clamp(value, InstantCatchSendHzMin, InstantCatchSendHzMax);
+
+        // --- Auto Bait accessors (used by UI + config persistence) ---
+        public static bool GetAutoBaitEnabled() => autoBaitEnabled;
+        public static void SetAutoBaitEnabled(bool value)
+        {
+            if (autoBaitEnabled == value)
+            {
+                return;
+            }
+
+            autoBaitEnabled = value;
+            ResetAutoBaitCounter();      // fresh budget each time it's turned on
+            noFishSinceAt = -1f;
+            nextAutoBaitAt = -999f;
+            Log("Auto Bait " + (value ? "enabled" : "disabled") + " choice=" + autoBaitChoice + " max=" + autoBaitMaxCount);
+        }
+        public static int GetAutoBaitChoice() => (int)autoBaitChoice;
+        public static void SetAutoBaitChoice(int value) => autoBaitChoice = (AutoBaitChoice)Mathf.Clamp(value, 0, 1);
+        public static int GetAutoBaitMaxCount() => autoBaitMaxCount;
+        public static void SetAutoBaitMaxCount(int value)
+        {
+            int clamped = Mathf.Clamp(value, 0, 999);
+            if (clamped == autoBaitMaxCount)
+            {
+                return;
+            }
+
+            autoBaitMaxCount = clamped;
+            ResetAutoBaitCounter();      // changing the limit refills the live counter
+        }
+        public static float GetAutoBaitNoFishSeconds() => autoBaitNoFishSeconds;
+        public static void SetAutoBaitNoFishSeconds(float value) => autoBaitNoFishSeconds = Mathf.Clamp(value, AutoBaitNoFishSecondsMin, AutoBaitNoFishSecondsMax);
+        public static int GetAutoBaitRemaining() => autoBaitRemaining;
+        public static void ResetAutoBaitCounter()
+        {
+            autoBaitRemaining = autoBaitMaxCount;
+            nextAutoBaitAt = -999f;
+        }
+
+        // Maintains the "no fish in radius" timer and throws the selected bait/attractor when the
+        // radius has been fish-free longer than the configured window. Called every scan tick.
+        private static void TryAutoBaitTick(HeartopiaComplete host, float now, int inRangeCount)
+        {
+            if (!autoBaitEnabled)
+            {
+                noFishSinceAt = -1f;
+                return;
+            }
+
+            if (inRangeCount > 0)
+            {
+                noFishSinceAt = -1f;   // fish present — reset the no-fish window
+                return;
+            }
+
+            if (noFishSinceAt < 0f)
+            {
+                noFishSinceAt = now;
+            }
+
+            if (autoBaitRemaining <= 0 || now < nextAutoBaitAt)
+            {
+                return;
+            }
+
+            if ((now - noFishSinceAt) < autoBaitNoFishSeconds)
+            {
+                return;
+            }
+
+            bool useBait = autoBaitChoice == AutoBaitChoice.Bait;
+            if (host.TryThrowFishBaitForAuto(useBait, out string kind))
+            {
+                autoBaitRemaining--;
+                nextAutoBaitAt = now + AutoBaitMinCooldown;
+                noFishSinceAt = now;   // restart the window while the server spawns fish
+                Log($"Auto Bait thrown ({kind}); remaining={autoBaitRemaining}/{autoBaitMaxCount}");
+                try { host.UI_AddMenuNotification(host.UI_Localize("Auto Bait thrown") + " (" + autoBaitRemaining + ")", new Color(0.45f, 1f, 0.55f)); } catch { }
+                if (autoBaitRemaining == 0)
+                {
+                    try { host.UI_AddMenuNotification(host.UI_Localize("Auto Bait limit reached"), new Color(1f, 0.65f, 0.45f)); } catch { }
+                }
+            }
+            else
+            {
+                nextAutoBaitAt = now + AutoBaitFailBackoff;
+                Log("Auto Bait: " + kind + " not available in bag; backing off " + AutoBaitFailBackoff + "s");
+            }
+        }
         public static bool GetInstantCatchEnabled() => instantCatchEnabled;
         public static void SetInstantCatchEnabled(bool value)
         {
@@ -435,6 +541,60 @@ namespace HeartopiaMod
                 try { host.UI_SaveKeybinds(false); } catch { }
             }
             num += 30;
+
+            // --- Auto Bait ---
+            bool nextAutoBait = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), autoBaitEnabled, "Auto Bait");
+            if (nextAutoBait != autoBaitEnabled)
+            {
+                SetAutoBaitEnabled(nextAutoBait);
+                host.UI_AddMenuNotification(
+                    "Auto Bait " + (nextAutoBait ? "Enabled" : "Disabled"),
+                    nextAutoBait ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                try { host.UI_SaveKeybinds(false); } catch { }
+            }
+            num += 30;
+
+            if (autoBaitEnabled)
+            {
+                string choiceLabel = autoBaitChoice == AutoBaitChoice.Bait
+                    ? host.UI_Localize("Item: Bait")
+                    : host.UI_Localize("Item: Attractor");
+                if (host.UI_DrawPrimaryActionButton(new Rect(20f, num, 260f, 30f), choiceLabel))
+                {
+                    SetAutoBaitChoice(autoBaitChoice == AutoBaitChoice.Bait ? (int)AutoBaitChoice.Attractor : (int)AutoBaitChoice.Bait);
+                    Log("Auto Bait item changed to " + autoBaitChoice);
+                    try { host.UI_SaveKeybinds(false); } catch { }
+                }
+                num += 36;
+
+                GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Max: {0}", autoBaitMaxCount), small);
+                num += 22;
+                int prevMax = autoBaitMaxCount;
+                int newMax = Mathf.RoundToInt(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), autoBaitMaxCount, 0f, 50f));
+                if (newMax != prevMax)
+                {
+                    SetAutoBaitMaxCount(newMax);
+                    try { host.UI_SaveKeybinds(false); } catch { }
+                }
+                num += 30;
+
+                GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("No-fish: {0:F0}s", autoBaitNoFishSeconds), small);
+                num += 22;
+                float prevSec = autoBaitNoFishSeconds;
+                autoBaitNoFishSeconds = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), autoBaitNoFishSeconds, AutoBaitNoFishSecondsMin, AutoBaitNoFishSecondsMax));
+                if (Math.Abs(autoBaitNoFishSeconds - prevSec) > 0.0001f)
+                {
+                    try { host.UI_SaveKeybinds(false); } catch { }
+                }
+                num += 30;
+
+                GUI.Label(new Rect(20f, num, 180f, 24f), host.UI_LocalizeFormat("Remaining: {0}/{1}", autoBaitRemaining, autoBaitMaxCount), small);
+                if (host.UI_DrawPrimaryActionButton(new Rect(190f, num - 3f, 90f, 28f), host.UI_Localize("Reset")))
+                {
+                    ResetAutoBaitCounter();
+                }
+                num += 32;
+            }
 
             return num + 20f;
         }
@@ -1035,7 +1195,13 @@ namespace HeartopiaMod
                 rodEquipRequestActive = false;
                 nextRodEquipAttemptAt = -999f;
 
-                if (!host.TryFindNearestFishShadowTarget(fishShadowDetectRange, out uint targetNetId, out Vector3 targetPos, out float targetDistance, out int detectedCount, out string targetStatus))
+                bool foundTarget = host.TryFindNearestFishShadowTarget(fishShadowDetectRange, out uint targetNetId, out Vector3 targetPos, out float targetDistance, out int detectedCount, out int inRangeCount, out string targetStatus);
+
+                // Auto Bait: track how long the radius has been fish-free and throw a bait/attractor
+                // once that exceeds the configured window. Runs every scan regardless of hit/miss.
+                TryAutoBaitTick(host, now, inRangeCount);
+
+                if (!foundTarget)
                 {
                     consecutiveTargetMisses++;
                     float missDelay = Mathf.Min(EmptyScanMaxDelay, EmptyScanMinDelay + (consecutiveTargetMisses * 0.12f));
