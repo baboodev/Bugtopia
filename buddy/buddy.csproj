@@ -213,6 +213,7 @@
     <Compile Include="HeartopiaComplete.CameraInput.cs" />
     <Compile Include="HeartopiaComplete.Meteor.cs" />
     <Compile Include="HeartopiaComplete.Fishing.cs" />
+    <Compile Include="HeartopiaComplete.EventHook.cs" />
     <Compile Include="HeartopiaComplete.Insect.cs" />
     <Compile Include="HeartopiaComplete.Bubble.cs" />
     <Compile Include="HeartopiaComplete.Shop.cs" />

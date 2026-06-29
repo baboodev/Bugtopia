@@ -116,8 +116,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.EnsureInstrumentHotkeyGuardUpdated();
-            if (this.instrumentHotkeyBlockedKeys.Contains(key))
+            if (this.IsInstrumentHotkeyConflict(key))
             {
                 return false;
             }
@@ -147,8 +146,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.EnsureInstrumentHotkeyGuardUpdated();
-            if (this.instrumentHotkeyBlockedKeys.Contains(key))
+            if (this.IsInstrumentHotkeyConflict(key))
             {
                 return false;
             }
@@ -167,15 +165,74 @@ namespace HeartopiaMod
             return Input.GetKey(key);
         }
 
+        // While an instrument is being played, block every mod hotkey except the menu toggle so
+        // gameplay keystrokes never trigger features (the original per-key/layout matching missed
+        // any hotkey bound outside the note layout — e.g. the equip hotkeys — see docs/GAME_EVENTS.md).
+        // The menu toggle stays live so the user can still open/close the mod menu.
         private bool IsInstrumentHotkeyConflict(KeyCode key)
         {
-            if (key == KeyCode.None)
+            if (key == KeyCode.None || key == this.keyToggleMenu)
             {
                 return false;
             }
 
+            return this.IsInstrumentPanelOpen();
+        }
+
+        // Event-driven "is an instrument panel open" — set by the InstrumentPanelOpen/CloseEvent
+        // hooks (zero per-frame cost). Falls back to the legacy TTL-throttled AuraMono/GetView poll
+        // only until the detour installs (or if a future game patch breaks it).
+        private const string InstrumentPanelOpenEventName = "XDTDataAndProtocol.Events.InstrumentPanelOpenEvent";
+        private const string InstrumentPanelCloseEventName = "XDTDataAndProtocol.Events.InstrumentPanelCloseEvent";
+
+        // InstrumentPanelOpenEvent layout: InstrumentType(int)@0, instrumentNetId(uint)@4,
+        // instrumentLevelObjectNetId(ulong)@8, staticId(int)@16 → struct size 24 (8-byte aligned).
+        private const int InstrumentPanelOpenEventBytes = 24;
+
+        private bool instrumentGuardHooksRegistered;
+        private bool instrumentEventPanelOpen;
+        private int instrumentEventInstrumentType;
+
+        private bool IsInstrumentPanelOpen()
+        {
+            this.EnsureInstrumentGuardEventHooks();
+
+            // Once the dispatch detour is live the flag is authoritative and free to read.
+            if (this.IsGameEventHookInstalled(InstrumentPanelOpenEventName))
+            {
+                return this.instrumentEventPanelOpen;
+            }
+
+            // Fallback path: the detour hasn't installed yet. Reuse the legacy poll, but only its
+            // open/closed bit now (the per-key layout set is no longer used for blocking).
             this.EnsureInstrumentHotkeyGuardUpdated();
-            return this.instrumentHotkeyBlockedKeys.Contains(key);
+            return this.instrumentHotkeyBlockedKeys.Count > 0;
+        }
+
+        private void EnsureInstrumentGuardEventHooks()
+        {
+            if (this.instrumentGuardHooksRegistered)
+            {
+                return;
+            }
+
+            this.instrumentGuardHooksRegistered = true;
+            this.RegisterGameEventHook(InstrumentPanelOpenEventName, InstrumentPanelOpenEventBytes, this.OnInstrumentPanelOpenEvent);
+            this.RegisterGameEventHook(InstrumentPanelCloseEventName, 0, this.OnInstrumentPanelCloseEvent);
+        }
+
+        // Handlers run on the Unity main thread (OnUpdate drain) — safe to do anything here.
+        // Close is dispatched from the same PlayerInstrumentMotion state machine as open (state
+        // exit), so a missed close that would strand the flag true is not expected on this build.
+        private void OnInstrumentPanelOpenEvent(GameEventSnapshot e)
+        {
+            this.instrumentEventInstrumentType = e.ReadInt32(0);
+            this.instrumentEventPanelOpen = true;
+        }
+
+        private void OnInstrumentPanelCloseEvent(GameEventSnapshot e)
+        {
+            this.instrumentEventPanelOpen = false;
         }
 
         // Detects an open + focused game text field purely from the Unity side (EventSystem +

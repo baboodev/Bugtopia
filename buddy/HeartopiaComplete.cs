@@ -718,6 +718,7 @@ namespace HeartopiaMod
             this.UpdateMovementInputBridge();
             this.ProcessAutoIceSkatingOnUpdate();
             this.ProcessBubbleFeatureOnUpdate();
+            this.ProcessGameEventHooksOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
             bool flag2 = HeartopiaComplete.OverridePlayerPosition && this.teleportFramesRemaining > 0;

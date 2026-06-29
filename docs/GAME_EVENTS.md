@@ -71,8 +71,9 @@ This is the chain behind the InstrumentHotkeyGuard feature, traced through the d
    - `InstrumentPanelCloseEvent` → `InstrumentModeEndedEvent`
 3. [`InstrumentPanel`](../ilspy-dumps/XDTGameUI/XDTGame.UI.Panel/InstrumentPanel.cs) is the UI
    view; `OnStart` builds the keyboard / `OnStop` tears it down. Its fields `_instrumentType`
-   (`InstrumentType` enum) and `_nowKeyOption` (`MusicKeyOption` enum) are what the mod reads
-   today via AuraMono `GetView`.
+   (`InstrumentType` enum) and `_nowKeyOption` (`MusicKeyOption` enum) are read via AuraMono
+   `GetView` only on the mod's **fallback** path; the primary path now reads the `InstrumentType`
+   straight from the `InstrumentPanelOpenEvent` payload (§3).
 
 ### The four instrument events
 
@@ -91,49 +92,130 @@ Enums (for reading payloads / panel fields):
 
 ---
 
-## 3. How the mod can hook game events — three strategies
+## 3. How the mod hooks game events — the reusable engine ✅
 
 The mod runs under BepInEx as a **separate .NET assembly**; the game's managed types
 (`XDTGame.*`, the `IEvent` structs) are **not loadable** as compile-time references and are
 absent from the mod's runtime (see `memory/homeland-farm-scan-perf.md`). The game executes in
 its own embedded **AuraMono** runtime. That rules out simply calling
-`EventCenter.AddListener<InstrumentPanelOpenEvent>(…)` in C#. The realistic options:
+`EventCenter.AddListener<InstrumentPanelOpenEvent>(…)` in C#.
 
-### A. Native method detour ✅ *recommended*
+**Solution (implemented, proven in-world):** NativeDetour the inflated generic dispatcher
+`EventCenter.DispatchEvent<T>(in T)` for the concrete event type and forward to the original via
+a trampoline. We intercept at the dispatcher entry, so we see **every dispatch of that type**
+regardless of who (if anyone) subscribed. This is wrapped in a reusable engine:
+[`HeartopiaComplete.EventHook.cs`](../buddy/HeartopiaComplete.EventHook.cs).
 
-The mod already has a working native-hook toolkit (used by the Bubble feature):
-- `mono_compile_method` → `mono_method_get_unmanaged_thunk` to get a method's native code
-  pointer ([`BubbleFeature.TryGetAuraMonoMethodNativePointer`](../buddy/BubbleFeature.cs)),
-- `BubbleMonoNativeHook.TryInstall(nativeMethod, hookPtr, out trampoline)` to splice in a
-  trampoline ([`BubbleFeature.cs`](../buddy/BubbleFeature.cs) ~line 1090–1126),
-- `Marshal.GetFunctionPointerForDelegate` / `GetDelegateForFunctionPointer` to bridge a mod C#
-  delegate ↔ native code.
+### Public API
 
-So instead of polling, **detour a method that always runs on open/close** and flip a static
-flag. For the instrument case the cleanest targets are `InstrumentPanel.OnStart` (→ open) and
-`InstrumentPanel.OnStop` (→ close), or `PlayerInstrumentMotion`'s dispatch methods. Cost: one
-hook installed once; zero per-frame work; no native-AV exposure from per-frame raw reads.
+```csharp
+// payloadBytes = the event struct's size from the dump (how many bytes to snapshot; 0 for empty
+// events like *CloseEvent). The handler runs on the Unity main thread (OnUpdate drain), so it may
+// allocate / log / call AuraMono freely. The native detour body only Marshal.Copy's the payload
+// into a reused buffer and forwards — it never allocates, throws, or calls into Mono.
+RegisterGameEventHook(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler);
 
-This is the right long-term mechanism for **any** "react to a game event" need in the mod, not
-just instruments.
+// In the handler, read scalar fields by offset (string/object fields can NOT be read this way):
+void OnSomeEvent(GameEventSnapshot e) {
+    int   t   = e.ReadInt32(0);
+    uint  net = e.ReadUInt32(4);
+    ulong id  = e.ReadUInt64(8);
+    float f   = e.ReadSingle(16);
+}
+```
 
-### B. Subscribe to `EventCenter` via AuraMono ⚠️ *possible but heavy*
+Registration is idempotent per event name (re-registering adds another handler to the shared
+detour). Install is lazy: the engine retries each frame from `ProcessGameEventHooksOnUpdate` until
+AuraMono + `XDTGame.Core.EventCenter` + the event's image are loaded, then splices the detour.
+`IsGameEventHookInstalled(name)` reports when a detour is live (for an event-flag-with-poll-fallback
+pattern). Reference consumer: [`InstrumentHotkeyGuardFeature`](../buddy/InstrumentHotkeyGuardFeature.cs).
 
-Mechanically: resolve `EventCenter`, `MakeGenericMethod` of `AddListener<T>` with the event's
-mono `Type`, build a mono delegate from a reverse-marshaled mod callback
-(`GetFunctionPointerForDelegate` + `mono_ftnptr_to_delegate`-style bridge), and pass it in.
-Doable, but it's strictly more moving parts than option A (generic instantiation + delegate
-marshaling + matching the exact `Action<T>` signature the bus stores) for the same outcome.
-Only worth it if we need to listen to many events generically rather than a couple of specific
-lifecycle points.
+### How it works (mechanism)
 
-### C. Per-frame `UIManager.GetView` polling — *current approach*
+1. Resolve `XDTGame.Core.EventCenter` via `FindAuraMonoClassByFullName`.
+2. `FindAuraMonoMethodOnHierarchy(cls, "DispatchEvent", 1)` — paramcount **1** selects the global
+   `DispatchEvent<T>(in T)` (the per-netId overload `DispatchEvent<T>(uint, in T)` has 2).
+3. Inflate that open generic method per concrete event class (`mono_metadata_get_generic_inst` +
+   `mono_class_inflate_generic_method`), validate `AuraMonoMethodParamCountIs(inflated, 1)`.
+4. Resolve own `IntPtr mono_compile_method(IntPtr)` export (the engine's shared
+   `auraMonoCompileMethod` is declared `void`, losing the code ptr); compile → native code pointer.
+5. `MonoMod.RuntimeDetour.NativeDetour(nativePtr, body)` + `GenerateTrampoline` — the modern
+   Iced-relocating hook (same proven path as fishing `NotifyFloatInWater`), **not** the abandoned
+   14-byte `BubbleMonoNativeHook` steal (see §5).
 
-What `InstrumentHotkeyGuardFeature` does now: every refresh tick, resolve `UIManager.Instance`
-and call `GetView(typeof(InstrumentPanel))` via AuraMono, then read `_instrumentType` /
-`_nowKeyOption`. **Confirmed working** (log: `aura GetView ok: type=1 keyOption=3`) but it is
-the most expensive option and carries native-AV risk on the raw field reads, which is why it is
-now TTL-throttled + failure-throttled + GC-guarded. Fine as a stopgap; superseded by A.
+**Key ABI fact (was the open risk, now confirmed safe):** for a value-type (non-shared) generic
+instantiation mono emits dedicated code with **no hidden rgctx arg**, so `DispatchEvent<T>(in T)`'s
+native signature is exactly `void(IntPtr eventPtr)` — `in T` is a raw pointer to the **bare** struct
+(no mono object header; by-ref, not boxed). Read payload fields by offset off `eventPtr`. Verified
+in-world: instrument open/close logged real payloads (`type=12`=Wbass, netId, staticId) with no crash.
+
+### Detour-body rules (native boundary)
+
+The 16 fixed static slot bodies (`EventSlotBody0..15`, no closures) must **not** throw, allocate, or
+call into Mono/Il2Cpp/Unity. Each only `Marshal.Copy`s `payloadBytes` into a preallocated ring
+buffer and forwards via the slot's trampoline. The main-thread drain (`DrainGameEventHooks`) decodes
+the snapshot and invokes handlers, where any work is allowed. Producer (body) and consumer (drain)
+both run on the Unity main thread, so the ring is single-threaded in practice.
+
+### Scope limit — do NOT mass-hook all ~1450 events
+
+Each event type needs its own inflated `DispatchEvent<T>` + detour. Hooking hundreds at once is a
+process-crash risk: per-type gsharedvt ABI roulette (some `T` may compile to shared code with a
+hidden arg → signature mismatch → AV), mass JIT of every instantiation, and high-frequency bodies on
+per-frame events. The engine caps at `MaxEventHookSlots` (16) concurrent hooks for this reason. Hook
+the specific events a feature needs; use `MasterLogGameEvents` to discover/verify payloads first.
+
+### Verified reusable events & payload layouts
+
+Offsets below are by-offset reads for the engine (scalars only; ref fields noted). Verify live with
+`MasterLogGameEvents` after a game patch — mono value-type layout is assumed natural/sequential.
+
+#### "Object appeared / disappeared on the map" — the common channel
+
+`EntityCreateEvent` / `EntityRemoveEvent` (namespace `XDTLevelAndEntity.BaseSystem.EntitiesManager`)
+fire for **every** ECS entity as it streams/spawns in or out. Dispatched via
+`EventCenter.DispatchEvent(in @event)` from
+[`EntityManager`](../ilspy-dumps/XDTLevelAndEntity/ScriptsRefactory.LevelAndEntity.BaseSystem/EntityManager.cs)
+(lines ~468 / ~492), so the engine hooks them. This is the generic "object on map" channel for
+radar / aura-farm targets / cookers / gift boxes / insects / pets — subscribe once, read `netId`,
+then qualify the entity by component/archetype in the handler (main thread).
+
+Both carry `public EntityData Value` — a **readonly struct** (`ScriptsRefactory.DataAndProtocol.ComponentsData.EntityData`),
+inlined into the event, so its fields are readable by offset. `payloadBytes = 32`:
+
+| field | type | offset |
+|---|---|---|
+| `level` | `EGameLevel` (sbyte) | 0 |
+| `entityId` | uint | 4 |
+| **`netId`** | **uint** | **8** ← key |
+| `field` | uint | 12 |
+| `tag` | `EntityTag` (ulong) | 16 |
+| `archetypeId` | short bucket@24 / short index@26 | 24 |
+| `_priority` | int | 28 |
+
+Note: high-frequency in dense towns — only process while a feature needs it and keep the per-event
+qualify check light. There is **no** dedicated `DataCreated<CookBuildComponent>` ("cooker appeared")
+event; cookers are detected by filtering `EntityCreateEvent` netIds for `CookBuildComponent`.
+
+#### Other verified payloads
+
+| Event | Namespace | `payloadBytes` | Fields (offset) | Notes |
+|---|---|---|---|---|
+| `InstrumentPanelOpenEvent` | `XDTDataAndProtocol.Events` | 24 | `InstrumentType`(int)@0, `instrumentNetId`(uint)@4, `instrumentLevelObjectNetId`(ulong)@8, `staticId`(int)@16 | hooked by InstrumentHotkeyGuard |
+| `InstrumentPanelCloseEvent` | `XDTDataAndProtocol.Events` | 0 | *(empty)* | dispatch-only signal |
+| `CollectObjectShowEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 8 | `netId`(uint)@0, `show`(bool)@4 | **fully scalar** — collectable show/hide |
+| `BottomDialogEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 12 | `message`(string ref)@0 **unreadable**, `active`(bool)@8 | read `active` only; `clickCallback`(Action ref) is the real confirm action but ref-unreadable |
+| `UIPanelOpenEvent` / `UIPanelCloseEvent` | `XDTGame.Framework.UI` | — | `panelType`(System.Type ref)@0 **unreadable** | universal panel open/close, but needs a mono-`Type*`→name resolver to be useful |
+
+#### Per-component events (`DataCreated<T>` / `DataRemoved<T>`)
+
+`ScriptsRefactory.DataAndProtocol.Events.DataCreated<T>` (`struct DataCreated<T> { T Value; }`) is
+dispatched **per component type** by the various `ClientSystem.*SyncSystem`s
+(`DataCreated<BlockComponent>`, `DataCreated<PetEntityData>`, …) via
+`EventCenter.DispatchEvent<DataCreated<TComp>>`. More precise than `EntityCreateEvent`, **but** it is
+a nested generic — to hook it you must build the `DataCreated<TComp>` instantiation via
+`mono_class_bind_generic_parameters` (`auraMonoClassBindGenericParameters`) rather than resolving by
+name. Deferred until a feature needs the precision.
 
 ---
 
@@ -168,57 +250,44 @@ done | sort -u > events.txt
 
 ---
 
-## 5. Status & next steps for the InstrumentHotkeyGuard bug
+## 5. InstrumentHotkeyGuard — history & final design
 
-**Diagnosis (from the live log).** Detection is *not* the problem — `aura GetView ok:
-type=1 keyOption=3` shows the open Piano panel in KeyMode22 was resolved. The mod hotkeys still
-fired (`SetHandhold toolId=1/3/5` = Axe/Rod/Net equips) because the **per-key blocking set did
-not contain the pressed keys**. Two contributing causes:
+**Original bug (historical).** Mod hotkeys still fired while playing (`SetHandhold toolId=1/3/5` =
+Axe/Rod/Net equips) because the guard only blocked keys in the instrument's **note layout**, and
+(a) `pianoSemitone` couldn't be read via managed reflection on the absent `GameSettingSystem` so the
+KeyMode22 piano layout was wrong, and (b) any hotkey bound *outside* the layout (the equip keys) was
+never in the blocking set. Fixed by **blocking all mod hotkeys except the menu toggle while an
+instrument is open**, and by driving "is open" from events instead of a per-frame poll — see the
+event-driven implementation below.
 
-1. **`pianoSemitone` can't be read.** `TryGetGameSettingPianoSemitone` uses *managed* reflection
-   on `GameSettingSystem`, which is absent on this build, so it always returns `false`. With
-   Piano + KeyMode22 the guard therefore always picks the plain `inputevent22` layout and never
-   the semitone+black-key layout — so half the real piano keys (`O P [ ] 0 - =`, number row,
-   etc.) are never blocked.
-2. **Design mismatch.** The guard only blocks keys that match the instrument's note layout. Any
-   mod hotkey bound to a key *outside* that layout still fires while you're playing — which is
-   exactly what happened with the equip hotkeys.
+### Implemented (final) — event-driven
 
-**Recommended fix (simple, matches the commit's intent "Block hotkeys if instrument is open"):**
-when an instrument panel is detected open, **block *all* mod hotkeys**, not just layout-matching
-keys. Detection already works reliably; drop the fragile per-key/`pianoSemitone` matching
-entirely. `IsModHotkeyBlockedByInstrument` / `TryGetModHotkeyDown` would just consult a single
-"instrument open" flag.
+`InstrumentHotkeyGuardFeature` now drives the "instrument open" state from the event engine (§3):
+it `RegisterGameEventHook`s `InstrumentPanelOpenEvent` (→ flag true, captures `InstrumentType`) and
+`InstrumentPanelCloseEvent` (→ flag false). `IsInstrumentPanelOpen()` reads the flag once the detour
+is installed (zero per-frame cost, no native-AV exposure); while a hook hasn't installed yet it falls
+back to the legacy throttled `GetView` poll. While the panel is open it **blocks every mod hotkey
+except the menu toggle** — this also fixes the original bug where hotkeys bound outside the note
+layout (e.g. the Axe/Rod/Net equip keys) still fired while playing. The per-key layout matching and
+`pianoSemitone` (`PlayerPrefs.GetInt("PianoSemitone", 0)`) logic now only feed the fallback path.
 
-**Recommended mechanism (robust):** replace the per-frame `GetView` poll (strategy C) with a
-one-time native detour (strategy A) on `InstrumentPanel.OnStart`/`OnStop` to maintain that flag.
-This removes the per-frame AuraMono work and the native-AV exposure that caused the original
-post-world-load crash.
+### Native detour — the working mechanism vs the abandoned one
 
-### Implemented (final)
-
-1. **Layout fix.** `pianoSemitone` is read from `PlayerPrefs.GetInt("PianoSemitone", 0)` (it's a
-   computed property, not a field — managed/AuraMono field reads could never see it). KeyMode22
-   piano now blocks the correct semitone + black-key layout.
-2. **Detection = throttled GetView polling (strategy C).** `InstrumentHotkeyGuardFeature` resolves
-   the open panel via `UIManager.GetView` at most every `InstrumentHotkeyGuardRefreshInterval`
-   (0.2s), with an AuraMono miss-cooldown and a GC guard around the raw reads. Reliable and stable.
-
-### Native detour (strategy A) — attempted, abandoned
-
-Detouring `InstrumentPanel.OnStart`/`OnStop` via `BubbleMonoNativeHook` **crashed** on the first
-instrument open. Root cause: `BubbleMonoNativeHook` steals a **fixed 14 bytes** of prologue and
-cannot relocate RIP-relative instructions; `CreateBubble`'s prologue happened to be relocatable,
-`OnStart`/`OnStop`'s was not. (Also note `mono_method_get_unmanaged_thunk`, which the Bubble path
-resolves, is a native-call wrapper that normal managed/vtable calls never traverse — to intercept
-real calls you must detour the `mono_compile_method` return address instead.) Making detours safe
-here needs a real length-disassembling hook library (MinHook/Detours-style) — deferred.
+- ✅ **NativeDetour on inflated `DispatchEvent<T>`** (the engine in §3) — installed once per event,
+  forwards via a trampoline, no per-frame cost. Proven, no crash.
+- ❌ **`BubbleMonoNativeHook` on `InstrumentPanel.OnStart`/`OnStop`** — earlier attempt; **crashed**
+  on first open. Root cause: that hook steals a **fixed 14 bytes** of prologue and cannot relocate
+  RIP-relative instructions (`CreateBubble`'s prologue happened to be relocatable, `OnStart`/`OnStop`'s
+  was not). The engine avoids this by using MonoMod's Iced-relocating `NativeDetour`. (Also note
+  `mono_method_get_unmanaged_thunk` is a native-call wrapper that normal managed/vtable calls never
+  traverse — intercept the `mono_compile_method` code pointer instead, which the engine does.)
 
 ### Other event routes (not pursued)
 
-- **EventCenter subscription via AuraMono** (true events): requires generic-method inflation of
-  `AddListener<T>` + constructing a managed `Action<T>` delegate around a native callback. No such
-  machinery exists in the mod today; crash risk comparable to the detour. Not worth it for this
-  feature.
+- **EventCenter `AddListener<T>` subscription via AuraMono** (true listener registration): would need
+  to construct a managed `Action<EventStruct>` delegate around a native callback and pass it to the
+  non-generic `AddListener(Type, Delegate)` overload — and dispatch does `node.data as Action<T>`, so
+  any delegate that isn't exactly `Action<EventStruct>` is silently skipped. Strictly more moving
+  parts than the dispatcher detour for the same outcome. Not pursued.
 - **mono vtable slot swap**: safer than byte-patching but needs vtable internals not currently
   exported.
