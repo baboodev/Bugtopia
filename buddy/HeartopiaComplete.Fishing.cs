@@ -2710,6 +2710,143 @@ namespace HeartopiaMod
             return true;
         }
 
+        // ---- NotifyFloatInWater detour: rewrite the game's own successLength to -2 at the source ----
+        // The game sends the REAL successLength exactly once, in PlayerStateFishing.OnStateEnter ->
+        // FishingProtocolManager.NotifyFloatInWater(uint, Vector3, Vector3, float successLength, float).
+        // We NativeDetour that Mono method (resolve via AuraMono + mono_compile_method, same pattern as
+        // BuildingFreeRotateFeature) and trampoline-forward to the original with successLength forced to
+        // -2 while Instant Catch is active. Vector3 args pass through untouched as raw pointers (Win64
+        // passes 12-byte structs by reference). This kills the condition-1 race in the source so the
+        // continuous -2 resend is no longer needed for it. buoyPos is NOT touched (rewriting it here =
+        // cast-time = fish chases far = bite breaks; the far-anchor for condition 2 stays on our sends).
+        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        private delegate void NotifyFloatInWaterHookDelegate(uint floatNetId, IntPtr buoyPos, IntPtr direction, float successLength, float failureLength);
+
+        private delegate IntPtr InstantCatchMonoCompileMethodDelegate(IntPtr method);
+
+        internal static bool instantCatchSuccessSpoofActive;
+        private static MonoMod.RuntimeDetour.NativeDetour instantCatchNotifyDetour;
+        private static NotifyFloatInWaterHookDelegate instantCatchNotifyHookKeepAlive; // anti-GC
+        private static NotifyFloatInWaterHookDelegate instantCatchNotifyTrampoline;
+        private bool instantCatchNotifyHookTried;
+
+        public void EnsureNotifyFloatInWaterHook()
+        {
+            if (this.instantCatchNotifyHookTried || instantCatchNotifyDetour != null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return; // AuraMono not up yet — retry on a later frame.
+                }
+
+                IntPtr cls = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Fishing.FishingProtocolManager");
+                if (cls == IntPtr.Zero)
+                {
+                    return; // image not loaded yet — retry later.
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "NotifyFloatInWater", 5);
+                if (method == IntPtr.Zero)
+                {
+                    this.instantCatchNotifyHookTried = true;
+                    this.InstantCatchLog("NotifyFloatInWater(5) not found on FishingProtocolManager", true);
+                    return;
+                }
+
+                IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                InstantCatchMonoCompileMethodDelegate compile = monoModule != IntPtr.Zero
+                    ? this.GetAuraMonoExport<InstantCatchMonoCompileMethodDelegate>(monoModule, "mono_compile_method")
+                    : null;
+                if (compile == null)
+                {
+                    this.instantCatchNotifyHookTried = true;
+                    this.InstantCatchLog("mono_compile_method export unavailable for NotifyFloatInWater hook", true);
+                    return;
+                }
+
+                IntPtr nativePtr = compile(method);
+                if (nativePtr == IntPtr.Zero)
+                {
+                    this.instantCatchNotifyHookTried = true;
+                    this.InstantCatchLog("mono_compile_method returned null for NotifyFloatInWater", true);
+                    return;
+                }
+
+                instantCatchNotifyHookKeepAlive = NotifyFloatInWaterDetourBody;
+                instantCatchNotifyDetour = new MonoMod.RuntimeDetour.NativeDetour(nativePtr, instantCatchNotifyHookKeepAlive);
+                instantCatchNotifyTrampoline = instantCatchNotifyDetour.GenerateTrampoline<NotifyFloatInWaterHookDelegate>();
+                this.instantCatchNotifyHookTried = true;
+
+                if (instantCatchNotifyTrampoline == null)
+                {
+                    // Without a way to call the original, the buoy would never activate — bail out safely.
+                    instantCatchNotifyDetour.Undo();
+                    instantCatchNotifyDetour = null;
+                    instantCatchNotifyHookKeepAlive = null;
+                    this.InstantCatchLog("NotifyFloatInWater trampoline unavailable; detour reverted", true);
+                    return;
+                }
+
+                this.InstantCatchLog("NotifyFloatInWater detour installed @0x" + nativePtr.ToInt64().ToString("X"), true);
+            }
+            catch (Exception ex)
+            {
+                this.instantCatchNotifyHookTried = true; // don't crash-loop on a hard failure
+                this.InstantCatchLog("NotifyFloatInWater hook failed: " + ex.Message, true);
+            }
+        }
+
+        // Apply/Undo the detour with the Instant Catch toggle so it is fully removed when off (a bad
+        // detour then can't affect normal fishing). Safe no-op until the detour has been created.
+        internal static void SetInstantCatchNotifyHookApplied(bool on)
+        {
+            try
+            {
+                if (instantCatchNotifyDetour == null)
+                {
+                    return;
+                }
+
+                if (on && !instantCatchNotifyDetour.IsApplied)
+                {
+                    instantCatchNotifyDetour.Apply();
+                }
+                else if (!on && instantCatchNotifyDetour.IsApplied)
+                {
+                    instantCatchNotifyDetour.Undo();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        // Native detour body. Must NOT throw across the boundary and does only a static-field read +
+        // a forward call to the original (the trampoline) — no Mono/Il2Cpp/Unity calls here.
+        private static void NotifyFloatInWaterDetourBody(uint floatNetId, IntPtr buoyPos, IntPtr direction, float successLength, float failureLength)
+        {
+            NotifyFloatInWaterHookDelegate orig = instantCatchNotifyTrampoline;
+            if (orig == null)
+            {
+                return;
+            }
+
+            try
+            {
+                float spoofed = instantCatchSuccessSpoofActive ? -2f : successLength;
+                orig(floatNetId, buoyPos, direction, spoofed, failureLength);
+            }
+            catch
+            {
+                try { orig(floatNetId, buoyPos, direction, successLength, failureLength); } catch { }
+            }
+        }
+
         public unsafe bool TryArmFishingInstantCatch(out string status)
         {
             status = "Instant catch unavailable";
@@ -2766,7 +2903,11 @@ namespace HeartopiaMod
                 // with a point far beyond it (away from the player) so the server's latched battle anchor
                 // is far. Outside the window we report the real buoy (so the fish still bites normally).
                 float sinceCastFar = this.InstantCatchCastAt > 0f ? Time.unscaledTime - this.InstantCatchCastAt : -1f;
-                if (sinceCastFar >= InstantCatchFarWinStart && sinceCastFar <= InstantCatchFarWinEnd)
+                // TEMPORARILY DISABLED: testing whether the NotifyFloatInWater detour alone (successLength=-2
+                // at source) handles "fighting" fish without the far-anchor condition-2 trick. Flip back to
+                // the window check to re-enable.
+                const bool InstantCatchFarAnchorEnabled = false;
+                if (InstantCatchFarAnchorEnabled && sinceCastFar >= InstantCatchFarWinStart && sinceCastFar <= InstantCatchFarWinEnd)
                 {
                     Vector3 flat = new Vector3(buoyPos.x - playerPos.x, 0f, buoyPos.z - playerPos.z);
                     float flatMag = flat.magnitude;

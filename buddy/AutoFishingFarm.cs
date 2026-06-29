@@ -20,9 +20,9 @@ namespace HeartopiaMod
         // be the server's value within ~1 frame of the bite/buoy-activation to win the latch race for
         // close fish. This fires (before the gate) using state cached from the last tick. The rate is
         // user-tunable (Hz) — higher = surer win but more reliable traffic.
-        private const float InstantCatchSendHzMin = 5f;
+        private const float InstantCatchSendHzMin = 0f; // 0 = disable our timed resend (rely on the detour)
         private const float InstantCatchSendHzMax = 240f;
-        private const float InstantCatchSendHzDefault = 50f;
+        private const float InstantCatchSendHzDefault = 0f; // detour handles it; resend is an opt-in fallback
         private static float instantCatchSendHz = InstantCatchSendHzDefault;
         private static float nextHighFreqInstantAt = -999f;
         private static bool instantCatchActiveCached = false;
@@ -89,6 +89,10 @@ namespace HeartopiaMod
             }
 
             instantCatchEnabled = value;
+            // Drives the NotifyFloatInWater detour (rewrites the game's successLength to -2 at source)
+            // and fully removes it when disabled so it can't affect normal fishing.
+            HeartopiaComplete.instantCatchSuccessSpoofActive = value;
+            HeartopiaComplete.SetInstantCatchNotifyHookApplied(value);
             nextInstantCatchAt = -999f;
             Log("Instant Catch " + (value ? "enabled" : "disabled"));
         }
@@ -445,10 +449,19 @@ namespace HeartopiaMod
             float now = Time.unscaledTime;
             try
             {
+                // Install the NotifyFloatInWater detour once (lazy; before any cast) so the game's own
+                // successLength send carries -2 at the source. Idempotent / tried-guarded.
+                if (instantCatchEnabled)
+                {
+                    host.EnsureNotifyFloatInWaterHook();
+                }
+
                 // High-frequency buoy resend — runs EVERY frame (not gated by nextActionAt), so the
                 // collapsed successLength is refreshed within ~1 frame of the bite/buoy-activation.
                 // Uses the active flag cached by the decision loop; harmlessly no-ops if not fishing.
-                if (instantCatchEnabled && instantCatchActiveCached && now >= nextHighFreqInstantAt)
+                // Send Rate 0 = disable our timed buoy resend entirely (the NotifyFloatInWater detour
+                // already rewrites successLength to -2 at source). Avoids a divide-by-zero too.
+                if (instantCatchEnabled && instantCatchActiveCached && instantCatchSendHz > 0f && now >= nextHighFreqInstantAt)
                 {
                     nextHighFreqInstantAt = now + (1f / instantCatchSendHz);
                     if (host.TryArmFishingInstantCatch(out _))
