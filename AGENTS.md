@@ -213,6 +213,16 @@ Full detail: [TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md).
 
 ### Choosing an access path
 
+> **Events first.** Before adding a new feature or reworking an existing one, if it needs to **react
+> to a game state change** (panel open/close, item added, stove/object spawned, QTE/bite, cooking
+> status, …), **search [docs/GAME_EVENTS_LIST.md](docs/GAME_EVENTS_LIST.md) for a suitable
+> `EventCenter` event first** and prefer hooking it via the reusable engine
+> (`RegisterGameEventHook` / `RegisterGameEventHookByNetId`, see [docs/GAME_EVENTS.md](docs/GAME_EVENTS.md))
+> over per-frame polling / AuraMono scans. Use the event-primary + poll-fallback pattern
+> (`IsGameEventHookInstalled`). **Exceptions** (keep polling): genuinely *continuous* per-frame values
+> (camera-dependent ESP screen projection, battle reel pull-strength) — events only mark *transitions*;
+> and cases where the existing poll is already cheap & build-independent (Unity uGUI text-input focus).
+
 ```mermaid
 flowchart TD
   A[Need game API] --> B{Authoritative server action?}
@@ -229,6 +239,7 @@ flowchart TD
 
 | Pattern | Examples |
 |---------|----------|
+| **Event hook (EventCenter)** ← *prefer for reacting to state changes* | Instrument open/close, cooking status, cat/dog QTE, backpack add (AutoSell), fishing bite/result — [docs/GAME_EVENTS.md](docs/GAME_EVENTS.md) |
 | **SendCommand** | Bird photo, bubbles, backpack move, task submit, farm commands |
 | **ProtocolManager static invoke** | `ResourceProtocolManager.SendHitStoneCommand`, `MailProtocolManager.*` |
 | **EcsService.TryGet&lt;T&gt;** (AuraMono inflate) | Daily claims services |
@@ -304,12 +315,16 @@ Only files listed in `buddy/buddy.csproj` `<Compile Include="...">` ship. Adding
 
 1. **Decompile** — find UI / manager / command in `ilspy-dumps/`; note assembly image.
 2. **List type aliases** — full name, `Gameplay`/`GamePlay`, `Il2Cpp` prefix, `ScriptsRefactory`, short name.
-3. **Pick access channel** — SendCommand vs Invoke vs AuraMono vs Harmony (§7).
-4. **Implement resolver** — reuse existing helpers; add shape check if short name collides.
-5. **Gate on readiness** — retry in `Update` after world load; separate managed vs AuraMono ready flags.
-6. **Build both loaders** — `build-all.bat`.
-7. **Test in private town** — verify logs, no native crash (Mono generic/ref mistakes crash the process).
-8. **Update docs** — `DECOMPILED_SOURCE_MAP.md` matrix row + `FEATURES.md` if user-visible.
+3. **Check for a suitable event FIRST** — if the feature reacts to a state change, search
+   [docs/GAME_EVENTS_LIST.md](docs/GAME_EVENTS_LIST.md) and prefer an `EventCenter` hook over polling
+   (§7 "Events first" + [docs/GAME_EVENTS.md](docs/GAME_EVENTS.md)). Only fall back to polling for
+   continuous per-frame values or where the poll is already cheap/build-independent.
+4. **Pick access channel** — Event hook vs SendCommand vs Invoke vs AuraMono vs Harmony (§7).
+5. **Implement resolver** — reuse existing helpers; add shape check if short name collides.
+6. **Gate on readiness** — retry in `Update` after world load; separate managed vs AuraMono ready flags.
+7. **Build both loaders** — `build-all.bat`.
+8. **Test in private town** — verify logs, no native crash (Mono generic/ref mistakes crash the process).
+9. **Update docs** — `DECOMPILED_SOURCE_MAP.md` matrix row + `FEATURES.md` if user-visible.
 
 ---
 

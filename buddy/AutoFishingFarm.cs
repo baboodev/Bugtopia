@@ -28,6 +28,84 @@ namespace HeartopiaMod
         private static bool instantCatchActiveCached = false;
         private static int instantCatchSendCount = 0;
 
+        // --- Event-driven fishing signals (see docs/GAME_EVENTS.md). All fishing events are GLOBAL
+        // (FishingProtocolManager / HandHoldFishingRod via EventCenter.DispatchEvent(in @event)). The
+        // continuous battle/reel control stays per-frame (polled); these events only mark the exact
+        // transition moments (buoy active, bite, result, catch, reset). Additive — they do not replace
+        // the polling state machine, only sharpen Instant Catch activation + per-cast diagnostics. ---
+        private static bool fishingEventHooksRegistered;
+        private static float fishBiteEventAt = -999f;        // CmdOnFishBait
+        private static uint fishBiteShadowNetId;
+        private static float fishBattleResultAt = -999f;     // CmdFishBattleResult
+        private static bool fishBattleResultSuccess;
+        private static int fishBattleResultFishId;
+        private static float fishCatchEventAt = -999f;        // PlayerCatchFish
+        private static uint fishCatchFishNetId;
+        // Instant-catch active window opened by the buoy-active / bite events and closed by the
+        // result/catch/reset events — lets the optional high-frequency resend start within ~1 frame of
+        // the actual bite instead of waiting for the ~0.15s decision-loop poll.
+        private static float instantCatchEventActiveUntil = -999f;
+        private const float FishingEventActiveWindow = 8f;
+        private static float lastLoggedFishBiteAt = -999f;
+        private static float lastLoggedFishResultAt = -999f;
+
+        private const string FishOnBaitEventName = "XDTDataAndProtocol.Events.CmdOnFishBait";
+        private const string FishBattleResultEventName = "XDTDataAndProtocol.Events.CmdFishBattleResult";
+        private const string FishBuoyResultEventName = "XDTDataAndProtocol.Events.CmdActivateRodBuoyResult";
+        private const string FishCatchEventName = "ScriptsRefactory.DataAndProtocol.Events.PlayerCatchFish";
+        private const string FishResetStateEventName = "XDTDataAndProtocol.Events.ResetFishState";
+
+        private static void EnsureFishingEventHooks(HeartopiaComplete host)
+        {
+            if (fishingEventHooksRegistered || host == null)
+            {
+                return;
+            }
+
+            fishingEventHooksRegistered = true;
+            host.RegisterGameEventHook(FishOnBaitEventName, 4, OnFishOnBaitEvent);             // {uint fishShadowNetId@0}
+            host.RegisterGameEventHook(FishBattleResultEventName, 12, OnFishBattleResultEvent);  // {bool result@0; int fishId@4; FailReason@8}
+            host.RegisterGameEventHook(FishBuoyResultEventName, 4, OnFishBuoyResultEvent);       // {bool result@0}
+            host.RegisterGameEventHook(FishCatchEventName, 8, OnPlayerCatchFishEvent);           // {uint playerNetId@0; uint fishNetId@4}
+            host.RegisterGameEventHook(FishResetStateEventName, 0, OnResetFishStateEvent);       // empty
+        }
+
+        // Handlers run on the Unity main thread (event drain) — only set fields / open-close the window.
+        private static void OnFishOnBaitEvent(HeartopiaComplete.GameEventSnapshot e)
+        {
+            fishBiteEventAt = Time.unscaledTime;
+            fishBiteShadowNetId = e.ReadUInt32(0);
+            instantCatchEventActiveUntil = fishBiteEventAt + FishingEventActiveWindow;
+        }
+
+        private static void OnFishBuoyResultEvent(HeartopiaComplete.GameEventSnapshot e)
+        {
+            if (e.ReadBool(0))
+            {
+                instantCatchEventActiveUntil = Time.unscaledTime + FishingEventActiveWindow;
+            }
+        }
+
+        private static void OnFishBattleResultEvent(HeartopiaComplete.GameEventSnapshot e)
+        {
+            fishBattleResultAt = Time.unscaledTime;
+            fishBattleResultSuccess = e.ReadBool(0);
+            fishBattleResultFishId = e.ReadInt32(4);
+            instantCatchEventActiveUntil = -999f; // cycle ended
+        }
+
+        private static void OnPlayerCatchFishEvent(HeartopiaComplete.GameEventSnapshot e)
+        {
+            fishCatchEventAt = Time.unscaledTime;
+            fishCatchFishNetId = e.ReadUInt32(4);
+            instantCatchEventActiveUntil = -999f;
+        }
+
+        private static void OnResetFishStateEvent(HeartopiaComplete.GameEventSnapshot e)
+        {
+            instantCatchEventActiveUntil = -999f;
+        }
+
         // --- Auto Bait: throw a bait/attractor when no fish has been in scan range for N seconds ---
         public enum AutoBaitChoice { Bait = 0, Attractor = 1 }
         private const float AutoBaitNoFishSecondsMin = 3f;
@@ -442,6 +520,12 @@ namespace HeartopiaMod
             lastBattleLostBaitAt = -999f;
             ignoreStaleFishingStateUntil = -999f;
             lastBattleBaitNetId = 0U;
+            instantCatchEventActiveUntil = -999f;
+            fishBiteEventAt = -999f;
+            fishBattleResultAt = -999f;
+            fishCatchEventAt = -999f;
+            lastLoggedFishBiteAt = -999f;
+            lastLoggedFishResultAt = -999f;
             lastCastSentAt = -999f;
             nextWorldReadyLogAt = -999f;
             nextRuntimeReadyLogAt = -999f;
@@ -609,6 +693,10 @@ namespace HeartopiaMod
             float now = Time.unscaledTime;
             try
             {
+                // Register the fishing event hooks while fishing automation is active (engine installs
+                // the detours lazily). They give exact bite/result/catch transitions; see below.
+                EnsureFishingEventHooks(host);
+
                 // Install the NotifyFloatInWater detour once (lazy; before any cast) so the game's own
                 // successLength send carries -2 at the source. Idempotent / tried-guarded.
                 if (instantCatchEnabled)
@@ -616,12 +704,34 @@ namespace HeartopiaMod
                     host.EnsureNotifyFloatInWaterHook();
                 }
 
+                // Event-precise per-cast diagnostics (bite/result) — fire exactly when the game
+                // dispatches CmdOnFishBait / CmdFishBattleResult, independent of the polled state.
+                if (instantCatchEnabled)
+                {
+                    if (fishBiteEventAt > lastLoggedFishBiteAt)
+                    {
+                        lastLoggedFishBiteAt = fishBiteEventAt;
+                        float dtBiteCast = host.InstantCatchCastAt > 0f ? fishBiteEventAt - host.InstantCatchCastAt : -1f;
+                        host.InstantCatchDiag("cast#" + instantCatchCastSeq + " EVENT-BITE shadow=" + fishBiteShadowNetId
+                            + " after " + dtBiteCast.ToString("F2") + "s from cast");
+                    }
+                    if (fishBattleResultAt > lastLoggedFishResultAt)
+                    {
+                        lastLoggedFishResultAt = fishBattleResultAt;
+                        float dtResCast = host.InstantCatchCastAt > 0f ? fishBattleResultAt - host.InstantCatchCastAt : -1f;
+                        float dtResBite = fishBiteEventAt > 0f ? fishBattleResultAt - fishBiteEventAt : -1f;
+                        host.InstantCatchDiag("cast#" + instantCatchCastSeq + " EVENT-RESULT success=" + fishBattleResultSuccess
+                            + " fishId=" + fishBattleResultFishId + " after " + dtResCast.ToString("F2") + "s from cast, "
+                            + dtResBite.ToString("F2") + "s from bite");
+                    }
+                }
+
                 // High-frequency buoy resend — runs EVERY frame (not gated by nextActionAt), so the
                 // collapsed successLength is refreshed within ~1 frame of the bite/buoy-activation.
                 // Uses the active flag cached by the decision loop; harmlessly no-ops if not fishing.
                 // Send Rate 0 = disable our timed buoy resend entirely (the NotifyFloatInWater detour
                 // already rewrites successLength to -2 at source). Avoids a divide-by-zero too.
-                if (instantCatchEnabled && instantCatchActiveCached && instantCatchSendHz > 0f && now >= nextHighFreqInstantAt)
+                if (instantCatchEnabled && (instantCatchActiveCached || now < instantCatchEventActiveUntil) && instantCatchSendHz > 0f && now >= nextHighFreqInstantAt)
                 {
                     nextHighFreqInstantAt = now + (1f / instantCatchSendHz);
                     if (host.TryArmFishingInstantCatch(out _))
@@ -1288,6 +1398,12 @@ namespace HeartopiaMod
             lastBattleLostBaitAt = -999f;
             ignoreStaleFishingStateUntil = -999f;
             lastBattleBaitNetId = 0U;
+            instantCatchEventActiveUntil = -999f;
+            fishBiteEventAt = -999f;
+            fishBattleResultAt = -999f;
+            fishCatchEventAt = -999f;
+            lastLoggedFishBiteAt = -999f;
+            lastLoggedFishResultAt = -999f;
             lastCastSentAt = -999f;
             nextWorldReadyLogAt = -999f;
             nextRuntimeReadyLogAt = -999f;

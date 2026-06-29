@@ -4,6 +4,14 @@ How Heartopia's in-game event bus works, how the mod can (and can't) plug into i
 and the full catalogue of event types. The flat list of all ~1450 events lives in
 [GAME_EVENTS_LIST.md](GAME_EVENTS_LIST.md).
 
+> **Events-first policy.** When adding a new feature or reworking an existing one that **reacts to a
+> game state change**, search [GAME_EVENTS_LIST.md](GAME_EVENTS_LIST.md) for a suitable event and
+> prefer a hook (`RegisterGameEventHook` / `RegisterGameEventHookByNetId`, §3) over per-frame polling
+> or AuraMono scans — using the event-primary + poll-fallback pattern (`IsGameEventHookInstalled`).
+> Keep polling only for genuinely *continuous* per-frame values (camera-dependent ESP projection,
+> battle reel pull-strength — events mark *transitions*, not continuous state) or where the existing
+> poll is already cheap and build-independent (Unity uGUI text-input focus). See AGENTS.md §7/§10.
+
 ---
 
 ## 1. The bus: `XDTGame.Core.EventCenter`
@@ -258,6 +266,22 @@ re-resolved from `staticId` at capture (`TryAddSynthesizedNetCookBurnerTargets`)
 | `CollectObjectShowEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 8 | `netId`(uint)@0, `show`(bool)@4 | **fully scalar** — collectable show/hide |
 | `RefreshBackPackEvent` | `XDTDataAndProtocol.Events` | 4 | `storageType`(EStorageType=int)@0 | bag changed (any mutation); `EStorageType.Backpack=1`. Used by **AutoSell** as a "bag dirty" signal — the periodic scan/sell is skipped when no backpack event arrived since the last scan (hook registered on enable; falls back to always-scan until installed) |
 | `RefreshBackPackGridEvent` | `XDTDataAndProtocol.Events` | 16 | `storageType`(int)@0, `isRemove`(bool)@4, `isAdd`(bool)@5, `gridId`(long)@8 | precise per-slot add/remove (`StorageBase.AddItem` sets `isAdd=true`, `gridId=0`); `DataCreated<BackpackItem>` (nested generic) carries the full added item |
+
+#### Fishing events (all global)
+
+All dispatched globally from `FishingProtocolManager` / `HandHoldFishingRod` (`EventCenter.DispatchEvent(in @event)`). Consumer: [`AutoFishingFarm`](../buddy/AutoFishingFarm.cs) — uses the bite/buoy events to open a low-latency Instant-Catch activation window and the bite/result events for exact per-cast diagnostics. The **continuous** battle/reel control (pull strength, pressed) stays per-frame polled — events only mark transitions.
+
+| Event | `payloadBytes` | Fields (offset) | Phase |
+|---|---|---|---|
+| `CmdCastRodResult` | 4 | `result`(bool)@0 | cast confirmed |
+| `CmdActivateRodBuoyResult` | 4 | `result`(bool)@0 | float/buoy active (in water) |
+| `CmdSetOnBaitFishShadowId` | 8 | `fishShadowNetId`(uint)@0, `needShowOff`(bool)@4 | fish targeting bait |
+| `CmdOnFishBait` | 4 | `fishShadowNetId`(uint)@0 | **bite** (fish on bait) |
+| `InformBattleStart` | 0 | *(empty)* | battle started |
+| `CmdFishBattleResult` | 12 | `result`(bool)@0, `fishId`(int)@4, `failReason`(enum)@8 | **catch result** |
+| `PlayerCatchFish` | 8 | `playerNetId`(uint)@0, `fishNetId`(uint)@4 | fish caught |
+| `ResetFishState` | 0 | *(empty)* | cycle reset (recast point) |
+| `FishingStickInputUpdated` | 8 | `input`(Vector2)@0 | reel stick input (**continuous** — stays per-frame) |
 | `BottomDialogEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 12 | `message`(string ref)@0 **unreadable**, `active`(bool)@8 | read `active` only; `clickCallback`(Action ref) is the real confirm action but ref-unreadable |
 | `UIPanelOpenEvent` / `UIPanelCloseEvent` | `XDTGame.Framework.UI` | — | `panelType`(System.Type ref)@0 **unreadable** | universal panel open/close, but needs a mono-`Type*`→name resolver to be useful |
 
