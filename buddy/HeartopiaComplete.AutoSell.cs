@@ -124,6 +124,10 @@ namespace HeartopiaMod
             if (this.autoSellEnabled != prevEnabled)
             {
                 this.nextAutoSellAt = 0f;
+                if (this.autoSellEnabled)
+                {
+                    this.autoSellBackpackDirty = true; // force a scan on the first tick after enabling
+                }
                 this.autoSellStatus = this.autoSellEnabled ? "Enabled" : "Disabled";
                 try { this.SaveKeybinds(false); } catch { }
                 this.AddMenuNotification("Auto Sell " + (this.autoSellEnabled ? "Enabled" : "Disabled"), this.autoSellEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
@@ -765,17 +769,31 @@ namespace HeartopiaMod
             {
                 return;
             }
+
+            // The backpack-change hook is installed only while Auto Sell is enabled (first enabled
+            // tick). Its handler marks the bag dirty on RefreshBackPackEvent.
+            this.EnsureAutoSellEventHooks();
+
             if (Time.unscaledTime < this.nextAutoSellAt)
             {
                 return;
             }
 
             this.nextAutoSellAt = Time.unscaledTime + Mathf.Clamp(this.autoSellInterval, 1f, 120f);
+
+            // If the hook is live and nothing was added/changed in the backpack since the last scan,
+            // there is nothing new to sell — skip the scan/sell entirely. Fall back to always-scan
+            // until the detour installs (engine lazy install / hard failure) so behaviour can't regress.
+            if (this.IsGameEventHookInstalled(AutoSellBackpackEventName) && !this.autoSellBackpackDirty)
+            {
+                return;
+            }
+
             Breadcrumbs.Drop("AutoSell.scan");
             if (string.IsNullOrWhiteSpace(this.GetActiveAutoSellMatchKey()) || this.GetActiveAutoSellMatchKey().Length < 2)
             {
                 this.autoSellStatus = "Waiting for item selection";
-                return;
+                return; // don't consume the dirty flag — retry once ready
             }
             if (this.isRepairing || this.isAutoEating)
             {
@@ -788,7 +806,42 @@ namespace HeartopiaMod
                 return;
             }
 
+            // About to scan the current bag state — consume the dirty flag. Selling re-marks it via
+            // the resulting removal events, which costs at most one extra no-op scan next tick.
+            this.autoSellBackpackDirty = false;
             this.ExecuteDirectAutoSell(true);
+        }
+
+        // RefreshBackPackEvent (XDTDataAndProtocol.Events) is a GLOBAL event dispatched by
+        // StorageBase.AddItem on every item add (and other bag mutations); payload is just
+        // EStorageType storageType @0. We use it as a "bag dirty" signal for the periodic Auto Sell
+        // scan. See docs/GAME_EVENTS.md.
+        private const string AutoSellBackpackEventName = "XDTDataAndProtocol.Events.RefreshBackPackEvent";
+        private const int AutoSellBackpackEventBytes = 4;
+        private const int AutoSellBackpackStorageType = 1; // EStorageType.Backpack
+
+        private bool autoSellEventHooksRegistered;
+        private bool autoSellBackpackDirty = true; // scan on the first run
+
+        private void EnsureAutoSellEventHooks()
+        {
+            if (this.autoSellEventHooksRegistered)
+            {
+                return;
+            }
+
+            this.autoSellEventHooksRegistered = true;
+            this.RegisterGameEventHook(AutoSellBackpackEventName, AutoSellBackpackEventBytes, this.OnAutoSellRefreshBackPackEvent);
+        }
+
+        // Runs on the Unity main thread (event drain). Marks the player backpack dirty so the next
+        // Auto Sell tick scans; mutations of other storages (warehouse, garage, …) are ignored.
+        private void OnAutoSellRefreshBackPackEvent(GameEventSnapshot e)
+        {
+            if (e.ReadInt32(0) == AutoSellBackpackStorageType)
+            {
+                this.autoSellBackpackDirty = true;
+            }
         }
 
         private bool ExecuteDirectAutoSell(bool fromAuto)

@@ -814,6 +814,7 @@ namespace HeartopiaMod
             this.netCookLevelObjectNetId = 0UL;
             this.netCookSentCount = 0;
             this.netCookTargets.Clear();
+            this.netCookStatusCache.Clear(); // drop event-cached statuses (avoid netId-recycle staleness)
             this.netCookMaterialNetIds.Clear();
             this.netCookDrainAfterIngredientsRunOut = false;
             this.netCookDrainReason = null;
@@ -1679,6 +1680,150 @@ namespace HeartopiaMod
             return false;
         }
 
+        // ---- Event-driven cooking status (see docs/GAME_EVENTS.md). UpdateCookingStatusEvent is a
+        // GLOBAL event dispatched by CookingComponent on every cooker status change, carrying the
+        // CookingComponentData struct inline. We cache the latest status per cookNetId and read it
+        // instead of the per-stove AuraMono component poll. ----
+        private const string UpdateCookingStatusEventName = "XDTDataAndProtocol.Events.UpdateCookingStatusEvent";
+        // Layout: levelObjectNetId(ulong)@0, cookNetId(uint)@8, textId(int)@12, data(CookingComponentData)@16.
+        // Inside data: Status(int)@24, FoodQuality(int)@44, FoodItemId(int)@56. Total 64 bytes.
+        private const int UpdateCookingStatusEventBytes = 64;
+
+        private struct NetCookStatusCacheEntry
+        {
+            public int Status;
+            public int FoodQuality;
+            public int FoodItemId;
+            public float UpdatedAt;
+        }
+
+        private readonly Dictionary<uint, NetCookStatusCacheEntry> netCookStatusCache = new Dictionary<uint, NetCookStatusCacheEntry>();
+        private bool netCookEventHooksRegistered;
+
+        private void EnsureNetCookEventHooks()
+        {
+            if (this.netCookEventHooksRegistered)
+            {
+                return;
+            }
+
+            this.netCookEventHooksRegistered = true;
+            this.RegisterGameEventHook(UpdateCookingStatusEventName, UpdateCookingStatusEventBytes, this.OnUpdateCookingStatusEvent);
+        }
+
+        // Runs on the Unity main thread (event drain). Reads CookingComponentData scalars by offset.
+        private void OnUpdateCookingStatusEvent(GameEventSnapshot e)
+        {
+            ulong levelObjectNetId = e.ReadUInt64(0);
+            uint cookNetId = e.ReadUInt32(8);
+            int statusValue = e.ReadInt32(24);
+
+            // Diagnostic (capped, unconditional) — confirms the handler fires and shows decoded fields.
+            this.netCookEventDiagCount++;
+            if (this.netCookEventDiagCount <= 12)
+            {
+                this.NetCookHookLog("CookingStatusEvent #" + this.netCookEventDiagCount
+                    + " cook=" + cookNetId + " status=" + statusValue
+                    + " levelObj=" + levelObjectNetId + " owner=" + ExtractNetCookOwnerNetId(levelObjectNetId));
+            }
+
+            // Status cache needs a valid burner netId + in-range status (CookingStatus is Idle(0)..
+            // Failed(6); out-of-range = wrong offset/layout, don't cache garbage).
+            if (cookNetId != 0U && statusValue >= 0 && statusValue <= 6)
+            {
+                NetCookStatusCacheEntry entry;
+                entry.Status = statusValue;
+                entry.FoodQuality = e.ReadInt32(44);
+                entry.FoodItemId = e.ReadInt32(56);
+                entry.UpdatedAt = Time.unscaledTime;
+                this.netCookStatusCache[cookNetId] = entry;
+            }
+            else if (cookNetId != 0U && (statusValue < 0 || statusValue > 6))
+            {
+                this.NetCookLog("UpdateCookingStatusEvent unexpected status=" + statusValue + " for cookNetId=" + cookNetId + " (offset/layout check)");
+            }
+
+            // Incremental cooker discovery keys off levelObjectNetId (NOT cookNetId, which can be 0 at
+            // OnSpawned), so it runs independently. Replaces the dead CookBuildComponent.OnSpawned
+            // Harmony hook; only POPULATES the registry — Capture distance-culls via
+            // RemoveOutOfRangeNetCookTargets, so no distance check here.
+            this.TryRegisterNetCookWorldCookerFromCookingEvent(levelObjectNetId);
+        }
+
+        // Resolve the owner (CookBuild) from the event's levelObjectNetId and register it (once) with
+        // its staticId/cookerType via the same AuraMono path Capture uses. Owner-keyed, so Capture's
+        // synth path expands it into all its burners.
+        private void TryRegisterNetCookWorldCookerFromCookingEvent(ulong levelObjectNetId)
+        {
+            if (levelObjectNetId == 0UL)
+            {
+                return;
+            }
+
+            uint ownerNetId = ExtractNetCookOwnerNetId(levelObjectNetId);
+            if (ownerNetId == 0U || this.netCookRegisteredWorldCookers.ContainsKey(ownerNetId))
+            {
+                return; // unknown id or already registered
+            }
+
+            bool diag = this.netCookEventRegDiagCount < 12;
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    if (diag) { this.netCookEventRegDiagCount++; this.NetCookHookLog("Event reg owner=" + ownerNetId + " skipped: AuraMono not ready."); }
+                    return; // retry on a later status event for this cooker
+                }
+
+                if (!this.TryGetAuraMonoEntityObjectByNetId(ownerNetId, out IntPtr ownerEntityObj) || ownerEntityObj == IntPtr.Zero)
+                {
+                    if (diag) { this.netCookEventRegDiagCount++; this.NetCookHookLog("Event reg owner=" + ownerNetId + " skipped: owner entity not resolvable."); }
+                    return;
+                }
+
+                if (!this.TryResolveNetCookBuildComponentAuraMono(ownerEntityObj, out IntPtr cookBuildComponentObj, out string cookBuildStatus))
+                {
+                    if (diag) { this.netCookEventRegDiagCount++; this.NetCookHookLog("Event reg owner=" + ownerNetId + " skipped: no CookBuildComponent (" + cookBuildStatus + ")."); }
+                    return;
+                }
+
+                int cookerStaticId = 0;
+                this.TryGetMonoInt32Member(cookBuildComponentObj, "_cookerStaticId", out cookerStaticId);
+                if (cookerStaticId <= 0)
+                {
+                    this.TryGetMonoInt32Member(cookBuildComponentObj, "cookerStaticId", out cookerStaticId);
+                }
+                if (cookerStaticId <= 0)
+                {
+                    if (diag) { this.netCookEventRegDiagCount++; this.NetCookHookLog("Event reg owner=" + ownerNetId + " skipped: staticId unresolved."); }
+                    return; // no staticId -> registry entry would be skipped at capture anyway
+                }
+
+                int cookerType = 0;
+                this.TryGetCookerTypeForStaticId(cookerStaticId, out cookerType);
+
+                this.RegisterNetCookWorldCooker(ownerNetId, 0, cookerStaticId, cookerType);
+
+                // Visible confirmation (NetCookHookLog is unconditional, unlike the debug-gated log
+                // inside RegisterNetCookWorldCooker). Capped so a stove-dense town doesn't spam.
+                this.netCookEventRegisterCount++;
+                if (this.netCookEventRegisterCount <= 8 || this.netCookEventRegisterCount % 25 == 0)
+                {
+                    this.NetCookHookLog("Event-registered world cooker owner=" + ownerNetId
+                        + " static=" + cookerStaticId + " type=" + cookerType
+                        + " (count=" + this.netCookEventRegisterCount + ").");
+                }
+            }
+            catch (Exception ex)
+            {
+                this.NetCookLog("Event cooker registration failed for owner=" + ownerNetId + ": " + ex.Message);
+            }
+        }
+
+        private int netCookEventRegisterCount;
+        private int netCookEventDiagCount;
+        private int netCookEventRegDiagCount;
+
         private bool TryGetNetCookTargetCookingStatus(NetCookTargetContext target, out int cookingStatus, out int resultRecipeId, out int foodQuality, out string status)
         {
             cookingStatus = -1;
@@ -1688,6 +1833,18 @@ namespace HeartopiaMod
 
             try
             {
+                // Prefer the event-driven cache (UpdateCookingStatusEvent) — avoids the per-stove
+                // AuraMono component read. Falls back to the AuraMono path until the first status
+                // event for this cooker arrives (or if the event hook never installs).
+                if (this.netCookStatusCache.TryGetValue(target.CookerNetId, out NetCookStatusCacheEntry cached))
+                {
+                    cookingStatus = cached.Status;
+                    foodQuality = cached.FoodQuality;
+                    resultRecipeId = cached.FoodItemId; // CookingComponentData.FoodItemId = cooked food id
+                    status = "Cooking status (event cache).";
+                    return true;
+                }
+
                 if (!this.TryGetAuraMonoEntityObjectByNetId(target.CookerNetId, out IntPtr burnerEntityObj) || burnerEntityObj == IntPtr.Zero)
                 {
                     status = "AuraMono burner entity missing.";
@@ -1842,6 +1999,7 @@ namespace HeartopiaMod
                 int previousCookerStaticId = this.netCookCookerStaticId;
                 int previousCookerType = this.netCookCookerType;
                 this.netCookTargets.Clear();
+                this.netCookStatusCache.Clear();
                 bool resolvedTargets = this.TryResolveNetCookContextsFromCurrentTarget(this.netCookTargets, out string multiCaptureStatus, true);
                 uint cookerNetId = 0U;
                 int cookerStaticId = 0;

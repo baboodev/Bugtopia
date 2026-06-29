@@ -215,6 +215,40 @@ Note: high-frequency in dense towns — only process while a feature needs it an
 qualify check light. There is **no** dedicated `DataCreated<CookBuildComponent>` ("cooker appeared")
 event; cookers are detected by filtering `EntityCreateEvent` netIds for `CookBuildComponent`.
 
+**Measured frequency & filtering (in-world 2026-06-30, `MasterLogEntityEvents`).** Very high and
+bursty: ~**1650/s** during a scene/world-epoch load, **hundreds/s** in bursts during play.
+Critically, **most creates have `netId == 0`** — local/non-networked view entities (one archetype,
+`1:53`, dominates the spam). Real networked objects (cookers, players, pets, props) have `netId != 0`.
+So the first filter is a cheap `if (netId == 0) return;` in the handler, which drops the bulk. Even
+the `netId != 0` subset still bursts to **~210/s** (and ~870/s on load), so a per-create AuraMono
+component check is **not** viable blanket — it needs an archetype prefilter (`archetypeId`@24: read
+the cooker archetype off a known stove once, then component-check only matching `bucket:index`).
+**Verdict:** `EntityCreateEvent` is a valid *generic* "object on map" channel but heavy; prefer a
+targeted event when one exists.
+
+**For cookers specifically, do NOT use `EntityCreateEvent`.** `CookingComponent.OnSpawned` calls
+`_OnComponentDataUpdated()` → dispatches `UpdateCookingStatusEvent` ([CookingComponent.cs:362](../ilspy-dumps/XDTLevelAndEntity/XDTLevelAndEntity.Gameplay.Component.Homeland/CookingComponent.cs)),
+so a stove is already seen at stream-in (and on `OnUnSpawn`) through the cooking-status hook NetCook
+already installs. **Implemented & confirmed in-world (2026-06-30):** `OnUpdateCookingStatusEvent` →
+`TryRegisterNetCookWorldCookerFromCookingEvent` derives the owner (`ExtractNetCookOwnerNetId(levelObjectNetId)`
+= low 32 bits), resolves staticId/cookerType via the same AuraMono path Capture uses, and registers it
+(once) into `netCookRegisteredWorldCookers` — no `EntityCreateEvent`, no archetype guessing, no
+per-create check. Log confirmed: `Event-registered world cooker owner=… static=370001 type=0`
+accumulating. It only **populates** the registry; Capture still gates which stoves are used and culls
+far ones via `RemoveOutOfRangeNetCookTargets` (so no distance check in the handler). This replaces the
+dead `CookBuildComponent.OnSpawned/OnComponentUpdated` Harmony hooks (their managed type is absent on
+this AuraMono-only build).
+
+The hook is registered **unconditionally from `OnUpdate`** (not gated on NetCook being active) so the
+engine installs the detour at world-entry — early enough to catch most stove `OnSpawned`. **Timing
+caveat (why "install earlier" can't fully solve it):** the detour cannot exist before its event type
+is loaded, and `UpdateCookingStatusEvent` / `EventCenter` / `CookingComponent` load *lazily on town
+entry* — i.e. at essentially the same moment the stoves stream in and dispatch `OnSpawned`. So stoves
+already loaded in the first frames of the very first town are missed by the event and are only found by
+the Capture `GetComponents<CookBuildComponent>` scan; a one-time scan-seed after a world-epoch change
+would close that gap (not implemented). `cookerType` often resolves to 0 at registration but is
+re-resolved from `staticId` at capture (`TryAddSynthesizedNetCookBurnerTargets`), so it's harmless.
+
 #### Other verified payloads
 
 | Event | Namespace | `payloadBytes` | Fields (offset) | Notes |
@@ -222,6 +256,8 @@ event; cookers are detected by filtering `EntityCreateEvent` netIds for `CookBui
 | `InstrumentPanelOpenEvent` | `XDTDataAndProtocol.Events` | 24 | `InstrumentType`(int)@0, `instrumentNetId`(uint)@4, `instrumentLevelObjectNetId`(ulong)@8, `staticId`(int)@16 | hooked by InstrumentHotkeyGuard |
 | `InstrumentPanelCloseEvent` | `XDTDataAndProtocol.Events` | 0 | *(empty)* | dispatch-only signal |
 | `CollectObjectShowEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 8 | `netId`(uint)@0, `show`(bool)@4 | **fully scalar** — collectable show/hide |
+| `RefreshBackPackEvent` | `XDTDataAndProtocol.Events` | 4 | `storageType`(EStorageType=int)@0 | bag changed (any mutation); `EStorageType.Backpack=1`. Used by **AutoSell** as a "bag dirty" signal — the periodic scan/sell is skipped when no backpack event arrived since the last scan (hook registered on enable; falls back to always-scan until installed) |
+| `RefreshBackPackGridEvent` | `XDTDataAndProtocol.Events` | 16 | `storageType`(int)@0, `isRemove`(bool)@4, `isAdd`(bool)@5, `gridId`(long)@8 | precise per-slot add/remove (`StorageBase.AddItem` sets `isAdd=true`, `gridId=0`); `DataCreated<BackpackItem>` (nested generic) carries the full added item |
 | `BottomDialogEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 12 | `message`(string ref)@0 **unreadable**, `active`(bool)@8 | read `active` only; `clickCallback`(Action ref) is the real confirm action but ref-unreadable |
 | `UIPanelOpenEvent` / `UIPanelCloseEvent` | `XDTGame.Framework.UI` | — | `panelType`(System.Type ref)@0 **unreadable** | universal panel open/close, but needs a mono-`Type*`→name resolver to be useful |
 
@@ -238,6 +274,29 @@ Cat events dispatch **globally** (hook with `RegisterGameEventHook`); dog events
 | `TeaseDogRoundBeginEvent` | **per-netId** ([PetProtocolManager](../ilspy-dumps/XDTDataAndProtocol/XDTDataAndProtocol.ProtocolService.Pet/PetProtocolManager.cs)) | 0 | *(empty; netId = the dog)* | kicks the dog resolver (choice needs live learning/motion state) |
 | `PetTeaseQteResultEvent` | **per-netId** | 8 | `result`(PetTeaseQteResult=int)@0, `isSelfPet`(bool)@4 | dog QTE result |
 | `TeaseDogPlayEvent` | **per-netId** | 0 | *(empty)* | dog play session signal |
+
+#### Cooking events (all global)
+
+All dispatch via `EventCenter.DispatchEvent(in @event)` (global). Consumer: [`HeartopiaComplete.NetCook.cs`](../buddy/HeartopiaComplete.NetCook.cs) caches `UpdateCookingStatusEvent` per `cookNetId` to drive the cook state machine without the per-stove AuraMono status poll (cache-first in `TryGetNetCookTargetCookingStatus`, AuraMono fallback until the first event / if the hook never installs).
+
+| Event | Namespace | `payloadBytes` | Fields (offset) | Notes |
+|---|---|---|---|---|
+| **`UpdateCookingStatusEvent`** | `XDTDataAndProtocol.Events` | 64 | `levelObjectNetId`(ulong)@0, `cookNetId`(uint)@8, `textId`(int)@12, **`data`** = `CookingComponentData` (struct, inline) @16 | the prize — fires on every cooker status change; `data` carries the full status |
+| `StartCookEvent` | `ScriptsRefactory…Events` | 24 | `cookerNetId`(uint)@0, `levelObjectNetId`(ulong)@8, `cookWithoutRice`(bool)@16, `foodItemId`(int)@20 | cooking started (prepare succeeded) |
+| `CookResultEvent` | `ScriptsRefactory…Events` | 24 | `cookerNetId`(uint)@0, `levelObjectNetId`(ulong)@8, `interaction`(CookingInteraction enum)@16 | cook interaction result |
+| `UpdateCookingRecentEvent` | `XDTDataAndProtocol.Events` | — | `recentRecipes`(**List\<int\> ref**) | ❌ ref field — unreadable by offset |
+
+`CookingComponentData` (inlined in `UpdateCookingStatusEvent.data` at +16, 48 bytes) — scalar fields read by offset off the event base:
+
+| `data` field | type | event offset |
+|---|---|---|
+| `Status` | `CookingStatus`(int) | **24** ← `Idle=0,Preparing=1,Cooking=2,Danger=3,Relief=4,Succeed=5,Failed=6` |
+| `FoodQuality` | int | 44 |
+| `BaseProgress` | float | 52 |
+| `FoodItemId` | int | 56 (cooked food id) |
+| `OwnerNetId` | uint | 60 |
+
+`UpdateCookingStatusEvent` is exactly 64 bytes = `EventPayloadCap` — if a patch adds fields to `CookingComponentData` the tail truncates; bump `EventPayloadCap`. The NetCook handler guards `Status ∈ [0,6]` and skips caching otherwise (catches a layout/offset drift without crashing).
 
 #### Per-component events (`DataCreated<T>` / `DataRemoved<T>`)
 

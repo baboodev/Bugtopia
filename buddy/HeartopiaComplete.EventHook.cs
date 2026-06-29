@@ -565,6 +565,81 @@ namespace HeartopiaMod
             }
         }
 
+        // ---- EntityCreate/Remove verification PoC (the generic "object appeared on the map"
+        // channel). High-frequency, so we don't log each one — we count them and emit a throttled
+        // summary + a sample netId/archetype so the EntityData netId@8 offset can be confirmed live
+        // and the frequency measured before wiring a feature (e.g. NetCook stove detection) to it. ----
+        internal const bool MasterLogEntityEvents = false; // debug toggle for the summary log (measured; off)
+
+        private const string EntityCreateEventName = "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityCreateEvent";
+        private const string EntityRemoveEventName = "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityRemoveEvent";
+        // EntityData: level(sbyte)@0, entityId(uint)@4, netId(uint)@8, field(uint)@12, tag(ulong)@16,
+        // archetypeId(short bucket@24/index@26), _priority(int)@28 → 32 bytes.
+        private const int EntityEventBytes = 32;
+        private const float EntityEventLogInterval = 3f;
+
+        private bool entityEventDebugRegistered;
+        private int entityCreateCount;
+        private int entityCreateNonZeroCount; // creates with netId != 0 (the networked ones we'd qualify)
+        private int entityRemoveCount;
+        private uint entityLastCreateNetId;
+        private uint entityLastRemoveNetId;
+        private int entityLastCreateArch;
+        private float entityEventNextLogAt;
+
+        private void ProcessEntityEventDebugOnUpdate()
+        {
+            if (!MasterLogEntityEvents)
+            {
+                return;
+            }
+
+            if (!this.entityEventDebugRegistered)
+            {
+                this.entityEventDebugRegistered = true;
+                this.RegisterGameEventHook(EntityCreateEventName, EntityEventBytes, this.OnEntityCreateDebug);
+                this.RegisterGameEventHook(EntityRemoveEventName, EntityEventBytes, this.OnEntityRemoveDebug);
+            }
+
+            if (UnityEngine.Time.unscaledTime < this.entityEventNextLogAt)
+            {
+                return;
+            }
+            this.entityEventNextLogAt = UnityEngine.Time.unscaledTime + EntityEventLogInterval;
+
+            if (this.entityCreateCount > 0 || this.entityRemoveCount > 0)
+            {
+                int bucket = (short)(this.entityLastCreateArch & 0xFFFF);
+                int index = (short)((this.entityLastCreateArch >> 16) & 0xFFFF);
+                ModLogger.Msg("[EntityEvents] +" + this.entityCreateCount + " (nz=" + this.entityCreateNonZeroCount + ") / -" + this.entityRemoveCount
+                    + " in " + EntityEventLogInterval + "s; lastNzCreate netId=" + this.entityLastCreateNetId
+                    + " arch=" + bucket + ":" + index + "; lastRemove netId=" + this.entityLastRemoveNetId);
+                this.entityCreateCount = 0;
+                this.entityCreateNonZeroCount = 0;
+                this.entityRemoveCount = 0;
+            }
+        }
+
+        private void OnEntityCreateDebug(GameEventSnapshot e)
+        {
+            this.entityCreateCount++;
+            uint netId = e.ReadUInt32(8);
+            if (netId != 0u)
+            {
+                // Only the networked entities matter for feature detection (cookers etc.); sample
+                // those so the archetype/netId shown isn't drowned out by the netId=0 local spam.
+                this.entityCreateNonZeroCount++;
+                this.entityLastCreateNetId = netId;
+                this.entityLastCreateArch = e.ReadInt32(24);
+            }
+        }
+
+        private void OnEntityRemoveDebug(GameEventSnapshot e)
+        {
+            this.entityRemoveCount++;
+            this.entityLastRemoveNetId = e.ReadUInt32(8);
+        }
+
         // Cheap scalar dump for MasterLogGameEvents discovery: first few int/uint words.
         private static string GameEventScalarDump(byte[] buf, int len)
         {

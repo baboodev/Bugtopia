@@ -651,6 +651,11 @@ namespace HeartopiaMod
             {
                 this.EnsureBirdPhotoRuntimeProbePatch();
             }
+            // Register the cooking-status event hook UNCONDITIONALLY (not gated on NetCook being
+            // active) so the engine installs the detour at world-entry — early enough to catch
+            // CookingComponent.OnSpawned for stoves as they stream in. Gating it behind the menu/
+            // active check (below) installed it too late and missed the spawn burst.
+            this.EnsureNetCookEventHooks();
             if (this.netCookEnabled || this.netCookTargets.Count > 0 || (this.showMenu && this.selectedTab == 3 && this.automationSubTab == 5))
             {
                 this.EnsureNetCookWorldCookerRegistrationPatch();
@@ -719,6 +724,7 @@ namespace HeartopiaMod
             this.ProcessAutoIceSkatingOnUpdate();
             this.ProcessBubbleFeatureOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
+            this.ProcessEntityEventDebugOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
             bool flag2 = HeartopiaComplete.OverridePlayerPosition && this.teleportFramesRemaining > 0;
