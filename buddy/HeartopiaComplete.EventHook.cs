@@ -38,6 +38,12 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void DispatchEventHookDelegate(IntPtr eventPtr);
 
+        // Per-entity EventCenter.DispatchEvent<T>(uint netId, in T): static, (uint, pointer) args,
+        // void return. Used for events dispatched per-netId (e.g. dog QTE: TeaseDogRoundBeginEvent,
+        // PetTeaseQteResultEvent) — a DIFFERENT method from the global 1-arg dispatcher.
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void DispatchEventByNetIdHookDelegate(uint netId, IntPtr eventPtr);
+
         // mono_compile_method returns the native code pointer; the engine's shared
         // auraMonoCompileMethod delegate is declared void, so resolve our own IntPtr-returning one.
         private delegate IntPtr EventHookCompileMethodDelegate(IntPtr method);
@@ -52,33 +58,40 @@ namespace HeartopiaMod
             private readonly byte[] _data;
             private readonly int _len;
 
-            public GameEventSnapshot(string eventName, byte[] data, int len)
+            public GameEventSnapshot(string eventName, uint netId, byte[] data, int len)
             {
                 this.EventName = eventName;
+                this.NetId = netId;
                 this._data = data;
                 this._len = len;
             }
 
             public string EventName { get; }
+
+            // For per-netId events the dispatch netId (e.g. the dog's netId); 0 for global events.
+            public uint NetId { get; }
             public int Length => this._len;
 
             public int ReadInt32(int offset) => (this._data != null && offset >= 0 && offset + 4 <= this._len) ? BitConverter.ToInt32(this._data, offset) : 0;
             public uint ReadUInt32(int offset) => (this._data != null && offset >= 0 && offset + 4 <= this._len) ? BitConverter.ToUInt32(this._data, offset) : 0u;
             public ulong ReadUInt64(int offset) => (this._data != null && offset >= 0 && offset + 8 <= this._len) ? BitConverter.ToUInt64(this._data, offset) : 0ul;
             public float ReadSingle(int offset) => (this._data != null && offset >= 0 && offset + 4 <= this._len) ? BitConverter.ToSingle(this._data, offset) : 0f;
+            public byte ReadByte(int offset) => (this._data != null && offset >= 0 && offset < this._len) ? this._data[offset] : (byte)0;
+            public bool ReadBool(int offset) => this.ReadByte(offset) != 0;
         }
 
         private sealed class GameEventHookEntry
         {
             public string EventFullName;
             public int PayloadBytes;
+            public bool ByNetId; // true => hook the 2-arg DispatchEvent<T>(uint netId, in T) overload
             public readonly List<Action<GameEventSnapshot>> Handlers = new List<Action<GameEventSnapshot>>();
             public int Slot;
             public bool InstallAttempted;
             public bool Installed;
             public MonoMod.RuntimeDetour.NativeDetour Detour;
-            public DispatchEventHookDelegate HookKeepAlive; // anti-GC
-            public DispatchEventHookDelegate Trampoline;
+            public Delegate HookKeepAlive;  // anti-GC (global or by-netId body)
+            public Delegate Trampoline;
         }
 
         private readonly Dictionary<string, GameEventHookEntry> gameEventHooksByName = new Dictionary<string, GameEventHookEntry>(StringComparer.Ordinal);
@@ -89,6 +102,7 @@ namespace HeartopiaMod
         // Per-slot routing consumed by the static native bodies (no instance state, no closures).
         private static readonly int[] eventSlotPayloadLen = new int[MaxEventHookSlots];
         private static readonly DispatchEventHookDelegate[] eventSlotTrampoline = new DispatchEventHookDelegate[MaxEventHookSlots];
+        private static readonly DispatchEventByNetIdHookDelegate[] eventSlotTrampolineNetId = new DispatchEventByNetIdHookDelegate[MaxEventHookSlots];
 
         // Ring buffer. Producer (detour body) and consumer (OnUpdate drain) both run on the Unity
         // main thread — the game dispatches these events from gameplay/state code on the same thread
@@ -97,6 +111,7 @@ namespace HeartopiaMod
         private const int EventRingSize = 64; // power of two
         private static readonly byte[] eventRingSlot = new byte[EventRingSize];
         private static readonly int[] eventRingLen = new int[EventRingSize];
+        private static readonly uint[] eventRingNetId = new uint[EventRingSize];
         private static readonly byte[][] eventRingData = CreateEventRing();
         private static int eventRingWrite;
         private static int eventRingRead;
@@ -111,10 +126,25 @@ namespace HeartopiaMod
             return ring;
         }
 
-        // Register a handler for a game event. Idempotent per (name): re-registering the same event
-        // name adds another handler to the shared detour. payloadBytes = the event struct size from
-        // the dump (how many bytes to snapshot; clamp to EventPayloadCap). Use 0 for empty events.
+        // Register a handler for a GLOBAL game event (dispatched via DispatchEvent<T>(in T)).
+        // Idempotent per (name): re-registering the same name adds another handler to the shared
+        // detour. payloadBytes = the event struct size from the dump (bytes to snapshot; clamp to
+        // EventPayloadCap). Use 0 for empty events. The handler runs on the Unity main thread.
         internal bool RegisterGameEventHook(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler)
+        {
+            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, false, handler);
+        }
+
+        // Register a handler for a PER-ENTITY game event (dispatched via DispatchEvent<T>(uint
+        // netId, in T) — e.g. dog QTE events). The handler receives the dispatch netId in
+        // GameEventSnapshot.NetId. Same name must NOT also be registered as global (one overload per
+        // event type per slot).
+        internal bool RegisterGameEventHookByNetId(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler)
+        {
+            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, true, handler);
+        }
+
+        private bool RegisterGameEventHookInternal(string eventFullName, int payloadBytes, bool byNetId, Action<GameEventSnapshot> handler)
         {
             if (string.IsNullOrEmpty(eventFullName) || handler == null)
             {
@@ -125,6 +155,11 @@ namespace HeartopiaMod
 
             if (this.gameEventHooksByName.TryGetValue(eventFullName, out GameEventHookEntry existing))
             {
+                if (existing.ByNetId != byNetId)
+                {
+                    ModLogger.Msg("[EventHook] " + eventFullName + " already hooked with byNetId=" + existing.ByNetId + "; ignoring conflicting byNetId=" + byNetId);
+                    return false;
+                }
                 existing.Handlers.Add(handler);
                 if (clamped > existing.PayloadBytes)
                 {
@@ -147,6 +182,7 @@ namespace HeartopiaMod
             {
                 EventFullName = eventFullName,
                 PayloadBytes = clamped,
+                ByNetId = byNetId,
                 Slot = this.gameEventHookSlotCount
             };
             entry.Handlers.Add(handler);
@@ -213,16 +249,6 @@ namespace HeartopiaMod
                     return; // XDTBaseService image not loaded yet — retry later.
                 }
 
-                // The <T>(in T) overload has 1 parameter; the per-netId DispatchEvent<T>(uint, in T)
-                // overload has 2 — selecting by param count picks the global dispatcher.
-                IntPtr openDispatch = this.FindAuraMonoMethodOnHierarchy(eventCenterClass, "DispatchEvent", 1);
-                if (openDispatch == IntPtr.Zero)
-                {
-                    this.gameEventHooksHardFailed = true;
-                    ModLogger.Msg("[EventHook] EventCenter.DispatchEvent<T>(in T) (1-arg) not found — event hooks disabled");
-                    return;
-                }
-
                 IntPtr monoModule = this.GetAuraMonoModuleHandle();
                 EventHookCompileMethodDelegate compile = monoModule != IntPtr.Zero
                     ? this.GetAuraMonoExport<EventHookCompileMethodDelegate>(monoModule, "mono_compile_method")
@@ -242,7 +268,7 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    this.TryInstallGameEventDetour(entry, openDispatch, compile);
+                    this.TryInstallGameEventDetour(entry, eventCenterClass, compile);
                 }
             }
             catch (Exception ex)
@@ -252,8 +278,19 @@ namespace HeartopiaMod
             }
         }
 
-        private void TryInstallGameEventDetour(GameEventHookEntry entry, IntPtr openDispatch, EventHookCompileMethodDelegate compile)
+        private void TryInstallGameEventDetour(GameEventHookEntry entry, IntPtr eventCenterClass, EventHookCompileMethodDelegate compile)
         {
+            // Global events go through DispatchEvent<T>(in T) (1 param); per-netId events go through
+            // DispatchEvent<T>(uint netId, in T) (2 params). Select the overload by param count.
+            int argc = entry.ByNetId ? 2 : 1;
+            IntPtr openDispatch = this.FindAuraMonoMethodOnHierarchy(eventCenterClass, "DispatchEvent", argc);
+            if (openDispatch == IntPtr.Zero)
+            {
+                entry.InstallAttempted = true;
+                ModLogger.Msg("[EventHook] EventCenter.DispatchEvent (" + argc + "-arg) not found for " + entry.EventFullName);
+                return;
+            }
+
             // The event struct's image (e.g. XDTDataAndProtocol) may load after EventCenter. If the
             // class isn't resolvable yet, leave InstallAttempted=false so we retry on a later frame.
             IntPtr eventClass = this.FindAuraMonoClassByFullName(entry.EventFullName);
@@ -266,9 +303,9 @@ namespace HeartopiaMod
 
             try
             {
-                if (!this.TryInflateDispatchForEvent(openDispatch, eventClass, out IntPtr inflated))
+                if (!this.TryInflateDispatchForEvent(openDispatch, eventClass, argc, out IntPtr inflated))
                 {
-                    ModLogger.Msg("[EventHook] inflate DispatchEvent<" + entry.EventFullName + "> failed");
+                    ModLogger.Msg("[EventHook] inflate DispatchEvent<" + entry.EventFullName + "> (" + argc + "-arg) failed");
                     return;
                 }
 
@@ -279,25 +316,37 @@ namespace HeartopiaMod
                     return;
                 }
 
-                DispatchEventHookDelegate body = EventSlotBodies[entry.Slot];
+                Delegate body = entry.ByNetId ? (Delegate)EventNetIdSlotBodies[entry.Slot] : EventSlotBodies[entry.Slot];
                 entry.HookKeepAlive = body;
                 entry.Detour = new MonoMod.RuntimeDetour.NativeDetour(nativePtr, body);
-                entry.Trampoline = entry.Detour.GenerateTrampoline<DispatchEventHookDelegate>();
-                if (entry.Trampoline == null)
+
+                if (entry.ByNetId)
                 {
-                    // Without a way to call the original the game would stop dispatching this event —
-                    // revert so normal gameplay is untouched.
-                    entry.Detour.Undo();
-                    entry.Detour = null;
-                    entry.HookKeepAlive = null;
-                    ModLogger.Msg("[EventHook] trampoline unavailable for " + entry.EventFullName + "; detour reverted");
-                    return;
+                    DispatchEventByNetIdHookDelegate tramp = entry.Detour.GenerateTrampoline<DispatchEventByNetIdHookDelegate>();
+                    entry.Trampoline = tramp;
+                    if (tramp == null)
+                    {
+                        this.RevertHalfInstalledDetour(entry);
+                        return;
+                    }
+                    eventSlotTrampolineNetId[entry.Slot] = tramp;
+                }
+                else
+                {
+                    DispatchEventHookDelegate tramp = entry.Detour.GenerateTrampoline<DispatchEventHookDelegate>();
+                    entry.Trampoline = tramp;
+                    if (tramp == null)
+                    {
+                        this.RevertHalfInstalledDetour(entry);
+                        return;
+                    }
+                    eventSlotTrampoline[entry.Slot] = tramp;
                 }
 
                 eventSlotPayloadLen[entry.Slot] = entry.PayloadBytes;
-                eventSlotTrampoline[entry.Slot] = entry.Trampoline;
                 entry.Installed = true;
-                ModLogger.Msg("[EventHook] hooked " + entry.EventFullName + " @0x" + nativePtr.ToInt64().ToString("X") + " (slot " + entry.Slot + ")");
+                ModLogger.Msg("[EventHook] hooked " + entry.EventFullName + " @0x" + nativePtr.ToInt64().ToString("X")
+                    + " (slot " + entry.Slot + ", " + (entry.ByNetId ? "per-netId" : "global") + ")");
             }
             catch (Exception ex)
             {
@@ -305,9 +354,21 @@ namespace HeartopiaMod
             }
         }
 
+        // Without a working trampoline the game would stop dispatching this event — revert so normal
+        // gameplay is untouched.
+        private void RevertHalfInstalledDetour(GameEventHookEntry entry)
+        {
+            try { entry.Detour?.Undo(); } catch { }
+            entry.Detour = null;
+            entry.HookKeepAlive = null;
+            entry.Trampoline = null;
+            ModLogger.Msg("[EventHook] trampoline unavailable for " + entry.EventFullName + "; detour reverted");
+        }
+
         // Inflate the open generic EventCenter.DispatchEvent<T> for a concrete event struct class.
-        // Mirrors TryAutoIceSkatingInflateAuraGenericMethod but validates the 1-arg `in T` shape.
-        private unsafe bool TryInflateDispatchForEvent(IntPtr openMethod, IntPtr eventClass, out IntPtr inflatedMethod)
+        // Mirrors TryAutoIceSkatingInflateAuraGenericMethod; validates the expected param count
+        // (1 = global `in T`, 2 = per-netId `(uint, in T)`).
+        private unsafe bool TryInflateDispatchForEvent(IntPtr openMethod, IntPtr eventClass, int expectedParamCount, out IntPtr inflatedMethod)
         {
             inflatedMethod = IntPtr.Zero;
             if (openMethod == IntPtr.Zero
@@ -345,9 +406,9 @@ namespace HeartopiaMod
                 return false;
             }
 
-            // Guard the native signature we splice a void(IntPtr) hook over: a wrong method_inst
-            // would otherwise hand the body a garbage pointer and AV the process.
-            return AuraMonoMethodParamCountIs(inflatedMethod, 1);
+            // Guard the native signature we splice our hook over: a wrong method_inst would
+            // otherwise hand the body a garbage pointer and AV the process.
+            return AuraMonoMethodParamCountIs(inflatedMethod, (uint)expectedParamCount);
         }
 
         // ---- Native detour bodies. 16 fixed static thunks (no closures) routing to RouteEventSlot.
@@ -382,6 +443,55 @@ namespace HeartopiaMod
         private static void RouteEventSlot(int slot, IntPtr eventPtr)
         {
             DispatchEventHookDelegate orig = eventSlotTrampoline[slot];
+            PushEventToRing(slot, 0u, eventPtr);
+            if (orig != null)
+            {
+                orig(eventPtr);
+            }
+        }
+
+        // ---- Per-netId native bodies. 16 fixed static thunks routing to RouteEventNetIdSlot.
+        // Same boundary rules as the global bodies; they additionally carry the dispatch netId. ----
+
+        private static readonly DispatchEventByNetIdHookDelegate[] EventNetIdSlotBodies =
+        {
+            EventNetIdSlotBody0, EventNetIdSlotBody1, EventNetIdSlotBody2, EventNetIdSlotBody3,
+            EventNetIdSlotBody4, EventNetIdSlotBody5, EventNetIdSlotBody6, EventNetIdSlotBody7,
+            EventNetIdSlotBody8, EventNetIdSlotBody9, EventNetIdSlotBody10, EventNetIdSlotBody11,
+            EventNetIdSlotBody12, EventNetIdSlotBody13, EventNetIdSlotBody14, EventNetIdSlotBody15
+        };
+
+        private static void EventNetIdSlotBody0(uint n, IntPtr p) => RouteEventNetIdSlot(0, n, p);
+        private static void EventNetIdSlotBody1(uint n, IntPtr p) => RouteEventNetIdSlot(1, n, p);
+        private static void EventNetIdSlotBody2(uint n, IntPtr p) => RouteEventNetIdSlot(2, n, p);
+        private static void EventNetIdSlotBody3(uint n, IntPtr p) => RouteEventNetIdSlot(3, n, p);
+        private static void EventNetIdSlotBody4(uint n, IntPtr p) => RouteEventNetIdSlot(4, n, p);
+        private static void EventNetIdSlotBody5(uint n, IntPtr p) => RouteEventNetIdSlot(5, n, p);
+        private static void EventNetIdSlotBody6(uint n, IntPtr p) => RouteEventNetIdSlot(6, n, p);
+        private static void EventNetIdSlotBody7(uint n, IntPtr p) => RouteEventNetIdSlot(7, n, p);
+        private static void EventNetIdSlotBody8(uint n, IntPtr p) => RouteEventNetIdSlot(8, n, p);
+        private static void EventNetIdSlotBody9(uint n, IntPtr p) => RouteEventNetIdSlot(9, n, p);
+        private static void EventNetIdSlotBody10(uint n, IntPtr p) => RouteEventNetIdSlot(10, n, p);
+        private static void EventNetIdSlotBody11(uint n, IntPtr p) => RouteEventNetIdSlot(11, n, p);
+        private static void EventNetIdSlotBody12(uint n, IntPtr p) => RouteEventNetIdSlot(12, n, p);
+        private static void EventNetIdSlotBody13(uint n, IntPtr p) => RouteEventNetIdSlot(13, n, p);
+        private static void EventNetIdSlotBody14(uint n, IntPtr p) => RouteEventNetIdSlot(14, n, p);
+        private static void EventNetIdSlotBody15(uint n, IntPtr p) => RouteEventNetIdSlot(15, n, p);
+
+        private static void RouteEventNetIdSlot(int slot, uint netId, IntPtr eventPtr)
+        {
+            DispatchEventByNetIdHookDelegate orig = eventSlotTrampolineNetId[slot];
+            PushEventToRing(slot, netId, eventPtr);
+            if (orig != null)
+            {
+                orig(netId, eventPtr);
+            }
+        }
+
+        // Snapshot the payload into the reused ring buffer. Native-boundary safe: only a bounded
+        // Marshal.Copy + index writes, never allocates or calls into Mono. Single-threaded in practice.
+        private static void PushEventToRing(int slot, uint netId, IntPtr eventPtr)
+        {
             try
             {
                 int len = eventSlotPayloadLen[slot];
@@ -402,15 +512,11 @@ namespace HeartopiaMod
                     eventRingLen[idx] = 0; // empty-payload event (e.g. *CloseEvent) — record dispatch
                 }
                 eventRingSlot[idx] = (byte)slot;
+                eventRingNetId[idx] = netId;
                 eventRingWrite = w + 1;
             }
             catch
             {
-            }
-
-            if (orig != null)
-            {
-                orig(eventPtr);
             }
         }
 
@@ -422,6 +528,7 @@ namespace HeartopiaMod
                 int idx = eventRingRead & (EventRingSize - 1);
                 int slot = eventRingSlot[idx];
                 int len = eventRingLen[idx];
+                uint netId = eventRingNetId[idx];
                 byte[] buf = eventRingData[idx];
                 eventRingRead++;
 
@@ -436,11 +543,11 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                GameEventSnapshot snap = new GameEventSnapshot(entry.EventFullName, buf, len);
+                GameEventSnapshot snap = new GameEventSnapshot(entry.EventFullName, netId, buf, len);
 
                 if (MasterLogGameEvents)
                 {
-                    ModLogger.Msg("[EventHook] " + entry.EventFullName + " len=" + len + GameEventScalarDump(buf, len));
+                    ModLogger.Msg("[EventHook] " + entry.EventFullName + (netId != 0u ? " netId=" + netId : string.Empty) + " len=" + len + GameEventScalarDump(buf, len));
                 }
 
                 List<Action<GameEventSnapshot>> handlers = entry.Handlers;

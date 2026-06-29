@@ -397,6 +397,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Register the QTE event hooks once a pet-play automation is active. Cat answers straight
+            // from the CatPlayQuestionForUiEvent payload; dog round-begin (per-netId) kicks the resolver.
+            this.EnsurePetPlayEventHooks();
+
             if (Time.unscaledTime < this.petPlayNextAutoTickAt)
             {
                 return;
@@ -414,11 +418,19 @@ namespace HeartopiaMod
 
             if (this.petPlayAutoCatEnabled)
             {
-                this.TryAutoAnswerCatPlayFromQuestionState();
+                // When the CatPlayQuestionForUiEvent hook is live, answers come from the event
+                // handler (no scan). Fall back to the UI scan only until the detour installs.
+                if (!this.IsGameEventHookInstalled(CatPlayQuestionForUiEventName))
+                {
+                    this.TryAutoAnswerCatPlayFromQuestionState();
+                }
             }
 
             if (this.petPlayAutoDogEnabled)
             {
+                // Dog choice needs the live learning/motion state, so the resolver still runs here —
+                // the per-netId TeaseDogRoundBeginEvent just clears the throttle so it answers
+                // promptly. Scans on its own timer when the hook isn't installed.
                 this.TryAutoAnswerDogPlayFromUi();
             }
 
@@ -456,6 +468,79 @@ namespace HeartopiaMod
 
             this.petPlayDogTeaseQteMethod.Invoke(null, new object[] { dogNetId, encourage });
             return true;
+        }
+
+        // ---- Event-driven QTE (see docs/GAME_EVENTS.md): the cat question is a GLOBAL event we
+        // answer straight from its payload; dog round-begin is a PER-netId event that kicks the
+        // existing resolver (the encourage/ignore choice needs the dog's live learning/motion). ----
+        private const string CatPlayQuestionForUiEventName = "XDTDataAndProtocol.Events.CatPlayQuestionForUiEvent";
+        // CatPlayQuestionForUiEvent: catHandle(uint)@0, questionId(MeowQteType=byte)@4, duration(float)@8 → 12 bytes.
+        private const int CatPlayQuestionForUiEventBytes = 12;
+        private const string TeaseDogRoundBeginEventName = "XDTDataAndProtocol.Events.TeaseDogRoundBeginEvent";
+
+        private bool petPlayEventHooksRegistered;
+
+        private void EnsurePetPlayEventHooks()
+        {
+            if (this.petPlayEventHooksRegistered)
+            {
+                return;
+            }
+
+            this.petPlayEventHooksRegistered = true;
+            this.RegisterGameEventHook(CatPlayQuestionForUiEventName, CatPlayQuestionForUiEventBytes, this.OnCatPlayQuestionEvent);
+            this.RegisterGameEventHookByNetId(TeaseDogRoundBeginEventName, 0, this.OnTeaseDogRoundBeginEvent);
+        }
+
+        // Cat QTE question appeared — answer directly. MeowQteType {Up=0,Down=1,Shake=2} maps 1:1 to
+        // the answer enum MeowTeaseQteType, so qteValue == (int)questionId (no sprite scan needed).
+        private void OnCatPlayQuestionEvent(GameEventSnapshot e)
+        {
+            if (!this.petPlayAutoCatEnabled)
+            {
+                return;
+            }
+
+            uint catNetId = e.ReadUInt32(0);
+            int qteValue = e.ReadByte(4);
+            if (catNetId == 0U)
+            {
+                return;
+            }
+
+            // One answer per (cat, qte) within a short window — the event normally fires once per
+            // question, but guard against any duplicate dispatch.
+            if (catNetId == this.petPlayLastCatNetId
+                && qteValue == this.petPlayLastCatQte
+                && Time.unscaledTime - this.petPlayLastCatAnswerAt < 0.85f)
+            {
+                return;
+            }
+
+            this.petPlayLastCatNetId = catNetId;
+            this.petPlayLastCatQte = qteValue;
+            this.petPlayLastCatAnswerAt = Time.unscaledTime;
+
+            if (this.TryInvokeCatTeaseQte(catNetId, qteValue))
+            {
+                this.petPlayCatAnswerCount++;
+                this.PetPlayLog("Cat QTE answered via event netId=" + catNetId + " type=" + qteValue + ".");
+            }
+        }
+
+        // Dog round began (per-netId) — clear the resolver throttle so the next automation tick
+        // answers immediately instead of waiting up to the scan interval. The choice itself is
+        // resolved by TryAutoAnswerDogPlayFromUi from the dog's live state.
+        private void OnTeaseDogRoundBeginEvent(GameEventSnapshot e)
+        {
+            if (!this.petPlayAutoDogEnabled)
+            {
+                return;
+            }
+
+            this.petPlayNextDogRoundScanAt = 0f;
+            this.petPlayLastDogRound = -1; // a new round began — allow re-answering this dog
+            this.PetPlayLog("Dog round-begin event netId=" + e.NetId + " -> kicking resolver.");
         }
 
         private bool EnsureCatTeaseQteMethod()

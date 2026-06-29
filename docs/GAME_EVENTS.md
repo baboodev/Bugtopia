@@ -115,12 +115,19 @@ regardless of who (if anyone) subscribed. This is wrapped in a reusable engine:
 // into a reused buffer and forwards — it never allocates, throws, or calls into Mono.
 RegisterGameEventHook(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler);
 
-// In the handler, read scalar fields by offset (string/object fields can NOT be read this way):
+// Per-ENTITY events — dispatched via DispatchEvent<T>(uint netId, in T) (e.g. dog QTE). The
+// dispatch netId arrives in GameEventSnapshot.NetId. (Don't register the same name both ways.)
+RegisterGameEventHookByNetId(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler);
+
+// In the handler, read scalar fields by offset (string/object/Type fields can NOT be read this way):
 void OnSomeEvent(GameEventSnapshot e) {
+    uint  who = e.NetId;          // dispatch netId for per-netId events, 0 for global
     int   t   = e.ReadInt32(0);
     uint  net = e.ReadUInt32(4);
     ulong id  = e.ReadUInt64(8);
     float f   = e.ReadSingle(16);
+    byte  b   = e.ReadByte(4);    // byte-backed enums
+    bool  on  = e.ReadBool(12);
 }
 ```
 
@@ -128,7 +135,18 @@ Registration is idempotent per event name (re-registering adds another handler t
 detour). Install is lazy: the engine retries each frame from `ProcessGameEventHooksOnUpdate` until
 AuraMono + `XDTGame.Core.EventCenter` + the event's image are loaded, then splices the detour.
 `IsGameEventHookInstalled(name)` reports when a detour is live (for an event-flag-with-poll-fallback
-pattern). Reference consumer: [`InstrumentHotkeyGuardFeature`](../buddy/InstrumentHotkeyGuardFeature.cs).
+pattern). Cap: `MaxEventHookSlots` (16) concurrent event types. Reference consumers:
+[`InstrumentHotkeyGuardFeature`](../buddy/InstrumentHotkeyGuardFeature.cs) (global) and
+[`PetPlayFeature`](../buddy/PetPlayFeature.cs) (cat = global, dog = per-netId).
+
+### Global vs per-netId dispatch (important)
+
+`EventCenter` has two dispatchers ([EventCenter.cs](../ilspy-dumps/XDTBaseService/XDTGame.Core/EventCenter.cs)):
+`DispatchEvent<T>(in T)` (global, 1 arg) and `DispatchEvent<T>(uint netId, in T)` (per-entity, 2 args).
+They are **different methods** — a global hook never sees per-netId dispatches and vice-versa. Check
+the dispatch site in the dump: `EventCenter.DispatchEvent(in @event)` → `RegisterGameEventHook`;
+`EventCenter.DispatchEvent(someNetId, in @event)` → `RegisterGameEventHookByNetId`. The per-netId
+native body is `void(uint netId, IntPtr eventPtr)` (validated as the 2-param inflation).
 
 ### How it works (mechanism)
 
@@ -206,6 +224,20 @@ event; cookers are detected by filtering `EntityCreateEvent` netIds for `CookBui
 | `CollectObjectShowEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 8 | `netId`(uint)@0, `show`(bool)@4 | **fully scalar** — collectable show/hide |
 | `BottomDialogEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 12 | `message`(string ref)@0 **unreadable**, `active`(bool)@8 | read `active` only; `clickCallback`(Action ref) is the real confirm action but ref-unreadable |
 | `UIPanelOpenEvent` / `UIPanelCloseEvent` | `XDTGame.Framework.UI` | — | `panelType`(System.Type ref)@0 **unreadable** | universal panel open/close, but needs a mono-`Type*`→name resolver to be useful |
+
+#### Pet-play QTE events (cat = global, dog = per-netId)
+
+Cat events dispatch **globally** (hook with `RegisterGameEventHook`); dog events dispatch **per-netId**
+(hook with `RegisterGameEventHookByNetId`). Wired in [`PetPlayFeature`](../buddy/PetPlayFeature.cs).
+
+| Event | Dispatch | `payloadBytes` | Fields (offset) | Notes |
+|---|---|---|---|---|
+| `CatPlayQuestionForUiEvent` | global ([MeowProtocolManager.ShowTeaseQte](../ilspy-dumps/XDTDataAndProtocol/XDTDataAndProtocol.ProtocolService.Meow/MeowProtocolManager.cs)) | 12 | `catHandle`(uint)@0, `questionId`(MeowQteType=byte)@4, `duration`(float)@8 | **the cat answer** — `MeowQteType {Up=0,Down=1,Shake=2}` maps 1:1 to answer enum `MeowTeaseQteType`, so `qteValue == (int)questionId`; answered directly, no sprite scan |
+| `CatPlayAnswerForUiEvent` | global | 16 | `catHandle`(uint)@0, `answerId`(KittyTeaseQteResultType=byte)@4, `score`(int)@8, `isSelfCat`(bool)@12 | result of the answer |
+| `TeaseQteEvent` | global | 4 | `catHandle`(uint)@0 | cat QTE input made |
+| `TeaseDogRoundBeginEvent` | **per-netId** ([PetProtocolManager](../ilspy-dumps/XDTDataAndProtocol/XDTDataAndProtocol.ProtocolService.Pet/PetProtocolManager.cs)) | 0 | *(empty; netId = the dog)* | kicks the dog resolver (choice needs live learning/motion state) |
+| `PetTeaseQteResultEvent` | **per-netId** | 8 | `result`(PetTeaseQteResult=int)@0, `isSelfPet`(bool)@4 | dog QTE result |
+| `TeaseDogPlayEvent` | **per-netId** | 0 | *(empty)* | dog play session signal |
 
 #### Per-component events (`DataCreated<T>` / `DataRemoved<T>`)
 
