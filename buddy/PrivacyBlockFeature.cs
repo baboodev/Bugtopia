@@ -6,8 +6,10 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // AuraMono NativeDetour hooks for Logan log upload, town merge enter, antispam report.
-    // UploadCheat forwards via trampoline unless privacyBlockUploadCheat is set.
+    // AuraMono NativeDetour hooks for Logan log upload, town merge enter, antispam report, UploadCheat.
+    // Each detour is installed ONLY while its matching privacyBlock* toggle is on (lazy, on demand);
+    // with all toggles off we install zero detours, so world-change teardown never runs these
+    // mono->coreclr callbacks. Bodies are allocation/IO-free: bump a counter and block or forward.
     public partial class HeartopiaComplete
     {
         public bool privacyBlockLogUploads;
@@ -89,6 +91,15 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Option B: install a NativeDetour only for a privacy feature the user has actually turned
+            // on. With everything off (the default) we install ZERO detours, so the world-change
+            // teardown never runs our mono->coreclr hook callbacks -> no ExecutionEngineException
+            // regression for users who don't use this feature.
+            if (!this.PrivacyBlockAnyEnabled())
+            {
+                return;
+            }
+
             if (this.PrivacyBlockAllHooksSettled())
             {
                 return;
@@ -103,14 +114,19 @@ namespace HeartopiaMod
             this.EnsurePrivacyBlockHooks();
         }
 
-        private bool PrivacyBlockHookSettled(bool tried, Delegate trampoline) => trampoline != null || tried;
+        private bool PrivacyBlockAnyEnabled()
+            => this.privacyBlockLogUploads || this.privacyBlockRoomMerges || this.privacyBlockSpamReports || this.privacyBlockUploadCheat;
+
+        // A hook is "settled" when its feature is disabled (nothing to install) or it is already
+        // installed/tried. Enabling a toggle later un-settles it, so the install loop resumes.
+        private bool PrivacyBlockHookSettled(bool enabled, bool tried, Delegate trampoline) => !enabled || trampoline != null || tried;
 
         private bool PrivacyBlockAllHooksSettled()
         {
-            return this.PrivacyBlockHookSettled(this.privacyLogHookTried, privacyLogTrampoline)
-                && this.PrivacyBlockHookSettled(this.privacyMergeHookTried, privacyMergeTrampoline)
-                && this.PrivacyBlockHookSettled(this.privacySpamHookTried, privacySpamTrampoline)
-                && this.PrivacyBlockHookSettled(this.privacyUploadCheatHookTried, privacyUploadCheatTrampoline);
+            return this.PrivacyBlockHookSettled(this.privacyBlockLogUploads, this.privacyLogHookTried, privacyLogTrampoline)
+                && this.PrivacyBlockHookSettled(this.privacyBlockRoomMerges, this.privacyMergeHookTried, privacyMergeTrampoline)
+                && this.PrivacyBlockHookSettled(this.privacyBlockSpamReports, this.privacySpamHookTried, privacySpamTrampoline)
+                && this.PrivacyBlockHookSettled(this.privacyBlockUploadCheat, this.privacyUploadCheatHookTried, privacyUploadCheatTrampoline);
         }
 
         private void PrivacyBlockDiag(string message)
@@ -179,22 +195,22 @@ namespace HeartopiaMod
                     return;
                 }
 
-                if (!this.privacyLogHookTried)
+                if (this.privacyBlockLogUploads && !this.privacyLogHookTried)
                 {
                     this.TryInstallPrivacyLogHook(compile);
                 }
 
-                if (!this.privacyMergeHookTried)
+                if (this.privacyBlockRoomMerges && !this.privacyMergeHookTried)
                 {
                     this.TryInstallPrivacyMergeHook(compile);
                 }
 
-                if (!this.privacySpamHookTried)
+                if (this.privacyBlockSpamReports && !this.privacySpamHookTried)
                 {
                     this.TryInstallPrivacySpamHook(compile);
                 }
 
-                if (!this.privacyUploadCheatHookTried)
+                if (this.privacyBlockUploadCheat && !this.privacyUploadCheatHookTried)
                 {
                     this.TryInstallPrivacyUploadCheatHook(compile);
                 }
@@ -377,11 +393,14 @@ namespace HeartopiaMod
             ModLogger.Msg("[PrivacyBlock] " + label + " not found — hook skipped");
         }
 
+        // These bodies run as native->coreclr reverse-pinvoke callbacks from mono-compiled game code,
+        // including during world-change teardown. Keep them allocation- and IO-free on the hot path:
+        // only bump a counter and either block (return) or forward via the trampoline. No per-call
+        // ModLogger.Msg / mono-string reads — that managed allocation inside the native callback at a
+        // fragile moment was part of the world-change ExecutionEngineException exposure.
         private static void PrivacyLogDetourBody()
         {
-            bool block = HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockLogUploads;
-            ModLogger.Msg("[PrivacyBlock] LoganUploadService.TryUploadLog block=" + block);
-            if (block)
+            if (HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockLogUploads)
             {
                 Interlocked.Increment(ref privacyBlockedLogCount);
                 return;
@@ -392,9 +411,7 @@ namespace HeartopiaMod
 
         private static void PrivacyMergeDetourBody()
         {
-            bool block = HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockRoomMerges;
-            ModLogger.Msg("[PrivacyBlock] TownMergeProtocolManager.EnterRoomMerge block=" + block);
-            if (block)
+            if (HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockRoomMerges)
             {
                 Interlocked.Increment(ref privacyBlockedMergeCount);
                 return;
@@ -405,10 +422,7 @@ namespace HeartopiaMod
 
         private static void PrivacySpamDetourBody(IntPtr encodedShortId, int type)
         {
-            string shortId = PrivacyReadMonoString(encodedShortId);
-            bool block = HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockSpamReports;
-            ModLogger.Msg("[PrivacyBlock] ReportProtocolManager.Report shortId=" + shortId + " type=" + type + " block=" + block);
-            if (block)
+            if (HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockSpamReports)
             {
                 Interlocked.Increment(ref privacyBlockedSpamCount);
                 return;
@@ -419,57 +433,14 @@ namespace HeartopiaMod
 
         private static void PrivacyUploadCheatDetourBody(IntPtr self, IntPtr objectId, IntPtr stream, IntPtr success, IntPtr failure)
         {
-            string obsId = PrivacyReadMonoString(objectId);
-            int bytes = PrivacyReadMonoArrayLength(stream);
             Interlocked.Increment(ref privacyUploadCheatSeenCount);
-            bool block = HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockUploadCheat;
-            ModLogger.Msg("[PrivacyBlock] UploadSystem.UploadCheat objectId=" + obsId + " bytes=" + bytes + " block=" + block);
-            if (block)
+            if (HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockUploadCheat)
             {
                 Interlocked.Increment(ref privacyBlockedUploadCheatCount);
                 return;
             }
 
             privacyUploadCheatTrampoline?.Invoke(self, objectId, stream, success, failure);
-        }
-
-        private static string PrivacyReadMonoString(IntPtr strObj)
-        {
-            HeartopiaComplete host = HeartopiaComplete.Instance;
-            if (host == null || strObj == IntPtr.Zero)
-            {
-                return string.Empty;
-            }
-
-            return host.TryReadMonoString(strObj, out string value) ? value : string.Empty;
-        }
-
-        private static int PrivacyReadMonoArrayLength(IntPtr arrayObj)
-        {
-            HeartopiaComplete host = HeartopiaComplete.Instance;
-            if (host == null || arrayObj == IntPtr.Zero)
-            {
-                return -1;
-            }
-
-            return host.PrivacyTryGetMonoArrayLength(arrayObj);
-        }
-
-        private int PrivacyTryGetMonoArrayLength(IntPtr arrayObj)
-        {
-            if (arrayObj == IntPtr.Zero || auraMonoArrayLength == null || !this.IsAuraMonoArrayObject(arrayObj))
-            {
-                return -1;
-            }
-
-            try
-            {
-                return (int)Math.Min(auraMonoArrayLength(arrayObj).ToUInt64(), int.MaxValue);
-            }
-            catch
-            {
-                return -1;
-            }
         }
 
         internal string GetPrivacyBlockHooksStatus()
