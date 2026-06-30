@@ -657,6 +657,7 @@ namespace HeartopiaMod
             // CookingComponent.OnSpawned for stoves as they stream in. Gating it behind the menu/
             // active check (below) installed it too late and missed the spawn burst.
             this.EnsureNetCookEventHooks();
+            this.UpdateNetCookStatusDiagnosticsOnUpdate();
             if (this.netCookEnabled || this.netCookTargets.Count > 0 || (this.showMenu && this.selectedTab == 3 && this.automationSubTab == 5))
             {
                 this.EnsureNetCookWorldCookerRegistrationPatch();
@@ -4930,6 +4931,9 @@ namespace HeartopiaMod
         private const float NetCookMinScanRadiusMeters = 2f;
         private const float NetCookMaxScanRadiusMeters = 30f;
         private const float NetCookCaptureCooldownSeconds = 3f;
+        private const float NetCookStatusDiagLogIntervalSeconds = 2f;
+        private const float NetCookStatusCacheStaleSeconds = 2.5f;
+        private const float NetCookRemoteActiveCookGuardSeconds = 45f;
         private const float NetCookBroadRefreshCooldownSeconds = 15f;
         private const bool AutoFarmLogsEnabled = MasterLogAutoFarm;
         private const bool NetCookLogsEnabled = MasterLogNetCook;
@@ -4957,6 +4961,22 @@ namespace HeartopiaMod
         private const float NetCookPostMoveMaterialRetryIntervalSeconds = 0.12f;
         private bool netCookEnabled = false;
         private bool netCookMiniGameOnly = false;
+        // Permanent Stove Memory: keep the captured stove set and reuse it on every mass-cook start
+        // without re-scanning, bypassing the distance/position culls so remote re-cooks use ALL
+        // remembered stoves (not just the last one). The registry (netCookRegisteredTargets) is the
+        // in-memory store; this toggle controls reuse. Cleared by Reset Capture.
+        private bool netCookRememberStoves = false;
+        // Runtime-only (not saved to config): parallel status probes for remote-cook diagnostics.
+        private bool netCookStatusDiagEnabled = false;
+        private bool netCookStatusDiagEventHooksRegistered = false;
+        private readonly Dictionary<uint, float> netCookStatusDiagLastLogAt = new Dictionary<uint, float>(16);
+        private int netCookStatusDiagStartCookEvents = 0;
+        private int netCookStatusDiagCookResultEvents = 0;
+        private int netCookStatusDiagEntityRemoveEvents = 0;
+        private int netCookStatusDiagEntityCreateEvents = 0;
+        private int netCookStatusDiagCookingStatusEvents = 0;
+        private bool netCookStatusDiagSessionAnnounced = false;
+        private float nextNetCookDiagHeartbeatAt = 0f;
         private bool netCookMoveIngredients = false;
         private bool netCookUseAllIngredients = false;
         private int netCookCookQuantity = 1;

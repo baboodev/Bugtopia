@@ -49,7 +49,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Snow Sculpting | Auto QTE, interact-icon start, move snowballs (id 5100) warehouse → bag |
 | Auto Buy | Cooking store purchase automation |
 | Auto Sell | Inventory sell automation |
-| Mass Cook | Network cooking at patrol points |
+| Mass Cook | Network cooking at stoves; remote QTE + Permanent Stove Memory |
 | Puzzle | Auto puzzle solver |
 | Pet Care | Feed all pets, auto cat play, auto dog train |
 
@@ -413,6 +413,21 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#auto-sell-detail).
 - Config: interval, scan radius, wait at spot, cooking speed.
 - Coroutine warmup on mod init (`NetCookCoroutineWarmupRoutine`).
 - **Ingredient model (Move Ingredients / max-quantity):** a recipe is a flat list of material slots, **one slot = one unit** (a recipe needing 3 wheat has 3 slots). A slot is either a **specific item** (ingredient id ≥ 100) or an **"any &lt;category&gt;" slot** (id &lt; 100 = a `FoodMaterialType`, e.g. "any fish" = `Fish`). Category slots carry `materialId == 0` and only set `materialType`. Requirements track `IsCategory`/`MaterialType`; `BuildNetCookDemands` aggregates per-dish counts (specific items vs categories), and warehouse move + max-quantity match category slots via `NetCookItemMatchesCategory` → `CookingSystem.CheckFoodTypeSatisfied` (cached). Cooking itself relies on the game's `AutoFill` to fill slots from the bag, so the mod only needs to move enough matching items. See [cooking ingredient details](DECOMPILED_SOURCE_MAP.md#312-cooking-net-cook--mass-cook).
+
+#### Remote cooking (QTE at distance)
+
+Cook commands (`PrepareCooking`/`StartCooking`/`InteractWithCooker`/`ContinueCooking`) are server-side and keyed only on the stable `LevelObjectNetId`, so they work at any distance. The blocker was **status visibility**: the QTE relief (`InteractWithCooker` on `Danger`) needs the live cooking status, but the mod read it from the **view** event `UpdateCookingStatusEvent`, which dies the moment the stove streams out (~17–85 m). Sending relief outside the Danger window instantly burns the dish, so blind relief is not an option — accurate remote status is mandatory.
+
+- **Status source:** a MonoMod `NativeDetour` on the static `CookingProtocolManager.OnUpdateCookerStatus` — the ECS→data chokepoint the sync bridge calls for **every** server status update, independent of the streamed view. Confirmed in-world that `Danger`/`Cooking`/`Failed` arrive there at 85 m+ (Danger holds ~12 s, ample relief time). The detour body is allocation-free (records scalars into a ring + forwards via the trampoline); a main-thread drain feeds a **`levelObjectNetId`-keyed status cache** (`netCookStatusByLevelObject`). `TryGetNetCookTargetCookingStatus` reads this cache first (stable across stream-out/in, unlike the view `CookerNetId`). Installs whenever cooking is active; logging gated behind **Status Diagnostics**.
+- **Remote completion:** the post-collect Idle reset travels via `ComponentRemoved<CookingStatusComponent>` (not `OnUpdateCookerStatus`), so the lo-cache never sees it at distance. The global `CookResultEvent` (`interaction == TakeFood`) is hooked as the remote "dish finished" signal → seeds the lo-cache to Idle and flags the stove collected so drain can remove it. Captured-but-never-cooked idle stoves (no status source at all at distance) are removed in drain once `Phase == 0`. Together these let a finite remote mass cook drain to zero and auto-stop.
+
+#### Permanent Stove Memory (`Remember Stoves` toggle)
+
+Reuse a captured stove set on every start **without re-scanning**, so you can run Mass Cook anywhere without standing in your homeland.
+
+- Captured stoves live in the in-memory registry `netCookRegisteredTargets`. With the toggle **ON**, restore (`TryResolveNetCookContextsFromRegisteredCache`) bypasses the distance/position culls (`RemoveOutOfRangeNetCookTargets` skipped; missing world position no longer drops a stove) — cooking uses the stable `LevelObjectNetId`, not position. After a cook finishes, the cook context persists so the next start restores the **full** remembered set instead of cooking only the last stove.
+- **Reset Capture** clears the registry (the "forget" action — use after switching homelands).
+- The toggle is saved to config. The registry itself is **session-only**: view/lo netIds are reassigned across game restarts, so re-capture once per login.
 
 ### Puzzle (`PuzzleNetFeature`)
 

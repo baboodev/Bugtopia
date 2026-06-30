@@ -145,6 +145,44 @@ namespace HeartopiaMod
             }
             num += 38;
 
+            bool previousNetCookRememberStoves = this.netCookRememberStoves;
+            bool nextNetCookRememberStoves = this.DrawSwitchToggle(new Rect(left, (float)num, controlWidth, 28f), this.netCookRememberStoves, "Remember Stoves");
+            if (nextNetCookRememberStoves != previousNetCookRememberStoves)
+            {
+                this.netCookRememberStoves = nextNetCookRememberStoves;
+                this.netCookStatus = this.netCookRememberStoves
+                    ? "Permanent Stove Memory ON: captured stoves are reused on every start (no re-scan). Use Reset Capture to forget."
+                    : "Permanent Stove Memory OFF: each start re-scans nearby stoves.";
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            num += 38;
+
+            bool previousNetCookStatusDiag = this.netCookStatusDiagEnabled;
+            bool nextNetCookStatusDiag = this.DrawSwitchToggle(new Rect(left, (float)num, controlWidth, 28f), this.netCookStatusDiagEnabled, "Status Diagnostics (log)");
+            if (nextNetCookStatusDiag != previousNetCookStatusDiag)
+            {
+                this.netCookStatusDiagEnabled = nextNetCookStatusDiag;
+                if (!this.netCookStatusDiagEnabled)
+                {
+                    this.netCookStatusDiagLastLogAt.Clear();
+                    this.netCookStatusDiagSessionAnnounced = false;
+                    this.nextNetCookDiagHeartbeatAt = 0f;
+                    try { ModLogger.Msg("[NetCookDiag] Status diagnostics OFF."); } catch { }
+                }
+                else
+                {
+                    this.EnsureNetCookStatusDiagHooks();
+                    try
+                    {
+                        ModLogger.Msg("[NetCookDiag] Status diagnostics ON. Capture stoves, then start Mass Cook. "
+                            + "Logs: BepInEx/LogOutput.log and BepInEx/UserData/helper.log. "
+                            + "Watch for textId=7, EntityRemoveEvent, TARGET REMOVED.");
+                    }
+                    catch { }
+                }
+            }
+            num += 38;
+
             if (this.netCookMiniGameOnly)
             {
                 const string assistModeDescription = "Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.";
@@ -813,8 +851,19 @@ namespace HeartopiaMod
             this.netCookCookerType = 0;
             this.netCookLevelObjectNetId = 0UL;
             this.netCookSentCount = 0;
+            if (this.netCookStatusDiagEnabled)
+            {
+                this.NetCookDiagLog("capture reset clearing targets=" + this.netCookTargets.Count);
+            }
             this.netCookTargets.Clear();
+            this.LogNetCookStatusCacheClear("capture-reset", this.netCookStatusCache.Count);
             this.netCookStatusCache.Clear(); // drop event-cached statuses (avoid netId-recycle staleness)
+            this.netCookStatusByLevelObject.Clear(); // drop detour lo-cache (avoid stale-Danger -> spurious relief)
+            // Reset Capture also forgets the Permanent Stove Memory registry, so the next capture starts
+            // from a clean set (e.g. after switching homelands). Without this the remembered stoves would
+            // persist forever.
+            this.netCookRegisteredTargets.Clear();
+            this.netCookRegisteredWorldCookers.Clear();
             this.netCookMaterialNetIds.Clear();
             this.netCookDrainAfterIngredientsRunOut = false;
             this.netCookDrainReason = null;
@@ -888,7 +937,7 @@ namespace HeartopiaMod
                 NetCookTargetContext target = this.netCookTargets[i];
                 if (target == null)
                 {
-                    this.netCookTargets.RemoveAt(i);
+                    this.RemoveNetCookTargetAt(i, "process-loop-null-target");
                     i--;
                     continue;
                 }
@@ -936,9 +985,10 @@ namespace HeartopiaMod
                         }
 
                         if (this.TryGetNetCookTargetCookingStatus(target, out int limitCookingStatus, out _, out _, out _)
-                            && limitCookingStatus == 0)
+                            && limitCookingStatus == 0
+                            && this.IsNetCookBurnerEntityAlive(target.CookerNetId))
                         {
-                            this.netCookTargets.RemoveAt(i);
+                            this.RemoveNetCookTargetAt(i, "quantity-limit-idle-stove");
                             i--;
                             if (processedTargets >= NetCookMaxActionsPerTick)
                             {
@@ -981,6 +1031,7 @@ namespace HeartopiaMod
                         target.LastStatus = -1;
                         target.LastStatusActionAt = -999f;
                         target.LastCookCommandAt = now;
+                        target.TrustedCollected = false; // new dish in progress — clear the stale collect flag
                         target.NextActionAt = now + NetCookPhaseAdvanceDelaySeconds;
                         readyTargets++;
                     }
@@ -1179,7 +1230,7 @@ namespace HeartopiaMod
                 NetCookTargetContext target = this.netCookTargets[i];
                 if (target == null)
                 {
-                    this.netCookTargets.RemoveAt(i);
+                    this.RemoveNetCookTargetAt(i, "process-loop-null-target");
                     i--;
                     continue;
                 }
@@ -1286,6 +1337,23 @@ namespace HeartopiaMod
                     {
                         target.LastStatusActionAt = now;
                         this.NetCookLog("Mini game status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                        if (this.netCookStatusDiagEnabled)
+                        {
+                            bool burnerAlive = this.TryGetAuraMonoEntityObjectByNetId(target.CookerNetId, out IntPtr burnerObj) && burnerObj != IntPtr.Zero;
+                            uint ownerNetId = ExtractNetCookOwnerNetId(target.LevelObjectNetId);
+                            bool ownerAlive = ownerNetId != 0U && this.TryGetAuraMonoEntityObjectByNetId(ownerNetId, out IntPtr ownerObj) && ownerObj != IntPtr.Zero;
+                            bool cacheHit = this.netCookStatusCache.TryGetValue(target.CookerNetId, out NetCookStatusCacheEntry cached);
+                            float cacheAge = cacheHit ? Mathf.Max(0f, now - cached.UpdatedAt) : -1f;
+                            this.NetCookDiagLog("mini-game status UNAVAILABLE stove=" + target.CookerNetId
+                                + " lo=" + target.LevelObjectNetId
+                                + " phase=" + target.Phase
+                                + " detail=" + statusDetails
+                                + " burnerAlive=" + burnerAlive
+                                + " ownerAlive=" + ownerAlive
+                                + " cacheHit=" + cacheHit
+                                + (cacheHit ? " cacheStatus=" + this.GetNetCookCookingStatusName(cached.Status) + " age=" + cacheAge.ToString("F1") + "s" : string.Empty)
+                                + " entityRemoves=" + this.netCookStatusDiagEntityRemoveEvents);
+                        }
                     }
                     this.netCookStatus = "Waiting for active cooking on stove " + target.CookerNetId + ".";
                     target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
@@ -1554,6 +1622,18 @@ namespace HeartopiaMod
         {
             targetRemoved = false;
 
+            // Authoritative remote completion: a global CookResultEvent(TakeFood) confirmed this stove's
+            // dish was collected, so it's free. Remove it now instead of waiting on a post-collect Idle
+            // that arrives via ComponentRemoved (not the OnUpdateCookerStatus detour) and never reaches
+            // the lo-cache at distance — the cause of mass cook staying "active" after a remote finish.
+            if (target.TrustedCollected)
+            {
+                this.NetCookLog("Drain stove " + target.CookerNetId + " collected (CookResultEvent TakeFood); removing.");
+                this.RemoveNetCookTargetAt(targetIndex, "drain-collected-remote");
+                targetRemoved = true;
+                return true;
+            }
+
             if (target.Phase == 1)
             {
                 if (this.TryInvokeNetCookStart())
@@ -1591,6 +1671,17 @@ namespace HeartopiaMod
 
             if (!this.TryGetNetCookTargetCookingStatus(target, out int cookingStatus, out int resultRecipeId, out int foodQuality, out string statusDetails))
             {
+                // No status source at all (captured-but-never-cooked stove, view streamed out at
+                // distance → no lo-cache entry, no event cache, no live component). A Phase-0 target
+                // has no dish we started, so there's nothing to finish — remove it so drain can reach
+                // zero. Without this, idle captured stoves keep mass cook "active" forever at distance.
+                if (target.Phase == 0)
+                {
+                    this.RemoveNetCookTargetAt(targetIndex, "drain-idle-no-status");
+                    targetRemoved = true;
+                    return true;
+                }
+
                 if (now - target.LastStatusActionAt > 3f)
                 {
                     target.LastStatusActionAt = now;
@@ -1610,7 +1701,14 @@ namespace HeartopiaMod
 
             if (cookingStatus == 0)
             {
-                this.netCookTargets.RemoveAt(targetIndex);
+                if (this.ShouldHoldNetCookDrainForUntrustedIdle(target, now))
+                {
+                    target.NextActionAt = now + 0.75f;
+                    this.netCookTargets[targetIndex] = target;
+                    return false;
+                }
+
+                this.RemoveNetCookTargetAt(targetIndex, "drain-idle-complete");
                 targetRemoved = true;
                 return true;
             }
@@ -1698,6 +1796,14 @@ namespace HeartopiaMod
         }
 
         private readonly Dictionary<uint, NetCookStatusCacheEntry> netCookStatusCache = new Dictionary<uint, NetCookStatusCacheEntry>();
+        // Status keyed by the STABLE levelObjectNetId (lo), fed by the OnUpdateCookerStatus detour —
+        // the ECS->data chokepoint that fires even when the stove view is streamed out. This is the
+        // remote-cook status source: confirmed in-world that Danger/Cooking/Failed arrive here with
+        // viewAlive=0. Unlike netCookStatusCache (keyed by the unstable view CookerNetId), lo is stable
+        // across stream-out/in. No staleness gate: the server only sends on change, so the last value
+        // IS the current status (a Danger held 12s with no new update is still Danger). Cleared on
+        // capture reset to avoid lo-recycle staleness.
+        private readonly Dictionary<ulong, NetCookStatusCacheEntry> netCookStatusByLevelObject = new Dictionary<ulong, NetCookStatusCacheEntry>(64);
         private bool netCookEventHooksRegistered;
 
         private void EnsureNetCookEventHooks()
@@ -1709,6 +1815,45 @@ namespace HeartopiaMod
 
             this.netCookEventHooksRegistered = true;
             this.RegisterGameEventHook(UpdateCookingStatusEventName, UpdateCookingStatusEventBytes, this.OnUpdateCookingStatusEvent);
+            // Functional (not diagnostic) hook: CookResultEvent is GLOBAL, so the collect/relief result
+            // reaches the client even when the stove is streamed out. We use interaction==TakeFood as the
+            // remote "dish finished" signal that the lo-cache can't get otherwise (post-collect Idle goes
+            // through ComponentRemoved, not OnUpdateCookerStatus). Drain uses it to remove stoves remotely.
+            if (!this.RegisterGameEventHook(NetCookDiagCookResultEventName, NetCookDiagCookLifecycleEventBytes, this.OnNetCookFunctionalCookResultEvent))
+            {
+                this.RegisterGameEventHook("XDTDataAndProtocol.Events.CookResultEvent", NetCookDiagCookLifecycleEventBytes, this.OnNetCookFunctionalCookResultEvent);
+            }
+        }
+
+        // CookingInteraction enum: TakeFood=0 (collect -> cooker goes Idle), Relief=1 (danger relieved
+        // -> cooker resumes Cooking). Only TakeFood means the dish is done and the stove is free.
+        private void OnNetCookFunctionalCookResultEvent(GameEventSnapshot e)
+        {
+            ulong levelObjectNetId = e.ReadUInt64(8);
+            int interaction = e.ReadInt32(16);
+            if (levelObjectNetId == 0UL || interaction != 0)
+            {
+                return; // not a TakeFood result
+            }
+
+            // Seed the lo-cache to Idle so any status read reflects the freed stove at distance.
+            NetCookStatusCacheEntry idle;
+            idle.Status = 0;
+            idle.FoodQuality = 0;
+            idle.FoodItemId = 0;
+            idle.UpdatedAt = Time.unscaledTime;
+            this.netCookStatusByLevelObject[levelObjectNetId] = idle;
+
+            // Mark matching active stoves collected so drain can remove them without waiting on an Idle
+            // status that never arrives remotely (and without the view-alive trust gate).
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target != null && target.LevelObjectNetId == levelObjectNetId)
+                {
+                    target.TrustedCollected = true;
+                }
+            }
         }
 
         // Runs on the Unity main thread (event drain). Reads CookingComponentData scalars by offset.
@@ -1716,7 +1861,16 @@ namespace HeartopiaMod
         {
             ulong levelObjectNetId = e.ReadUInt64(0);
             uint cookNetId = e.ReadUInt32(8);
+            int textId = e.ReadInt32(12);
             int statusValue = e.ReadInt32(24);
+            int foodQualityRaw = e.ReadInt32(44);
+            int foodItemIdRaw = e.ReadInt32(56);
+            uint ownerNetId = ExtractNetCookOwnerNetId(levelObjectNetId);
+            bool trackedCooker = this.IsNetCookDiagTrackedCooker(cookNetId);
+            bool trackedLevelObject = this.IsNetCookDiagTrackedLevelObject(levelObjectNetId);
+            bool trackedOwner = this.IsNetCookDiagTrackedOwnerNetId(ownerNetId);
+            bool tracked = trackedCooker || trackedLevelObject || trackedOwner;
+            bool suspicious = textId == 7 || statusValue == 7 || (statusValue < 0 || statusValue > 6);
 
             // Diagnostic (capped, unconditional) — confirms the handler fires and shows decoded fields.
             this.netCookEventDiagCount++;
@@ -1724,23 +1878,91 @@ namespace HeartopiaMod
             {
                 this.NetCookHookLog("CookingStatusEvent #" + this.netCookEventDiagCount
                     + " cook=" + cookNetId + " status=" + statusValue
-                    + " levelObj=" + levelObjectNetId + " owner=" + ExtractNetCookOwnerNetId(levelObjectNetId));
+                    + " textId=" + textId
+                    + " levelObj=" + levelObjectNetId + " owner=" + ownerNetId);
+            }
+
+            bool entityAlive = this.IsNetCookBurnerEntityAlive(cookNetId != 0U ? cookNetId : ownerNetId);
+
+            if (this.netCookStatusDiagEnabled && (tracked || suspicious))
+            {
+                this.netCookStatusDiagCookingStatusEvents++;
+                this.NetCookDiagLog("UpdateCookingStatusEvent #" + this.netCookStatusDiagCookingStatusEvents
+                    + " cook=" + cookNetId
+                    + " lo=" + levelObjectNetId
+                    + " owner=" + ownerNetId
+                    + " textId=" + textId
+                    + (textId == 7 ? " [TEXTID_7_UNSPAWN?]" : string.Empty)
+                    + " status=" + statusValue
+                    + (statusValue == 7 ? " [STATUS_7?]" : (statusValue >= 0 && statusValue <= 6 ? "(" + this.GetNetCookCookingStatusName(statusValue) + ")" : " [OUT_OF_RANGE]"))
+                    + " quality=" + foodQualityRaw
+                    + " foodId=" + foodItemIdRaw
+                    + " tracked=" + tracked
+                    + " (cook=" + trackedCooker + " lo=" + trackedLevelObject + " owner=" + trackedOwner + ")"
+                    + " entityAlive=" + (entityAlive ? 1f : 0f)
+                    + " massCook=" + this.netCookEnabled
+                    + " targets=" + this.netCookTargets.Count);
             }
 
             // Status cache needs a valid burner netId + in-range status (CookingStatus is Idle(0)..
             // Failed(6); out-of-range = wrong offset/layout, don't cache garbage).
             if (cookNetId != 0U && statusValue >= 0 && statusValue <= 6)
             {
-                NetCookStatusCacheEntry entry;
-                entry.Status = statusValue;
-                entry.FoodQuality = e.ReadInt32(44);
-                entry.FoodItemId = e.ReadInt32(56);
-                entry.UpdatedAt = Time.unscaledTime;
-                this.netCookStatusCache[cookNetId] = entry;
+                bool hadPrevious = this.netCookStatusCache.TryGetValue(cookNetId, out NetCookStatusCacheEntry previous);
+                if (!this.ShouldAcceptNetCookStatusCacheIngest(statusValue, entityAlive, previous, hadPrevious, out string rejectReason))
+                {
+                    if (this.netCookStatusDiagEnabled && tracked)
+                    {
+                        this.NetCookDiagLog("status cache SKIP cook=" + cookNetId
+                            + " status=" + statusValue
+                            + "(" + this.GetNetCookCookingStatusName(statusValue) + ")"
+                            + " textId=" + textId
+                            + " entityAlive=" + (entityAlive ? 1 : 0)
+                            + " reason=" + rejectReason
+                            + (hadPrevious ? " keep=" + this.GetNetCookCookingStatusName(previous.Status) : " keep=none"));
+                    }
+                }
+                else
+                {
+                    NetCookStatusCacheEntry entry;
+                    entry.Status = statusValue;
+                    entry.FoodQuality = foodQualityRaw;
+                    entry.FoodItemId = foodItemIdRaw;
+                    entry.UpdatedAt = Time.unscaledTime;
+                    this.netCookStatusCache[cookNetId] = entry;
+                    if (this.netCookStatusDiagEnabled
+                        && tracked
+                        && (!hadPrevious || previous.Status != statusValue))
+                    {
+                        this.NetCookDiagLog("status cache UPDATE cook=" + cookNetId
+                            + " " + (hadPrevious ? this.GetNetCookCookingStatusName(previous.Status) : "none")
+                            + " -> " + this.GetNetCookCookingStatusName(statusValue)
+                            + " textId=" + textId
+                            + " entityAlive=" + (entityAlive ? 1 : 0));
+                    }
+                }
             }
-            else if (cookNetId != 0U && (statusValue < 0 || statusValue > 6))
+            else if (cookNetId != 0U)
             {
-                this.NetCookLog("UpdateCookingStatusEvent unexpected status=" + statusValue + " for cookNetId=" + cookNetId + " (offset/layout check)");
+                if (this.netCookStatusDiagEnabled && (tracked || suspicious))
+                {
+                    bool evicted = this.netCookStatusCache.Remove(cookNetId);
+                    this.NetCookDiagLog("status cache SKIP/EVICT cook=" + cookNetId
+                        + " status=" + statusValue
+                        + " textId=" + textId
+                        + " evicted=" + evicted
+                        + " reason=" + (statusValue < 0 || statusValue > 6 ? "out-of-range-status" : "cookNetId-zero"));
+                }
+
+                if (statusValue < 0 || statusValue > 6)
+                {
+                    this.NetCookLog("UpdateCookingStatusEvent unexpected status=" + statusValue + " for cookNetId=" + cookNetId + " textId=" + textId + " (offset/layout check)");
+                }
+            }
+            else if (this.netCookStatusDiagEnabled && trackedLevelObject && textId == 7)
+            {
+                this.NetCookDiagLog("UpdateCookingStatusEvent UNTRACKED cookNetId=0 lo=" + levelObjectNetId
+                    + " textId=7 [possible stove unspawn] owner=" + ownerNetId);
             }
 
             // Incremental cooker discovery keys off levelObjectNetId (NOT cookNetId, which can be 0 at
@@ -1824,6 +2046,942 @@ namespace HeartopiaMod
         private int netCookEventDiagCount;
         private int netCookEventRegDiagCount;
 
+        private struct NetCookStatusProbeSnapshot
+        {
+            public bool Found;
+            public int Status;
+            public int FoodQuality;
+            public int FoodItemId;
+            public float AgeSeconds;
+            public bool Stale;
+            public string Detail;
+        }
+
+        private const string NetCookDiagStartCookEventName = "ScriptsRefactory.DataAndProtocol.Events.StartCookEvent";
+        private const string NetCookDiagCookResultEventName = "ScriptsRefactory.DataAndProtocol.Events.CookResultEvent";
+        private const int NetCookDiagCookLifecycleEventBytes = 24;
+        private const string NetCookDiagEntityCreateEventName = "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityCreateEvent";
+        private const string NetCookDiagEntityRemoveEventName = "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityRemoveEvent";
+        private const int NetCookDiagEntityEventBytes = 32;
+
+        private void EnsureNetCookStatusDiagHooks()
+        {
+            if (this.netCookStatusDiagEventHooksRegistered)
+            {
+                return;
+            }
+
+            this.netCookStatusDiagEventHooksRegistered = true;
+            bool startHooked = this.RegisterGameEventHook(NetCookDiagStartCookEventName, NetCookDiagCookLifecycleEventBytes, this.OnNetCookDiagStartCookEvent);
+            if (!startHooked)
+            {
+                startHooked = this.RegisterGameEventHook("XDTDataAndProtocol.Events.StartCookEvent", NetCookDiagCookLifecycleEventBytes, this.OnNetCookDiagStartCookEvent);
+            }
+
+            bool resultHooked = this.RegisterGameEventHook(NetCookDiagCookResultEventName, NetCookDiagCookLifecycleEventBytes, this.OnNetCookDiagCookResultEvent);
+            if (!resultHooked)
+            {
+                resultHooked = this.RegisterGameEventHook("XDTDataAndProtocol.Events.CookResultEvent", NetCookDiagCookLifecycleEventBytes, this.OnNetCookDiagCookResultEvent);
+            }
+
+            bool entityCreateHooked = this.RegisterGameEventHook(NetCookDiagEntityCreateEventName, NetCookDiagEntityEventBytes, this.OnNetCookDiagEntityCreateEvent);
+            bool entityRemoveHooked = this.RegisterGameEventHook(NetCookDiagEntityRemoveEventName, NetCookDiagEntityEventBytes, this.OnNetCookDiagEntityRemoveEvent);
+
+            this.NetCookDiagLog("Diag hooks: StartCook=" + startHooked + " CookResult=" + resultHooked
+                + " EntityCreate=" + entityCreateHooked + " EntityRemove=" + entityRemoveHooked
+                + " (UpdateCookingStatus already via EnsureNetCookEventHooks).", force: true);
+        }
+
+        // --- CookingProtocolManager.OnUpdateCookerStatus native detour (diagnostics only) ---
+        //
+        // OnUpdateCookerStatus is the single chokepoint the ECS->data bridge (CookingSyncSystem.
+        // On<ComponentUpdated<CookingStatusComponent>>) calls for EVERY server status update, BEFORE
+        // it touches the streamed view. UpdateCookingStatusEvent (the view event we already hook) only
+        // fires once a CookingComponent view exists, so it dies when the stove streams out. Detouring
+        // OnUpdateCookerStatus lets us see whether danger/cooking status updates still arrive at the
+        // client while the player is far from the stove (view despawned) — the decisive remote-cook
+        // question. The detour body is allocation-free, never throws, never calls Mono: it copies the
+        // scalars into a static ring and forwards via the trampoline. The drain (main thread) logs.
+        //
+        // Signature (XDTDataAndProtocol.ProtocolService.Cooking.CookingProtocolManager, static):
+        //   void OnUpdateCookerStatus(uint cookerNetId, ulong levelObjectNetId, CookingStatus status,
+        //     bool useMagicItem, DateTime startTime, int periodTimeMs, int totalTimeMs,
+        //     float baseProgress, int foodQuality, int foodItemId, uint OwnerNetId)
+        // Native ABI: CookingStatus enum -> int; bool -> 1-byte (declared byte, no BOOL widening);
+        // DateTime is one 8-byte field -> declared long (Win64 passes <=8B POD structs by value in a
+        // slot; we only forward it verbatim, never interpret it, so a by-ref pass would still be slot-
+        // correct). Install/forward run on the same Unity main thread the bridge dispatches on, so the
+        // construct->trampoline window cannot race a real call.
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void OnUpdateCookerStatusHookDelegate(
+            uint cookerNetId, ulong levelObjectNetId, int status, byte useMagicItem,
+            long startTime, int periodTimeMs, int totalTimeMs, float baseProgress,
+            int foodQuality, int foodItemId, uint ownerNetId);
+
+        private delegate IntPtr NetCookCompileMethodDelegate(IntPtr method);
+
+        private bool netCookOnUpdateCookerStatusDetourAttempted;
+        private bool netCookOnUpdateCookerStatusDetourInstalled;
+        private MonoMod.RuntimeDetour.NativeDetour netCookOnUpdateCookerStatusDetour;
+        private OnUpdateCookerStatusHookDelegate netCookOnUpdateCookerStatusBodyKeepAlive;
+
+        private const int NetCookCookStatusRingSize = 128; // power of two
+        private const int NetCookCookStatusRingMask = NetCookCookStatusRingSize - 1;
+        private static readonly uint[] netCookCookStatusRingCooker = new uint[NetCookCookStatusRingSize];
+        private static readonly ulong[] netCookCookStatusRingLo = new ulong[NetCookCookStatusRingSize];
+        private static readonly int[] netCookCookStatusRingStatus = new int[NetCookCookStatusRingSize];
+        private static readonly int[] netCookCookStatusRingFoodId = new int[NetCookCookStatusRingSize];
+        private static readonly int[] netCookCookStatusRingQuality = new int[NetCookCookStatusRingSize];
+        private static int netCookCookStatusRingWrite; // monotonic; written only by the detour body (main thread)
+        private static OnUpdateCookerStatusHookDelegate netCookOnUpdateCookerStatusTrampoline;
+        private static long netCookOnUpdateCookerStatusHookCount;
+        private int netCookCookStatusRingRead; // drained on the main thread
+
+        // Allocation-free, no throw, no Mono calls. Records scalars into the ring and forwards.
+        private static void NetCookOnUpdateCookerStatusDetourBody(
+            uint cookerNetId, ulong levelObjectNetId, int status, byte useMagicItem,
+            long startTime, int periodTimeMs, int totalTimeMs, float baseProgress,
+            int foodQuality, int foodItemId, uint ownerNetId)
+        {
+            int idx = netCookCookStatusRingWrite & NetCookCookStatusRingMask;
+            netCookCookStatusRingCooker[idx] = cookerNetId;
+            netCookCookStatusRingLo[idx] = levelObjectNetId;
+            netCookCookStatusRingStatus[idx] = status;
+            netCookCookStatusRingFoodId[idx] = foodItemId;
+            netCookCookStatusRingQuality[idx] = foodQuality;
+            netCookCookStatusRingWrite++;
+            netCookOnUpdateCookerStatusHookCount++;
+
+            OnUpdateCookerStatusHookDelegate tramp = netCookOnUpdateCookerStatusTrampoline;
+            if (tramp != null)
+            {
+                tramp(cookerNetId, levelObjectNetId, status, useMagicItem, startTime, periodTimeMs,
+                    totalTimeMs, baseProgress, foodQuality, foodItemId, ownerNetId);
+            }
+        }
+
+        private void EnsureNetCookOnUpdateCookerStatusDetour()
+        {
+            if (this.netCookOnUpdateCookerStatusDetourAttempted)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return; // API not ready — retry next frame (don't mark attempted).
+                }
+
+                IntPtr protocolClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Cooking.CookingProtocolManager");
+                if (protocolClass == IntPtr.Zero)
+                {
+                    protocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ProtocolService.Cooking", "CookingProtocolManager");
+                }
+                if (protocolClass == IntPtr.Zero)
+                {
+                    return; // image not loaded yet — retry next frame.
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(protocolClass, "OnUpdateCookerStatus", 11);
+                if (method == IntPtr.Zero)
+                {
+                    this.netCookOnUpdateCookerStatusDetourAttempted = true;
+                    this.NetCookDiagLog("OnUpdateCookerStatus detour: 11-arg method not found.", force: true);
+                    return;
+                }
+
+                IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                NetCookCompileMethodDelegate compile = monoModule != IntPtr.Zero
+                    ? this.GetAuraMonoExport<NetCookCompileMethodDelegate>(monoModule, "mono_compile_method")
+                    : null;
+                if (compile == null)
+                {
+                    this.netCookOnUpdateCookerStatusDetourAttempted = true;
+                    this.NetCookDiagLog("OnUpdateCookerStatus detour: mono_compile_method unavailable.", force: true);
+                    return;
+                }
+
+                IntPtr nativePtr = compile(method);
+                if (nativePtr == IntPtr.Zero)
+                {
+                    this.netCookOnUpdateCookerStatusDetourAttempted = true;
+                    this.NetCookDiagLog("OnUpdateCookerStatus detour: compiled native ptr null.", force: true);
+                    return;
+                }
+
+                this.netCookOnUpdateCookerStatusDetourAttempted = true;
+                OnUpdateCookerStatusHookDelegate body = NetCookOnUpdateCookerStatusDetourBody;
+                this.netCookOnUpdateCookerStatusBodyKeepAlive = body;
+                this.netCookOnUpdateCookerStatusDetour = new MonoMod.RuntimeDetour.NativeDetour(nativePtr, body);
+
+                OnUpdateCookerStatusHookDelegate tramp = this.netCookOnUpdateCookerStatusDetour.GenerateTrampoline<OnUpdateCookerStatusHookDelegate>();
+                if (tramp == null)
+                {
+                    // Without a trampoline the game would stop updating cook status — revert.
+                    try { this.netCookOnUpdateCookerStatusDetour.Undo(); } catch { }
+                    this.netCookOnUpdateCookerStatusDetour = null;
+                    this.netCookOnUpdateCookerStatusBodyKeepAlive = null;
+                    this.NetCookDiagLog("OnUpdateCookerStatus detour: trampoline null, reverted.", force: true);
+                    return;
+                }
+
+                netCookOnUpdateCookerStatusTrampoline = tramp;
+                this.netCookOnUpdateCookerStatusDetourInstalled = true;
+                this.NetCookDiagLog("OnUpdateCookerStatus detour INSTALLED @0x" + nativePtr.ToInt64().ToString("X")
+                    + " — watching ECS->data status writes (fires regardless of view).", force: true);
+            }
+            catch (Exception ex)
+            {
+                this.netCookOnUpdateCookerStatusDetourAttempted = true;
+                this.NetCookDiagLog("OnUpdateCookerStatus detour install failed: " + ex.Message, force: true);
+            }
+        }
+
+        // Installs the detour (once) and drains its ring — call this from the active cook loop AND the
+        // diagnostics tick so the lo-keyed status cache is populated whenever cooking is running, not
+        // only while Status Diagnostics is on. Cheap when idle (the monotonic ring drains nothing).
+        private void PumpNetCookCookStatusDetour()
+        {
+            this.EnsureNetCookOnUpdateCookerStatusDetour();
+            this.DrainNetCookCookStatusRing();
+        }
+
+        // Main-thread drain of the detour ring. ALWAYS populates the lo-keyed status cache (the remote-
+        // cook status source); additionally logs each entry (viewAlive=0/1) when Status Diagnostics is
+        // on. Producer (detour body) and consumer both run on the Unity main thread.
+        private void DrainNetCookCookStatusRing()
+        {
+            int write = netCookCookStatusRingWrite; // monotonic snapshot
+            if (this.netCookCookStatusRingRead == write)
+            {
+                return;
+            }
+
+            int backlog = write - this.netCookCookStatusRingRead;
+            if (backlog > NetCookCookStatusRingSize)
+            {
+                if (this.netCookStatusDiagEnabled)
+                {
+                    this.NetCookDiagLog("OnUpdateCookerStatus ring overflow: skipped "
+                        + (backlog - NetCookCookStatusRingSize) + " entries.");
+                }
+                this.netCookCookStatusRingRead = write - NetCookCookStatusRingSize;
+            }
+
+            float now = Time.unscaledTime;
+            int logged = 0;
+            while (this.netCookCookStatusRingRead != write)
+            {
+                int idx = this.netCookCookStatusRingRead & NetCookCookStatusRingMask;
+                uint cooker = netCookCookStatusRingCooker[idx];
+                ulong lo = netCookCookStatusRingLo[idx];
+                int status = netCookCookStatusRingStatus[idx];
+                int foodId = netCookCookStatusRingFoodId[idx];
+                int quality = netCookCookStatusRingQuality[idx];
+                this.netCookCookStatusRingRead++;
+
+                // Populate the stable lo-keyed cache (guard in-range status; out-of-range = layout drift).
+                if (lo != 0UL && status >= 0 && status <= 6)
+                {
+                    NetCookStatusCacheEntry entry;
+                    entry.Status = status;
+                    entry.FoodQuality = quality;
+                    entry.FoodItemId = foodId;
+                    entry.UpdatedAt = now;
+                    this.netCookStatusByLevelObject[lo] = entry;
+                }
+
+                if (this.netCookStatusDiagEnabled && logged < 24)
+                {
+                    logged++;
+                    uint owner = ExtractNetCookOwnerNetId(lo);
+                    bool tracked = this.IsNetCookDiagTrackedLevelObject(lo)
+                        || this.IsNetCookDiagTrackedOwnerNetId(owner)
+                        || this.IsNetCookDiagTrackedCooker(cooker);
+                    bool viewAlive = this.IsNetCookBurnerEntityAlive(cooker != 0U ? cooker : owner);
+                    this.NetCookDiagLog("OnUpdateCookerStatus#" + netCookOnUpdateCookerStatusHookCount
+                        + " cooker=" + cooker
+                        + " lo=" + lo
+                        + " owner=" + owner
+                        + " status=" + this.GetNetCookCookingStatusName(status)
+                        + " foodId=" + foodId
+                        + " q=" + quality
+                        + " tracked=" + tracked
+                        + " viewAlive=" + (viewAlive ? 1 : 0));
+                }
+            }
+        }
+
+        private bool IsNetCookDiagTrackedOwnerNetId(uint ownerNetId)
+        {
+            if (ownerNetId == 0U)
+            {
+                return false;
+            }
+
+            if (this.netCookRegisteredWorldCookers.ContainsKey(ownerNetId))
+            {
+                return true;
+            }
+
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target != null && ExtractNetCookOwnerNetId(target.LevelObjectNetId) == ownerNetId)
+                {
+                    return true;
+                }
+            }
+
+            foreach (NetCookTargetContext registeredTarget in this.netCookRegisteredTargets.Values)
+            {
+                if (registeredTarget != null && ExtractNetCookOwnerNetId(registeredTarget.LevelObjectNetId) == ownerNetId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsNetCookDiagTrackedLevelObject(ulong levelObjectNetId)
+        {
+            if (levelObjectNetId == 0UL)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target != null && target.LevelObjectNetId == levelObjectNetId)
+                {
+                    return true;
+                }
+            }
+
+            foreach (NetCookTargetContext registeredTarget in this.netCookRegisteredTargets.Values)
+            {
+                if (registeredTarget != null && registeredTarget.LevelObjectNetId == levelObjectNetId)
+                {
+                    return true;
+                }
+            }
+
+            return this.netCookLevelObjectNetId != 0UL && this.netCookLevelObjectNetId == levelObjectNetId;
+        }
+
+        private bool IsNetCookDiagTrackedNetId(uint netId)
+        {
+            return netId != 0U && (this.IsNetCookDiagTrackedCooker(netId) || this.IsNetCookDiagTrackedOwnerNetId(netId));
+        }
+
+        private static string FormatNetCookTargetShort(NetCookTargetContext target)
+        {
+            if (target == null)
+            {
+                return "<null>";
+            }
+
+            return "cook=" + target.CookerNetId
+                + " lo=" + target.LevelObjectNetId
+                + " static=" + target.CookerStaticId
+                + " phase=" + target.Phase
+                + " lastStatus=" + target.LastStatus;
+        }
+
+        private void LogNetCookTargetRemoved(NetCookTargetContext target, string reason)
+        {
+            if (!this.netCookStatusDiagEnabled)
+            {
+                return;
+            }
+
+            string distanceText = "?";
+            if (target != null
+                && this.TryGetNetCookScanOrigin(out Vector3 scanOrigin, out _)
+                && target.HasWorldPosition)
+            {
+                distanceText = Vector3.Distance(scanOrigin, target.WorldPosition).ToString("F1") + "m";
+            }
+
+            this.NetCookDiagLog("TARGET REMOVED reason=" + reason
+                + " target=" + FormatNetCookTargetShort(target)
+                + " dist=" + distanceText
+                + " remaining=" + Math.Max(0, this.netCookTargets.Count - 1)
+                + " massCook=" + this.netCookEnabled);
+        }
+
+        private void RemoveNetCookTargetAt(int index, string reason)
+        {
+            if (index < 0 || index >= this.netCookTargets.Count)
+            {
+                return;
+            }
+
+            this.LogNetCookTargetRemoved(this.netCookTargets[index], reason);
+            this.netCookTargets.RemoveAt(index);
+        }
+
+        private void RemoveNetCookTargetFromList(List<NetCookTargetContext> targets, int index, string reason)
+        {
+            if (targets == null || index < 0 || index >= targets.Count)
+            {
+                return;
+            }
+
+            if (object.ReferenceEquals(targets, this.netCookTargets))
+            {
+                this.RemoveNetCookTargetAt(index, reason);
+                return;
+            }
+
+            if (this.netCookStatusDiagEnabled)
+            {
+                this.NetCookDiagLog("TARGET REMOVED (list) reason=" + reason + " target=" + FormatNetCookTargetShort(targets[index]));
+            }
+
+            targets.RemoveAt(index);
+        }
+
+        private void LogNetCookStatusCacheClear(string reason, int count)
+        {
+            if (!this.netCookStatusDiagEnabled || count <= 0)
+            {
+                return;
+            }
+
+            this.NetCookDiagLog("status cache CLEAR reason=" + reason + " entries=" + count);
+        }
+
+        private void OnNetCookDiagEntityCreateEvent(GameEventSnapshot e)
+        {
+            if (!this.netCookStatusDiagEnabled)
+            {
+                return;
+            }
+
+            uint netId = e.ReadUInt32(8);
+            if (netId == 0U || !this.IsNetCookDiagTrackedNetId(netId))
+            {
+                return;
+            }
+
+            uint entityId = e.ReadUInt32(4);
+            int archetypePacked = e.ReadInt32(24);
+            int bucket = (short)(archetypePacked & 0xFFFF);
+            int index = (short)((archetypePacked >> 16) & 0xFFFF);
+            this.netCookStatusDiagEntityCreateEvents++;
+            this.NetCookDiagLog("EntityCreateEvent #" + this.netCookStatusDiagEntityCreateEvents
+                + " netId=" + netId
+                + " entityId=" + entityId
+                + " arch=" + bucket + ":" + index
+                + " trackedCooker=" + this.IsNetCookDiagTrackedCooker(netId)
+                + " trackedOwner=" + this.IsNetCookDiagTrackedOwnerNetId(netId));
+        }
+
+        private void OnNetCookDiagEntityRemoveEvent(GameEventSnapshot e)
+        {
+            if (!this.netCookStatusDiagEnabled)
+            {
+                return;
+            }
+
+            uint netId = e.ReadUInt32(8);
+            uint entityId = e.ReadUInt32(4);
+            int archetypePacked = e.ReadInt32(24);
+            int bucket = (short)(archetypePacked & 0xFFFF);
+            int index = (short)((archetypePacked >> 16) & 0xFFFF);
+            bool trackedCooker = this.IsNetCookDiagTrackedCooker(netId);
+            bool trackedOwner = this.IsNetCookDiagTrackedOwnerNetId(netId);
+            if (netId == 0U || (!trackedCooker && !trackedOwner))
+            {
+                return;
+            }
+
+            this.netCookStatusDiagEntityRemoveEvents++;
+            bool cacheEvicted = this.netCookStatusCache.Remove(netId);
+            bool stillInTargets = false;
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target != null && (target.CookerNetId == netId || ExtractNetCookOwnerNetId(target.LevelObjectNetId) == netId))
+                {
+                    stillInTargets = true;
+                    break;
+                }
+            }
+
+            this.NetCookDiagLog("EntityRemoveEvent #" + this.netCookStatusDiagEntityRemoveEvents
+                + " netId=" + netId
+                + " entityId=" + entityId
+                + " arch=" + bucket + ":" + index
+                + " trackedCooker=" + trackedCooker
+                + " trackedOwner=" + trackedOwner
+                + " cacheEvicted=" + cacheEvicted
+                + " stillInTargets=" + stillInTargets
+                + " massCook=" + this.netCookEnabled
+                + " [POSSIBLE STOVE UNLOAD]");
+        }
+
+        private bool IsNetCookDiagTrackedCooker(uint cookNetId)
+        {
+            if (cookNetId == 0U)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target != null && target.CookerNetId == cookNetId)
+                {
+                    return true;
+                }
+            }
+
+            foreach (NetCookTargetContext registeredTarget in this.netCookRegisteredTargets.Values)
+            {
+                if (registeredTarget != null && registeredTarget.CookerNetId == cookNetId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void OnNetCookDiagStartCookEvent(GameEventSnapshot e)
+        {
+            if (!this.netCookStatusDiagEnabled)
+            {
+                return;
+            }
+
+            uint cookNetId = e.ReadUInt32(0);
+            ulong levelObjectNetId = e.ReadUInt64(8);
+            bool cookWithoutRice = e.ReadInt32(16) != 0;
+            int foodItemId = e.ReadInt32(20);
+            this.netCookStatusDiagStartCookEvents++;
+            if (!this.IsNetCookDiagTrackedCooker(cookNetId))
+            {
+                return;
+            }
+
+            this.NetCookDiagLog("StartCookEvent #" + this.netCookStatusDiagStartCookEvents
+                + " cook=" + cookNetId
+                + " lo=" + levelObjectNetId
+                + " noRice=" + cookWithoutRice
+                + " foodId=" + foodItemId);
+        }
+
+        private void OnNetCookDiagCookResultEvent(GameEventSnapshot e)
+        {
+            if (!this.netCookStatusDiagEnabled)
+            {
+                return;
+            }
+
+            uint cookNetId = e.ReadUInt32(0);
+            ulong levelObjectNetId = e.ReadUInt64(8);
+            int interaction = e.ReadInt32(16);
+            this.netCookStatusDiagCookResultEvents++;
+            if (!this.IsNetCookDiagTrackedCooker(cookNetId))
+            {
+                return;
+            }
+
+            this.NetCookDiagLog("CookResultEvent #" + this.netCookStatusDiagCookResultEvents
+                + " cook=" + cookNetId
+                + " lo=" + levelObjectNetId
+                + " interaction=" + interaction);
+        }
+
+        private void ProcessNetCookStatusDiagnostics(float now)
+        {
+            if (!this.netCookStatusDiagEnabled || this.netCookTargets.Count <= 0)
+            {
+                return;
+            }
+
+            this.EnsureNetCookStatusDiagHooks();
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                this.MaybeLogNetCookStatusDiagnostics(this.netCookTargets[i], now);
+            }
+        }
+
+        private void UpdateNetCookStatusDiagnosticsOnUpdate()
+        {
+            if (!this.netCookStatusDiagEnabled)
+            {
+                return;
+            }
+
+            this.EnsureNetCookStatusDiagHooks();
+            this.PumpNetCookCookStatusDetour();
+            float now = Time.unscaledTime;
+
+            if (!this.netCookStatusDiagSessionAnnounced)
+            {
+                this.netCookStatusDiagSessionAnnounced = true;
+                try
+                {
+                    ModLogger.Msg("[NetCookDiag] tick active. targets=" + this.netCookTargets.Count
+                        + " massCook=" + this.netCookEnabled
+                        + " miniGameOnly=" + this.netCookMiniGameOnly
+                        + " statusCache=" + this.netCookStatusCache.Count
+                        + " hooks=" + this.netCookStatusDiagEventHooksRegistered);
+                }
+                catch
+                {
+                }
+            }
+
+            if (now >= this.nextNetCookDiagHeartbeatAt)
+            {
+                this.nextNetCookDiagHeartbeatAt = now + 15f;
+                try
+                {
+                    ModLogger.Msg("[NetCookDiag] heartbeat targets=" + this.netCookTargets.Count
+                        + " massCook=" + this.netCookEnabled
+                        + " cache=" + this.netCookStatusCache.Count
+                        + " cookingStatusEvents=" + this.netCookStatusDiagCookingStatusEvents
+                        + " entityRemoves=" + this.netCookStatusDiagEntityRemoveEvents
+                        + " onUpdateCookerStatusHook=" + netCookOnUpdateCookerStatusHookCount
+                        + (this.netCookOnUpdateCookerStatusDetourInstalled ? "(installed)" : "(not installed)")
+                        + (this.netCookTargets.Count <= 0 ? " (capture stoves to begin PROBE logs)" : string.Empty));
+                }
+                catch
+                {
+                }
+            }
+
+            if (this.netCookTargets.Count > 0)
+            {
+                this.ProcessNetCookStatusDiagnostics(now);
+            }
+        }
+
+        private void MaybeLogNetCookStatusDiagnostics(NetCookTargetContext target, float now)
+        {
+            if (target == null || target.CookerNetId == 0U)
+            {
+                return;
+            }
+
+            if (this.netCookStatusDiagLastLogAt.TryGetValue(target.CookerNetId, out float lastLogAt)
+                && now - lastLogAt < NetCookStatusDiagLogIntervalSeconds)
+            {
+                return;
+            }
+
+            this.netCookStatusDiagLastLogAt[target.CookerNetId] = now;
+
+            NetCookStatusProbeSnapshot eventProbe = this.ProbeNetCookStatusFromEventCache(target.CookerNetId, now);
+            NetCookStatusProbeSnapshot auraProbe = this.ProbeNetCookStatusFromAuraMono(target);
+            this.ProbeNetCookTrackingUi(out int trackingDangerButtons, out int trackingInteractButtons, out string trackingDetail);
+
+            string distanceText = "?";
+            if (this.TryGetNetCookScanOrigin(out Vector3 scanOrigin, out _))
+            {
+                if (target.HasWorldPosition)
+                {
+                    distanceText = Vector3.Distance(scanOrigin, target.WorldPosition).ToString("F1") + "m";
+                }
+                else if (this.TryGetNetCookTargetWorldPosition(target.LevelObjectNetId, target.CookerNetId, out Vector3 resolvedPosition)
+                         && resolvedPosition != Vector3.zero)
+                {
+                    distanceText = Vector3.Distance(scanOrigin, resolvedPosition).ToString("F1") + "m";
+                }
+            }
+
+            bool productionOk;
+            int productionStatus;
+            int productionRecipeId;
+            int productionQuality;
+            string productionSource;
+            productionOk = this.TryGetNetCookTargetCookingStatus(target, out productionStatus, out productionRecipeId, out productionQuality, out productionSource);
+
+            this.NetCookDiagLog(
+                "PROBE stove=" + target.CookerNetId
+                + " lo=" + target.LevelObjectNetId
+                + " phase=" + target.Phase
+                + " dist=" + distanceText
+                + " | event: " + FormatNetCookStatusProbe(eventProbe)
+                + " | aura: " + FormatNetCookStatusProbe(auraProbe)
+                + " | tracking: dangerBtns=" + trackingDangerButtons
+                + " interactBtns=" + trackingInteractButtons
+                + (string.IsNullOrWhiteSpace(trackingDetail) ? string.Empty : " (" + trackingDetail + ")")
+                + " | production: " + (productionOk
+                    ? this.GetNetCookCookingStatusName(productionStatus) + " via " + productionSource
+                    : "UNAVAILABLE (" + productionSource + ")")
+                + " | lifecycle: StartCook=" + this.netCookStatusDiagStartCookEvents
+                + " CookResult=" + this.netCookStatusDiagCookResultEvents
+                + " CookingStatus=" + this.netCookStatusDiagCookingStatusEvents
+                + " EntityRemove=" + this.netCookStatusDiagEntityRemoveEvents
+                + " EntityCreate=" + this.netCookStatusDiagEntityCreateEvents);
+        }
+
+        private static string FormatNetCookStatusProbe(NetCookStatusProbeSnapshot probe)
+        {
+            if (!probe.Found)
+            {
+                return probe.Detail ?? "miss";
+            }
+
+            string name = probe.Status switch
+            {
+                0 => "Idle",
+                1 => "Preparing",
+                2 => "Cooking",
+                3 => "Danger",
+                4 => "Relief",
+                5 => "Succeed",
+                6 => "Failed",
+                _ => "Unknown(" + probe.Status + ")"
+            };
+            string suffix = probe.Stale ? " STALE" : string.Empty;
+            string extras = probe.FoodItemId > 0 ? " food=" + probe.FoodItemId : string.Empty;
+            if (probe.FoodQuality > 0)
+            {
+                extras += " q=" + probe.FoodQuality;
+            }
+
+            if (probe.AgeSeconds > 0f)
+            {
+                return name + "(" + probe.Status + ") age=" + probe.AgeSeconds.ToString("F1") + "s" + suffix + extras;
+            }
+
+            return name + "(" + probe.Status + ")" + suffix + extras + (string.IsNullOrWhiteSpace(probe.Detail) ? string.Empty : " " + probe.Detail);
+        }
+
+        private NetCookStatusProbeSnapshot ProbeNetCookStatusFromEventCache(uint cookNetId, float now)
+        {
+            NetCookStatusProbeSnapshot probe;
+            probe.Found = false;
+            probe.Status = -1;
+            probe.FoodQuality = 0;
+            probe.FoodItemId = 0;
+            probe.AgeSeconds = 0f;
+            probe.Stale = false;
+            probe.Detail = "no cache entry";
+
+            if (!this.netCookStatusCache.TryGetValue(cookNetId, out NetCookStatusCacheEntry cached))
+            {
+                return probe;
+            }
+
+            probe.Found = true;
+            probe.Status = cached.Status;
+            probe.FoodQuality = cached.FoodQuality;
+            probe.FoodItemId = cached.FoodItemId;
+            probe.AgeSeconds = Mathf.Max(0f, now - cached.UpdatedAt);
+            probe.Stale = probe.AgeSeconds > NetCookStatusCacheStaleSeconds;
+            probe.Detail = null;
+            return probe;
+        }
+
+        private NetCookStatusProbeSnapshot ProbeNetCookStatusFromAuraMono(NetCookTargetContext target)
+        {
+            NetCookStatusProbeSnapshot probe;
+            probe.Found = false;
+            probe.Status = -1;
+            probe.FoodQuality = 0;
+            probe.FoodItemId = 0;
+            probe.AgeSeconds = 0f;
+            probe.Stale = false;
+            probe.Detail = "burner entity missing";
+
+            try
+            {
+                if (!this.TryGetAuraMonoEntityObjectByNetId(target.CookerNetId, out IntPtr burnerEntityObj) || burnerEntityObj == IntPtr.Zero)
+                {
+                    return probe;
+                }
+
+                if (!this.TryResolveNetCookCookingComponentAuraMono(burnerEntityObj, out IntPtr cookingComponentObj, out string componentStatus))
+                {
+                    probe.Detail = componentStatus;
+                    return probe;
+                }
+
+                IntPtr componentDataObj = IntPtr.Zero;
+                if ((!this.TryGetMonoObjectMember(cookingComponentObj, "ComponentData", out componentDataObj) || componentDataObj == IntPtr.Zero)
+                    && (!this.TryGetMonoObjectMember(cookingComponentObj, "_componentData", out componentDataObj) || componentDataObj == IntPtr.Zero)
+                    && (!this.TryGetMonoObjectMember(cookingComponentObj, "componentData", out componentDataObj) || componentDataObj == IntPtr.Zero))
+                {
+                    probe.Detail = "component data missing";
+                    return probe;
+                }
+
+                if (!this.TryGetMonoInt32Member(componentDataObj, "Status", out probe.Status)
+                    && !this.TryGetMonoInt32Member(componentDataObj, "status", out probe.Status))
+                {
+                    probe.Detail = "status field missing";
+                    return probe;
+                }
+
+                this.TryGetMonoInt32Member(componentDataObj, "ResultRecipeId", out probe.FoodItemId);
+                if (probe.FoodItemId <= 0)
+                {
+                    this.TryGetMonoInt32Member(componentDataObj, "resultRecipeId", out probe.FoodItemId);
+                }
+
+                if (probe.FoodItemId <= 0)
+                {
+                    this.TryGetMonoInt32Member(componentDataObj, "FoodItemId", out probe.FoodItemId);
+                }
+
+                if (probe.FoodItemId <= 0)
+                {
+                    this.TryGetMonoInt32Member(componentDataObj, "foodItemId", out probe.FoodItemId);
+                }
+
+                this.TryGetMonoInt32Member(componentDataObj, "FoodQuality", out probe.FoodQuality);
+                if (probe.FoodQuality <= 0)
+                {
+                    this.TryGetMonoInt32Member(componentDataObj, "foodQuality", out probe.FoodQuality);
+                }
+
+                probe.Found = true;
+                probe.Detail = "live component";
+                return probe;
+            }
+            catch (Exception ex)
+            {
+                probe.Detail = "exception: " + ex.Message;
+                return probe;
+            }
+        }
+
+        private void ProbeNetCookTrackingUi(out int dangerButtons, out int interactButtons, out string detail)
+        {
+            dangerButtons = 0;
+            interactButtons = 0;
+            detail = null;
+
+            try
+            {
+                const string dangerPath = "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_cook_danger@list";
+                const string interactPath = "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list";
+
+                GameObject dangerRoot = GameObject.Find(dangerPath);
+                if (dangerRoot != null)
+                {
+                    Button[] dangerButtonsAll = dangerRoot.GetComponentsInChildren<Button>(true);
+                    for (int i = 0; i < dangerButtonsAll.Length; i++)
+                    {
+                        Button button = dangerButtonsAll[i];
+                        if (button != null && button.gameObject.activeInHierarchy && button.interactable)
+                        {
+                            dangerButtons++;
+                        }
+                    }
+                }
+
+                GameObject interactRoot = GameObject.Find(interactPath);
+                if (interactRoot != null)
+                {
+                    Button[] interactButtonsAll = interactRoot.GetComponentsInChildren<Button>(true);
+                    for (int i = 0; i < interactButtonsAll.Length; i++)
+                    {
+                        Button button = interactButtonsAll[i];
+                        if (button != null && button.gameObject.activeInHierarchy && button.interactable)
+                        {
+                            interactButtons++;
+                        }
+                    }
+                }
+
+                bool trackingPanelOpen = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)") != null;
+                detail = "panel=" + trackingPanelOpen + " dangerRoot=" + (dangerRoot != null) + " interactRoot=" + (interactRoot != null);
+            }
+            catch (Exception ex)
+            {
+                detail = "exception: " + ex.Message;
+            }
+        }
+
+        private void NetCookDiagLog(string message, bool force = false)
+        {
+            if (!force && !this.netCookStatusDiagEnabled)
+            {
+                return;
+            }
+
+            try
+            {
+                ModLogger.Msg("[NetCookDiag] " + message);
+            }
+            catch
+            {
+            }
+        }
+
+        private bool IsNetCookBurnerEntityAlive(uint cookerOrOwnerNetId)
+        {
+            return cookerOrOwnerNetId != 0U
+                && this.TryGetAuraMonoEntityObjectByNetId(cookerOrOwnerNetId, out IntPtr entityObj)
+                && entityObj != IntPtr.Zero;
+        }
+
+        private bool ShouldAcceptNetCookStatusCacheIngest(int statusValue, bool entityAlive, NetCookStatusCacheEntry previous, bool hadPrevious, out string rejectReason)
+        {
+            rejectReason = string.Empty;
+
+            // Danger+ must always be cached — mini-game timing depends on these even when streamed out.
+            if (statusValue >= 3)
+            {
+                return true;
+            }
+
+            if (statusValue == 0 && !entityAlive)
+            {
+                rejectReason = "streaming-idle-placeholder";
+                return false;
+            }
+
+            if (statusValue == 0 && hadPrevious && previous.Status >= 1 && !entityAlive)
+            {
+                rejectReason = "streaming-idle-downgrade";
+                return false;
+            }
+
+            if ((statusValue == 1 || statusValue == 2) && !entityAlive && hadPrevious && previous.Status >= 3)
+            {
+                rejectReason = "streaming-active-downgrade";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool ShouldHoldNetCookDrainForUntrustedIdle(NetCookTargetContext target, float now)
+        {
+            if (target == null)
+            {
+                return false;
+            }
+
+            if (this.IsNetCookTargetInActiveRemoteCookGuard(target, now))
+            {
+                return true;
+            }
+
+            return target.Phase >= 1
+                && !this.IsNetCookBurnerEntityAlive(target.CookerNetId);
+        }
+
+        private bool IsNetCookTargetInActiveRemoteCookGuard(NetCookTargetContext target, float now)
+        {
+            return target != null
+                && target.Phase >= 2
+                && (now - target.LastCookCommandAt) < NetCookRemoteActiveCookGuardSeconds;
+        }
+
         private bool TryGetNetCookTargetCookingStatus(NetCookTargetContext target, out int cookingStatus, out int resultRecipeId, out int foodQuality, out string status)
         {
             cookingStatus = -1;
@@ -1833,15 +2991,50 @@ namespace HeartopiaMod
 
             try
             {
-                // Prefer the event-driven cache (UpdateCookingStatusEvent) — avoids the per-stove
-                // AuraMono component read. Falls back to the AuraMono path until the first status
-                // event for this cooker arrives (or if the event hook never installs).
+                // Primary source: the lo-keyed cache fed by the OnUpdateCookerStatus detour (the ECS->
+                // data chokepoint). Works at ANY distance — it fires even when the stove view is streamed
+                // out, and lo is stable across stream-out/in (unlike the view CookerNetId). No staleness
+                // gate: the server only sends on change, so the cached value is the live status. This is
+                // what lets remote mass-cook see Danger and relieve it before the dish burns.
+                if (target.LevelObjectNetId != 0UL
+                    && this.netCookStatusByLevelObject.TryGetValue(target.LevelObjectNetId, out NetCookStatusCacheEntry loCached))
+                {
+                    cookingStatus = loCached.Status;
+                    foodQuality = loCached.FoodQuality;
+                    resultRecipeId = loCached.FoodItemId;
+                    status = "Cooking status (OnUpdateCookerStatus detour, lo-cache).";
+                    return true;
+                }
+
+                // Fallback: the view event cache (UpdateCookingStatusEvent) — only valid while the stove
+                // is streamed in. Falls back to the AuraMono component read until the first event arrives.
                 if (this.netCookStatusCache.TryGetValue(target.CookerNetId, out NetCookStatusCacheEntry cached))
                 {
+                    bool entityAlive = this.IsNetCookBurnerEntityAlive(target.CookerNetId);
+                    float cacheAge = Mathf.Max(0f, Time.unscaledTime - cached.UpdatedAt);
+                    bool stale = cacheAge > NetCookStatusCacheStaleSeconds;
+
+                    if (cached.Status == 0 && !entityAlive)
+                    {
+                        status = stale
+                            ? "Event cache Idle while streamed out (stale " + cacheAge.ToString("F1") + "s)."
+                            : "Event cache Idle while streamed out.";
+                        return false;
+                    }
+
+                    if (!entityAlive && cached.Status < 3 && stale)
+                    {
+                        status = "Event cache " + this.GetNetCookCookingStatusName(cached.Status)
+                            + " while streamed out (stale " + cacheAge.ToString("F1") + "s).";
+                        return false;
+                    }
+
                     cookingStatus = cached.Status;
                     foodQuality = cached.FoodQuality;
                     resultRecipeId = cached.FoodItemId; // CookingComponentData.FoodItemId = cooked food id
-                    status = "Cooking status (event cache).";
+                    status = stale
+                        ? "Cooking status (event cache, stale " + cacheAge.ToString("F1") + "s)."
+                        : "Cooking status (event cache).";
                     return true;
                 }
 
@@ -1934,6 +3127,13 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Install + drain the OnUpdateCookerStatus detour whenever cooking is active so the lo-keyed
+            // status cache is fed even with Status Diagnostics off — this is what makes remote QTE work.
+            this.PumpNetCookCookStatusDetour();
+
+            float diagNow = Time.unscaledTime;
+            this.ProcessNetCookStatusDiagnostics(diagNow);
+
             if (this.netCookMiniGameOnly)
             {
                 float miniGameNow = Time.unscaledTime;
@@ -1998,8 +3198,14 @@ namespace HeartopiaMod
                 int previousRecipeId = this.netCookRecipeId;
                 int previousCookerStaticId = this.netCookCookerStaticId;
                 int previousCookerType = this.netCookCookerType;
+                if (this.netCookStatusDiagEnabled)
+                {
+                    this.NetCookDiagLog("capture start clearing targets=" + this.netCookTargets.Count);
+                }
                 this.netCookTargets.Clear();
+                this.LogNetCookStatusCacheClear("capture-start", this.netCookStatusCache.Count);
                 this.netCookStatusCache.Clear();
+                this.netCookStatusByLevelObject.Clear();
                 bool resolvedTargets = this.TryResolveNetCookContextsFromCurrentTarget(this.netCookTargets, out string multiCaptureStatus, true);
                 uint cookerNetId = 0U;
                 int cookerStaticId = 0;
@@ -5296,7 +6502,7 @@ namespace HeartopiaMod
                 NetCookTargetContext target = this.netCookTargets[i];
                 if (target == null || target.CookerNetId == 0U || target.LevelObjectNetId == 0UL)
                 {
-                    this.netCookTargets.RemoveAt(i);
+                    this.RemoveNetCookTargetAt(i, "ensure-assist-invalid-target");
                 }
             }
 
@@ -5345,13 +6551,13 @@ namespace HeartopiaMod
                 NetCookTargetContext target = this.netCookTargets[i];
                 if (target.CookerNetId == 0U || target.LevelObjectNetId == 0UL)
                 {
-                    this.netCookTargets.RemoveAt(i);
+                    this.RemoveNetCookTargetAt(i, "ensure-recipe-invalid-target");
                     continue;
                 }
 
                 if (recipeCookerType > 0 && target.CookerType > 0 && recipeCookerType != target.CookerType)
                 {
-                    this.netCookTargets.RemoveAt(i);
+                    this.RemoveNetCookTargetAt(i, "ensure-recipe-incompatible-cooker-type");
                 }
             }
 
@@ -5879,7 +7085,11 @@ namespace HeartopiaMod
                 }
 
                 NetCookTargetContext copy = this.CloneNetCookTargetContext(registeredTarget);
-                if (!this.TryRefreshNetCookTargetWorldPosition(copy, true))
+                // With Permanent Stove Memory the stove may be streamed out (remote re-cook), so its
+                // live world position is unresolvable — keep the position captured earlier (carried by
+                // the clone) instead of dropping the stove. Cooking uses the stable LevelObjectNetId,
+                // not the position, so a missing position doesn't block the cook.
+                if (!this.TryRefreshNetCookTargetWorldPosition(copy, true) && !this.netCookRememberStoves)
                 {
                     continue;
                 }
@@ -6163,7 +7373,11 @@ namespace HeartopiaMod
                 return false;
             }
 
-            int removedOutOfRange = this.RemoveOutOfRangeNetCookTargets(targets, seenTargets, seenCookerNetIds);
+            // Permanent Stove Memory: reuse the full remembered set regardless of distance (remote
+            // re-cook). Otherwise apply the normal scan-radius cull.
+            int removedOutOfRange = this.netCookRememberStoves
+                ? 0
+                : this.RemoveOutOfRangeNetCookTargets(targets, seenTargets, seenCookerNetIds);
             if (targets.Count <= 0)
             {
                 status = "Cached cooker targets are outside scan radius.";
@@ -7153,7 +8367,7 @@ namespace HeartopiaMod
                 {
                     seenCookerNetIds.Remove(target.CookerNetId);
                 }
-                targets.RemoveAt(i);
+                this.RemoveNetCookTargetFromList(targets, i, "incompatible-cooker-type");
                 removed++;
             }
 
@@ -7179,7 +8393,7 @@ namespace HeartopiaMod
                 NetCookTargetContext target = targets[i];
                 if (target == null)
                 {
-                    targets.RemoveAt(i);
+                    this.RemoveNetCookTargetFromList(targets, i, "out-of-range-null-target");
                     removed++;
                     continue;
                 }
@@ -7204,6 +8418,14 @@ namespace HeartopiaMod
                         seenCookerNetIds.Remove(target.CookerNetId);
                     }
 
+                    float distance = target.HasWorldPosition ? Vector3.Distance(scanOrigin, target.WorldPosition) : -1f;
+                    string reason = !target.HasWorldPosition
+                        ? "out-of-range-no-world-position"
+                        : "out-of-range dist=" + distance.ToString("F1") + "m max=" + maxScanDistance.ToString("F1") + "m";
+                    if (this.netCookStatusDiagEnabled)
+                    {
+                        this.NetCookDiagLog("TARGET REMOVED reason=" + reason + " target=" + FormatNetCookTargetShort(target));
+                    }
                     targets.RemoveAt(i);
                     removed++;
                 }
@@ -11674,6 +12896,11 @@ namespace HeartopiaMod
             public float NextActionAt;
             public bool HasWorldPosition;
             public Vector3 WorldPosition;
+            // Set when a global CookResultEvent(TakeFood) confirms this stove's dish was collected —
+            // the authoritative "finished" signal that reaches the client even at distance (the post-
+            // collect Idle goes through ComponentRemoved<CookingStatusComponent>, NOT OnUpdateCookerStatus,
+            // so the lo-cache never sees it). Lets drain remove the stove remotely. Reset on re-prepare.
+            public bool TrustedCollected;
         }
 
         private sealed class NetCookRegisteredWorldCooker
