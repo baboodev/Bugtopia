@@ -6,16 +6,22 @@ namespace HeartopiaMod
     // Force Swim / Skate on land.
     //
     // Locomotion is a client FSM (PlayerFsMachine on LocalPlayerComponent). The Free<->Swim and
-    // Free<->Skate transitions are gated purely by two synced status fields:
+    // Free<->Skate transitions are gated purely by two status fields:
     //   * PlayerStateSwim.IsStateSatisfy()  => Status.SwimStatus.IsSwimming
     //   * PlayerStateSkate.IsStateSatisfy() => Status.SkateStatus.Enable (Mode != None)
     // (see ilspy-dumps/.../Component/Player/PlayerStateSwim.cs, PlayerStateSkate.cs, *Transition*.cs)
     //
-    // This is the SERVER-going variant: we write the field through its real struct setter
-    // (set_IsSwimming / set_Mode), which raises the status DirtyMask, then call
-    // LocalPlayerComponent.ForceSyncStatus() so PlayerSyncStatus.SendSyncStatus pushes the dirtied
-    // field to the server (and thus to other players). Setters are no-ops when the value is
-    // unchanged, so periodic re-assertion costs nothing on a steady state.
+    // SWIM is the server-going variant: written through SwimStatus.set_IsSwimming (raises DirtyMask)
+    // + LocalPlayerComponent.ForceSyncStatus() so the server and other players see it.
+    //
+    // SKATE is server-authoritative: FsmStatus.Mode=Skate (set by the game when the FSM enters
+    // PlayerStateSkate) replicates, and WITHOUT a server-sanctioned skate session the server reverts
+    // it (~1 Hz vs our reassert => the flicker). Diagnostics proved the server ACCEPTS
+    // SkateProtocolManager.SendStartSkateCommand even on land (SkateStartedEvent isSucceed=True). So we
+    // mirror the game's own SkateCommand flow: on enable send Start and only write SkateStatus.mode=Free
+    // once SkateStartedEvent(isSucceed) confirms the session; on disable write mode=None so
+    // GameSkateMode.OnModeFinish sends the paired End. No native detour (hooking SendExitSkateCommand
+    // crashed at world-teardown — coreclr heap corruption).
     public partial class HeartopiaComplete
     {
         private const string ForceSwimStatusFullName = "XDTLevelAndEntity.Gameplay.Component.Player.SwimStatus";
@@ -37,15 +43,31 @@ namespace HeartopiaMod
         private IntPtr forceLocomotionSwimStatusClass;
         private IntPtr forceLocomotionSkateStatusClass;
         private IntPtr forceLocomotionSwimSetMethod;       // SwimStatus.set_IsSwimming(bool)
-        private IntPtr forceLocomotionSkateSetModeMethod;  // SkateStatus.set_Mode(SkateMode)
         private IntPtr forceLocomotionForceSyncMethod;     // LocalPlayerComponent.ForceSyncStatus()
         private IntPtr forceLocomotionForceSyncClass;
         private IntPtr forceLocomotionStatusClassResolvedFor;
         private int forceLocomotionSwimFieldOffset = -1;   // offset of SwimStatus field in PlayerSyncStatus
         private int forceLocomotionSkateFieldOffset = -1;  // offset of SkateStatus field in PlayerSyncStatus
+        private int forceLocomotionSkateModeInnerOffset = -1; // offset of SkateStatus.mode inside the struct
+
+        // Skate server-session state. Enter skate only once the server confirms our Start.
+        private bool forceSkateAwaitingStart;     // Start sent, waiting for SkateStartedEvent
+        private bool forceSkateServerSanctioned;  // server confirmed session -> safe to hold mode=Free
+
+        // GameSkateMode exits ~1 Hz on non-ice land via its ground-timeout (CheckExitCondition:
+        // _leaveSkateGroundTime + _skateConfig.ExitTime). We pin _leaveSkateGroundTime=-1 each frame so
+        // that exit never fires. Field ptr cached per class (image lifetime).
+        private IntPtr forceSkateGroundFieldClass;
+        private IntPtr forceSkateLeaveGroundField;
+        private float forceSkateGroundLogAt = -999f;
 
         private void ProcessForceLocomotionOnUpdate()
         {
+            this.EnsureForceSkateHooksRegistered();
+            this.ForceSkateHoldGround();
+
+            float now = Time.unscaledTime;
+
             bool togglesChanged = this.forceSwimEnabled != this.forceLocomotionPrevSwim
                 || this.forceSkateEnabled != this.forceLocomotionPrevSkate;
 
@@ -54,7 +76,6 @@ namespace HeartopiaMod
                 return;
             }
 
-            float now = Time.unscaledTime;
             if (!togglesChanged && now < this.forceLocomotionNextReassertAt)
             {
                 return;
@@ -63,6 +84,57 @@ namespace HeartopiaMod
             if (!this.forceLocomotionBreaker.ShouldRun(now))
             {
                 return;
+            }
+
+            bool skateRising = this.forceSkateEnabled && !this.forceLocomotionPrevSkate;
+            bool skateFalling = !this.forceSkateEnabled && this.forceLocomotionPrevSkate;
+
+            // ENABLE: open a server-sanctioned skate session. We DON'T enter skate (write mode=Free)
+            // until SkateStartedEvent confirms — otherwise the server reverts the unsanctioned skate
+            // (the flicker). The reply is handled in OnForceSkateStartedEvent.
+            if (skateRising)
+            {
+                this.forceSkateServerSanctioned = false;
+                this.forceSkateAwaitingStart = true;
+                try
+                {
+                    if (this.EnsureIceSkatingSequenceSendResolver(out _))
+                    {
+                        this.TrySendIceSkatingStart(out string startStatus);
+                        if (ForceSkateDiagLogs)
+                        {
+                            ModLogger.Msg("[ForceSkateDiag] ENABLE: Start sent, awaiting server (" + startStatus + ")");
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+            else if (skateFalling)
+            {
+                // If Start was sent but we never entered skate (reply pending / refused), close the
+                // orphan session ourselves — GameSkateMode.OnModeFinish only sends End if it activated.
+                if (this.forceSkateAwaitingStart && !this.forceSkateServerSanctioned)
+                {
+                    try
+                    {
+                        if (this.EnsureIceSkatingSequenceSendResolver(out _))
+                        {
+                            this.TrySendIceSkatingEnd(out _);
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                this.forceSkateAwaitingStart = false;
+                this.forceSkateServerSanctioned = false;
+                if (ForceSkateDiagLogs)
+                {
+                    ModLogger.Msg("[ForceSkateDiag] DISABLE: mode=None (game sends paired End if it was skating)");
+                }
             }
 
             this.forceLocomotionPrevSwim = this.forceSwimEnabled;
@@ -121,14 +193,17 @@ namespace HeartopiaMod
                         this.forceLocomotionSwimSetMethod,
                         this.forceSwimEnabled);
 
-                bool skateOk = this.forceLocomotionSkateSetModeMethod != IntPtr.Zero
-                    && this.forceLocomotionSkateFieldOffset >= 0
-                    && this.TryForceLocomotionSetStructInt(
+                // Enter skate (mode=Free) ONLY once the server has sanctioned the session; otherwise
+                // hold None so we don't fight the server. Raw write (no DirtyMask); FsmStatus.Mode=Skate
+                // replicates to others and is now accepted because a real session is open.
+                bool skateActive = this.forceSkateEnabled && this.forceSkateServerSanctioned;
+                bool skateOk = this.forceLocomotionSkateFieldOffset >= 0
+                    && this.forceLocomotionSkateModeInnerOffset >= 0
+                    && this.TryForceLocomotionSetSkateModeRaw(
                         statusObj,
-                        this.forceLocomotionSkateFieldOffset,
-                        this.forceLocomotionSkateSetModeMethod,
-                        this.forceSkateEnabled ? ForceSkateModeFree : ForceSkateModeNone);
+                        skateActive ? ForceSkateModeFree : ForceSkateModeNone);
 
+                // Pushes only the swim field (skate stays undirty / client-only).
                 bool synced = this.TryForceLocomotionSyncStatus(playerObj);
 
                 this.forceLocomotionLastStatus =
@@ -173,10 +248,20 @@ namespace HeartopiaMod
                     this.forceLocomotionSwimStatusClass, "set_IsSwimming", 1);
             }
 
-            if (this.forceLocomotionSkateSetModeMethod == IntPtr.Zero && this.forceLocomotionSkateStatusClass != IntPtr.Zero)
+            // SkateStatus is written CLIENT-ONLY (raw `mode` field, no DirtyMask) so it never syncs to
+            // the server: skate-on-land has no server session, and any synced Mode=Free is rejected /
+            // corrected (constant flicker). The raw write keeps the FSM (Free->Skate) satisfied locally
+            // without the server fighting it. mono_field_get_offset includes the boxed 2-ptr header, so
+            // the inline offset inside the struct subtracts it (cf. AuraFarm SelectPriorityInfo.shape).
+            if (this.forceLocomotionSkateModeInnerOffset < 0
+                && this.forceLocomotionSkateStatusClass != IntPtr.Zero
+                && auraMonoFieldGetOffset != null)
             {
-                this.forceLocomotionSkateSetModeMethod = this.FindAuraMonoMethodOnHierarchy(
-                    this.forceLocomotionSkateStatusClass, "set_Mode", 1);
+                IntPtr modeField = this.FindAuraMonoFieldOnHierarchy(this.forceLocomotionSkateStatusClass, "mode");
+                if (modeField != IntPtr.Zero)
+                {
+                    this.forceLocomotionSkateModeInnerOffset = (int)auraMonoFieldGetOffset(modeField) - 2 * IntPtr.Size;
+                }
             }
 
             IntPtr playerClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(playerObj) : IntPtr.Zero;
@@ -209,7 +294,7 @@ namespace HeartopiaMod
             }
 
             bool swimReady = this.forceLocomotionSwimSetMethod != IntPtr.Zero && this.forceLocomotionSwimFieldOffset >= 0;
-            bool skateReady = this.forceLocomotionSkateSetModeMethod != IntPtr.Zero && this.forceLocomotionSkateFieldOffset >= 0;
+            bool skateReady = this.forceLocomotionSkateFieldOffset >= 0 && this.forceLocomotionSkateModeInnerOffset >= 0;
             if (swimReady && skateReady && this.forceLocomotionForceSyncMethod != IntPtr.Zero)
             {
                 return true;
@@ -219,8 +304,8 @@ namespace HeartopiaMod
                 + " swimSet=" + (this.forceLocomotionSwimSetMethod != IntPtr.Zero)
                 + " swimOff=" + this.forceLocomotionSwimFieldOffset
                 + " skateClass=" + (this.forceLocomotionSkateStatusClass != IntPtr.Zero)
-                + " skateSet=" + (this.forceLocomotionSkateSetModeMethod != IntPtr.Zero)
                 + " skateOff=" + this.forceLocomotionSkateFieldOffset
+                + " skateModeOff=" + this.forceLocomotionSkateModeInnerOffset
                 + " forceSync=" + (this.forceLocomotionForceSyncMethod != IntPtr.Zero);
             return false;
         }
@@ -236,15 +321,14 @@ namespace HeartopiaMod
             return exc == IntPtr.Zero;
         }
 
-        private unsafe bool TryForceLocomotionSetStructInt(IntPtr statusObj, int fieldOffset, IntPtr setMethod, int value)
+        // Writes SkateStatus.mode directly (no property setter => DirtyMask stays 0 => never synced).
+        private unsafe bool TryForceLocomotionSetSkateModeRaw(IntPtr statusObj, int skateMode)
         {
-            IntPtr structAddr = (IntPtr)((byte*)statusObj + fieldOffset);
-            IntPtr exc = IntPtr.Zero;
-            int arg = value;
-            IntPtr* args = stackalloc IntPtr[1];
-            args[0] = (IntPtr)(&arg);
-            auraMonoRuntimeInvoke(setMethod, structAddr, (IntPtr)args, ref exc);
-            return exc == IntPtr.Zero;
+            int* modeAddr = (int*)((byte*)statusObj
+                + this.forceLocomotionSkateFieldOffset
+                + this.forceLocomotionSkateModeInnerOffset);
+            *modeAddr = skateMode;
+            return true;
         }
 
         private bool TryForceLocomotionSyncStatus(IntPtr playerObj)
@@ -257,6 +341,120 @@ namespace HeartopiaMod
             IntPtr exc = IntPtr.Zero;
             auraMonoRuntimeInvoke(this.forceLocomotionForceSyncMethod, playerObj, IntPtr.Zero, ref exc);
             return exc == IntPtr.Zero;
+        }
+
+        // Diagnostics. Off (skate confirmed stable — server reverts mode=None only once per session
+        // start, the per-frame hold wins thereafter). The SkateStartedEvent hook itself is functional
+        // (drives session sanctioning) and is registered regardless. Flip on to re-trace event flow.
+        private const bool ForceSkateDiagLogs = false;
+        private float forceSkateModeLogAt = -999f;
+        private int forceSkateLastLoggedMode = int.MinValue;
+        private bool forceSkateHooksRegistered;
+
+        private void EnsureForceSkateHooksRegistered()
+        {
+            if (this.forceSkateHooksRegistered)
+            {
+                return;
+            }
+
+            this.forceSkateHooksRegistered = true;
+
+            // FUNCTIONAL: server's verdict on our Start. Gates entering skate (no flicker).
+            this.RegisterGameEventHook("XDTDataAndProtocol.Events.SkateStartedEvent", 4, this.OnForceSkateStartedEvent);
+
+            if (ForceSkateDiagLogs)
+            {
+                this.RegisterGameEventHook("XDTDataAndProtocol.Events.SkateModeChangedEvent", 20, snap =>
+                    ModLogger.Msg("[ForceSkateDiag] SkateModeChangedEvent challengeEnd=" + snap.ReadBool(0)
+                        + " score=" + snap.ReadInt32(4) + " target=" + snap.ReadInt32(8) + " high=" + snap.ReadInt32(12)));
+                this.RegisterGameEventHook("XDTLevelAndEntity.Game.GameMode.GameModeEnterEvent", 1, snap =>
+                    ModLogger.Msg("[ForceSkateDiag] GameModeEnter mode=" + snap.ReadByte(0)));
+                this.RegisterGameEventHook("XDTLevelAndEntity.Game.GameMode.GameModeExitEvent", 1, snap =>
+                    ModLogger.Msg("[ForceSkateDiag] GameModeExit mode=" + snap.ReadByte(0)));
+            }
+
+            ModLogger.Msg("[ForceSkate] skate event hooks registered");
+        }
+
+        // Per-frame skate hold while a session is open:
+        //   (1) re-assert SkateStatus.mode=Free every frame — the server pushes mode=None back to the
+        //       owner (SkateStatus_Field_0.OnHandle) ~1 Hz; the 1 s reassert lost that race (flicker).
+        //   (2) hold GameSkateMode._leaveSkateGroundTime=-1 so the ground-timeout exit never fires.
+        private unsafe void ForceSkateHoldGround()
+        {
+            if (!this.forceSkateEnabled || !this.forceSkateServerSanctioned)
+            {
+                return;
+            }
+
+            try
+            {
+                // (1) Hold mode=Free against the server's None corrections (raw write, no DirtyMask).
+                if (this.forceLocomotionSkateFieldOffset >= 0 && this.forceLocomotionSkateModeInnerOffset >= 0
+                    && this.TryGetAuraMonoLocalPlayerObject(out IntPtr playerObj) && playerObj != IntPtr.Zero
+                    && this.TryGetMonoObjectMember(playerObj, "Status", out IntPtr statusObj) && statusObj != IntPtr.Zero)
+                {
+                    int* modeAddr = (int*)((byte*)statusObj
+                        + this.forceLocomotionSkateFieldOffset
+                        + this.forceLocomotionSkateModeInnerOffset);
+                    int curMode = *modeAddr;
+                    if (ForceSkateDiagLogs && (curMode != this.forceSkateLastLoggedMode || Time.unscaledTime >= this.forceSkateModeLogAt))
+                    {
+                        bool changed = curMode != this.forceSkateLastLoggedMode;
+                        this.forceSkateLastLoggedMode = curMode;
+                        this.forceSkateModeLogAt = Time.unscaledTime + 1f;
+                        ModLogger.Msg("[ForceSkateDiag] SkateStatus.mode=" + curMode + (changed ? " <CHANGED>" : string.Empty));
+                    }
+
+                    *modeAddr = ForceSkateModeFree;
+                }
+
+                // (2) Hold the ground-exit timer off (only meaningful while the mode is active).
+                if (this.TryResolveAutoIceSkatingReflection(out _)
+                    && this.TryGetAutoIceSkatingAuraMode(out IntPtr skateMode, out _) && skateMode != IntPtr.Zero
+                    && this.TryGetMonoBoolMember(skateMode, "actived", out bool actived) && actived
+                    && auraMonoFieldSetValue != null)
+                {
+                    IntPtr cls = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(skateMode) : IntPtr.Zero;
+                    if (cls != this.forceSkateGroundFieldClass)
+                    {
+                        this.forceSkateGroundFieldClass = cls;
+                        this.forceSkateLeaveGroundField = cls != IntPtr.Zero
+                            ? this.FindAuraMonoFieldOnHierarchy(cls, "_leaveSkateGroundTime")
+                            : IntPtr.Zero;
+                    }
+
+                    if (this.forceSkateLeaveGroundField != IntPtr.Zero)
+                    {
+                        float minusOne = -1f;
+                        auraMonoFieldSetValue(skateMode, this.forceSkateLeaveGroundField, (IntPtr)(&minusOne));
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void OnForceSkateStartedEvent(GameEventSnapshot snap)
+        {
+            bool ok = snap.ReadBool(0);
+            if (ForceSkateDiagLogs)
+            {
+                ModLogger.Msg("[ForceSkateDiag] SkateStartedEvent isSucceed=" + ok);
+            }
+
+            if (this.forceSkateEnabled && this.forceSkateAwaitingStart && ok)
+            {
+                this.forceSkateServerSanctioned = true;
+                this.forceSkateAwaitingStart = false;
+                this.forceLocomotionNextReassertAt = 0f; // apply mode=Free on the next tick
+                if (ForceSkateDiagLogs)
+                {
+                    ModLogger.Msg("[ForceSkate] server sanctioned session — entering skate");
+                }
+            }
         }
 
         // --- Force Swim hotkeys (space = ascend, ctrl = dive, shift = sprint) ---------------------

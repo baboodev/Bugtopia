@@ -125,7 +125,7 @@ namespace HeartopiaMod
                 this.AddMenuNotification(this.forceSkateEnabled ? "Force Skate on" : "Force Skate off", new Color(0.55f, 1f, 0.65f));
             }
             y += forceSkateToggleHeight + 6f;
-            GUI.Label(new Rect(left, y, 460f, 36f), "Writes SwimStatus/SkateStatus and syncs to the server. Status: " + this.forceLocomotionLastStatus);
+            GUI.Label(new Rect(left, y, 460f, 36f), "Swim/Skate on land (others see it). Toggling is flicker-free. Status: " + this.forceLocomotionLastStatus);
             y += 40f;
 
             y = this.DrawPrivacyBlockExtraTab(y, left);
