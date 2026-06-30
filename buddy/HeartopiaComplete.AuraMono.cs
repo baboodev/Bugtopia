@@ -1885,6 +1885,10 @@ namespace HeartopiaMod
             {
                 imageNames = new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll" };
             }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("ScriptsRefactory.DataAndProtocol", StringComparison.Ordinal))
+            {
+                imageNames = new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" };
+            }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTBaseService", StringComparison.Ordinal))
             {
                 imageNames = new[] { "XDTBaseService", "XDTBaseService.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };

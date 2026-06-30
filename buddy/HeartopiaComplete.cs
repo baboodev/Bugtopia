@@ -723,6 +723,7 @@ namespace HeartopiaMod
             this.UpdateMovementInputBridge();
             this.ProcessAutoIceSkatingOnUpdate();
             this.ProcessBubbleFeatureOnUpdate();
+            this.ProcessShowOffBypassOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
             this.ProcessPrivacyBlockOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();

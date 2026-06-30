@@ -94,6 +94,18 @@ namespace HeartopiaMod
             GUI.Label(new Rect(left, y, 460f, 20f), "Drives the character from the gamepad left stick (and WASD).");
             y += 26f;
 
+            const string skipShowOffLabel = "Skip Show Off animations";
+            bool prevSkipShowOff = this.skipShowOffAnimations;
+            float skipShowOffToggleHeight = this.GetSwitchToggleHeight(360f, skipShowOffLabel, 25f);
+            this.skipShowOffAnimations = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, skipShowOffToggleHeight), this.skipShowOffAnimations, skipShowOffLabel, 25f);
+            if (this.skipShowOffAnimations != prevSkipShowOff)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            y += skipShowOffToggleHeight + 6f;
+            GUI.Label(new Rect(left, y, 460f, 36f), "Blocks FlauntActionEvent / FlauntActionWithNetIdEvent (character hold-up animation).");
+            y += 40f;
+
             y = this.DrawPrivacyBlockExtraTab(y, left);
 
             return y + 20f;

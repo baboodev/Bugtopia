@@ -85,6 +85,8 @@ namespace HeartopiaMod
             public string EventFullName;
             public int PayloadBytes;
             public bool ByNetId; // true => hook the 2-arg DispatchEvent<T>(uint netId, in T) overload
+            public bool SuppressForward; // when true, detour swallows dispatch (no trampoline call)
+            public float NextResolveLogAt;
             public readonly List<Action<GameEventSnapshot>> Handlers = new List<Action<GameEventSnapshot>>();
             public int Slot;
             public bool InstallAttempted;
@@ -101,6 +103,8 @@ namespace HeartopiaMod
 
         // Per-slot routing consumed by the static native bodies (no instance state, no closures).
         private static readonly int[] eventSlotPayloadLen = new int[MaxEventHookSlots];
+        private static readonly bool[] eventSlotSuppressForward = new bool[MaxEventHookSlots];
+        private static readonly int[] eventSlotHandlerCount = new int[MaxEventHookSlots];
         private static readonly DispatchEventHookDelegate[] eventSlotTrampoline = new DispatchEventHookDelegate[MaxEventHookSlots];
         private static readonly DispatchEventByNetIdHookDelegate[] eventSlotTrampolineNetId = new DispatchEventByNetIdHookDelegate[MaxEventHookSlots];
 
@@ -132,7 +136,7 @@ namespace HeartopiaMod
         // EventPayloadCap). Use 0 for empty events. The handler runs on the Unity main thread.
         internal bool RegisterGameEventHook(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler)
         {
-            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, false, handler);
+            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, false, handler, false);
         }
 
         // Register a handler for a PER-ENTITY game event (dispatched via DispatchEvent<T>(uint
@@ -141,12 +145,33 @@ namespace HeartopiaMod
         // event type per slot).
         internal bool RegisterGameEventHookByNetId(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler)
         {
-            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, true, handler);
+            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, true, handler, false);
         }
 
-        private bool RegisterGameEventHookInternal(string eventFullName, int payloadBytes, bool byNetId, Action<GameEventSnapshot> handler)
+        // Swallow dispatches of this event type (no game listeners run). Handler is optional.
+        internal bool RegisterGameEventSuppressHook(string eventFullName, int payloadBytes, bool byNetId = false)
         {
-            if (string.IsNullOrEmpty(eventFullName) || handler == null)
+            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, byNetId, null, true);
+        }
+
+        internal void SetGameEventHookSuppressForward(string eventFullName, bool suppress)
+        {
+            if (string.IsNullOrEmpty(eventFullName)
+                || !this.gameEventHooksByName.TryGetValue(eventFullName, out GameEventHookEntry entry))
+            {
+                return;
+            }
+
+            entry.SuppressForward = suppress;
+            if (entry.Installed)
+            {
+                eventSlotSuppressForward[entry.Slot] = suppress;
+            }
+        }
+
+        private bool RegisterGameEventHookInternal(string eventFullName, int payloadBytes, bool byNetId, Action<GameEventSnapshot> handler, bool suppressForward)
+        {
+            if (string.IsNullOrEmpty(eventFullName) || (handler == null && !suppressForward))
             {
                 return false;
             }
@@ -160,7 +185,20 @@ namespace HeartopiaMod
                     ModLogger.Msg("[EventHook] " + eventFullName + " already hooked with byNetId=" + existing.ByNetId + "; ignoring conflicting byNetId=" + byNetId);
                     return false;
                 }
-                existing.Handlers.Add(handler);
+                if (handler != null)
+                {
+                    existing.Handlers.Add(handler);
+                }
+
+                if (suppressForward)
+                {
+                    existing.SuppressForward = true;
+                    if (existing.Installed)
+                    {
+                        eventSlotSuppressForward[existing.Slot] = true;
+                    }
+                }
+
                 if (clamped > existing.PayloadBytes)
                 {
                     existing.PayloadBytes = clamped;
@@ -169,6 +207,8 @@ namespace HeartopiaMod
                         eventSlotPayloadLen[existing.Slot] = clamped;
                     }
                 }
+
+                this.SyncGameEventHookSlotHandlerCount(existing);
                 return true;
             }
 
@@ -183,13 +223,28 @@ namespace HeartopiaMod
                 EventFullName = eventFullName,
                 PayloadBytes = clamped,
                 ByNetId = byNetId,
+                SuppressForward = suppressForward,
                 Slot = this.gameEventHookSlotCount
             };
-            entry.Handlers.Add(handler);
+            if (handler != null)
+            {
+                entry.Handlers.Add(handler);
+            }
             this.gameEventHookSlots[entry.Slot] = entry;
             this.gameEventHooksByName[eventFullName] = entry;
             this.gameEventHookSlotCount++;
+            this.SyncGameEventHookSlotHandlerCount(entry);
             return true;
+        }
+
+        private void SyncGameEventHookSlotHandlerCount(GameEventHookEntry entry)
+        {
+            if (entry == null || entry.Slot < 0 || entry.Slot >= MaxEventHookSlots)
+            {
+                return;
+            }
+
+            eventSlotHandlerCount[entry.Slot] = entry.Handlers.Count;
         }
 
         // True once the detour for this event is live (used by features that keep an event-driven
@@ -293,9 +348,15 @@ namespace HeartopiaMod
 
             // The event struct's image (e.g. XDTDataAndProtocol) may load after EventCenter. If the
             // class isn't resolvable yet, leave InstallAttempted=false so we retry on a later frame.
-            IntPtr eventClass = this.FindAuraMonoClassByFullName(entry.EventFullName);
+            IntPtr eventClass = this.ResolveGameEventClass(entry.EventFullName);
             if (eventClass == IntPtr.Zero)
             {
+                if (UnityEngine.Time.unscaledTime >= entry.NextResolveLogAt)
+                {
+                    entry.NextResolveLogAt = UnityEngine.Time.unscaledTime + 5f;
+                    ModLogger.Msg("[EventHook] awaiting event type: " + entry.EventFullName);
+                }
+
                 return;
             }
 
@@ -344,6 +405,8 @@ namespace HeartopiaMod
                 }
 
                 eventSlotPayloadLen[entry.Slot] = entry.PayloadBytes;
+                eventSlotSuppressForward[entry.Slot] = entry.SuppressForward;
+                this.SyncGameEventHookSlotHandlerCount(entry);
                 entry.Installed = true;
                 ModLogger.Msg("[EventHook] hooked " + entry.EventFullName + " @0x" + nativePtr.ToInt64().ToString("X")
                     + " (slot " + entry.Slot + ", " + (entry.ByNetId ? "per-netId" : "global") + ")");
@@ -442,6 +505,16 @@ namespace HeartopiaMod
 
         private static void RouteEventSlot(int slot, IntPtr eventPtr)
         {
+            if (eventSlotSuppressForward[slot])
+            {
+                if (eventSlotHandlerCount[slot] > 0)
+                {
+                    PushEventToRing(slot, 0u, eventPtr);
+                }
+
+                return;
+            }
+
             DispatchEventHookDelegate orig = eventSlotTrampoline[slot];
             PushEventToRing(slot, 0u, eventPtr);
             if (orig != null)
@@ -480,6 +553,16 @@ namespace HeartopiaMod
 
         private static void RouteEventNetIdSlot(int slot, uint netId, IntPtr eventPtr)
         {
+            if (eventSlotSuppressForward[slot])
+            {
+                if (eventSlotHandlerCount[slot] > 0)
+                {
+                    PushEventToRing(slot, netId, eventPtr);
+                }
+
+                return;
+            }
+
             DispatchEventByNetIdHookDelegate orig = eventSlotTrampolineNetId[slot];
             PushEventToRing(slot, netId, eventPtr);
             if (orig != null)
@@ -638,6 +721,49 @@ namespace HeartopiaMod
         {
             this.entityRemoveCount++;
             this.entityLastRemoveNetId = e.ReadUInt32(8);
+        }
+
+        private IntPtr ResolveGameEventClass(string eventFullName)
+        {
+            if (string.IsNullOrWhiteSpace(eventFullName))
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr cls = this.FindAuraMonoClassByFullName(eventFullName);
+            if (cls != IntPtr.Zero)
+            {
+                return cls;
+            }
+
+            int lastDot = eventFullName.LastIndexOf('.');
+            if (lastDot <= 0)
+            {
+                return IntPtr.Zero;
+            }
+
+            string ns = eventFullName.Substring(0, lastDot);
+            string name = eventFullName.Substring(lastDot + 1);
+            if (!ns.StartsWith("ScriptsRefactory.DataAndProtocol", StringComparison.Ordinal))
+            {
+                return IntPtr.Zero;
+            }
+
+            cls = this.FindAuraMonoClassInImages(ns, name, new string[]
+            {
+                "XDTDataAndProtocol",
+                "XDTDataAndProtocol.dll",
+                "XDTLevelAndEntity",
+                "XDTLevelAndEntity.dll",
+                "Client",
+                "Client.dll"
+            });
+            if (cls != IntPtr.Zero && MasterLogShowOffBypass)
+            {
+                ModLogger.Msg("[EventHook] resolved " + eventFullName + " via XDTDataAndProtocol image");
+            }
+
+            return cls;
         }
 
         // Cheap scalar dump for MasterLogGameEvents discovery: first few int/uint words.
