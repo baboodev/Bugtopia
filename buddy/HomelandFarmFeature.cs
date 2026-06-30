@@ -15776,23 +15776,10 @@ namespace HeartopiaMod
             int batchCount = 0;
             int failCount = 0;
 
-            if (fertilizer.NetId != 0U)
-            {
-                if (!this.TryHomelandFarmEquipHandhold(fertilizer.NetId, out string equipStatus))
-                {
-                    this.homelandFarmLastStatus = "Equip fertilizer failed: " + equipStatus;
-                    this.HomelandFarmLog(this.homelandFarmLastStatus);
-                    if (!silent)
-                    {
-                        this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
-                    }
-
-                    yield break;
-                }
-
-                yield return null;
-            }
-            else
+            // Equipping the fertilizer into the character's hand (EquipHandhold) is
+            // intentionally skipped: AddManure is server-authoritative and does not
+            // require the item to be held, so we avoid the visible handhold swap.
+            if (fertilizer.NetId == 0U)
             {
                 this.HomelandFarmLog("Fertilize warning: fertilizer backpack netId missing; server may reject.");
             }
