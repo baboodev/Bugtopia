@@ -111,6 +111,8 @@ namespace HeartopiaMod
             { "ENABLE CHOP & MINE", "ENABLE CHOP & MINE" },
             { "DISABLE CHOP & MINE", "DISABLE CHOP & MINE" },
             { "Auto Collect", "Auto Collect" },
+            { "Auto Pickup Drops", "Auto Pickup Drops" },
+            { "Pickup Distance: {0}m", "Pickup Distance: {0}m" },
             { "Collect Types:", "Collect Types:" },
             { "  Mushrooms", "  Mushrooms" },
             { "  Berries / Bushes / Plants", "  Berries / Bushes / Plants" },

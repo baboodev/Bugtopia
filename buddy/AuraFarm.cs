@@ -477,6 +477,7 @@ namespace HeartopiaMod
             this.auraNextMeteorObjectScanAt = 0f;
             this.auraTargetInfoByOwnerId.Clear();
             this.auraNextAllowedByOwnerId.Clear();
+            this.ResetAuraLootCollectRuntimeState();
 
             if (enabled)
             {
@@ -527,6 +528,7 @@ namespace HeartopiaMod
 
             this.RunAuraFarmTick();
             this.CleanupAuraCooldownMap(now);
+            this.UpdateAuraFarmLootCollect();
         }
 
         private void RunAuraFarmTick()

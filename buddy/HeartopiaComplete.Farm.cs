@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -251,7 +251,10 @@ namespace HeartopiaMod
             }
             num += (int)statusPanel.height + 14;
 
-            float settingsHeight = 184f + (this.autoFarmEnabled ? 98f : 0f) + (this.autoFarmAutoStopEnabled ? 44f : 0f);
+            float settingsHeight = 184f
+                + (this.auraFarmEnabled ? (this.auraFarmLootCollectEnabled ? 102f : 68f) : 0f)
+                + (this.autoFarmEnabled ? 98f : 0f)
+                + (this.autoFarmAutoStopEnabled ? 44f : 0f);
             Rect settingsPanel = new Rect(left, (float)num, panelWidth, settingsHeight);
             this.DrawExentriSectionPanel(settingsPanel, accent, panelFill, panelLine);
             GUI.Label(new Rect(settingsPanel.x + 14f, settingsPanel.y + 12f, settingsPanel.width - 28f, 18f), this.L("SETTINGS"), sectionStyle);
@@ -288,6 +291,40 @@ namespace HeartopiaMod
             }
             GUI.Label(new Rect(settingsPanel.x + 304f, rowY + 2f, settingsPanel.width - 324f, 20f), auraResolverText, auraResolverStyle);
             rowY += 34f;
+
+            if (this.auraFarmEnabled)
+            {
+                float lootToggleWidth = 250f;
+                float lootToggleHeight = this.GetSwitchToggleHeight(lootToggleWidth, "Auto Pickup Drops", 25f);
+                bool newLootCollectEnabled = this.DrawWrappedSwitchToggle(
+                    new Rect(settingsPanel.x + 14f, rowY, lootToggleWidth, lootToggleHeight),
+                    this.auraFarmLootCollectEnabled,
+                    "Auto Pickup Drops",
+                    25f);
+                if (newLootCollectEnabled != this.auraFarmLootCollectEnabled)
+                {
+                    this.auraFarmLootCollectEnabled = newLootCollectEnabled;
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+
+                rowY += Mathf.Ceil(lootToggleHeight + 8f);
+                if (this.auraFarmLootCollectEnabled)
+                {
+                    GUI.Label(new Rect(settingsPanel.x + 14f, rowY, 170f, 20f), this.LF("Pickup Distance: {0}m", (int)this.auraFarmLootCollectDistance), bodyStyle);
+                    float prevLootDistance = this.auraFarmLootCollectDistance;
+                    this.auraFarmLootCollectDistance = Mathf.Round(this.DrawAccentSlider(
+                        new Rect(settingsPanel.x + 192f, rowY + 1f, settingsPanel.width - 220f, 20f),
+                        this.auraFarmLootCollectDistance,
+                        1f,
+                        500f));
+                    if (this.auraFarmLootCollectDistance != prevLootDistance)
+                    {
+                        try { this.SaveKeybinds(false); } catch { }
+                    }
+
+                    rowY += 34f;
+                }
+            }
 
             float autoCollectToggleWidth = 250f;
             float autoCollectToggleHeight = this.GetSwitchToggleHeight(autoCollectToggleWidth, "Auto Collect", 25f);

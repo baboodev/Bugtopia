@@ -252,6 +252,8 @@ namespace HeartopiaMod
             public int autoSellScanSource;
             public bool autoSellFestivalTokensEnabled;
             public bool collectEventResources;
+            public bool auraFarmLootCollectEnabled;
+            public float auraFarmLootCollectDistance;
         }
 
         [Serializable]

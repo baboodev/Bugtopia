@@ -265,6 +265,8 @@ namespace HeartopiaMod
             data.autoSellScanSource = this.autoSellScanSource;
             data.autoSellFestivalTokensEnabled = this.autoSellFestivalTokensEnabled;
             data.collectEventResources = this.collectEventResources;
+            data.auraFarmLootCollectEnabled = this.auraFarmLootCollectEnabled;
+            data.auraFarmLootCollectDistance = this.auraFarmLootCollectDistance;
         }
 
         private void ApplyKeybindConfig(KeybindConfigData data)
@@ -452,6 +454,13 @@ namespace HeartopiaMod
             this.autoSellScanSource = Mathf.Clamp(data.autoSellScanSource, 0, 2);
             this.autoSellFestivalTokensEnabled = data.autoSellFestivalTokensEnabled;
             this.collectEventResources = data.collectEventResources;
+            this.auraFarmLootCollectDistance = Mathf.Clamp(
+                data.auraFarmLootCollectDistance > 0f ? data.auraFarmLootCollectDistance : 100f,
+                1f,
+                500f);
+            this.auraFarmLootCollectEnabled = data.auraFarmLootCollectDistance > 0f
+                ? data.auraFarmLootCollectEnabled
+                : true;
         }
 
         private void PopulateAllConfigSections(UnifiedConfigData data)
@@ -665,6 +674,8 @@ namespace HeartopiaMod
                         else if (line.Contains("collectTallMustard")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectTallMustard\":") != 0);
                         else if (line.Contains("collectBurdock")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectBurdock\":") != 0);
                         else if (line.Contains("collectMustardGreens")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectMustardGreens\":") != 0);
+                        else if (line.Contains("auraFarmLootCollectEnabled")) this.auraFarmLootCollectEnabled = GetJsonInt(line, "\"auraFarmLootCollectEnabled\":") != 0;
+                        else if (line.Contains("auraFarmLootCollectDistance")) this.auraFarmLootCollectDistance = Mathf.Clamp(GetJsonFloat(line, "\"auraFarmLootCollectDistance\":"), 1f, 500f);
                     }
                     this.ResetNetCookDishLimitToDefault();
                     this.SyncLodOverrideAfterConfigLoad();
