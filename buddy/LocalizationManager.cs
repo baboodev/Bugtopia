@@ -338,6 +338,7 @@ namespace HeartopiaMod
             { "Use Bait spreads bait near water (not while fishing). Assign a hotkey in Settings.", "Use Bait spreads bait near water (not while fishing). Assign a hotkey in Settings." },
             { "Use Attractor places a fish attractor near water (not while fishing). Assign a hotkey in Settings.", "Use Attractor places a fish attractor near water (not while fishing). Assign a hotkey in Settings." },
             { "Noclip", "Noclip" },
+            { "Vehicle Bypass", "Vehicle Bypass" },
             { "Noclip Speed: {0:F1}", "Noclip Speed: {0:F1}" },
             { "Noclip Boost: {0:F1}x", "Noclip Boost: {0:F1}x" },
             { "Anti AFK (Auto Click)", "Anti AFK (Auto Click)" },

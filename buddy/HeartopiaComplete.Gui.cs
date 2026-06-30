@@ -1831,6 +1831,16 @@ namespace HeartopiaMod
                 }
                 num += 30;
 
+                bool prevVehicleBypass = this.vehicleBypassEnabled;
+                this.vehicleBypassEnabled = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.vehicleBypassEnabled, this.L("Vehicle Bypass"));
+                if (this.vehicleBypassEnabled != prevVehicleBypass)
+                {
+                    this.AddMenuNotification(
+                        "Vehicle Bypass " + (this.vehicleBypassEnabled ? "Enabled" : "Disabled"),
+                        this.vehicleBypassEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                }
+                num += 30;
+
                 if (this.noclipEnabled)
                 {
                     GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Noclip Speed: {0:F1}", this.noclipSpeed));

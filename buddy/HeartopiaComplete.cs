@@ -728,6 +728,7 @@ namespace HeartopiaMod
             this.ProcessShowOffBypassOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
             this.ProcessPrivacyBlockOnUpdate();
+            this.ProcessVehicleBypassOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
