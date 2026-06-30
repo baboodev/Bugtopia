@@ -593,19 +593,8 @@ namespace HeartopiaMod
             }
             num += 30;
 
-            if (instantCatchEnabled)
-            {
-                GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Send Rate: {0:F0} Hz", instantCatchSendHz), small);
-                num += 22;
-                float prevHz = instantCatchSendHz;
-                instantCatchSendHz = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), instantCatchSendHz, InstantCatchSendHzMin, InstantCatchSendHzMax));
-                if (Math.Abs(instantCatchSendHz - prevHz) > 0.0001f)
-                {
-                    Log("Instant catch send rate changed to " + instantCatchSendHz.ToString("F0") + " Hz");
-                    try { host.UI_SaveKeybinds(false); } catch { }
-                }
-                num += 30;
-            }
+            // Send Rate slider intentionally hidden: the NotifyFloatInWater detour handles instant catch
+            // at the source, so the timed resend stays at 0 Hz (init default). Kept in code as a fallback.
 
             GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Status: {0}", GetLastStatus()), small);
             num += 24;
