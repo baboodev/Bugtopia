@@ -10,11 +10,13 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         public bool vehicleBypassEnabled;
+        public bool vehicleBypassServerEventsEnabled;
 
         private const float VehicleBypassHookRetrySeconds = 3f;
         private float vehicleBypassNextHookAttemptAt = -999f;
         private bool vehicleBypassHooksHardFailed;
-        private bool vehicleBypassReadyLogged;
+        private bool vehicleBypassClientReadyLogged;
+        private bool vehicleBypassServerReadyLogged;
 
         private static readonly string[] VehicleBypassLevelEntityImages =
         {
@@ -37,6 +39,26 @@ namespace HeartopiaMod
             "Client", "Client.dll",
         };
 
+        private static readonly string[] VehicleBypassProtocolImages =
+        {
+            "XDTDataAndProtocol", "XDTDataAndProtocol.dll",
+            "Client", "Client.dll",
+            "Assembly-CSharp", "Assembly-CSharp.dll",
+        };
+
+        private const int VehicleBypassAreaForbidGetOffReason = 1;
+        private const int VehicleBypassGetOffReasonDefault = 0;
+        private const int VehicleBypassAreaForbidReCallType = 5;
+        private const int VehicleBypassAreaForbidErrorCode = 28;
+        private const int VehicleBypassErrorCodeSuccess = 0;
+
+        private static volatile bool vehicleBypassEnabledStatic;
+        private static volatile bool vehicleBypassServerEventsEnabledStatic;
+        private static volatile uint vehicleBypassSelfPlayerNetId;
+        private static volatile uint vehicleBypassSelfVehicleNetId;
+        private static volatile uint vehicleBypassLatchedVehicleNetId;
+        private static volatile uint vehicleBypassPendingUserGetOffVehicleNetId;
+
         private static VehicleBypassCompileMethodDelegate vehicleBypassCompileMethod;
 
         private static VehicleBypassDetourSlot vehicleBypassHomeStaySlot;
@@ -46,6 +68,16 @@ namespace HeartopiaMod
         private static VehicleBypassDetourSlot vehicleBypassPartyForbidSlot;
         private static VehicleBypassDetourSlot vehicleBypassInNoPermissionSlot;
         private static VehicleBypassDetourSlot vehicleBypassCreateDrivingSlot;
+        private static VehicleBypassDetourSlot vehicleBypassGetOffVehicleSlot;
+        private static VehicleBypassDetourSlot vehicleBypassGetOffResultSlot;
+        private static VehicleBypassDetourSlot vehicleBypassReCallResultSlot;
+        private static VehicleBypassDetourSlot vehicleBypassTransitionIsSatisfySlot;
+        private static VehicleBypassDetourSlot vehicleBypassDoPassengerLeaveSlot;
+        private static VehicleBypassDetourSlot vehicleBypassStatusField0Slot;
+        private static VehicleBypassDetourSlot vehicleBypassStatusField1Slot;
+        private static VehicleBypassDetourSlot vehicleBypassDriveExitSlot;
+        private static VehicleBypassDetourSlot vehicleBypassServerRemoveVehicleSlot;
+        private static VehicleBypassDetourSlot vehicleBypassRemovePlayerVehicleSlot;
 
         private static VehicleBypassVoid4HookDelegate vehicleBypassHomeStayHook;
         private static VehicleBypassVoid3HookDelegate vehicleBypassForbiddenEnterHook;
@@ -92,8 +124,58 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate byte VehicleBypassCreateDrivingHookDelegate(IntPtr self, int itemId, int getOnVehicle);
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void VehicleBypassGetOffVehicleHookDelegate(uint vehicleNetId, int reason);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void VehicleBypassGetOffVehicleResultHookDelegate(int errorCode, uint playerNetId, uint vehicleNetId);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void VehicleBypassReCallVehicleResultHookDelegate(
+            uint vehicleNetId,
+            int vehicleStaticId,
+            int reCallEventType,
+            long recallUnixMs,
+            int destroy);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate byte VehicleBypassBoolSelf3HookDelegate(IntPtr self, IntPtr arg0, IntPtr arg1, IntPtr arg2);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void VehicleBypassVoidSelf1HookDelegate(IntPtr self, IntPtr arg0);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate byte VehicleBypassStatusFieldOnHandleDelegate(IntPtr command, IntPtr status);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void VehicleBypassRemovePlayerVehicleHookDelegate(IntPtr self, IntPtr removeEvent);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void VehicleBypassServerRemoveVehicleHookDelegate(uint netId, int realDel);
+
         private static VehicleBypassCreateDrivingHookDelegate vehicleBypassCreateDrivingHook;
         private static VehicleBypassCreateDrivingHookDelegate vehicleBypassCreateDrivingTrampoline;
+
+        private static VehicleBypassGetOffVehicleHookDelegate vehicleBypassGetOffVehicleHook;
+        private static VehicleBypassGetOffVehicleHookDelegate vehicleBypassGetOffVehicleTrampoline;
+        private static VehicleBypassGetOffVehicleResultHookDelegate vehicleBypassGetOffVehicleResultHook;
+        private static VehicleBypassGetOffVehicleResultHookDelegate vehicleBypassGetOffVehicleResultTrampoline;
+        private static VehicleBypassReCallVehicleResultHookDelegate vehicleBypassReCallVehicleResultHook;
+        private static VehicleBypassReCallVehicleResultHookDelegate vehicleBypassReCallVehicleResultTrampoline;
+        private static VehicleBypassBoolSelf3HookDelegate vehicleBypassTransitionIsSatisfyHook;
+        private static VehicleBypassBoolSelf3HookDelegate vehicleBypassTransitionIsSatisfyTrampoline;
+        private static VehicleBypassVoidSelf1HookDelegate vehicleBypassDoPassengerLeaveHook;
+        private static VehicleBypassVoidSelf1HookDelegate vehicleBypassDoPassengerLeaveTrampoline;
+        private static VehicleBypassStatusFieldOnHandleDelegate vehicleBypassStatusField0Hook;
+        private static VehicleBypassStatusFieldOnHandleDelegate vehicleBypassStatusField0Trampoline;
+        private static VehicleBypassStatusFieldOnHandleDelegate vehicleBypassStatusField1Hook;
+        private static VehicleBypassStatusFieldOnHandleDelegate vehicleBypassStatusField1Trampoline;
+        private static VehicleBypassBoolSelfOnlyHookDelegate vehicleBypassDriveExitHook;
+        private static VehicleBypassBoolSelfOnlyHookDelegate vehicleBypassDriveExitTrampoline;
+        private static VehicleBypassServerRemoveVehicleHookDelegate vehicleBypassServerRemoveVehicleHook;
+        private static VehicleBypassServerRemoveVehicleHookDelegate vehicleBypassServerRemoveVehicleTrampoline;
+        private static VehicleBypassRemovePlayerVehicleHookDelegate vehicleBypassRemovePlayerVehicleHook;
+        private static VehicleBypassRemovePlayerVehicleHookDelegate vehicleBypassRemovePlayerVehicleTrampoline;
 
         private static volatile bool vehicleBypassPendingForceSummon;
         private static int vehicleBypassPendingItemId;
@@ -116,36 +198,71 @@ namespace HeartopiaMod
 
         private void ProcessVehicleBypassOnUpdate()
         {
+            vehicleBypassEnabledStatic = this.vehicleBypassEnabled;
+            vehicleBypassServerEventsEnabledStatic = this.vehicleBypassServerEventsEnabled;
+
             if (this.vehicleBypassHooksHardFailed)
             {
                 return;
             }
 
-            if (!this.vehicleBypassEnabled)
+            bool clientOn = this.vehicleBypassEnabled;
+            bool serverOn = this.vehicleBypassServerEventsEnabled;
+            if (!clientOn && !serverOn)
             {
                 this.RemoveVehicleBypassDetours();
-                this.vehicleBypassReadyLogged = false;
+                this.vehicleBypassClientReadyLogged = false;
+                this.vehicleBypassServerReadyLogged = false;
                 return;
             }
 
-            if (!this.VehicleBypassAllHooksApplied())
+            if (!clientOn)
+            {
+                this.RemoveVehicleBypassClientDetours();
+            }
+
+            if (!serverOn)
+            {
+                this.RemoveVehicleBypassServerDetours();
+            }
+
+            if (serverOn)
+            {
+                this.TryVehicleBypassRefreshDrivingContext();
+            }
+
+            bool needClientHooks = clientOn && !this.VehicleBypassClientHooksApplied();
+            bool needServerHooks = serverOn && !this.VehicleBypassServerHooksApplied();
+            if (needClientHooks || needServerHooks)
             {
                 if (Time.unscaledTime >= this.vehicleBypassNextHookAttemptAt)
                 {
                     this.vehicleBypassNextHookAttemptAt = Time.unscaledTime + VehicleBypassHookRetrySeconds;
-                    this.EnsureVehicleBypassDetours();
+                    this.EnsureVehicleBypassDetours(clientOn, serverOn);
                 }
             }
-            else if (!this.vehicleBypassReadyLogged)
+            else
             {
-                this.vehicleBypassReadyLogged = true;
-                ModLogger.Msg("[VehicleBypass] all detours applied (homeland + forbidden zone + summon).");
+                if (clientOn && !this.vehicleBypassClientReadyLogged)
+                {
+                    this.vehicleBypassClientReadyLogged = true;
+                    ModLogger.Msg("[VehicleBypass] client detours applied (triggers + summon).");
+                }
+
+                if (serverOn && !this.vehicleBypassServerReadyLogged)
+                {
+                    this.vehicleBypassServerReadyLogged = true;
+                    ModLogger.Msg("[VehicleBypass] server-event detours applied (protocol + sync/status).");
+                }
             }
 
-            this.TryVehicleBypassProcessPendingSummon();
+            if (clientOn)
+            {
+                this.TryVehicleBypassProcessPendingSummon();
+            }
         }
 
-        private bool VehicleBypassAllHooksApplied()
+        private bool VehicleBypassClientHooksApplied()
         {
             return VehicleBypassSlotApplied(vehicleBypassHomeStaySlot)
                 && VehicleBypassSlotApplied(vehicleBypassForbiddenEnterSlot)
@@ -156,13 +273,32 @@ namespace HeartopiaMod
                 && VehicleBypassSlotApplied(vehicleBypassCreateDrivingSlot);
         }
 
+        private bool VehicleBypassServerHooksApplied()
+        {
+            return VehicleBypassSlotApplied(vehicleBypassGetOffVehicleSlot)
+                && VehicleBypassSlotApplied(vehicleBypassGetOffResultSlot)
+                && VehicleBypassSlotApplied(vehicleBypassReCallResultSlot)
+                && VehicleBypassSlotApplied(vehicleBypassTransitionIsSatisfySlot)
+                && VehicleBypassSlotApplied(vehicleBypassDoPassengerLeaveSlot)
+                && VehicleBypassSlotApplied(vehicleBypassStatusField0Slot)
+                && VehicleBypassSlotApplied(vehicleBypassStatusField1Slot)
+                && VehicleBypassSlotApplied(vehicleBypassDriveExitSlot)
+                && VehicleBypassSlotApplied(vehicleBypassServerRemoveVehicleSlot)
+                && VehicleBypassSlotApplied(vehicleBypassRemovePlayerVehicleSlot);
+        }
+
         private static bool VehicleBypassSlotApplied(VehicleBypassDetourSlot slot)
             => slot.Detour != null && slot.Detour.IsApplied;
 
-        private void EnsureVehicleBypassDetours()
+        private void EnsureVehicleBypassDetours(bool installClient, bool installServer)
         {
             try
             {
+                if (!installClient && !installServer)
+                {
+                    return;
+                }
+
                 if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
                 {
                     return;
@@ -185,6 +321,24 @@ namespace HeartopiaMod
                     }
                 }
 
+                if (installClient)
+                {
+                    this.EnsureVehicleBypassClientDetours();
+                }
+
+                if (installServer)
+                {
+                    this.EnsureVehicleBypassServerDetours();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[VehicleBypass] install pass failed: " + ex.Message);
+            }
+        }
+
+        private void EnsureVehicleBypassClientDetours()
+        {
                 this.TryInstallVehicleBypassDetour(
                     ref vehicleBypassHomeStaySlot,
                     VehicleBypassDelegateKind.Void4,
@@ -257,11 +411,130 @@ namespace HeartopiaMod
                     "CreateDrivingVehicle",
                     1,
                     2);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[VehicleBypass] install pass failed: " + ex.Message);
-            }
+        }
+
+        private void EnsureVehicleBypassServerDetours()
+        {
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassGetOffVehicleSlot,
+                    ref vehicleBypassGetOffVehicleHook,
+                    ref vehicleBypassGetOffVehicleTrampoline,
+                    VehicleBypassGetOffVehicleNative,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle",
+                    "VehicleProtocolManager",
+                    VehicleBypassProtocolImages,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle.VehicleProtocolManager",
+                    "GetOffVehicle",
+                    1,
+                    2);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassGetOffResultSlot,
+                    ref vehicleBypassGetOffVehicleResultHook,
+                    ref vehicleBypassGetOffVehicleResultTrampoline,
+                    VehicleBypassGetOffVehicleResultNative,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle",
+                    "VehicleProtocolManager",
+                    VehicleBypassProtocolImages,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle.VehicleProtocolManager",
+                    "GetOffVehicleResult",
+                    3);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassReCallResultSlot,
+                    ref vehicleBypassReCallVehicleResultHook,
+                    ref vehicleBypassReCallVehicleResultTrampoline,
+                    VehicleBypassReCallVehicleResultNative,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle",
+                    "VehicleProtocolManager",
+                    VehicleBypassProtocolImages,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle.VehicleProtocolManager",
+                    "ReCallVehicleResult",
+                    5);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassTransitionIsSatisfySlot,
+                    ref vehicleBypassTransitionIsSatisfyHook,
+                    ref vehicleBypassTransitionIsSatisfyTrampoline,
+                    VehicleBypassTransitionVehicle2FreeIsSatisfyNative,
+                    "XDTLevelAndEntity.Gameplay.Component.Player",
+                    "TransitionVehicle2Free",
+                    VehicleBypassLevelEntityImages,
+                    "XDTLevelAndEntity.Gameplay.Component.Player.TransitionVehicle2Free",
+                    "IsSatisfy",
+                    3);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassDoPassengerLeaveSlot,
+                    ref vehicleBypassDoPassengerLeaveHook,
+                    ref vehicleBypassDoPassengerLeaveTrampoline,
+                    VehicleBypassDoPassengerLeaveNative,
+                    "XDTLevelAndEntity.GameplaySystem.Vehicle",
+                    "VehicleManager",
+                    VehicleBypassLevelEntityImages,
+                    "XDTLevelAndEntity.GameplaySystem.Vehicle.VehicleManager",
+                    "DoPassengerLeave",
+                    1);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassStatusField0Slot,
+                    ref vehicleBypassStatusField0Hook,
+                    ref vehicleBypassStatusField0Trampoline,
+                    VehicleBypassVehicleStatusField0OnHandleNative,
+                    "XDTLevelAndEntity.Gameplay.Component.Player",
+                    "VehicleStatus_Field_0",
+                    VehicleBypassLevelEntityImages,
+                    "XDTLevelAndEntity.Gameplay.Component.Player.VehicleStatus_Field_0",
+                    "OnHandle",
+                    2);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassStatusField1Slot,
+                    ref vehicleBypassStatusField1Hook,
+                    ref vehicleBypassStatusField1Trampoline,
+                    VehicleBypassVehicleStatusField1OnHandleNative,
+                    "XDTLevelAndEntity.Gameplay.Component.Player",
+                    "VehicleStatus_Field_1",
+                    VehicleBypassLevelEntityImages,
+                    "XDTLevelAndEntity.Gameplay.Component.Player.VehicleStatus_Field_1",
+                    "OnHandle",
+                    2);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassDriveExitSlot,
+                    ref vehicleBypassDriveExitHook,
+                    ref vehicleBypassDriveExitTrampoline,
+                    VehicleBypassDriveModeCheckExitNative,
+                    "XDTLevelAndEntity.Game.GameMode",
+                    "GameDriveMode",
+                    VehicleBypassLevelEntityImages,
+                    "XDTLevelAndEntity.Game.GameMode.GameDriveMode",
+                    "CheckExitCondition",
+                    0);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassServerRemoveVehicleSlot,
+                    ref vehicleBypassServerRemoveVehicleHook,
+                    ref vehicleBypassServerRemoveVehicleTrampoline,
+                    VehicleBypassServerRemoveVehicleNative,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle",
+                    "VehicleProtocolManager",
+                    VehicleBypassProtocolImages,
+                    "XDTDataAndProtocol.ProtocolService.Vehicle.VehicleProtocolManager",
+                    "ServerRemoveVehicle",
+                    2);
+
+                this.TryInstallVehicleBypassTrampolineDetour(
+                    ref vehicleBypassRemovePlayerVehicleSlot,
+                    ref vehicleBypassRemovePlayerVehicleHook,
+                    ref vehicleBypassRemovePlayerVehicleTrampoline,
+                    VehicleBypassRemovePlayerVehicleNative,
+                    "XDTLevelAndEntity.GameplaySystem.Vehicle",
+                    "VehicleManager",
+                    VehicleBypassLevelEntityImages,
+                    "XDTLevelAndEntity.GameplaySystem.Vehicle.VehicleManager",
+                    "RemovePlayerVehicle",
+                    1);
         }
 
         private void TryInstallVehicleBypassTrampolineDetour<TDelegate>(
@@ -495,6 +768,23 @@ namespace HeartopiaMod
 
         private void RemoveVehicleBypassDetours()
         {
+            this.RemoveVehicleBypassClientDetours();
+            this.RemoveVehicleBypassServerDetours();
+            vehicleBypassCreateDrivingTrampoline = null;
+            vehicleBypassGetOffVehicleTrampoline = null;
+            vehicleBypassGetOffVehicleResultTrampoline = null;
+            vehicleBypassReCallVehicleResultTrampoline = null;
+            vehicleBypassTransitionIsSatisfyTrampoline = null;
+            vehicleBypassDoPassengerLeaveTrampoline = null;
+            vehicleBypassStatusField0Trampoline = null;
+            vehicleBypassStatusField1Trampoline = null;
+            vehicleBypassDriveExitTrampoline = null;
+            vehicleBypassServerRemoveVehicleTrampoline = null;
+            vehicleBypassRemovePlayerVehicleTrampoline = null;
+        }
+
+        private void RemoveVehicleBypassClientDetours()
+        {
             this.UndoVehicleBypassSlot(ref vehicleBypassHomeStaySlot);
             this.UndoVehicleBypassSlot(ref vehicleBypassForbiddenEnterSlot);
             this.UndoVehicleBypassSlot(ref vehicleBypassPosForbiddenSlot);
@@ -502,9 +792,26 @@ namespace HeartopiaMod
             this.UndoVehicleBypassSlot(ref vehicleBypassPartyForbidSlot);
             this.UndoVehicleBypassSlot(ref vehicleBypassInNoPermissionSlot);
             this.UndoVehicleBypassSlot(ref vehicleBypassCreateDrivingSlot);
-            vehicleBypassCreateDrivingTrampoline = null;
             vehicleBypassPendingForceSummon = false;
             vehicleBypassPendingAttempts = 0;
+        }
+
+        private void RemoveVehicleBypassServerDetours()
+        {
+            this.UndoVehicleBypassSlot(ref vehicleBypassGetOffVehicleSlot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassGetOffResultSlot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassReCallResultSlot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassTransitionIsSatisfySlot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassDoPassengerLeaveSlot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassStatusField0Slot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassStatusField1Slot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassDriveExitSlot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassServerRemoveVehicleSlot);
+            this.UndoVehicleBypassSlot(ref vehicleBypassRemovePlayerVehicleSlot);
+            vehicleBypassPendingUserGetOffVehicleNetId = 0;
+            vehicleBypassSelfPlayerNetId = 0;
+            vehicleBypassSelfVehicleNetId = 0;
+            vehicleBypassLatchedVehicleNetId = 0;
         }
 
         private void UndoVehicleBypassSlot(ref VehicleBypassDetourSlot slot)
@@ -556,6 +863,263 @@ namespace HeartopiaMod
             vehicleBypassPendingAttempts = 0;
             vehicleBypassPendingForceSummon = true;
             return 0;
+        }
+
+        private void TryVehicleBypassRefreshDrivingContext()
+        {
+            vehicleBypassSelfPlayerNetId = 0;
+            vehicleBypassSelfVehicleNetId = 0;
+            if (!this.vehicleBypassServerEventsEnabled)
+            {
+                vehicleBypassLatchedVehicleNetId = 0;
+                return;
+            }
+
+            if (this.TryGetSelfPlayerNetId(out uint playerNetId) && playerNetId != 0)
+            {
+                vehicleBypassSelfPlayerNetId = playerNetId;
+            }
+
+            IntPtr vehicleComponentObj = this.TryGetSelfEntityVehicleComponentMono();
+            if (vehicleComponentObj != IntPtr.Zero
+                && this.TryGetMonoObjectMember(vehicleComponentObj, "entity", out IntPtr entityObj)
+                && entityObj != IntPtr.Zero
+                && this.TryGetMonoUInt32Member(entityObj, "netId", out uint vehicleNetId)
+                && vehicleNetId != 0)
+            {
+                vehicleBypassSelfVehicleNetId = vehicleNetId;
+                vehicleBypassLatchedVehicleNetId = vehicleNetId;
+            }
+            else if (this.TryVehicleBypassReadLocalVehicleStatusNetId(out uint statusVehicleNetId) && statusVehicleNetId != 0)
+            {
+                vehicleBypassSelfVehicleNetId = statusVehicleNetId;
+                vehicleBypassLatchedVehicleNetId = statusVehicleNetId;
+            }
+        }
+
+        private bool TryVehicleBypassReadLocalVehicleStatusNetId(out uint vehicleNetId)
+        {
+            vehicleNetId = 0;
+            try
+            {
+                if (!this.TryGetManagedViewModuleSelfPlayerObject(out object selfPlayer, out _)
+                    || !this.TryGetObjectMember(selfPlayer, "Status", out object statusObj)
+                    || !this.TryGetObjectMember(statusObj, "VehicleStatus", out object vehicleStatusObj)
+                    || !this.TryGetObjectMember(vehicleStatusObj, "VehicleNetId", out object netIdObj))
+                {
+                    return false;
+                }
+
+                vehicleNetId = netIdObj is uint u ? u : Convert.ToUInt32(netIdObj);
+                return vehicleNetId != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool VehicleBypassBlockForcedVehicleExit()
+        {
+            return vehicleBypassServerEventsEnabledStatic
+                && vehicleBypassPendingUserGetOffVehicleNetId == 0
+                && vehicleBypassLatchedVehicleNetId != 0;
+        }
+
+        private static bool VehicleBypassShouldBlockGetOffResult(int errorCode, uint playerNetId, uint vehicleNetId)
+        {
+            if (!vehicleBypassServerEventsEnabledStatic)
+            {
+                return false;
+            }
+
+            if (errorCode == VehicleBypassAreaForbidErrorCode)
+            {
+                return true;
+            }
+
+            if (errorCode != VehicleBypassErrorCodeSuccess)
+            {
+                return false;
+            }
+
+            if (vehicleBypassSelfPlayerNetId == 0 || playerNetId != vehicleBypassSelfPlayerNetId)
+            {
+                return false;
+            }
+
+            if (vehicleBypassPendingUserGetOffVehicleNetId != 0
+                && vehicleNetId == vehicleBypassPendingUserGetOffVehicleNetId)
+            {
+                vehicleBypassPendingUserGetOffVehicleNetId = 0;
+                vehicleBypassLatchedVehicleNetId = 0;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void VehicleBypassGetOffVehicleNative(uint vehicleNetId, int reason)
+        {
+            if (vehicleBypassEnabledStatic && reason == VehicleBypassAreaForbidGetOffReason)
+            {
+                return;
+            }
+
+            if (vehicleBypassServerEventsEnabledStatic && reason == VehicleBypassGetOffReasonDefault && vehicleNetId != 0)
+            {
+                vehicleBypassPendingUserGetOffVehicleNetId = vehicleNetId;
+            }
+
+            if (vehicleBypassGetOffVehicleTrampoline != null)
+            {
+                vehicleBypassGetOffVehicleTrampoline(vehicleNetId, reason);
+            }
+        }
+
+        private static void VehicleBypassGetOffVehicleResultNative(int errorCode, uint playerNetId, uint vehicleNetId)
+        {
+            if (VehicleBypassShouldBlockGetOffResult(errorCode, playerNetId, vehicleNetId))
+            {
+                return;
+            }
+
+            if (vehicleBypassGetOffVehicleResultTrampoline != null)
+            {
+                vehicleBypassGetOffVehicleResultTrampoline(errorCode, playerNetId, vehicleNetId);
+            }
+        }
+
+        private static void VehicleBypassReCallVehicleResultNative(
+            uint vehicleNetId,
+            int vehicleStaticId,
+            int reCallEventType,
+            long recallUnixMs,
+            int destroy)
+        {
+            if (vehicleBypassServerEventsEnabledStatic && reCallEventType == VehicleBypassAreaForbidReCallType)
+            {
+                return;
+            }
+
+            if (vehicleBypassReCallVehicleResultTrampoline != null)
+            {
+                vehicleBypassReCallVehicleResultTrampoline(
+                    vehicleNetId,
+                    vehicleStaticId,
+                    reCallEventType,
+                    recallUnixMs,
+                    destroy);
+            }
+        }
+
+        private static byte VehicleBypassTransitionVehicle2FreeIsSatisfyNative(
+            IntPtr self,
+            IntPtr actor,
+            IntPtr current,
+            IntPtr next)
+        {
+            if (VehicleBypassBlockForcedVehicleExit())
+            {
+                return 0;
+            }
+
+            if (vehicleBypassTransitionIsSatisfyTrampoline != null)
+            {
+                return vehicleBypassTransitionIsSatisfyTrampoline(self, actor, current, next);
+            }
+
+            return 0;
+        }
+
+        private static byte VehicleBypassVehicleStatusField0OnHandleNative(IntPtr command, IntPtr status)
+        {
+            if (VehicleBypassBlockForcedVehicleExit())
+            {
+                return 0;
+            }
+
+            if (vehicleBypassStatusField0Trampoline != null)
+            {
+                return vehicleBypassStatusField0Trampoline(command, status);
+            }
+
+            return 0;
+        }
+
+        private static byte VehicleBypassVehicleStatusField1OnHandleNative(IntPtr command, IntPtr status)
+        {
+            if (VehicleBypassBlockForcedVehicleExit())
+            {
+                return 0;
+            }
+
+            if (vehicleBypassStatusField1Trampoline != null)
+            {
+                return vehicleBypassStatusField1Trampoline(command, status);
+            }
+
+            return 0;
+        }
+
+        private static byte VehicleBypassDriveModeCheckExitNative(IntPtr self)
+        {
+            if (VehicleBypassBlockForcedVehicleExit())
+            {
+                return 0;
+            }
+
+            if (vehicleBypassDriveExitTrampoline != null)
+            {
+                return vehicleBypassDriveExitTrampoline(self);
+            }
+
+            return 0;
+        }
+
+        private static void VehicleBypassServerRemoveVehicleNative(uint netId, int realDel)
+        {
+            if (VehicleBypassBlockForcedVehicleExit()
+                && netId != 0
+                && netId == vehicleBypassLatchedVehicleNetId)
+            {
+                return;
+            }
+
+            if (vehicleBypassServerRemoveVehicleTrampoline != null)
+            {
+                vehicleBypassServerRemoveVehicleTrampoline(netId, realDel);
+            }
+        }
+
+        private static void VehicleBypassRemovePlayerVehicleNative(IntPtr self, IntPtr removeEvent)
+        {
+            if (VehicleBypassBlockForcedVehicleExit() && removeEvent != IntPtr.Zero)
+            {
+                uint vehicleNetId = (uint)Marshal.ReadInt32(removeEvent);
+                if (vehicleNetId != 0 && vehicleNetId == vehicleBypassLatchedVehicleNetId)
+                {
+                    return;
+                }
+            }
+
+            if (vehicleBypassRemovePlayerVehicleTrampoline != null)
+            {
+                vehicleBypassRemovePlayerVehicleTrampoline(self, removeEvent);
+            }
+        }
+
+        private static void VehicleBypassDoPassengerLeaveNative(IntPtr self, IntPtr player)
+        {
+            if (VehicleBypassBlockForcedVehicleExit())
+            {
+                return;
+            }
+
+            if (vehicleBypassDoPassengerLeaveTrampoline != null)
+            {
+                vehicleBypassDoPassengerLeaveTrampoline(self, player);
+            }
         }
 
         private void TryVehicleBypassProcessPendingSummon()

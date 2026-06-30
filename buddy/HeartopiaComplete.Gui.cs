@@ -1841,6 +1841,19 @@ namespace HeartopiaMod
                 }
                 num += 30;
 
+                bool prevVehicleBypassServer = this.vehicleBypassServerEventsEnabled;
+                this.vehicleBypassServerEventsEnabled = this.DrawSwitchToggle(
+                    new Rect(20f, (float)num, 260f, 25f),
+                    this.vehicleBypassServerEventsEnabled,
+                    this.L("Vehicle Bypass Server Events"));
+                if (this.vehicleBypassServerEventsEnabled != prevVehicleBypassServer)
+                {
+                    this.AddMenuNotification(
+                        "Vehicle Bypass Server Events " + (this.vehicleBypassServerEventsEnabled ? "Enabled" : "Disabled"),
+                        this.vehicleBypassServerEventsEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                }
+                num += 30;
+
                 if (this.noclipEnabled)
                 {
                     GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Noclip Speed: {0:F1}", this.noclipSpeed));
