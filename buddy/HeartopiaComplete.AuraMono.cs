@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -1884,6 +1884,14 @@ namespace HeartopiaMod
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTDataAndProtocol", StringComparison.Ordinal))
             {
                 imageNames = new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll" };
+            }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTBaseService", StringComparison.Ordinal))
+            {
+                imageNames = new[] { "XDTBaseService", "XDTBaseService.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
+            }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTGUI.Module", StringComparison.Ordinal))
+            {
+                imageNames = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTGameUI", "XDTGameUI.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
             }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("ClientSystem", StringComparison.Ordinal))
             {

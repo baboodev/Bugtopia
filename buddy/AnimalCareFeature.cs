@@ -94,6 +94,8 @@ namespace HeartopiaMod
             GUI.Label(new Rect(left, y, 460f, 20f), "Drives the character from the gamepad left stick (and WASD).");
             y += 26f;
 
+            y = this.DrawPrivacyBlockExtraTab(y, left);
+
             return y + 20f;
         }
 

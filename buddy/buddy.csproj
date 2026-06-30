@@ -256,6 +256,7 @@
     <Compile Include="HomelandFarmFeature.cs" />
     <Compile Include="IceSkatingSequenceFeature.cs" />
     <Compile Include="PadBuildHotkeyFeature.cs" />
+    <Compile Include="PrivacyBlockFeature.cs" />
     <Compile Include="BuildingFreeRotateFeature.cs" />
     <Compile Include="BunnyHopFeature.cs" />
     <Compile Include="AutoIceSkatingFeature.cs" />

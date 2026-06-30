@@ -224,6 +224,9 @@ namespace HeartopiaMod
             data.notificationsEnabled = this.notificationsEnabled;
             data.notificationPosition = this.notificationPosition;
             data.blockGameUiWhenMenuOpen = this.blockGameUiWhenMenuOpen;
+            data.privacyBlockLogUploads = this.privacyBlockLogUploads;
+            data.privacyBlockRoomMerges = this.privacyBlockRoomMerges;
+            data.privacyBlockSpamReports = this.privacyBlockSpamReports;
             data.autoClickStartEnabled = this.autoClickStartEnabled;
             data.autoCloseAnnouncementEnabled = this.autoCloseAnnouncementEnabled;
             data.maxAutoEatAttempts = this.maxAutoEatAttempts;
@@ -402,6 +405,9 @@ namespace HeartopiaMod
             this.notificationsEnabled = data.notificationsEnabled;
             this.notificationPosition = Mathf.Clamp(data.notificationPosition, 0, NotificationPositionOptions.Length - 1);
             this.blockGameUiWhenMenuOpen = data.blockGameUiWhenMenuOpen;
+            this.privacyBlockLogUploads = data.privacyBlockLogUploads;
+            this.privacyBlockRoomMerges = data.privacyBlockRoomMerges;
+            this.privacyBlockSpamReports = data.privacyBlockSpamReports;
             this.autoClickStartEnabled = data.autoClickStartEnabled;
             this.autoCloseAnnouncementEnabled = data.autoCloseAnnouncementEnabled;
             this.maxAutoEatAttempts = data.maxAutoEatAttempts;

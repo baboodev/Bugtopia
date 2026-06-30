@@ -211,6 +211,9 @@ namespace HeartopiaMod
             public bool notificationsEnabled;
             public int notificationPosition = 5;
             public bool blockGameUiWhenMenuOpen;
+            public bool privacyBlockLogUploads;
+            public bool privacyBlockRoomMerges;
+            public bool privacyBlockSpamReports;
             public bool autoClickStartEnabled;
             public bool autoCloseAnnouncementEnabled;
             public int maxAutoEatAttempts;

@@ -724,6 +724,7 @@ namespace HeartopiaMod
             this.ProcessAutoIceSkatingOnUpdate();
             this.ProcessBubbleFeatureOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
+            this.ProcessPrivacyBlockOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
