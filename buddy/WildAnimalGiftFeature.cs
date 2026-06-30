@@ -387,10 +387,15 @@ namespace HeartopiaMod
         // GetComponents path. Gated on GetComponents readiness: once ready it is authoritative (returns
         // true even with 0 gifts, so the caller never falls back to the crash-prone / truncation-prone
         // entity-graph walk). Returns false only when GetComponents is unavailable on this build.
+        // Returned gift entity pointers are pinned into wildAnimalGiftScanEntityPins so they survive the
+        // moving sgen GC until the caller reads them; released at the start of the next scan.
+        private readonly List<uint> wildAnimalGiftScanEntityPins = new List<uint>();
+
         private bool TryCollectWildAnimalGiftComponentEntities(out List<IntPtr> giftEntities, out string status)
         {
             giftEntities = null;
             status = string.Empty;
+            FreeAuraMonoPins(this.wildAnimalGiftScanEntityPins);
 
             if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
             {
@@ -411,30 +416,49 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> result = new List<IntPtr>(32);
-            if (this.TryAuraMonoGetComponentObjects(giftClass, out List<IntPtr> components) && components != null)
+            // Pin components for the loop (the "entity" member read touches the component); each accepted
+            // gift entity is pinned for the caller's lifetime against the moving sgen GC.
+            List<uint> compPins = new List<uint>();
+            if (this.TryAuraMonoGetComponentObjects(giftClass, out List<IntPtr> components, compPins) && components != null)
             {
                 HashSet<IntPtr> seenObj = new HashSet<IntPtr>();
-                for (int i = 0; i < components.Count; i++)
+                try
                 {
-                    IntPtr componentObj = components[i];
-                    if (componentObj == IntPtr.Zero)
+                    for (int i = 0; i < components.Count; i++)
                     {
-                        continue;
-                    }
+                        IntPtr componentObj = components[i];
+                        if (componentObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
 
-                    // Gift-box entity is the component's back-reference.
-                    IntPtr entityObj = IntPtr.Zero;
-                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
-                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
-                    {
-                        continue;
-                    }
+                        // Gift-box entity is the component's back-reference.
+                        IntPtr entityObj = IntPtr.Zero;
+                        if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                            && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                        {
+                            continue;
+                        }
 
-                    if (seenObj.Add(entityObj))
-                    {
-                        result.Add(entityObj);
+                        if (seenObj.Add(entityObj))
+                        {
+                            result.Add(entityObj);
+                            uint entityPin = AuraMonoPinNew(entityObj);
+                            if (entityPin != 0U)
+                            {
+                                this.wildAnimalGiftScanEntityPins.Add(entityPin);
+                            }
+                        }
                     }
                 }
+                finally
+                {
+                    FreeAuraMonoPins(compPins);
+                }
+            }
+            else
+            {
+                FreeAuraMonoPins(compPins);
             }
 
             giftEntities = result;

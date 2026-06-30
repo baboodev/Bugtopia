@@ -2177,10 +2177,16 @@ namespace HeartopiaMod
         // GetComponents readiness: once ready, this is authoritative (returns true even with 0 birds,
         // so the caller never falls back to the walk on a dense/bird-free field). Returns false only
         // when GetComponents is unavailable on this build (then the caller uses the legacy walk).
+        // The bird entity pointers returned here are pinned into birdFarmScanEntityPins so they survive
+        // the moving sgen GC until the caller reads them; released at the start of the next scan (by then
+        // the previous caller has consumed its list). Per-scan, not per-frame.
+        private readonly List<uint> birdFarmScanEntityPins = new List<uint>();
+
         private bool TryCollectBirdFarmAuraBirdEntities(out List<IntPtr> birdEntities, out string status)
         {
             birdEntities = null;
             status = string.Empty;
+            FreeAuraMonoPins(this.birdFarmScanEntityPins);
 
             if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
             {
@@ -2201,31 +2207,47 @@ namespace HeartopiaMod
             for (int c = 0; c < classes.Length; c++)
             {
                 IntPtr cls = classes[c];
-                if (cls == IntPtr.Zero || !this.TryAuraMonoGetComponentObjects(cls, out List<IntPtr> components) || components == null)
+                // Pin components for the loop (the "entity" member read below would otherwise touch a
+                // relocated component); each accepted bird entity is pinned for the caller's lifetime.
+                List<uint> compPins = new List<uint>();
+                if (cls == IntPtr.Zero || !this.TryAuraMonoGetComponentObjects(cls, out List<IntPtr> components, compPins) || components == null)
                 {
+                    FreeAuraMonoPins(compPins);
                     continue;
                 }
 
-                for (int i = 0; i < components.Count; i++)
+                try
                 {
-                    IntPtr componentObj = components[i];
-                    if (componentObj == IntPtr.Zero)
+                    for (int i = 0; i < components.Count; i++)
                     {
-                        continue;
-                    }
+                        IntPtr componentObj = components[i];
+                        if (componentObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
 
-                    // Owner bird entity is the component's back-reference.
-                    IntPtr entityObj = IntPtr.Zero;
-                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
-                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
-                    {
-                        continue;
-                    }
+                        // Owner bird entity is the component's back-reference.
+                        IntPtr entityObj = IntPtr.Zero;
+                        if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                            && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                        {
+                            continue;
+                        }
 
-                    if (seen.Add(entityObj))
-                    {
-                        result.Add(entityObj);
+                        if (seen.Add(entityObj))
+                        {
+                            result.Add(entityObj);
+                            uint entityPin = AuraMonoPinNew(entityObj);
+                            if (entityPin != 0U)
+                            {
+                                this.birdFarmScanEntityPins.Add(entityPin);
+                            }
+                        }
                     }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(compPins);
                 }
             }
 

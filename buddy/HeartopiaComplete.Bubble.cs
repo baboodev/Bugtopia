@@ -731,39 +731,58 @@ namespace HeartopiaMod
 
             try
             {
-                if (!this.TryAuraMonoGetComponentObjects(bubbleClass, out List<IntPtr> bubbleComponents) || bubbleComponents == null)
+                // Pin components + each derived entity across the field reads (moving sgen GC stale-pointer
+                // guard): an unpinned component/entity relocated mid-loop -> bad read -> heap corruption.
+                List<uint> bubblePins = new List<uint>();
+                if (!this.TryAuraMonoGetComponentObjects(bubbleClass, out List<IntPtr> bubbleComponents, bubblePins) || bubbleComponents == null)
                 {
+                    FreeAuraMonoPins(bubblePins);
                     status = "Aura bubble scan: GetComponents<BubbleComponent> returned no bubbles";
                     return false;
                 }
 
                 int inspected = 0;
                 int bubbleMatches = 0;
-                for (int i = 0; i < bubbleComponents.Count; i++)
+                try
                 {
-                    IntPtr componentObj = bubbleComponents[i];
-                    if (componentObj == IntPtr.Zero)
+                    for (int i = 0; i < bubbleComponents.Count; i++)
                     {
-                        continue;
+                        IntPtr componentObj = bubbleComponents[i];
+                        if (componentObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        inspected++;
+
+                        // Bubble entity is the component's back-reference.
+                        IntPtr entityObj = IntPtr.Zero;
+                        if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                            && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                        {
+                            continue;
+                        }
+
+                        uint entityPin = AuraMonoPinNew(entityObj);
+                        try
+                        {
+                            if (!this.TryResolveAuraMonoBubbleEntityMarker(entityObj, out int markerId, out Vector3 bubblePos))
+                            {
+                                continue;
+                            }
+
+                            positions[markerId] = bubblePos;
+                            bubbleMatches++;
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(entityPin);
+                        }
                     }
-
-                    inspected++;
-
-                    // Bubble entity is the component's back-reference.
-                    IntPtr entityObj = IntPtr.Zero;
-                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
-                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryResolveAuraMonoBubbleEntityMarker(entityObj, out int markerId, out Vector3 bubblePos))
-                    {
-                        continue;
-                    }
-
-                    positions[markerId] = bubblePos;
-                    bubbleMatches++;
+                }
+                finally
+                {
+                    FreeAuraMonoPins(bubblePins);
                 }
 
                 status = bubbleMatches > 0

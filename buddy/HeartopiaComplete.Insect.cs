@@ -294,45 +294,64 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryAuraMonoGetComponentObjects(insectClass, out List<IntPtr> insectComponents) || insectComponents == null)
+            // Pin components + each derived entity across the field reads (moving sgen GC stale-pointer
+            // guard): an unpinned component/entity relocated mid-loop -> bad read -> heap corruption.
+            List<uint> insectPins = new List<uint>();
+            if (!this.TryAuraMonoGetComponentObjects(insectClass, out List<IntPtr> insectComponents, insectPins) || insectComponents == null)
             {
+                FreeAuraMonoPins(insectPins);
                 status = "No loaded insects (GetComponents)";
                 return false;
             }
 
             HashSet<uint> seen = new HashSet<uint>();
-            for (int i = 0; i < insectComponents.Count; i++)
+            try
             {
-                IntPtr componentObj = insectComponents[i];
-                if (componentObj == IntPtr.Zero)
+                for (int i = 0; i < insectComponents.Count; i++)
                 {
-                    continue;
-                }
-
-                // Owner insect entity is the component's back-reference.
-                IntPtr entityObj = IntPtr.Zero;
-                if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
-                    && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
-                {
-                    continue;
-                }
-
-                if (!this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U || !seen.Add(netId))
-                {
-                    continue;
-                }
-
-                Vector3 position;
-                if (!this.TryGetAuraMonoEntityPosition(entityObj, out position) || position == Vector3.zero)
-                {
-                    if (!this.TryGetEntityPositionByNetIdMono(netId, out position) && !this.TryGetEntityPositionByNetId(netId, out position))
+                    IntPtr componentObj = insectComponents[i];
+                    if (componentObj == IntPtr.Zero)
                     {
                         continue;
                     }
-                }
 
-                ids.Add(netId);
-                positions.Add(position);
+                    // Owner insect entity is the component's back-reference.
+                    IntPtr entityObj = IntPtr.Zero;
+                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        if (!this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U || !seen.Add(netId))
+                        {
+                            continue;
+                        }
+
+                        Vector3 position;
+                        if (!this.TryGetAuraMonoEntityPosition(entityObj, out position) || position == Vector3.zero)
+                        {
+                            if (!this.TryGetEntityPositionByNetIdMono(netId, out position) && !this.TryGetEntityPositionByNetId(netId, out position))
+                            {
+                                continue;
+                            }
+                        }
+
+                        ids.Add(netId);
+                        positions.Add(position);
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(insectPins);
             }
 
             status = ids.Count > 0

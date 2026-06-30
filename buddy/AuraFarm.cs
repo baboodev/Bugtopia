@@ -3435,72 +3435,92 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryAuraMonoGetComponentObjects(logicComponentClass, out List<IntPtr> logicComponents)
+            // Pin the components + each derived owner entity across the field reads: the moving sgen GC
+            // would otherwise relocate an unpinned component/entity mid-loop -> bad read/write -> heap
+            // corruption that a later GC trips (e.g. the world-change ExecutionEngineException).
+            List<uint> logicPins = new List<uint>();
+            if (!this.TryAuraMonoGetComponentObjects(logicComponentClass, out List<IntPtr> logicComponents, logicPins)
                 || logicComponents == null
                 || logicComponents.Count == 0)
             {
+                FreeAuraMonoPins(logicPins);
                 return false;
             }
 
             float bestDistSqr = float.MaxValue;
             uint bestLogicNetId = 0U;
-            for (int i = 0; i < logicComponents.Count; i++)
+            try
             {
-                IntPtr logicComponentObj = logicComponents[i];
-                if (logicComponentObj == IntPtr.Zero)
+                for (int i = 0; i < logicComponents.Count; i++)
                 {
-                    continue;
-                }
+                    IntPtr logicComponentObj = logicComponents[i];
+                    if (logicComponentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                IntPtr logicEntityObj;
-                if (!this.TryGetAuraMonoComponentOwnerEntity(logicComponentObj, out logicEntityObj) || logicEntityObj == IntPtr.Zero)
-                {
-                    continue;
-                }
+                    IntPtr logicEntityObj;
+                    if (!this.TryGetAuraMonoComponentOwnerEntity(logicComponentObj, out logicEntityObj) || logicEntityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out uint linkedViewNetId))
-                {
-                    linkedViewNetId = 0U;
-                }
+                    uint logicEntityPin = AuraMonoPinNew(logicEntityObj);
+                    try
+                    {
+                        if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out uint linkedViewNetId))
+                        {
+                            linkedViewNetId = 0U;
+                        }
 
-                if (!this.TryReadAuraMonoEntityNetIdLoose(logicEntityObj, out uint candidateLogicNetId))
-                {
-                    candidateLogicNetId = 0U;
-                }
+                        if (!this.TryReadAuraMonoEntityNetIdLoose(logicEntityObj, out uint candidateLogicNetId))
+                        {
+                            candidateLogicNetId = 0U;
+                        }
 
-                bool netHintMatch = hintNetId != 0U
-                    && (candidateLogicNetId == hintNetId || linkedViewNetId == hintNetId);
-                float distSqr = float.MaxValue;
-                if (this.TryGetAuraMonoEntityPosition(logicEntityObj, out Vector3 logicPosition) && logicPosition != Vector3.zero)
-                {
-                    distSqr = (logicPosition - anchor).sqrMagnitude;
-                }
-                else if (!netHintMatch)
-                {
-                    continue;
-                }
-                else
-                {
-                    distSqr = 0f;
-                }
+                        bool netHintMatch = hintNetId != 0U
+                            && (candidateLogicNetId == hintNetId || linkedViewNetId == hintNetId);
+                        float distSqr = float.MaxValue;
+                        if (this.TryGetAuraMonoEntityPosition(logicEntityObj, out Vector3 logicPosition) && logicPosition != Vector3.zero)
+                        {
+                            distSqr = (logicPosition - anchor).sqrMagnitude;
+                        }
+                        else if (!netHintMatch)
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            distSqr = 0f;
+                        }
 
-                if (!netHintMatch && distSqr > (AuraMeteorMatchRadius + 1.5f) * (AuraMeteorMatchRadius + 1.5f))
-                {
-                    continue;
-                }
+                        if (!netHintMatch && distSqr > (AuraMeteorMatchRadius + 1.5f) * (AuraMeteorMatchRadius + 1.5f))
+                        {
+                            continue;
+                        }
 
-                if (netHintMatch)
-                {
-                    distSqr -= 100f;
-                }
+                        if (netHintMatch)
+                        {
+                            distSqr -= 100f;
+                        }
 
-                if (candidateLogicNetId == 0U || distSqr >= bestDistSqr)
-                {
-                    continue;
-                }
+                        if (candidateLogicNetId == 0U || distSqr >= bestDistSqr)
+                        {
+                            continue;
+                        }
 
-                bestDistSqr = distSqr;
-                bestLogicNetId = candidateLogicNetId;
+                        bestDistSqr = distSqr;
+                        bestLogicNetId = candidateLogicNetId;
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(logicEntityPin);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(logicPins);
             }
 
             if (bestLogicNetId == 0U)
@@ -3526,68 +3546,87 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryAuraMonoGetComponentObjects(viewComponentClass, out List<IntPtr> viewComponents)
+            // Pin components + each derived owner entity across the field reads (moving sgen GC guard;
+            // see TryScanAuraMeteorLogicNearPosition).
+            List<uint> viewPins = new List<uint>();
+            if (!this.TryAuraMonoGetComponentObjects(viewComponentClass, out List<IntPtr> viewComponents, viewPins)
                 || viewComponents == null
                 || viewComponents.Count == 0)
             {
+                FreeAuraMonoPins(viewPins);
                 return false;
             }
 
             float bestDistSqr = float.MaxValue;
             uint bestParentNetId = 0U;
-            for (int i = 0; i < viewComponents.Count; i++)
+            try
             {
-                IntPtr viewComponentObj = viewComponents[i];
-                if (viewComponentObj == IntPtr.Zero)
+                for (int i = 0; i < viewComponents.Count; i++)
                 {
-                    continue;
-                }
-
-                IntPtr viewEntityObj;
-                if (!this.TryGetAuraMonoComponentOwnerEntity(viewComponentObj, out viewEntityObj) || viewEntityObj == IntPtr.Zero)
-                {
-                    continue;
-                }
-
-                if (!this.TryReadAuraMonoEntityNetIdLoose(viewEntityObj, out uint linkedViewNetId))
-                {
-                    linkedViewNetId = 0U;
-                }
-
-                bool netHintMatch = hintNetId != 0U && linkedViewNetId == hintNetId;
-                if (!this.TryGetAuraMonoEntityPosition(viewEntityObj, out Vector3 viewPosition))
-                {
-                    if (!netHintMatch)
+                    IntPtr viewComponentObj = viewComponents[i];
+                    if (viewComponentObj == IntPtr.Zero)
                     {
                         continue;
                     }
-                }
-                else if (!netHintMatch
-                    && !this.TryAuraMeteorPositionMatchesAnchor(anchor, viewPosition, AuraMeteorMatchRadius + 1.5f))
-                {
-                    continue;
-                }
 
-                if (!this.TryReadAuraMeteorParentNetIdFromComponent(viewComponentObj, linkedViewNetId, out uint candidateParentNetId)
-                    || !this.IsLikelyAuraEntityNetId(candidateParentNetId)
-                    || candidateParentNetId == linkedViewNetId)
-                {
-                    continue;
-                }
+                    IntPtr viewEntityObj;
+                    if (!this.TryGetAuraMonoComponentOwnerEntity(viewComponentObj, out viewEntityObj) || viewEntityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                float distSqr = viewPosition == Vector3.zero ? 0f : (viewPosition - anchor).sqrMagnitude;
-                if (netHintMatch)
-                {
-                    distSqr -= 100f;
-                }
+                    uint viewEntityPin = AuraMonoPinNew(viewEntityObj);
+                    try
+                    {
+                        if (!this.TryReadAuraMonoEntityNetIdLoose(viewEntityObj, out uint linkedViewNetId))
+                        {
+                            linkedViewNetId = 0U;
+                        }
 
-                if (distSqr >= bestDistSqr)
-                {
-                    continue;
-                }
+                        bool netHintMatch = hintNetId != 0U && linkedViewNetId == hintNetId;
+                        if (!this.TryGetAuraMonoEntityPosition(viewEntityObj, out Vector3 viewPosition))
+                        {
+                            if (!netHintMatch)
+                            {
+                                continue;
+                            }
+                        }
+                        else if (!netHintMatch
+                            && !this.TryAuraMeteorPositionMatchesAnchor(anchor, viewPosition, AuraMeteorMatchRadius + 1.5f))
+                        {
+                            continue;
+                        }
 
-                bestDistSqr = distSqr;
-                bestParentNetId = candidateParentNetId;
+                        if (!this.TryReadAuraMeteorParentNetIdFromComponent(viewComponentObj, linkedViewNetId, out uint candidateParentNetId)
+                            || !this.IsLikelyAuraEntityNetId(candidateParentNetId)
+                            || candidateParentNetId == linkedViewNetId)
+                        {
+                            continue;
+                        }
+
+                        float distSqr = viewPosition == Vector3.zero ? 0f : (viewPosition - anchor).sqrMagnitude;
+                        if (netHintMatch)
+                        {
+                            distSqr -= 100f;
+                        }
+
+                        if (distSqr >= bestDistSqr)
+                        {
+                            continue;
+                        }
+
+                        bestDistSqr = distSqr;
+                        bestParentNetId = candidateParentNetId;
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(viewEntityPin);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(viewPins);
             }
 
             if (bestParentNetId == 0U)
@@ -3695,40 +3734,57 @@ namespace HeartopiaMod
             }
 
             IntPtr logicComponentClass;
+            List<uint> logicPins = new List<uint>();
             if (!this.TryEnsureAuraMeteorLogicComponentClass(out logicComponentClass)
                 || logicComponentClass == IntPtr.Zero
-                || !this.TryAuraMonoGetComponentObjects(logicComponentClass, out List<IntPtr> logicComponents)
+                || !this.TryAuraMonoGetComponentObjects(logicComponentClass, out List<IntPtr> logicComponents, logicPins)
                 || logicComponents == null
                 || logicComponents.Count == 0)
             {
+                FreeAuraMonoPins(logicPins);
                 return false;
             }
 
-            for (int i = 0; i < logicComponents.Count; i++)
+            try
             {
-                IntPtr logicComponentObj = logicComponents[i];
-                if (logicComponentObj == IntPtr.Zero)
+                for (int i = 0; i < logicComponents.Count; i++)
                 {
-                    continue;
-                }
+                    IntPtr logicComponentObj = logicComponents[i];
+                    if (logicComponentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                uint linkedViewNetId = 0U;
-                if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out linkedViewNetId)
-                    || linkedViewNetId != viewNetId)
-                {
-                    continue;
-                }
+                    uint linkedViewNetId = 0U;
+                    if (!this.TryReadAuraMeteorViewNetIdFromLogicComponent(logicComponentObj, out linkedViewNetId)
+                        || linkedViewNetId != viewNetId)
+                    {
+                        continue;
+                    }
 
-                IntPtr logicEntityObj;
-                if (!this.TryGetAuraMonoComponentOwnerEntity(logicComponentObj, out logicEntityObj) || logicEntityObj == IntPtr.Zero)
-                {
-                    continue;
-                }
+                    IntPtr logicEntityObj;
+                    if (!this.TryGetAuraMonoComponentOwnerEntity(logicComponentObj, out logicEntityObj) || logicEntityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                if (this.TryReadAuraMonoEntityNetIdLoose(logicEntityObj, out logicNetId) && this.IsLikelyAuraEntityNetId(logicNetId))
-                {
-                    return true;
+                    uint logicEntityPin = AuraMonoPinNew(logicEntityObj);
+                    try
+                    {
+                        if (this.TryReadAuraMonoEntityNetIdLoose(logicEntityObj, out logicNetId) && this.IsLikelyAuraEntityNetId(logicNetId))
+                        {
+                            return true;
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(logicEntityPin);
+                    }
                 }
+            }
+            finally
+            {
+                FreeAuraMonoPins(logicPins);
             }
 
             logicNetId = 0U;
@@ -3744,37 +3800,54 @@ namespace HeartopiaMod
             }
 
             IntPtr viewComponentClass;
+            List<uint> viewPins = new List<uint>();
             if (!this.TryEnsureAuraMeteorViewComponentClass(out viewComponentClass) || viewComponentClass == IntPtr.Zero
-                || !this.TryAuraMonoGetComponentObjects(viewComponentClass, out List<IntPtr> viewComponents)
+                || !this.TryAuraMonoGetComponentObjects(viewComponentClass, out List<IntPtr> viewComponents, viewPins)
                 || viewComponents == null
                 || viewComponents.Count == 0)
             {
+                FreeAuraMonoPins(viewPins);
                 return false;
             }
 
-            for (int i = 0; i < viewComponents.Count; i++)
+            try
             {
-                IntPtr viewComponentObj = viewComponents[i];
-                if (viewComponentObj == IntPtr.Zero)
+                for (int i = 0; i < viewComponents.Count; i++)
                 {
-                    continue;
-                }
+                    IntPtr viewComponentObj = viewComponents[i];
+                    if (viewComponentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                IntPtr viewEntityObj;
-                if (!this.TryGetAuraMonoComponentOwnerEntity(viewComponentObj, out viewEntityObj) || viewEntityObj == IntPtr.Zero)
-                {
-                    continue;
-                }
+                    IntPtr viewEntityObj;
+                    if (!this.TryGetAuraMonoComponentOwnerEntity(viewComponentObj, out viewEntityObj) || viewEntityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                if (!this.TryReadAuraMonoEntityNetIdLoose(viewEntityObj, out uint linkedViewNetId) || linkedViewNetId != viewNetId)
-                {
-                    continue;
-                }
+                    uint viewEntityPin = AuraMonoPinNew(viewEntityObj);
+                    try
+                    {
+                        if (!this.TryReadAuraMonoEntityNetIdLoose(viewEntityObj, out uint linkedViewNetId) || linkedViewNetId != viewNetId)
+                        {
+                            continue;
+                        }
 
-                if (this.TryReadAuraMeteorParentNetIdFromComponent(viewComponentObj, viewNetId, out parentNetId))
-                {
-                    return true;
+                        if (this.TryReadAuraMeteorParentNetIdFromComponent(viewComponentObj, viewNetId, out parentNetId))
+                        {
+                            return true;
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(viewEntityPin);
+                    }
                 }
+            }
+            finally
+            {
+                FreeAuraMonoPins(viewPins);
             }
 
             parentNetId = 0U;
