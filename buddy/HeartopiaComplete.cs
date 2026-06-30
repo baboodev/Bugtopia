@@ -554,6 +554,7 @@ namespace HeartopiaMod
         public void OnLateUpdate()
         {
             this.ProcessNoclipVehicleOnLateUpdate();
+            this.ProcessVehicleTeleportOnLateUpdate();
             this.UpdateDirectMouseLookCamera(this.mouseLookCaptureActive);
 
             bool flag = this.monitorPosition;

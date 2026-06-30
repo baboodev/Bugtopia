@@ -286,6 +286,7 @@
     <Compile Include="TransformRotationPatch.cs" />
     <Compile Include="NoclipFeature.cs" />
     <Compile Include="VehicleBypassFeature.cs" />
+    <Compile Include="VehicleTeleportFeature.cs" />
     <Compile Include="WarehouseBypassFeature.cs" />
   </ItemGroup>
 

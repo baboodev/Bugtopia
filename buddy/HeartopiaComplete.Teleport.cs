@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -1639,6 +1639,17 @@ namespace HeartopiaMod
         private void TeleportToLocation(Vector3 targetPos)
         {
             Breadcrumbs.Drop("Teleport", targetPos.ToString("F1"));
+            if (this.IsPlayerDrivingVehicle())
+            {
+                if (this.TryTeleportVehicleToLocation(targetPos, null))
+                {
+                    return;
+                }
+
+                ModLogger.Msg("[VehicleTeleport] vehicle warp unavailable");
+                return;
+            }
+
             GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (flag)
@@ -1669,6 +1680,17 @@ namespace HeartopiaMod
 
         private void TeleportToLocation(Vector3 targetPos, Quaternion targetRot)
         {
+            if (this.IsPlayerDrivingVehicle())
+            {
+                if (this.TryTeleportVehicleToLocation(targetPos, targetRot))
+                {
+                    return;
+                }
+
+                ModLogger.Msg("[VehicleTeleport] vehicle warp unavailable");
+                return;
+            }
+
             GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (flag)
