@@ -7,17 +7,19 @@ using UnityEngine;
 namespace HeartopiaMod
 {
     // AuraMono NativeDetour hooks for Logan log upload, town merge enter, antispam report.
-    // UploadCheat is log-only (always forwards via trampoline).
+    // UploadCheat forwards via trampoline unless privacyBlockUploadCheat is set.
     public partial class HeartopiaComplete
     {
         public bool privacyBlockLogUploads;
         public bool privacyBlockRoomMerges;
         public bool privacyBlockSpamReports;
+        public bool privacyBlockUploadCheat;
 
         internal static int privacyBlockedLogCount;
         internal static int privacyBlockedMergeCount;
         internal static int privacyBlockedSpamCount;
         internal static int privacyUploadCheatSeenCount;
+        internal static int privacyBlockedUploadCheatCount;
 
         private const float PrivacyBlockHookRetrySeconds = 5f;
         private const float PrivacyBlockDiagIntervalSeconds = 30f;
@@ -366,7 +368,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            ModLogger.Msg("[PrivacyBlock] hooked UploadSystem.UploadCheat (log-only) @0x" + nativePtr.ToInt64().ToString("X"));
+            ModLogger.Msg("[PrivacyBlock] hooked UploadSystem.UploadCheat @0x" + nativePtr.ToInt64().ToString("X"));
         }
 
         private void MarkPrivacyHookMissing(ref bool triedFlag, string label)
@@ -420,7 +422,14 @@ namespace HeartopiaMod
             string obsId = PrivacyReadMonoString(objectId);
             int bytes = PrivacyReadMonoArrayLength(stream);
             Interlocked.Increment(ref privacyUploadCheatSeenCount);
-            ModLogger.Msg("[PrivacyBlock] UploadSystem.UploadCheat objectId=" + obsId + " bytes=" + bytes);
+            bool block = HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockUploadCheat;
+            ModLogger.Msg("[PrivacyBlock] UploadSystem.UploadCheat objectId=" + obsId + " bytes=" + bytes + " block=" + block);
+            if (block)
+            {
+                Interlocked.Increment(ref privacyBlockedUploadCheatCount);
+                return;
+            }
+
             privacyUploadCheatTrampoline?.Invoke(self, objectId, stream, success, failure);
         }
 
@@ -535,7 +544,23 @@ namespace HeartopiaMod
             }
 
             y += spamsToggleHeight + 4f;
-            GUI.Label(new Rect(left, y, width, 18f), this.LF("Spams blocked: {0} | UploadCheat seen: {1}", privacyBlockedSpamCount, privacyUploadCheatSeenCount), labelStyle);
+            GUI.Label(new Rect(left, y, width, 18f), this.LF("Spams blocked: {0}", privacyBlockedSpamCount), labelStyle);
+            y += 22f;
+
+            bool prevBlockUploadCheat = this.privacyBlockUploadCheat;
+            float uploadCheatToggleHeight = this.GetSwitchToggleHeight(360f, "Block Cheat Upload", 25f);
+            this.privacyBlockUploadCheat = this.DrawWrappedSwitchToggle(
+                new Rect(left, y, 360f, uploadCheatToggleHeight),
+                this.privacyBlockUploadCheat,
+                "Block Cheat Upload",
+                25f);
+            if (this.privacyBlockUploadCheat != prevBlockUploadCheat)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+
+            y += uploadCheatToggleHeight + 4f;
+            GUI.Label(new Rect(left, y, width, 18f), this.LF("UploadCheat seen: {0} | blocked: {1}", privacyUploadCheatSeenCount, privacyBlockedUploadCheatCount), labelStyle);
             y += 20f;
             GUI.Label(new Rect(left, y, width, 18f), this.GetPrivacyBlockHooksStatus(), labelStyle);
             y += 22f;

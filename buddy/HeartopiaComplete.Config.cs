@@ -228,6 +228,7 @@ namespace HeartopiaMod
             data.privacyBlockLogUploads = this.privacyBlockLogUploads;
             data.privacyBlockRoomMerges = this.privacyBlockRoomMerges;
             data.privacyBlockSpamReports = this.privacyBlockSpamReports;
+            data.privacyBlockUploadCheat = this.privacyBlockUploadCheat;
             data.autoClickStartEnabled = this.autoClickStartEnabled;
             data.autoCloseAnnouncementEnabled = this.autoCloseAnnouncementEnabled;
             data.maxAutoEatAttempts = this.maxAutoEatAttempts;
@@ -410,6 +411,7 @@ namespace HeartopiaMod
             this.privacyBlockLogUploads = data.privacyBlockLogUploads;
             this.privacyBlockRoomMerges = data.privacyBlockRoomMerges;
             this.privacyBlockSpamReports = data.privacyBlockSpamReports;
+            this.privacyBlockUploadCheat = data.privacyBlockUploadCheat;
             this.autoClickStartEnabled = data.autoClickStartEnabled;
             this.autoCloseAnnouncementEnabled = data.autoCloseAnnouncementEnabled;
             this.maxAutoEatAttempts = data.maxAutoEatAttempts;

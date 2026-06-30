@@ -215,6 +215,7 @@ namespace HeartopiaMod
             public bool privacyBlockLogUploads;
             public bool privacyBlockRoomMerges;
             public bool privacyBlockSpamReports;
+            public bool privacyBlockUploadCheat;
             public bool autoClickStartEnabled;
             public bool autoCloseAnnouncementEnabled;
             public int maxAutoEatAttempts;
