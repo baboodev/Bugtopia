@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -380,7 +380,8 @@ namespace HeartopiaMod
             GUI.BeginGroup(tabDrawRect);
             try
             {
-                float contentHeight = this.GetSelectedTabEstimatedHeight() + 30f;
+                float estimatedHeight = this.GetSelectedTabEstimatedHeight() + 30f;
+                float contentHeight = Mathf.Max(estimatedHeight, this.tabDrawContentHeight + 20f);
                 float contentWidth = tabDrawRect.width - 18f;
                 this.tabScrollPos = GUI.BeginScrollView(
                     new Rect(0f, 0f, tabDrawRect.width, tabDrawRect.height),
@@ -398,6 +399,7 @@ namespace HeartopiaMod
                 else if (this.selectedTab == 5) calculatedHeight = this.DrawTeleportTab(contentY);
                 else if (this.selectedTab == 6) calculatedHeight = this.DrawBulkSelectorTab(contentY);
                 else if (this.selectedTab == 7) calculatedHeight = this.DrawSettingsTab(contentY);
+                this.tabDrawContentHeight = calculatedHeight;
                 GUI.EndScrollView();
             }
             finally

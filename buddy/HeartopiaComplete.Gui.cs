@@ -322,6 +322,7 @@ namespace HeartopiaMod
                 {
                     this.selectedTab = tabIndex;
                     this.tabScrollPos = Vector2.zero;
+                    this.tabDrawContentHeight = 0f;
                 }
             }
         }

@@ -4799,6 +4799,7 @@ namespace HeartopiaMod
         // Token: 0x04000015 RID: 21
         private Vector2 fastTravelScrollPosition;
         private Vector2 tabScrollPos = Vector2.zero;
+        private float tabDrawContentHeight = 0f;
         private int settingsSubTab = 0;
         private string selectedLanguage = "en";
         private bool localizationDropdownOpen = false;

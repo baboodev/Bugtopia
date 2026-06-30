@@ -681,16 +681,66 @@ namespace HeartopiaMod
 
         private float CalculateSettingsTabHeight()
         {
-            // Settings tab with sub-tabs
+            if (this.settingsSubTab == 0)
+            {
+                return this.CalculateSettingsMainTabHeight();
+            }
+
             if (this.settingsSubTab == 1)
             {
                 return string.IsNullOrEmpty(this.keyBindingActive) ? 1720f : 300f;
             }
+
             if (this.settingsSubTab == 2)
             {
                 return this.uiThemePickerOpen ? 1180f : 860f;
             }
-            return 940f; // Default settings height
+
+            return this.CalculateSettingsMainTabHeight();
+        }
+
+        private float GetSettingsMainLanguagePanelHeight()
+        {
+            string[] languageCodes = LocalizationManager.GetAvailableLanguageCodes();
+            float localizationDropdownHeight = (languageCodes.Length * 28f) + 8f;
+            float notificationDropdownHeight = (NotificationPositionOptions.Length * 28f) + 8f;
+            float languagePanelHeight = this.notificationsEnabled ? 158f : 118f;
+            if (this.localizationDropdownOpen)
+            {
+                float localizationBottom = 42f + 28f + 4f + localizationDropdownHeight;
+                float shiftedRowsBottom = this.notificationsEnabled
+                    ? localizationBottom + 86f
+                    : localizationBottom + 14f;
+                languagePanelHeight = Mathf.Max(languagePanelHeight, shiftedRowsBottom);
+            }
+
+            if (this.notificationsEnabled && this.notificationPositionDropdownOpen)
+            {
+                float positionRowY = 122f;
+                if (this.localizationDropdownOpen)
+                {
+                    positionRowY += localizationDropdownHeight + 6f;
+                }
+
+                float optionsBottom = positionRowY + 28f + 4f + notificationDropdownHeight + 10f;
+                languagePanelHeight = Mathf.Max(languagePanelHeight, optionsBottom);
+            }
+
+            return languagePanelHeight;
+        }
+
+        private float CalculateSettingsMainTabHeight()
+        {
+            const float startY = 10f;
+            const float sectionGap = 14f;
+            const float rowHeight = 30f;
+
+            float height = startY + 26f;
+            height += this.GetSettingsMainLanguagePanelHeight() + sectionGap;
+            height += (this.customDisplayIdEnabled ? 344f : 306f) + sectionGap;
+            height += 48f + rowHeight + (this.fpsBypassEnabled ? rowHeight : 0f) + this.GetLodSettingsPanelHeight() + sectionGap;
+            height += 100f + 20f;
+            return height + 48f;
         }
 
         private void QueueGameSpeedConfigSave()
@@ -760,6 +810,7 @@ namespace HeartopiaMod
             {
                 this.settingsSubTab = subTab;
                 this.tabScrollPos = Vector2.zero;
+                this.tabDrawContentHeight = 0f;
                 if (subTab != 1)
                 {
                     this.keyBindingActive = "";
@@ -988,25 +1039,7 @@ namespace HeartopiaMod
             string currentDisplayName = LocalizationManager.GetLanguageDisplayName(this.selectedLanguage);
             float localizationDropdownHeight = (languageCodes.Length * 28f) + 8f;
             float notificationDropdownHeight = (NotificationPositionOptions.Length * 28f) + 8f;
-            float languagePanelHeight = this.notificationsEnabled ? 158f : 118f;
-            if (this.localizationDropdownOpen)
-            {
-                float localizationBottom = 42f + 28f + 4f + localizationDropdownHeight;
-                float shiftedRowsBottom = this.notificationsEnabled
-                    ? localizationBottom + 86f
-                    : localizationBottom + 14f;
-                languagePanelHeight = Mathf.Max(languagePanelHeight, shiftedRowsBottom);
-            }
-            if (this.notificationsEnabled && this.notificationPositionDropdownOpen)
-            {
-                float positionRowY = 122f;
-                if (this.localizationDropdownOpen)
-                {
-                    positionRowY += localizationDropdownHeight + 6f;
-                }
-                float optionsBottom = positionRowY + 28f + 4f + notificationDropdownHeight + 10f;
-                languagePanelHeight = Mathf.Max(languagePanelHeight, optionsBottom);
-            }
+            float languagePanelHeight = this.GetSettingsMainLanguagePanelHeight();
 
             Rect languagePanel = new Rect(left, (float)num, contentWidth, languagePanelHeight);
             this.DrawExentriSectionPanel(languagePanel, accent, panelFill, panelLine);
