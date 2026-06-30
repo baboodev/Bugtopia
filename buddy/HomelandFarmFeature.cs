@@ -239,6 +239,7 @@ namespace HeartopiaMod
         private IntPtr homelandFarmAuraCropWeedMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraCropAddManureMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraCharacterEquipHandholdMethod = IntPtr.Zero;
+        private IntPtr homelandFarmAuraCharacterUnEquipHandholdMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraToolProtocolSetHandHoldMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraToolSystemSetHandholdMethod = IntPtr.Zero;
         private IntPtr homelandFarmAuraToolSystemInstanceGetterMethod = IntPtr.Zero;
@@ -1804,6 +1805,15 @@ namespace HeartopiaMod
             if (characterProtocolClass != IntPtr.Zero && this.homelandFarmAuraCharacterEquipHandholdMethod == IntPtr.Zero)
             {
                 this.homelandFarmAuraCharacterEquipHandholdMethod = this.FindAuraMonoMethodOnHierarchy(characterProtocolClass, "EquipHandhold", 1);
+            }
+
+            // CharacterProtocolManager.UnEquipHandhold() (parameterless) sends
+            // CancelHolderSystemCommand{HoldItem} + ToolProtocolManager.SetHandHold(0). These network
+            // command types live only in embedded Mono (absent from interop), so resolve/invoke via
+            // AuraMono — same class/path the equip uses.
+            if (characterProtocolClass != IntPtr.Zero && this.homelandFarmAuraCharacterUnEquipHandholdMethod == IntPtr.Zero)
+            {
+                this.homelandFarmAuraCharacterUnEquipHandholdMethod = this.FindAuraMonoMethodOnHierarchy(characterProtocolClass, "UnEquipHandhold", 0);
             }
 
             if (plantProtocolClass != IntPtr.Zero)
@@ -6589,6 +6599,45 @@ namespace HeartopiaMod
             }
 
             return sent;
+        }
+
+        // Take the item out of the player's hand again after fertilizing via AuraMono
+        // CharacterProtocolManager.UnEquipHandhold() (parameterless), the mirror of the
+        // EquipHandhold(netId) the equip uses. It sends CancelHolderSystemCommand{HoldItem}
+        // + ToolProtocolManager.SetHandHold(0). The holder network command types live only in embedded
+        // Mono (absent from the BepInEx interop), so AuraMono is the only path — no managed fallback.
+        private bool TryHomelandFarmCancelHandhold(out string status)
+        {
+            return this.TryHomelandFarmInvokeUnEquipHandholdAura(out status);
+        }
+
+        // AuraMono invoke of CharacterProtocolManager.UnEquipHandhold() (static, parameterless).
+        private unsafe bool TryHomelandFarmInvokeUnEquipHandholdAura(out string status)
+        {
+            status = "Aura UnEquipHandhold unavailable.";
+
+            if (!this.TryResolveHomelandFarmAuraProtocol(out status))
+            {
+                return false;
+            }
+
+            if (this.homelandFarmAuraCharacterUnEquipHandholdMethod == IntPtr.Zero)
+            {
+                status = "Aura CharacterProtocolManager.UnEquipHandhold() unresolved.";
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(this.homelandFarmAuraCharacterUnEquipHandholdMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                status = "Aura UnEquipHandhold failed exc=0x" + exc.ToInt64().ToString("X") + ".";
+                return false;
+            }
+
+            status = "Aura UnEquipHandhold ok (HoldItem).";
+            this.HomelandFarmLog(status);
+            return true;
         }
 
         private bool TryHomelandFarmTryGetEquippedHandholdBagNetId(out uint bagNetId, out int staticId)
@@ -15775,11 +15824,34 @@ namespace HeartopiaMod
             int fertilized = 0;
             int batchCount = 0;
             int failCount = 0;
+            bool equipped = false;
 
-            // Equipping the fertilizer into the character's hand (EquipHandhold) is
-            // intentionally skipped: AddManure is server-authoritative and does not
-            // require the item to be held, so we avoid the visible handhold swap.
-            if (fertilizer.NetId == 0U)
+            // The fertilizer MUST be equipped into the character's hand before AddManure:
+            // ManuredNetworkCommand carries only cropNetIds (no fertilizer staticId), so the server
+            // resolves which fertilizer to consume/apply from the player's equipped handhold.
+            //
+            // The action-cast path (PlayerParameterFertilization, see git history) was tried as a
+            // no-equip alternative and EMPIRICALLY FAILED: the cast only broadcasts the staticId as
+            // the player's current animation via player-status sync; the server still applies nothing
+            // without the handhold ("verify=no crop state change"). So the equip is mandatory.
+            if (fertilizer.NetId != 0U)
+            {
+                if (!this.TryHomelandFarmEquipHandhold(fertilizer.NetId, out string equipStatus))
+                {
+                    this.homelandFarmLastStatus = "Equip fertilizer failed: " + equipStatus;
+                    this.HomelandFarmLog(this.homelandFarmLastStatus);
+                    if (!silent)
+                    {
+                        this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
+                    }
+
+                    yield break;
+                }
+
+                equipped = true;
+                yield return null;
+            }
+            else
             {
                 this.HomelandFarmLog("Fertilize warning: fertilizer backpack netId missing; server may reject.");
             }
@@ -15823,6 +15895,19 @@ namespace HeartopiaMod
                 {
                     failCount++;
                     this.HomelandFarmLog("Fertilize batch fail count=" + batch.Count + " verify=" + verifyDetail);
+                }
+            }
+
+            // Put the fertilizer back: take it out of the player's hand once all batches are sent.
+            if (equipped)
+            {
+                if (this.TryHomelandFarmCancelHandhold(out string cancelStatus))
+                {
+                    this.HomelandFarmLog("Fertilize unequip: " + cancelStatus);
+                }
+                else
+                {
+                    this.HomelandFarmLog("Fertilize unequip failed: " + cancelStatus);
                 }
             }
 
@@ -16025,6 +16110,7 @@ namespace HeartopiaMod
             int plantCount = 0;
             int batchCount = 0;
             int failCount = 0;
+            bool sprinklerEquipped = false;
             string modeLabel = mode.ToString();
 
             try
@@ -16042,6 +16128,10 @@ namespace HeartopiaMod
 
                         yield break;
                     }
+
+                    // Remember WE equipped the sprinkler so it gets taken back out of the hand once
+                    // watering finishes (only when we equipped it — leave a pre-held one alone).
+                    sprinklerEquipped = true;
 
                     // The equip action returned success (SetHandhold ok). The equipped-state check is
                     // unreliable on builds where HandHoldSprinkler has no managed type and is not an
@@ -16272,6 +16362,20 @@ namespace HeartopiaMod
             }
             finally
             {
+                // Put the watering can back: take the sprinkler out of the player's hand after watering
+                // (only if we equipped it this run). Synchronous, so safe inside finally.
+                if (sprinklerEquipped)
+                {
+                    if (this.TryHomelandFarmUnequipHandTool(out string unequipStatus))
+                    {
+                        this.HomelandFarmLog("Water unequip sprinkler: " + unequipStatus);
+                    }
+                    else
+                    {
+                        this.HomelandFarmLog("Water unequip sprinkler failed: " + unequipStatus);
+                    }
+                }
+
                 this.homelandFarmCoroutine = null;
                 this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
             }
