@@ -106,6 +106,28 @@ namespace HeartopiaMod
             GUI.Label(new Rect(left, y, 460f, 36f), "Blocks FlauntActionEvent / FlauntActionWithNetIdEvent (character hold-up animation).");
             y += 40f;
 
+            const string forceSwimLabel = "Force Swim (swim on land)";
+            bool prevForceSwim = this.forceSwimEnabled;
+            float forceSwimToggleHeight = this.GetSwitchToggleHeight(360f, forceSwimLabel, 25f);
+            this.forceSwimEnabled = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, forceSwimToggleHeight), this.forceSwimEnabled, forceSwimLabel, 25f);
+            if (this.forceSwimEnabled != prevForceSwim)
+            {
+                this.AddMenuNotification(this.forceSwimEnabled ? "Force Swim on" : "Force Swim off", new Color(0.45f, 0.85f, 1f));
+            }
+            y += forceSwimToggleHeight + 6f;
+
+            const string forceSkateLabel = "Force Skate (skate on land)";
+            bool prevForceSkate = this.forceSkateEnabled;
+            float forceSkateToggleHeight = this.GetSwitchToggleHeight(360f, forceSkateLabel, 25f);
+            this.forceSkateEnabled = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, forceSkateToggleHeight), this.forceSkateEnabled, forceSkateLabel, 25f);
+            if (this.forceSkateEnabled != prevForceSkate)
+            {
+                this.AddMenuNotification(this.forceSkateEnabled ? "Force Skate on" : "Force Skate off", new Color(0.55f, 1f, 0.65f));
+            }
+            y += forceSkateToggleHeight + 6f;
+            GUI.Label(new Rect(left, y, 460f, 36f), "Writes SwimStatus/SkateStatus and syncs to the server. Status: " + this.forceLocomotionLastStatus);
+            y += 40f;
+
             y = this.DrawPrivacyBlockExtraTab(y, left);
 
             return y + 20f;
@@ -443,7 +465,7 @@ namespace HeartopiaMod
 
             if (this.newFeaturesSubTab == 6)
             {
-                return 200f;
+                return 560f;
             }
 
             return 400f;

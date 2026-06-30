@@ -260,6 +260,7 @@
     <Compile Include="PrivacyBlockFeature.cs" />
     <Compile Include="BuildingFreeRotateFeature.cs" />
     <Compile Include="BunnyHopFeature.cs" />
+    <Compile Include="ForceLocomotionFeature.cs" />
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
