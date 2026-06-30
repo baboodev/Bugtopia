@@ -22,7 +22,7 @@ namespace HeartopiaMod
     internal static class Breadcrumbs
     {
         // Bump on every diagnostic deploy so the running build is verifiable from the log header.
-        private const string BuildTag = "2026-06-24T03 homeland-radius-scan-pin-FIX";
+        private const string BuildTag = "2026-06-24T04 hang-watchdog+petfav-crumbs";
         private const int RingSize = 160;
         private const long ThrottleMs = 250;
 
@@ -35,6 +35,16 @@ namespace HeartopiaMod
         private static FileStream _stream;
         private static bool _disabled;
 
+        // Hang watchdog. Drop/Tick are written by the main thread, so a hang (the main thread itself
+        // stuck in a loop / blocking native call) leaves NO trail -- the thread that would log is the
+        // one frozen. A background thread instead watches the heartbeat (refreshed on every main-thread
+        // Drop/Tick); when it stalls past HangThresholdMs it writes a WATCHDOG.hang crumb naming the
+        // last area reached, from its OWN thread, so it fires even while the main thread is frozen.
+        private const long HangThresholdMs = 5000;
+        private static long _lastHeartbeatTick;
+        private static volatile string _lastArea = "(none)";
+        private static Thread _watchdog;
+
         public static void Init()
         {
             try
@@ -43,6 +53,9 @@ namespace HeartopiaMod
                 // Share ReadWrite so the file can be tailed while the game runs.
                 _stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
                 Drop("Init", "breadcrumb trail started");
+                _lastHeartbeatTick = Environment.TickCount64;
+                _watchdog = new Thread(WatchdogLoop) { IsBackground = true, Name = "BreadcrumbWatchdog" };
+                _watchdog.Start();
                 ModLogger.Msg("[Breadcrumb] trail -> " + path);
             }
             catch (Exception ex)
@@ -60,6 +73,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Heartbeat: a Drop from the main thread proves it is alive. Set before taking the lock so
+            // the watchdog never mistakes lock contention for a hang. (The watchdog calls DropLocked
+            // directly, bypassing this, so its own writes do NOT refresh the heartbeat.)
+            _lastHeartbeatTick = Environment.TickCount64;
             lock (_gate)
             {
                 DropLocked(area, detail);
@@ -75,6 +92,9 @@ namespace HeartopiaMod
             }
 
             long now = Environment.TickCount64;
+            // Heartbeat on every Tick (even throttled ones that do not write): a tight but *progressing*
+            // hot loop keeps ticking, so the watchdog won't false-positive on a slow-but-alive scan.
+            _lastHeartbeatTick = now;
             lock (_gate)
             {
                 _tickCounts.TryGetValue(area, out long count);
@@ -93,6 +113,7 @@ namespace HeartopiaMod
 
         private static void DropLocked(string area, string detail)
         {
+            _lastArea = area ?? "?";
             try
             {
                 long n = Interlocked.Increment(ref _seq);
@@ -129,6 +150,59 @@ namespace HeartopiaMod
             catch
             {
                 // Never let breadcrumb I/O throw into game code.
+            }
+        }
+
+        // Runs on a dedicated background thread. Detects a stalled main-thread heartbeat and records a
+        // WATCHDOG.hang crumb (with the last area reached) so silent hangs leave a trail too. Reports
+        // once per stall; rearms when the main thread recovers (heartbeat refreshes).
+        private static void WatchdogLoop()
+        {
+            bool reported = false;
+            while (!_disabled && _stream != null)
+            {
+                try
+                {
+                    Thread.Sleep(1000);
+
+                    long hb = _lastHeartbeatTick;
+                    if (hb == 0L)
+                    {
+                        continue; // main loop not started yet
+                    }
+
+                    long stuck = Environment.TickCount64 - hb;
+                    if (stuck < HangThresholdMs)
+                    {
+                        reported = false; // alive (or recovered) -> rearm
+                        continue;
+                    }
+
+                    if (reported)
+                    {
+                        continue; // already logged this stall
+                    }
+                    reported = true;
+
+                    // The main thread is frozen and is NOT holding _gate (Drop/Tick release it
+                    // immediately), so TryEnter should succeed quickly. DropLocked deliberately does not
+                    // touch the heartbeat, so this write keeps the stall "stuck" for recovery detection.
+                    if (Monitor.TryEnter(_gate, 1000))
+                    {
+                        try
+                        {
+                            DropLocked("WATCHDOG.hang", "stuck=" + stuck + "ms lastArea=" + _lastArea + " (main thread frozen)");
+                        }
+                        finally
+                        {
+                            Monitor.Exit(_gate);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Never let the watchdog thread die on a transient error.
+                }
             }
         }
     }

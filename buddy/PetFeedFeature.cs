@@ -5599,6 +5599,7 @@ namespace HeartopiaMod
 
         private bool RefreshPetFeedFavoriteUiRows(bool writeLog)
         {
+            Breadcrumbs.Drop("petfav.refresh.begin");
             this.petFeedFavoriteUiRows.Clear();
             this.petFeedFavoriteUiScroll = Vector2.zero;
 
@@ -5609,17 +5610,21 @@ namespace HeartopiaMod
             string dogStatus;
             bool catOk = this.TryCollectPetFeedPetList(false, pets, out catCount, out catStatus);
             bool dogOk = this.TryCollectPetFeedPetList(true, pets, out dogCount, out dogStatus);
+            Breadcrumbs.Drop("petfav.scan.done", "pets=" + pets.Count);
 
-            foreach (PetFeedTarget pet in pets)
+            for (int pi = 0; pi < pets.Count; pi++)
             {
+                PetFeedTarget pet = pets[pi];
                 if (pet != null)
                 {
+                    Breadcrumbs.Drop("petfav.populate", pi + "/" + pets.Count + " netId=" + pet.NetId);
                     pet.FavoriteFoods = null;
                     pet.SecretFavoriteFoods = null;
                     pet.SecretDislikeFoods = null;
                     this.PopulatePetFeedTargetFavoriteMetadata(pet);
                 }
             }
+            Breadcrumbs.Drop("petfav.populate.done");
 
             if (writeLog)
             {
@@ -5741,6 +5746,7 @@ namespace HeartopiaMod
                 return startY;
             }
 
+            Breadcrumbs.Tick("petfav.draw");
             Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
             Color mutedColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB);
 
