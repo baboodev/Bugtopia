@@ -88,8 +88,9 @@ namespace HeartopiaMod
             // Also block while the cursor is over the auto move-panel (so clicking its toggles / drag
             // bar never leaks into the game world). blockInputReleaseUntil covers the release grace.
             bool overMovePanel = this.buildingMovePanelActive && this.buildingMovePanelMouseOver;
-            bool shouldBlock = (this.showMenu || overMovePanel || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
-            if (overMovePanel)
+            bool overQuestAssistantWindow = this.questAssistantWindowVisible && this.questAssistantWindowMouseOver;
+            bool shouldBlock = (this.showMenu || overMovePanel || overQuestAssistantWindow || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
+            if (overMovePanel || overQuestAssistantWindow)
             {
                 this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
             }

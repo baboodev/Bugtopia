@@ -32,6 +32,7 @@ namespace HeartopiaMod
             CatchFish,
             CatchInsect,
             CatchBird,
+            HomelandFarm, // SowPlant / UseCropFertilizer — confirmed 2026-07-02, see progress doc §5.5
         }
 
         private sealed class ConditionSnapshot
@@ -66,6 +67,11 @@ namespace HeartopiaMod
             public List<ConditionSnapshot> Conditions = new List<ConditionSnapshot>();
             public QuestObjectiveKind ObjectiveKind;
             public int ObjectiveTargetId;
+            // 0 unless classified via Tier 1 (trackMark). Collection(5) ids are in the radar's known
+            // collectable-atlas space; DynamicMapResource(13) ids are a DIFFERENT space not covered by
+            // that atlas — a future radar-mapping step (plan Phase 3) must branch on this, not just on
+            // ObjectiveKind==Collect. See progress doc §1/§5.4.
+            public int ObjectiveTrackMarkCategory;
         }
 
         // Class/method pointers only — safe to cache raw (image lifetime, per AGENTS.md §9). The
@@ -266,6 +272,20 @@ namespace HeartopiaMod
                 int stateInt = this.TryGetMonoIntMember(boxedComponent, "TaskState", out int s) ? s : -1;
                 bool isFailed = this.TryGetMonoBoolMember(boxedComponent, "IsFailed", out bool failed) && failed;
 
+                // Cheap pre-filter on state alone (displayType isn't known yet — that needs the row
+                // resolve below). This only rules out Finished/Closed/etc.; the real active gate
+                // (state + displayType) is applied after the row read, see below.
+                bool stateIsCandidate = (stateInt == QuestAssistantStateAccepted || stateInt == QuestAssistantStateCanSubmit) && !isFailed;
+                if (!stateIsCandidate)
+                {
+                    if (verboseDump)
+                    {
+                        this.QuestAssistantLog("  skip taskId=" + taskId + " netId=" + taskNetId + " state=" + stateInt + " failed=" + isFailed + ": not active");
+                    }
+
+                    return false;
+                }
+
                 this.TryGetMonoObjectMember(boxedComponent, "Progresses", out IntPtr progressesArrayObj);
                 int progressesLength = 0;
                 if (progressesArrayObj != IntPtr.Zero && auraMonoArrayLength != null)
@@ -286,12 +306,28 @@ namespace HeartopiaMod
                     int displayType = this.TryGetMonoIntMember(gameTaskRow, "displayType", out int d) ? d : -1;
                     string name = this.TryGetMonoStringMember(gameTaskRow, "taskName", out string n) ? n : ("task#" + taskId);
 
-                    // Vanilla active-visibility filter (GameTaskModule.GetTasks) — state + displayType
-                    // gate only. Sub-task cross-exclusion (FilterSubTask) is NOT replicated yet; see
-                    // Phase 1 scope note in docs/plans/2026-07-02-quest-assistant.md.
-                    bool activeByState =
+                    // Active-quest filter — REVERTED 2026-07-02 to the exact vanilla rule
+                    // (GameTaskModule.GetTasks: state + displayType gate). The earlier "drop
+                    // displayType, state alone is enough" change was WRONG: cross-checked against the
+                    // real in-game quest list (exactly 3: Apple/Orange-Tip/Pet the Cat, all
+                    // displayType=0) confirmed the other ~59 state=Accepted/displayType=1 records
+                    // (many "Dream Goal", "Three Days Later"/PlayerDailyLogin, event-participation
+                    // trackers) are persistent account-wide milestone trackers, NOT quests the player
+                    // is "currently working on" — the original vanilla filter was right. See progress
+                    // doc §6 for the correction writeup.
+                    isActive =
                         (stateInt == QuestAssistantStateAccepted && (displayType == 0 || displayType == 4))
                         || (stateInt == QuestAssistantStateCanSubmit && (displayType == 0 || (uint)(displayType - 3) > 1u));
+
+                    if (!isActive)
+                    {
+                        if (verboseDump)
+                        {
+                            this.QuestAssistantLog("  skip taskId=" + taskId + " netId=" + taskNetId + " state=" + stateInt + " displayType=" + displayType + ": not active (displayType gate)");
+                        }
+
+                        return false;
+                    }
 
                     List<ConditionSnapshot> conditions = this.QuestAssistantReadConditions(gameTaskRow, progressesArrayObj, progressesLength);
                     List<TrackMarkSnapshot> trackMarks = this.QuestAssistantReadTrackMarks(gameTaskRow);
@@ -309,11 +345,10 @@ namespace HeartopiaMod
                     };
 
                     this.QuestAssistantClassify(trackMarks, snapshot);
-                    isActive = activeByState && !isFailed;
 
                     if (verboseDump)
                     {
-                        this.QuestAssistantLogTaskDetail(snapshot, trackMarks, activeByState);
+                        this.QuestAssistantLogTaskDetail(snapshot, trackMarks);
                     }
 
                     return true;
@@ -464,12 +499,55 @@ namespace HeartopiaMod
             return result;
         }
 
-        // ===== Classification (Tier 1: track marks, Tier 2: recipe-id fallback) =====
+        // ===== Classification (Tier 1: track marks, Tier 2: checkParamString allowlist) =====
+        //
+        // Redesigned 2026-07-02 after a real-account dump (669 quests) showed the original Tier 2
+        // (blindly testing every condition's checkParam/typeParam as a candidate id against
+        // TableCookingRecipe/TableRecipe) produced false positives: e.g. "Enable Friend Chat"
+        // (checkParamString="SocialFriendLevelUpgrade") was wrongly classified Craft because its
+        // checkParam (30204) coincidentally matched a real TableRecipe id. See progress doc §2/§3.
+        //
+        // Fix: Tier 2 now keys off checkParamString (the condition's event name) FIRST via an
+        // allowlist, and only probes recipe tables for event names empirically confirmed to carry a
+        // real item/recipe id. Unlisted event names contribute no candidates at all (default-deny,
+        // not a blocklist — new/unseen event names should NOT be probed blind).
+
+        // Unambiguous event names -> direct ObjectiveKind, no table probe needed (confirmed via the
+        // 2026-07-02 checkParamString frequency census across all 669 quests).
+        private static readonly Dictionary<string, QuestObjectiveKind> QuestAssistantDirectEventKinds =
+            new Dictionary<string, QuestObjectiveKind>(StringComparer.Ordinal)
+        {
+            { "CollectItem", QuestObjectiveKind.Collect },
+            { "CaughtFish", QuestObjectiveKind.CatchFish },
+            { "CatchingInsect", QuestObjectiveKind.CatchInsect },
+            { "BirdWatchingSuccessPhoto", QuestObjectiveKind.CatchBird },
+            { "CookOutFood", QuestObjectiveKind.Cook },
+            { "CookWithGreatIngredient", QuestObjectiveKind.Cook },
+            { "CookWithMagicFlavour", QuestObjectiveKind.Cook },
+            { "SowPlant", QuestObjectiveKind.HomelandFarm },
+            { "UseCropFertilizer", QuestObjectiveKind.HomelandFarm },
+        };
+
+        // Event names whose numeric params were CONFIRMED (not just plausible) to be a real item/
+        // recipe id in the 2026-07-02 dump — safe to probe against TableCookingRecipe/TableRecipe.
+        // Anything not in this set is skipped entirely (see redesign note above).
+        private static readonly HashSet<string> QuestAssistantItemBackedEventNames =
+            new HashSet<string>(StringComparer.Ordinal)
+        {
+            "BagItemCount",
+            "ItemGain",
+            "FurnitureSpecificCheck",
+            "RecipeState",
+            "Place",
+            "BuildMaterialState",
+            "PictorialState",
+        };
 
         private void QuestAssistantClassify(List<TrackMarkSnapshot> trackMarks, QuestSnapshot snapshot)
         {
             snapshot.ObjectiveKind = QuestObjectiveKind.Unknown;
             snapshot.ObjectiveTargetId = 0;
+            snapshot.ObjectiveTrackMarkCategory = 0;
 
             for (int i = 0; i < trackMarks.Count; i++)
             {
@@ -479,60 +557,105 @@ namespace HeartopiaMod
                 {
                     snapshot.ObjectiveKind = kind;
                     snapshot.ObjectiveTargetId = mark.Id;
+                    snapshot.ObjectiveTrackMarkCategory = mark.MarkCategory;
                     this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier1 trackMark category=" + mark.MarkCategory + " id=" + mark.Id + " -> " + kind);
                     return;
                 }
             }
 
-            List<int> candidates = new List<int>();
             for (int i = 0; i < snapshot.Conditions.Count; i++)
             {
                 ConditionSnapshot cond = snapshot.Conditions[i];
-                if (cond.CheckParam > 0 && !candidates.Contains(cond.CheckParam))
+                if (string.IsNullOrEmpty(cond.CheckParamString)
+                    || !QuestAssistantDirectEventKinds.TryGetValue(cond.CheckParamString, out QuestObjectiveKind directKind))
                 {
-                    candidates.Add(cond.CheckParam);
+                    continue;
                 }
 
-                if (int.TryParse(cond.CheckParamString, out int p1) && p1 > 0 && !candidates.Contains(p1))
-                {
-                    candidates.Add(p1);
-                }
-
-                if (int.TryParse(cond.TypeParam, out int p2) && p2 > 0 && !candidates.Contains(p2))
-                {
-                    candidates.Add(p2);
-                }
-            }
-
-            if (candidates.Count == 0)
-            {
-                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": no track mark, no numeric candidate -> Unknown");
+                int directTarget = QuestAssistantFirstNumericCandidate(cond);
+                snapshot.ObjectiveKind = directKind;
+                snapshot.ObjectiveTargetId = directTarget;
+                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 direct event \"" + cond.CheckParamString + "\" -> " + directKind + " target=" + directTarget);
                 return;
             }
 
-            this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 candidates=[" + string.Join(",", candidates) + "]");
-
-            for (int i = 0; i < candidates.Count; i++)
+            for (int i = 0; i < snapshot.Conditions.Count; i++)
             {
-                if (this.QuestAssistantTryProbeIdInTable("GetCookingRecipe", candidates[i]))
+                ConditionSnapshot cond = snapshot.Conditions[i];
+                if (string.IsNullOrEmpty(cond.CheckParamString) || !QuestAssistantItemBackedEventNames.Contains(cond.CheckParamString))
                 {
-                    snapshot.ObjectiveKind = QuestObjectiveKind.Cook;
-                    snapshot.ObjectiveTargetId = candidates[i];
-                    return;
+                    continue;
+                }
+
+                List<int> candidates = QuestAssistantNumericCandidates(cond);
+                if (candidates.Count == 0)
+                {
+                    continue;
+                }
+
+                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 item-backed event \"" + cond.CheckParamString + "\" candidates=[" + string.Join(",", candidates) + "]");
+
+                for (int c = 0; c < candidates.Count; c++)
+                {
+                    if (this.QuestAssistantTryProbeIdInTable("GetCookingRecipe", candidates[c]))
+                    {
+                        snapshot.ObjectiveKind = QuestObjectiveKind.Cook;
+                        snapshot.ObjectiveTargetId = candidates[c];
+                        return;
+                    }
+                }
+
+                for (int c = 0; c < candidates.Count; c++)
+                {
+                    if (this.QuestAssistantTryProbeIdInTable("GetRecipe", candidates[c]))
+                    {
+                        snapshot.ObjectiveKind = QuestObjectiveKind.Craft;
+                        snapshot.ObjectiveTargetId = candidates[c];
+                        return;
+                    }
                 }
             }
 
-            for (int i = 0; i < candidates.Count; i++)
+            this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": no track mark, no allowlisted event match -> Unknown");
+        }
+
+        // typeParam is sometimes a comma-separated list (e.g. "45352,45353,45354" for dish quality
+        // variants, or "324,325" for alternate items) — split and parse every token. typeParam is
+        // checked before checkParam because it was the field observed to carry the real item/recipe
+        // id in every confirmed true positive from the 2026-07-02 dump.
+        private static List<int> QuestAssistantNumericCandidates(ConditionSnapshot cond)
+        {
+            List<int> candidates = new List<int>();
+            QuestAssistantAddNumericTokens(cond.TypeParam, candidates);
+            if (cond.CheckParam > 0 && !candidates.Contains(cond.CheckParam))
             {
-                if (this.QuestAssistantTryProbeIdInTable("GetRecipe", candidates[i]))
-                {
-                    snapshot.ObjectiveKind = QuestObjectiveKind.Craft;
-                    snapshot.ObjectiveTargetId = candidates[i];
-                    return;
-                }
+                candidates.Add(cond.CheckParam);
             }
 
-            this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 no match -> Unknown");
+            return candidates;
+        }
+
+        private static int QuestAssistantFirstNumericCandidate(ConditionSnapshot cond)
+        {
+            List<int> candidates = QuestAssistantNumericCandidates(cond);
+            return candidates.Count > 0 ? candidates[0] : 0;
+        }
+
+        private static void QuestAssistantAddNumericTokens(string raw, List<int> candidates)
+        {
+            if (string.IsNullOrEmpty(raw))
+            {
+                return;
+            }
+
+            string[] parts = raw.Split(',');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (int.TryParse(parts[i].Trim(), out int value) && value > 0 && !candidates.Contains(value))
+                {
+                    candidates.Add(value);
+                }
+            }
         }
 
         private static QuestObjectiveKind QuestAssistantMapTrackMarkCategory(int markCategory)
@@ -618,12 +741,12 @@ namespace HeartopiaMod
 
         // ===== Logging =====
 
-        private void QuestAssistantLogTaskDetail(QuestSnapshot q, List<TrackMarkSnapshot> trackMarks, bool activeByState)
+        private void QuestAssistantLogTaskDetail(QuestSnapshot q, List<TrackMarkSnapshot> trackMarks)
         {
             this.QuestAssistantLog(
                 "task taskId=" + q.TaskId + " netId=" + q.TaskNetId
                 + " state=" + q.State + " category=" + q.Category + " displayType=" + q.DisplayType
-                + " active=" + activeByState + " failed=" + q.IsFailed
+                + " failed=" + q.IsFailed
                 + " name=\"" + q.Name + "\"");
 
             for (int i = 0; i < trackMarks.Count; i++)
@@ -666,6 +789,11 @@ namespace HeartopiaMod
             }
 
             GUI.enabled = true;
+
+            if (GUI.Button(new Rect(left + 210f, y, 220f, 32f), this.questAssistantWindowVisible ? "Hide Floating Window" : "Show Floating Window", GUI.skin.button))
+            {
+                this.QuestAssistantToggleWindow();
+            }
 
             y += 40f;
 

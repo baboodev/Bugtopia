@@ -50,6 +50,7 @@ namespace HeartopiaMod
             }
 
             this.DrawBuildingMovePanel();
+            this.DrawQuestAssistantWindow();
 
             bool flag = !this.showMenu;
             if (flag)

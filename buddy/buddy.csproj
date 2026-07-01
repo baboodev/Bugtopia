@@ -216,6 +216,7 @@
     <Compile Include="HeartopiaComplete.Fishing.cs" />
     <Compile Include="HeartopiaComplete.EventHook.cs" />
     <Compile Include="HeartopiaComplete.QuestAssistant.cs" />
+    <Compile Include="HeartopiaComplete.QuestAssistantUi.cs" />
     <Compile Include="HeartopiaComplete.Insect.cs" />
     <Compile Include="HeartopiaComplete.Bubble.cs" />
     <Compile Include="HeartopiaComplete.Shop.cs" />
