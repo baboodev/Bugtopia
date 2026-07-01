@@ -271,7 +271,13 @@ namespace HeartopiaMod
             footerStyle.fontStyle = FontStyle.Bold;
             footerStyle.alignment = TextAnchor.MiddleCenter;
             footerStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.85f);
-            GUI.Label(sidebarFooterRect, "Baboodev", footerStyle);
+            footerStyle.hover.textColor = new Color(accent.r, accent.g, accent.b, 0.95f);
+            // Label-styled button (no button chrome): clicking the footer hides the menu — same as
+            // the menu hotkey, reopen the usual way.
+            if (GUI.Button(sidebarFooterRect, "Baboodev", footerStyle))
+            {
+                this.showMenu = false;
+            }
 
             GUIStyle titleStyle = new GUIStyle(GUI.skin.label);
             titleStyle.fontSize = 21;

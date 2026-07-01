@@ -1298,6 +1298,11 @@ namespace HeartopiaMod
 
         /// <summary>
         /// Build List&lt;ItemNetPair&gt; in game Mono without Il2Cpp interop types (uses MonoDump/EcsClient image).
+        /// An empty (but non-null) pairs list is valid input — the Add-loop and count-check below both
+        /// handle zero elements correctly — and is needed by QuestAssistantOnSubmitToNpcClicked's
+        /// no-items-required branch (see progress doc §29): vanilla's own AutoSubmitNpcTaskItem sends
+        /// ClientSubmitTaskItem with an empty ItemNetPairs list when TableGameTask.submitTargetItem is
+        /// empty, so an empty list here is a legitimate wire payload, not an error condition.
         /// </summary>
         private unsafe bool TryCreateDailyQuestItemNetPairListAuraMonoNative(
             List<DailyQuestSubmitNetPair> pairs,
@@ -1306,9 +1311,9 @@ namespace HeartopiaMod
         {
             listObj = IntPtr.Zero;
             status = string.Empty;
-            if (pairs == null || pairs.Count == 0)
+            if (pairs == null)
             {
-                status = "empty pairs";
+                status = "null pairs";
                 return false;
             }
 

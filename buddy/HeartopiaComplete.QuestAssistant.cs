@@ -19,9 +19,11 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         private const float QuestAssistantMinSecondsBetweenDumps = 1f; // guards accidental rapid re-click, not a background timer
+        private const int QuestAssistantStateCanAccept = 2;  // GameTaskState.CanAccept
         private const int QuestAssistantStateAccepted = 3;   // GameTaskState.Accepted
         private const int QuestAssistantStateCanSubmit = 4;  // GameTaskState.CanSubmit
         private const int QuestAssistantCheckTypeKindAccumulate = 4; // CompleteConditionCheckType.KindAccumulate
+        private const int QuestAssistantCategoryTaskOrder = 5; // GameTaskType.TaskOrder (order board "Request: X" quests)
 
         private enum QuestObjectiveKind
         {
@@ -33,6 +35,8 @@ namespace HeartopiaMod
             CatchInsect,
             CatchBird,
             HomelandFarm, // SowPlant / UseCropFertilizer — confirmed 2026-07-02, see progress doc §5.5
+            TalkToNpc, // InteractWithNpc / EnterDialogNode — added 2026-07-02, see progress doc §13
+            SubmitToNpc, // CanSubmit + TableGameTask.submitNpc>0 — added 2026-07-02, see progress doc §24
         }
 
         private sealed class ConditionSnapshot
@@ -67,11 +71,22 @@ namespace HeartopiaMod
             public List<ConditionSnapshot> Conditions = new List<ConditionSnapshot>();
             public QuestObjectiveKind ObjectiveKind;
             public int ObjectiveTargetId;
+            // Every id that qualifies for ObjectiveKind (usually just [ObjectiveTargetId], but a
+            // "collect any of these N" condition can list several — e.g. "Collect 15 Common
+            // Mushrooms" carries all 6 mushroom item ids in one typeParam). Action buttons should
+            // loop this list (e.g. enable radar for every matched id), not just the first. Added
+            // 2026-07-02 after that exact quest only enabled Oyster Mushroom instead of all mushroom
+            // types — see progress doc §10.
+            public List<int> ObjectiveTargetIds = new List<int>();
             // 0 unless classified via Tier 1 (trackMark). Collection(5) ids are in the radar's known
             // collectable-atlas space; DynamicMapResource(13) ids are a DIFFERENT space not covered by
             // that atlas — a future radar-mapping step (plan Phase 3) must branch on this, not just on
             // ObjectiveKind==Collect. See progress doc §1/§5.4.
             public int ObjectiveTrackMarkCategory;
+            // TableGameTask.submitNpc — the NPC a CanSubmit quest hands its items to (0 if none).
+            // Drives ObjectiveKind.SubmitToNpc; the submit wire command carries this STATIC id (not a
+            // netId), so no streaming/teleport needed. See progress doc §24.
+            public int SubmitNpcId;
         }
 
         // Class/method pointers only — safe to cache raw (image lifetime, per AGENTS.md §9). The
@@ -85,11 +100,14 @@ namespace HeartopiaMod
         private float questAssistantLastDumpAt = -999f;
 
         private List<QuestSnapshot> questAssistantSnapshot = new List<QuestSnapshot>();
+        private List<QuestSnapshot> questAssistantAvailable = new List<QuestSnapshot>();
         private string questAssistantLastStatus = "Idle. Load into a town, then click the button below.";
 
-        // ===== Entry point — purely button-triggered. No OnUpdate/background tick: this must never
-        // run before the user explicitly asks for it (world/session data isn't guaranteed to exist
-        // at mod load / main menu — AGENTS.md §5, "many assemblies load only after entering a town"). =====
+        // ===== Entry point — purely button-triggered. No OnUpdate TIMER: this must never run before
+        // the user explicitly asks for it (world/session data isn't guaranteed to exist at mod load /
+        // main menu — AGENTS.md §5, "many assemblies load only after entering a town"). The auto-
+        // refresh below is a SEPARATE, event-driven mechanism (not a timer) — see its own comment for
+        // why it doesn't reopen that risk. =====
 
         private void QuestAssistantOnDumpButtonClicked()
         {
@@ -114,6 +132,163 @@ namespace HeartopiaMod
             {
                 this.questAssistantBusy = false;
             }
+        }
+
+        // ===== Auto-refresh (2026-07-02, progress doc §30) — event-driven, NOT a timer. =====
+        //
+        // Hooks XDTDataAndProtocol.Events.TaskUpdated{uint taskNetId; int taskStaticId} (8 bytes).
+        // TaskSystem dispatches this from ALL THREE of its GameTaskItem lifecycle handlers
+        // (OnCreateTaskItem/OnUpdateTaskItem/OnRemoveTaskItem — i.e. accept, any state change,
+        // submit, and removal all go through here — ilspy-dumps/.../TaskSystem.cs), so it's a single,
+        // comprehensive "something about the quest list changed" signal — no need to also hook
+        // TaskAccepted/TaskStateChanged/TaskSubmitted separately.
+        //
+        // Why this does NOT reopen the startup-crash risk the button-only rule above guards against:
+        // RegisterGameEventHook only records handler metadata — it touches no AuraMono API at
+        // registration time. The actual native detour installs lazily from OnUpdate, gated behind
+        // EnsureAuraMonoApiReady() (HeartopiaComplete.EventHook.cs); and TaskUpdated can only fire
+        // from TaskSystem's OWN already-running code, which is strictly stronger proof the world/
+        // session exists than an unconditional timer tick ever gave.
+        //
+        // Burst safety: on every town/session load, TaskSystem.InitTaskData() replays the ENTIRE
+        // quest list through OnUpdateTaskItem in one synchronous pass (confirmed in the decompile) —
+        // i.e. 600-700+ TaskUpdated dispatches in a single frame. The handler below only flips a bool
+        // (near-zero cost per event, and the fixed-size event ring naturally coalesces a same-frame
+        // burst down to whatever the next OnUpdate drain sees); the actual resolve stays on a
+        // throttled tick, mirroring the Collect/TalkToNpc monitor pattern, so a burst — whether from
+        // world load or from this mod's own Accept-All — causes at most one resolve per throttle
+        // window, not one per event.
+        private const string QuestAssistantTaskUpdatedEventName = "XDTDataAndProtocol.Events.TaskUpdated";
+        private const int QuestAssistantTaskUpdatedEventBytes = 8; // uint taskNetId@0, int taskStaticId@4
+        private const float QuestAssistantAutoRefreshMinIntervalSeconds = 1.5f;
+
+        private bool questAssistantAutoRefreshHookRegistered = false;
+        private bool questAssistantAutoRefreshDirty = false;
+        private float questAssistantAutoRefreshNextAllowedAt = 0f;
+
+        // Checked from OnUpdate but cheap every frame it isn't dirty (one bool read) — same
+        // reachable-only-after-the-mod-is-already-running shape as the Collect/TalkToNpc monitors.
+        private void QuestAssistantAutoRefreshOnUpdate()
+        {
+            if (!this.questAssistantAutoRefreshHookRegistered)
+            {
+                this.questAssistantAutoRefreshHookRegistered = true;
+                this.RegisterGameEventHook(QuestAssistantTaskUpdatedEventName, QuestAssistantTaskUpdatedEventBytes, this.QuestAssistantOnTaskUpdatedEvent);
+            }
+
+            if (!this.questAssistantAutoRefreshDirty || this.questAssistantBusy)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.questAssistantAutoRefreshNextAllowedAt)
+            {
+                return;
+            }
+
+            this.questAssistantAutoRefreshDirty = false;
+            this.questAssistantAutoRefreshNextAllowedAt = now + QuestAssistantAutoRefreshMinIntervalSeconds;
+
+            // No point silently rescanning 600+ tasks in the background when nobody's looking — only
+            // refresh if the floating window is open or a manual dump has already happened this
+            // session (the first-ever resolve of a session still always originates from the explicit
+            // button click, never from this tick alone).
+            if (!this.questAssistantWindowVisible && this.questAssistantLastDumpAt < 0f)
+            {
+                return;
+            }
+
+            try
+            {
+                this.QuestAssistantResolveSnapshot(false);
+                this.QuestAssistantLog("Auto-refresh: resolved after TaskUpdated event(s)");
+            }
+            catch (Exception ex)
+            {
+                this.QuestAssistantLog("Auto-refresh EXCEPTION: " + ex);
+            }
+        }
+
+        // Handler runs on the Unity main thread (EventHook engine's OnUpdate drain) — deliberately
+        // does nothing but flip a flag; see the burst-safety note above for why.
+        private void QuestAssistantOnTaskUpdatedEvent(GameEventSnapshot e)
+        {
+            this.questAssistantAutoRefreshDirty = true;
+        }
+
+        private object questAssistantAcceptAllCoroutine = null;
+
+        // Reuses TryInvokeDailyQuestClientAcceptTaskAura (DailyQuestSubmitFeature.cs) as-is — despite
+        // the name it just resolves/invokes TaskProtocolManager.ClientAcceptTask(taskId), which is
+        // generic (not scoped to the daily order board). Confirmed 2026-07-02: GetAllTasks() already
+        // lists CanAccept(2) quests for any quest type, so this works for the same set this file's
+        // "available" list already resolves — no separate daily-order-specific API needed.
+        private void QuestAssistantOnAcceptAllClicked()
+        {
+            if (this.questAssistantAcceptAllCoroutine != null || this.questAssistantAvailable == null || this.questAssistantAvailable.Count == 0)
+            {
+                return;
+            }
+
+            this.questAssistantAcceptAllCoroutine = ModCoroutines.Start(this.QuestAssistantAcceptAllRoutine());
+        }
+
+        private System.Collections.IEnumerator QuestAssistantAcceptAllRoutine()
+        {
+            List<QuestSnapshot> targets = new List<QuestSnapshot>(this.questAssistantAvailable);
+            this.questAssistantLastStatus = "Accepting " + targets.Count + " quest(s)...";
+            int accepted = 0;
+
+            for (int i = 0; i < targets.Count; i++)
+            {
+                int taskId = targets[i].TaskId;
+                if (this.TryInvokeDailyQuestClientAcceptTaskAura(taskId, out string status))
+                {
+                    accepted++;
+                    this.QuestAssistantLog("Accept ok taskId=" + taskId + " " + status);
+                }
+                else
+                {
+                    this.QuestAssistantLog("Accept failed taskId=" + taskId + ": " + status);
+                }
+
+                yield return new WaitForSecondsRealtime(0.3f);
+            }
+
+            this.questAssistantLastStatus = "Accepted " + accepted + "/" + targets.Count + " quest(s)";
+            yield return new WaitForSecondsRealtime(0.5f);
+            this.QuestAssistantResolveSnapshot(false);
+            this.questAssistantAcceptAllCoroutine = null;
+        }
+
+        // "Submit Ready Items" reuses DailyQuestSubmitFeature.StartDailyQuestAutoSubmitItems as-is —
+        // no new submit logic. It already: finds every order in CanSubmit state (not just the
+        // Quest Assistant active list — it re-derives its own order list from DailyOrderSystem), fills
+        // from bag/warehouse, honors the existing "Skip 5 Star Items" setting
+        // (dailyQuestSubmitSkipFiveStar, configured on the Daily Quests tab), and shows its own
+        // AddMenuNotification on completion. This is a plain wiring call, requested 2026-07-02 after
+        // the user pointed at that exact feature to reuse rather than duplicate.
+        private int QuestAssistantCountReadyToSubmit()
+        {
+            int count = 0;
+            if (this.questAssistantSnapshot != null)
+            {
+                for (int i = 0; i < this.questAssistantSnapshot.Count; i++)
+                {
+                    if (this.questAssistantSnapshot[i].State == QuestAssistantStateCanSubmit)
+                    {
+                        count++;
+                    }
+                }
+            }
+
+            return count;
+        }
+
+        private bool QuestAssistantIsDailyQuestSubmitBusy()
+        {
+            return this.dailyQuestSubmitCoroutine != null || this.birdPhotoSubmitCoroutine != null || this.dailyClaimsCoroutine != null;
         }
 
         private void QuestAssistantLog(string message)
@@ -155,7 +330,9 @@ namespace HeartopiaMod
             List<IntPtr> taskItems = new List<IntPtr>();
             List<uint> taskPins = new List<uint>();
             List<QuestSnapshot> resolved = new List<QuestSnapshot>();
+            List<QuestSnapshot> available = new List<QuestSnapshot>();
             int activeCount = 0;
+            int availableCount = 0;
             int totalCount = 0;
 
             try
@@ -164,6 +341,7 @@ namespace HeartopiaMod
                 {
                     this.questAssistantLastStatus = "GetAllTasks: 0 tasks";
                     this.questAssistantSnapshot = resolved;
+                    this.questAssistantAvailable = available;
                     return;
                 }
 
@@ -178,7 +356,7 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (!this.QuestAssistantTryResolveTask(boxedGameTaskItem, verboseDump, out QuestSnapshot snapshot, out bool isActive))
+                    if (!this.QuestAssistantTryResolveTask(boxedGameTaskItem, verboseDump, out QuestSnapshot snapshot, out bool isActive, out bool isAvailable))
                     {
                         continue;
                     }
@@ -188,6 +366,11 @@ namespace HeartopiaMod
                         activeCount++;
                         resolved.Add(snapshot);
                     }
+                    else if (isAvailable)
+                    {
+                        availableCount++;
+                        available.Add(snapshot);
+                    }
                 }
             }
             finally
@@ -196,8 +379,9 @@ namespace HeartopiaMod
             }
 
             this.questAssistantSnapshot = resolved;
-            this.questAssistantLastStatus = "OK: " + activeCount + "/" + totalCount + " active";
-            this.QuestAssistantLog("=== resolve pass done: " + activeCount + " active of " + totalCount + " total ===");
+            this.questAssistantAvailable = available;
+            this.questAssistantLastStatus = "OK: " + activeCount + "/" + totalCount + " active, " + availableCount + " available to accept";
+            this.QuestAssistantLog("=== resolve pass done: " + activeCount + " active, " + availableCount + " available, of " + totalCount + " total ===");
         }
 
         // Re-resolves the TaskSystem *instance* every call (cheap DataModule&lt;T&gt;.Instance lookup) —
@@ -243,10 +427,11 @@ namespace HeartopiaMod
         // calling convention question (mono_runtime_invoke on a value-type method expects the
         // unboxed data pointer as `obj`, not the boxed object — untested here, so sidestepped).
         // KindAccumulate's popcount is trivial pure C# and reimplemented in QuestAssistantPopCount.
-        private unsafe bool QuestAssistantTryResolveTask(IntPtr boxedGameTaskItem, bool verboseDump, out QuestSnapshot snapshot, out bool isActive)
+        private unsafe bool QuestAssistantTryResolveTask(IntPtr boxedGameTaskItem, bool verboseDump, out QuestSnapshot snapshot, out bool isActive, out bool isAvailable)
         {
             snapshot = null;
             isActive = false;
+            isAvailable = false;
 
             if (!this.TryGetMonoUInt32Member(boxedGameTaskItem, "taskNetId", out uint taskNetId))
             {
@@ -273,9 +458,13 @@ namespace HeartopiaMod
                 bool isFailed = this.TryGetMonoBoolMember(boxedComponent, "IsFailed", out bool failed) && failed;
 
                 // Cheap pre-filter on state alone (displayType isn't known yet — that needs the row
-                // resolve below). This only rules out Finished/Closed/etc.; the real active gate
-                // (state + displayType) is applied after the row read, see below.
-                bool stateIsCandidate = (stateInt == QuestAssistantStateAccepted || stateInt == QuestAssistantStateCanSubmit) && !isFailed;
+                // resolve below). This only rules out Finished/Closed/etc. CanAccept(2) is included
+                // 2026-07-02: confirmed via a real dump that GetAllTasks() already lists not-yet-
+                // accepted quests (total count didn't change across accept), so no separate
+                // "available quests" discovery API is needed — see progress doc §10.
+                bool stateIsCandidate =
+                    (stateInt == QuestAssistantStateCanAccept || stateInt == QuestAssistantStateAccepted || stateInt == QuestAssistantStateCanSubmit)
+                    && !isFailed;
                 if (!stateIsCandidate)
                 {
                     if (verboseDump)
@@ -306,24 +495,57 @@ namespace HeartopiaMod
                     int displayType = this.TryGetMonoIntMember(gameTaskRow, "displayType", out int d) ? d : -1;
                     string name = this.TryGetMonoStringMember(gameTaskRow, "taskName", out string n) ? n : ("task#" + taskId);
 
-                    // Active-quest filter — REVERTED 2026-07-02 to the exact vanilla rule
-                    // (GameTaskModule.GetTasks: state + displayType gate). The earlier "drop
-                    // displayType, state alone is enough" change was WRONG: cross-checked against the
-                    // real in-game quest list (exactly 3: Apple/Orange-Tip/Pet the Cat, all
-                    // displayType=0) confirmed the other ~59 state=Accepted/displayType=1 records
-                    // (many "Dream Goal", "Three Days Later"/PlayerDailyLogin, event-participation
-                    // trackers) are persistent account-wide milestone trackers, NOT quests the player
-                    // is "currently working on" — the original vanilla filter was right. See progress
-                    // doc §6 for the correction writeup.
+                    if (stateInt == QuestAssistantStateCanAccept)
+                    {
+                        // Available-to-accept bucket: no displayType filter yet (unverified whether
+                        // CanAccept suffers the same noise problem Accepted did — ship the simple
+                        // version, correct if the next dump shows junk entries here too). Skip the
+                        // conditions/trackMarks read entirely — not needed for an Accept button, and
+                        // cuts native-call volume for what's typically a short list.
+                        isAvailable = true;
+                        snapshot = new QuestSnapshot
+                        {
+                            TaskNetId = taskNetId,
+                            TaskId = taskId,
+                            State = stateInt,
+                            IsFailed = isFailed,
+                            Name = name,
+                            Category = category,
+                            DisplayType = displayType,
+                        };
+
+                        if (verboseDump)
+                        {
+                            this.QuestAssistantLog("  available taskId=" + taskId + " netId=" + taskNetId + " category=" + category + " name=\"" + name + "\"");
+                        }
+
+                        return true;
+                    }
+
+                    // Active-quest filter — vanilla rule (GameTaskModule.GetTasks: state + displayType
+                    // gate). The CanSubmit term below was inverted since §6 (bug, not a game-state
+                    // edge case) — see progress doc §28 for the re-derivation. Vanilla's actual code is
+                    // written as an EXCLUDE condition ("continue" = skip):
+                    //   if ((displayType != 0 && (uint)(displayType - 3) > 1u) || 1==0) continue;
+                    // so the INCLUDE set is the negation: displayType==0 || (uint)(displayType-3) <= 1u
+                    // (i.e. displayType ∈ {0,3,4}) — NOT "> 1u", which is what this line had (silently
+                    // wrong since no CanSubmit quest with displayType∈{3,4} had been tested until
+                    // "Naughty's Treasure" — every prior CanSubmit test quest happened to have
+                    // displayType=0, which passes either way and never exercised this term).
                     isActive =
                         (stateInt == QuestAssistantStateAccepted && (displayType == 0 || displayType == 4))
-                        || (stateInt == QuestAssistantStateCanSubmit && (displayType == 0 || (uint)(displayType - 3) > 1u));
+                        || (stateInt == QuestAssistantStateCanSubmit && (displayType == 0 || (uint)(displayType - 3) <= 1u));
 
                     if (!isActive)
                     {
                         if (verboseDump)
                         {
-                            this.QuestAssistantLog("  skip taskId=" + taskId + " netId=" + taskNetId + " state=" + stateInt + " displayType=" + displayType + ": not active (displayType gate)");
+                            // name/category logged HERE (unlike the plain "not active" skip above,
+                            // which never reads the row at all) so a gate-excluded-but-Accepted/
+                            // CanSubmit task can be identified by name from one dump — added 2026-07-02
+                            // to check whether "Naughty's Treasure" (visible in-game under Gossips,
+                            // missing from Quest Assistant) is being cut here. See progress doc §28.
+                            this.QuestAssistantLog("  skip taskId=" + taskId + " netId=" + taskNetId + " state=" + stateInt + " category=" + category + " displayType=" + displayType + " name=\"" + name + "\": not active (displayType gate)");
                         }
 
                         return false;
@@ -342,6 +564,7 @@ namespace HeartopiaMod
                         Category = category,
                         DisplayType = displayType,
                         Conditions = conditions,
+                        SubmitNpcId = this.TryGetMonoIntMember(gameTaskRow, "submitNpc", out int submitNpc) ? submitNpc : 0,
                     };
 
                     this.QuestAssistantClassify(trackMarks, snapshot);
@@ -526,6 +749,8 @@ namespace HeartopiaMod
             { "CookWithMagicFlavour", QuestObjectiveKind.Cook },
             { "SowPlant", QuestObjectiveKind.HomelandFarm },
             { "UseCropFertilizer", QuestObjectiveKind.HomelandFarm },
+            { "InteractWithNpc", QuestObjectiveKind.TalkToNpc },
+            { "EnterDialogNode", QuestObjectiveKind.TalkToNpc },
         };
 
         // Event names whose numeric params were CONFIRMED (not just plausible) to be a real item/
@@ -547,20 +772,86 @@ namespace HeartopiaMod
         {
             snapshot.ObjectiveKind = QuestObjectiveKind.Unknown;
             snapshot.ObjectiveTargetId = 0;
+            snapshot.ObjectiveTargetIds = new List<int>();
             snapshot.ObjectiveTrackMarkCategory = 0;
+
+            // CanSubmit + an NPC to hand items to => the actionable step is "submit items to that
+            // NPC", regardless of the original objective (already satisfied at CanSubmit). submitNpc
+            // is a TableGameTask field read up front (not from a condition), and the submit wire
+            // command carries it as a STATIC id, so this needs no NPC streaming/teleport (unlike
+            // TalkToNpc). Takes priority precisely because it's the one remaining action. §24.
+            if (snapshot.State == QuestAssistantStateCanSubmit && snapshot.SubmitNpcId > 0)
+            {
+                snapshot.ObjectiveKind = QuestObjectiveKind.SubmitToNpc;
+                snapshot.ObjectiveTargetId = snapshot.SubmitNpcId;
+                snapshot.ObjectiveTargetIds = new List<int> { snapshot.SubmitNpcId };
+                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": CanSubmit + submitNpc=" + snapshot.SubmitNpcId + " -> SubmitToNpc");
+                return;
+            }
 
             for (int i = 0; i < trackMarks.Count; i++)
             {
                 TrackMarkSnapshot mark = trackMarks[i];
                 QuestObjectiveKind kind = QuestAssistantMapTrackMarkCategory(mark.MarkCategory);
-                if (kind != QuestObjectiveKind.Unknown)
+                if (kind == QuestObjectiveKind.Unknown)
                 {
-                    snapshot.ObjectiveKind = kind;
-                    snapshot.ObjectiveTargetId = mark.Id;
-                    snapshot.ObjectiveTrackMarkCategory = mark.MarkCategory;
-                    this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier1 trackMark category=" + mark.MarkCategory + " id=" + mark.Id + " -> " + kind);
-                    return;
+                    continue;
                 }
+
+                // A "collect/catch any of these" objective can carry ONE track mark PER valid target
+                // (e.g. "Collect 15 Common Mushrooms" has 6 separate Collection track marks, one per
+                // mushroom species, all groupId=1) — collect every mark that resolves to the SAME
+                // kind, not just the first. 2026-07-02 fix: the earlier version returned right after
+                // the first match, so the button only ever enabled Oyster Mushroom's radar category
+                // instead of all 6 — see progress doc §11 (this is the Tier-1 counterpart to the
+                // Tier-2 multi-id fix from §10.2, which only covered the direct-event path).
+                List<int> ids = new List<int>();
+                for (int j = 0; j < trackMarks.Count; j++)
+                {
+                    if (QuestAssistantMapTrackMarkCategory(trackMarks[j].MarkCategory) == kind && !ids.Contains(trackMarks[j].Id))
+                    {
+                        ids.Add(trackMarks[j].Id);
+                    }
+                }
+
+                snapshot.ObjectiveKind = kind;
+                snapshot.ObjectiveTargetId = ids.Count > 0 ? ids[0] : mark.Id;
+                snapshot.ObjectiveTargetIds = ids;
+                snapshot.ObjectiveTrackMarkCategory = mark.MarkCategory;
+
+                // Craft-specific correction (2026-07-02, progress doc §34): Furniture(12) trackMarks
+                // recur across MANY different craft quests with the SAME id (330001) — confirmed via
+                // dump this is the WORKBENCH furniture id (a "craft at this station" location marker),
+                // not the recipe/output item to make. The real target is the condition's own
+                // typeParam/checkParam (e.g. "Fishing: Bait" has typeParam="20511", checkParamString=
+                // "ItemMade", and 20511 resolves via TableData.GetRecipe — confirmed the SAME id space
+                // TableRecipe.id/output-item share). Prefer that over the trackMark id whenever it
+                // resolves as a real recipe, so the eventual Craft action targets the right recipe.
+                if (kind == QuestObjectiveKind.Craft)
+                {
+                    for (int c = 0; c < snapshot.Conditions.Count; c++)
+                    {
+                        List<int> recipeCandidates = QuestAssistantNumericCandidates(snapshot.Conditions[c]);
+                        for (int r = 0; r < recipeCandidates.Count; r++)
+                        {
+                            if (this.QuestAssistantTryProbeIdInTable("GetRecipe", recipeCandidates[r]))
+                            {
+                                snapshot.ObjectiveTargetId = recipeCandidates[r];
+                                snapshot.ObjectiveTargetIds = new List<int> { recipeCandidates[r] };
+                                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": Craft target corrected trackMark id=" + mark.Id + " (workbench) -> recipe id=" + recipeCandidates[r]);
+                                break;
+                            }
+                        }
+
+                        if (snapshot.ObjectiveTargetId != mark.Id)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier1 trackMark category=" + mark.MarkCategory + " ids=[" + string.Join(",", ids) + "] -> " + kind);
+                return;
             }
 
             for (int i = 0; i < snapshot.Conditions.Count; i++)
@@ -572,10 +863,15 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                int directTarget = QuestAssistantFirstNumericCandidate(cond);
+                // A "collect any of these N" condition lists every qualifying id in typeParam (e.g.
+                // "Collect 15 Common Mushrooms" carries all 6 mushroom ids) — keep all of them, not
+                // just the first, so action buttons can act on every one (2026-07-02 fix, progress
+                // doc §10; previously only the first/Oyster Mushroom got its radar category enabled).
+                List<int> directCandidates = QuestAssistantNumericCandidates(cond);
                 snapshot.ObjectiveKind = directKind;
-                snapshot.ObjectiveTargetId = directTarget;
-                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 direct event \"" + cond.CheckParamString + "\" -> " + directKind + " target=" + directTarget);
+                snapshot.ObjectiveTargetId = directCandidates.Count > 0 ? directCandidates[0] : 0;
+                snapshot.ObjectiveTargetIds = directCandidates;
+                this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 direct event \"" + cond.CheckParamString + "\" -> " + directKind + " targets=[" + string.Join(",", directCandidates) + "]");
                 return;
             }
 
@@ -601,6 +897,7 @@ namespace HeartopiaMod
                     {
                         snapshot.ObjectiveKind = QuestObjectiveKind.Cook;
                         snapshot.ObjectiveTargetId = candidates[c];
+                        snapshot.ObjectiveTargetIds.Add(candidates[c]);
                         return;
                     }
                 }
@@ -611,8 +908,33 @@ namespace HeartopiaMod
                     {
                         snapshot.ObjectiveKind = QuestObjectiveKind.Craft;
                         snapshot.ObjectiveTargetId = candidates[c];
+                        snapshot.ObjectiveTargetIds.Add(candidates[c]);
                         return;
                     }
+                }
+            }
+
+            // Tier 3 (narrow, text-matched fallback): TaskOrder-category board requests for "Bird
+            // Info Card" have NO trackMark and checkParamString="TaskSubmitState" (a live inventory
+            // check, not an event name — same shape as "Too Much of a Good Thing"'s item-submit
+            // condition, just not yet CanSubmit). "Bird Info Card" isn't a raw catch reward — it comes
+            // from exchanging BirdNetFarm's photo drops via BirdPhotoExchange (BirdPhotoSubmitFeature,
+            // "Submit Bird Photo"), so CatchBird's action button must ALSO trigger that exchange, not
+            // just run the farm — see QuestAssistantStartCatchBird. 2026-07-02, progress doc §31.
+            // Matched on desc text (not just checkParamString, which "Too Much of a Good Thing" also
+            // has) to avoid misclassifying unrelated TaskSubmitState conditions as bird quests; also
+            // requires TaskOrder category as a second guard against false positives elsewhere.
+            for (int i = 0; i < snapshot.Conditions.Count; i++)
+            {
+                ConditionSnapshot cond = snapshot.Conditions[i];
+                if (snapshot.Category == QuestAssistantCategoryTaskOrder
+                    && string.Equals(cond.CheckParamString, "TaskSubmitState", StringComparison.Ordinal)
+                    && !string.IsNullOrEmpty(cond.Description)
+                    && cond.Description.IndexOf("Bird", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    snapshot.ObjectiveKind = QuestObjectiveKind.CatchBird;
+                    this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier3 TaskSubmitState desc=\"" + cond.Description + "\" -> CatchBird (order board, needs BirdNetFarm + photo exchange)");
+                    return;
                 }
             }
 
@@ -633,12 +955,6 @@ namespace HeartopiaMod
             }
 
             return candidates;
-        }
-
-        private static int QuestAssistantFirstNumericCandidate(ConditionSnapshot cond)
-        {
-            List<int> candidates = QuestAssistantNumericCandidates(cond);
-            return candidates.Count > 0 ? candidates[0] : 0;
         }
 
         private static void QuestAssistantAddNumericTokens(string raw, List<int> candidates)
@@ -793,6 +1109,29 @@ namespace HeartopiaMod
             if (GUI.Button(new Rect(left + 210f, y, 220f, 32f), this.questAssistantWindowVisible ? "Hide Floating Window" : "Show Floating Window", GUI.skin.button))
             {
                 this.QuestAssistantToggleWindow();
+            }
+
+            if (this.questAssistantAvailable != null && this.questAssistantAvailable.Count > 0)
+            {
+                GUI.enabled = this.questAssistantAcceptAllCoroutine == null;
+                if (GUI.Button(new Rect(left + 440f, y, 180f, 32f), "Accept All (" + this.questAssistantAvailable.Count + ")", GUI.skin.button))
+                {
+                    this.QuestAssistantOnAcceptAllClicked();
+                }
+
+                GUI.enabled = true;
+            }
+
+            int readyToSubmit = this.QuestAssistantCountReadyToSubmit();
+            if (readyToSubmit > 0)
+            {
+                GUI.enabled = !this.QuestAssistantIsDailyQuestSubmitBusy();
+                if (GUI.Button(new Rect(left + 630f, y, 200f, 32f), "Submit Ready Items (" + readyToSubmit + ")", GUI.skin.button))
+                {
+                    this.StartDailyQuestAutoSubmitItems(false);
+                }
+
+                GUI.enabled = true;
             }
 
             y += 40f;

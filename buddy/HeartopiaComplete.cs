@@ -732,6 +732,11 @@ namespace HeartopiaMod
             this.ProcessBubbleFeatureOnUpdate();
             this.ProcessShowOffBypassOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
+            this.QuestAssistantCollectMonitorTick();
+            this.QuestAssistantTalkToNpcMonitorTick();
+            this.QuestAssistantBirdMonitorTick();
+            this.QuestAssistantCraftMonitorTick();
+            this.QuestAssistantAutoRefreshOnUpdate();
             this.ProcessPrivacyBlockOnUpdate();
             this.ProcessVehicleBypassOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();
