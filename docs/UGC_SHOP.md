@@ -392,7 +392,7 @@ rewardItem.syncExtraEx[RewardExtraType.UgcItemId] = ugcItemGuid.ToString();
 
 ---
 
-## 15. Интеграция в мод (Heartopia Helper)
+## 15. Интеграция в мод (Bugtopia)
 
 | Задача | Канал | API |
 |--------|-------|-----|

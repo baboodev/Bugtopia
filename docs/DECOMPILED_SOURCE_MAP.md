@@ -1,6 +1,6 @@
 # Decompiled Source Map and Mod Interaction Reference
 
-Detailed guide to offline decompilation folders and **every game type** that **Heartopia Helper** touches:
+Detailed guide to offline decompilation folders and **every game type** that **Bugtopia** touches:
 
 | Folder | Runtime | ILSpy bodies? |
 |--------|---------|---------------|
@@ -45,7 +45,7 @@ flowchart LR
     R[Signatures + native RVAs]
   end
   subgraph live [Runtime mod]
-    M[helper.dll — interop / IL2CPP / AuraMono]
+    M[bugtopia.dll — interop / IL2CPP / AuraMono]
   end
   E --> M
   G --> M

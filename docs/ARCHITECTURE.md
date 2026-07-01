@@ -1,6 +1,6 @@
 # Architecture Reference (Game + Mod)
 
-Master orientation document for **Heartopia Helper**. Use this when adding features, fixing type resolution after patches, or navigating `ilspy-dumps/` and `buddy/`.
+Master orientation document for **Bugtopia**. Use this when adding features, fixing type resolution after patches, or navigating `ilspy-dumps/` and `buddy/`.
 
 Specialized docs (still valid, linked from here):
 
@@ -19,7 +19,7 @@ Specialized docs (still valid, linked from here):
 
 ## 1. Executive summary
 
-Heartopia is a **hybrid IL2CPP + embedded Mono** Unity game. The mod is a **single `helper.dll`** loaded by **MelonLoader** or **BepInEx IL2CPP** (one loader per build). Almost all logic lives in one partial class `HeartopiaComplete` (~58k lines) split across feature files; farms are static controllers ticked from `OnUpdate`.
+Heartopia is a **hybrid IL2CPP + embedded Mono** Unity game. The mod is a **single `bugtopia.dll`** loaded by **MelonLoader** or **BepInEx IL2CPP** (one loader per build). Almost all logic lives in one partial class `HeartopiaComplete` (~58k lines) split across feature files; farms are static controllers ticked from `OnUpdate`.
 
 The mod talks to the game through **four access channels**:
 
@@ -328,7 +328,7 @@ ilspy-dumps/
 | Item | Value |
 |------|-------|
 | Project | `buddy/buddy.csproj` |
-| Output | `buddy/bin/<Loader>/<Configuration>/helper.dll` |
+| Output | `buddy/bin/<Loader>/<Configuration>/bugtopia.dll` |
 | TFM | `net6.0`, x64, `AllowUnsafeBlocks` |
 | Loaders | `MelonLoader` or `BepInEx` via `-p:Loader=` and `#if MELONLOADER` / `BEPINEX` |
 | Script | `buddy/build-all.bat` |
@@ -355,7 +355,7 @@ flowchart TB
 | `HeartopiaComplete.cs` | Lifecycle / `OnUpdate` glue for the partial class; most logic split by domain into `HeartopiaComplete.*.cs` |
 | `ModLogger.cs` | Loader-agnostic logging |
 | `ModCoroutines.cs` | MelonCoroutines vs `MonoBehaviour.StartCoroutine` |
-| `HelperPaths.cs` | `%LocalLow%/HelperSettings/` via known folder GUID |
+| `HelperPaths.cs` | `%LocalLow%/Bugtopia/` via known folder GUID |
 
 `HeartopiaComplete` is **not** a MelonMod — plain class with explicit lifecycle methods.
 
@@ -496,7 +496,7 @@ flowchart LR
 - Farms **never** reference each other; they call **`HeartopiaComplete` host methods** for game access (equip tool, send commands, scan entities).
 - Features as partials access **private host state** directly (shared caches, config fields).
 - **`HeartopiaComplete.AuraMonoEngine.cs`** owns the Mono bridge (export delegates, `EnsureAuraMonoApiReady()`, GC pinning); other partials call into it. `AuraFarm.cs` keeps only farm-specific interact pointers + gather invokers.
-- **Config** is centralized in `UnifiedConfigData` → `%LocalLow%/HelperSettings/Config.xml`.
+- **Config** is centralized in `UnifiedConfigData` → `%LocalLow%/Bugtopia/Config.xml`.
 
 ### 4.5 Movement & teleport model
 
@@ -512,10 +512,10 @@ Flow: set transform + override flag → `CharacterControllerPatch` steers `Move`
 
 | Path | Content |
 |------|---------|
-| `%LocalLow%/HelperSettings/Config.xml` | Unified XML config (keybinds, theme, radar, patrols, bird farm) |
-| `%LocalLow%/HelperSettings/Cache/` | Radar species icon index |
-| `%LocalLow%/HelperSettings/DecryptedAssemblies/` | Primary Mono PE dumps for ILSpy / `ilspy-dumps/` (dev only) |
-| `{Game}/UserData/helper.log` | BepInEx mod log append |
+| `%LocalLow%/Bugtopia/Config.xml` | Unified XML config (keybinds, theme, radar, patrols, bird farm) |
+| `%LocalLow%/Bugtopia/Cache/` | Radar species icon index |
+| `%LocalLow%/Bugtopia/DecryptedAssemblies/` | Primary Mono PE dumps for ILSpy / `ilspy-dumps/` (dev only) |
+| `{Game}/UserData/bugtopia.log` | BepInEx mod log append |
 
 Legacy JSON files migrated once via `HelperPaths.TryMigrateLegacyUserData`.
 
@@ -792,8 +792,8 @@ Bag tab UI
 |----------|---------|
 | `<Game>/BepInEx/interop/` or `MelonLoader/Il2CppAssemblies/` | Live interop stubs |
 | `%LocalLow%/xd/Heartopia/DotnetAssemblies/` | XDENCODE blobs — research only, not interop |
-| `%LocalLow%/HelperSettings/DecryptedAssemblies/` | Primary Mono PE dumps for ILSpy / `ilspy-dumps/` (dev only) |
-| `%LocalLow%/HelperSettings/MonoDump/` | Legacy Mono PE dumps (same use as above if present) |
+| `%LocalLow%/Bugtopia/DecryptedAssemblies/` | Primary Mono PE dumps for ILSpy / `ilspy-dumps/` (dev only) |
+| `%LocalLow%/Bugtopia/MonoDump/` | Legacy Mono PE dumps (same use as above if present) |
 | `ilspy-dumps/` in repo workspace | Mono decompilation reference (gitignored) |
 | `gameassembly-dumps/` in repo workspace | IL2CPP decompilation reference (gitignored) |
 | `tools/cpp2il_out/` | Il2CppDumper artifacts (gitignored) |

@@ -264,14 +264,14 @@ namespace HeartopiaMod
             logoStyle.fontStyle = FontStyle.Bold;
             logoStyle.alignment = TextAnchor.MiddleCenter;
             logoStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.92f);
-            GUI.Label(sidebarTopRect, "Heartopia Helper", logoStyle);
+            GUI.Label(sidebarTopRect, "Bugtopia", logoStyle);
 
             GUIStyle footerStyle = new GUIStyle(GUI.skin.label);
             footerStyle.fontSize = 10;
             footerStyle.fontStyle = FontStyle.Bold;
             footerStyle.alignment = TextAnchor.MiddleCenter;
             footerStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.85f);
-            GUI.Label(sidebarFooterRect, "Rayyy", footerStyle);
+            GUI.Label(sidebarFooterRect, "Baboodev", footerStyle);
 
             GUIStyle titleStyle = new GUIStyle(GUI.skin.label);
             titleStyle.fontSize = 21;

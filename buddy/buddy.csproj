@@ -5,7 +5,7 @@
     <Loader Condition="'$(Loader)' == ''">MelonLoader</Loader>
     <HeartopiaDir Condition="'$(HeartopiaDir)' == ''">D:\SteamLibrary\steamapps\common\Heartopia</HeartopiaDir>
     <OutputType>Library</OutputType>
-    <AssemblyName>helper</AssemblyName>
+    <AssemblyName>bugtopia</AssemblyName>
     <RootNamespace>buddy</RootNamespace>
     <TargetFramework>net6.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -302,6 +302,8 @@
     </None>
   </ItemGroup>
 
+  <Import Project="Version.targets" />
+
   <!-- Auto-deploy the built mod into the game so a rebuild is actually picked up on the next
        game launch. Without this the DLL only lands in bin/ and must be copied by hand, which made
        stale builds look like "the fix didn't work". If the game is running it holds a lock on the
@@ -311,20 +313,20 @@
       <DeployDir Condition="'$(Loader)' == 'BepInEx'">$(HeartopiaDir)\BepInEx\plugins</DeployDir>
       <DeployDir Condition="'$(Loader)' == 'MelonLoader'">$(HeartopiaDir)\Mods</DeployDir>
     </PropertyGroup>
-    <Copy SourceFiles="$(OutputPath)helper.dll"
+    <Copy SourceFiles="$(OutputPath)bugtopia.dll"
           DestinationFolder="$(DeployDir)"
           ContinueOnError="true"
           Condition="Exists('$(DeployDir)')">
       <Output TaskParameter="CopiedFiles" ItemName="DeployedDll" />
     </Copy>
-    <Copy SourceFiles="$(OutputPath)helper.pdb"
+    <Copy SourceFiles="$(OutputPath)bugtopia.pdb"
           DestinationFolder="$(DeployDir)"
           ContinueOnError="true"
-          Condition="Exists('$(DeployDir)') and Exists('$(OutputPath)helper.pdb')" />
-    <Warning Text="Could not deploy helper.dll to $(DeployDir) (is the game running? close it and rebuild)."
+          Condition="Exists('$(DeployDir)') and Exists('$(OutputPath)bugtopia.pdb')" />
+    <Warning Text="Could not deploy bugtopia.dll to $(DeployDir) (is the game running? close it and rebuild)."
              Condition="Exists('$(DeployDir)') and '@(DeployedDll)' == ''" />
     <Message Importance="high"
-             Text="Deployed helper.dll -> $(DeployDir)"
+             Text="Deployed bugtopia.dll -> $(DeployDir)"
              Condition="'@(DeployedDll)' != ''" />
   </Target>
 </Project>

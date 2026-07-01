@@ -576,7 +576,7 @@ ilspy-dumps/EcsClient/.../XDT.Scene.Shared.Modules.Ugc/*Book*
 
 ---
 
-## 15. Рекомендации для мода (Heartopia Helper)
+## 15. Рекомендации для мода (Bugtopia)
 
 | Задача | Канал | Типы |
 |--------|-------|------|

@@ -1,6 +1,6 @@
 # Build and Run Guide
 
-How to build **Heartopia Helper**, deploy it for **MelonLoader** or **BepInEx**, and verify that it loads.
+How to build **Bugtopia**, deploy it for **MelonLoader** or **BepInEx**, and verify that it loads.
 
 ---
 
@@ -10,7 +10,7 @@ How to build **Heartopia Helper**, deploy it for **MelonLoader** or **BepInEx**,
 |------|-------|
 | Mod loaders | [MelonLoader](https://melonloader.co/download.html) **or** [BepInEx IL2CPP](https://docs.bepinex.dev/) |
 | Target framework | .NET **6.0** (x64) |
-| Output assembly | **`helper.dll`** (same name for both loaders) |
+| Output assembly | **`bugtopia.dll`** (same name for both loaders) |
 | Core logic | `HeartopiaComplete` (plain class, not tied to a loader) |
 | Loader entry points | `MelonLoaderPlugin.cs` / `BepInExPlugin.cs` |
 | Shared abstractions | `ModLogger.cs`, `ModCoroutines.cs` |
@@ -95,8 +95,8 @@ build-all.bat
 Output:
 
 ```
-buddy/bin/MelonLoader/Release/helper.dll
-buddy/bin/BepInEx/Release/helper.dll
+buddy/bin/MelonLoader/Release/bugtopia.dll
+buddy/bin/BepInEx/Release/bugtopia.dll
 ```
 
 ### Single loader
@@ -125,18 +125,41 @@ Debug builds go to `bin\<Loader>\Debug\`.
 
 | Loader | Copy to |
 |--------|---------|
-| MelonLoader | `<HeartopiaDir>/Mods/helper.dll` |
-| BepInEx | `<HeartopiaDir>/BepInEx/plugins/helper.dll` |
+| MelonLoader | `<HeartopiaDir>/Mods/bugtopia.dll` |
+| BepInEx | `<HeartopiaDir>/BepInEx/plugins/bugtopia.dll` |
 
-Optional: copy `helper.pdb` next to the DLL for debugging.
+Optional: copy `bugtopia.pdb` next to the DLL for debugging.
+
+### Build version
+
+Each build stamps `ModBuildVersion.Display` into the DLL (About tab, MelonLoader/BepInEx metadata):
+
+| Build context | Version shown |
+|---------------|---------------|
+| Any commit | `{nearest-or-exact-tag} ({short-sha})`, e.g. `1.8.0 (4a31f61)` |
+| Exact tag on HEAD | same format; `IsTaggedRelease = true` |
+| Commit after nearest tag | numeric from nearest tag + current SHA, e.g. `1.8.0 (4a31f61)` on `v1.8.0~1` |
+
+Override numeric part only: `-p:ModDisplayVersion=1.8.0` (SHA still taken from `HEAD`).
+
+`BepInPlugin` / MelonLoader metadata use `ModBuildVersion.Numeric` (semver). About UI uses `ModBuildVersion.Display`.
+
+Generated at compile time: `buddy/obj/<Loader>/<Configuration>/ModVersion.g.cs` via `ci/resolve-build-version.ps1`.
 
 No installer in-repo — manual copy only.
+
+### Upgrading from Heartopia Helper (`helper.dll`)
+
+1. Remove the old `helper.dll` from `Mods/` or `BepInEx/plugins/` (do not run both).
+2. Deploy `bugtopia.dll`.
+3. Settings in `%LocalLow%/HelperSettings/` are copied to `%LocalLow%/Bugtopia/` automatically on first run.
+4. BepInEx backup log is now `UserData/bugtopia.log` (was `helper.log`).
 
 ### BepInEx logging (optional)
 
 Merge settings from `buddy/BepInEx.logging.cfg.snippet` into `BepInEx/config/BepInEx.cfg` for console + disk logs.
 
-Mod backup log (BepInEx only): `<HeartopiaDir>/UserData/helper.log`
+Mod backup log (BepInEx only): `<HeartopiaDir>/UserData/bugtopia.log`
 
 ---
 
@@ -153,7 +176,7 @@ Mod backup log (BepInEx only): `<HeartopiaDir>/UserData/helper.log`
 3. Expect lines like:
 
    ```
-   Heartopia Helper initialized!
+   Bugtopia initialized!
    === Attempting Harmony Patches ===
    [OK] Successfully patched CharacterController.Move!
    ...
@@ -164,14 +187,14 @@ Mod backup log (BepInEx only): `<HeartopiaDir>/UserData/helper.log`
    BepInEx also logs: `HeartopiaBehaviour Awake — Update/OnGUI active on BepInEx manager.`
 
 4. Press **Insert** (default) to open the mod menu.
-5. Settings persist under `%LocalLow%/HelperSettings/` (see [TECHNICAL.md](./TECHNICAL.md)).
+5. Settings persist under `%LocalLow%/Bugtopia/` (see [TECHNICAL.md](./TECHNICAL.md)).
 
 ---
 
 ## Configuration Data Location
 
 ```
-%USERPROFILE%\AppData\LocalLow\HelperSettings\
+%USERPROFILE%\AppData\LocalLow\Bugtopia\
 ```
 
 Main file: `Config.xml` (XML-serialized `UnifiedConfigData`).
@@ -218,13 +241,13 @@ Orphan `.cs` files in `buddy/` (legacy fish, ECS dump, etc.) are **not** in the 
 
 | Symptom | Fix |
 |---------|-----|
-| Mod not loaded | Wrong deploy path or wrong DLL name (`helper.dll`) |
+| Mod not loaded | Wrong deploy path or wrong DLL name (`bugtopia.dll`) |
 | Both loaders installed | Remove one; conflicts are likely |
 | Menu won't open | Check keybind in Settings (default Insert) |
 | Harmony `[ERR]` lines | Game update broke patches — rebuild against new interop |
 | Feature says type `unavailable` / `Null` | See [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md); enter world, check probe logs, verify names in ILSpy |
 | Auto fishing inactive | Use **Resource Gathering → Fishing** (`AutoFishingFarm`); legacy `AutoFishLogic` is not compiled |
-| BepInEx: no UI | Check `LogOutput.log` and `UserData/helper.log` |
+| BepInEx: no UI | Check `LogOutput.log` and `UserData/bugtopia.log` |
 
 **BepInEx log (Steam default):** `<Game>/BepInEx/LogOutput.log` — e.g. `C:\Program Files (x86)\Steam\steamapps\common\Heartopia\BepInEx\LogOutput.log`
 

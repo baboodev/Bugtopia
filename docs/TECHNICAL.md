@@ -1,6 +1,6 @@
 # Technical Architecture
 
-Deep technical reference for **Heartopia Helper**. For maintainers updating after game patches or extending features.
+Deep technical reference for **Bugtopia**. For maintainers updating after game patches or extending features.
 
 ---
 
@@ -57,7 +57,7 @@ flowchart TB
 
 ```csharp
 #if MELONLOADER
-[assembly: MelonInfo(typeof(HeartopiaMelonPlugin), "Heartopia Helper", "1.0.0", "HeartopiaMod")]
+[assembly: MelonInfo(typeof(HeartopiaMelonPlugin), "Bugtopia", "1.0.0", "HeartopiaMod")]
 public class HeartopiaMelonPlugin : MelonMod
 {
     private HeartopiaComplete _mod;
@@ -123,7 +123,7 @@ public partial class HeartopiaComplete  // NOT MelonMod
 | Loader | Output |
 |--------|--------|
 | MelonLoader | `MelonLogger.Msg` / `Warning` |
-| BepInEx | BepInEx log + append `{Game}/UserData/helper.log` |
+| BepInEx | BepInEx log + append `{Game}/UserData/bugtopia.log` |
 
 All mod code uses `ModLogger.Msg(...)` — never call loader APIs directly.
 
@@ -374,7 +374,7 @@ Periodic world scan builds hierarchy under internal `radarContainer` GameObject.
 
 ### Species icon index
 
-Cached text file: `%LocalLow%/HelperSettings/Cache/radar_species_icons.txt`
+Cached text file: `%LocalLow%/Bugtopia/Cache/radar_species_icons.txt`
 
 ### Visual ESP
 
@@ -469,7 +469,7 @@ wrappers); `FindAuraMonoClassByFullName` probes only the first loaded image (nam
 
 ### Primary store
 
-**Path:** `%LocalLow%/HelperSettings/Config.xml`
+**Path:** `%LocalLow%/Bugtopia/Config.xml`
 
 Despite the `.xml` extension, serialization uses `System.Xml.Serialization.XmlSerializer` on `UnifiedConfigData` — file content is XML.
 
@@ -505,15 +505,15 @@ Notable floats:
 
 | File | Location | Notes |
 |------|----------|-------|
-| `keybinds.json` | HelperSettings | Legacy; migration reads some lines |
-| `ui_theme.json` | HelperSettings | Legacy parallel to unified theme |
-| `radar_settings.json` | HelperSettings | Legacy radar |
-| `patrol_points.json` | HelperSettings | Foraging patrol |
-| `tree_farm_patrol_points.json` | HelperSettings | Tree farm |
-| `custom_teleports.json` | HelperSettings | Custom TP list |
-| `cooking_patrol_saves/` | HelperSettings directory | Named saves |
+| `keybinds.json` | Bugtopia | Legacy; migration reads some lines |
+| `ui_theme.json` | Bugtopia | Legacy parallel to unified theme |
+| `radar_settings.json` | Bugtopia | Legacy radar |
+| `patrol_points.json` | Bugtopia | Foraging patrol |
+| `tree_farm_patrol_points.json` | Bugtopia | Tree farm |
+| `custom_teleports.json` | Bugtopia | Custom TP list |
+| `cooking_patrol_saves/` | Bugtopia directory | Named saves |
 
-`HelperPaths.TryMigrateLegacyUserData(gameBaseDir)` copies `{Game}/UserData/**` → `HelperSettings` once if present.
+`HelperPaths.TryMigrateLegacyHelperSettings()` copies `%LocalLow%/HelperSettings/**` → `Bugtopia` once if the legacy folder exists. `HelperPaths.TryMigrateLegacyUserData(gameBaseDir)` copies `{Game}/UserData/**` → `Bugtopia` once if present.
 
 ### Path resolution
 
@@ -609,7 +609,7 @@ Extended fishing debug / ECS work may live on the **`test`** git branch.
 |----------|-------|
 | SDK | `Microsoft.NET.Sdk` |
 | TFM | `net6.0`, x64 |
-| Assembly | `helper.dll` |
+| Assembly | `bugtopia.dll` |
 | Output | `bin/<Loader>/<Configuration>/` |
 | Script | `build-all.bat` |
 | Config | `Directory.Build.props` → `HeartopiaDir` |

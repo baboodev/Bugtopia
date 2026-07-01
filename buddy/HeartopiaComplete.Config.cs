@@ -710,6 +710,11 @@ namespace HeartopiaMod
                 return this.uiThemePickerOpen ? 1180f : 860f;
             }
 
+            if (this.settingsSubTab == 3)
+            {
+                return 520f;
+            }
+
             return this.CalculateSettingsMainTabHeight();
         }
 
@@ -847,6 +852,11 @@ namespace HeartopiaMod
             if (this.settingsSubTab == 2)
             {
                 return this.DrawUiThemeTab(startY);
+            }
+
+            if (this.settingsSubTab == 3)
+            {
+                return this.DrawAboutTab(startY);
             }
 
             int num = startY;
@@ -1638,6 +1648,80 @@ namespace HeartopiaMod
             }
 
             y += 32;
+        }
+
+        private float DrawAboutTab(int startY)
+        {
+            const float left = 24f;
+            const float width = 540f;
+            float y = startY + 8f;
+            Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
+            Color mutedColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
+            Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+
+            GUIStyle titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 18,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft
+            };
+            titleStyle.normal.textColor = textColor;
+
+            GUIStyle headingStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true
+            };
+            headingStyle.normal.textColor = accent;
+
+            GUIStyle bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true,
+                richText = true
+            };
+            bodyStyle.normal.textColor = mutedColor;
+
+            GUI.Label(new Rect(left, y, width, 28f), "Bugtopia", titleStyle);
+            y += 30f;
+            GUI.Label(new Rect(left, y, width, 40f), "Automation and utility mod for Heartopia.", bodyStyle);
+            y += 44f;
+
+            GUI.Label(new Rect(left, y, width, 20f), "What it does", headingStyle);
+            y += 22f;
+            GUI.Label(new Rect(left, y, width, 56f),
+                "Farming, gathering, teleport, radar, bag tools, and other QoL helpers — from one in-game menu. Press Insert to open it.",
+                bodyStyle);
+            y += 62f;
+
+            GUI.Label(new Rect(left, y, width, 20f), "Open & free", headingStyle);
+            y += 22f;
+            GUI.Label(new Rect(left, y, width, 40f),
+                "Bugtopia will always stay open-source and free for everyone.",
+                bodyStyle);
+            y += 46f;
+
+            GUI.Label(new Rect(left, y, width, 20f), "Credits", headingStyle);
+            y += 22f;
+            GUI.Label(new Rect(left, y, width, 56f),
+                "Based on Heartopia Helper by Rayyy2.\nThank you to everyone who shares ideas for new features.",
+                bodyStyle);
+            y += 62f;
+
+            GUI.Label(new Rect(left, y, width, 20f), "Disclaimer", headingStyle);
+            y += 22f;
+            GUI.Label(new Rect(left, y, width, 56f),
+                "For educational and research use only. Use at your own risk; you are responsible for any account actions taken by the game operator.",
+                bodyStyle);
+            y += 62f;
+
+            GUI.Label(new Rect(left, y, width, 20f), $"Version {ModBuildVersion.Display} · bugtopia.dll", bodyStyle);
+            y += 28f;
+
+            return y + 12f;
         }
 
     }

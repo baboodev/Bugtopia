@@ -1,4 +1,4 @@
-# AGENTS.md — Heartopia Helper
+# AGENTS.md — Bugtopia
 
 Guide for AI agents and developers working on this mod. Read this file first, then follow links into `docs/` for depth.
 
@@ -9,7 +9,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | Item | Value |
 |------|--------|
 | Product | Automation / utility mod for **Heartopia** (Unity, hybrid **IL2CPP + embedded Mono**) |
-| Output | Single assembly **`helper.dll`** |
+| Output | Single assembly **`bugtopia.dll`** |
 | Loaders | **MelonLoader** or **BepInEx IL2CPP** — one per build, never both in-game |
 | Core code | `partial class HeartopiaComplete` split **by domain** across ~39 `buddy/HeartopiaComplete*.cs` files (`HeartopiaComplete.cs` is now ~6k lines of lifecycle glue) |
 | Game access | Reflection, Harmony, `WebRequestUtility.SendCommand`, IL2CPP native API, **AuraMono** (`mono_runtime_invoke`) |
@@ -39,7 +39,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 ## 3. Repository layout
 
 ```
-Heartopia-Helper/
+Bugtopia/
 ├── AGENTS.md                 ← you are here
 ├── README.md
 ├── docs/                     ← canonical documentation
@@ -87,8 +87,8 @@ build-all.bat
 Produces:
 
 ```
-buddy/bin/MelonLoader/Release/helper.dll
-buddy/bin/BepInEx/Release/helper.dll
+buddy/bin/MelonLoader/Release/bugtopia.dll
+buddy/bin/BepInEx/Release/bugtopia.dll
 ```
 
 Single loader:
@@ -108,16 +108,16 @@ Shipping build (hides loader console): `-c ReleaseShip`
 
 ### Deploy
 
-| Loader | Copy `helper.dll` to |
+| Loader | Copy `bugtopia.dll` to |
 |--------|-------------------------|
-| MelonLoader | `<HeartopiaDir>/Mods/helper.dll` |
-| BepInEx | `<HeartopiaDir>/BepInEx/plugins/helper.dll` |
+| MelonLoader | `<HeartopiaDir>/Mods/bugtopia.dll` |
+| BepInEx | `<HeartopiaDir>/BepInEx/plugins/bugtopia.dll` |
 
 ### Verify
 
 - Logs: `MelonLoader/Latest.log` or `BepInEx/LogOutput.log`
 - In-game menu: **Insert** (default)
-- Config: `%LocalLow%/HelperSettings/Config.xml`
+- Config: `%LocalLow%/Bugtopia/Config.xml` (migrated automatically from legacy `%LocalLow%/HelperSettings/` on first run)
 
 **After game patch:** regenerate loader interop, rebuild mod, re-verify type names in dumps.
 
@@ -179,7 +179,7 @@ ilspy-dumps/<AssemblyRoot>/<ProjectName>/.../Namespace/ClassName.cs
 4. For ECS state, find **component** under `XDTLevelAndEntity.Gameplay.Component.*`.
 5. Cross-check [DECOMPILED_SOURCE_MAP.md](docs/DECOMPILED_SOURCE_MAP.md) matrix (feature → types → mod file).
 
-If `ilspy-dumps/` is missing locally: dump to `%LocalLow%/HelperSettings/DecryptedAssemblies/` (empty folder opt-in, wait ≥60 s in-world), then decompile per assembly with `ilspycmd` — see [GAME_ASSEMBLIES_AND_TOOLS.md](docs/GAME_ASSEMBLIES_AND_TOOLS.md#decompiling-mono-pe-to-ilspy-dumps).
+If `ilspy-dumps/` is missing locally: dump to `%LocalLow%/Bugtopia/DecryptedAssemblies/` (empty folder opt-in, wait ≥60 s in-world), then decompile per assembly with `ilspycmd` — see [GAME_ASSEMBLIES_AND_TOOLS.md](docs/GAME_ASSEMBLIES_AND_TOOLS.md#decompiling-mono-pe-to-ilspy-dumps).
 
 ---
 

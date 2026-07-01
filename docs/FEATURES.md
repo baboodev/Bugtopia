@@ -1,6 +1,6 @@
 # Features Reference
 
-Complete feature catalog for **Heartopia Helper**. Works identically under MelonLoader and BepInEx (same `HeartopiaComplete` core). Menu toggled with **Insert** by default. Labels support en, es, zh-CN, pt-BR.
+Complete feature catalog for **Bugtopia**. Works identically under MelonLoader and BepInEx (same `HeartopiaComplete` core). Menu toggled with **Insert** by default. Labels support en, es, zh-CN, pt-BR.
 
 ---
 
@@ -321,7 +321,7 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 #### Debug
 
-- `MasterLogSnowSculpture` in `SnowSculptureFeature.cs` (default **false**) — `[SnowSculpture]` lines in `helper.log`.
+- `MasterLogSnowSculpture` in `SnowSculptureFeature.cs` (default **false**) — `[SnowSculpture]` lines in `bugtopia.log`.
 
 ### Auto Buy
 
@@ -570,7 +570,7 @@ Details and troubleshooting: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#dai
 
 ## New Features — Pictures (ScreenCapture)
 
-Decrypts `persistentDataPath/ScreenCapture` to `ScreenCaptureDecrypted` (AES, same as game `EncryptUtil`). **Encrypt changed** re-imports only files whose plain SHA256 differs from `.heartopia-helper-manifest.json`.
+Decrypts `persistentDataPath/ScreenCapture` to `ScreenCaptureDecrypted` (AES, same as game `EncryptUtil`). **Encrypt changed** re-imports only files whose plain SHA256 differs from `.bugtopia-manifest.json`.
 
 **Draw** files are palette index maps (`TextureFormat.R8`), not normal photos. On decrypt:
 
@@ -755,7 +755,7 @@ Sections typically include:
 | Performance | FPS bypass; LOD override (game default / better / performance / custom bias & max level) |
 | Misc | Restore defaults, export-related options |
 
-Config persisted to `%LocalLow%/HelperSettings/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, and the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30).
+Config persisted to `%LocalLow%/Bugtopia/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, and the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30).
 
 Separate legacy-compatible JSON fragments still loaded line-by-line for some keys in older migration path.
 

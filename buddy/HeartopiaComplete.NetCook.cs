@@ -175,7 +175,7 @@ namespace HeartopiaMod
                     try
                     {
                         ModLogger.Msg("[NetCookDiag] Status diagnostics ON. Capture stoves, then start Mass Cook. "
-                            + "Logs: BepInEx/LogOutput.log and BepInEx/UserData/helper.log. "
+                            + "Logs: BepInEx/LogOutput.log and BepInEx/UserData/bugtopia.log. "
                             + "Watch for textId=7, EntityRemoveEvent, TARGET REMOVED.");
                     }
                     catch { }

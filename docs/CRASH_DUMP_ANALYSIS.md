@@ -186,7 +186,7 @@ Include as much of the following as possible:
 | **Managed stack** | Full `clrstack` output from §5 (crash thread) |
 | **Mod log tail** | `<HeartopiaDir>\BepInEx\LogOutput.log` — last ~200 lines before crash |
 | **Game + loader versions** | Heartopia build, BepInEx version |
-| **Mod build** | Git commit or `helper.dll` build date |
+| **Mod build** | Git commit or `bugtopia.dll` build date |
 | **Repro steps** | What features were on (e.g. Pad Build + noclip) |
 | **Dump file** | Optional — large; upload separately if asked |
 

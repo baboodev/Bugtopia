@@ -21,13 +21,13 @@ public static class ModLogger
         {
             string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "UserData");
             Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, "helper.log");
+            string path = Path.Combine(dir, "bugtopia.log");
             _fileLog = new StreamWriter(path, append: true) { AutoFlush = true };
             _fileLog.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] === session start ===");
         }
         catch (Exception ex)
         {
-            _log?.LogWarning("Could not open UserData/helper.log: " + ex.Message);
+            _log?.LogWarning("Could not open UserData/bugtopia.log: " + ex.Message);
         }
     }
 

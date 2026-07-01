@@ -9,9 +9,9 @@ namespace HeartopiaMod
     [BepInPlugin(HeartopiaBepInPlugin.PluginGuid, HeartopiaBepInPlugin.PluginName, HeartopiaBepInPlugin.PluginVersion)]
     public class HeartopiaBepInPlugin : BasePlugin
     {
-        public const string PluginGuid = "com.heartopia.helper";
-        public const string PluginName = "Heartopia Helper";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginGuid = "com.bugtopia.mod";
+        public const string PluginName = "Bugtopia";
+        public const string PluginVersion = ModBuildVersion.Numeric;
 
         public override void Load()
         {

@@ -6,14 +6,17 @@ namespace HeartopiaMod
 {
     internal static class HelperPaths
     {
-        private const string AppFolderName = "HelperSettings";
+        private const string AppFolderName = "Bugtopia";
+        private const string LegacyAppFolderName = "HelperSettings";
         private static readonly Guid LocalAppDataLowFolderId = new Guid("A520A1A4-1780-4FF6-BD18-167343C5AF16");
         private static bool legacyMigrationAttempted;
+        private static bool helperSettingsMigrationAttempted;
 
         public static string Root
         {
             get
             {
+                TryMigrateLegacyHelperSettings();
                 return EnsureDirectory(Path.Combine(GetLocalLowDirectory(), AppFolderName));
             }
         }
@@ -48,6 +51,7 @@ namespace HeartopiaMod
             }
 
             legacyMigrationAttempted = true;
+            TryMigrateLegacyHelperSettings();
 
             try
             {
@@ -63,6 +67,32 @@ namespace HeartopiaMod
                 }
 
                 CopyDirectoryIfMissing(legacyRoot, Root);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TryMigrateLegacyHelperSettings()
+        {
+            if (helperSettingsMigrationAttempted)
+            {
+                return;
+            }
+
+            helperSettingsMigrationAttempted = true;
+
+            try
+            {
+                string localLow = GetLocalLowDirectory();
+                string legacyRoot = Path.Combine(localLow, LegacyAppFolderName);
+                if (!Directory.Exists(legacyRoot))
+                {
+                    return;
+                }
+
+                string destinationRoot = Path.Combine(localLow, AppFolderName);
+                CopyDirectoryIfMissing(legacyRoot, destinationRoot);
             }
             catch
             {

@@ -178,7 +178,7 @@ namespace HeartopiaMod
             ModLogger.Msg("[SnowSculpture] " + message);
         }
 
-        // Writes to helper.log regardless of MasterLogSnowSculpture, deduped so a stuck
+        // Writes to bugtopia.log regardless of MasterLogSnowSculpture, deduped so a stuck
         // per-tick state (backoff) is logged once rather than spamming the file.
         private void SnowSculptureLogStatus(string message)
         {

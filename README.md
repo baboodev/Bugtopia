@@ -1,14 +1,14 @@
-# Heartopia Helper
+# Bugtopia
 
 Automation and utility mod for [Heartopia](https://store.steampowered.com/app/heartopia). Supports **MelonLoader** or **BepInEx IL2CPP** (build once per loader — use **only one** in the game).
 
 ## Quick start
 
 1. Install [MelonLoader](https://melonloader.co/download.html) **or** [BepInEx](https://docs.bepinex.dev/) for Heartopia.
-2. Build or download `helper.dll` (see [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)).
+2. Build or download `bugtopia.dll` (see [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)).
 3. Deploy:
-   - **MelonLoader:** `<Game>/Mods/helper.dll`
-   - **BepInEx:** `<Game>/BepInEx/plugins/helper.dll`
+   - **MelonLoader:** `<Game>/Mods/bugtopia.dll`
+   - **BepInEx:** `<Game>/BepInEx/plugins/bugtopia.dll`
 4. Launch the game. Press **Insert** to toggle the menu.
 
 Recommended: play in a **private town** when using automation.

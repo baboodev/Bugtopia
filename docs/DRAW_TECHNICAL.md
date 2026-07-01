@@ -243,6 +243,6 @@ board entity + ownership).
 - `SelectedPaintingId` and board `DrawPhotoId` are **empty during edit** → read the live canvas — §7/§9.
 - `mono_class_bind_generic_parameters` crashes → build generics by **type-name** — §7.
 - `icall.c:1622` log lines are non-fatal — §7.
-- Deploy: the running game **locks `helper.dll`** — build/copy while the game is closed.
+- Deploy: the running game **locks `bugtopia.dll`** — build/copy while the game is closed.
 - **Follow-ups (not done):** split the single big `DrawingOperation` into stepped chunks for
   anti-cheat (see BEHAVIORAL_ANTI_CHEAT.md); localize the two button labels.

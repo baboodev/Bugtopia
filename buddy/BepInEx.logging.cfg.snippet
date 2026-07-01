@@ -1,22 +1,13 @@
-# Recommended BepInEx logging settings for Heartopia Helper
-# Merge into: {GameFolder}\BepInEx\config\BepInEx.cfg
-
-[Chainloader]
-HideManagerGameObject = true
+# Recommended BepInEx logging settings for Bugtopia
+# Copy these lines into your game's BepInEx/config/BepInEx.cfg [Logging.Console] / [Logging.Disk] sections.
 
 [Logging.Console]
 Enabled = true
-PreventClose = true
+LogLevels = Fatal, Error, Warning, Message, Info
 
 [Logging.Disk]
 Enabled = true
-AppendLog = true
-InstantFlushing = true
-WriteUnityLog = true
-LogLevels = Fatal, Error, Warning, Message, Info, Debug
+LogLevels = Fatal, Error, Warning, Message, Info
 
-# Log file path (default, do not change unless you know why):
-#   {GameFolder}\BepInEx\LogOutput.log
-#
-# Mod-specific backup log (written by helper.dll):
-#   {GameFolder}\UserData\helper.log
+# Mod-specific backup log (written by bugtopia.dll):
+#   {GameFolder}\UserData\bugtopia.log

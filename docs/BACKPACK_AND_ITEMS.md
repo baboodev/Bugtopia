@@ -1,6 +1,6 @@
 # Backpack, Warehouse, and Item Selection
 
-How **Heartopia Helper** reads player inventory, filters stacks, sorts candidates, and sends server commands. Applies to **MelonLoader** and **BepInEx** (same `HeartopiaComplete` core).
+How **Bugtopia** reads player inventory, filters stacks, sorts candidates, and sends server commands. Applies to **MelonLoader** and **BepInEx** (same `HeartopiaComplete` core).
 
 For type lookup failures see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md). For menu locations see [FEATURES.md](./FEATURES.md).
 
@@ -108,7 +108,7 @@ Transfer grid can filter tiles by star when picking stacks (same `autoSellStarFi
 | **Bag / Warehouse** | Bag / Warehouse | One side at a time (Bag **or** Warehouse) | Mono `GetAllItem` only | Locked stacks shown but **not** sent; `netId == 0` skipped | Display name **A→Z** | `MoveBatchBackpackItems` → opposite storage (1↔2) |
 | **Snow Sculpting — move snowballs** | Features → Snow Sculpting | **Warehouse only** | AuraMono `GetAllItem(2)` | **`staticId == 5100`** only; locked skipped | All matching stacks in one action | `MoveBatchBackpackItems` → bag (**1**); reuses transfer send helpers in `HeartopiaComplete` |
 | **Daily Quest submit** | New Features → Daily Quests | **Backpack + warehouse together** | Managed + AuraMono; dedupe by `netId` | `CheckSubmitItem` per target row; locked skipped; skip 5★ optional | **Price ↑**, then **star ↑** (same as game `CompareSubmitItem`); greedy stack fill for `needNum` | `ClientSubmitNpcTaskItem` / Il2Cpp `List<ItemNetPair>`; verifies task state leaves `CanSubmit` (4) |
-| **Daily Quest probe** | Same | N/A (reads `DailyOrderSystem` / tasks) | AuraMono table + task rows | Logs only | N/A | BepInEx / `helper.log` dump |
+| **Daily Quest probe** | Same | N/A (reads `DailyOrderSystem` / tasks) | AuraMono table + task rows | Logs only | N/A | BepInEx / `bugtopia.log` dump |
 | **Wild animal feed** | New Features → Animal Care | Backpack (+ AuraMono path) | `GetAllItem` per storage; `GetAnimalFoodThough` | Allowed food static IDs; fullness for animal **group**; skip 5★ food; favorites boost bond in score | **SortScore ↓** = `bondExp×10000 + fullness` (favorite bond % bonus) | Trough feed commands |
 | **Wild animal gifts** | Animal Care | ECS entity scan (`WildAnimalGiftFeature`) | Pending `AnimalGroup` from `HaveGift()`; gift box or `HaveGift(entity)` + group match | Order discovered in entity list | `AnimalProtocolManager.TakeGift` per `netId` (~0.45 s apart) |
 | **Pet feed** | Features → Pet Care | `PetSystem.GetFoods()` (not full bag scan) | Managed + AuraMono pet APIs | `Count > 0`, `Fullness > 0`, not locked; user **selected food** filter | **Fullness ↑**, then **StaticId ↑** | `Begin` feed with food `netId` list per pet |

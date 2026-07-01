@@ -515,7 +515,7 @@ namespace HeartopiaMod
             this.ApplyMasterConsoleVisibility();
             HeartopiaComplete.Instance = this;
             HeartopiaComplete.harmonyInstance = new HarmonyLib.Harmony("com.heartopia.teleport");
-            ModLogger.Msg("Heartopia Helper initialized!");
+            ModLogger.Msg("Bugtopia initialized!");
             this.InitializeLocalization();
             this.LoadRadarSpeciesIconIndex();
             this.LoadCustomTeleports();
@@ -2407,6 +2407,7 @@ namespace HeartopiaMod
                 tabs.Add(("Main", () => this.settingsSubTab == 0, () => this.SetSettingsSubTab(0)));
                 tabs.Add(("Keybinds", () => this.settingsSubTab == 1, () => this.SetSettingsSubTab(1)));
                 tabs.Add(("UI Theme", () => this.settingsSubTab == 2, () => this.SetSettingsSubTab(2)));
+                tabs.Add(("About", () => this.settingsSubTab == 3, () => this.SetSettingsSubTab(3)));
             }
             return tabs;
         }

@@ -22,7 +22,7 @@ namespace HeartopiaMod
     /// the raw buffer is recovered from the <c>MonoImage</c> struct (offset discovered once, every
     /// native read guarded by VirtualQuery so a bad pointer can never crash the process).
     ///
-    /// Output: <c>LocalLow/HelperSettings/DecryptedAssemblies/</c>. The folder's existence is an
+    /// Output: <c>LocalLow/Bugtopia/DecryptedAssemblies/</c>. The folder's existence is an
     /// opt-in switch: present → auto-dump when the Mono runtime is ready (into an empty folder),
     /// then a second pass 60 s later for lazily loaded modules; absent → do nothing and never create it.
     /// </summary>

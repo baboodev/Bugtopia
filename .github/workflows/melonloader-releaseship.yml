@@ -15,7 +15,6 @@ on:
     paths:
       - "buddy/**"
       - "ci/**"
-      - ".github/workflows/melonloader-releaseship.yml"
   workflow_dispatch:
     inputs:
       deps_url:
@@ -33,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Crash-hardening lint
         shell: pwsh
@@ -57,7 +58,7 @@ jobs:
           if (-not $depsUrl) {
             $release = Invoke-RestMethod `
               -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/deps" `
-              -Headers @{ "User-Agent" = "Heartopia-Helper-CI" }
+              -Headers @{ "User-Agent" = "Bugtopia-CI" }
             $asset = $release.assets | Where-Object { $_.name -eq "melonloader-ci-deps.zip" } | Select-Object -First 1
             if ($asset) {
               $depsUrl = $asset.browser_download_url
@@ -101,11 +102,11 @@ jobs:
             -p:ContinuousIntegrationBuild=true `
             --nologo
 
-      - name: Upload helper.dll artifact
+      - name: Upload bugtopia.dll artifact
         uses: actions/upload-artifact@v4
         with:
-          name: helper-melonloader-releaseship
-          path: buddy/bin/MelonLoader/ReleaseShip/helper.dll
+          name: bugtopia-melonloader-releaseship
+          path: buddy/bin/MelonLoader/ReleaseShip/bugtopia.dll
           if-no-files-found: error
 
       - name: Publish release
@@ -120,4 +121,4 @@ jobs:
           gh release create "${{ github.ref_name }}" `
             --title "${{ github.ref_name }}" `
             --notes $notes `
-            "buddy/bin/MelonLoader/ReleaseShip/helper.dll"
+            "buddy/bin/MelonLoader/ReleaseShip/bugtopia.dll"

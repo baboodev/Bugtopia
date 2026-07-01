@@ -1,7 +1,7 @@
 #if MELONLOADER
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(HeartopiaMod.HeartopiaMelonPlugin), "Heartopia Helper", "1.0.0", "HeartopiaMod")]
+[assembly: MelonInfo(typeof(HeartopiaMod.HeartopiaMelonPlugin), "Bugtopia", HeartopiaMod.ModBuildVersion.Numeric, "HeartopiaMod")]
 [assembly: MelonGame(null, null)]
 
 namespace HeartopiaMod

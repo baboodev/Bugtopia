@@ -1,6 +1,6 @@
 # Game Assemblies, API Access, and Tools
 
-How **Heartopia Helper** reaches game code at runtime, where assemblies live on disk, which tools to use for research, and what **cannot** be substituted (for example `LocalLow` assembly dumps vs BepInEx interop).
+How **Bugtopia** reaches game code at runtime, where assemblies live on disk, which tools to use for research, and what **cannot** be substituted (for example `LocalLow` assembly dumps vs BepInEx interop).
 
 Related: [BUILD_AND_RUN.md](./BUILD_AND_RUN.md), [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md), [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md), [TECHNICAL.md](./TECHNICAL.md).
 
@@ -28,7 +28,7 @@ flowchart TB
   subgraph local [LocalLow optional dump]
     Dot[DotnetAssemblies XDENCODE blobs]
   end
-  subgraph mod [helper.dll]
+  subgraph mod [bugtopia.dll]
     FL[FindLoadedType / SendCommand]
     IL[IL2CPP.GetIl2CppClass]
     AM[AuraMono mono_class_from_name]
@@ -68,11 +68,11 @@ Replace `<Game>` with your Heartopia install (Steam, TapTap, etc.). Replace `<Us
 | `<Game>/xdt_Data/il2cpp_data/Metadata/global-metadata.dat` | IL2CPP metadata | Required for Il2CppInterop / Il2CppDumper (Steam build uses `xdt_Data`, not `Heartopia_Data`) |
 | `<Game>/BepInEx/interop/*.dll` | BepInEx-generated interop | Build references (`buddy.csproj`), `Assembly.LoadFrom` preload |
 | `<Game>/MelonLoader/Il2CppAssemblies/*.dll` | MelonLoader interop | Same for MelonLoader builds |
-| `<Game>/BepInEx/plugins/helper.dll` | Mod deploy target | — |
-| `<User>/AppData/LocalLow/HelperSettings/` | Mod config (`Config.xml`) | Not game assemblies |
+| `<Game>/BepInEx/plugins/bugtopia.dll` | Mod deploy target | — |
+| `<User>/AppData/LocalLow/Bugtopia/` | Mod config (`Config.xml`) | Not game assemblies |
 | `<User>/AppData/LocalLow/xd/Heartopia/DotnetAssemblies/` | **Game dump** (optional, often XDENCODE) | Research only; see [DotnetAssemblies dumps](#dotnetassemblies-dumps-locallow) |
-| `<User>/AppData/LocalLow/HelperSettings/DecryptedAssemblies/` | **Mono PE dump** (mod built-in dumper) | **Primary** offline Mono source — decrypted PE + IL deobfuscation; see [Decrypting DotnetAssemblies](#decrypting-dotnetassemblies-at-runtime-built-in-dumper) |
-| `<User>/AppData/LocalLow/HelperSettings/MonoDump/` | Legacy / manual Mono PE dump | Same role as `DecryptedAssemblies` if present; prefer the built-in dumper |
+| `<User>/AppData/LocalLow/Bugtopia/DecryptedAssemblies/` | **Mono PE dump** (mod built-in dumper) | **Primary** offline Mono source — decrypted PE + IL deobfuscation; see [Decrypting DotnetAssemblies](#decrypting-dotnetassemblies-at-runtime-built-in-dumper) |
+| `<User>/AppData/LocalLow/Bugtopia/MonoDump/` | Legacy / manual Mono PE dump | Same role as `DecryptedAssemblies` if present; prefer the built-in dumper |
 | Repo `ilspy-dumps/` (if present) | Decompiled C# from **embedded Mono** modules | Full method bodies; gameplay / protocol research |
 | Repo `gameassembly-dumps/` (if present) | Decompiled C# from **IL2CPP** (`GameAssembly.dll`) | Type signatures + native RVAs; launcher / bootstrap / `GameApp` research |
 | Repo `tools/cpp2il_out/` (if present) | Il2CppDumper raw output (`DummyDll`, `dump.cs`, `script.json`) | Regenerate `gameassembly-dumps/`; Ghidra/IDA scripts |
@@ -168,7 +168,7 @@ There are **two separate .NET runtimes in the process**, with different `System.
 
 | Runtime | corelib | What lives here |
 |---------|---------|-----------------|
-| BepInEx / `helper.dll` | `dotnet\System.Private.CoreLib.dll` (~10.6 MB) | BepInEx, Il2CppInterop, interop stubs, BCL |
+| BepInEx / `bugtopia.dll` | `dotnet\System.Private.CoreLib.dll` (~10.6 MB) | BepInEx, Il2CppInterop, interop stubs, BCL |
 | **Game (embedded Mono)** | `DotnetAssemblies\System.Private.CoreLib.dll` (~4.5 MB) | **EcsClient, EcsSystem, XDT\*, …** |
 
 The game's modules run in an **embedded Mono runtime**, `xdt_Data\Plugins\x86_64\mono-2.0-sgen.dll`
@@ -197,7 +197,7 @@ If a future patch exports `mono_image_get_raw_data`, prefer it over the struct s
 
 ### Trigger and the opt-in folder
 
-Output: `%USERPROFILE%\AppData\LocalLow\HelperSettings\DecryptedAssemblies\`.
+Output: `%USERPROFILE%\AppData\LocalLow\Bugtopia\DecryptedAssemblies\`.
 
 An **empty folder is the opt-in switch** — there is no hotkey:
 
@@ -246,7 +246,7 @@ Namespace segments appear as **dot-separated folder names** (ILSpy project mode)
 ### Commands (Windows PowerShell)
 
 ```powershell
-$Src  = "$env:USERPROFILE\AppData\LocalLow\HelperSettings\DecryptedAssemblies"
+$Src  = "$env:USERPROFILE\AppData\LocalLow\Bugtopia\DecryptedAssemblies"
 $Repo = "C:\path\to\Heartopia-Helper"   # workspace root
 $Out  = "$Repo\ilspy-dumps"
 
@@ -272,19 +272,19 @@ Mono `ilspy-dumps/` and IL2CPP `gameassembly-dumps/` are **different inputs**. F
 
 ### Practical workflow after a game patch
 
-1. Clear `%LocalLow%/HelperSettings/DecryptedAssemblies/`, launch game, enter world, wait **≥ 60 s**.
+1. Clear `%LocalLow%/Bugtopia/DecryptedAssemblies/`, launch game, enter world, wait **≥ 60 s**.
 2. Run the **per-assembly** `ilspycmd` loop above into repo `ilspy-dumps/`.
 3. Regenerate **BepInEx/MelonLoader interop** from the game install ([below](#generating-bepinex--melonloader-interop-correct-method)).
 4. Diff critical types (`ItemNetPair`, `WebRequestUtility`, feature-specific commands) against the previous `ilspy-dumps/`.
 
 ---
 
-## MonoDump (HelperSettings, legacy)
+## MonoDump (Bugtopia, legacy)
 
 Older workflows (or manual copies) may use:
 
 ```text
-%USERPROFILE%\AppData\LocalLow\HelperSettings\MonoDump\
+%USERPROFILE%\AppData\LocalLow\Bugtopia\MonoDump\
 ```
 
 **Prefer `DecryptedAssemblies/`** — same PE format, but produced by the shipping mod with IL body deobfuscation and the 60 s lazy-load retry. If you only have `MonoDump/`, decompile it with the **same per-assembly `ilspycmd` commands** as in [Decompiling Mono PE to `ilspy-dumps/`](#decompiling-mono-pe-to-ilspy-dumps).
@@ -309,14 +309,14 @@ These are **real managed assemblies** from the game’s **embedded Mono** side (
 | **Copy into `BepInEx/interop`** | **No** | Interop stubs are Il2Cpp wrappers, not these Mono DLLs |
 | **`dotnet build` reference** | Optional, dev-only | You could point `HintPath` at MonoDump for **reading** APIs; types are **not** the same as runtime Il2Cpp interop — do not assume `Invoke` on live game objects will match |
 | **Runtime `Assembly.LoadFrom` in mod** | Discouraged | Duplicate type universe vs Il2Cpp interop; use IL2CPP/AuraMono paths instead |
-| **Ship on another PC with the game** | **No** | Other players only need `<Game>/BepInEx/interop/` + `helper.dll`; MonoDump is for **your** reverse engineering |
+| **Ship on another PC with the game** | **No** | Other players only need `<Game>/BepInEx/interop/` + `bugtopia.dll`; MonoDump is for **your** reverse engineering |
 
 ### Practical workflow
 
 1. Dump PEs to `DecryptedAssemblies/` (or use legacy `MonoDump/`).
 2. Decompile **each** DLL into `ilspy-dumps/<AssemblyName>/` with `ilspycmd -p` (see [Decompiling Mono PE to `ilspy-dumps/`](#decompiling-mono-pe-to-ilspy-dumps)) → copy full type names into `FindLoadedType` / docs.
 3. Regenerate **BepInEx interop** from the game install for actual mod runtime.
-4. Keep dump version aligned with the **same game patch** as your interop and `helper.dll`.
+4. Keep dump version aligned with the **same game patch** as your interop and `bugtopia.dll`.
 
 ---
 
@@ -489,7 +489,7 @@ Missing file does **not** block the build.
 
 | Tool | Purpose | Required for playing with mod? |
 |------|---------|--------------------------------|
-| [.NET SDK 6+](https://dotnet.microsoft.com/download) | Build `helper.dll` | Yes (build) |
+| [.NET SDK 6+](https://dotnet.microsoft.com/download) | Build `bugtopia.dll` | Yes (build) |
 | [BepInEx IL2CPP](https://docs.bepinex.dev/) **or** [MelonLoader](https://melonloader.co/download.html) | Load mod + generate interop | Yes |
 | [ILSpy](https://github.com/icsharpcode/ILSpy) / [ilspycmd](https://www.nuget.org/packages/ilspycmd) | Decompile interop, Mono dump, or IL2CPP dummy DLLs | Strongly recommended for development |
 | [Il2CppDumper](https://github.com/Perfare/Il2CppDumper) | `GameAssembly.dll` + metadata → DummyDll, `script.json` | Used to build `gameassembly-dumps/` |
@@ -510,8 +510,8 @@ Missing file does **not** block the build.
 | `gameassembly-dumps/` in repo | IL2CPP bootstrap, `GameApp`, launcher, native API RVAs |
 | `tools/cpp2il_out/dump.cs` | Single-file grep across all IL2CPP types |
 | `DotnetAssemblies/EcsClient.dll` | **Not** directly — XDENCODE; use IL2CPP or MonoDump PE instead |
-| `HelperSettings/DecryptedAssemblies/EcsClient.dll` | **Yes** — normal PE; primary offline Mono source |
-| `HelperSettings/MonoDump/EcsClient.dll` | **Yes** — same format if present (legacy path) |
+| `Bugtopia/DecryptedAssemblies/EcsClient.dll` | **Yes** — normal PE; primary offline Mono source |
+| `Bugtopia/MonoDump/EcsClient.dll` | **Yes** — same format if present (legacy path) |
 
 ---
 

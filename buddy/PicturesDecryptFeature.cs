@@ -12,7 +12,8 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const string PicturesManifestFileName = ".heartopia-helper-manifest.json";
+        private const string PicturesManifestFileName = ".bugtopia-manifest.json";
+        private const string PicturesLegacyManifestFileName = ".heartopia-helper-manifest.json";
         private const int PicturesManifestVersion = 2;
         private const string PicturesContentPhoto = "photo";
         private const string PicturesContentDrawIndex = "draw-index";
@@ -1022,8 +1023,8 @@ namespace HeartopiaMod
         {
             try
             {
-                string path = this.GetPicturesManifestPath(destRoot);
-                if (!File.Exists(path))
+                string path = this.ResolvePicturesManifestPath(destRoot);
+                if (string.IsNullOrWhiteSpace(path))
                 {
                     return null;
                 }
@@ -1074,6 +1075,18 @@ namespace HeartopiaMod
         private string GetPicturesManifestPath(string destRoot)
         {
             return Path.Combine(destRoot, PicturesManifestFileName);
+        }
+
+        private string ResolvePicturesManifestPath(string destRoot)
+        {
+            string path = this.GetPicturesManifestPath(destRoot);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            string legacyPath = Path.Combine(destRoot, PicturesLegacyManifestFileName);
+            return File.Exists(legacyPath) ? legacyPath : null;
         }
 
         private void NormalizePicturesManifest(PicturesManifest manifest)

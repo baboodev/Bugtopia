@@ -1,6 +1,6 @@
 # Runtime Type Resolution (IL2CPP)
 
-How **Heartopia Helper** finds game classes and methods at runtime. Required reading when a feature logs `unavailable`, `Null`, or Harmony never applies.
+How **Bugtopia** finds game classes and methods at runtime. Required reading when a feature logs `unavailable`, `Null`, or Harmony never applies.
 
 For build/interop setup see [BUILD_AND_RUN.md](./BUILD_AND_RUN.md). For assembly locations, EcsClient, LocalLow dumps, and tools see [GAME_ASSEMBLIES_AND_TOOLS.md](./GAME_ASSEMBLIES_AND_TOOLS.md). For architecture overview see [TECHNICAL.md](./TECHNICAL.md).
 
