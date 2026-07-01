@@ -111,6 +111,9 @@ namespace HeartopiaMod
         internal const bool MasterLogAutoFish = false;
         internal const bool MasterLogInstantCatch = true;
         internal const bool MasterLogAutoFarm = false;
+        // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
+        // recipe-id probes per active quest) — flip to false once classification is confirmed.
+        internal const bool MasterLogQuestAssistant = true;
         private const bool MasterLogAutoEatRepair = false;
         private const bool MasterLogNpcTeleport = false;
         private const bool MasterLogNetCook = false;
@@ -2382,6 +2385,7 @@ namespace HeartopiaMod
                 tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
                 tabs.Add(("Ice Skating", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
                 tabs.Add((this.L("extra.title"), () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
+                tabs.Add(("Quest Assistant", () => this.newFeaturesSubTab == 6, () => this.SetNewFeaturesSubTab(6)));
             }
             else if (this.selectedTab == 4)
             {

@@ -52,6 +52,11 @@ namespace HeartopiaMod
                 return this.DrawExtraFeaturesTab(startY);
             }
 
+            if (this.newFeaturesSubTab == 6)
+            {
+                return this.DrawQuestAssistantTab(startY);
+            }
+
             return startY + 40f;
         }
 
