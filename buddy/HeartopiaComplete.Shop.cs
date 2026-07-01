@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -39,7 +39,7 @@ namespace HeartopiaMod
                 case 0:
                     reason = "No shop selected.";
                     return false;
-                case 17:
+                case 18:
                     reason = "Meteor Exchange uses item cost, not Coin.";
                     return false;
             }
@@ -116,6 +116,10 @@ namespace HeartopiaMod
                     storeId = 7;
                     label = "Showroom";
                     return true;
+                case 17:
+                    storeId = 81;
+                    label = "Music Store";
+                    return true;
                 case 12:
                     label = "General Store";
                     if (this.forceOpenShopResolvedStoreIds.TryGetValue(label, out int cachedStoreId) && cachedStoreId > 0 && cachedStoreId != 88)
@@ -183,7 +187,7 @@ namespace HeartopiaMod
                 case 12:
                     if (this.TryOpenGeneralStore()) { status = this.forceOpenShopStatus; return true; }
                     status = this.forceOpenShopStatus; return false;
-                case 17:
+                case 18:
                     if (this.TryOpenMeteorWeatherExchangeShop()) { status = this.forceOpenShopStatus; return true; }
                     status = this.forceOpenShopStatus; return false;
                 default:

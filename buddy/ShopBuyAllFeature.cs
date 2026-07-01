@@ -20,9 +20,12 @@ namespace HeartopiaMod
         private const int ShopBuyAllClothingStoreId = 5;
         private const int ShopBuyAllRewardTypeAvatar = 21;
 
+        private const int ShopBuyAllMaxPerItemDefault = 200;
+
         private object shopBuyAllCoroutine = null;
         private string shopBuyAllStatus = "Idle.";
         private bool shopBuyAllRunning = false;
+        private int shopBuyAllMaxPerItem = ShopBuyAllMaxPerItemDefault;
 
         private IntPtr shopBuyAllShelfBuyItemMethod = IntPtr.Zero;
         private IntPtr shopBuyAllShelfBuyClothesMethod = IntPtr.Zero;
@@ -1178,11 +1181,16 @@ namespace HeartopiaMod
             {
                 ShopBuyAllCandidate item = items[i];
                 int unitPrice = item.Price;
+                int perItemCap = Mathf.Clamp(this.shopBuyAllMaxPerItem, 1, 999999);
                 int maxAffordable = unitPrice > 0
                     ? (clothingStore
                         ? (coinBalance >= unitPrice && item.LeftCount > 0 ? 1 : 0)
                         : (int)Math.Min(item.LeftCount, coinBalance / unitPrice))
                     : 0;
+                if (maxAffordable > 0)
+                {
+                    maxAffordable = Math.Min(maxAffordable, perItemCap);
+                }
                 if (maxAffordable <= 0)
                 {
                     skipped++;

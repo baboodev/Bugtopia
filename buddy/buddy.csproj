@@ -234,6 +234,7 @@
     <Compile Include="HeartopiaComplete.Tools.cs" />
     <Compile Include="HeartopiaComplete.ManagedReflection.cs" />
     <Compile Include="HeartopiaComplete.UiKitPrimitives.cs" />
+    <Compile Include="HeartopiaComplete.LiveStatus.cs" />
     <Compile Include="HeartopiaComplete.ConfigTypes.cs" />
     <Compile Include="HeartopiaComplete.Win32.cs" />
     <Compile Include="HeartopiaComplete.AuraMonoEngine.cs" />

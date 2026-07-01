@@ -15,7 +15,8 @@ namespace HeartopiaMod
     {
         private const bool IceSkatingSequenceLogsEnabled = true;
         private const int IceSkatingChallengeSequencePerfectCount = 5;
-        private const int IceSkatingChallengeEndScore = 1500;
+        private const int IceSkatingChallengeEndScoreDefault = 1500;
+        private const int IceSkatingChallengeEndScoreMax = 999999;
         private const int IceSkatingPerfectDrillPerfectsPerRun = 10;
         private const int IceSkatingSequenceMaxRunCount = 999;
         private const int IceSkatingSequenceActionReportInterval = 5;
@@ -43,6 +44,7 @@ namespace HeartopiaMod
         private int iceSkatingSequenceBranchNormalId = IceSkatingSequenceDefaultBranchNormalId;
         private int iceSkatingSequenceRunCount = 1;
         private int iceSkatingPerfectDrillRunCount = 1;
+        private int iceSkatingChallengeEndScore = IceSkatingChallengeEndScoreDefault;
         private string iceSkatingSequenceNormalsOverride = string.Empty;
 
         private bool iceSkatingSequenceResolverReady;
@@ -102,31 +104,48 @@ namespace HeartopiaMod
 
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
             headerStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(left, y, 400f, 24f), "Perfect Ice Skating", headerStyle);
+            GUI.Label(new Rect(left, y, 400f, 24f), this.L("ice_skating.send_score_title"), headerStyle);
             y += 30f;
 
             bool busy = this.iceSkatingSequenceCoroutine != null;
             GUI.enabled = !busy;
-            if (GUI.Button(new Rect(left, y, 280f, 32f), "Challenge (5 perfect, 1500)", this.themePrimaryButtonStyle ?? GUI.skin.button))
+            if (GUI.Button(new Rect(left, y, 200f, 32f), this.L("ice_skating.challenge_button"), this.themePrimaryButtonStyle ?? GUI.skin.button))
             {
                 this.StartIceSkatingNetworkSequence();
             }
 
-            this.iceSkatingSequenceRunCount = this.DrawIceSkatingRunCountField(
-                new Rect(left + 290f, y + 4f, 100f, 22f),
-                "Runs",
-                this.iceSkatingSequenceRunCount);
+            int prevChallengeScore = this.iceSkatingChallengeEndScore;
+            this.iceSkatingChallengeEndScore = this.DrawIceSkatingIntField(
+                new Rect(left + 206f, y + 4f, 132f, 22f),
+                this.L("ice_skating.challenge_score"),
+                this.iceSkatingChallengeEndScore,
+                0,
+                IceSkatingChallengeEndScoreMax,
+                50f);
+            if (this.iceSkatingChallengeEndScore != prevChallengeScore)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+
+            this.iceSkatingSequenceRunCount = this.DrawIceSkatingIntField(
+                new Rect(left + 346f, y + 4f, 104f, 22f),
+                this.L("ice_skating.runs"),
+                this.iceSkatingSequenceRunCount,
+                1,
+                IceSkatingSequenceMaxRunCount);
 
             y += 36f;
-            if (GUI.Button(new Rect(left, y, 280f, 32f), "Perfect Drill", GUI.skin.button))
+            if (GUI.Button(new Rect(left, y, 280f, 32f), this.L("ice_skating.perfect_drill"), GUI.skin.button))
             {
                 this.StartIceSkatingPerfectDrillSequence();
             }
 
-            this.iceSkatingPerfectDrillRunCount = this.DrawIceSkatingRunCountField(
-                new Rect(left + 290f, y + 4f, 100f, 22f),
-                "Runs",
-                this.iceSkatingPerfectDrillRunCount);
+            this.iceSkatingPerfectDrillRunCount = this.DrawIceSkatingIntField(
+                new Rect(left + 346f, y + 4f, 104f, 22f),
+                this.L("ice_skating.runs"),
+                this.iceSkatingPerfectDrillRunCount,
+                1,
+                IceSkatingSequenceMaxRunCount);
 
             GUI.enabled = true;
             y += 40f;
@@ -135,16 +154,22 @@ namespace HeartopiaMod
             return this.DrawExtraTab(y);
         }
 
-        private int DrawIceSkatingRunCountField(Rect rect, string label, int value)
+        private int DrawIceSkatingIntField(Rect rect, string label, int value, int min, int max, float labelWidth = 40f)
         {
-            GUI.Label(new Rect(rect.x, rect.y, 36f, rect.height), label);
-            string text = GUI.TextField(new Rect(rect.x + 40f, rect.y, rect.width - 40f, rect.height), value.ToString());
+            labelWidth = Mathf.Clamp(labelWidth, 32f, rect.width - 44f);
+            GUI.Label(new Rect(rect.x, rect.y, labelWidth, rect.height), label);
+            string text = GUI.TextField(new Rect(rect.x + labelWidth + 4f, rect.y, rect.width - labelWidth - 4f, rect.height), value.ToString());
             if (int.TryParse(text, out int parsed))
             {
-                return Mathf.Clamp(parsed, 1, IceSkatingSequenceMaxRunCount);
+                return Mathf.Clamp(parsed, min, max);
             }
 
-            return Mathf.Clamp(value, 1, IceSkatingSequenceMaxRunCount);
+            return Mathf.Clamp(value, min, max);
+        }
+
+        private int IceSkatingSequenceClampChallengeScore(int score)
+        {
+            return Mathf.Clamp(score, 0, IceSkatingChallengeEndScoreMax);
         }
 
         private int IceSkatingSequenceClampRunCount(int runCount)
@@ -358,6 +383,7 @@ namespace HeartopiaMod
             }
 
             int runCount = this.IceSkatingSequenceClampRunCount(this.iceSkatingSequenceRunCount);
+            int endScore = this.IceSkatingSequenceClampChallengeScore(this.iceSkatingChallengeEndScore);
             if (!this.TryResolveIceSkatingNormalActionIds(
                     IceSkatingChallengeSequencePerfectCount,
                     out int[] actionIds,
@@ -368,7 +394,7 @@ namespace HeartopiaMod
             }
 
             this.IceSkatingSequenceLog(
-                "challenge actions=[" + string.Join(",", actionIds) + "] endScore=" + IceSkatingChallengeEndScore
+                "challenge actions=[" + string.Join(",", actionIds) + "] endScore=" + endScore
                 + " (" + actionStatus + ")");
 
             for (int run = 0; run < runCount; run++)
@@ -418,14 +444,14 @@ namespace HeartopiaMod
                     this.IceSkatingSequenceLog("DoAction flush (" + flushStatus + ")");
                 }
 
-                if (!this.TrySendIceSkatingChallengeEnd(IceSkatingChallengeEndScore, out string endStatus))
+                if (!this.TrySendIceSkatingChallengeEnd(endScore, out string endStatus))
                 {
                     this.IceSkatingSequenceFail("SkateChallengeEnd failed run " + (run + 1) + ": " + endStatus);
                     yield break;
                 }
 
                 this.IceSkatingSequenceLog(
-                    "SkateChallengeEndNetworkCommand Score=" + IceSkatingChallengeEndScore + " (" + endStatus + ")");
+                    "SkateChallengeEndNetworkCommand Score=" + endScore + " (" + endStatus + ")");
                 yield return new WaitForSecondsRealtime(IceSkatingSequencePhaseDelaySeconds);
 
                 if (!this.TrySendIceSkatingEnd(out string exitStatus))

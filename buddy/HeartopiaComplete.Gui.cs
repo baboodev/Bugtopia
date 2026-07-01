@@ -107,21 +107,28 @@ namespace HeartopiaMod
                 }
             }
 
-            // Draw optional on-screen status overlay (left-center)
-            if (this.showStatusOverlay)
+            // Draw optional on-screen status overlay (left-center) and notifications with UI scale.
+            this.RunWithUiScale(() =>
             {
-                float ow = this.GetStatusOverlayWidth();
-                float oh = this.GetStatusOverlayHeight();
-                float ox = Mathf.Clamp(16f, 8f, Screen.width - ow - 8f);
-                float oy = Mathf.Clamp((Screen.height - oh) * 0.5f, 72f, Screen.height - oh - 24f);
-                Rect overlayRect = new Rect(ox, oy, ow, oh);
+                float screenW = this.GetLogicalScreenWidth();
+                float screenH = this.GetLogicalScreenHeight();
 
-                Rect inner = new Rect(overlayRect.x + 10f, overlayRect.y + 10f, overlayRect.width - 20f, overlayRect.height - 20f);
-                this.DrawStatusOverlay(inner);
-            }
+                if (this.showStatusOverlay)
+                {
+                    float ow = this.GetStatusOverlayWidth();
+                    float oh = this.GetStatusOverlayHeight();
+                    float ox = Mathf.Clamp(16f, 8f, screenW - ow - 8f);
+                    float oy = Mathf.Clamp((screenH - oh) * 0.5f, 72f, screenH - oh - 24f);
+                    Rect overlayRect = new Rect(ox, oy, ow, oh);
+
+                    Rect inner = new Rect(overlayRect.x + 10f, overlayRect.y + 10f, overlayRect.width - 20f, overlayRect.height - 20f);
+                    this.DrawStatusOverlay(inner);
+                }
+
+                this.DrawMenuNotifications(new Rect(screenW - 280f, 14f, 260f, screenH - 20f));
+            });
 
             this.DrawMouseLookCrosshair();
-            this.DrawMenuNotifications(new Rect((float)Screen.width - 280f, 14f, 260f, (float)Screen.height - 20f));
         }
 
         private void KeepMenuWindowOnScreen(float scale)
@@ -187,36 +194,54 @@ namespace HeartopiaMod
 
                 if (this.mouseLookEnabled)
                 {
-                    // Crosshair toggle
                     num += 30;
                 }
 
-                // Noclip Toggle
-                num += 30;
+                num += 30; // Noclip
+                num += 30; // Vehicle Bypass
+                num += 30; // Vehicle Bypass Server Events
 
-                // Noclip Speed label and slider
-                num += 22 + 30;
+                if (this.noclipEnabled)
+                {
+                    num += 22 + 30;
+                    num += 22 + 30;
+                }
 
-                // Noclip Boost label and slider
-                num += 22 + 30;
+                num += 26; // Anti AFK
 
-                // Anti AFK toggle
-                num += 26;
+                if (this.antiAfkEnabled)
+                {
+                    num += 22 + 30;
+                }
 
-                // AFK interval label and slider
-                num += 22 + 30;
+                num += 30; // Warehouse Anywhere
+                num += 30; // Stranger Chat Bypass
+                num += 22 + 30; // Game Speed
+                num += 33 + 22 + 40; // Custom Camera FOV + slider
+                num += 33 + 26; // Analog Move + hint
+                num += 33; // Skip Show Off
 
-                // Help text
-                return (float)num + 160f;
+                if (this.noclipEnabled)
+                {
+                    return (float)num + 160f;
+                }
+
+                return (float)num + 24f;
             }
 
-            // Building sub-tab: Bypass overlap toggle
             if (this.selfSubTab == 1)
             {
-                num += 26; // Header
-                num += 36; // Toggle
-                // Credits text
-                return (float)num + 50f;
+                return 410f;
+            }
+
+            if (this.selfSubTab == 2)
+            {
+                return 180f;
+            }
+
+            if (this.selfSubTab == 3)
+            {
+                return 380f;
             }
 
             return (float)num + 50f;
@@ -251,7 +276,7 @@ namespace HeartopiaMod
 
             if (this.automationSubTab == 3)
             {
-                return this.forceOpenShopDropdownOpen ? 1348f : 1128f;
+                return this.forceOpenShopDropdownOpen ? 1060f : 820f;
             }
 
             if (this.automationSubTab == 5)
@@ -274,7 +299,7 @@ namespace HeartopiaMod
                 return 898f + this.GetPetFeedFavoriteUiTableHeight();
             }
 
-            return 900f;
+            return 750f;
         }
 
         private float CalculateBulkSelectorTabHeight()
@@ -430,49 +455,6 @@ namespace HeartopiaMod
                     num += 28;
                 }
 
-                Rect rect = new Rect(20f, (float)num, 260f, 20f);
-                GUI.Label(rect, this.LF("Game Speed: {0:F1}x", this.gameSpeed));
-                num += 22;
-                float prevGameSpeed = this.gameSpeed;
-                float newGameSpeed = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.gameSpeed, 1f, 10f);
-                if (Math.Abs(newGameSpeed - prevGameSpeed) > 0.0001f)
-                {
-                    this.SetGameSpeed(newGameSpeed);
-                    this.QueueGameSpeedConfigSave();
-                }
-
-                num += 30;
-                bool prevCustomCameraFOVEnabled = this.customCameraFOVEnabled;
-                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Custom Camera FOV", 25f);
-                this.customCameraFOVEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.customCameraFOVEnabled, "Custom Camera FOV", 25f);
-                if (this.customCameraFOVEnabled != prevCustomCameraFOVEnabled)
-                {
-                    if (this.customCameraFOVEnabled)
-                    {
-                        this.ApplyCameraFOV();
-                    }
-                    else
-                    {
-                        this.RestoreCameraFOV();
-                    }
-                    try { this.SaveKeybinds(false); } catch { }
-                }
-                num += Mathf.CeilToInt(toggleHeight + 8f);
-                Rect rectFOV = new Rect(20f, (float)num, 260f, 20f);
-                GUI.Label(rectFOV, this.LF("Camera FOV: {0:F0}", this.cameraFOV));
-                num += 22;
-                float newFOV = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.cameraFOV, 30f, 120f);
-                if (newFOV != this.cameraFOV)
-                {
-                    this.cameraFOV = newFOV;
-                    if (this.customCameraFOVEnabled)
-                    {
-                        this.ApplyCameraFOV();
-                    }
-                    try { this.SaveKeybinds(false); } catch { }
-                }
-                num += 40;
-                
                 bool flag2 = this.DrawDangerActionButton(new Rect(20f, (float)num, 260f, 35f), "DISABLE ALL");
                 if (flag2)
                 {
@@ -1007,87 +989,8 @@ namespace HeartopiaMod
                 bodyStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f);
                 GUIStyle mutedStyle = new GUIStyle(bodyStyle) { fontSize = 11, wordWrap = true };
                 mutedStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
-                GUIStyle summaryStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontSize = 12, fontStyle = FontStyle.Bold, wordWrap = true };
 
-                string autoBuySummaryStore = this.autoBuyStoreOptions[this.autoBuySelectedStore];
-                bool autoBuySummaryActive = this.autoBuyEnabled || this.autoBuyBirdEnabled || this.autoBuyGardenEnabled || this.autoBuyFishingEnabled;
-                string autoBuySummaryState = "Idle";
-                string autoBuySummaryDetail = "Select a store to enable auto buy.";
-                if (this.autoBuySelectedStore == 1)
-                {
-                    autoBuySummaryState = this.autoBuyEnabled ? this.autoBuySubState.ToString() : "Idle";
-                    autoBuySummaryDetail = "Ingredient cap: " + this.autoBuyMaxPerIngredient;
-                }
-                else if (this.autoBuySelectedStore == 2)
-                {
-                    autoBuySummaryState = this.autoBuyBirdEnabled ? this.autoBuyBirdSubState.ToString() : "Idle";
-                    autoBuySummaryDetail = "Item cap: " + this.autoBuyBirdMaxPerItem;
-                }
-                else if (this.autoBuySelectedStore == 3)
-                {
-                    autoBuySummaryState = this.autoBuyGardenEnabled ? this.autoBuyGardenSubState.ToString() : "Idle";
-                    autoBuySummaryDetail = "Item cap: " + this.autoBuyGardenMaxPerItem;
-                }
-                else if (this.autoBuySelectedStore == 4)
-                {
-                    autoBuySummaryState = this.autoBuyFishingEnabled ? this.autoBuyFishingSubState.ToString() : "Idle";
-                    autoBuySummaryDetail = "Item cap: " + this.autoBuyFishingMaxPerItem;
-                }
-                summaryStyle.normal.textColor = autoBuySummaryActive
-                    ? new Color(0.45f, 1f, 0.55f)
-                    : (this.autoBuySelectedStore == 0 ? new Color(1f, 0.7f, 0.45f) : new Color(this.uiTextR, this.uiTextG, this.uiTextB));
-
-                float autoBuyBodyHeight = 236f + (this.autoBuyStoreDropdownOpen ? (this.autoBuyStoreOptions.Length * 28f) + 12f : 0f);
-                if (this.autoBuySelectedStore == 0)
-                {
-                    autoBuyBodyHeight += 18f;
-                }
-                else
-                {
-                    autoBuyBodyHeight += 92f;
-                    if ((this.autoBuySelectedStore == 1 && this.autoBuyEnabled) ||
-                        (this.autoBuySelectedStore == 2 && this.autoBuyBirdEnabled) ||
-                        (this.autoBuySelectedStore == 3 && this.autoBuyGardenEnabled) ||
-                        (this.autoBuySelectedStore == 4 && this.autoBuyFishingEnabled))
-                    {
-                        autoBuyBodyHeight += 92f;
-                    }
-                }
-                Rect autoBuyBodyPanel = new Rect(left, (float)num, panelWidth, autoBuyBodyHeight);
-                this.DrawExentriSectionPanel(autoBuyBodyPanel, accent, panelFill, panelLine);
-                GUI.Label(new Rect(autoBuyBodyPanel.x + 14f, autoBuyBodyPanel.y + 12f, autoBuyBodyPanel.width - 28f, 18f), this.L("AUTO BUY"), sectionStyle);
-                Rect autoBuyStoreBox = new Rect(autoBuyBodyPanel.x + 14f, autoBuyBodyPanel.y + 36f, 164f, 60f);
-                this.DrawRoundedPanel(autoBuyStoreBox, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, Color.clear);
-                GUI.Label(new Rect(autoBuyStoreBox.x + 12f, autoBuyStoreBox.y + 7f, autoBuyStoreBox.width - 24f, 18f), this.L("STORE"), sectionStyle);
-                GUI.Label(new Rect(autoBuyStoreBox.x + 12f, autoBuyStoreBox.y + 28f, autoBuyStoreBox.width - 24f, 18f), autoBuySummaryStore, bodyStyle);
-                Rect autoBuySummaryBox = new Rect(autoBuyStoreBox.xMax + 14f, autoBuyBodyPanel.y + 36f, autoBuyBodyPanel.xMax - (autoBuyStoreBox.xMax + 28f), 60f);
-                this.DrawRoundedPanel(autoBuySummaryBox, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, new Color(accent.r, accent.g, accent.b, 0.35f));
-                GUI.Label(new Rect(autoBuySummaryBox.x + 12f, autoBuySummaryBox.y + 7f, 92f, 18f), this.L("STATUS"), sectionStyle);
-                GUI.Label(new Rect(autoBuySummaryBox.x + 12f, autoBuySummaryBox.y + 26f, autoBuySummaryBox.width - 24f, 18f), autoBuySummaryState, summaryStyle);
-                GUI.Label(new Rect(autoBuySummaryBox.x + 12f, autoBuySummaryBox.y + 42f, autoBuySummaryBox.width - 24f, 16f), autoBuySummaryDetail, mutedStyle);
-                float sectionLeft = autoBuyBodyPanel.x + 14f;
-                float sectionWidth = autoBuyBodyPanel.width - 28f;
                 float dropdownWidth = 280f;
-                float detailWidth = autoBuyBodyPanel.width - 28f;
-                this.DrawCardOutline(new Rect(autoBuyBodyPanel.x + 14f, autoBuyBodyPanel.y + 112f, autoBuyBodyPanel.width - 28f, 1f), 1f);
-                num += 126;
-
-                // Store Selection Dropdown
-                GUI.Label(new Rect(sectionLeft, (float)num, sectionWidth, 20f), this.L("Select Store"), bodyStyle);
-                num += 26;
-
-                Rect dropdownRect = new Rect(sectionLeft, (float)num, dropdownWidth, 28f);
-                GUI.Box(dropdownRect, "", this.themeTopTabStyle ?? this.themePanelStyle ?? GUI.skin.box);
-                this.DrawCardOutline(dropdownRect, 1f);
-                if (GUI.Button(dropdownRect, "", GUIStyle.none))
-                {
-                    this.autoBuyStoreDropdownOpen = !this.autoBuyStoreDropdownOpen;
-                    if (this.autoBuyStoreDropdownOpen)
-                    {
-                        this.forceOpenShopDropdownOpen = false;
-                    }
-                }
-
                 GUIStyle valueStyle = new GUIStyle(GUI.skin.label);
                 valueStyle.fontSize = 12;
                 valueStyle.fontStyle = FontStyle.Bold;
@@ -1100,236 +1003,10 @@ namespace HeartopiaMod
                 arrowStyle.alignment = TextAnchor.MiddleCenter;
                 arrowStyle.normal.textColor = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
 
-                string currentStoreName = this.autoBuyStoreOptions[this.autoBuySelectedStore];
-                GUI.Label(new Rect(dropdownRect.x + 10f, dropdownRect.y + 1f, dropdownRect.width - 32f, dropdownRect.height - 2f), currentStoreName, valueStyle);
-                GUI.Label(new Rect(dropdownRect.xMax - 22f, dropdownRect.y + 1f, 14f, dropdownRect.height - 2f), this.autoBuyStoreDropdownOpen ? "^" : "v", arrowStyle);
-
-                num += 42;
-
-                // Dropdown options
-                if (this.autoBuyStoreDropdownOpen)
-                {
-                    int optionCount = this.autoBuyStoreOptions.Length;
-                    float dropdownHeight = (optionCount * 28f) + 8f;
-
-                    // Border box behind options
-                    Rect optionsBoxRect = new Rect(sectionLeft + 4f, (float)num, dropdownWidth - 8f, dropdownHeight);
-                    GUI.Box(optionsBoxRect, "", this.themePanelStyle ?? GUI.skin.box);
-                    this.DrawCardOutline(optionsBoxRect, 1f);
-
-                    for (int i = 0; i < this.autoBuyStoreOptions.Length; i++)
-                    {
-                        string optionName = this.autoBuyStoreOptions[i];
-                        bool isSelected = (i == this.autoBuySelectedStore);
-
-                        Rect optionRect = new Rect(sectionLeft + 8f, (float)num, dropdownWidth - 16f, 26f);
-                        bool clicked = GUI.Button(optionRect, "", GUIStyle.none);
-
-                        // Highlight if selected
-                        if (isSelected)
-                        {
-                            GUI.Box(optionRect, "", this.themePanelStyle ?? GUI.skin.box);
-                        }
-
-                        GUIStyle optionStyle = new GUIStyle(GUI.skin.label);
-                        optionStyle.fontSize = 12;
-                        optionStyle.alignment = TextAnchor.MiddleLeft;
-                        optionStyle.normal.textColor = isSelected ? new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB) : new Color(this.uiTextR, this.uiTextG, this.uiTextB);
-
-                        GUI.Label(new Rect(optionRect.x + 10f, optionRect.y + 1f, optionRect.width - 20f, optionRect.height - 2f), (isSelected ? "> " : "") + optionName, optionStyle);
-
-                        if (clicked)
-                        {
-                            // Stop previous store if running
-                            if (this.autoBuyEnabled && this.autoBuySelectedStore != 1)
-                            {
-                                this.StopAutoBuy("Store switched");
-                            }
-                            if (this.autoBuyBirdEnabled && this.autoBuySelectedStore != 2)
-                            {
-                                this.StopAutoBuyBird("Store switched");
-                            }
-                            if (this.autoBuyGardenEnabled && this.autoBuySelectedStore != 3)
-                            {
-                                this.StopAutoBuyGarden("Store switched");
-                            }
-                            this.autoBuySelectedStore = i;
-                            this.autoBuyStoreDropdownOpen = false;
-                        }
-
-                        num += 28;
-                    }
-                    num += 12;
-                }
-
-                num += 18;
-
-                // Show toggle and settings based on selected store
-                if (this.autoBuySelectedStore == 1) // Cooking Store
-                {
-                    // Enable/Disable Toggle
-                    bool prevAuto = this.autoBuyEnabled;
-                    this.autoBuyEnabled = this.DrawSwitchToggle(new Rect(sectionLeft, (float)num, sectionWidth, 30f), this.autoBuyEnabled, "Auto Buy: Teleport -> Buy -> Return");
-                    if (this.autoBuyEnabled != prevAuto)
-                    {
-                        if (this.autoBuyEnabled) { this.StartAutoBuy(); }
-                        else { this.StopAutoBuy("Disabled"); }
-                    }
-                    num += 40;
-
-                    // Status box when running
-                    if (this.autoBuyEnabled)
-                    {
-                        Rect detailRect = new Rect(sectionLeft, (float)num, detailWidth, 72f);
-                        this.DrawRoundedPanel(detailRect, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, Color.clear);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 10f, detailRect.width - 24f, 18f), this.LF("State: {0}", this.autoBuySubState), bodyStyle);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 32f, detailRect.width - 24f, 18f), this.LF("Current Ingredient: {0}", this.autoBuyCurrentIngredientIndex), mutedStyle);
-                        num += 92;
-                    }
-                    else
-                    {
-                        num += 16;
-                    }
-
-                    // Cooking Store slider
-                    GUI.Label(new Rect(sectionLeft, (float)num, sectionWidth, 20f), this.LF("Max per ingredient: {0}", this.autoBuyMaxPerIngredient), bodyStyle);
-                    num += 26;
-                    int prevMax = this.autoBuyMaxPerIngredient;
-                    this.autoBuyMaxPerIngredient = Mathf.RoundToInt(this.UI_DrawAccentSlider(new Rect(sectionLeft, (float)num, sectionWidth, 20f), (float)this.autoBuyMaxPerIngredient, 1f, 50f));
-                    if (this.autoBuyMaxPerIngredient != prevMax) { try { this.SaveKeybinds(false); } catch { } }
-                    num += 28;
-                }
-                else if (this.autoBuySelectedStore == 2) // Birdwatching Store
-                {
-                    // Enable/Disable Toggle
-                    bool prevBird = this.autoBuyBirdEnabled;
-                    this.autoBuyBirdEnabled = this.DrawSwitchToggle(new Rect(sectionLeft, (float)num, sectionWidth, 30f), this.autoBuyBirdEnabled, "Auto Buy: Teleport -> Buy -> Return");
-                    if (this.autoBuyBirdEnabled != prevBird)
-                    {
-                        if (this.autoBuyBirdEnabled) { this.StartAutoBuyBird(); }
-                        else { this.StopAutoBuyBird("Disabled"); }
-                    }
-                    num += 40;
-
-                    // Status box when running
-                    if (this.autoBuyBirdEnabled)
-                    {
-                        Rect detailRect = new Rect(sectionLeft, (float)num, detailWidth, 72f);
-                        this.DrawRoundedPanel(detailRect, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, Color.clear);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 10f, detailRect.width - 24f, 18f), this.LF("State: {0}", this.autoBuyBirdSubState), bodyStyle);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 32f, detailRect.width - 24f, 18f), this.LF("Current Item: {0}", this.autoBuyBirdCurrentItemIndex), mutedStyle);
-                        num += 92;
-                    }
-                    else
-                    {
-                        num += 16;
-                    }
-
-                    // Birdwatching Store slider
-                    GUI.Label(new Rect(sectionLeft, (float)num, sectionWidth, 20f), this.LF("Max per item: {0}", this.autoBuyBirdMaxPerItem), bodyStyle);
-                    num += 26;
-                    int prevBirdMax = this.autoBuyBirdMaxPerItem;
-                    this.autoBuyBirdMaxPerItem = Mathf.RoundToInt(this.UI_DrawAccentSlider(new Rect(sectionLeft, (float)num, sectionWidth, 20f), (float)this.autoBuyBirdMaxPerItem, 1f, 10f));
-                    if (this.autoBuyBirdMaxPerItem != prevBirdMax) { try { this.SaveKeybinds(false); } catch { } }
-                    num += 28;
-                }
-                else if (this.autoBuySelectedStore == 3) // Garden Store
-                {
-                    // Enable/Disable Toggle
-                    bool prevGarden = this.autoBuyGardenEnabled;
-                    this.autoBuyGardenEnabled = this.DrawSwitchToggle(new Rect(sectionLeft, (float)num, sectionWidth, 30f), this.autoBuyGardenEnabled, "Auto Buy: Teleport -> Buy -> Return");
-                    if (this.autoBuyGardenEnabled != prevGarden)
-                    {
-                        if (this.autoBuyGardenEnabled) { this.StartAutoBuyGarden(); }
-                        else { this.StopAutoBuyGarden("Disabled"); }
-                    }
-                    num += 40;
-
-                    // Status box when running
-                    if (this.autoBuyGardenEnabled)
-                    {
-                        Rect detailRect = new Rect(sectionLeft, (float)num, detailWidth, 72f);
-                        this.DrawRoundedPanel(detailRect, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, Color.clear);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 10f, detailRect.width - 24f, 18f), this.LF("State: {0}", this.autoBuyGardenSubState), bodyStyle);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 32f, detailRect.width - 24f, 18f), this.LF("Current Item: {0}", this.autoBuyGardenCurrentItemIndex), mutedStyle);
-                        num += 92;
-                    }
-                    else
-                    {
-                        num += 16;
-                    }
-
-                    // Garden Store slider
-                    GUI.Label(new Rect(sectionLeft, (float)num, sectionWidth, 20f), this.LF("Max per item: {0}", this.autoBuyGardenMaxPerItem), bodyStyle);
-                    num += 26;
-                    int prevGardenMax = this.autoBuyGardenMaxPerItem;
-                    this.autoBuyGardenMaxPerItem = Mathf.RoundToInt(this.UI_DrawAccentSlider(new Rect(sectionLeft, (float)num, sectionWidth, 20f), (float)this.autoBuyGardenMaxPerItem, 1f, 25f));
-                    if (this.autoBuyGardenMaxPerItem != prevGardenMax) { try { this.SaveKeybinds(false); } catch { } }
-                    num += 28;
-                }
-                else if (this.autoBuySelectedStore == 4) // Fishing Store
-                {
-                    // Enable/Disable Toggle
-                    bool prevFishing = this.autoBuyFishingEnabled;
-                    this.autoBuyFishingEnabled = this.DrawSwitchToggle(new Rect(sectionLeft, (float)num, sectionWidth, 30f), this.autoBuyFishingEnabled, "Auto Buy: Teleport -> Buy -> Return");
-                    if (this.autoBuyFishingEnabled != prevFishing)
-                    {
-                        if (this.autoBuyFishingEnabled) { this.StartAutoBuyFishing(); }
-                        else { this.StopAutoBuyFishing("Disabled"); }
-                    }
-                    num += 40;
-
-                    // Status box when running
-                    if (this.autoBuyFishingEnabled)
-                    {
-                        Rect detailRect = new Rect(sectionLeft, (float)num, detailWidth, 72f);
-                        this.DrawRoundedPanel(detailRect, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, Color.clear);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 10f, detailRect.width - 24f, 18f), this.LF("State: {0}", this.autoBuyFishingSubState), bodyStyle);
-                        GUI.Label(new Rect(detailRect.x + 12f, detailRect.y + 32f, detailRect.width - 24f, 18f), this.LF("Current Item: {0}", this.autoBuyFishingCurrentItemIndex), mutedStyle);
-                        num += 92;
-                    }
-                    else
-                    {
-                        num += 16;
-                    }
-
-                    // Fishing Store slider
-                    GUI.Label(new Rect(sectionLeft, (float)num, sectionWidth, 20f), this.LF("Max per item: {0}", this.autoBuyFishingMaxPerItem), bodyStyle);
-                    num += 26;
-                    int prevFishingMax = this.autoBuyFishingMaxPerItem;
-                    this.autoBuyFishingMaxPerItem = Mathf.RoundToInt(this.UI_DrawAccentSlider(new Rect(sectionLeft, (float)num, sectionWidth, 20f), (float)this.autoBuyFishingMaxPerItem, 1f, 50f));
-                    if (this.autoBuyFishingMaxPerItem != prevFishingMax) { try { this.SaveKeybinds(false); } catch { } }
-                    num += 28;
-                }
-                else // None selected
-                {
-                    GUI.Label(new Rect(sectionLeft, (float)num, sectionWidth, 20f), this.L("Select a store to enable auto buy"), mutedStyle);
-                    num += 24;
-
-                    // Stop any running auto buy if switched to None
-                    if (this.autoBuyEnabled)
-                    {
-                        this.StopAutoBuy("Store deselected");
-                    }
-                    if (this.autoBuyBirdEnabled)
-                    {
-                        this.StopAutoBuyBird("Store deselected");
-                    }
-                    if (this.autoBuyGardenEnabled)
-                    {
-                        this.StopAutoBuyGarden("Store deselected");
-                    }
-                    if (this.autoBuyFishingEnabled)
-                    {
-                        this.StopAutoBuyFishing("Store deselected");
-                    }
-                }
-
-                num += 36;
-                float forcePanelHeight = 734f + (this.forceOpenShopDropdownOpen ? (this.forceOpenShopOptions.Length * 28f) + 12f : 0f);
+                float forcePanelHeight = 762f + (this.forceOpenShopDropdownOpen ? (this.forceOpenShopOptions.Length * 28f) + 12f : 0f);
                 Rect forcePanel = new Rect(left, (float)num, panelWidth, forcePanelHeight);
                 this.DrawExentriSectionPanel(forcePanel, accent, panelFill, panelLine);
-                GUI.Label(new Rect(forcePanel.x + 14f, forcePanel.y + 12f, forcePanel.width - 28f, 18f), this.L("FORCE OPEN SHOP"), sectionStyle);
+                GUI.Label(new Rect(forcePanel.x + 14f, forcePanel.y + 12f, forcePanel.width - 28f, 18f), this.L("Auto Buy"), sectionStyle);
                 float forceLeft = forcePanel.x + 14f;
                 float forceWidth = forcePanel.width - 28f;
                 num += 48;
@@ -1343,10 +1020,6 @@ namespace HeartopiaMod
                 if (GUI.Button(forceDropdownRect, "", GUIStyle.none))
                 {
                     this.forceOpenShopDropdownOpen = !this.forceOpenShopDropdownOpen;
-                    if (this.forceOpenShopDropdownOpen)
-                    {
-                        this.autoBuyStoreDropdownOpen = false;
-                    }
                 }
 
                 GUI.Label(new Rect(forceDropdownRect.x + 10f, forceDropdownRect.y + 1f, forceDropdownRect.width - 32f, forceDropdownRect.height - 2f), this.forceOpenShopOptions[this.forceOpenShopSelectedIndex], valueStyle);
@@ -1408,6 +1081,22 @@ namespace HeartopiaMod
                     }
                 }
                 num += 40;
+
+                int prevShopBuyAllMaxPerItem = this.shopBuyAllMaxPerItem;
+                GUI.Label(new Rect(forceLeft, (float)num, 120f, 22f), this.L("Max per item"), bodyStyle);
+                string shopBuyAllMaxPerItemText = GUI.TextField(
+                    new Rect(forceLeft + 124f, (float)num, 80f, 22f),
+                    this.shopBuyAllMaxPerItem.ToString(),
+                    8);
+                if (int.TryParse(shopBuyAllMaxPerItemText, out int parsedShopBuyAllMaxPerItem))
+                {
+                    this.shopBuyAllMaxPerItem = Mathf.Clamp(parsedShopBuyAllMaxPerItem, 1, 999999);
+                }
+                if (this.shopBuyAllMaxPerItem != prevShopBuyAllMaxPerItem)
+                {
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+                num += 30;
 
                 bool shopBuyAllSupported = this.IsForceShopBuyAllSupported(this.forceOpenShopSelectedIndex, out string shopBuyAllBlockReason);
                 GUI.enabled = !this.shopBuyAllRunning && shopBuyAllSupported;
@@ -1818,7 +1507,6 @@ namespace HeartopiaMod
                     num += 30;
                 }
 
-                // Noclip Toggle
                 this.noclipEnabled = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.noclipEnabled, "Noclip");
                 if (this.noclipEnabled)
                 {
@@ -1900,6 +1588,13 @@ namespace HeartopiaMod
                     num += 30;
                 }
 
+                num = this.DrawSelfWarehouseAnywhereControl(num);
+                num = this.DrawSelfStrangerChatBypassControl(num);
+                num = this.DrawSelfGameSpeedControls(num);
+                num = this.DrawSelfCustomCameraFovControls(num);
+                num = this.DrawSelfAnalogMoveControl(num);
+                num = this.DrawSelfSkipShowOffControl(num);
+
                 if (this.noclipEnabled)
                 {
                     GUI.Label(new Rect(20f, (float)num, 260f, 120f), this.L("Noclip: WASD + Space/Ctrl\nShift = Speed Boost"));
@@ -1909,25 +1604,226 @@ namespace HeartopiaMod
                 return (float)num + 24f;
             }
 
-            // Building sub-tab: Bypass overlap toggle
             if (this.selfSubTab == 1)
             {
-                GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.L("Building - Bypass Overlap"));
-                num += 26;
-
-                this.bypassOverlapEnabled = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.bypassOverlapEnabled, "Bypass Overlap");
-                // reflect into static flag used by prefix
-                HeartopiaComplete.bypassOverlapEnabledStatic = this.bypassOverlapEnabled;
-                if (this.bypassOverlapEnabled && !this.bypassOverlapPatched)
-                {
-                    this.EnsureBypassPatched();
-                }
-                num += 36;
-
-                GUI.Label(new Rect(20f, (float)num, 260f, 120f), this.L("Credits: evermoreee12 for Bypass Overlap"));
-                return (float)num + 50f;
+                return this.DrawBuildingTab(startY);
             }
 
+            if (this.selfSubTab == 2)
+            {
+                return this.DrawSelfFunTab(startY);
+            }
+
+            if (this.selfSubTab == 3)
+            {
+                return this.DrawPrivacyBlockExtraTab(startY + 8f, 20f);
+            }
+
+            return (float)num + 50f;
+        }
+
+        private int DrawSelfWarehouseAnywhereControl(int num)
+        {
+            bool newWarehouseBypass = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.warehouseBypassEnabled, "Warehouse Anywhere");
+            if (newWarehouseBypass != this.warehouseBypassEnabled)
+            {
+                this.warehouseBypassEnabled = newWarehouseBypass;
+                WarehouseBypassFeature.ResetState();
+                this.warehouseMonoTabGiveUp = false;
+                this.warehouseMonoTabNextAttemptAt = -999f;
+                this.warehouseMonoTabUnlockCommitted = false;
+                this.warehouseMonoTabUnlockedLogged = false;
+                this.warehouseMonoMoveButtonLogged = false;
+                this.warehouseBagOpenBypassCacheFrame = -1;
+                if (!this.warehouseBypassEnabled)
+                {
+                    this.warehouseAuraBagPanelTypeObj = IntPtr.Zero;
+                }
+                this.SaveKeybinds(false);
+                if (this.warehouseBypassEnabled)
+                {
+                    this.AddMenuNotification(this.L("Warehouse Anywhere Enabled"), new Color(0.55f, 0.88f, 1f));
+                }
+                else
+                {
+                    this.AddMenuNotification(this.L("Warehouse Anywhere Disabled"), new Color(0.88f, 0.6f, 0.6f));
+                }
+            }
+
+            return num + 30;
+        }
+
+        private int DrawSelfStrangerChatBypassControl(int num)
+        {
+            bool newStrangerChat = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.strangerChatBypassEnabled, "Stranger Chat Bypass");
+            if (newStrangerChat != this.strangerChatBypassEnabled)
+            {
+                this.strangerChatBypassEnabled = newStrangerChat;
+                this.SaveKeybinds(false);
+                if (this.strangerChatBypassEnabled)
+                {
+                    this.strangerChatBypassPatchApplied = false;
+                    this.strangerChatBypassPatchUnavailableLogged = false;
+                    this.strangerChatOriginalInSelfRoom = false;
+                    this.strangerChatOriginalInSelfRoomValid = false;
+                    this.nextStrangerChatBypassPatchAttemptAt = -999f;
+                    this.AddMenuNotification(this.L("Stranger Chat Bypass Enabled"), new Color(0.55f, 0.88f, 1f));
+                }
+                else
+                {
+                    if (this.TryRestoreAuraMonoStrangerChatDisplayGate(out string restoreStatus))
+                    {
+                        this.StrangerChatLog("Stranger Chat Bypass restored. " + restoreStatus);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(restoreStatus))
+                    {
+                        this.StrangerChatLog("Stranger Chat Bypass restore failed. " + restoreStatus);
+                    }
+
+                    this.strangerChatBypassPatchApplied = false;
+                    this.strangerChatBypassPatchUnavailableLogged = false;
+                    this.nextStrangerChatBypassPatchAttemptAt = -999f;
+                    this.AddMenuNotification(this.L("Stranger Chat Bypass Disabled"), new Color(0.88f, 0.6f, 0.6f));
+                }
+            }
+
+            return num + 30;
+        }
+
+        private int DrawSelfGameSpeedControls(int num)
+        {
+            GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Game Speed: {0:F1}x", this.gameSpeed));
+            num += 22;
+            float prevGameSpeed = this.gameSpeed;
+            float newGameSpeed = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.gameSpeed, 1f, 10f);
+            if (Math.Abs(newGameSpeed - prevGameSpeed) > 0.0001f)
+            {
+                this.SetGameSpeed(newGameSpeed);
+                this.QueueGameSpeedConfigSave();
+            }
+
+            return num + 30;
+        }
+
+        private int DrawSelfCustomCameraFovControls(int num)
+        {
+            const float toggleWidth = 260f;
+            bool prevCustomCameraFovEnabled = this.customCameraFOVEnabled;
+            float toggleHeight = this.GetSwitchToggleHeight(toggleWidth, "Custom Camera FOV", 25f);
+            this.customCameraFOVEnabled = this.DrawWrappedSwitchToggle(
+                new Rect(20f, (float)num, toggleWidth, toggleHeight),
+                this.customCameraFOVEnabled,
+                "Custom Camera FOV",
+                25f);
+            if (this.customCameraFOVEnabled != prevCustomCameraFovEnabled)
+            {
+                if (this.customCameraFOVEnabled)
+                {
+                    this.ApplyCameraFOV();
+                }
+                else
+                {
+                    this.RestoreCameraFOV();
+                }
+
+                try { this.SaveKeybinds(false); } catch { }
+            }
+
+            num += Mathf.CeilToInt(toggleHeight + 8f);
+            GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Camera FOV: {0:F0}", this.cameraFOV));
+            num += 22;
+            float newFov = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.cameraFOV, 30f, 120f);
+            if (newFov != this.cameraFOV)
+            {
+                this.cameraFOV = newFov;
+                if (this.customCameraFOVEnabled)
+                {
+                    this.ApplyCameraFOV();
+                }
+
+                try { this.SaveKeybinds(false); } catch { }
+            }
+
+            return num + 40;
+        }
+
+        private int DrawSelfAnalogMoveControl(int num)
+        {
+            const string analogMoveLabel = "Analog Move (gamepad stick)";
+            bool prevAnalogMoveBridge = this.analogMoveBridgeEnabled;
+            float toggleHeight = this.GetSwitchToggleHeight(260f, analogMoveLabel, 25f);
+            this.analogMoveBridgeEnabled = this.DrawWrappedSwitchToggle(
+                new Rect(20f, (float)num, 260f, toggleHeight),
+                this.analogMoveBridgeEnabled,
+                analogMoveLabel,
+                25f);
+            if (this.analogMoveBridgeEnabled != prevAnalogMoveBridge)
+            {
+                if (!this.analogMoveBridgeEnabled)
+                {
+                    this.ReleaseMovementBridgeIfInjecting();
+                }
+
+                try { this.SaveKeybinds(false); } catch { }
+            }
+
+            num += Mathf.CeilToInt(toggleHeight + 6f);
+            GUI.Label(new Rect(20f, (float)num, 260f, 20f), "Drives the character from the gamepad left stick (and WASD).");
+            return num + 26;
+        }
+
+        private int DrawSelfSkipShowOffControl(int num)
+        {
+            const string skipShowOffLabel = "Skip Show Off animations";
+            bool prevSkipShowOff = this.skipShowOffAnimations;
+            float toggleHeight = this.GetSwitchToggleHeight(260f, skipShowOffLabel, 25f);
+            this.skipShowOffAnimations = this.DrawWrappedSwitchToggle(
+                new Rect(20f, (float)num, 260f, toggleHeight),
+                this.skipShowOffAnimations,
+                skipShowOffLabel,
+                25f);
+            if (this.skipShowOffAnimations != prevSkipShowOff)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+
+            return num + Mathf.CeilToInt(toggleHeight + 8f);
+        }
+
+        private float DrawSelfFunTab(int startY)
+        {
+            int num = startY + 25;
+            const float toggleWidth = 260f;
+
+            const string forceSkateLabel = "Force Skate (skate on land)";
+            bool prevForceSkate = this.forceSkateEnabled;
+            float forceSkateToggleHeight = this.GetSwitchToggleHeight(toggleWidth, forceSkateLabel, 25f);
+            this.forceSkateEnabled = this.DrawWrappedSwitchToggle(
+                new Rect(20f, (float)num, toggleWidth, forceSkateToggleHeight),
+                this.forceSkateEnabled,
+                forceSkateLabel,
+                25f);
+            if (this.forceSkateEnabled != prevForceSkate)
+            {
+                this.AddMenuNotification(this.forceSkateEnabled ? "Force Skate on" : "Force Skate off", new Color(0.55f, 1f, 0.65f));
+            }
+            num += Mathf.CeilToInt(forceSkateToggleHeight + 8f);
+
+            const string forceSwimLabel = "Force Swim (swim on land)";
+            bool prevForceSwim = this.forceSwimEnabled;
+            float forceSwimToggleHeight = this.GetSwitchToggleHeight(toggleWidth, forceSwimLabel, 25f);
+            this.forceSwimEnabled = this.DrawWrappedSwitchToggle(
+                new Rect(20f, (float)num, toggleWidth, forceSwimToggleHeight),
+                this.forceSwimEnabled,
+                forceSwimLabel,
+                25f);
+            if (this.forceSwimEnabled != prevForceSwim)
+            {
+                this.AddMenuNotification(this.forceSwimEnabled ? "Force Swim on" : "Force Swim off", new Color(0.45f, 0.85f, 1f));
+            }
+            num += Mathf.CeilToInt(forceSwimToggleHeight + 8f);
+
+            GUI.Label(new Rect(20f, (float)num, 260f, 36f), "Swim/Skate on land (others see it). Status: " + this.forceLocomotionLastStatus);
             return (float)num + 50f;
         }
 

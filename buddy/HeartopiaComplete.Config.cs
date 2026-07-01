@@ -189,6 +189,8 @@ namespace HeartopiaMod
             data.autoIceSkatingLast30sUltimate = this.autoIceSkatingLast30sUltimate;
             data.autoIceSkatingPerfectMove = this.autoIceSkatingPerfectMove;
             data.autoIceSkatingPreferNewMove = this.autoIceSkatingPreferNewMove;
+            data.iceSkatingChallengeEndScore = this.iceSkatingChallengeEndScore;
+            data.shopBuyAllMaxPerItem = this.shopBuyAllMaxPerItem;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
             data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
             data.cookingAutoSpeed = this.cookingAutoSpeed;
@@ -349,6 +351,14 @@ namespace HeartopiaMod
             this.autoIceSkatingLast30sUltimate = data.autoIceSkatingLast30sUltimate;
             this.autoIceSkatingPerfectMove = data.autoIceSkatingPerfectMove;
             this.autoIceSkatingPreferNewMove = data.autoIceSkatingPreferNewMove;
+            this.iceSkatingChallengeEndScore = Mathf.Clamp(
+                data.iceSkatingChallengeEndScore > 0 ? data.iceSkatingChallengeEndScore : 1500,
+                0,
+                999999);
+            this.shopBuyAllMaxPerItem = Mathf.Clamp(
+                data.shopBuyAllMaxPerItem > 0 ? data.shopBuyAllMaxPerItem : 200,
+                1,
+                999999);
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
             this.cookingAutoSpeed = data.cookingAutoSpeed;
@@ -616,6 +626,8 @@ namespace HeartopiaMod
                         else if (line.Contains("autoIceSkatingLast30sUltimate")) this.autoIceSkatingLast30sUltimate = GetJsonInt(line, "\"autoIceSkatingLast30sUltimate\":") != 0;
                         else if (line.Contains("autoIceSkatingPerfectMove")) this.autoIceSkatingPerfectMove = GetJsonInt(line, "\"autoIceSkatingPerfectMove\":") != 0;
                         else if (line.Contains("autoIceSkatingPreferNewMove")) this.autoIceSkatingPreferNewMove = GetJsonInt(line, "\"autoIceSkatingPreferNewMove\":") != 0;
+                        else if (line.Contains("iceSkatingChallengeEndScore")) this.iceSkatingChallengeEndScore = Mathf.Clamp(GetJsonInt(line, "\"iceSkatingChallengeEndScore\":"), 0, 999999);
+                        else if (line.Contains("shopBuyAllMaxPerItem")) this.shopBuyAllMaxPerItem = Mathf.Clamp(GetJsonInt(line, "\"shopBuyAllMaxPerItem\":"), 1, 999999);
                         else if (line.Contains("autoIceSkatingEnabled")) this.autoIceSkatingEnabled = GetJsonInt(line, "\"autoIceSkatingEnabled\":") != 0;
                         else if (line.Contains("fastBubbleGenEnabled")) this.fastBubbleGenEnabled = GetJsonInt(line, "\"fastBubbleGenEnabled\":") != 0;
                         else if (line.Contains("bubbleBubblesPerMinute")) this.bubbleBubblesPerMinute = Mathf.Clamp(GetJsonFloat(line, "\"bubbleBubblesPerMinute\":"), 0f, 100f);
@@ -756,7 +768,7 @@ namespace HeartopiaMod
 
             float height = startY + 26f;
             height += this.GetSettingsMainLanguagePanelHeight() + sectionGap;
-            height += (this.customDisplayIdEnabled ? 344f : 306f) + sectionGap;
+            height += (this.customDisplayIdEnabled ? 284f : 246f) + sectionGap;
             height += 48f + rowHeight + (this.fpsBypassEnabled ? rowHeight : 0f) + this.GetLodSettingsPanelHeight() + sectionGap;
             height += 100f + 20f;
             return height + 48f;
@@ -1190,7 +1202,7 @@ namespace HeartopiaMod
 
             num += (int)languagePanel.height + (int)sectionGap;
 
-            Rect behaviorPanel = new Rect(left, (float)num, contentWidth, this.customDisplayIdEnabled ? 344f : 306f);
+            Rect behaviorPanel = new Rect(left, (float)num, contentWidth, this.customDisplayIdEnabled ? 284f : 246f);
             this.DrawExentriSectionPanel(behaviorPanel, accent, panelFill, panelLine);
             GUI.Label(new Rect(behaviorPanel.x + 14f, behaviorPanel.y + 12f, behaviorPanel.width - 28f, 18f), this.L("BEHAVIOR"), subHeaderStyle);
 
@@ -1315,66 +1327,6 @@ namespace HeartopiaMod
                 else
                 {
                     this.AddMenuNotification(this.L("Block Input Disabled"), new Color(0.88f, 0.6f, 0.6f));
-                }
-            }
-
-            rowY += 30f;
-            bool newWarehouseBypass = this.DrawSwitchToggle(new Rect(behaviorPanel.x + 16f, rowY, behaviorPanel.width - 32f, rowHeight), this.warehouseBypassEnabled, "Warehouse Anywhere");
-            if (newWarehouseBypass != this.warehouseBypassEnabled)
-            {
-                this.warehouseBypassEnabled = newWarehouseBypass;
-                WarehouseBypassFeature.ResetState();
-                this.warehouseMonoTabGiveUp = false;
-                this.warehouseMonoTabNextAttemptAt = -999f;
-                this.warehouseMonoTabUnlockCommitted = false;
-                this.warehouseMonoTabUnlockedLogged = false;
-                this.warehouseMonoMoveButtonLogged = false;
-                this.warehouseBagOpenBypassCacheFrame = -1;
-                if (!this.warehouseBypassEnabled)
-                {
-                    this.warehouseAuraBagPanelTypeObj = IntPtr.Zero;
-                }
-                this.SaveKeybinds(false);
-                if (this.warehouseBypassEnabled)
-                {
-                    this.AddMenuNotification(this.L("Warehouse Anywhere Enabled"), new Color(0.55f, 0.88f, 1f));
-                }
-                else
-                {
-                    this.AddMenuNotification(this.L("Warehouse Anywhere Disabled"), new Color(0.88f, 0.6f, 0.6f));
-                }
-            }
-
-            rowY += 30f;
-            bool newStrangerChat = this.DrawSwitchToggle(new Rect(behaviorPanel.x + 16f, rowY, behaviorPanel.width - 32f, rowHeight), this.strangerChatBypassEnabled, "Stranger Chat Bypass");
-            if (newStrangerChat != this.strangerChatBypassEnabled)
-            {
-                this.strangerChatBypassEnabled = newStrangerChat;
-                this.SaveKeybinds(false);
-                if (this.strangerChatBypassEnabled)
-                {
-                    this.strangerChatBypassPatchApplied = false;
-                    this.strangerChatBypassPatchUnavailableLogged = false;
-                    this.strangerChatOriginalInSelfRoom = false;
-                    this.strangerChatOriginalInSelfRoomValid = false;
-                    this.nextStrangerChatBypassPatchAttemptAt = -999f;
-                    this.AddMenuNotification(this.L("Stranger Chat Bypass Enabled"), new Color(0.55f, 0.88f, 1f));
-                }
-                else
-                {
-                    if (this.TryRestoreAuraMonoStrangerChatDisplayGate(out string restoreStatus))
-                    {
-                        this.StrangerChatLog("Stranger Chat Bypass restored. " + restoreStatus);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(restoreStatus))
-                    {
-                        this.StrangerChatLog("Stranger Chat Bypass restore failed. " + restoreStatus);
-                    }
-
-                    this.strangerChatBypassPatchApplied = false;
-                    this.strangerChatBypassPatchUnavailableLogged = false;
-                    this.nextStrangerChatBypassPatchAttemptAt = -999f;
-                    this.AddMenuNotification(this.L("Stranger Chat Bypass Disabled"), new Color(0.88f, 0.6f, 0.6f));
                 }
             }
 

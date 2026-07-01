@@ -233,12 +233,12 @@ namespace HeartopiaMod
             { "Apple Tree", "Apple Tree" },
             { "Mandarin Tree", "Mandarin Tree" },
             { "Tree", "Tree" },
-            { "Farm Rocks", "Farmear rocas" },
-            { "Farm Ores", "Farmear menas" },
-            { "Farm Trees", "Farmear árboles" },
-            { "Farm Rare Trees", "Farmear árboles raros" },
-            { "Farm Apple Trees", "Farmear manzanos" },
-            { "Farm Mandarin Trees", "Farmear árboles mandarinos" },
+            { "Farm Rocks", "Farm Rocks" },
+            { "Farm Ores", "Farm Ores" },
+            { "Farm Trees", "Farm Trees" },
+            { "Farm Rare Trees", "Farm Rare Trees" },
+            { "Farm Apple Trees", "Farm Apple Trees" },
+            { "Farm Mandarin Trees", "Farm Mandarin Trees" },
             { "Reset Cooldowns", "Reset Cooldowns" },
             { "Chop & Mine flow:", "Chop & Mine flow:" },
             { "• Build list of available markers", "• Build list of available markers" },
@@ -397,8 +397,14 @@ namespace HeartopiaMod
             { "pictures.encrypt_progress", "Encrypt {0}/{1} — imported {2}, failed {3}" },
             { "pictures.encrypt_done", "Re-imported {0} file(s), {1} failed\n{2}" },
             { "pictures.encrypt_done_short", "Re-imported {0} changed file(s)" },
-            { "pictures.draw_hint", "Draw: edit colored Draw/*.png files. Index maps are stored in Draw/.index/ for roundtrip." },
+            { "pictures.draw_hint", "Draw: open your drawing in the in-game editor, press Extract to save drawing.png, edit that PNG, then press Upload to re-import it into the game." },
             { "pictures.done_draw", "Done: {0} new ({1} decrypted, {2} plain, {3} failed, {4} skipped, {5} draw previews)\n{6}" },
+            // Ice skating — network score sender
+            { "ice_skating.send_score_title", "Send Ice Skating score" },
+            { "ice_skating.challenge_button", "Challenge (5 perfect)" },
+            { "ice_skating.challenge_score", "Score" },
+            { "ice_skating.runs", "Runs" },
+            { "ice_skating.perfect_drill", "Perfect Drill" },
             // Homeland Farm
             { "homeland_farm.title", "Homeland Farm" },
             // Extra / Craft
@@ -841,8 +847,13 @@ namespace HeartopiaMod
             { "pictures.encrypt_progress", "Cifrado {0}/{1} — importados {2}, fallidos {3}" },
             { "pictures.encrypt_done", "Reimportados {0} archivo(s), {1} fallidos\n{2}" },
             { "pictures.encrypt_done_short", "Reimportados {0} archivo(s)" },
-            { "pictures.draw_hint", "Draw: edita Draw/*.png a color. Los mapas de índice están en Draw/.index/." },
+            { "pictures.draw_hint", "Draw: abre tu dibujo en el editor del juego, pulsa Extract para guardar drawing.png, edítalo y luego Upload para volver a importarlo." },
             { "pictures.done_draw", "Listo: {0} nuevos ({1} descifrados, {2} planos, {3} fallidos, {4} omitidos, {5} vistas Draw)\n{6}" },
+            { "ice_skating.send_score_title", "Enviar puntuación de patinaje" },
+            { "ice_skating.challenge_button", "Desafío (5 perfectos)" },
+            { "ice_skating.challenge_score", "Puntos" },
+            { "ice_skating.runs", "Vueltas" },
+            { "ice_skating.perfect_drill", "Práctica perfecta" },
             { "homeland_farm.title", "Granja del hogar" },
             { "extra.title", "Extra" },
             { "craft.open", "Abrir crafteo" },
@@ -1281,8 +1292,13 @@ namespace HeartopiaMod
             { "pictures.encrypt_progress", "加密 {0}/{1} — 已导入 {2}，失败 {3}" },
             { "pictures.encrypt_done", "已重新导入 {0} 个文件，失败 {1}\n{2}" },
             { "pictures.encrypt_done_short", "已重新导入 {0} 个已修改文件" },
-            { "pictures.draw_hint", "Draw：编辑彩色 Draw/*.png。索引图保存在 Draw/.index/。" },
+            { "pictures.draw_hint", "Draw：在游戏编辑器中打开画作，点 Extract 导出 drawing.png，编辑该 PNG 后点 Upload 重新导入游戏。" },
             { "pictures.done_draw", "完成: {0} 个新文件（解密 {1}，明文 {2}，失败 {3}，跳过 {4}，Draw 预览 {5}）\n{6}" },
+            { "ice_skating.send_score_title", "发送滑冰分数" },
+            { "ice_skating.challenge_button", "挑战（5 次完美）" },
+            { "ice_skating.challenge_score", "分数" },
+            { "ice_skating.runs", "次数" },
+            { "ice_skating.perfect_drill", "完美练习" },
             { "homeland_farm.title", "家园农场" },
             { "extra.title", "额外" },
             { "craft.open", "打开制作" },
@@ -1707,8 +1723,13 @@ namespace HeartopiaMod
             { "pictures.encrypt_progress", "Criptografar {0}/{1} — importados {2}, falhas {3}" },
             { "pictures.encrypt_done", "Reimportados {0} arquivo(s), {1} falhas\n{2}" },
             { "pictures.encrypt_done_short", "Reimportados {0} arquivo(s) alterado(s)" },
-            { "pictures.draw_hint", "Draw: edite Draw/*.png coloridos. Mapas de índice ficam em Draw/.index/." },
+            { "pictures.draw_hint", "Draw: abra o desenho no editor do jogo, use Extract para exportar drawing.png, edite o PNG e depois Upload para reimportar no jogo." },
             { "pictures.done_draw", "Concluído: {0} novos ({1} descriptografados, {2} texto, {3} falhas, {4} ignorados, {5} previews Draw)\n{6}" },
+            { "ice_skating.send_score_title", "Enviar pontuação de patinação" },
+            { "ice_skating.challenge_button", "Desafio (5 perfeitos)" },
+            { "ice_skating.challenge_score", "Pontos" },
+            { "ice_skating.runs", "Voltas" },
+            { "ice_skating.perfect_drill", "Treino perfeito" },
             { "homeland_farm.title", "Fazenda da Casa" },
             { "extra.title", "Extra" },
             { "craft.open", "Abrir craft" },
@@ -2139,8 +2160,13 @@ namespace HeartopiaMod
             { "pictures.encrypt_progress", "เข้ารหัส {0}/{1} — นำเข้า {2}, ล้มเหลว {3}" },
             { "pictures.encrypt_done", "นำเข้าใหม่ {0} ไฟล์, ล้มเหลว {1}\n{2}" },
             { "pictures.encrypt_done_short", "นำเข้าใหม่ {0} ไฟล์ที่แก้ไข" },
-            { "pictures.draw_hint", "Draw: แก้ไข Draw/*.png สี Index อยู่ใน Draw/.index/" },
+            { "pictures.draw_hint", "Draw: เปิดภาพวาดในเอดิเตอร์ของเกม กด Extract เพื่อบันทึก drawing.png แก้ไขไฟล์ PNG แล้วกด Upload เพื่อนำกลับเข้าเกม" },
             { "pictures.done_draw", "เสร็จสิ้น: {0} ใหม่ (ถอดรหัส {1}, ข้อความ {2}, ล้มเหลว {3}, ข้าม {4}, Draw preview {5})\n{6}" },
+            { "ice_skating.send_score_title", "ส่งคะแนนเล่นสเก็ต" },
+            { "ice_skating.challenge_button", "ท้าทาย (สมบูรณ์แบบ 5 ครั้ง)" },
+            { "ice_skating.challenge_score", "คะแนน" },
+            { "ice_skating.runs", "รอบ" },
+            { "ice_skating.perfect_drill", "ฝึกสมบูรณ์แบบ" },
             { "homeland_farm.title", "ฟาร์มในบ้าน" },
             { "extra.title", "เพิ่มเติม" },
             { "craft.open", "เปิดคราฟต์" },
@@ -2347,7 +2373,10 @@ namespace HeartopiaMod
             {
                 string json = File.ReadAllText(path);
                 Dictionary<string, string> existing = ParseDictionary(json);
-                Dictionary<string, string> ordered = CreateOrderedDictionary(defaults, existing);
+                Dictionary<string, string> leakSource = string.Equals(languageCode, "en", StringComparison.OrdinalIgnoreCase)
+                    ? SpanishDefaults
+                    : null;
+                Dictionary<string, string> ordered = CreateOrderedDictionary(defaults, existing, leakSource);
                 string orderedJson = SerializeDictionary(ordered);
                 if (!string.Equals(json.Trim(), orderedJson.Trim(), StringComparison.Ordinal))
                 {
@@ -2409,7 +2438,19 @@ namespace HeartopiaMod
             return GetDefaultValue(EnglishDefaults, key);
         }
 
-        private static Dictionary<string, string> CreateOrderedDictionary(Dictionary<string, string> defaults, Dictionary<string, string> existing)
+        private static readonly Dictionary<string, HashSet<string>> ObsoleteLocalizationValues =
+            new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+            {
+                ["pictures.draw_hint"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "Draw: edit colored Draw/*.png files. Index maps are stored in Draw/.index/ for roundtrip.",
+                },
+            };
+
+        private static Dictionary<string, string> CreateOrderedDictionary(
+            Dictionary<string, string> defaults,
+            Dictionary<string, string> existing,
+            Dictionary<string, string> leakedDefaults = null)
         {
             Dictionary<string, string> ordered = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -2417,7 +2458,11 @@ namespace HeartopiaMod
             {
                 if (existing != null && existing.TryGetValue(pair.Key, out string existingValue))
                 {
-                    ordered[pair.Key] = ShouldPreferDefaultTranslation(pair.Value, existingValue) ? pair.Value : (existingValue ?? string.Empty);
+                    ordered[pair.Key] = ShouldReplaceObsoleteLocalization(pair.Key, existingValue)
+                        || ShouldReplaceCrossLanguageLeak(pair.Key, pair.Value, existingValue, leakedDefaults)
+                        || ShouldPreferDefaultTranslation(pair.Value, existingValue)
+                        ? pair.Value
+                        : (existingValue ?? string.Empty);
                 }
                 else
                 {
@@ -2437,6 +2482,30 @@ namespace HeartopiaMod
             }
 
             return ordered;
+        }
+
+        private static bool ShouldReplaceObsoleteLocalization(string key, string existingValue)
+        {
+            return !string.IsNullOrEmpty(existingValue)
+                && ObsoleteLocalizationValues.TryGetValue(key, out HashSet<string> obsoleteValues)
+                && obsoleteValues.Contains(existingValue);
+        }
+
+        private static bool ShouldReplaceCrossLanguageLeak(
+            string key,
+            string defaultValue,
+            string existingValue,
+            Dictionary<string, string> leakedDefaults)
+        {
+            if (leakedDefaults == null || string.IsNullOrEmpty(existingValue) || string.IsNullOrEmpty(defaultValue))
+            {
+                return false;
+            }
+
+            string leakedValue = GetDefaultValue(leakedDefaults, key);
+            return !string.IsNullOrEmpty(leakedValue)
+                && string.Equals(existingValue, leakedValue, StringComparison.Ordinal)
+                && !string.Equals(defaultValue, leakedValue, StringComparison.Ordinal);
         }
 
         private static bool ShouldPreferDefaultTranslation(string defaultValue, string existingValue)

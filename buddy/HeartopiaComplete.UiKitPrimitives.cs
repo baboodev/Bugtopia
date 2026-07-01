@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -31,6 +31,47 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
+        private float GetLogicalScreenWidth()
+        {
+            float scale = this.GetUiScale();
+            return (float)Screen.width / Mathf.Max(scale, 0.001f);
+        }
+
+        private float GetLogicalScreenHeight()
+        {
+            float scale = this.GetUiScale();
+            return (float)Screen.height / Mathf.Max(scale, 0.001f);
+        }
+
+        private void RunWithUiScale(Action draw)
+        {
+            if (draw == null)
+            {
+                return;
+            }
+
+            Matrix4x4 previousMatrix = GUI.matrix;
+            Color prevColor = GUI.color;
+            Color prevBg = GUI.backgroundColor;
+            Color prevContent = GUI.contentColor;
+            try
+            {
+                GUI.color = Color.white;
+                GUI.backgroundColor = Color.white;
+                GUI.contentColor = Color.white;
+                float scale = this.GetUiScale();
+                GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
+                draw();
+            }
+            finally
+            {
+                GUI.matrix = previousMatrix;
+                GUI.color = prevColor;
+                GUI.backgroundColor = prevBg;
+                GUI.contentColor = prevContent;
+            }
+        }
+
         private float GetUiScale()
         {
             float requested = this.NormalizeUiScale(this.uiScale > 0f ? this.uiScale : 1f);
@@ -373,98 +414,55 @@ namespace HeartopiaMod
             float x = panelRect.x + 14f;
             float w = panelRect.width - 28f;
             float y = panelRect.y + 46f;
-            bool anyActive = false;
+            List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
 
-            // Helper to draw a feature row
-            void Row(string label, string detail)
+            for (int i = 0; i < entries.Count; i++)
             {
-                GUI.Label(new Rect(x, y, w, 22f), this.L(label), title);
+                LiveFeatureStatusEntry entry = entries[i];
+                GUI.Label(new Rect(x, y, w, 22f), this.L(entry.Label), title);
                 y += 19f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L(detail), value);
-                y += 26f;
-                anyActive = true;
+                GUI.Label(new Rect(x, y, w, 20f), this.L(entry.Summary), value);
+                y += 20f;
+
+                List<LiveFeatureStatusDetail> details = entry.Details;
+                if (details != null)
+                {
+                    for (int j = 0; j < details.Count; j++)
+                    {
+                        LiveFeatureStatusDetail detail = details[j];
+                        GUI.Label(new Rect(x, y, w, 20f), this.L(detail.Label) + ": " + this.L(detail.Value), value);
+                        y += 18f;
+                    }
+                }
+
+                y += 8f;
             }
 
-            if (this.isRadarActive)
-                Row("Radar", "Active");
-
-            if (this.autoFarmActive)
-                Row("Foraging", this.GetForagingStatusDisplayText(false));
-
-            if (this.autoCookEnabled)
-
-            if (this.gameSpeed != 1.0f)
-                Row("Speed", $"{this.gameSpeed:F1}x");
-
-            if (this.noclipEnabled)
-                Row("Noclip", "Active");
-
-            if (this.bypassOverlapEnabled)
-                Row("Bypass Overlap", "Active");
-
-            if (this.birdVacuumEnabled)
-                Row("Bird Vacuum", "Active");
-
-            if (this.autoSnowEnabled)
-                Row("Auto Snow", "Active");
-
-            if (this.autoJoinFriendEnabled)
-                Row("Auto Join Friend", "Active");
-
-            if (InsectNetFarm.IsEnabled)
+            if (entries.Count == 0)
             {
-                GUI.Label(new Rect(x, y, w, 22f), this.L("Insect Farm"), title);
-                y += 19f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L(InsectNetFarm.GetLastStatus()), value);
-                y += 18f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L("Tool") + ": " + this.L(InsectNetFarm.GetLastToolStatus()), value);
-                y += 18f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L("Caught") + ": " + InsectNetFarm.GetSessionCatchCount().ToString(), value);
-                y += 26f;
-                anyActive = true;
-            }
-
-            if (BirdNetFarm.IsEnabled)
-            {
-                GUI.Label(new Rect(x, y, w, 22f), this.L("Bird Farm"), title);
-                y += 19f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L(BirdNetFarm.GetLastStatus()), value);
-                y += 18f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L("Tool") + ": " + this.L(BirdNetFarm.GetLastToolStatus()), value);
-                y += 18f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L("Caught") + ": " + BirdNetFarm.GetSessionCatchCount().ToString(), value);
-                y += 18f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L("Scared") + ": " + BirdNetFarm.GetSessionScaredCount().ToString(), value);
-                y += 26f;
-                anyActive = true;
-            }
-
-            if (!anyActive)
                 GUI.Label(new Rect(x, y, w, 24f), this.L("No active features"), none);
+            }
+        }
+
+        private static void ApplyStatusOverlayTextStyle(GUIStyle style)
+        {
+            style.clipping = TextClipping.Overflow;
+            style.padding = new RectOffset(0, 0, 1, 3);
         }
 
         private float GetStatusOverlayHeight()
         {
-            int lineCount = 0;
-            if (this.isRadarActive) lineCount++;
-            if (this.gameSpeed != 1.0f) lineCount++;
-            if (this.noclipEnabled) lineCount++;
-            if (this.bypassOverlapEnabled) lineCount++;
-            if (this.birdVacuumEnabled) lineCount++;
-            if (this.autoFarmActive) lineCount += 2;
-            else if (this.auraFarmEnabled) lineCount++;
-            if (InsectNetFarm.IsEnabled) lineCount += 4;
-            if (BirdNetFarm.IsEnabled) lineCount += 5;
-            if (AutoFishingFarm.IsEnabled) lineCount += 4;
-            if (this.autoSnowEnabled) lineCount++;
-            if (this.autoJoinFriendEnabled) lineCount++;
-
-            if (lineCount == 0)
+            List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
+            const float chrome = 38f + 36f + 28f;
+            if (entries.Count == 0)
             {
-                return 124f;
+                return chrome + 30f;
             }
 
-            return Mathf.Clamp(112f + (lineCount * 24f), 154f, 448f);
+            int lineCount = this.CountLiveFeatureStatusLines(entries);
+            int blockGaps = Mathf.Max(0, entries.Count - 1);
+            float body = (lineCount * 26f) + (blockGaps * 12f);
+            return Mathf.Clamp(chrome + body + 10f, 172f, 760f);
         }
 
         private float GetStatusOverlayWidth()
@@ -481,44 +479,8 @@ namespace HeartopiaMod
                 maxTextLength = Math.Max(maxTextLength, text.Trim().Length);
             }
 
-            if (this.isRadarActive) Consider("Active");
-            if (this.gameSpeed != 1.0f) Consider(string.Format("{0:F1}x", this.gameSpeed));
-            if (this.noclipEnabled) Consider("Active");
-            if (this.bypassOverlapEnabled) Consider("Active");
-            if (this.birdVacuumEnabled) Consider("Active");
-
-            if (this.autoFarmActive)
-            {
-                Consider(this.GetForagingModeLabel());
-                Consider(this.GetForagingStatusDisplayText(false));
-            }
-            else if (this.auraFarmEnabled)
-            {
-                Consider("Running");
-            }
-
-            if (InsectNetFarm.IsEnabled)
-            {
-                Consider(InsectNetFarm.GetLastStatus());
-                Consider(InsectNetFarm.GetLastToolStatus());
-                Consider(InsectNetFarm.GetSessionCatchCount().ToString());
-            }
-            if (BirdNetFarm.IsEnabled)
-            {
-                Consider(BirdNetFarm.GetLastStatus());
-                Consider(BirdNetFarm.GetLastToolStatus());
-                Consider(BirdNetFarm.GetSessionCatchCount().ToString());
-                Consider(BirdNetFarm.GetSessionScaredCount().ToString());
-            }
-            if (AutoFishingFarm.IsEnabled)
-            {
-                Consider(AutoFishingFarm.GetLastStatus());
-                Consider(AutoFishingFarm.GetLastToolStatus());
-                Consider(AutoFishingFarm.GetLastTargetStatus());
-            }
-            if (BirdNetFarm.IsEnabled) Consider("Running");
-            if (this.autoSnowEnabled) Consider("Active");
-            if (this.autoJoinFriendEnabled) Consider("Active");
+            List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
+            this.ConsiderLiveFeatureStatusTextLengths(entries, Consider);
 
             if (maxTextLength <= 0)
             {
@@ -526,7 +488,7 @@ namespace HeartopiaMod
             }
 
             float width = 228f + Mathf.Max(0f, (maxTextLength - 14) * 5.6f);
-            return Mathf.Clamp(width, 228f, Mathf.Min(420f, Screen.width - 16f));
+            return Mathf.Clamp(width, 228f, Mathf.Min(420f, this.GetLogicalScreenWidth() - 16f));
         }
 
         private void DrawStatusOverlay(Rect panelRect)
@@ -539,6 +501,15 @@ namespace HeartopiaMod
             GUIStyle hintStyle = new GUIStyle(GUI.skin.label) { fontSize = 10, alignment = TextAnchor.MiddleLeft, wordWrap = false };
             GUIStyle footerLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft, wordWrap = false };
             GUIStyle footerValueStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight, wordWrap = false };
+
+            ApplyStatusOverlayTextStyle(headerStyle);
+            ApplyStatusOverlayTextStyle(badgeStyle);
+            ApplyStatusOverlayTextStyle(sectionStyle);
+            ApplyStatusOverlayTextStyle(detailLabelStyle);
+            ApplyStatusOverlayTextStyle(detailValueStyle);
+            ApplyStatusOverlayTextStyle(hintStyle);
+            ApplyStatusOverlayTextStyle(footerLabelStyle);
+            ApplyStatusOverlayTextStyle(footerValueStyle);
 
             Color textPrimary = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.98f);
             Color textMuted = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.88f);
@@ -565,21 +536,8 @@ namespace HeartopiaMod
 
             Color prevColor = GUI.color;
 
-            int activeRows = 0;
-            if (this.isRadarActive) activeRows++;
-            if (this.gameSpeed != 1.0f) activeRows++;
-            if (this.noclipEnabled) activeRows++;
-            if (this.bypassOverlapEnabled) activeRows++;
-            if (this.birdVacuumEnabled) activeRows++;
-            if (this.autoFarmActive) activeRows++;
-            else if (this.auraFarmEnabled) activeRows++;
-            if (InsectNetFarm.IsEnabled) activeRows++;
-            if (BirdNetFarm.IsEnabled) activeRows++;
-            if (AutoFishingFarm.IsEnabled) activeRows++;
-            if (this.autoSnowEnabled) activeRows++;
-            if (this.autoJoinFriendEnabled) activeRows++;
-
-            bool hasActiveSystems = activeRows > 0;
+            List<LiveFeatureStatusEntry> liveEntries = this.CollectLiveFeatureStatusEntries();
+            bool hasActiveSystems = liveEntries.Count > 0;
             Rect frameRect = new Rect(x - 6f, y - 6f, w + 12f, panelRect.height + 12f);
             float currentFps = Time.unscaledDeltaTime > 0.0001f ? (1f / Time.unscaledDeltaTime) : this.statusOverlaySmoothedFps;
             if (this.statusOverlaySmoothedFps <= 0f)
@@ -598,18 +556,18 @@ namespace HeartopiaMod
             string fpsText = this.statusOverlayDisplayedFps > 0f ? Mathf.RoundToInt(this.statusOverlayDisplayedFps).ToString() : "--";
 
             this.DrawRoundedPanel(frameRect, 10f, overlayFill, overlayBorder, 1f, Color.clear);
-            Rect headerRect = new Rect(frameRect.x + 1f, frameRect.y + 1f, frameRect.width - 2f, 34f);
-            Rect footerRect = new Rect(frameRect.x + 1f, frameRect.yMax - 33f, frameRect.width - 2f, 32f);
-            Rect bodyRect = new Rect(frameRect.x + 10f, headerRect.yMax + 8f, frameRect.width - 20f, footerRect.y - headerRect.yMax - 14f);
+            Rect headerRect = new Rect(frameRect.x + 1f, frameRect.y + 1f, frameRect.width - 2f, 38f);
+            Rect footerRect = new Rect(frameRect.x + 1f, frameRect.yMax - 37f, frameRect.width - 2f, 36f);
+            Rect bodyRect = new Rect(frameRect.x + 10f, headerRect.yMax + 8f, frameRect.width - 20f, footerRect.y - headerRect.yMax - 16f);
 
             this.DrawRoundedPanel(headerRect, 10f, overlayHeaderFill, Color.clear, 0f, Color.clear);
             GUI.color = separator;
             GUI.DrawTexture(new Rect(bodyRect.x, bodyRect.y - 4f, bodyRect.width, 1f), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            GUI.Label(new Rect(headerRect.x + 12f, headerRect.y + 7f, 116f, 18f), this.L("Helper Status"), headerStyle);
+            GUI.Label(new Rect(headerRect.x + 12f, headerRect.y + 8f, 116f, 22f), "Bugtopia", headerStyle);
 
-            Rect badgeRect = new Rect(headerRect.xMax - 82f, headerRect.y + 6f, 70f, 20f);
+            Rect badgeRect = new Rect(headerRect.xMax - 82f, headerRect.y + 8f, 70f, 22f);
             this.DrawCapsule(badgeRect, hasActiveSystems ? badgeFill : badgeIdleFill);
             GUI.Label(badgeRect, hasActiveSystems ? this.L("ACTIVE") : this.L("STANDBY"), badgeStyle);
 
@@ -622,102 +580,50 @@ namespace HeartopiaMod
             };
             Action<string, string> drawFeature = (label, value) =>
             {
-                Rect rowRect = new Rect(bodyRect.x, rowY, bodyRect.width, 18f);
-                GUI.Label(new Rect(rowRect.x + 8f, rowRect.y + 1f, 112f, 16f), this.L(label), sectionStyle);
-                GUI.Label(new Rect(rowRect.x + 120f, rowRect.y + 1f, rowRect.width - 128f, 16f), this.L(value), detailValueStyle);
-                rowY += 20f;
+                Rect rowRect = new Rect(bodyRect.x, rowY, bodyRect.width, 24f);
+                GUI.Label(new Rect(rowRect.x + 8f, rowRect.y + 2f, 112f, 20f), this.L(label), sectionStyle);
+                GUI.Label(new Rect(rowRect.x + 120f, rowRect.y + 2f, rowRect.width - 128f, 20f), this.L(value), detailValueStyle);
+                rowY += 26f;
             };
             Action<string, string> drawDetail = (label, value) =>
             {
-                Rect rowRect = new Rect(bodyRect.x, rowY, bodyRect.width, 16f);
-                GUI.Label(new Rect(rowRect.x + 18f, rowRect.y, 92f, 16f), this.L(label), detailLabelStyle);
-                GUI.Label(new Rect(rowRect.x + 110f, rowRect.y, rowRect.width - 118f, 16f), this.L(value), detailValueStyle);
-                rowY += 18f;
+                Rect rowRect = new Rect(bodyRect.x, rowY, bodyRect.width, 20f);
+                GUI.Label(new Rect(rowRect.x + 18f, rowRect.y + 1f, 92f, 18f), this.L(label), detailLabelStyle);
+                GUI.Label(new Rect(rowRect.x + 110f, rowRect.y + 1f, rowRect.width - 118f, 18f), this.L(value), detailValueStyle);
+                rowY += 22f;
             };
             Action finishBlock = () =>
             {
-                rowY += 4f;
-                drawDivider();
                 rowY += 6f;
+                drawDivider();
+                rowY += 8f;
             };
 
             if (!hasActiveSystems)
             {
-                Rect idleRect = new Rect(bodyRect.x + 8f, bodyRect.y + 8f, bodyRect.width - 16f, 18f);
+                Rect idleRect = new Rect(bodyRect.x + 8f, bodyRect.y + 8f, bodyRect.width - 16f, 22f);
                 GUI.Label(idleRect, this.L("All systems idle"), hintStyle);
             }
             else
             {
-                if (this.isRadarActive)
+                for (int i = 0; i < liveEntries.Count; i++)
                 {
-                    drawFeature("Radar", "Active");
-                    finishBlock();
-                }
-                if (this.gameSpeed != 1.0f)
-                {
-                    drawFeature("Speed", string.Format("{0:F1}x", this.gameSpeed));
-                    finishBlock();
-                }
-                if (this.noclipEnabled)
-                {
-                    drawFeature("Noclip", "Active");
-                    finishBlock();
-                }
-                if (this.bypassOverlapEnabled)
-                {
-                    drawFeature("Bypass Overlap", "Active");
-                    finishBlock();
-                }
-                if (this.birdVacuumEnabled)
-                {
-                    drawFeature("Bird Vacuum", "Active");
-                    finishBlock();
-                }
-                if (this.autoFarmActive)
-                {
-                    drawFeature("Foraging", this.GetForagingModeLabel());
-                    drawDetail("Status", this.GetForagingStatusDisplayText(false));
-                    finishBlock();
-                }
-                else if (this.auraFarmEnabled)
-                {
-                    drawFeature("Aura Farm", "Running");
-                    finishBlock();
-                }
-                if (InsectNetFarm.IsEnabled)
-                {
-                    drawFeature("Insect Farm", "Active");
-                    drawDetail("Status", InsectNetFarm.GetLastStatus());
-                    drawDetail("Tool", InsectNetFarm.GetLastToolStatus());
-                    drawDetail("Caught", InsectNetFarm.GetSessionCatchCount().ToString());
-                    finishBlock();
-                }
-                if (BirdNetFarm.IsEnabled)
-                {
-                    drawFeature("Bird Farm", "Active");
-                    drawDetail("Status", BirdNetFarm.GetLastStatus());
-                    drawDetail("Tool", BirdNetFarm.GetLastToolStatus());
-                    drawDetail("Caught", BirdNetFarm.GetSessionCatchCount().ToString());
-                    drawDetail("Scared", BirdNetFarm.GetSessionScaredCount().ToString());
-                    finishBlock();
-                }
-                if (AutoFishingFarm.IsEnabled)
-                {
-                    drawFeature("Fishing Farm", "Active");
-                    drawDetail("Status", AutoFishingFarm.GetLastStatus());
-                    drawDetail("Tool", AutoFishingFarm.GetLastToolStatus());
-                    drawDetail("Target", AutoFishingFarm.GetLastTargetStatus());
-                    finishBlock();
-                }
+                    LiveFeatureStatusEntry entry = liveEntries[i];
+                    drawFeature(entry.Label, entry.Summary);
+                    List<LiveFeatureStatusDetail> details = entry.Details;
+                    if (details != null)
+                    {
+                        for (int j = 0; j < details.Count; j++)
+                        {
+                            LiveFeatureStatusDetail detail = details[j];
+                            drawDetail(detail.Label, detail.Value);
+                        }
+                    }
 
-                if (this.autoSnowEnabled)
-                {
-                    drawFeature("Auto Snow", "Active");
-                    finishBlock();
-                }
-                if (this.autoJoinFriendEnabled)
-                {
-                    drawFeature("Auto Join Friend", "Active");
+                    if (i < liveEntries.Count - 1)
+                    {
+                        finishBlock();
+                    }
                 }
             }
 
@@ -725,8 +631,8 @@ namespace HeartopiaMod
             GUI.color = separator;
             GUI.DrawTexture(new Rect(footerRect.x, footerRect.y, footerRect.width, 1f), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            GUI.Label(new Rect(footerRect.x + 12f, footerRect.y + 8f, 60f, 16f), this.L("FPS"), footerLabelStyle);
-            GUI.Label(new Rect(footerRect.x + 72f, footerRect.y + 7f, footerRect.width - 84f, 18f), fpsText, footerValueStyle);
+            GUI.Label(new Rect(footerRect.x + 12f, footerRect.y + 9f, 60f, 20f), this.L("FPS"), footerLabelStyle);
+            GUI.Label(new Rect(footerRect.x + 72f, footerRect.y + 8f, footerRect.width - 84f, 22f), fpsText, footerValueStyle);
 
             GUI.color = prevColor;
         }

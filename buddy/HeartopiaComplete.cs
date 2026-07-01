@@ -2351,6 +2351,8 @@ namespace HeartopiaMod
             {
                 tabs.Add(("Main", () => this.selfSubTab == 0, () => this.SetSelfSubTab(0)));
                 tabs.Add(("Building", () => this.selfSubTab == 1, () => this.SetSelfSubTab(1)));
+                tabs.Add(("Fun", () => this.selfSubTab == 2, () => this.SetSelfSubTab(2)));
+                tabs.Add(("Privacy", () => this.selfSubTab == 3, () => this.SetSelfSubTab(3)));
             }
             else if (this.selectedTab == 2)
             {
@@ -2379,8 +2381,7 @@ namespace HeartopiaMod
                 tabs.Add((this.L("homeland_farm.title"), () => this.newFeaturesSubTab == 2, () => this.SetNewFeaturesSubTab(2)));
                 tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
                 tabs.Add(("Ice Skating", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
-                tabs.Add(("Building", () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
-                tabs.Add((this.L("extra.title"), () => this.newFeaturesSubTab == 6, () => this.SetNewFeaturesSubTab(6)));
+                tabs.Add((this.L("extra.title"), () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
             }
             else if (this.selectedTab == 4)
             {
@@ -5076,7 +5077,7 @@ namespace HeartopiaMod
         private float autoCookAutoStopAt = -1f;
         private int autoFarmSubTab = 0; // 0 = Main, 1 = Tree Farm, 2 = Fish Farm, 3 = Insect Farm, 4 = Bird Farm
         private int automationSubTab = 0; // 0 = Main, 1 = Food & Repair, 2 = Snow Sculpting, 3 = Auto Buy, 4 = Auto Sell, 5 = Mass Cook, 6 = Puzzle, 7 = Pet Care
-        private int selfSubTab = 0; // 0 = Main
+        private int selfSubTab = 0; // 0 = Main, 1 = Building, 2 = Fun, 3 = Privacy
         private Type cachedFishingGameplayApiType = null;
         private Type cachedFishingSubStateType = null;
         private MethodInfo cachedFishingEnterFishingMethod = null;
@@ -5294,6 +5295,7 @@ namespace HeartopiaMod
             "Pet Store",
             "Special Home Decor Store",
             "Showroom",
+            "Music Store",
             "Meteor / Starfall Exchange"
         };
 

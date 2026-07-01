@@ -49,11 +49,6 @@ namespace HeartopiaMod
 
             if (this.newFeaturesSubTab == 5)
             {
-                return this.DrawBuildingTab(startY);
-            }
-
-            if (this.newFeaturesSubTab == 6)
-            {
                 return this.DrawExtraFeaturesTab(startY);
             }
 
@@ -76,59 +71,6 @@ namespace HeartopiaMod
                 this.AddMenuNotification(status, ok ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.5f, 0.4f));
             }
             y += 42f;
-
-            const string analogMoveLabel = "Analog Move (gamepad stick)";
-            bool prevAnalogMoveBridge = this.analogMoveBridgeEnabled;
-            float analogMoveToggleHeight = this.GetSwitchToggleHeight(360f, analogMoveLabel, 25f);
-            this.analogMoveBridgeEnabled = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, analogMoveToggleHeight), this.analogMoveBridgeEnabled, analogMoveLabel, 25f);
-            if (this.analogMoveBridgeEnabled != prevAnalogMoveBridge)
-            {
-                if (!this.analogMoveBridgeEnabled)
-                {
-                    this.ReleaseMovementBridgeIfInjecting();
-                }
-
-                try { this.SaveKeybinds(false); } catch { }
-            }
-            y += analogMoveToggleHeight + 6f;
-            GUI.Label(new Rect(left, y, 460f, 20f), "Drives the character from the gamepad left stick (and WASD).");
-            y += 26f;
-
-            const string skipShowOffLabel = "Skip Show Off animations";
-            bool prevSkipShowOff = this.skipShowOffAnimations;
-            float skipShowOffToggleHeight = this.GetSwitchToggleHeight(360f, skipShowOffLabel, 25f);
-            this.skipShowOffAnimations = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, skipShowOffToggleHeight), this.skipShowOffAnimations, skipShowOffLabel, 25f);
-            if (this.skipShowOffAnimations != prevSkipShowOff)
-            {
-                try { this.SaveKeybinds(false); } catch { }
-            }
-            y += skipShowOffToggleHeight + 6f;
-            GUI.Label(new Rect(left, y, 460f, 36f), "Blocks FlauntActionEvent / FlauntActionWithNetIdEvent (character hold-up animation).");
-            y += 40f;
-
-            const string forceSwimLabel = "Force Swim (swim on land)";
-            bool prevForceSwim = this.forceSwimEnabled;
-            float forceSwimToggleHeight = this.GetSwitchToggleHeight(360f, forceSwimLabel, 25f);
-            this.forceSwimEnabled = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, forceSwimToggleHeight), this.forceSwimEnabled, forceSwimLabel, 25f);
-            if (this.forceSwimEnabled != prevForceSwim)
-            {
-                this.AddMenuNotification(this.forceSwimEnabled ? "Force Swim on" : "Force Swim off", new Color(0.45f, 0.85f, 1f));
-            }
-            y += forceSwimToggleHeight + 6f;
-
-            const string forceSkateLabel = "Force Skate (skate on land)";
-            bool prevForceSkate = this.forceSkateEnabled;
-            float forceSkateToggleHeight = this.GetSwitchToggleHeight(360f, forceSkateLabel, 25f);
-            this.forceSkateEnabled = this.DrawWrappedSwitchToggle(new Rect(left, y, 360f, forceSkateToggleHeight), this.forceSkateEnabled, forceSkateLabel, 25f);
-            if (this.forceSkateEnabled != prevForceSkate)
-            {
-                this.AddMenuNotification(this.forceSkateEnabled ? "Force Skate on" : "Force Skate off", new Color(0.55f, 1f, 0.65f));
-            }
-            y += forceSkateToggleHeight + 6f;
-            GUI.Label(new Rect(left, y, 460f, 36f), "Swim/Skate on land (others see it). Toggling is flicker-free. Status: " + this.forceLocomotionLastStatus);
-            y += 40f;
-
-            y = this.DrawPrivacyBlockExtraTab(y, left);
 
             return y + 20f;
         }
@@ -460,12 +402,7 @@ namespace HeartopiaMod
 
             if (this.newFeaturesSubTab == 5)
             {
-                return 410f;
-            }
-
-            if (this.newFeaturesSubTab == 6)
-            {
-                return 560f;
+                return 140f;
             }
 
             return 400f;

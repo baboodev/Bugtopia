@@ -176,6 +176,8 @@ namespace HeartopiaMod
             public bool autoIceSkatingLast30sUltimate = true;
             public bool autoIceSkatingPerfectMove = true;
             public bool autoIceSkatingPreferNewMove = true;
+            public int iceSkatingChallengeEndScore = 1500;
+            public int shopBuyAllMaxPerItem = 200;
             public bool fastBubbleGenEnabled;
             public float bubbleBubblesPerMinute;
             public float cookingAutoSpeed;

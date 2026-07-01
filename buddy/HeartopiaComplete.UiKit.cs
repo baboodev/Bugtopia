@@ -610,7 +610,9 @@ namespace HeartopiaMod
             style.alignment = TextAnchor.MiddleLeft;
             style.wordWrap = true;
 
-            float maxWidth = Mathf.Clamp(Screen.width * 0.44f, 260f, 520f);
+            float screenW = this.GetLogicalScreenWidth();
+            float screenH = this.GetLogicalScreenHeight();
+            float maxWidth = Mathf.Clamp(screenW * 0.44f, 260f, 520f);
             List<HeartopiaComplete.MenuNotification> visibleNotifications = new List<HeartopiaComplete.MenuNotification>();
             for (int i = this.menuNotifications.Count - 1; i >= 0; i--)
             {
@@ -651,8 +653,8 @@ namespace HeartopiaMod
 
             float xMargin = 20f;
             float topY = 14f;
-            float middleY = Mathf.Max(14f, (Screen.height - totalHeight) * 0.5f);
-            float bottomY = Mathf.Max(14f, Screen.height - totalHeight - 20f);
+            float middleY = Mathf.Max(14f, (screenH - totalHeight) * 0.5f);
+            float bottomY = Mathf.Max(14f, screenH - totalHeight - 20f);
             float y = topY;
             switch (this.notificationPosition)
             {
@@ -694,10 +696,10 @@ namespace HeartopiaMod
                         break;
                     case 3:
                     case 4:
-                        boxX = (Screen.width - boxWidth) * 0.5f;
+                        boxX = (screenW - boxWidth) * 0.5f;
                         break;
                     default:
-                        boxX = Screen.width - boxWidth - xMargin + slide;
+                        boxX = screenW - boxWidth - xMargin + slide;
                         break;
                 }
 
@@ -736,7 +738,7 @@ namespace HeartopiaMod
                 GUI.color = Color.white;
 
                 y += boxHeight + 6f;
-                if (y > Screen.height - 42f)
+                if (y > screenH - 42f)
                 {
                     break;
                 }
