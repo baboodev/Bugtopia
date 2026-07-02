@@ -736,6 +736,7 @@ namespace HeartopiaMod
             this.QuestAssistantTalkToNpcMonitorTick();
             this.QuestAssistantBirdMonitorTick();
             this.QuestAssistantCraftMonitorTick();
+            this.QuestAssistantGoToAreaMonitorTick();
             this.QuestAssistantAutoRefreshOnUpdate();
             this.ProcessPrivacyBlockOnUpdate();
             this.ProcessVehicleBypassOnUpdate();

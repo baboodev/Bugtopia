@@ -24,6 +24,7 @@ namespace HeartopiaMod
         private const int QuestAssistantStateCanSubmit = 4;  // GameTaskState.CanSubmit
         private const int QuestAssistantCheckTypeKindAccumulate = 4; // CompleteConditionCheckType.KindAccumulate
         private const int QuestAssistantCategoryTaskOrder = 5; // GameTaskType.TaskOrder (order board "Request: X" quests)
+        private const int QuestAssistantMarkCategoryNaviPoint = 1; // CompleteConditionTrackMarkType.NaviPoint
 
         private enum QuestObjectiveKind
         {
@@ -37,6 +38,7 @@ namespace HeartopiaMod
             HomelandFarm, // SowPlant / UseCropFertilizer — confirmed 2026-07-02, see progress doc §5.5
             TalkToNpc, // InteractWithNpc / EnterDialogNode — added 2026-07-02, see progress doc §13
             SubmitToNpc, // CanSubmit + TableGameTask.submitNpc>0 — added 2026-07-02, see progress doc §24
+            GoToArea, // PlayerInSpecificArea — added 2026-07-03, see progress doc §40
         }
 
         private sealed class ConditionSnapshot
@@ -751,6 +753,10 @@ namespace HeartopiaMod
             { "UseCropFertilizer", QuestObjectiveKind.HomelandFarm },
             { "InteractWithNpc", QuestObjectiveKind.TalkToNpc },
             { "EnterDialogNode", QuestObjectiveKind.TalkToNpc },
+            // "Go to <area>" quests (e.g. "Astralis in Fishing Village") — typeParam is the area /
+            // navigation-point id (matches the NaviPoint(1) trackMark id). Satisfied by being
+            // physically in the area, so the action teleports to the marked map spot. See §40.
+            { "PlayerInSpecificArea", QuestObjectiveKind.GoToArea },
         };
 
         // Event names whose numeric params were CONFIRMED (not just plausible) to be a real item/
@@ -767,6 +773,19 @@ namespace HeartopiaMod
             "BuildMaterialState",
             "PictorialState",
         };
+
+        // A condition (by 0-based index) counts as complete when Current >= Needed (Needed>0). Used
+        // to skip finished steps of a multi-step quest so classification targets the ACTIVE step (§45).
+        private static bool QuestAssistantConditionComplete(QuestSnapshot snapshot, int conditionIndex)
+        {
+            if (snapshot.Conditions == null || conditionIndex < 0 || conditionIndex >= snapshot.Conditions.Count)
+            {
+                return false;
+            }
+
+            ConditionSnapshot c = snapshot.Conditions[conditionIndex];
+            return c.Needed > 0 && c.Current >= c.Needed;
+        }
 
         private void QuestAssistantClassify(List<TrackMarkSnapshot> trackMarks, QuestSnapshot snapshot)
         {
@@ -792,6 +811,18 @@ namespace HeartopiaMod
             for (int i = 0; i < trackMarks.Count; i++)
             {
                 TrackMarkSnapshot mark = trackMarks[i];
+
+                // Skip a trackMark whose condition (groupId-1, 1-based) is already COMPLETE — for a
+                // multi-step quest we want the ACTIVE step, not a finished earlier one. E.g.
+                // "Gardening: Fertilizer": the Furniture trackMark belongs to the done "Make fertilizer
+                // at the Workbench" condition (2/2), so classifying Craft off it is wrong — the active
+                // step is "Apply fertilizer" (condition[1], UseCropFertilizer → HomelandFarm), which
+                // Tier 2 then picks up. §45.
+                if (QuestAssistantConditionComplete(snapshot, mark.GroupId - 1))
+                {
+                    continue;
+                }
+
                 QuestObjectiveKind kind = QuestAssistantMapTrackMarkCategory(mark.MarkCategory);
                 if (kind == QuestObjectiveKind.Unknown)
                 {
@@ -857,10 +888,46 @@ namespace HeartopiaMod
             for (int i = 0; i < snapshot.Conditions.Count; i++)
             {
                 ConditionSnapshot cond = snapshot.Conditions[i];
+                // Prefer the active step: skip a condition that's already complete (§45).
+                if (QuestAssistantConditionComplete(snapshot, i))
+                {
+                    continue;
+                }
+
                 if (string.IsNullOrEmpty(cond.CheckParamString)
                     || !QuestAssistantDirectEventKinds.TryGetValue(cond.CheckParamString, out QuestObjectiveKind directKind))
                 {
                     continue;
+                }
+
+                // GoToArea target = the NaviPoint(1) trackMark's id, NOT the condition's typeParam
+                // (2026-07-03, progress doc §44). The game teleport marker uses
+                // GetNavigationPoint(trackMark.id) (MapSpotsSystem.UpdateTaskMapSpot), while the
+                // PlayerInSpecificArea condition's typeParam is the area/trigger id for the CHECK — a
+                // DIFFERENT id space. They coincided for "Fishing Village" (both 144, hiding the
+                // distinction), but "Onsen Mountain" has trackMark id=5001003 ≠ typeParam=1231, and
+                // navpoint config has no 1231. Prefer the NaviPoint trackMark id; fall back to
+                // typeParam only if there's no NaviPoint trackMark.
+                if (directKind == QuestObjectiveKind.GoToArea)
+                {
+                    int navId = 0;
+                    for (int t = 0; t < trackMarks.Count; t++)
+                    {
+                        if (trackMarks[t].MarkCategory == QuestAssistantMarkCategoryNaviPoint && trackMarks[t].Id > 0)
+                        {
+                            navId = trackMarks[t].Id;
+                            break;
+                        }
+                    }
+
+                    if (navId > 0)
+                    {
+                        snapshot.ObjectiveKind = QuestObjectiveKind.GoToArea;
+                        snapshot.ObjectiveTargetId = navId;
+                        snapshot.ObjectiveTargetIds = new List<int> { navId };
+                        this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 \"PlayerInSpecificArea\" -> GoToArea navpoint(trackMark) id=" + navId);
+                        return;
+                    }
                 }
 
                 // A "collect any of these N" condition lists every qualifying id in typeParam (e.g.

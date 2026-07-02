@@ -32,6 +32,11 @@ namespace HeartopiaMod
         private bool questAssistantWindowMouseOver = false;
         private int questAssistantFocusedTaskId = 0;
         private Vector2 questAssistantScrollPos = Vector2.zero;
+        // Collapse-to-title-bar: when collapsed the window shrinks to just its header row; the full
+        // height is remembered so expanding restores it. Toggled by the header collapse button.
+        private const float QuestAssistantCollapsedHeight = 30f;
+        private bool questAssistantWindowCollapsed = false;
+        private float questAssistantWindowExpandedHeight = 450f;
 
         // Collect auto-stop monitor (Phase 3 follow-up, 2026-07-02): tracks the one quest the
         // "start farming" button was pressed for and auto-stops Aura Farm/Foraging once its first
@@ -67,6 +72,21 @@ namespace HeartopiaMod
         // SendTalkWithNpc(netId, start:false) so the server-side talk session doesn't stay open —
         // same paired start/end discipline as the skate sessions ([[force-swim-skate-locomotion]]).
         private uint questAssistantTalkToNpcMonitorNpcNetId = 0U;
+
+        private void QuestAssistantToggleCollapse()
+        {
+            if (!this.questAssistantWindowCollapsed)
+            {
+                this.questAssistantWindowExpandedHeight = this.questAssistantWindowRect.height;
+                this.questAssistantWindowRect.height = QuestAssistantCollapsedHeight;
+                this.questAssistantWindowCollapsed = true;
+            }
+            else
+            {
+                this.questAssistantWindowRect.height = this.questAssistantWindowExpandedHeight;
+                this.questAssistantWindowCollapsed = false;
+            }
+        }
 
         private void QuestAssistantToggleWindow()
         {
@@ -134,9 +154,29 @@ namespace HeartopiaMod
 
             GUIStyle title = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold };
             title.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(12f, 4f, w - 90f, 20f), "Quest Assistant", title);
+            GUI.Label(new Rect(12f, 4f, w - 132f, 20f), "Quest Assistant", title);
 
-            if (GUI.Button(new Rect(w - 70f, 4f, 58f, 20f), "Refresh", GUI.skin.button))
+            // Hide the whole panel (far right). Re-open it from the mod menu's "Show Floating Window"
+            // button. Drawn before the collapsed early-return so it also works while collapsed.
+            if (GUI.Button(new Rect(w - 28f, 4f, 20f, 20f), "×", GUI.skin.button))
+            {
+                this.QuestAssistantToggleWindow();
+            }
+
+            // Collapse/expand toggle. When collapsed only this header row shows.
+            if (GUI.Button(new Rect(w - 52f, 4f, 20f, 20f), this.questAssistantWindowCollapsed ? "+" : "–", GUI.skin.button))
+            {
+                this.QuestAssistantToggleCollapse();
+            }
+
+            if (this.questAssistantWindowCollapsed)
+            {
+                // Thin title bar only — skip Refresh/status/lists/detail. Keep it draggable.
+                GUI.DragWindow(new Rect(0f, 0f, w, QuestAssistantCollapsedHeight));
+                return;
+            }
+
+            if (GUI.Button(new Rect(w - 116f, 4f, 58f, 20f), "Refresh", GUI.skin.button))
             {
                 this.QuestAssistantOnDumpButtonClicked();
             }
@@ -343,6 +383,29 @@ namespace HeartopiaMod
                     }
                 }
 
+                else if (focused.ObjectiveKind == QuestObjectiveKind.GoToArea)
+                {
+                    int areaId = focused.ObjectiveTargetId;
+                    string label = "Teleport to area #" + areaId + " (Go there)";
+                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
+                    {
+                        this.QuestAssistantOnGoToAreaClicked(focused, areaId);
+                    }
+                }
+
+                else if (focused.ObjectiveKind == QuestObjectiveKind.HomelandFarm)
+                {
+                    bool fertilize = this.QuestAssistantActiveHomelandFarmIsFertilize(focused);
+                    bool booster = fertilize && this.QuestAssistantActiveHomelandFarmEffectType(focused) == HomelandFarmFertilizerEffectGrowthRate;
+                    string label = booster
+                        ? "Apply Growth Booster in radius"
+                        : (fertilize ? "Fertilize crops in radius" : "Sow crops in radius");
+                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
+                    {
+                        this.QuestAssistantOnHomelandFarmClicked(focused, fertilize);
+                    }
+                }
+
                 // Phase 5 contextual action buttons (cook) attach the same way once implemented —
                 // the classifier already has everything they need.
             }
@@ -374,6 +437,7 @@ namespace HeartopiaMod
                 case QuestObjectiveKind.HomelandFarm: return "Homeland farming";
                 case QuestObjectiveKind.TalkToNpc: return "Talk to an NPC";
                 case QuestObjectiveKind.SubmitToNpc: return "Complete via an NPC (talk and/or submit)";
+                case QuestObjectiveKind.GoToArea: return "Go to an area";
                 default: return "(not automatable yet)";
             }
         }
@@ -844,6 +908,495 @@ namespace HeartopiaMod
                     + "requires being physically at a Workbench.";
                 this.QuestAssistantLog(
                     "Craft RESULT: NO progress change after " + QuestAssistantCraftMonitorTimeoutSeconds
+                    + "s taskId=" + taskId + " before=" + before);
+            }
+        }
+
+        // ===== GoToArea button: teleport to a "be in area X" quest's navigation point =====
+        //
+        // "Astralis in Fishing Village" (progress doc §40-§43): condition checkParamString=
+        // "PlayerInSpecificArea", typeParam="144" (a NAVIGATION-POINT id, matching the NaviPoint(1)
+        // trackMark id). Satisfied by the player being physically IN that area — the game runs its own
+        // client-side area check off the player's live position, so teleporting there and letting the
+        // check fire is the natural completion, no direct wire command needed.
+        //
+        // Position source (§43, after three wrong turns): the ONLY correct position is
+        // NavigationPointConfig.GetNavigationPoint(144).position. Map-spot scanning was wrong — the
+        // quest's own TrackTask Navigation spot is dropped on scene reload and not re-added (§40/§42,
+        // and force-tracking doesn't re-add it — tracking dispatches AddOrUpdateTrackTaskEvent, not the
+        // TaskUpdated that UpdateTaskMapSpot needs), while the only present usageId=144 spot is a
+        // RegionName in a DIFFERENT id space (map-element id 144 ≠ navpoint id 144, coincidental
+        // collision → teleported to an unrelated region, §41/§42). So read the navpoint config
+        // directly: the config lives behind the generic Managers.Get<IConfigManager>() (a crash trap
+        // to invoke — §37), so instead read its static backing dictionary Managers._serviceDic
+        // (Dictionary<Type,ServiceObject>) with a Type key built via the proven
+        // TryCreateAuraMonoSystemTypeObjectFromClass (mono_class_get_type + mono_type_get_object — NOT
+        // the Type.GetType string parser that crashed in §35), then field-walk:
+        // ServiceObject.manager (ConfigManager) → _mainGameLvlConf (GameLevelBaseConfig) →
+        // NavigationPointConfig (public field) → navigationPoints (List<NavigationPointData{int id;
+        // Vector3 position}>) → the entry with id==144. Uses only proven primitives (static-field read,
+        // TryGetValue on an ALREADY-INSTANTIATED generic type — safe, unlike the §37 runtime-inflated
+        // case — list enumeration, field reads); no generic-method inflation, no Nullable, no
+        // Type.GetType string.
+        private const float QuestAssistantGoToAreaMonitorIntervalSeconds = 2f;
+        private const float QuestAssistantGoToAreaMonitorTimeoutSeconds = 20f;
+        private bool questAssistantGoToAreaMonitorActive = false;
+        private int questAssistantGoToAreaMonitorTaskId = 0;
+        private int questAssistantGoToAreaMonitorBeforeCurrent = 0;
+        private float questAssistantGoToAreaMonitorNextCheckAt = 0f;
+        private float questAssistantGoToAreaMonitorDeadlineAt = 0f;
+
+        private void QuestAssistantOnGoToAreaClicked(QuestSnapshot focused, int areaId)
+        {
+            if (areaId <= 0)
+            {
+                this.questAssistantLastStatus = "No area id resolved for this quest.";
+                return;
+            }
+
+            this.QuestAssistantLog(
+                "GoToArea: taskId=" + focused.TaskId + " areaId=" + areaId
+                + " progressBefore=" + QuestAssistantSummarizeProgress(focused));
+
+            if (!this.QuestAssistantTryGetNavPointConfigPosition(areaId, out Vector3 areaPos, out string posStatus))
+            {
+                this.questAssistantLastStatus = "Could not resolve navpoint #" + areaId + " position: " + posStatus;
+                this.QuestAssistantLog("GoToArea: navpoint resolve FAILED areaId=" + areaId + " status=" + posStatus);
+                return;
+            }
+
+            this.QuestAssistantLog("GoToArea: teleporting to navpoint #" + areaId + " at " + areaPos.ToString("F1"));
+            this.TeleportToLocation(areaPos);
+
+            this.QuestAssistantArmGoToAreaMonitor(focused);
+            this.questAssistantLastStatus =
+                "Teleported to area #" + areaId + " (" + areaPos.ToString("F0") + "). Auto-checking progress for "
+                + (int)QuestAssistantGoToAreaMonitorTimeoutSeconds + "s (the game credits it once you're in the area).";
+        }
+
+        // ===== HomelandFarm button: run the existing Homeland Farm auto-fertilize / auto-sow =====
+        //
+        // "Gardening: Fertilizer" (progress doc §45): the active step is a UseCropFertilizer condition
+        // ("Apply fertilizer to crops", 0/N) — classified HomelandFarm now that the classifier skips
+        // the already-done Craft condition. HomelandFarm also covers SowPlant quests. Both just reuse
+        // the ready Homeland Farm feature entry points (StartHomelandFarmFertilizeAll /
+        // StartHomelandFarmSowAll) — they scan crops in the configured radius and apply the selected
+        // fertilizer/seed, exactly what the quest needs. No new farm logic; the quest's progress then
+        // updates in the panel via the §30 auto-refresh as applications register.
+        private bool QuestAssistantActiveHomelandFarmIsFertilize(QuestSnapshot focused)
+        {
+            // Default to fertilize. Pick sow only if the first INCOMPLETE condition is a SowPlant.
+            if (focused.Conditions != null)
+            {
+                for (int i = 0; i < focused.Conditions.Count; i++)
+                {
+                    ConditionSnapshot c = focused.Conditions[i];
+                    if (c.Needed > 0 && c.Current >= c.Needed)
+                    {
+                        continue; // skip completed step
+                    }
+
+                    if (string.Equals(c.CheckParamString, "SowPlant", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    if (string.Equals(c.CheckParamString, "UseCropFertilizer", StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        // How many applications the active (first incomplete) sow/fertilize step still needs, so the
+        // quest button consumes only what the quest requires instead of every crop in radius. Returns
+        // int.MaxValue when it can't tell — that leaves the Homeland Farm "do everything" behavior.
+        private int QuestAssistantActiveHomelandFarmRemaining(QuestSnapshot focused)
+        {
+            if (focused.Conditions != null)
+            {
+                for (int i = 0; i < focused.Conditions.Count; i++)
+                {
+                    ConditionSnapshot c = focused.Conditions[i];
+                    if (c.Needed > 0 && c.Current >= c.Needed)
+                    {
+                        continue; // skip completed step
+                    }
+
+                    if (string.Equals(c.CheckParamString, "SowPlant", StringComparison.Ordinal)
+                        || string.Equals(c.CheckParamString, "UseCropFertilizer", StringComparison.Ordinal))
+                    {
+                        int remaining = c.Needed - c.Current;
+                        return remaining > 0 ? remaining : 1;
+                    }
+                }
+            }
+
+            return int.MaxValue;
+        }
+
+        // Which FertilizerEffectTypeEnum the active step wants applied. Returns
+        // HomelandFarmFertilizerEffectGrowthRate (1) for an "Apply Growth Booster" step, else -1 (no
+        // override → the button uses the user's Homeland Farm dropdown selection). A booster fires the
+        // SAME UseCropFertilizer event and shares its checkParamString, so the objective text is what
+        // distinguishes the two steps; checkParam/typeParam are logged (once, on click) so we can
+        // switch to a language-independent discriminator later if the text match ever proves fragile.
+        // NOTE: called every OnGUI frame from the button label — must NOT log unless log==true.
+        private int QuestAssistantActiveHomelandFarmEffectType(QuestSnapshot focused, bool log = false)
+        {
+            if (focused.Conditions == null)
+            {
+                return -1;
+            }
+
+            for (int i = 0; i < focused.Conditions.Count; i++)
+            {
+                ConditionSnapshot c = focused.Conditions[i];
+                if (c.Needed > 0 && c.Current >= c.Needed)
+                {
+                    continue; // skip completed step
+                }
+
+                if (!string.Equals(c.CheckParamString, "UseCropFertilizer", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (log)
+                {
+                    this.QuestAssistantLog("HomelandFarm effect probe: desc=\"" + (c.Description ?? string.Empty)
+                        + "\" checkParam=" + c.CheckParam + " typeParam=\"" + (c.TypeParam ?? string.Empty) + "\"");
+                }
+
+                string desc = (c.Description ?? string.Empty).ToLowerInvariant();
+                if (desc.Contains("booster") || desc.Contains("growth boost"))
+                {
+                    return HomelandFarmFertilizerEffectGrowthRate; // 1 = GrowthSpeedPromote
+                }
+
+                return -1;
+            }
+
+            return -1;
+        }
+
+        // The exact fertilizer item id the active UseCropFertilizer step requires, read from the
+        // condition's typeParam (confirmed 2026-07-03: typeParam="770201" carried the growth-booster
+        // item id, matching the scanned inventory item exactly). 0 = none/unparseable → the apply path
+        // falls back to effect-type/dropdown selection. This is the quest's ground-truth,
+        // language-independent discriminator and works even when the fertilizer table can't resolve the
+        // item's effect type.
+        private int QuestAssistantActiveHomelandFarmRequiredStaticId(QuestSnapshot focused)
+        {
+            if (focused.Conditions == null)
+            {
+                return 0;
+            }
+
+            for (int i = 0; i < focused.Conditions.Count; i++)
+            {
+                ConditionSnapshot c = focused.Conditions[i];
+                if (c.Needed > 0 && c.Current >= c.Needed)
+                {
+                    continue; // skip completed step
+                }
+
+                if (!string.Equals(c.CheckParamString, "UseCropFertilizer", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(c.TypeParam) && int.TryParse(c.TypeParam.Trim(), out int id) && id > 0)
+                {
+                    return id;
+                }
+
+                return 0;
+            }
+
+            return 0;
+        }
+
+        private void QuestAssistantOnHomelandFarmClicked(QuestSnapshot focused, bool fertilize)
+        {
+            int remaining = this.QuestAssistantActiveHomelandFarmRemaining(focused);
+            int effectType = fertilize ? this.QuestAssistantActiveHomelandFarmEffectType(focused, log: true) : -1;
+            int requiredStaticId = fertilize ? this.QuestAssistantActiveHomelandFarmRequiredStaticId(focused) : 0;
+            bool booster = effectType == HomelandFarmFertilizerEffectGrowthRate;
+            this.QuestAssistantLog(
+                "HomelandFarm: taskId=" + focused.TaskId + " action=" + (booster ? "growth-booster" : (fertilize ? "fertilize" : "sow"))
+                + " item=" + requiredStaticId
+                + " cap=" + (remaining == int.MaxValue ? "none" : remaining.ToString())
+                + " progressBefore=" + QuestAssistantSummarizeProgress(focused));
+
+            if (fertilize)
+            {
+                this.StartHomelandFarmFertilizeAll(silent: false, maxCount: remaining, requiredEffectType: effectType, requiredStaticId: requiredStaticId);
+            }
+            else
+            {
+                this.StartHomelandFarmSowAll(silent: false, maxCount: remaining);
+            }
+
+            string countText = remaining == int.MaxValue ? "crops" : remaining + " crop(s)";
+            string verb = booster ? "Applying growth booster to " : (fertilize ? "Fertilizing " : "Sowing ");
+            this.questAssistantLastStatus =
+                verb + countText + " in the Homeland Farm radius (only what the quest still needs) — watch the "
+                + "quest progress update here (panel auto-refreshes).";
+        }
+
+        // Read NavigationPointConfig.navigationPoints[i where id==navpointId].position — see the
+        // class comment above for why this is the only correct source and why it's read via the static
+        // Managers._serviceDic backing dictionary rather than the generic Managers.Get<IConfigManager>().
+        private unsafe bool QuestAssistantTryGetNavPointConfigPosition(int navpointId, out Vector3 position, out string status)
+        {
+            position = Vector3.zero;
+            status = "AuraMono unavailable";
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null || auraMonoFieldGetValueObject == null || this.auraMonoRootDomain == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // 1) System.Type object for IConfigManager (the Dictionary<Type,ServiceObject> key).
+            if (!this.TryCreateAuraMonoSystemTypeObjectFromClass("XDTDataAndProtocol.Config.IConfigManager", out IntPtr configTypeObj) || configTypeObj == IntPtr.Zero)
+            {
+                status = "IConfigManager Type object unresolved";
+                return false;
+            }
+
+            // 2) static Managers._serviceDic (Dictionary<Type, ServiceObject>).
+            IntPtr managersClass = this.FindAuraMonoClassByFullName("XDTGame.Framework.Managers");
+            if (managersClass == IntPtr.Zero)
+            {
+                managersClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTGame.Framework", "Managers");
+            }
+
+            IntPtr serviceDicField = managersClass != IntPtr.Zero ? this.FindAuraMonoFieldOnHierarchy(managersClass, "_serviceDic") : IntPtr.Zero;
+            if (serviceDicField == IntPtr.Zero)
+            {
+                status = "Managers._serviceDic field unresolved";
+                return false;
+            }
+
+            IntPtr serviceDicObj = auraMonoFieldGetValueObject(this.auraMonoRootDomain, serviceDicField, IntPtr.Zero);
+            if (serviceDicObj == IntPtr.Zero)
+            {
+                status = "Managers._serviceDic is null (Managers not started?)";
+                return false;
+            }
+
+            // 3) _serviceDic.TryGetValue(configTypeObj, out ServiceObject serviceObj). Instance method
+            //    of an ALREADY-INSTANTIATED generic type — safe to invoke (unlike a runtime-inflated
+            //    generic method, §37). out is a reference type ⇒ pointer-to-local-IntPtr is safe.
+            uint dicPin = AuraMonoPinNew(serviceDicObj);
+            IntPtr serviceObj;
+            try
+            {
+                IntPtr dicClass = auraMonoObjectGetClass(serviceDicObj);
+                IntPtr tryGetValueMethod = dicClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(dicClass, "TryGetValue", 2) : IntPtr.Zero;
+                if (tryGetValueMethod == IntPtr.Zero)
+                {
+                    status = "Dictionary.TryGetValue method missing";
+                    return false;
+                }
+
+                IntPtr localServiceObj = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = configTypeObj;                 // Type key (reference) — pass object directly.
+                args[1] = (IntPtr)(&localServiceObj);    // out ServiceObject (reference out) — ptr to local.
+                IntPtr exc = IntPtr.Zero;
+                IntPtr result = auraMonoRuntimeInvoke(tryGetValueMethod, serviceDicObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "TryGetValue invoke exception";
+                    return false;
+                }
+
+                bool got = result != IntPtr.Zero && this.TryUnboxMonoBoolean(result, out bool b) && b;
+                if (!got || localServiceObj == IntPtr.Zero)
+                {
+                    status = "IConfigManager not registered in _serviceDic";
+                    return false;
+                }
+
+                serviceObj = localServiceObj;
+            }
+            finally
+            {
+                AuraMonoPinFree(dicPin);
+            }
+
+            // 4) ServiceObject.manager (ConfigManager) → _mainGameLvlConf → NavigationPointConfig →
+            //    navigationPoints (List<NavigationPointData>).
+            if (!this.TryGetMonoObjectMember(serviceObj, "manager", out IntPtr configManagerObj) || configManagerObj == IntPtr.Zero)
+            {
+                status = "ServiceObject.manager (ConfigManager) null";
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(configManagerObj, "_mainGameLvlConf", out IntPtr levelConfObj) || levelConfObj == IntPtr.Zero)
+            {
+                status = "ConfigManager._mainGameLvlConf null (no scene config loaded?)";
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(levelConfObj, "NavigationPointConfig", out IntPtr navConfObj) || navConfObj == IntPtr.Zero)
+            {
+                status = "GameLevelBaseConfig.NavigationPointConfig null";
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(navConfObj, "navigationPoints", out IntPtr navListObj) || navListObj == IntPtr.Zero)
+            {
+                status = "NavigationPointConfig.navigationPoints null";
+                return false;
+            }
+
+            // 5) find the NavigationPointData with id==navpointId, read its position (Vector3).
+            List<IntPtr> items = new List<IntPtr>();
+            List<uint> pins = new List<uint>();
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(navListObj, items, pins))
+                {
+                    status = "navigationPoints enumerate failed";
+                    return false;
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (items[i] == IntPtr.Zero
+                        || !this.TryGetMonoIntMember(items[i], "id", out int id)
+                        || id != navpointId)
+                    {
+                        continue;
+                    }
+
+                    if (this.TryGetMonoVector3Member(items[i], "position", out position) && position != Vector3.zero)
+                    {
+                        status = "ok";
+                        this.QuestAssistantLog("  navpointConfig MATCH id=" + navpointId + " pos=" + position.ToString("F1"));
+                        return true;
+                    }
+
+                    status = "navpoint " + navpointId + " found but position zero/unreadable";
+                    return false;
+                }
+
+                status = "no navigation point with id=" + navpointId + " (" + items.Count + " navpoints scanned)";
+                return false;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        private void QuestAssistantArmGoToAreaMonitor(QuestSnapshot focused)
+        {
+            int before = 0;
+            if (focused.Conditions != null && focused.Conditions.Count > 0)
+            {
+                before = focused.Conditions[0].Current;
+            }
+
+            this.questAssistantGoToAreaMonitorActive = true;
+            this.questAssistantGoToAreaMonitorTaskId = focused.TaskId;
+            this.questAssistantGoToAreaMonitorBeforeCurrent = before;
+            float now = Time.unscaledTime;
+            this.questAssistantGoToAreaMonitorNextCheckAt = now + QuestAssistantGoToAreaMonitorIntervalSeconds;
+            this.questAssistantGoToAreaMonitorDeadlineAt = now + QuestAssistantGoToAreaMonitorTimeoutSeconds;
+            this.QuestAssistantLog("GoToArea monitor: armed taskId=" + focused.TaskId + " before=" + before);
+        }
+
+        // Same reachable-only-after-an-explicit-click shape as the other monitors.
+        private void QuestAssistantGoToAreaMonitorTick()
+        {
+            if (!this.questAssistantGoToAreaMonitorActive)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now >= this.questAssistantGoToAreaMonitorDeadlineAt)
+            {
+                this.QuestAssistantConcludeGoToAreaMonitor(false, this.questAssistantGoToAreaMonitorBeforeCurrent, "timeout");
+                return;
+            }
+
+            if (now < this.questAssistantGoToAreaMonitorNextCheckAt)
+            {
+                return;
+            }
+
+            this.questAssistantGoToAreaMonitorNextCheckAt = now + QuestAssistantGoToAreaMonitorIntervalSeconds;
+
+            try
+            {
+                this.QuestAssistantResolveSnapshot(false);
+            }
+            catch (Exception ex)
+            {
+                this.QuestAssistantLog("GoToArea monitor EXCEPTION, stopping monitor: " + ex);
+                this.questAssistantGoToAreaMonitorActive = false;
+                return;
+            }
+
+            QuestSnapshot stillActive = null;
+            for (int i = 0; i < this.questAssistantSnapshot.Count; i++)
+            {
+                if (this.questAssistantSnapshot[i].TaskId == this.questAssistantGoToAreaMonitorTaskId)
+                {
+                    stillActive = this.questAssistantSnapshot[i];
+                    break;
+                }
+            }
+
+            if (stillActive == null)
+            {
+                this.QuestAssistantConcludeGoToAreaMonitor(true, this.questAssistantGoToAreaMonitorBeforeCurrent, "task left active list (completed)");
+                return;
+            }
+
+            if (stillActive.Conditions != null && stillActive.Conditions.Count > 0)
+            {
+                ConditionSnapshot c = stillActive.Conditions[0];
+                bool changed = c.Current != this.questAssistantGoToAreaMonitorBeforeCurrent;
+                bool satisfied = c.Needed > 0 && c.Current >= c.Needed;
+                if (changed || satisfied)
+                {
+                    this.QuestAssistantConcludeGoToAreaMonitor(true, c.Current, satisfied ? "condition satisfied" : "progress changed");
+                }
+            }
+        }
+
+        private void QuestAssistantConcludeGoToAreaMonitor(bool changed, int afterCurrent, string reason)
+        {
+            int taskId = this.questAssistantGoToAreaMonitorTaskId;
+            int before = this.questAssistantGoToAreaMonitorBeforeCurrent;
+            this.questAssistantGoToAreaMonitorActive = false;
+
+            if (changed)
+            {
+                this.questAssistantLastStatus =
+                    "GoToArea RESULT: progress CHANGED (before=" + before + " after=" + afterCurrent + ") "
+                    + "— being in the area DID count toward the quest. (" + reason + ")";
+                this.QuestAssistantLog(
+                    "GoToArea RESULT: progress CHANGED (before=" + before + " after=" + afterCurrent
+                    + ") — being in the area DID count toward the quest. taskId=" + taskId + " reason=" + reason);
+            }
+            else
+            {
+                this.questAssistantLastStatus =
+                    "GoToArea RESULT: NO progress change after " + (int)QuestAssistantGoToAreaMonitorTimeoutSeconds
+                    + "s — teleport landed but the area check didn't credit it (wrong spot position, or the "
+                    + "server validates differently). Try walking a step inside the marked area.";
+                this.QuestAssistantLog(
+                    "GoToArea RESULT: NO progress change after " + QuestAssistantGoToAreaMonitorTimeoutSeconds
                     + "s taskId=" + taskId + " before=" + before);
             }
         }

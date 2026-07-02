@@ -20931,6 +20931,93 @@ namespace HeartopiaMod
                 && this.TryHomelandFarmTryGetCropFertilizerTableRow(cropFertilizerId, out _, out effectType, out effectLevel);
         }
 
+        // Pick the scanned crop-fertilizer with this exact item staticId (the id the quest condition
+        // names in its typeParam). Ground-truth selection that doesn't depend on the fertilizer table.
+        private bool TryHomelandFarmPickFertilizerIndexByStaticId(int staticId, out int index)
+        {
+            index = -1;
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < this.homelandFarmScannedFertilizers.Count; i++)
+            {
+                HomelandFarmInventoryItem item = this.homelandFarmScannedFertilizers[i];
+                if (item != null && item.StaticId == staticId && item.Count > 0)
+                {
+                    index = i;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Pick the first scanned crop-fertilizer whose table effect type matches requiredEffectType
+        // (0 = GrowthValue fertilizer, 1 = GrowthSpeed/booster, 2 = Harvest breeding powder). Used by
+        // the Quest Assistant so an "Apply Growth Booster" step applies a booster specifically instead
+        // of the user's dropdown selection.
+        private bool TryHomelandFarmPickFertilizerIndexByEffect(int requiredEffectType, out int index, out string effectName)
+        {
+            index = -1;
+            effectName = HomelandFarmFertilizerEffectName(requiredEffectType);
+            for (int i = 0; i < this.homelandFarmScannedFertilizers.Count; i++)
+            {
+                HomelandFarmInventoryItem item = this.homelandFarmScannedFertilizers[i];
+                if (item == null || item.StaticId <= 0 || item.Count <= 0)
+                {
+                    continue;
+                }
+
+                if (this.TryHomelandFarmTryGetCropFertilizerTableRowById(item.StaticId, out int effectType, out _)
+                    && effectType == requiredEffectType)
+                {
+                    index = i;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string HomelandFarmFertilizerEffectName(int effectType)
+        {
+            switch (effectType)
+            {
+                case HomelandFarmFertilizerEffectGrowthValue: return "fertilizer";
+                case HomelandFarmFertilizerEffectGrowthRate: return "growth booster";
+                case HomelandFarmFertilizerEffectGrowthProduct: return "breeding powder";
+                default: return "fertilizer";
+            }
+        }
+
+        // Diagnostic: list every scanned fertilizer with its resolved effect type, so a test log makes
+        // it obvious whether a growth booster is even present / scanned under the cropfertilizer type.
+        private string HomelandFarmDescribeScannedFertilizerEffects()
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder("scanned=[");
+            for (int i = 0; i < this.homelandFarmScannedFertilizers.Count; i++)
+            {
+                HomelandFarmInventoryItem item = this.homelandFarmScannedFertilizers[i];
+                if (item == null)
+                {
+                    continue;
+                }
+
+                bool ok = this.TryHomelandFarmTryGetCropFertilizerTableRowById(item.StaticId, out int effectType, out _);
+                if (i > 0)
+                {
+                    sb.Append(", ");
+                }
+
+                sb.Append(item.StaticId).Append(":eff").Append(ok ? effectType.ToString() : "?").Append("x").Append(item.Count);
+            }
+
+            sb.Append("]");
+            return sb.ToString();
+        }
+
         private bool TryHomelandFarmCheckFertilizerEffectValid(
             int cropFertilizerIdOnCrop,
             int selectedEffectType,
@@ -21093,31 +21180,47 @@ namespace HeartopiaMod
             return result;
         }
 
-        private void StartHomelandFarmSowAll(bool silent)
+        // maxCount caps how many slots get sown this run (default = no cap, use every seed held).
+        // The Quest Assistant passes the quest's remaining needed count so it consumes only what the
+        // quest needs instead of sowing every empty planter in radius.
+        private void StartHomelandFarmSowAll(bool silent, int maxCount = int.MaxValue)
         {
             if (!this.TryBeginHomelandFarmAction(silent, out _))
             {
                 return;
             }
 
-            this.HomelandFarmLog("Start sow all source=" + this.homelandFarmSeedStorage + " radius=" + this.homelandFarmWaterRadius.ToString("F1"));
+            this.HomelandFarmLog("Start sow all source=" + this.homelandFarmSeedStorage + " radius=" + this.homelandFarmWaterRadius.ToString("F1") + (maxCount == int.MaxValue ? string.Empty : " cap=" + maxCount));
             this.homelandFarmLastStatus = "Sowing crops...";
-            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmSowAllRoutine(silent));
+            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmSowAllRoutine(silent, maxCount));
         }
 
-        private void StartHomelandFarmFertilizeAll(bool silent)
+        // maxCount caps how many crops get fertilized this run (default = no cap, use every fertilizer
+        // held). The Quest Assistant passes the quest's remaining needed count so it consumes only what
+        // the quest needs instead of fertilizing every crop in radius.
+        // requiredStaticId (>0) = apply THIS exact fertilizer item, ignoring the dropdown/effect. The
+        // Quest Assistant passes the item id the condition names in its typeParam (e.g. 770201 for the
+        // growth-booster step) — the quest's own ground-truth requirement, so it works regardless of
+        // whether the fertilizer table resolves that item's effect type. Takes priority over
+        // requiredEffectType.
+        // requiredEffectType (-1 = use the user's dropdown selection; 0/1/2 = force a scanned fertilizer
+        // of that FertilizerEffectTypeEnum: 0 GrowthValue, 1 GrowthSpeed/booster, 2 Harvest) — fallback
+        // when the condition carries no specific item id. A growth booster is just a crop-fertilizer
+        // item whose effect type is GrowthSpeedPromote and fires the same UseCropFertilizer event, so
+        // the whole apply path is reused unchanged.
+        private void StartHomelandFarmFertilizeAll(bool silent, int maxCount = int.MaxValue, int requiredEffectType = -1, int requiredStaticId = 0)
         {
             if (!this.TryBeginHomelandFarmAction(silent, out _))
             {
                 return;
             }
 
-            this.HomelandFarmLog("Start fertilize all source=" + this.homelandFarmFertStorage + " radius=" + this.homelandFarmWaterRadius.ToString("F1"));
-            this.homelandFarmLastStatus = "Fertilizing crops...";
-            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmFertilizeAllRoutine(silent));
+            this.HomelandFarmLog("Start fertilize all source=" + this.homelandFarmFertStorage + " radius=" + this.homelandFarmWaterRadius.ToString("F1") + (maxCount == int.MaxValue ? string.Empty : " cap=" + maxCount) + (requiredStaticId > 0 ? " item=" + requiredStaticId : string.Empty) + (requiredEffectType < 0 ? string.Empty : " effect=" + requiredEffectType));
+            this.homelandFarmLastStatus = requiredEffectType == HomelandFarmFertilizerEffectGrowthRate ? "Applying growth booster..." : "Fertilizing crops...";
+            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmFertilizeAllRoutine(silent, maxCount, requiredEffectType, requiredStaticId));
         }
 
-        private IEnumerator HomelandFarmSowAllRoutine(bool silent)
+        private IEnumerator HomelandFarmSowAllRoutine(bool silent, int maxCount = int.MaxValue)
         {
             yield return null;
 
@@ -21157,6 +21260,11 @@ namespace HeartopiaMod
                 this.HomelandFarmLog("Sow batch size=" + sowBatchSize + " (hobby skill cell count)");
 
                 int remainingSeeds = seed.Count;
+                if (maxCount >= 1 && maxCount < remainingSeeds)
+                {
+                    remainingSeeds = maxCount; // quest cap: sow only the count the quest still needs
+                }
+
                 while (remainingSeeds > 0)
                 {
                     // Drive the slot-scan coroutine manually (yielding its values) so it works under
@@ -21244,7 +21352,7 @@ namespace HeartopiaMod
             }
         }
 
-        private IEnumerator HomelandFarmFertilizeAllRoutine(bool silent)
+        private IEnumerator HomelandFarmFertilizeAllRoutine(bool silent, int maxCount = int.MaxValue, int requiredEffectType = -1, int requiredStaticId = 0)
         {
             yield return null;
 
@@ -21266,7 +21374,55 @@ namespace HeartopiaMod
                     yield break;
                 }
 
-                int fertIndex = Mathf.Clamp(this.homelandFarmSelectedFertilizerIndex, 0, this.homelandFarmScannedFertilizers.Count - 1);
+                int fertIndex;
+                if (requiredStaticId > 0)
+                {
+                    // Quest-driven (primary): the condition names the exact fertilizer item to apply
+                    // (typeParam). Apply THAT item regardless of the dropdown or the effect table —
+                    // this is the quest's own requirement, and it works even when the fertilizer table
+                    // can't resolve the item's effect type.
+                    if (!this.TryHomelandFarmPickFertilizerIndexByStaticId(requiredStaticId, out fertIndex))
+                    {
+                        this.HomelandFarmLog("Fertilize: quest item #" + requiredStaticId + " not in scan; "
+                            + this.HomelandFarmDescribeScannedFertilizerEffects());
+                        this.homelandFarmLastStatus = "Quest needs item #" + requiredStaticId + " — none in "
+                            + this.homelandFarmFertStorage + ". Put it in that storage.";
+                        if (!silent)
+                        {
+                            this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
+                        }
+
+                        yield break;
+                    }
+
+                    this.HomelandFarmLog("Fertilize: quest item override staticId=" + requiredStaticId + " -> index=" + fertIndex);
+                }
+                else if (requiredEffectType >= 0)
+                {
+                    // Fallback: apply a fertilizer of the requested effect type (e.g. a growth booster)
+                    // regardless of what the user picked in the Homeland Farm dropdown.
+                    if (!this.TryHomelandFarmPickFertilizerIndexByEffect(requiredEffectType, out fertIndex, out string wantEffectName))
+                    {
+                        this.HomelandFarmLog("Fertilize: no scanned item with effectType=" + requiredEffectType
+                            + " (" + wantEffectName + "); " + this.HomelandFarmDescribeScannedFertilizerEffects());
+                        this.homelandFarmLastStatus = "No " + wantEffectName + " in " + this.homelandFarmFertStorage
+                            + " — put one in that storage (or select it on the Homeland Farm page).";
+                        if (!silent)
+                        {
+                            this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
+                        }
+
+                        yield break;
+                    }
+
+                    this.HomelandFarmLog("Fertilize: effect override effectType=" + requiredEffectType
+                        + " (" + wantEffectName + ") -> index=" + fertIndex + " staticId=" + this.homelandFarmScannedFertilizers[fertIndex].StaticId);
+                }
+                else
+                {
+                    fertIndex = Mathf.Clamp(this.homelandFarmSelectedFertilizerIndex, 0, this.homelandFarmScannedFertilizers.Count - 1);
+                }
+
                 HomelandFarmInventoryItem fertilizer = this.homelandFarmScannedFertilizers[fertIndex];
                 if (fertilizer == null || fertilizer.StaticId <= 0)
                 {
@@ -21311,6 +21467,11 @@ namespace HeartopiaMod
 
                 Dictionary<string, int> rejectReasons = new Dictionary<string, int>(StringComparer.Ordinal);
                 int maxTargets = Math.Max(1, fertilizer.Count);
+                if (maxCount >= 1 && maxCount < maxTargets)
+                {
+                    maxTargets = maxCount; // quest cap: fertilize only the count the quest still needs
+                }
+
                 for (int i = 0; i < ownCrops.Count; i++)
                 {
                     if (this.IsHomelandFarmCropFertilizable(ownCrops[i], fertilizer.StaticId, scanNetIds, out string rejectReason))
