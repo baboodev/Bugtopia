@@ -63,6 +63,21 @@ namespace HeartopiaMod
         private const float HomelandFarmAutoFinalWeedIntervalSeconds = 1f;
         private const float HomelandFarmAutoCoarseWeedIntervalSeconds = 30f;
         private const float HomelandFarmAutoEmptyRetrySeconds = 5f;       // cache empty + seeds left, sow found nothing
+        // Event-driven mode: when the field looks full (live crops + pending sows >= captured planters,
+        // tracked from detour events — no scan), skip the empty-slot radius scan that otherwise runs every
+        // tick and causes the steady-growth hitch. A harvest shrinks the count and re-enables sowing next
+        // tick; this slow safety sweep still forces one reconciling scan periodically in case the tracked
+        // count ever drifts from reality (e.g. a co-op friend removes a planter).
+        private const float HomelandFarmAutoFullFieldSowSweepSeconds = 120f;
+        // Event-driven weeding: weeds are sent the moment a hasWeed event arrives (from the detour),
+        // throttled per-crop so the event path and the poll path never double-send. Because weeding no
+        // longer needs a fast poll, the loop sleeps up to this cap (waking mainly at crop maturity)
+        // instead of every 1s/30s — removes the periodic "sleeping" churn.
+        private const float HomelandFarmAutoWeedThrottleSeconds = 4f;
+        private const float HomelandFarmAutoMaxIdleSleepSeconds = 60f;
+        // Only log the "next ripe … sleeping" line this often during an idle grow (plus whenever
+        // something actually happened that tick), so the loop doesn't churn the log while waiting.
+        private const float HomelandFarmAutoSleepLogIntervalSeconds = 120f;
         // Minimum gap between sow passes. The server takes a moment to register sown crops; sowing
         // again before that re-sows the same boxes → OnBuildSeedResult MaxPlantCountLimit.
         private const float HomelandFarmAutoSowCooldownSeconds = 15f;
@@ -94,6 +109,16 @@ namespace HeartopiaMod
         private const int HomelandFarmMaxRegisteredFarmTargets = 512;
         private const int HomelandFarmHarvestFramePaceBatch = 4;
         private const float HomelandFarmAuraComponentClassResolveRetrySeconds = 30f;
+        // Per-frame slice budget for the radius scans (build/filter/collect loops). Distinct from the
+        // wall-clock caps above (those bound the WORST-CASE freeze at N seconds in ONE frame); this
+        // one is a cooperative-yield budget so a scan spreads its work across many frames and NEVER
+        // stalls a single frame. When a sliced loop has spent this long since its last yield (and has
+        // made at least the minimum forward progress), it yields back to Unity for one frame. A former
+        // ~600ms scan spreads over ~1.7s of wall time with no perceptible hitch. See HomelandFarmScanSlicer.
+        private const long HomelandFarmScanFrameBudgetMs = 6L;
+        // Forward-progress floor: always process at least this many entities before a budget yield, so a
+        // single slow first-miss resolve can never starve the loop into yielding every entity.
+        private const int HomelandFarmScanMinEntitiesPerSlice = 4;
 
         private enum HomelandFarmWaterMode
         {
@@ -117,6 +142,40 @@ namespace HeartopiaMod
             public bool IsCropBox;
             public bool NeedsWater;
             public Vector3 Position;
+        }
+
+        // Cooperative frame-budget helper for the radius scans. A sliced scan loop calls Tick() once
+        // per entity at the TOP of the loop body (before acquiring that entity's mono pointer); when it
+        // returns true the loop `yield return null`s for one frame and then calls Yielded() to reset.
+        // Yielding only at the loop top — after the previous entity is fully resolved and before the
+        // next pointer is taken — is the GC-safety invariant: no raw MonoObject* is ever held across a
+        // yield (see [[auramono-raw-pointers-across-yields]]). Everything carried across the yield is a
+        // value type (uint netIds, Vector3 positions, counters). Pointers are re-resolved from netId in
+        // the next chunk, which every per-entity helper here already does.
+        private sealed class HomelandFarmScanSlicer
+        {
+            private readonly System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            private int processedThisSlice;
+
+            public bool Tick()
+            {
+                this.processedThisSlice++;
+                return this.processedThisSlice >= HomelandFarmScanMinEntitiesPerSlice
+                    && this.stopwatch.ElapsedMilliseconds >= HomelandFarmScanFrameBudgetMs;
+            }
+
+            public void Yielded()
+            {
+                this.processedThisSlice = 0;
+                this.stopwatch.Restart();
+            }
+        }
+
+        private sealed class HomelandFarmWaterScanResult
+        {
+            public bool Ok;
+            public string Status;
+            public List<HomelandFarmTarget> Targets = new List<HomelandFarmTarget>();
         }
 
         private sealed class HomelandFarmInventoryItem
@@ -180,6 +239,20 @@ namespace HeartopiaMod
         private int homelandFarmAutoPlanterCount = 0;
         private int homelandFarmAutoCaptureExcludedOutsideRadius = 0;
         private bool homelandFarmAutoRunning = false;
+        // Separate coroutine slot for the weed+water hotkey so it can run INDEPENDENTLY of auto-farm
+        // (which holds homelandFarmCoroutine). While it is set, the auto loop defers its own AuraMono
+        // scans so the two never scan concurrently (back-to-back Aura passes crash).
+        private object homelandFarmHotkeyCoroutine = null;
+        // Event-driven auto-farm (default ON): read crop/box state from the detour-fed event cache and
+        // skip the per-tick empty-slot radius scan when the field is full. Flip OFF to fall back to the
+        // proven always-rescan behaviour if the event path ever misbehaves in-game.
+        private bool homelandFarmAutoEventDriven = true;
+        private float homelandFarmAutoNextFullFieldSowSweepAt = 0f;
+        // Field owner captured at "Capture planters", used as a SCAN-FREE presence gate: the auto loop
+        // only runs scans/sow while the player is standing in THIS field (current in-field owner ==
+        // captured owner). Never call TryHomelandFarmIsInHomeland(allowVisitingFarmArea:true) per tick —
+        // it runs a farm scan (the visiting fallback) which crashes on streaming fields.
+        private uint homelandFarmAutoFieldOwnerNetId = 0U;
         private int homelandFarmAutoSowCount = 0;
         // Crop netIds discovered after sow; polled directly each tick (no radius re-scan).
         private readonly List<uint> homelandFarmAutoCropNetIds = new List<uint>();
@@ -188,6 +261,9 @@ namespace HeartopiaMod
         private readonly HashSet<uint> homelandFarmAutoHarvestedNetIds = new HashSet<uint>();
         // Planter boxes sown this generation but not yet visible to the crop scan / occupied check.
         private readonly HashSet<uint> homelandFarmAutoPendingSowBoxNetIds = new HashSet<uint>();
+        // Per-crop weed-send throttle so the event-driven weeder (drain) and the poll loop don't double-send.
+        private readonly Dictionary<uint, float> homelandFarmAutoWeedSentAt = new Dictionary<uint, float>();
+        private float homelandFarmAutoNextSleepLogAt = 0f;
         private readonly Dictionary<uint, ulong> homelandFarmResolvedPutZoneByPlanterNetId = new Dictionary<uint, ulong>();
         // While set, every radius scan (sow slots, weed, harvest) centers on the captured
         // planter zone instead of the live player position, so the player may drift slightly.
@@ -199,6 +275,25 @@ namespace HeartopiaMod
             public Quaternion WorldRotation;
             public ulong PutZoneId;
         }
+
+        // Everything CropSeeding needs for one planter, resolved WHILE the field is loaded (at capture)
+        // and kept for the session so a remote re-sow (player away, field unloaded) can rebuild the
+        // CropPlantPoint list without a scan or a live level object. These are the exact inputs to
+        // CreateHomelandFarmCropPlantPoint(FieldLocalPos, Angle, LevelObjectNetId, boxNetId).
+        private sealed class HomelandFarmCapturedSowPoint
+        {
+            public ulong LevelObjectNetId; // putZoneId (validated GetLevelObject at capture)
+            public Vector3 FieldLocalPos;  // ReducePrecision(worldToLocal * planter root world pos)
+            public int Angle;              // field-local Y euler, rounded
+        }
+
+        private readonly Dictionary<uint, HomelandFarmCapturedSowPoint> homelandFarmCapturedSowPointByBoxNetId =
+            new Dictionary<uint, HomelandFarmCapturedSowPoint>();
+
+        // Crop netIds present at capture, so an auto-farm STARTED while away (where discovery can't scan
+        // the field) still maintains the crops that were growing when you captured. The poll loop drops
+        // any that turn out stale; discovery refreshes it the moment you're back at the field.
+        private readonly HashSet<uint> homelandFarmCapturedCropNetIds = new HashSet<uint>();
 
         private readonly Dictionary<uint, HomelandFarmPlanterSowAnchor> homelandFarmPlanterSowAnchorByNetId =
             new Dictionary<uint, HomelandFarmPlanterSowAnchor>();
@@ -1103,6 +1198,11 @@ namespace HeartopiaMod
 
         internal void UpdateHomelandFarmBackground()
         {
+            // Event diagnostics pump (HomelandFarmEventDiagFeature.cs): lazy detour install +
+            // ring drain. A single bool check when the toggle is off; runs before the scene gate
+            // so drains keep up whenever the detours fire.
+            this.PumpHomelandFarmEventDiag();
+
             if (!this.IsHomelandFarmSceneLoadFinished())
             {
                 return;
@@ -2912,21 +3012,41 @@ namespace HeartopiaMod
             }
         }
 
+        // Synchronous drain of the sliced water-target scan (used by non-UI / one-shot callers).
+        // Runs the routine to completion in one frame, exactly like before the frame-budget rework.
         private bool ScanHomelandFarmWaterTargets(out List<HomelandFarmTarget> targets, out string status, bool allowVisitingFarmArea = false, float scanRadiusOverride = 0f)
         {
-            targets = new List<HomelandFarmTarget>();
-            status = "Homeland farm scan unavailable.";
-            if (!this.TryHomelandFarmIsInHomeland(out status, allowVisitingFarmArea))
+            HomelandFarmWaterScanResult result = new HomelandFarmWaterScanResult();
+            IEnumerator drive = this.ScanHomelandFarmWaterTargetsRoutine(result, allowVisitingFarmArea, scanRadiusOverride);
+            while (drive.MoveNext())
             {
-                return false;
+            }
+
+            targets = result.Targets;
+            status = result.Status ?? "Homeland farm scan unavailable.";
+            return result.Ok;
+        }
+
+        // Frame-budgeted water-target scan. The per-netId build loop (TryHomelandFarmBuildWaterTarget
+        // does several component resolves each) yields between fully-resolved entities so it never
+        // stalls a frame. Drive it from a coroutine with `while (r.MoveNext()) yield return r.Current;`
+        // for the responsive path, or via ScanHomelandFarmWaterTargets for a synchronous result.
+        private IEnumerator ScanHomelandFarmWaterTargetsRoutine(HomelandFarmWaterScanResult result, bool allowVisitingFarmArea, float scanRadiusOverride)
+        {
+            result.Ok = false;
+            result.Status = "Homeland farm scan unavailable.";
+            if (!this.TryHomelandFarmIsInHomeland(out string homelandStatus, allowVisitingFarmArea))
+            {
+                result.Status = homelandStatus;
+                yield break;
             }
 
             if (!this.EnsureHomelandFarmReflectionReady())
             {
-                status = string.IsNullOrEmpty(this.homelandFarmReflectionUnavailableStatus)
+                result.Status = string.IsNullOrEmpty(this.homelandFarmReflectionUnavailableStatus)
                     ? "Homeland farm reflection unavailable."
                     : this.homelandFarmReflectionUnavailableStatus;
-                return false;
+                yield break;
             }
 
             HashSet<uint> netIds = new HashSet<uint>();
@@ -2948,8 +3068,8 @@ namespace HeartopiaMod
                         radius,
                         useAutoFarmCollectShortcuts: false))
                 {
-                    status = string.IsNullOrEmpty(scanSource) ? "No homeland farm entities found." : scanSource;
-                    return false;
+                    result.Status = string.IsNullOrEmpty(scanSource) ? "No homeland farm entities found." : scanSource;
+                    yield break;
                 }
 
                 // For radius requests, drop far netIds before the expensive BuildWaterTarget step
@@ -2962,12 +3082,19 @@ namespace HeartopiaMod
             }
             else if (!this.TryHomelandFarmCollectFarmEntityNetIds(netIds, out scanSource))
             {
-                status = string.IsNullOrEmpty(scanSource) ? "No homeland farm entities found." : scanSource;
-                return false;
+                result.Status = string.IsNullOrEmpty(scanSource) ? "No homeland farm entities found." : scanSource;
+                yield break;
             }
 
+            HomelandFarmScanSlicer slicer = new HomelandFarmScanSlicer();
             foreach (uint netId in netIds)
             {
+                if (slicer.Tick())
+                {
+                    yield return null;
+                    slicer.Yielded();
+                }
+
                 if (netId == 0U)
                 {
                     continue;
@@ -2991,12 +3118,12 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                targets.Add(target);
+                result.Targets.Add(target);
             }
 
-            status = "Scanned " + targets.Count + " water target(s) via " + scanSource + ".";
-            this.HomelandFarmLog(status);
-            return targets.Count > 0;
+            result.Status = "Scanned " + result.Targets.Count + " water target(s) via " + scanSource + ".";
+            this.HomelandFarmLog(result.Status);
+            result.Ok = result.Targets.Count > 0;
         }
 
         private void FilterHomelandFarmByRadius(List<HomelandFarmTarget> targets, Vector3 center, float radius)
@@ -3119,9 +3246,42 @@ namespace HeartopiaMod
             bool useCapturedScanCenter = false)
         {
             List<uint> result = new List<uint>();
+            IEnumerator drive = this.ScanHomelandFarmCropsByRadiusRoutine(
+                result,
+                cropPredicate,
+                label,
+                requireOwn,
+                preCollectedNetIds,
+                logScanSummary,
+                includePlantData,
+                useAutoFarmCollectShortcuts,
+                useCapturedScanCenter);
+            while (drive.MoveNext())
+            {
+            }
+
+            return result;
+        }
+
+        // Frame-budgeted crop radius scan. Collect (Phase 1) still runs synchronously; the per-netId
+        // filter/build loop (FilterHomelandFarmCropsFromNetIdsRoutine — several component resolves per
+        // entity) is sliced so it never stalls a frame. Fills `result`. Drive from a coroutine with
+        // `while (r.MoveNext()) yield return r.Current;`, or call ScanHomelandFarmCropsByRadius for a
+        // synchronous drain.
+        private IEnumerator ScanHomelandFarmCropsByRadiusRoutine(
+            List<uint> result,
+            Func<object, bool> cropPredicate,
+            string label,
+            bool requireOwn,
+            HashSet<uint> preCollectedNetIds = null,
+            bool logScanSummary = true,
+            bool includePlantData = false,
+            bool useAutoFarmCollectShortcuts = false,
+            bool useCapturedScanCenter = false)
+        {
             if (cropPredicate == null || !this.EnsureHomelandFarmReflectionReady())
             {
-                return result;
+                yield break;
             }
 
             uint playerNetId = 0U;
@@ -3133,7 +3293,7 @@ namespace HeartopiaMod
                 if (playerNetId == 0U)
                 {
                     this.HomelandFarmLog(label + ": player netId unavailable for own filter.");
-                    return result;
+                    yield break;
                 }
 
                 onOwnField = this.TryHomelandFarmIsOnOwnFarmField(playerNetId);
@@ -3179,7 +3339,8 @@ namespace HeartopiaMod
                 }
             }
 
-            return this.FilterHomelandFarmCropsFromNetIds(
+            IEnumerator filter = this.FilterHomelandFarmCropsFromNetIdsRoutine(
+                result,
                 netIds,
                 cropPredicate,
                 label,
@@ -3192,8 +3353,13 @@ namespace HeartopiaMod
                 radius,
                 logScanSummary,
                 includePlantData);
+            while (filter.MoveNext())
+            {
+                yield return filter.Current;
+            }
         }
 
+        // Synchronous drain of the sliced crop-filter loop (non-UI callers).
         private List<uint> FilterHomelandFarmCropsFromNetIds(
             HashSet<uint> netIds,
             Func<object, bool> cropPredicate,
@@ -3209,6 +3375,42 @@ namespace HeartopiaMod
             bool includePlantData = false)
         {
             List<uint> result = new List<uint>();
+            IEnumerator drive = this.FilterHomelandFarmCropsFromNetIdsRoutine(
+                result,
+                netIds,
+                cropPredicate,
+                label,
+                requireOwn,
+                playerNetId,
+                effectiveOwnerNetId,
+                onOwnField,
+                hasPlayerPos,
+                playerPos,
+                radius,
+                logScanSummary,
+                includePlantData);
+            while (drive.MoveNext())
+            {
+            }
+
+            return result;
+        }
+
+        private IEnumerator FilterHomelandFarmCropsFromNetIdsRoutine(
+            List<uint> result,
+            HashSet<uint> netIds,
+            Func<object, bool> cropPredicate,
+            string label,
+            bool requireOwn,
+            uint playerNetId,
+            uint effectiveOwnerNetId,
+            bool onOwnField,
+            bool hasPlayerPos,
+            Vector3 playerPos,
+            float radius,
+            bool logScanSummary = true,
+            bool includePlantData = false)
+        {
             if (netIds == null || netIds.Count == 0 || cropPredicate == null)
             {
                 if (logScanSummary)
@@ -3216,13 +3418,20 @@ namespace HeartopiaMod
                     this.HomelandFarmLog(label + " (radius " + radius.ToString("F0") + (requireOwn ? ", own" : string.Empty) + "): 0");
                 }
 
-                return result;
+                yield break;
             }
 
             float radiusSq = radius * radius;
             HashSet<uint> seenCrops = new HashSet<uint>();
+            HomelandFarmScanSlicer slicer = new HomelandFarmScanSlicer();
             foreach (uint netId in netIds)
             {
+                if (slicer.Tick())
+                {
+                    yield return null;
+                    slicer.Yielded();
+                }
+
                 if (netId == 0U)
                 {
                     continue;
@@ -3365,8 +3574,6 @@ namespace HeartopiaMod
             {
                 this.HomelandFarmLog(label + " (radius " + radius.ToString("F0") + (requireOwn ? ", own" : string.Empty) + "): " + result.Count);
             }
-
-            return result;
         }
 
         // CropItemData often reports ownerId=0; fall back to the linked crop-box owner (same as water scan).
@@ -3414,6 +3621,17 @@ namespace HeartopiaMod
                 requireOwn: true);
         }
 
+        // Frame-budgeted sibling of ScanHomelandFarmHarvestableCropsByRadius. Fills `result`; drive
+        // from the harvest coroutine so the scan never stalls a frame.
+        private IEnumerator ScanHomelandFarmHarvestableCropsByRadiusRoutine(List<uint> result)
+        {
+            return this.ScanHomelandFarmCropsByRadiusRoutine(
+                result,
+                cropData => this.TryHomelandFarmReadComponentInt(cropData, out int stage, "stage", "Stage") && stage == 4,
+                "Harvestable crops",
+                requireOwn: true);
+        }
+
         private List<uint> ScanHomelandFarmCollectablePlantSeedsByRadius()
         {
             return this.ScanHomelandFarmPlantsByRadius(
@@ -3426,10 +3644,39 @@ namespace HeartopiaMod
                 "Collectable plant seeds");
         }
 
+        // Frame-budgeted sibling of ScanHomelandFarmCollectablePlantSeedsByRadius.
+        private IEnumerator ScanHomelandFarmCollectablePlantSeedsByRadiusRoutine(List<uint> result)
+        {
+            return this.ScanHomelandFarmPlantsByRadiusRoutine(
+                result,
+                (plantData, _) => this.TryHomelandFarmReadComponentBool(
+                    plantData,
+                    out bool hasCrossedSeed,
+                    "hasCrossedSeed",
+                    "_hasCrossedSeed",
+                    "HasCrossedSeed") && hasCrossedSeed,
+                "Collectable plant seeds");
+        }
+
         private List<uint> ScanHomelandFarmPickablePlantsByRadius(bool requireOutOfSeason)
         {
             return this.ScanHomelandFarmPlantsByRadius(
-                (plantData, netId) =>
+                this.BuildHomelandFarmPickablePlantPredicate(requireOutOfSeason),
+                requireOutOfSeason ? "Dormant plants" : "Mature plants");
+        }
+
+        // Frame-budgeted sibling of ScanHomelandFarmPickablePlantsByRadius.
+        private IEnumerator ScanHomelandFarmPickablePlantsByRadiusRoutine(List<uint> result, bool requireOutOfSeason)
+        {
+            return this.ScanHomelandFarmPlantsByRadiusRoutine(
+                result,
+                this.BuildHomelandFarmPickablePlantPredicate(requireOutOfSeason),
+                requireOutOfSeason ? "Dormant plants" : "Mature plants");
+        }
+
+        private Func<object, uint, bool> BuildHomelandFarmPickablePlantPredicate(bool requireOutOfSeason)
+        {
+            return (plantData, netId) =>
                 {
                     if (!this.TryHomelandFarmReadComponentInt(plantData, out int stage, "stage", "Stage") || stage != 4)
                     {
@@ -3449,16 +3696,29 @@ namespace HeartopiaMod
                     IntPtr entityObj = IntPtr.Zero;
                     this.TryGetAuraMonoEntityObjectByNetId(netId, out entityObj);
                     return this.TryHomelandFarmTryReadPlantCheckIfOutOfSeason(netId, entityObj, out bool outOfSeason) && outOfSeason;
-                },
-                requireOutOfSeason ? "Dormant plants" : "Mature plants");
+                };
         }
 
+        // Synchronous drain of the sliced plant scan (non-UI callers).
         private List<uint> ScanHomelandFarmPlantsByRadius(Func<object, uint, bool> acceptPlant, string logLabel)
         {
             List<uint> result = new List<uint>();
+            IEnumerator drive = this.ScanHomelandFarmPlantsByRadiusRoutine(result, acceptPlant, logLabel);
+            while (drive.MoveNext())
+            {
+            }
+
+            return result;
+        }
+
+        // Frame-budgeted plant radius scan. The per-netId PlantItemData read loop is sliced so it
+        // never stalls a frame. Fills `result`. Drive from a coroutine with
+        // `while (r.MoveNext()) yield return r.Current;`, or drain via ScanHomelandFarmPlantsByRadius.
+        private IEnumerator ScanHomelandFarmPlantsByRadiusRoutine(List<uint> result, Func<object, uint, bool> acceptPlant, string logLabel)
+        {
             if (!this.EnsureHomelandFarmReflectionReady() || acceptPlant == null)
             {
-                return result;
+                yield break;
             }
 
             HashSet<uint> netIds = new HashSet<uint>();
@@ -3479,8 +3739,15 @@ namespace HeartopiaMod
             }
 
             float radiusSq = radius * radius;
+            HomelandFarmScanSlicer slicer = new HomelandFarmScanSlicer();
             foreach (uint netId in netIds)
             {
+                if (slicer.Tick())
+                {
+                    yield return null;
+                    slicer.Yielded();
+                }
+
                 if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object plantData, out _, "PlantItemData")
                     || plantData == null
                     || !acceptPlant(plantData, netId))
@@ -3500,12 +3767,21 @@ namespace HeartopiaMod
             }
 
             this.HomelandFarmLog(logLabel + " (radius " + radius.ToString("F0") + "): " + result.Count);
-            return result;
         }
 
         private List<uint> ScanHomelandFarmWeedableCropsByRadius()
         {
             return this.ScanHomelandFarmCropsByRadius(
+                cropData => this.TryHomelandFarmReadComponentBool(cropData, out bool hasWeed, "hasWeed", "_hasWeed", "HasWeed") && hasWeed,
+                "Weedable crops",
+                requireOwn: false);
+        }
+
+        // Frame-budgeted sibling of ScanHomelandFarmWeedableCropsByRadius.
+        private IEnumerator ScanHomelandFarmWeedableCropsByRadiusRoutine(List<uint> result)
+        {
+            return this.ScanHomelandFarmCropsByRadiusRoutine(
+                result,
                 cropData => this.TryHomelandFarmReadComponentBool(cropData, out bool hasWeed, "hasWeed", "_hasWeed", "HasWeed") && hasWeed,
                 "Weedable crops",
                 requireOwn: false);
@@ -4261,6 +4537,33 @@ namespace HeartopiaMod
             if (this.TryResolveHomelandFarmAuraProtocol(out _)
                 && this.TryHomelandFarmInvokeAuraUintProtocol(this.homelandFarmAuraCropWeedMethod, cropNetId, "Weed", out status))
             {
+                return true;
+            }
+
+            return false;
+        }
+
+        // Send a weed command for one crop, throttled per-netId. Shared by the event-driven weeder (the
+        // detour drain, which weeds the instant a hasWeed event lands) and the auto poll loop, so the two
+        // paths never double-send for the same crop within the throttle window. Safe to call from OnUpdate
+        // (the weed command is a lightweight protocol send, no scan / no coroutine).
+        private bool TryHomelandFarmAutoWeedThrottled(uint cropNetId)
+        {
+            if (cropNetId == 0U)
+            {
+                return false;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            if (this.homelandFarmAutoWeedSentAt.TryGetValue(cropNetId, out float last)
+                && now - last < HomelandFarmAutoWeedThrottleSeconds)
+            {
+                return false;
+            }
+
+            if (this.TryHomelandFarmWeed(cropNetId, out _))
+            {
+                this.homelandFarmAutoWeedSentAt[cropNetId] = now;
                 return true;
             }
 
@@ -14674,7 +14977,12 @@ namespace HeartopiaMod
             this.homelandFarmAutoCropNetIds.Clear();
             this.homelandFarmAutoHarvestedNetIds.Clear();
             this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+            this.homelandFarmAutoWeedSentAt.Clear();
+            this.homelandFarmCapturedSowPointByBoxNetId.Clear();
+            this.homelandFarmCapturedCropNetIds.Clear();
             this.homelandFarmRegisteredFarmTargets.Clear();
+            // Drop event-fed crop/box state so a new field / run never reads a previous field's netIds.
+            this.ClearHomelandFarmEventStateCache();
         }
 
         // Snapshot the planters (crop boxes) within the current radius around the player,
@@ -14795,6 +15103,70 @@ namespace HeartopiaMod
             this.homelandFarmAutoCaptureRadius = radius;
             this.homelandFarmAutoPlanterCount = planterCount;
             this.homelandFarmAutoCaptured = true;
+            // Remember which field this is (scan-free presence gate for the auto loop). 0 = unknown →
+            // the loop falls back to the scan-free own-homeland flag.
+            this.homelandFarmAutoFieldOwnerNetId =
+                this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint capturedFieldOwner) ? capturedFieldOwner : 0U;
+            this.HomelandFarmLog("Auto capture field owner=" + this.homelandFarmAutoFieldOwnerNetId);
+
+            // Save the full CropSeeding input (putZoneId + field-local pos + angle) for every planter
+            // NOW, while the field is loaded, so a future remote re-sow can rebuild the sow command
+            // without a scan or a live level object (which are unavailable when the player is away).
+            // This is the same per-box placement the sow pass resolves — done once here up front.
+            this.homelandFarmCapturedSowPointByBoxNetId.Clear();
+            int sowPointsCaptured = 0;
+            foreach (uint boxNetId in cropBoxNetIds)
+            {
+                if (boxNetId == 0U)
+                {
+                    continue;
+                }
+
+                if (this.TryHomelandFarmResolveBoxFieldPlacement(boxNetId, out ulong sowLevelObjectNetId, out Vector3 sowFieldLocalPos, out int sowAngle)
+                    && sowLevelObjectNetId != 0UL)
+                {
+                    this.homelandFarmCapturedSowPointByBoxNetId[boxNetId] = new HomelandFarmCapturedSowPoint
+                    {
+                        LevelObjectNetId = sowLevelObjectNetId,
+                        FieldLocalPos = sowFieldLocalPos,
+                        Angle = sowAngle,
+                    };
+                    sowPointsCaptured++;
+                }
+            }
+
+            this.HomelandFarmLog("Auto capture sow points: " + sowPointsCaptured + "/" + cropBoxNetIds.Count
+                + " planter(s) saved for remote re-sow.");
+
+            // Snapshot the crops currently growing on the field (same filter the auto loop's discovery
+            // uses) so an auto-farm started while AWAY still knows which crops to weed/harvest — discovery
+            // can't scan the field remotely. Reuses the capture farm-entity set (no extra collect).
+            List<uint> capturedCrops = this.ScanHomelandFarmCropsByRadius(
+                cropData =>
+                {
+                    if (this.TryHomelandFarmReadComponentInt(cropData, out int stage, "stage", "Stage") && stage > 4)
+                    {
+                        return false;
+                    }
+
+                    return !(this.TryHomelandFarmReadComponentBool(cropData, out bool isPick, "isPick", "_isPick", "IsPick") && isPick);
+                },
+                "Auto capture crops",
+                requireOwn: false,
+                preCollectedNetIds: farmNetIds,
+                logScanSummary: false,
+                includePlantData: true);
+            this.homelandFarmCapturedCropNetIds.Clear();
+            foreach (uint cropNetId in capturedCrops)
+            {
+                if (cropNetId != 0U)
+                {
+                    this.homelandFarmCapturedCropNetIds.Add(cropNetId);
+                }
+            }
+
+            this.HomelandFarmLog("Auto capture crops: " + this.homelandFarmCapturedCropNetIds.Count
+                + " live crop(s) saved for a remote start.");
 
             string radiusNote = excludedOutsideRadius > 0
                 ? " (" + excludedOutsideRadius + " outside radius)"
@@ -14816,11 +15188,26 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (!this.TryBeginHomelandFarmAction(silent: false, out _, allowVisitingFarmArea: true))
+            // Auto-farm can be started from ANYWHERE once planters are captured — the loop maintains the
+            // field remotely (event-driven weed/harvest by netId) and defers scan/sow until you return.
+            // So do NOT gate the start on TryBeginHomelandFarmAction: its homeland check FAILS when you're
+            // away (blocking the start) and it runs a crash-prone visiting farm scan. Use a scan-free gate.
+            if (this.homelandFarmCoroutine != null || Time.realtimeSinceStartup < this.homelandFarmBusyUntil)
             {
+                this.AddMenuNotification("Homeland farm action already running.", new Color(0.45f, 0.88f, 1f));
                 return;
             }
 
+            if (!this.EnsureHomelandFarmReflectionReady())
+            {
+                this.homelandFarmLastStatus = string.IsNullOrEmpty(this.homelandFarmReflectionUnavailableStatus)
+                    ? "Homeland farm reflection unavailable."
+                    : this.homelandFarmReflectionUnavailableStatus;
+                this.AddMenuNotification(this.homelandFarmLastStatus, new Color(1f, 0.55f, 0.45f));
+                return;
+            }
+
+            this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
             this.HomelandFarmLog("Start auto farm center=" + this.homelandFarmAutoCenter + " radius=" + this.homelandFarmAutoCaptureRadius.ToString("F0"));
             this.homelandFarmLastStatus = "Auto farming...";
             this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmAutoRoutine());
@@ -14937,6 +15324,14 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Cache-first: the UpdateComponentData<CropItemData> detour pushes crop state into the event
+            // cache (allocation-free, works at distance, no AuraMono view read). Only fall back to the
+            // view read when we have never seen an event for this crop (cold start, near-field).
+            if (this.TryGetHomelandFarmEventCropState(cropNetId, out stage, out hasWeed, out _, out remainingSeconds))
+            {
+                return true;
+            }
+
             object cropData = null;
             if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out cropData, out _, "CropItemData")
                 || cropData == null)
@@ -14977,6 +15372,12 @@ namespace HeartopiaMod
             if (this.homelandFarmAutoHarvestedNetIds.Contains(netId))
             {
                 return true;
+            }
+
+            // Cache-first: the detour pushes isPick into the event cache (works at distance).
+            if (this.TryGetHomelandFarmEventCropState(netId, out _, out _, out bool cachedIsPick, out _))
+            {
+                return cachedIsPick;
             }
 
             object cropData = null;
@@ -15376,6 +15777,16 @@ namespace HeartopiaMod
             this.homelandFarmAutoCropNetIds.Clear();
             this.homelandFarmAutoHarvestedNetIds.Clear();
             this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+            // Seed the tracked crops from the capture snapshot so a start made AWAY from the field (where
+            // discovery can't scan) immediately maintains the crops that were growing at capture. When
+            // you're at the field, discovery rebuilds this on the first tick, so this is a no-op there.
+            foreach (uint capturedCropNetId in this.homelandFarmCapturedCropNetIds)
+            {
+                if (capturedCropNetId != 0U && !this.homelandFarmAutoCropNetIds.Contains(capturedCropNetId))
+                {
+                    this.homelandFarmAutoCropNetIds.Add(capturedCropNetId);
+                }
+            }
 
             int totalSown = 0;
             int totalWeeded = 0;
@@ -15416,12 +15827,50 @@ namespace HeartopiaMod
 
                 while (true)
                 {
+                    // Pause the whole tick while an independent weed+water hotkey action runs, so
+                    // auto-farm never runs an AuraMono scan (discovery / sow-slot / occupied) concurrently
+                    // with the hotkey's scan — back-to-back Aura passes crash. The hotkey action is short;
+                    // auto resumes as soon as it clears. Loop-local state (needDiscovery, cooldowns) persists.
+                    if (this.homelandFarmHotkeyCoroutine != null)
+                    {
+                        this.homelandFarmLastStatus = "Auto: paused for water+weed hotkey...";
+                        yield return new WaitForSecondsRealtime(0.5f);
+                        continue;
+                    }
+
+                    // Whether the player is currently standing in the CAPTURED field. Discovery, the
+                    // occupied cross-check, and sowing all need loaded farm entities, so they FAIL when the
+                    // player has roamed away (ComponentRadius returns 0 → valid crops get pruned → re-sow
+                    // storm). At distance we keep only the event-driven work (weed/harvest by netId, which
+                    // the server accepts remotely) and defer discovery/occupied/sow until the player
+                    // returns. This gate MUST be scan-free: TryHomelandFarmIsInHomeland(allowVisitingFarmArea:
+                    // true) runs a farm scan (the visiting fallback) which crashed on the streaming field
+                    // (the "why did it scan" + AuraMono MoveNext-storm crash). Use the cheap in-field-owner
+                    // read instead: are we in the same field we captured? Fall back to the scan-free own-
+                    // homeland flag when the captured owner is unknown.
+                    // FIX ("harvested but never re-sowed"): the old in-field-owner check was true ONLY while
+                    // literally standing on a planter tile, so re-sow was wrongly deferred as "away" after
+                    // harvesting from a step away. Use the scan-free own-homeland flag (allowVisitingFarmArea:
+                    // false does NOT scan) — true anywhere in the OWN homeland, on OR off a field tile.
+                    bool inHomeland = this.TryHomelandFarmIsInHomeland(out _, allowVisitingFarmArea: false, logDecisions: false);
+                    // Extra guard: if we're demonstrably standing in a DIFFERENT field (current in-field
+                    // owner non-zero and != captured owner), we're visiting elsewhere → treat as away so we
+                    // never scan/sow the wrong field.
+                    if (inHomeland
+                        && this.homelandFarmAutoFieldOwnerNetId != 0U
+                        && this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint currentFieldOwner)
+                        && currentFieldOwner != 0U
+                        && currentFieldOwner != this.homelandFarmAutoFieldOwnerNetId)
+                    {
+                        inHomeland = false;
+                    }
+
                     // 1. DISCOVERY FIRST — (re)build the crop cache so we know what is actually in the
                     //    zone BEFORE deciding to sow. This is the only radius scan in the loop. Running
                     //    it before sow is what prevents re-sowing already-occupied planters on a restart
                     //    (the sow-slot occupied check is unreliable right after a previous sow). Wait the
-                    //    registration delay only when we just sowed.
-                    if (needDiscovery)
+                    //    registration delay only when we just sowed. Skipped when away (scan returns 0).
+                    if (needDiscovery && inHomeland)
                     {
                         needDiscovery = false;
                         if (discoveryDelay)
@@ -15469,7 +15918,9 @@ namespace HeartopiaMod
                     // validation. During steady growth the directed per-netId poll (readCropState) is
                     // enough, so we avoid a heavy scan + warmup on every tick.
                     bool haveOccupiedPlanters = false;
-                    if (this.homelandFarmAutoPendingSowBoxNetIds.Count > 0)
+                    // Only run the occupied radius scan while in homeland. At distance it returns empty and
+                    // would prune every valid growing crop (the observed "pruned=12" → re-sow storm).
+                    if (this.homelandFarmAutoPendingSowBoxNetIds.Count > 0 && inHomeland)
                     {
                         haveOccupiedPlanters = this.TryHomelandFarmCollectOccupiedCapturedPlanterNetIds(
                             out occupiedPlanters,
@@ -15511,7 +15962,7 @@ namespace HeartopiaMod
                             continue;
                         }
 
-                        if (hasWeed && this.TryHomelandFarmWeed(cropNetId, out _))
+                        if (hasWeed && this.TryHomelandFarmAutoWeedThrottled(cropNetId))
                         {
                             totalWeeded++;
                             weededThisTick++;
@@ -15559,8 +16010,27 @@ namespace HeartopiaMod
                     //    excluded via homelandFarmAutoPendingSowBoxNetIds), so this never re-sows an
                     //    un-registered box (MaxPlantCountLimit). Cooldown-gated so the heavy empty-slot
                     //    scan runs at most once per interval, even when nothing was free.
-                    if (!seedsExhausted && Time.realtimeSinceStartup >= nextSowAllowedAt)
+                    // Event-driven: when the field is full (live crops + pending sows >= captured
+                    // planters), skip the empty-slot radius scan — that scan every tick is the steady-
+                    // growth hitch. A harvest shrinks the count so the very next tick re-enables sowing;
+                    // a slow safety sweep still forces an occasional reconciling scan.
+                    bool sowScanSkipped = false;
+                    if (this.homelandFarmAutoEventDriven && this.homelandFarmAutoPlanterCount > 0)
                     {
+                        int occupiedEstimate = this.homelandFarmAutoCropNetIds.Count + this.homelandFarmAutoPendingSowBoxNetIds.Count;
+                        if (occupiedEstimate >= this.homelandFarmAutoPlanterCount
+                            && Time.realtimeSinceStartup < this.homelandFarmAutoNextFullFieldSowSweepAt)
+                        {
+                            sowScanSkipped = true;
+                        }
+                    }
+
+                    // Sowing needs loaded planters + the homeland gate; skip it entirely when away
+                    // (otherwise it re-sow-storms and spams "Homeland gate blocked"). Freed boxes are
+                    // topped up when the player returns.
+                    if (!sowScanSkipped && !seedsExhausted && inHomeland && Time.realtimeSinceStartup >= nextSowAllowedAt)
+                    {
+                        this.homelandFarmAutoNextFullFieldSowSweepAt = Time.realtimeSinceStartup + HomelandFarmAutoFullFieldSowSweepSeconds;
                         this.RefreshHomelandFarmSeeds();
                         HomelandFarmInventoryItem seed = this.FindHomelandFarmSeedByStaticId(seedStaticId);
                         if (seed == null)
@@ -15610,34 +16080,26 @@ namespace HeartopiaMod
 
                         // Waiting for just-sown crops to register/grow, or for the sow cooldown to
                         // elapse. Re-discover (picks up crops once they register) before deciding again.
-                        this.homelandFarmLastStatus = "Auto: waiting for crops...";
-                        yield return new WaitForSecondsRealtime(HomelandFarmAutoEmptyRetrySeconds);
+                        // Away with an empty field nothing can happen until the player returns, so wait
+                        // the long interval instead of retrying every few seconds.
+                        this.homelandFarmLastStatus = inHomeland ? "Auto: waiting for crops..." : "Auto: away — waiting to return...";
+                        yield return new WaitForSecondsRealtime(inHomeland ? HomelandFarmAutoEmptyRetrySeconds : HomelandFarmAutoMaxIdleSleepSeconds);
                         needDiscovery = true;
                         continue;
                     }
 
-                    // 5. Sleep until the next meaningful moment, driven by exact maturity:
-                    //    final minute → weed every second; otherwise coarse weeding cadence.
-                    float sleep;
-                    if (minRemaining == long.MaxValue)
-                    {
-                        sleep = HomelandFarmAutoCoarseWeedIntervalSeconds;
-                    }
-                    else if (minRemaining <= HomelandFarmAutoFinalMinuteSeconds)
-                    {
-                        sleep = HomelandFarmAutoFinalWeedIntervalSeconds;
-                    }
-                    else
-                    {
-                        sleep = Mathf.Min(
-                            HomelandFarmAutoCoarseWeedIntervalSeconds,
-                            (float)(minRemaining - HomelandFarmAutoFinalMinuteSeconds));
-                        sleep = Mathf.Max(sleep, HomelandFarmAutoFinalWeedIntervalSeconds);
-                    }
+                    // 5. Sleep until the next crop matures. Weeding is event-driven now (sent the instant
+                    //    a hasWeed event arrives, throttled), so the loop no longer polls every 1s/30s just
+                    //    to catch weeds — it wakes mainly at maturity to harvest, capped at a coarse safety
+                    //    interval so a drifted maturity estimate / missed event still self-corrects.
+                    float sleep = minRemaining == long.MaxValue
+                        ? HomelandFarmAutoMaxIdleSleepSeconds
+                        : Mathf.Clamp((float)minRemaining, HomelandFarmAutoFinalWeedIntervalSeconds, HomelandFarmAutoMaxIdleSleepSeconds);
 
                     // Just harvested some crops while others still grow with > threshold seconds to
                     // ripen: the freed boxes likely aren't server-free yet, so don't sleep all the way
-                    // to the next ripe. Wake within the short retry window to re-sow the freed boxes.
+                    // to the next ripe. Wake within the short retry window to re-sow the freed boxes
+                    // (only acts in homeland; away, sow is deferred until return).
                     if (harvestedThisTick > 0
                         && minRemaining != long.MaxValue
                         && minRemaining > HomelandFarmAutoPostHarvestResowThresholdSeconds)
@@ -15651,8 +16113,16 @@ namespace HeartopiaMod
                         : Mathf.Max(0, (int)minRemaining) + "s";
                     this.homelandFarmLastStatus = "Auto farming — sown " + totalSown + ", weeded " + totalWeeded
                         + ", harvested " + totalHarvested + ". Next ripe in " + remainLabel + ".";
-                    this.HomelandFarmLog("Auto: next ripe in " + remainLabel + " (" + this.homelandFarmAutoCropNetIds.Count
-                        + " crop(s) tracked), sleeping " + sleep.ToString("F0") + "s.");
+                    // Throttle the idle log: only when something happened this tick, or every couple of
+                    // minutes, so a long grow doesn't spam "sleeping" lines.
+                    if (weededThisTick > 0 || harvestedThisTick > 0 || prunedThisTick > 0
+                        || Time.realtimeSinceStartup >= this.homelandFarmAutoNextSleepLogAt)
+                    {
+                        this.homelandFarmAutoNextSleepLogAt = Time.realtimeSinceStartup + HomelandFarmAutoSleepLogIntervalSeconds;
+                        this.HomelandFarmLog("Auto: next ripe in " + remainLabel + " (" + this.homelandFarmAutoCropNetIds.Count
+                            + " crop(s) tracked)" + (inHomeland ? string.Empty : ", away") + ", sleeping " + sleep.ToString("F0") + "s.");
+                    }
+
                     yield return new WaitForSecondsRealtime(sleep);
                 }
 
@@ -15683,41 +16153,69 @@ namespace HeartopiaMod
         private IEnumerator HomelandFarmAutoSowPassRoutine(HomelandFarmInventoryItem seed)
         {
             this.homelandFarmAutoSowCount = 0;
-            if (seed == null || seed.NetId == 0U || seed.Count <= 0)
+            if (seed == null || seed.StaticId <= 0)
+            {
+                yield break;
+            }
+
+            // Aggregate EVERY inventory stack of this seed type — the same crop seed can be split
+            // across several stacks (each a separate item/netId). Sowing one stack per pass filled the
+            // field only over several passes; summing the counts lets ONE pass fill every empty planter,
+            // walking stack→stack for the seed netId as each is consumed (CropSeeding debits the exact
+            // stack it is handed, so we must never send a box more than a stack's remaining count).
+            List<HomelandFarmInventoryItem> stacks = new List<HomelandFarmInventoryItem>();
+            int totalSeeds = 0;
+            for (int i = 0; i < this.homelandFarmScannedSeeds.Count; i++)
+            {
+                HomelandFarmInventoryItem s = this.homelandFarmScannedSeeds[i];
+                if (s != null && s.StaticId == seed.StaticId && s.NetId != 0U && s.Count > 0)
+                {
+                    stacks.Add(s);
+                    totalSeeds += s.Count;
+                }
+            }
+
+            if (totalSeeds <= 0)
             {
                 yield break;
             }
 
             int sowBatchSize = Mathf.Clamp(this.TryHomelandFarmGetSprinklerCellCount(), 1, HomelandFarmBatchLimit);
-            int remainingSeeds = seed.Count;
             int sowedPoints = 0;
 
-            while (remainingSeeds > 0)
+            // Single radius scan returns every empty planter (up to the total seeds we can plant).
+            IEnumerator slotRoutine = this.FindEmptyCropPlanterSlotsRoutine(totalSeeds, useAutoFarmCollectShortcuts: true);
+            while (slotRoutine.MoveNext())
             {
-                IEnumerator slotRoutine = this.FindEmptyCropPlanterSlotsRoutine(remainingSeeds, useAutoFarmCollectShortcuts: true);
-                while (slotRoutine.MoveNext())
-                {
-                    yield return slotRoutine.Current;
-                }
+                yield return slotRoutine.Current;
+            }
 
-                List<object> plantPoints = this.homelandFarmSowSlotPoints;
-                if (!this.homelandFarmSowSlotOk || plantPoints == null || plantPoints.Count == 0)
-                {
-                    break;
-                }
+            List<object> plantPoints = this.homelandFarmSowSlotPoints;
+            if (!this.homelandFarmSowSlotOk || plantPoints == null || plantPoints.Count == 0)
+            {
+                yield break;
+            }
 
-                this.HomelandFarmRememberAutoSowPendingBoxes(plantPoints);
-                yield return null;
+            this.HomelandFarmRememberAutoSowPendingBoxes(plantPoints);
+            yield return null;
 
-                for (int offset = 0; offset < plantPoints.Count && remainingSeeds > 0; offset += sowBatchSize)
+            // Sow the points, consuming stacks in order. A batch never crosses a stack boundary and
+            // never exceeds a stack's remaining count, so each CropSeeding debits a stack it can cover.
+            int pointIdx = 0;
+            for (int si = 0; si < stacks.Count && pointIdx < plantPoints.Count; si++)
+            {
+                HomelandFarmInventoryItem stack = stacks[si];
+                int stackRemaining = stack.Count;
+                while (stackRemaining > 0 && pointIdx < plantPoints.Count)
                 {
-                    int batchSize = Math.Min(sowBatchSize, Math.Min(plantPoints.Count - offset, remainingSeeds));
-                    List<object> batch = plantPoints.GetRange(offset, batchSize);
-                    if (this.TryHomelandFarmSow(seed.NetId, batch, out string sowStatus))
+                    int batchSize = Math.Min(sowBatchSize, Math.Min(plantPoints.Count - pointIdx, stackRemaining));
+                    List<object> batch = plantPoints.GetRange(pointIdx, batchSize);
+                    if (this.TryHomelandFarmSow(stack.NetId, batch, out string sowStatus))
                     {
                         sowedPoints += batch.Count;
-                        remainingSeeds -= batch.Count;
-                        this.HomelandFarmLog("Auto sow batch ok seedNetId=" + seed.NetId + " count=" + batch.Count + " " + sowStatus);
+                        pointIdx += batch.Count;
+                        stackRemaining -= batch.Count;
+                        this.HomelandFarmLog("Auto sow batch ok seedNetId=" + stack.NetId + " count=" + batch.Count + " " + sowStatus);
                     }
                     else
                     {
@@ -15728,10 +16226,6 @@ namespace HeartopiaMod
 
                     yield return new WaitForSecondsRealtime(HomelandFarmCommandDelaySeconds);
                 }
-
-                // Single radius scan already returns every empty planter; re-scanning re-sows the
-                // same not-yet-occupied slots and floods CropSeeding (crash + wasted seeds).
-                break;
             }
 
             this.homelandFarmAutoSowCount = sowedPoints;
@@ -16060,14 +16554,96 @@ namespace HeartopiaMod
         // Hotkey convenience: water in radius, then weed in radius, as a single action.
         private void StartHomelandFarmWaterAndWeed(bool silent)
         {
-            if (!this.TryBeginHomelandFarmAction(silent, out _, allowVisitingFarmArea: true))
+            // Independent of auto-farm: uses its own coroutine slot so it is NOT blocked while auto-farm
+            // holds homelandFarmCoroutine. Still blocks if another hotkey action is running, or if a
+            // NON-auto manual action is running — that bounds concurrent AuraMono scans to at most
+            // auto-farm (which defers its scans while this runs) + this one.
+            if (this.homelandFarmHotkeyCoroutine != null)
             {
+                if (!silent)
+                {
+                    this.AddMenuNotification("Water + weed already running.", new Color(0.45f, 0.88f, 1f));
+                }
+
                 return;
             }
 
-            this.HomelandFarmLog("Start water + weed in radius");
+            if (this.homelandFarmCoroutine != null && !this.homelandFarmAutoRunning)
+            {
+                if (!silent)
+                {
+                    this.AddMenuNotification("Homeland farm action already running.", new Color(0.45f, 0.88f, 1f));
+                }
+
+                return;
+            }
+
+            if (!this.TryHomelandFarmIsInHomeland(out string blockReason, allowVisitingFarmArea: true))
+            {
+                if (!silent)
+                {
+                    this.AddMenuNotification(this.FormatHomelandFarmBlockNotification(blockReason), new Color(1f, 0.55f, 0.45f));
+                }
+
+                return;
+            }
+
+            if (!this.EnsureHomelandFarmReflectionReady())
+            {
+                if (!silent)
+                {
+                    this.AddMenuNotification(
+                        string.IsNullOrEmpty(this.homelandFarmReflectionUnavailableStatus)
+                            ? "Homeland farm reflection unavailable."
+                            : this.homelandFarmReflectionUnavailableStatus,
+                        new Color(1f, 0.55f, 0.45f));
+                }
+
+                return;
+            }
+
+            this.HomelandFarmLog("Start water + weed in radius (independent of auto-farm)");
             this.homelandFarmLastStatus = "Water + weed in radius...";
-            this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmWaterAndWeedRoutine(silent));
+            this.homelandFarmHotkeyCoroutine = ModCoroutines.Start(this.HomelandFarmHotkeyWaterAndWeedRoutine(silent));
+        }
+
+        // Wrapper that drives the shared water+weed routine in the hotkey slot. The water/weed
+        // sub-routines null homelandFarmCoroutine in their finally blocks; when auto-farm owns that
+        // slot, restore its handle after every step so auto-farm keeps running. Only restore while
+        // auto-farm is actually running (so a just-finished auto run isn't pinned back by a stale handle).
+        private IEnumerator HomelandFarmHotkeyWaterAndWeedRoutine(bool silent)
+        {
+            object autoHandle = this.homelandFarmCoroutine;
+            try
+            {
+                IEnumerator inner = this.HomelandFarmWaterAndWeedRoutine(silent);
+                while (true)
+                {
+                    bool moved;
+                    try
+                    {
+                        moved = inner.MoveNext();
+                    }
+                    finally
+                    {
+                        if (autoHandle != null && this.homelandFarmAutoRunning && this.homelandFarmCoroutine == null)
+                        {
+                            this.homelandFarmCoroutine = autoHandle;
+                        }
+                    }
+
+                    if (!moved)
+                    {
+                        break;
+                    }
+
+                    yield return inner.Current;
+                }
+            }
+            finally
+            {
+                this.homelandFarmHotkeyCoroutine = null;
+            }
         }
 
         private IEnumerator HomelandFarmWaterAndWeedRoutine(bool silent)
@@ -16145,7 +16721,17 @@ namespace HeartopiaMod
                     || mode == HomelandFarmWaterMode.InRadius;
                 // InRadius only needs the local radius scanned — keeps the scan fast (no freeze).
                 float scanRadiusOverride = mode == HomelandFarmWaterMode.InRadius ? this.homelandFarmWaterRadius : 0f;
-                if (!this.ScanHomelandFarmWaterTargets(out List<HomelandFarmTarget> targets, out string scanStatus, allowVisitingFarmArea, scanRadiusOverride))
+                // Frame-budgeted scan: drive the sliced routine so the target build never stalls a frame.
+                HomelandFarmWaterScanResult waterScan = new HomelandFarmWaterScanResult();
+                IEnumerator waterScanDrive = this.ScanHomelandFarmWaterTargetsRoutine(waterScan, allowVisitingFarmArea, scanRadiusOverride);
+                while (waterScanDrive.MoveNext())
+                {
+                    yield return waterScanDrive.Current;
+                }
+
+                List<HomelandFarmTarget> targets = waterScan.Targets;
+                string scanStatus = waterScan.Status;
+                if (!waterScan.Ok)
                 {
                     this.homelandFarmLastStatus = scanStatus;
                     if (!silent)
@@ -16387,7 +16973,13 @@ namespace HeartopiaMod
 
             try
             {
-                List<uint> cropNetIds = this.ScanHomelandFarmHarvestableCropsByRadius();
+                List<uint> cropNetIds = new List<uint>();
+                IEnumerator harvestScan = this.ScanHomelandFarmHarvestableCropsByRadiusRoutine(cropNetIds);
+                while (harvestScan.MoveNext())
+                {
+                    yield return harvestScan.Current;
+                }
+
                 if (cropNetIds.Count == 0)
                 {
                     this.homelandFarmLastStatus = "No harvestable crops in radius.";
@@ -16449,7 +17041,13 @@ namespace HeartopiaMod
 
             try
             {
-                List<uint> plantNetIds = this.ScanHomelandFarmCollectablePlantSeedsByRadius();
+                List<uint> plantNetIds = new List<uint>();
+                IEnumerator seedScan = this.ScanHomelandFarmCollectablePlantSeedsByRadiusRoutine(plantNetIds);
+                while (seedScan.MoveNext())
+                {
+                    yield return seedScan.Current;
+                }
+
                 if (plantNetIds.Count == 0)
                 {
                     this.homelandFarmLastStatus = "No collectable plant seeds in radius.";
@@ -16525,7 +17123,13 @@ namespace HeartopiaMod
 
             try
             {
-                List<uint> plantNetIds = this.ScanHomelandFarmPickablePlantsByRadius(dormantOnly);
+                List<uint> plantNetIds = new List<uint>();
+                IEnumerator pickScan = this.ScanHomelandFarmPickablePlantsByRadiusRoutine(plantNetIds, dormantOnly);
+                while (pickScan.MoveNext())
+                {
+                    yield return pickScan.Current;
+                }
+
                 if (plantNetIds.Count == 0)
                 {
                     this.homelandFarmLastStatus = emptyStatus;
@@ -16588,7 +17192,13 @@ namespace HeartopiaMod
 
             try
             {
-                List<uint> cropNetIds = this.ScanHomelandFarmWeedableCropsByRadius();
+                List<uint> cropNetIds = new List<uint>();
+                IEnumerator weedScan = this.ScanHomelandFarmWeedableCropsByRadiusRoutine(cropNetIds);
+                while (weedScan.MoveNext())
+                {
+                    yield return weedScan.Current;
+                }
+
                 if (cropNetIds.Count == 0)
                 {
                     this.homelandFarmLastStatus = "No weedable crops in radius.";
@@ -20685,12 +21295,20 @@ namespace HeartopiaMod
 
                 // Fertilize targets CROPS only (CropItemData). Do NOT include PlantItemData
                 // (flowers / trees) — those are a separate system and must never be fertilized here.
-                List<uint> ownCrops = this.ScanHomelandFarmCropsByRadius(
+                // Frame-budgeted: drive the sliced routine so the filter never stalls a frame.
+                List<uint> ownCrops = new List<uint>();
+                IEnumerator fertScan = this.ScanHomelandFarmCropsByRadiusRoutine(
+                    ownCrops,
                     cropData => cropData != null,
                     "Fertilizable crops",
                     requireOwn: true,
                     preCollectedNetIds: scanNetIds,
                     includePlantData: false);
+                while (fertScan.MoveNext())
+                {
+                    yield return fertScan.Current;
+                }
+
                 Dictionary<string, int> rejectReasons = new Dictionary<string, int>(StringComparer.Ordinal);
                 int maxTargets = Math.Max(1, fertilizer.Count);
                 for (int i = 0; i < ownCrops.Count; i++)
@@ -21334,6 +21952,27 @@ namespace HeartopiaMod
 
             GUI.enabled = true;
             y += 284f;
+
+            // 6. EVENT DIAGNOSTICS — detour DataCenter.UpdateComponentData<T> (crop/plant/crop-box)
+            // and log each server component write (netId + scalar state). Diagnostics only: OFF by
+            // default, installs lazily on first enable, wires no actions. See
+            // HomelandFarmEventDiagFeature.cs.
+            bool previousEventDiag = this.homelandFarmEventDiagEnabled;
+            bool nextEventDiag = this.DrawSwitchToggle(new Rect(left, y, width, 28f), this.homelandFarmEventDiagEnabled, "Event Diagnostics (log)");
+            if (nextEventDiag != previousEventDiag)
+            {
+                this.homelandFarmEventDiagEnabled = nextEventDiag;
+                this.OnHomelandFarmEventDiagToggled();
+            }
+
+            y += 34f;
+
+            // Event-driven auto-farm: read crop/box state from the detour events + skip the per-tick
+            // empty-slot rescan when full. ON by default; turn OFF to revert to the always-rescan loop.
+            this.homelandFarmAutoEventDriven = this.DrawSwitchToggle(
+                new Rect(left, y, width, 28f), this.homelandFarmAutoEventDriven, "Event-driven auto-farm (no rescan)");
+
+            y += 38f;
 
             Rect statusRect = new Rect(left, y, width, 52f);
             GUI.Box(statusRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);

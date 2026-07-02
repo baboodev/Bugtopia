@@ -257,6 +257,7 @@
     <Compile Include="ShowOffBypassFeature.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />
+    <Compile Include="HomelandFarmEventDiagFeature.cs" />
     <Compile Include="IceSkatingSequenceFeature.cs" />
     <Compile Include="PadBuildHotkeyFeature.cs" />
     <Compile Include="PrivacyBlockFeature.cs" />
