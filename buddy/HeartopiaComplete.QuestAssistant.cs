@@ -25,6 +25,7 @@ namespace HeartopiaMod
         private const int QuestAssistantCheckTypeKindAccumulate = 4; // CompleteConditionCheckType.KindAccumulate
         private const int QuestAssistantCategoryTaskOrder = 5; // GameTaskType.TaskOrder (order board "Request: X" quests)
         private const int QuestAssistantMarkCategoryNaviPoint = 1; // CompleteConditionTrackMarkType.NaviPoint
+        private const int QuestAssistantMarkCategoryNpc = 2; // CompleteConditionTrackMarkType.Npc
 
         private enum QuestObjectiveKind
         {
@@ -40,6 +41,7 @@ namespace HeartopiaMod
             SubmitToNpc, // CanSubmit + TableGameTask.submitNpc>0 — added 2026-07-02, see progress doc §24
             GoToArea, // PlayerInSpecificArea — added 2026-07-03, see progress doc §40
             PurchaseItem, // PurchaseItem — buy the exact item (typeParam=staticId) from a shop — added 2026-07-03, §49
+            EnterArea, // PlayerEnterArea — self-report PlayerEnterAreaCommand{netId, typeParam=areaId} — added 2026-07-04, §53
         }
 
         private sealed class ConditionSnapshot
@@ -762,6 +764,10 @@ namespace HeartopiaMod
             // truth as UseCropFertilizer, §47.1); the action button searches every store's goods for
             // that staticId and buys the remaining count via the Auto Buy RPC path. §49.
             { "PurchaseItem", QuestObjectiveKind.PurchaseItem },
+            // "Head to <area>" steps — typeParam is the area-trigger id. Credited server-side by the
+            // self-reported PlayerEnterAreaCommand{PlayerNetId, AreaTriggerId} (no position check —
+            // same confirmed-server-trusted lever the dragon-boat checkpoints used). §53.
+            { "PlayerEnterArea", QuestObjectiveKind.EnterArea },
         };
 
         // Event names whose numeric params were CONFIRMED (not just plausible) to be a real item/
@@ -931,6 +937,44 @@ namespace HeartopiaMod
                         snapshot.ObjectiveTargetId = navId;
                         snapshot.ObjectiveTargetIds = new List<int> { navId };
                         this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 \"PlayerInSpecificArea\" -> GoToArea navpoint(trackMark) id=" + navId);
+                        return;
+                    }
+                }
+
+                // TalkToNpc target: for InteractWithNpc quests typeParam IS the NPC static id, but
+                // for EnterDialogNode quests typeParam is a DIALOGUE NODE id (e.g. "Gossip: The Vast
+                // World" has typeParam=10014 while the real NPC is trackMark markCategory=2 id=307) —
+                // resolving netId/map-spot position by a dialogue-node id fails everywhere ("no netId
+                // and no map-spot position", 2026-07-04). Same id-space lesson as GoToArea/§44: prefer
+                // the NPC trackMark's id; keep the typeParam candidates as fallback extras. §51.
+                if (directKind == QuestObjectiveKind.TalkToNpc)
+                {
+                    int npcMarkId = 0;
+                    for (int t = 0; t < trackMarks.Count; t++)
+                    {
+                        if (trackMarks[t].MarkCategory == QuestAssistantMarkCategoryNpc && trackMarks[t].Id > 0)
+                        {
+                            npcMarkId = trackMarks[t].Id;
+                            break;
+                        }
+                    }
+
+                    if (npcMarkId > 0)
+                    {
+                        List<int> talkCandidates = new List<int> { npcMarkId };
+                        List<int> extras = QuestAssistantNumericCandidates(cond);
+                        for (int e = 0; e < extras.Count; e++)
+                        {
+                            if (!talkCandidates.Contains(extras[e]))
+                            {
+                                talkCandidates.Add(extras[e]);
+                            }
+                        }
+
+                        snapshot.ObjectiveKind = QuestObjectiveKind.TalkToNpc;
+                        snapshot.ObjectiveTargetId = npcMarkId;
+                        snapshot.ObjectiveTargetIds = talkCandidates;
+                        this.QuestAssistantLog("  classify taskId=" + snapshot.TaskId + ": tier2 \"" + cond.CheckParamString + "\" -> TalkToNpc npc(trackMark) id=" + npcMarkId + " targets=[" + string.Join(",", talkCandidates) + "]");
                         return;
                     }
                 }

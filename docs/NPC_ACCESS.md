@@ -39,8 +39,13 @@
 
 ## Ключевые факты про квесты "поговори с NPC"
 
-- Условие `InteractWithNpc`(30011)/`EnterDialogNode`: `typeParam` = static id NPC (для
-  InteractWithNpc; подтверждается trackMark `markCategory=2(NPC)`).
+- Условие `InteractWithNpc`(30011): `typeParam` = static id NPC. Но у `EnterDialogNode`(30501)
+  `typeParam` = **id ДИАЛОГОВОГО УЗЛА, НЕ NPC** (подтверждено 2026-07-04: "Gossip: The Vast World"
+  typeParam=10014, реальный NPC = 307 Li Zhen; "Princess Stella's Adventure" typeParam=10013, NPC =
+  106 Mrs. Joan) — резолв netId/позиции по нему падает везде («no netId and no map-spot position»).
+  **Правильный id NPC для ОБОИХ условий — trackMark `markCategory=2(NPC)`.id** (для InteractWithNpc
+  typeParam с ним просто совпадает). Классификатор предпочитает NPC-trackMark (progress doc §51) —
+  тот же id-space урок, что navpoint/§44.
 - Прогресс кредитует **сервер** при обработке `TalkWithPlayerCommand` — клиентская панель ничего
   не двигает. Реальный флоу игры: interact-target рядом → `SendTalkWithNpc(netId, true)` → ответ
   `NpcTalkStartEvent` → только потом UI (`TalkWithTaskNpcCommand.cs`, `[InteractSetting(10401)]`).
