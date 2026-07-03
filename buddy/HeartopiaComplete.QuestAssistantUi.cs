@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -72,6 +73,15 @@ namespace HeartopiaMod
         // SendTalkWithNpc(netId, start:false) so the server-side talk session doesn't stay open —
         // same paired start/end discipline as the skate sessions ([[force-swim-skate-locomotion]]).
         private uint questAssistantTalkToNpcMonitorNpcNetId = 0U;
+
+        // PurchaseItem buy coroutine (§49): non-null while a quest-driven shop purchase run is in
+        // flight (button disabled meanwhile). Started only from the explicit button click.
+        private object questAssistantPurchaseCoroutine = null;
+
+        // staticId → decoded EntityType (0 = decode failed). Per-session cache for the sow-button
+        // crop-vs-flower check (§50): the decode (managed table / AuraMono DecodeTypeEntityData) must
+        // run once per item, not every OnGUI frame.
+        private readonly Dictionary<int, int> questAssistantEntityTypeCache = new Dictionary<int, int>();
 
         private void QuestAssistantToggleCollapse()
         {
@@ -397,13 +407,36 @@ namespace HeartopiaMod
                 {
                     bool fertilize = this.QuestAssistantActiveHomelandFarmIsFertilize(focused);
                     bool booster = fertilize && this.QuestAssistantActiveHomelandFarmEffectType(focused) == HomelandFarmFertilizerEffectGrowthRate;
-                    string label = booster
-                        ? "Apply Growth Booster in radius"
-                        : (fertilize ? "Fertilize crops in radius" : "Sow crops in radius");
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
+                    // Flower seeds can't be planted by the crop sow command (separate flower-bed
+                    // system) — show a disabled button explaining that instead of a dud action (§50).
+                    bool sowBlocked = !fertilize && !this.QuestAssistantActiveSowSeedsAreCropSeeds(focused, out _, out _);
+                    if (sowBlocked)
                     {
-                        this.QuestAssistantOnHomelandFarmClicked(focused, fertilize);
+                        GUI.enabled = false;
+                        GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), "Flower seeds — plant manually (auto-sow is crops-only)", this.themePrimaryButtonStyle ?? GUI.skin.button);
+                        GUI.enabled = true;
                     }
+                    else
+                    {
+                        string label = booster
+                            ? "Apply Growth Booster in radius"
+                            : (fertilize ? "Fertilize crops in radius" : "Sow crops in radius");
+                        if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
+                        {
+                            this.QuestAssistantOnHomelandFarmClicked(focused, fertilize);
+                        }
+                    }
+                }
+
+                else if (focused.ObjectiveKind == QuestObjectiveKind.PurchaseItem)
+                {
+                    GUI.enabled = this.questAssistantPurchaseCoroutine == null;
+                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), "Buy quest items from shop", this.themePrimaryButtonStyle ?? GUI.skin.button))
+                    {
+                        this.QuestAssistantOnPurchaseItemClicked(focused);
+                    }
+
+                    GUI.enabled = true;
                 }
 
                 // Phase 5 contextual action buttons (cook) attach the same way once implemented —
@@ -438,6 +471,7 @@ namespace HeartopiaMod
                 case QuestObjectiveKind.TalkToNpc: return "Talk to an NPC";
                 case QuestObjectiveKind.SubmitToNpc: return "Complete via an NPC (talk and/or submit)";
                 case QuestObjectiveKind.GoToArea: return "Go to an area";
+                case QuestObjectiveKind.PurchaseItem: return "Purchase items from a shop";
                 default: return "(not automatable yet)";
             }
         }
@@ -1120,6 +1154,97 @@ namespace HeartopiaMod
             return 0;
         }
 
+        private int QuestAssistantGetEntityTypeCached(int staticId)
+        {
+            if (staticId <= 0)
+            {
+                return 0;
+            }
+
+            if (this.questAssistantEntityTypeCache.TryGetValue(staticId, out int cached))
+            {
+                return cached;
+            }
+
+            int decoded = 0;
+            try
+            {
+                if (!this.TryHomelandFarmGetEntityTypeForStaticId(staticId, out decoded))
+                {
+                    decoded = 0;
+                }
+            }
+            catch
+            {
+                decoded = 0;
+            }
+
+            this.questAssistantEntityTypeCache[staticId] = decoded;
+            this.QuestAssistantLog("entityType decode: staticId=" + staticId + " -> " + decoded);
+            return decoded;
+        }
+
+        // Whether the active SowPlant step's seeds are CROP seeds — the only thing the sow-in-radius
+        // command (CropProtocolManager.CropSeeding into crop planters) can plant. Flower seeds decode
+        // to a different EntityType (seedbag=26 vs cropseed=2801) and belong to the separate
+        // flower-bed system, so the sow button is disabled for them (§50). Fail-open: if the seed id
+        // or the entity types can't be resolved, the button stays enabled and the sow run reports its
+        // own errors as before.
+        private bool QuestAssistantActiveSowSeedsAreCropSeeds(QuestSnapshot focused, out int blockedSeedId, out int blockedType)
+        {
+            blockedSeedId = 0;
+            blockedType = 0;
+            if (focused.Conditions == null)
+            {
+                return true;
+            }
+
+            for (int i = 0; i < focused.Conditions.Count; i++)
+            {
+                ConditionSnapshot c = focused.Conditions[i];
+                if (c.Needed > 0 && c.Current >= c.Needed)
+                {
+                    continue; // skip completed step
+                }
+
+                if (!string.Equals(c.CheckParamString, "SowPlant", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!this.TryResolveHomelandFarmCropSeedEntityType(out int cropSeedType))
+                {
+                    return true; // can't resolve the enum — fail open
+                }
+
+                List<int> seedIds = QuestAssistantNumericCandidates(c);
+                bool sawDecoded = false;
+                for (int s = 0; s < seedIds.Count; s++)
+                {
+                    int decoded = this.QuestAssistantGetEntityTypeCached(seedIds[s]);
+                    if (decoded == 0)
+                    {
+                        continue; // decode failed for this id — ignore it
+                    }
+
+                    sawDecoded = true;
+                    if (decoded == cropSeedType)
+                    {
+                        return true; // at least one required seed is a crop seed — sowable
+                    }
+
+                    blockedSeedId = seedIds[s];
+                    blockedType = decoded;
+                }
+
+                // Every decodable required seed is a non-crop type (flowers) → block; nothing
+                // decodable → fail open.
+                return !sawDecoded;
+            }
+
+            return true; // no active SowPlant condition — nothing to block
+        }
+
         private void QuestAssistantOnHomelandFarmClicked(QuestSnapshot focused, bool fertilize)
         {
             int remaining = this.QuestAssistantActiveHomelandFarmRemaining(focused);
@@ -1146,6 +1271,188 @@ namespace HeartopiaMod
             this.questAssistantLastStatus =
                 verb + countText + " in the Homeland Farm radius (only what the quest still needs) — watch the "
                 + "quest progress update here (panel auto-refreshes).";
+        }
+
+        // ===== PurchaseItem — buy the exact quest-required items from whichever store sells them (§49)
+        //
+        // A PurchaseItem condition's typeParam is the EXACT item staticId to buy (same ground truth as
+        // the fertilizer steps, §47.1) and Needed-Current is how many. One task can carry several such
+        // conditions at once ("Gardening: Flowers" wants 2× item 700201 AND 2× item 700202), so the
+        // button processes every incomplete PurchaseItem condition in one run.
+        //
+        // Mechanism (all reused from the shipped Auto Buy / Force Shop machinery, zero new game paths):
+        //   TryGetAllStoreIdsMono          — every storeId from static TableData.TableStoreInfos
+        //   TryFindShopCandidateByStaticIdAura — local ShopSystem.GetStoreGoodsData(storeId) listing,
+        //                                    matched on rewardData.staticId (no UI, no server call)
+        //   TryInvokeShopBuyItem           — managed by-netId buy, falling back to the
+        //                                    ShopShelfProtocolManager.BuyItem server RPC
+        // The buy is server-authoritative and fires the same PurchaseItem game event the quest listens
+        // for, so progress updates arrive via the TaskUpdated auto-refresh (§30).
+
+        private void QuestAssistantOnPurchaseItemClicked(QuestSnapshot focused)
+        {
+            if (this.questAssistantPurchaseCoroutine != null)
+            {
+                this.questAssistantLastStatus = "A quest purchase run is already in progress.";
+                return;
+            }
+
+            // (staticId, remaining) per incomplete PurchaseItem condition.
+            List<KeyValuePair<int, int>> wanted = new List<KeyValuePair<int, int>>();
+            System.Text.StringBuilder wantedText = new System.Text.StringBuilder();
+            if (focused.Conditions != null)
+            {
+                for (int i = 0; i < focused.Conditions.Count; i++)
+                {
+                    ConditionSnapshot c = focused.Conditions[i];
+                    if (!string.Equals(c.CheckParamString, "PurchaseItem", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (c.Needed > 0 && c.Current >= c.Needed)
+                    {
+                        continue; // step already complete
+                    }
+
+                    if (string.IsNullOrWhiteSpace(c.TypeParam) || !int.TryParse(c.TypeParam.Trim(), out int staticId) || staticId <= 0)
+                    {
+                        this.QuestAssistantLog("PurchaseItem: condition[" + i + "] has no parseable typeParam (\"" + (c.TypeParam ?? string.Empty) + "\") — skipped");
+                        continue;
+                    }
+
+                    int remaining = Math.Max(1, c.Needed - c.Current);
+                    wanted.Add(new KeyValuePair<int, int>(staticId, remaining));
+                    if (wantedText.Length > 0)
+                    {
+                        wantedText.Append(", ");
+                    }
+
+                    wantedText.Append(staticId).Append("x").Append(remaining);
+                }
+            }
+
+            this.QuestAssistantLog("PurchaseItem: taskId=" + focused.TaskId + " wanted=[" + wantedText + "] progressBefore=" + QuestAssistantSummarizeProgress(focused));
+            if (wanted.Count == 0)
+            {
+                this.questAssistantLastStatus = "No incomplete purchase steps with an item id.";
+                return;
+            }
+
+            this.questAssistantLastStatus = "Searching shops for " + wanted.Count + " quest item(s)...";
+            this.questAssistantPurchaseCoroutine = ModCoroutines.Start(this.QuestAssistantPurchaseItemsRoutine(wanted));
+        }
+
+        private IEnumerator QuestAssistantPurchaseItemsRoutine(List<KeyValuePair<int, int>> wanted)
+        {
+            yield return null;
+
+            try
+            {
+                List<int> storeIds = new List<int>();
+                bool storesOk = false;
+                try
+                {
+                    storesOk = this.TryGetAllStoreIdsMono(storeIds);
+                }
+                catch (Exception ex)
+                {
+                    this.QuestAssistantLog("PurchaseItem: store table enumeration threw: " + ex.Message);
+                }
+
+                if (!storesOk || storeIds.Count == 0)
+                {
+                    this.questAssistantLastStatus = "Shop table unavailable — cannot search stores.";
+                    yield break;
+                }
+
+                this.QuestAssistantLog("PurchaseItem: searching " + storeIds.Count + " store(s) for " + wanted.Count + " item(s)");
+
+                int boughtKinds = 0;
+                int failedKinds = 0;
+                for (int wIdx = 0; wIdx < wanted.Count; wIdx++)
+                {
+                    int staticId = wanted[wIdx].Key;
+                    int count = wanted[wIdx].Value;
+                    bool resolved = false;
+
+                    for (int sIdx = 0; sIdx < storeIds.Count; sIdx++)
+                    {
+                        bool found = false;
+                        ShopBuyAllCandidate candidate = default(ShopBuyAllCandidate);
+                        try
+                        {
+                            found = this.TryFindShopCandidateByStaticIdAura(storeIds[sIdx], staticId, out candidate);
+                        }
+                        catch (Exception ex)
+                        {
+                            this.QuestAssistantLog("PurchaseItem: goods read failed store=" + storeIds[sIdx] + ": " + ex.Message);
+                        }
+
+                        if (!found)
+                        {
+                            // Listing reads are local but not free — spread the store sweep over frames.
+                            if ((sIdx & 3) == 3)
+                            {
+                                yield return null;
+                            }
+
+                            continue;
+                        }
+
+                        int buyCount = candidate.LeftCount > 0 ? Math.Min(count, candidate.LeftCount) : count;
+                        bool ok = false;
+                        string buyError = null;
+                        try
+                        {
+                            ok = this.TryInvokeShopBuyItem(candidate, buyCount, out buyError);
+                        }
+                        catch (Exception ex)
+                        {
+                            buyError = ex.Message;
+                        }
+
+                        if (ok)
+                        {
+                            boughtKinds++;
+                            this.QuestAssistantLog("PurchaseItem: bought item=" + staticId + " x" + buyCount
+                                + " store=" + candidate.StoreId + " slot=" + candidate.SlotId + " price=" + candidate.Price
+                                + (buyCount < count ? " (capped by stock, wanted " + count + ")" : string.Empty));
+                            this.questAssistantLastStatus = "Bought item #" + staticId + " x" + buyCount + " (store " + candidate.StoreId + ").";
+                        }
+                        else
+                        {
+                            failedKinds++;
+                            this.QuestAssistantLog("PurchaseItem: buy FAILED item=" + staticId + " store=" + candidate.StoreId + ": " + (buyError ?? "unknown"));
+                            this.questAssistantLastStatus = "Buy failed for item #" + staticId + ": " + (buyError ?? "unknown");
+                        }
+
+                        resolved = true;
+                        yield return new WaitForSecondsRealtime(0.4f);
+                        break; // next wanted item
+                    }
+
+                    if (!resolved)
+                    {
+                        failedKinds++;
+                        this.QuestAssistantLog("PurchaseItem: item=" + staticId + " not found (unlocked) in any of " + storeIds.Count + " store(s)");
+                        this.questAssistantLastStatus = "Item #" + staticId + " not sold in any known store.";
+                    }
+                }
+
+                if (failedKinds == 0)
+                {
+                    this.questAssistantLastStatus = "Quest purchases done (" + boughtKinds + " item type(s)) — progress updates as the server registers them.";
+                }
+                else if (boughtKinds > 0)
+                {
+                    this.questAssistantLastStatus = "Quest purchases: " + boughtKinds + " bought, " + failedKinds + " failed — see log.";
+                }
+            }
+            finally
+            {
+                this.questAssistantPurchaseCoroutine = null;
+            }
         }
 
         // Read NavigationPointConfig.navigationPoints[i where id==navpointId].position — see the

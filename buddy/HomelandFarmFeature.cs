@@ -17600,25 +17600,79 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.EnsureHomelandFarmTableDataReflection() || this.homelandFarmDecodeTypeEntityDataMethod == null)
+            if (this.EnsureHomelandFarmTableDataReflection() && this.homelandFarmDecodeTypeEntityDataMethod != null)
             {
-                return false;
+                try
+                {
+                    object decoded = this.homelandFarmDecodeTypeEntityDataMethod.Invoke(null, new object[] { staticId });
+                    if (decoded != null)
+                    {
+                        if (this.TryReadManagedInt32Member(decoded, "id", out entityType) && entityType != 0)
+                        {
+                            return true;
+                        }
+
+                        if (this.TryReadManagedInt32Member(decoded, "Id", out entityType) && entityType != 0)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                catch
+                {
+                }
             }
 
+            // Managed TableData is partly dead on this build — decode via the embedded-Mono copy of
+            // the same static method (result row's "id" is read within this call, no yields).
+            return this.TryHomelandFarmGetEntityTypeForStaticIdAura(staticId, out entityType);
+        }
+
+        private unsafe bool TryHomelandFarmGetEntityTypeForStaticIdAura(int staticId, out int entityType)
+        {
+            entityType = 0;
             try
             {
-                object decoded = this.homelandFarmDecodeTypeEntityDataMethod.Invoke(null, new object[] { staticId });
-                if (decoded == null)
+                this.ResolveAuraFarmRuntimeMethodsViaMono();
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null || auraMonoRuntimeInvoke == null)
                 {
                     return false;
                 }
 
-                if (this.TryReadManagedInt32Member(decoded, "id", out entityType) && entityType != 0)
+                IntPtr ecsImage = this.FindAuraMonoImage(new string[] { "EcsClient", "EcsClient.dll" });
+                if (ecsImage == IntPtr.Zero)
                 {
-                    return true;
+                    return false;
                 }
 
-                return this.TryReadManagedInt32Member(decoded, "Id", out entityType) && entityType != 0;
+                IntPtr tableDataClass = auraMonoClassFromName(ecsImage, string.Empty, "TableData");
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    tableDataClass = auraMonoClassFromName(ecsImage, "EcsClient", "TableData");
+                }
+
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr decodeMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "DecodeTypeEntityData", 1);
+                if (decodeMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                int staticIdValue = staticId;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&staticIdValue);
+                IntPtr exc = IntPtr.Zero;
+                IntPtr rowObj = auraMonoRuntimeInvoke(decodeMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                return this.TryGetMonoIntMember(rowObj, "id", out entityType) && entityType != 0;
             }
             catch
             {

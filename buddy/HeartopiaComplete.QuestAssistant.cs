@@ -39,6 +39,7 @@ namespace HeartopiaMod
             TalkToNpc, // InteractWithNpc / EnterDialogNode — added 2026-07-02, see progress doc §13
             SubmitToNpc, // CanSubmit + TableGameTask.submitNpc>0 — added 2026-07-02, see progress doc §24
             GoToArea, // PlayerInSpecificArea — added 2026-07-03, see progress doc §40
+            PurchaseItem, // PurchaseItem — buy the exact item (typeParam=staticId) from a shop — added 2026-07-03, §49
         }
 
         private sealed class ConditionSnapshot
@@ -757,6 +758,10 @@ namespace HeartopiaMod
             // navigation-point id (matches the NaviPoint(1) trackMark id). Satisfied by being
             // physically in the area, so the action teleports to the marked map spot. See §40.
             { "PlayerInSpecificArea", QuestObjectiveKind.GoToArea },
+            // "Purchase N <item>" steps — typeParam is the EXACT item staticId to buy (same ground
+            // truth as UseCropFertilizer, §47.1); the action button searches every store's goods for
+            // that staticId and buys the remaining count via the Auto Buy RPC path. §49.
+            { "PurchaseItem", QuestObjectiveKind.PurchaseItem },
         };
 
         // Event names whose numeric params were CONFIRMED (not just plausible) to be a real item/

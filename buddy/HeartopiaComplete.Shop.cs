@@ -553,6 +553,66 @@ namespace HeartopiaMod
             }
         }
 
+        // All store ids from the static TableData.TableStoreInfos table — the same enumeration
+        // TryResolveStoreIdByKeywordsMono walks, without the keyword scoring. The Quest Assistant uses
+        // this to search every store's goods for a quest-required item staticId (PurchaseItem steps).
+        // Raw pointers are read within this single call (no yields), matching the resolver's pattern.
+        private bool TryGetAllStoreIdsMono(List<int> storeIds)
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null)
+                {
+                    return false;
+                }
+
+                IntPtr ecsImage = this.FindAuraMonoImage(new string[] { "EcsClient", "EcsClient.dll" });
+                if (ecsImage == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr tableDataClass = auraMonoClassFromName(ecsImage, string.Empty, "TableData");
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    tableDataClass = auraMonoClassFromName(ecsImage, "EcsClient", "TableData");
+                }
+
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                if (!this.TryGetAuraMonoStaticObjectField(tableDataClass, "TableStoreInfos", out IntPtr tableStoreInfosObj) || tableStoreInfosObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                List<IntPtr> items = new List<IntPtr>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(tableStoreInfosObj, items) || items.Count == 0)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (this.TryReadStoreTableEntryMono(tableDataClass, items[i], out int candidateId, out _, out _, out _, out _)
+                        && candidateId > 0
+                        && !storeIds.Contains(candidateId))
+                    {
+                        storeIds.Add(candidateId);
+                    }
+                }
+
+                return storeIds.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                this.LogForceOpenShop("Store id enumeration failed: " + ex.Message);
+                return false;
+            }
+        }
+
         private string TryGetLocalizedStoreName(object tableStoreInfoObj, MethodInfo localizationMethod)
         {
             if (tableStoreInfoObj == null)

@@ -536,6 +536,49 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Find an unlocked shop listing for this exact item staticId in the given store (local
+        // ShopSystem read via GetStoreGoodsData — no UI, no server round-trip). The Quest Assistant
+        // uses this to buy quest-required items (PurchaseItem steps) from whichever store lists them.
+        // Unlike TryCollectGoldCoinItemsAura this applies NO coin/owned filters — the quest needs the
+        // purchase itself. Raw list pointers are read within this single call (no yields).
+        private bool TryFindShopCandidateByStaticIdAura(int storeId, int itemStaticId, out ShopBuyAllCandidate found)
+        {
+            found = default(ShopBuyAllCandidate);
+            if (storeId <= 0 || itemStaticId <= 0)
+            {
+                return false;
+            }
+
+            if (!this.TryInvokeAuraGetStoreGoodsData(storeId, out IntPtr listObj, out _))
+            {
+                return false;
+            }
+
+            List<IntPtr> elements = new List<IntPtr>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(listObj, elements) || elements.Count == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < elements.Count; i++)
+            {
+                if (!this.TryReadAuraShopItemData(elements[i], out ShopBuyAllCandidate candidate))
+                {
+                    continue;
+                }
+
+                if (candidate.ItemStaticId != itemStaticId || !candidate.IsUnlock)
+                {
+                    continue;
+                }
+
+                found = candidate;
+                return true;
+            }
+
+            return false;
+        }
+
         private bool TryIsShopBuyAllAvatarRewardOwned(in ShopBuyAllCandidate candidate)
         {
             if (candidate.RewardType != ShopBuyAllRewardTypeAvatar || candidate.ItemStaticId <= 0)
