@@ -111,6 +111,85 @@ namespace HeartopiaMod
         // track would then render blank, so such ids must fall back to Furniture (NormalItem item icon).
         private readonly HashSet<int> mapAtlasIdSet = new HashSet<int>();
 
+        // Other players: scan RemotePlayerComponent (view component of every remote player) for entity
+        // netId + position, and position-match radar "Player" markers so their Player tracks carry the
+        // REAL TargetNetId. With a real netId the game natively shows the friend's avatar photo
+        // (MiniMapSpotWidget.SetData IsFriend branch -> HeadIconWidget with GetUserProfile().AvatarImageUrl)
+        // and dedups our track against the vanilla server player spot (same usageId).
+        private IntPtr mapPlayerClass = IntPtr.Zero;
+        private bool mapPlayerClassResolveTried;
+        private float mapPlayerNextScanAt;
+        private bool mapPlayerDiagLogged;
+        private readonly List<MapPlayerEntity> mapPlayerEntities = new List<MapPlayerEntity>(16);
+        private struct MapPlayerEntity
+        {
+            public Vector3 Position;
+            public uint NetId;
+        }
+        private const float MapPlayerScanInterval = 1.0f;  // players move — rescan faster than collectables
+        private const float MapPlayerMatchRadiusSqr = 25f; // 5 m XZ: marker/entity drift between scans
+
+        // Real player names for non-friends (radarPlayerAvatarsAll): the game shows strangers a Title instead
+        // of their name. Read PlayerProfile.Name via AuraMono (FriendSystem.GetUserProfile(netId), boxed
+        // struct return) in the throttled remote-player scan, cache netId -> pinned name MonoString, and
+        // return it from a MapSpot.get_name detour for Player spots. No force-friend -> no dialog regression.
+        private IntPtr mapNameFriendSystemClass = IntPtr.Zero;
+        private IntPtr mapNamePlayerServiceClass = IntPtr.Zero;
+        private readonly List<IntPtr> mapNameGetProfileMethods = new List<IntPtr>(2); // both 1-arg overloads
+        private int mapNameProfileNameOffset = -1;   // PlayerProfile.Name raw offset (value-type buffer)
+        private int mapNameProfileIdOffset = -1;     // PlayerProfile.Id (encoded shortId string) raw offset
+        private IntPtr mapNameDecodeShortIdMethod = IntPtr.Zero; // ShortIdUtil.DecodeShortId(string)->long
+        private IntPtr mapNameGetPlayerNameMethod = IntPtr.Zero; // PlayerServiceSystem.GetPlayerName(long,long)
+        private bool mapNameMethodsTried;
+        private bool mapNameDiagLogged;
+        // shortId -> pinned real-name MonoString. GetPlayerName(shortId) is the central name function (map
+        // spot, profile card, over-head nameplate, chat...) so keying by shortId covers them all.
+        private static Dictionary<long, IntPtr> mapNameByShortId = new Dictionary<long, IntPtr>(); // read by hook
+        private readonly Dictionary<long, IntPtr> mapNameByShortIdNext = new Dictionary<long, IntPtr>();
+        private readonly List<uint> mapNamePins = new List<uint>();      // pins backing the live map
+        private readonly List<uint> mapNamePinsNext = new List<uint>();
+        private delegate IntPtr GetPlayerNameDelegate(IntPtr self, long shortId, long title);
+        private static GetPlayerNameDelegate getPlayerNameHook;          // anti-GC
+        private static GetPlayerNameDelegate getPlayerNameTrampoline;    // original
+        private static MonoMod.RuntimeDetour.NativeDetour getPlayerNameDetour;
+        private static volatile bool mapNameActive;
+        private bool getNamePatchTried;
+
+        // The over-head nameplate (EntityTrackBarModel.TryGetName) and the profile card read
+        // userProfile.Title.TitleString directly, NOT GetPlayerName — so they never showed the real name.
+        // GetUserProfile(shortId/netId) returns a by-value PlayerProfile copy that already carries the real
+        // Name (@NameOffset); we detour it and mirror Name -> Title._titleString in the returned copy, so the
+        // TitleString getter yields the real name for both surfaces. Pure copy-mutation of the caller's local
+        // struct — the FriendSystem cache is untouched. Both 1-arg overloads (long shortId / uint netId) are
+        // hooked with an identical unconditional body (no shortId gate needed -> no overload disambiguation).
+        private int mapNameTitleStringOffset = -1;  // Title._titleString raw offset within PlayerProfile buffer
+        // sret struct-return ABI (instance): RCX=self/this, RDX=sret buffer, R8=arg (confirmed via crash dump).
+        private delegate IntPtr GetProfileDelegate(IntPtr self, IntPtr sret, long arg);
+        private static volatile bool mapNameReadingSelf; // true while our scan is inside GetUserProfile
+        private static readonly GetProfileDelegate[] getProfileHooks = new GetProfileDelegate[2];       // anti-GC
+        private static readonly GetProfileDelegate[] getProfileTrampolines = new GetProfileDelegate[2];  // originals
+        private static readonly MonoMod.RuntimeDetour.NativeDetour[] getProfileDetours = new MonoMod.RuntimeDetour.NativeDetour[2];
+        private static int gpNameOffset = -1;         // PlayerProfile.Name raw offset (hook copy)
+        private static int gpTitleStringOffset = -1;  // Title._titleString raw offset (hook copy)
+        private bool getProfilePatchTried;
+
+        // The over-head nameplate (EntityTrackBarModel.TryGetName) only returns a name for friends /
+        // acquaintances / hide-seek — a plain stranger hits `return false` (empty) until you interact (open
+        // their card), which registers them as an acquaintance. FriendSystem.IsAcquaintance is used ONLY by
+        // that nameplate (no social/action gating elsewhere), so we detour it to report scanned players as
+        // acquaintances — the nameplate then reaches the Title branch and shows our mirrored real name. Gated
+        // on the name cache so it only affects players we actually have a name for.
+        private delegate byte IsAcquaintanceDelegate(IntPtr self, long shortId);
+        private static IsAcquaintanceDelegate isAcquaintanceHook;        // anti-GC
+        private static IsAcquaintanceDelegate isAcquaintanceTrampoline;  // original
+        private static MonoMod.RuntimeDetour.NativeDetour isAcquaintanceDetour;
+        private bool acqPatchTried;
+
+        // Per-token TargetNetId for the injected tracks (Player -> real player netId, MapResource -> the
+        // big-map spot usageId, else 0). Changing it re-dispatches the track.
+        private readonly Dictionary<ulong, uint> mapTrackDesiredTargetNet = new Dictionary<ulong, uint>(16);
+        private readonly Dictionary<ulong, uint> mapTrackInjectedTargetNet = new Dictionary<ulong, uint>(16);
+
         // Live collectable entities: world position + resource ENTITY static id (for the real item icon).
         private IntPtr mapResCollectableClass = IntPtr.Zero;
         private bool mapResClassResolveTried;
@@ -219,6 +298,10 @@ namespace HeartopiaMod
         // Driven from OnUpdate every frame; self-gates and throttles.
         private void ProcessGameMapSpotsOnUpdate()
         {
+            // Avatar patches follow their own toggle, independent of the radar/display mode (they also
+            // upgrade the VANILLA player spots on the mini/big map).
+            this.ManagePlayerAvatarPatches();
+
             if (this.radarDisplayMode != 1 || !this.isRadarActive || this.radarContainer == null)
             {
                 if (this.mapTrackInjected.Count > 0)
@@ -427,9 +510,12 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (string.Equals(label, "Player", StringComparison.Ordinal)
-                    && this.TryGetRadarMarkerTrackedTarget(child.gameObject, out GameObject trackedPlayer)
-                    && this.IsLocalPlayerSkeletonGameObject(trackedPlayer))
+                // "Player" markers get a world track ONLY when the avatar feature is on: the pointer's avatar is
+                // rendered by MapTrackWidget.SetData's friend branch, which we enable via the SCOPED force-friend
+                // (mapTrackWidgetRendering) — no dialog leak. With the feature off we skip them (vanilla shows
+                // players on the maps via server Player spots; a bare world pin would just be clutter). Morphs
+                // stay tracked regardless (hide-and-seek reveal).
+                if (string.Equals(label, "Player", StringComparison.Ordinal) && !this.radarPlayerAvatarsAll)
                 {
                     continue;
                 }
@@ -478,7 +564,24 @@ namespace HeartopiaMod
             this.mapTrackDesired.Clear();
             this.mapTrackDesiredType.Clear();
             this.mapTrackDesiredStaticId.Clear();
+            this.mapTrackDesiredTargetNet.Clear();
             this.mapBigSpotDesired.Clear();
+            this.mapAvatarWorldNetIdsNext.Clear();
+
+            // Refresh remote-player entities only when player markers are actually on the radar.
+            bool anyPlayerCandidates = false;
+            for (int i = 0; i < this.mapTrackCandidates.Count; i++)
+            {
+                if (this.mapTrackCandidates[i].TrackType == MapTrackTypePlayer)
+                {
+                    anyPlayerCandidates = true;
+                    break;
+                }
+            }
+            if (anyPlayerCandidates)
+            {
+                this.RefreshRemotePlayerScan();
+            }
             for (int i = 0; i < this.mapTrackCandidates.Count && this.mapTrackDesired.Count < limit; i++)
             {
                 MapTrackCandidate cand = this.mapTrackCandidates[i];
@@ -576,9 +679,24 @@ namespace HeartopiaMod
                             + " (collectables=" + this.mapResEntities.Count + ")");
                     }
                 }
+                // TargetNetId per track: Player -> the real player netId (position-matched against the
+                // RemotePlayerComponent scan) so the game's native friend-avatar path and vanilla-spot dedup
+                // work; MapResource -> the big-map spot usageId (low token bits); else 0.
+                uint desiredTargetNet = 0u;
+                if (type == MapTrackTypePlayer && this.TryMatchRemotePlayer(cand.Position, out uint playerNetId))
+                {
+                    desiredTargetNet = playerNetId;
+                    this.mapAvatarWorldNetIdsNext.Add(playerNetId); // force-friend this one for the world pointer
+                }
+                else if (type == MapTrackTypeMapResource)
+                {
+                    desiredTargetNet = unchecked((uint)(cand.Token & 0xFFFFFFFFUL));
+                }
+
                 this.mapTrackDesired[cand.Token] = cand.Position;
                 this.mapTrackDesiredType[cand.Token] = type;
                 this.mapTrackDesiredStaticId[cand.Token] = staticId;
+                this.mapTrackDesiredTargetNet[cand.Token] = desiredTargetNet;
 
                 // Big map: a MapResource marker (drop-item icon) gets a per-position Collectable map-spot,
                 // keyed by a UNIQUE usageId (low bits of the token). The spot borrows its icon from the
@@ -615,6 +733,7 @@ namespace HeartopiaMod
                 this.mapTrackInjected.Remove(token);
                 this.mapTrackInjectedType.Remove(token);
                 this.mapTrackInjectedStaticId.Remove(token);
+                this.mapTrackInjectedTargetNet.Remove(token);
             }
 
             // Add new / refresh changed tracks (re-dispatching StartTrack overwrites the entry by token).
@@ -623,30 +742,30 @@ namespace HeartopiaMod
             {
                 byte trackType = this.mapTrackDesiredType.TryGetValue(entry.Key, out byte t) ? t : MapTrackTypeNavigationPoint;
                 int staticId = this.mapTrackDesiredStaticId.TryGetValue(entry.Key, out int s) ? s : MapTrackSyntheticStaticId;
+                uint targetNet = this.mapTrackDesiredTargetNet.TryGetValue(entry.Key, out uint tn) ? tn : 0u;
 
                 bool isNew = !this.mapTrackInjected.TryGetValue(entry.Key, out Vector3 prev);
                 if (!isNew)
                 {
-                    // Re-dispatch if it moved OR its icon (type/staticId) changed -- e.g. a marker that was a
-                    // placeholder flag now resolved to a real item icon once we cached the resource type.
+                    // Re-dispatch if it moved OR its icon (type/staticId) or TargetNetId changed -- e.g. a
+                    // placeholder that resolved to a real icon, or a player marker that just matched its
+                    // netId (enables the native friend-avatar path).
                     byte prevType = this.mapTrackInjectedType.TryGetValue(entry.Key, out byte pt) ? pt : MapTrackTypeNavigationPoint;
                     int prevStaticId = this.mapTrackInjectedStaticId.TryGetValue(entry.Key, out int ps) ? ps : MapTrackSyntheticStaticId;
+                    uint prevTargetNet = this.mapTrackInjectedTargetNet.TryGetValue(entry.Key, out uint ptn) ? ptn : 0u;
                     if ((entry.Value - prev).sqrMagnitude <= MapTrackMoveThresholdSqr
-                        && prevType == trackType && prevStaticId == staticId)
+                        && prevType == trackType && prevStaticId == staticId && prevTargetNet == targetNet)
                     {
                         continue; // unchanged
                     }
                 }
 
-                // MapResource markers carry TargetNetId = the big-map spot's usageId (low bits of the token)
-                // so the Collectable spot matches this track and borrows its per-resource icon.
-                uint targetNet = (trackType == MapTrackTypeMapResource)
-                    ? unchecked((uint)(entry.Key & 0xFFFFFFFFUL)) : 0u;
                 if (this.DispatchStartTrack(entry.Key, entry.Value, trackType, staticId, targetNet))
                 {
                     this.mapTrackInjected[entry.Key] = entry.Value;
                     this.mapTrackInjectedType[entry.Key] = trackType;
                     this.mapTrackInjectedStaticId[entry.Key] = staticId;
+                    this.mapTrackInjectedTargetNet[entry.Key] = targetNet;
                     if (isNew) addOk++;
                 }
                 else if (isNew)
@@ -663,6 +782,10 @@ namespace HeartopiaMod
                     + " collectables=" + this.mapResEntities.Count + " matched=" + matched
                     + " addOk=" + addOk + " addFail=" + addFail + " removed=" + removed + " removeFail=" + removeFail);
             }
+
+            // Publish the world-pointer force-friend set for the FriendClientService detour (swap in one
+            // assignment so the static hook always sees a consistent set).
+            mapAvatarWorldNetIds = new HashSet<uint>(this.mapAvatarWorldNetIdsNext);
 
             // Big-map markers (Collectable spots) from the same resolved item ids.
             this.SyncBigMapSpots();
@@ -800,6 +923,311 @@ namespace HeartopiaMod
                     + " | sample netId=" + sampleNetId + " resIdMethods=" + sampleResId
                     + " itemTypeId=" + sampleItemTypeId + " staticId=" + sampleStaticId);
             }
+        }
+
+        // Scan live remote players (RemotePlayerComponent view components): world position + entity netId.
+        // Same pinning discipline as the collectable scan: components pinned by the enumerator, each derived
+        // entity pinned across its field reads (moving sgen GC).
+        private void RefreshRemotePlayerScan()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.mapPlayerNextScanAt)
+            {
+                return;
+            }
+            this.mapPlayerNextScanAt = now + MapPlayerScanInterval;
+
+            if (this.mapPlayerClass == IntPtr.Zero)
+            {
+                // Retry each scan until the image is loaded (do not lock on first miss).
+                this.mapPlayerClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Gameplay.Component.Player.RemotePlayerComponent");
+                if (this.mapPlayerClass == IntPtr.Zero)
+                {
+                    if (!this.mapPlayerClassResolveTried)
+                    {
+                        this.mapPlayerClassResolveTried = true;
+                        ModLogger.Msg("[MapSpots] player scan: RemotePlayerComponent class NOT resolved (retrying)");
+                    }
+                    return;
+                }
+            }
+
+            this.mapPlayerEntities.Clear();
+            // Build the next real-name map (shortId -> pinned name MonoString) from this scan.
+            this.mapNameByShortIdNext.Clear();
+            this.mapNamePinsNext.Clear();
+            IntPtr friendInstance = this.EnsureNameReadReady();
+
+            List<uint> compPins = new List<uint>();
+            if (!this.TryAuraMonoGetComponentObjects(this.mapPlayerClass, out List<IntPtr> components, compPins) || components == null)
+            {
+                FreeAuraMonoPins(compPins);
+                return;
+            }
+            try
+            {
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr comp = components[i];
+                    if (comp == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+                    if (!this.TryGetMonoObjectMember(comp, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        if (!this.TryGetMonoVector3Member(entityObj, "position", out Vector3 pos))
+                        {
+                            continue;
+                        }
+                        if (!this.TryGetMonoUInt32Member(entityObj, "netId", out uint netId) || netId == 0u)
+                        {
+                            continue;
+                        }
+                        this.mapPlayerEntities.Add(new MapPlayerEntity { Position = pos, NetId = netId });
+
+                        // Real name: PlayerProfile.Name from FriendSystem.GetUserProfile(netId), keyed by the
+                        // decoded shortId. Pin the string so the GetPlayerName detour can return it safely
+                        // until the next scan rebuilds the map.
+                        if (friendInstance != IntPtr.Zero
+                            && this.TryReadPlayerName(friendInstance, netId, out long shortId, out IntPtr nameStr, out uint namePin)
+                            && nameStr != IntPtr.Zero)
+                        {
+                            if (this.mapNameByShortIdNext.ContainsKey(shortId))
+                            {
+                                AuraMonoPinFree(namePin); // already cached this player this pass
+                            }
+                            else
+                            {
+                                this.mapNamePinsNext.Add(namePin);
+                                this.mapNameByShortIdNext[shortId] = nameStr;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(compPins);
+            }
+
+            // Publish the new name map (backed by the Next pins), then release the previous pins.
+            mapNameByShortId = new Dictionary<long, IntPtr>(this.mapNameByShortIdNext);
+            FreeAuraMonoPins(this.mapNamePins);
+            this.mapNamePins.Clear();
+            this.mapNamePins.AddRange(this.mapNamePinsNext);
+            this.mapNamePinsNext.Clear();
+
+            if (!this.mapPlayerDiagLogged && this.mapPlayerEntities.Count > 0)
+            {
+                this.mapPlayerDiagLogged = true;
+                ModLogger.Msg("[MapSpots] player scan: remotePlayers=" + this.mapPlayerEntities.Count
+                    + " named=" + mapNameByShortId.Count + " sample netId=" + this.mapPlayerEntities[0].NetId);
+            }
+        }
+
+        // Resolve FriendSystem class + GetUserProfile(1-arg) overloads + PlayerProfile.Name offset (once),
+        // then return the live FriendSystem DataModule instance (or Zero if not ready).
+        private IntPtr EnsureNameReadReady()
+        {
+            if (!this.mapNameMethodsTried)
+            {
+                if (auraMonoClassGetMethods == null || auraMonoMethodGetName == null
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null)
+                {
+                    return IntPtr.Zero;
+                }
+                if (this.mapNameFriendSystemClass == IntPtr.Zero)
+                {
+                    this.mapNameFriendSystemClass = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.Social.FriendSystem");
+                    if (this.mapNameFriendSystemClass == IntPtr.Zero)
+                    {
+                        return IntPtr.Zero; // image not loaded yet — retry later
+                    }
+                }
+                if (this.mapNameGetProfileMethods.Count == 0)
+                {
+                    IntPtr iter = IntPtr.Zero;
+                    while (true)
+                    {
+                        IntPtr m = auraMonoClassGetMethods(this.mapNameFriendSystemClass, ref iter);
+                        if (m == IntPtr.Zero) break;
+                        string nm = Marshal.PtrToStringAnsi(auraMonoMethodGetName(m)) ?? string.Empty;
+                        if (nm == "GetUserProfile" && AuraMonoMethodParamCountIs(m, 1u))
+                        {
+                            this.mapNameGetProfileMethods.Add(m);
+                        }
+                    }
+                }
+                if (this.mapNameProfileNameOffset < 0 || this.mapNameProfileIdOffset < 0
+                    || this.mapNameTitleStringOffset < 0)
+                {
+                    IntPtr profCls = this.FindAuraMonoClassByFullName("XDTGameSystem.PlayerService.PlayerProfile");
+                    if (profCls != IntPtr.Zero)
+                    {
+                        this.TryGetTrackFieldRawOffset(profCls, "Name", out this.mapNameProfileNameOffset);
+                        this.TryGetTrackFieldRawOffset(profCls, "Id", out this.mapNameProfileIdOffset);
+                        // Title._titleString within the PlayerProfile buffer = Title field offset (embedded
+                        // value type) + _titleString offset within PlayerTitle.
+                        IntPtr titleCls = this.FindAuraMonoClassByFullName("XDTGameSystem.PlayerService.PlayerTitle");
+                        if (titleCls != IntPtr.Zero
+                            && this.TryGetTrackFieldRawOffset(profCls, "Title", out int titleFieldOff)
+                            && this.TryGetTrackFieldRawOffset(titleCls, "_titleString", out int titleStrOff))
+                        {
+                            this.mapNameTitleStringOffset = titleFieldOff + titleStrOff;
+                        }
+                    }
+                }
+                if (this.mapNameDecodeShortIdMethod == IntPtr.Zero)
+                {
+                    IntPtr shortIdCls = this.FindAuraMonoClassByFullName("Sazabi.Login.Shared.ShortIdUtil");
+                    if (shortIdCls == IntPtr.Zero)
+                    {
+                        shortIdCls = this.FindAuraMonoClassInAllLoadedImages("ShortIdUtil", "Sazabi.Login.Shared");
+                    }
+                    if (shortIdCls != IntPtr.Zero)
+                    {
+                        this.mapNameDecodeShortIdMethod = this.FindAuraMonoMethodOnHierarchy(shortIdCls, "DecodeShortId", 1);
+                    }
+                }
+                if (this.mapNamePlayerServiceClass == IntPtr.Zero)
+                {
+                    this.mapNamePlayerServiceClass = this.FindAuraMonoClassByFullName("XDTGameSystem.PlayerService.PlayerServiceSystem");
+                }
+                if (this.mapNameGetProfileMethods.Count == 0 || this.mapNameProfileNameOffset < 0
+                    || this.mapNameProfileIdOffset < 0 || this.mapNameTitleStringOffset < 0
+                    || this.mapNameDecodeShortIdMethod == IntPtr.Zero
+                    || this.mapNamePlayerServiceClass == IntPtr.Zero)
+                {
+                    return IntPtr.Zero; // not fully resolved yet — retry (don't lock)
+                }
+                this.mapNameMethodsTried = true;
+                ModLogger.Msg("[MapSpots] name read: GetUserProfile overloads=" + this.mapNameGetProfileMethods.Count
+                    + " Name@" + this.mapNameProfileNameOffset + " Id@" + this.mapNameProfileIdOffset
+                    + " Title.str@" + this.mapNameTitleStringOffset
+                    + " decode=" + (this.mapNameDecodeShortIdMethod != IntPtr.Zero));
+            }
+            return this.TryGetAuraMonoDataModuleInstance(this.mapNameFriendSystemClass);
+        }
+
+        // Invoke FriendSystem.GetUserProfile(netId) -> boxed PlayerProfile -> read Name MonoString + Id
+        // (encoded shortId), decode Id to the raw shortId. Tries both 1-arg overloads (uint netId vs long
+        // shortId); the netId overload returns a populated profile -> keep whichever yields a name.
+        private unsafe bool TryReadPlayerName(IntPtr friendInstance, uint netId, out long shortId, out IntPtr nameStr, out uint namePin)
+        {
+            shortId = 0L;
+            nameStr = IntPtr.Zero;
+            namePin = 0u;
+            uint arg = netId;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&arg);
+            for (int i = 0; i < this.mapNameGetProfileMethods.Count; i++)
+            {
+                IntPtr exc = IntPtr.Zero;
+                IntPtr boxed;
+                mapNameReadingSelf = true; // suppress the Title-mirror detour for our own cache-read invoke
+                try
+                {
+                    boxed = auraMonoRuntimeInvoke(this.mapNameGetProfileMethods[i], friendInstance, (IntPtr)args, ref exc);
+                }
+                finally
+                {
+                    mapNameReadingSelf = false;
+                }
+                if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+                {
+                    continue;
+                }
+                IntPtr raw = auraMonoObjectUnbox(boxed);
+                if (raw == IntPtr.Zero)
+                {
+                    continue;
+                }
+                IntPtr candidate = Marshal.ReadIntPtr(raw, this.mapNameProfileNameOffset);
+                IntPtr idStr = Marshal.ReadIntPtr(raw, this.mapNameProfileIdOffset);
+                if (candidate == IntPtr.Zero)
+                {
+                    continue;
+                }
+                // Pin the name string BEFORE reading it: TryReadMonoString allocates, which can trigger a GC
+                // that would otherwise move `candidate` -> stale pointer -> crash when the hook returns it.
+                uint pin = AuraMonoPinNew(candidate);
+                if (this.TryReadMonoString(candidate, out string s) && !string.IsNullOrEmpty(s)
+                    && idStr != IntPtr.Zero && this.TryDecodeShortId(idStr, out shortId) && shortId != 0L)
+                {
+                    nameStr = candidate;
+                    namePin = pin;
+                    if (i != 0) // move the working overload to the front so we stop probing the wrong one
+                    {
+                        IntPtr good = this.mapNameGetProfileMethods[i];
+                        this.mapNameGetProfileMethods.RemoveAt(i);
+                        this.mapNameGetProfileMethods.Insert(0, good);
+                    }
+                    if (!this.mapNameDiagLogged)
+                    {
+                        this.mapNameDiagLogged = true;
+                        ModLogger.Msg("[MapSpots] name read: netId=" + netId + " shortId=" + shortId + " name='" + s + "'");
+                    }
+                    return true;
+                }
+                AuraMonoPinFree(pin); // empty/invalid — release
+            }
+            return false;
+        }
+
+        // ShortIdUtil.DecodeShortId(encodedId) -> raw shortId (long). Static; string arg passed directly.
+        private unsafe bool TryDecodeShortId(IntPtr encodedIdStr, out long shortId)
+        {
+            shortId = 0L;
+            if (this.mapNameDecodeShortIdMethod == IntPtr.Zero || encodedIdStr == IntPtr.Zero
+                || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = encodedIdStr; // reference-type (string) arg = object pointer directly
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(this.mapNameDecodeShortIdMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+            IntPtr rawv = auraMonoObjectUnbox(boxed);
+            if (rawv == IntPtr.Zero)
+            {
+                return false;
+            }
+            shortId = *(long*)rawv;
+            return true;
+        }
+
+        private bool TryMatchRemotePlayer(Vector3 pos, out uint netId)
+        {
+            netId = 0u;
+            float bestSqr = MapPlayerMatchRadiusSqr;
+            bool found = false;
+            for (int i = 0; i < this.mapPlayerEntities.Count; i++)
+            {
+                float dx = this.mapPlayerEntities[i].Position.x - pos.x;
+                float dz = this.mapPlayerEntities[i].Position.z - pos.z;
+                float sqr = dx * dx + dz * dz;
+                if (sqr < bestSqr)
+                {
+                    bestSqr = sqr;
+                    netId = this.mapPlayerEntities[i].NetId;
+                    found = true;
+                }
+            }
+            return found;
         }
 
         private void EnsureEntityResIdMethods()
@@ -1502,6 +1930,1002 @@ namespace HeartopiaMod
             this.mapBigSpotInjected.Clear();
         }
 
+        // ---- "Player avatars for everyone" (radarPlayerAvatarsAll) ----
+        // The game shows the real avatar photo on a map player marker only when the target is a FRIEND:
+        // MiniMapSpotWidget.SetData -> spot.IsFriend -> HeadIconWidget(GetUserProfile(usageId).AvatarImageUrl)
+        // (same gate on the big map: MapSpotWidget -> MapSpot.IsFriend). The profile cache itself is warmed
+        // for EVERY player with a server Player spot (MapSpotsSystem.CreateMapSpotData ->
+        // FriendSystem.UpdateUserCacheInMap), so only the friendship CHECK blocks strangers. These two
+        // callback-free NativeDetours replace the getters with "any (non-self) player counts": Apply while
+        // the toggle is on, Undo when off (same pattern as the Building hooks — no trampoline, no managed
+        // callbacks, allocation-free bodies reading raw fields).
+        private delegate byte IsFriendGetterDelegate(IntPtr thisPtr);
+        private static IsFriendGetterDelegate miniMapIsFriendHook;   // anti-GC
+        private static IsFriendGetterDelegate mapSpotIsFriendHook;   // anti-GC
+        private static MonoMod.RuntimeDetour.NativeDetour miniMapIsFriendDetour;
+        private static MonoMod.RuntimeDetour.NativeDetour mapSpotIsFriendDetour;
+        // Suppress the big-map "tracked" square frame (MapSpotWidget.tracked_go = MapSpot.IsTracked) on the
+        // player spots our injected Player track incidentally marks as tracked. Trampoline: keep the real
+        // value except for our player netIds (returns them to normal, non-tracked player styling/LOD).
+        private static IsFriendGetterDelegate mapSpotIsTrackedHook;        // anti-GC
+        private static IsFriendGetterDelegate mapSpotIsTrackedTrampoline;  // original
+        private static MonoMod.RuntimeDetour.NativeDetour mapSpotIsTrackedDetour;
+        private bool avatarPatchTried;
+        private float avatarPatchNextTryAt;
+        // MiniMapSpot is a STRUCT: `this` = pointer to the raw struct data -> header-subtracted offsets.
+        private static int miniMapOffTrackType = -1;
+        private static int miniMapOffUsageId = -1;
+        // MapSpot is a CLASS: `this` = object pointer -> header-inclusive offsets (mono_field_get_offset as-is).
+        private static int mapSpotOffCategory = -1;
+        private static int mapSpotOffUsageId = -1;
+        private static uint mapAvatarSelfNetId; // exclude self (vanilla getters do too)
+        private const int SpotEnumPlayer = 3;
+
+        // "Player Avatars (all)" for the IN-WORLD pointer: the native MapTrackWidget shows the avatar only
+        // when TryGetFriendByNetId(cell.NetID) is true (twice, inline, unhookable). A trampoline detour on
+        // FriendClientService.TryGetFriendByNetId forces true for the specific player netIds we inject a
+        // world track for (scoped set, refreshed each sync) while the toggle is on — out FriendComponent is
+        // left as the original's default (all readers are null-safe: GetDisplayName / IsNullOrEmpty), so the
+        // blast radius is only those nearby players and only cosmetic (a blank name in a social panel).
+        private delegate byte TryGetFriendByNetIdDelegate(IntPtr self, uint netId, IntPtr outFriend);
+        private static TryGetFriendByNetIdDelegate friendGateHook;        // anti-GC
+        private static TryGetFriendByNetIdDelegate friendGateTrampoline;  // original
+        private static MonoMod.RuntimeDetour.NativeDetour friendGateDetour;
+        private static volatile bool avatarForceFriendActive;
+        // The in-world player pointer (MapTrackWidget) only draws the avatar head icon when
+        // FriendProtocolManager.TryGetFriendByNetId is true — but that check is used by ~30 call sites
+        // (dialogs, panels), so force-friending it globally broke those. Instead we bracket MapTrackWidget.SetData
+        // with this flag and let FriendGateNative force-friend ONLY while it is set, so the override is confined
+        // to the pointer's own render call and never leaks to a dialog's friend check.
+        // Two methods read TryGetFriendByNetId to build the pointer's avatar, at different times:
+        //  [0] MapTrackCellModel.SetData(TrackingItem)      -> iconId.SpriteName = GetUserProfile.AvatarImageUrl
+        //  [1] MapTrackWidget.SetData(MapPositionTrackBarModel) -> shows the head-icon texture branch
+        // Both must run with the force-friend flag set, so we bracket BOTH (save/restore for nesting safety).
+        private static volatile bool mapTrackWidgetRendering;
+        private delegate void MapTrackSetDataDelegate(IntPtr self, IntPtr arg);
+        private static readonly MapTrackSetDataDelegate[] mapTrackSetDataHooks = new MapTrackSetDataDelegate[2];       // anti-GC
+        private static readonly MapTrackSetDataDelegate[] mapTrackSetDataTrampolines = new MapTrackSetDataDelegate[2]; // originals
+        private static readonly MonoMod.RuntimeDetour.NativeDetour[] mapTrackSetDataDetours = new MonoMod.RuntimeDetour.NativeDetour[2];
+        private bool mapTrackSetDataPatchTried;
+        private bool mapTrackClassMissLogged;
+        // The track icon (incl. the player avatar URL) is computed by TrackingItem.GetAtlasSpriteId, which is
+        // also invoked from refresh/streaming paths that DON'T go through our SetData brackets — so at close
+        // range the avatar URL is recomputed without force-friend and reverts to the non-friend placeholder.
+        // Bracket GetAtlasSpriteId itself (sret struct return: RCX=this, RDX=sret, R8=useReason) so force-friend
+        // covers EVERY icon computation for our player netIds. Scoped like the SetData brackets -> no dialog leak.
+        private delegate IntPtr GetAtlasSpriteIdDelegate(IntPtr self, IntPtr sret, int useReason);
+        private static GetAtlasSpriteIdDelegate getAtlasSpriteIdHook;        // anti-GC
+        private static GetAtlasSpriteIdDelegate getAtlasSpriteIdTrampoline;  // original
+        private static MonoMod.RuntimeDetour.NativeDetour getAtlasSpriteIdDetour;
+        // netIds we currently inject a world Player track for. Read by the static hook -> a plain field the
+        // sync writes wholesale each pass (single-threaded UI thread; the detour also fires on it).
+        private static HashSet<uint> mapAvatarWorldNetIds = new HashSet<uint>();
+        private readonly HashSet<uint> mapAvatarWorldNetIdsNext = new HashSet<uint>();
+
+        private void ManagePlayerAvatarPatches()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.avatarPatchNextTryAt)
+            {
+                return;
+            }
+            this.avatarPatchNextTryAt = now + 2f;
+            avatarForceFriendActive = this.radarPlayerAvatarsAll;
+            if (this.radarPlayerAvatarsAll)
+            {
+                // Prefer the AuraMono PlayerDataCenter path (the managed TryGetSelfPlayerNetId is dead on this
+                // build -> returned 0); fall back to it only if the Mono path isn't up yet.
+                if (this.TryResolveSelfPlayerNetIdMono(out uint selfId) && selfId != 0u)
+                {
+                    mapAvatarSelfNetId = selfId;
+                }
+                else if (this.TryGetSelfPlayerNetId(out uint selfIdManaged) && selfIdManaged != 0u)
+                {
+                    mapAvatarSelfNetId = selfIdManaged;
+                }
+                this.EnsurePlayerAvatarPatches();
+                // In-world player pointer avatars: the force-friend detour on TryGetFriendByNetId is now SCOPED
+                // to MapTrackWidget.SetData via the mapTrackWidgetRendering flag (EnsureTrackWidgetPatch), so it
+                // no longer leaks into dialogs/panels (the earlier global force-friend regression). Map avatars
+                // still come from the scoped get_IsFriend detours; names from GetPlayerName/GetUserProfile.
+                this.EnsureTrackWidgetPatch();
+                this.EnsureFriendGatePatch();
+            }
+            else
+            {
+                this.UndoPlayerAvatarPatches();
+                this.UndoTrackWidgetPatch();
+                this.UndoFriendGatePatch();
+            }
+
+            // Real names for non-friends (map spot / dialog title): scan + get_name detour. Managed by the
+            // same avatar toggle. No force-friend -> no dialog regression.
+            mapNameActive = this.radarPlayerAvatarsAll;
+            if (this.radarPlayerAvatarsAll)
+            {
+                this.RefreshRemotePlayerScan(); // also (re)builds the netId -> real-name cache
+                this.EnsureGetNamePatch();          // map spot / chat surfaces (GetPlayerName)
+                this.EnsureGetProfilePatch();       // over-head nameplate + profile card (GetUserProfile.Title)
+                this.EnsureIsAcquaintancePatch();   // let the nameplate show strangers without opening the card
+            }
+            else
+            {
+                this.UndoGetNamePatch();
+                this.UndoGetProfilePatch();
+                this.UndoIsAcquaintancePatch();
+            }
+
+            // The tracked-square suppression (MapSpot.get_IsTracked) is needed by BOTH big-map resource spots
+            // and world-player spots, so it's managed independently of the avatar toggle.
+            if (this.radarBigMapSpots || this.radarPlayerAvatarsAll)
+            {
+                this.EnsureIsTrackedPatch();
+            }
+            else
+            {
+                this.UndoIsTrackedPatch();
+            }
+        }
+
+        // Detour PlayerServiceSystem.GetPlayerName(shortId, title): return the cached real name for players we
+        // scanned (map spot, profile card, over-head nameplate, chat all route through this), else original.
+        private void EnsureGetNamePatch()
+        {
+            try
+            {
+                if (getPlayerNameDetour != null)
+                {
+                    if (!getPlayerNameDetour.IsApplied)
+                    {
+                        getPlayerNameDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.getNamePatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+                if (this.mapNamePlayerServiceClass == IntPtr.Zero)
+                {
+                    this.mapNamePlayerServiceClass = this.FindAuraMonoClassByFullName("XDTGameSystem.PlayerService.PlayerServiceSystem");
+                }
+                if (this.mapNamePlayerServiceClass == IntPtr.Zero)
+                {
+                    return; // class not loaded yet — retry later
+                }
+                IntPtr nameNative = this.ResolveBuildingMonoNative(this.mapNamePlayerServiceClass, "GetPlayerName", 2);
+                if (nameNative == IntPtr.Zero)
+                {
+                    this.getNamePatchTried = true;
+                    ModLogger.Msg("[MapSpots] name patch: PlayerServiceSystem.GetPlayerName(2) not resolved");
+                    return;
+                }
+                getPlayerNameHook = GetPlayerNameNative;
+                getPlayerNameDetour = new MonoMod.RuntimeDetour.NativeDetour(nameNative, getPlayerNameHook);
+                getPlayerNameTrampoline = getPlayerNameDetour.GenerateTrampoline<GetPlayerNameDelegate>();
+                this.getNamePatchTried = true;
+                ModLogger.Msg("[MapSpots] name patch: real-name detour installed on PlayerServiceSystem.GetPlayerName");
+            }
+            catch (Exception ex)
+            {
+                this.getNamePatchTried = true;
+                ModLogger.Msg("[MapSpots] name patch: GetPlayerName detour failed: " + ex.Message);
+            }
+        }
+
+        private void UndoGetNamePatch()
+        {
+            try
+            {
+                if (getPlayerNameDetour != null && getPlayerNameDetour.IsApplied)
+                {
+                    getPlayerNameDetour.Undo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] name patch: GetPlayerName undo failed: " + ex.Message);
+            }
+        }
+
+        private void FreePlayerNamePins()
+        {
+            FreeAuraMonoPins(this.mapNamePins);
+            this.mapNamePins.Clear();
+            FreeAuraMonoPins(this.mapNamePinsNext);
+            this.mapNamePinsNext.Clear();
+            this.mapNameByShortIdNext.Clear();
+            mapNameByShortId = new Dictionary<long, IntPtr>();
+        }
+
+        // Detour BOTH 1-arg FriendSystem.GetUserProfile overloads (long shortId / uint netId): the over-head
+        // nameplate and profile card read the returned copy's Title.TitleString, so mirror the profile's real
+        // Name into Title._titleString within that copy. sret struct-return ABI: RCX=sret buffer, RDX=this,
+        // R8=arg; the original returns the sret pointer in RAX, so the hook returns the trampoline's result to
+        // keep RAX intact. Requires Name + Title._titleString offsets (resolved by EnsureNameReadReady).
+        private void EnsureGetProfilePatch()
+        {
+            try
+            {
+                bool anyInstalled = false;
+                for (int i = 0; i < getProfileDetours.Length; i++)
+                {
+                    if (getProfileDetours[i] != null)
+                    {
+                        anyInstalled = true;
+                        if (!getProfileDetours[i].IsApplied)
+                        {
+                            getProfileDetours[i].Apply();
+                        }
+                    }
+                }
+                if (anyInstalled || this.getProfilePatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+                if (this.mapNameGetProfileMethods.Count == 0 || this.mapNameProfileNameOffset < 0
+                    || this.mapNameTitleStringOffset < 0)
+                {
+                    return; // methods/offsets not resolved yet — retry on a later scan
+                }
+                if (buildingMonoCompileMethod == null)
+                {
+                    IntPtr mod = this.GetAuraMonoModuleHandle();
+                    if (mod != IntPtr.Zero)
+                    {
+                        buildingMonoCompileMethod = this.GetAuraMonoExport<BuildingMonoCompileMethodDelegate>(mod, "mono_compile_method");
+                    }
+                }
+                if (buildingMonoCompileMethod == null)
+                {
+                    return; // retry
+                }
+                gpNameOffset = this.mapNameProfileNameOffset;
+                gpTitleStringOffset = this.mapNameTitleStringOffset;
+                getProfileHooks[0] = GetProfileNative0;
+                getProfileHooks[1] = GetProfileNative1;
+                int installed = 0;
+                int count = this.mapNameGetProfileMethods.Count < 2 ? this.mapNameGetProfileMethods.Count : 2;
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr native = buildingMonoCompileMethod(this.mapNameGetProfileMethods[i]);
+                    if (native == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+                    // Construct (auto-applies) then generate the trampoline. If trampoline generation throws,
+                    // the detour is live with a null trampoline -> every GetUserProfile would return an
+                    // unfilled struct. Undo immediately on failure so the hook is never left half-installed.
+                    MonoMod.RuntimeDetour.NativeDetour d = new MonoMod.RuntimeDetour.NativeDetour(native, getProfileHooks[i]);
+                    try
+                    {
+                        getProfileTrampolines[i] = d.GenerateTrampoline<GetProfileDelegate>();
+                    }
+                    catch
+                    {
+                        try { d.Undo(); } catch { }
+                        getProfileTrampolines[i] = null;
+                        throw;
+                    }
+                    getProfileDetours[i] = d;
+                    installed++;
+                }
+                this.getProfilePatchTried = true;
+                ModLogger.Msg("[MapSpots] name patch: GetUserProfile Title-mirror detour installed on "
+                    + installed + " overload(s), Name@" + gpNameOffset + " Title.str@" + gpTitleStringOffset);
+            }
+            catch (Exception ex)
+            {
+                this.getProfilePatchTried = true;
+                ModLogger.Msg("[MapSpots] name patch: GetUserProfile detour failed: " + ex.Message);
+            }
+        }
+
+        private void UndoGetProfilePatch()
+        {
+            try
+            {
+                for (int i = 0; i < getProfileDetours.Length; i++)
+                {
+                    if (getProfileDetours[i] != null && getProfileDetours[i].IsApplied)
+                    {
+                        getProfileDetours[i].Undo();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] name patch: GetUserProfile undo failed: " + ex.Message);
+            }
+        }
+
+        // Detour FriendSystem.IsAcquaintance(long shortId) -> true for players in the name cache, so the
+        // over-head nameplate shows their (mirrored) name without needing the profile card opened first.
+        private void EnsureIsAcquaintancePatch()
+        {
+            try
+            {
+                if (isAcquaintanceDetour != null)
+                {
+                    if (!isAcquaintanceDetour.IsApplied)
+                    {
+                        isAcquaintanceDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.acqPatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+                if (this.mapNameFriendSystemClass == IntPtr.Zero)
+                {
+                    this.mapNameFriendSystemClass = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.Social.FriendSystem");
+                }
+                if (this.mapNameFriendSystemClass == IntPtr.Zero)
+                {
+                    return; // class not loaded yet — retry later
+                }
+                IntPtr acqNative = this.ResolveBuildingMonoNative(this.mapNameFriendSystemClass, "IsAcquaintance", 1);
+                if (acqNative == IntPtr.Zero)
+                {
+                    this.acqPatchTried = true;
+                    ModLogger.Msg("[MapSpots] name patch: FriendSystem.IsAcquaintance(1) not resolved");
+                    return;
+                }
+                isAcquaintanceHook = IsAcquaintanceNative;
+                MonoMod.RuntimeDetour.NativeDetour d = new MonoMod.RuntimeDetour.NativeDetour(acqNative, isAcquaintanceHook);
+                try
+                {
+                    isAcquaintanceTrampoline = d.GenerateTrampoline<IsAcquaintanceDelegate>();
+                }
+                catch
+                {
+                    try { d.Undo(); } catch { }
+                    isAcquaintanceTrampoline = null;
+                    throw;
+                }
+                isAcquaintanceDetour = d;
+                this.acqPatchTried = true;
+                ModLogger.Msg("[MapSpots] name patch: IsAcquaintance detour installed (nameplate shows scanned strangers)");
+            }
+            catch (Exception ex)
+            {
+                this.acqPatchTried = true;
+                ModLogger.Msg("[MapSpots] name patch: IsAcquaintance detour failed: " + ex.Message);
+            }
+        }
+
+        private void UndoIsAcquaintancePatch()
+        {
+            try
+            {
+                if (isAcquaintanceDetour != null && isAcquaintanceDetour.IsApplied)
+                {
+                    isAcquaintanceDetour.Undo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] name patch: IsAcquaintance undo failed: " + ex.Message);
+            }
+        }
+
+        // Return true (=1) for players we have a cached name for so the nameplate treats them as acquaintances
+        // and shows the name; everything else falls through to the original. Allocation-free (hot path).
+        private static byte IsAcquaintanceNative(IntPtr self, long shortId)
+        {
+            if (mapNameActive && shortId != 0L && mapNameByShortId.ContainsKey(shortId))
+            {
+                return 1;
+            }
+            return isAcquaintanceTrampoline != null ? isAcquaintanceTrampoline(self, shortId) : (byte)0;
+        }
+
+        // sret struct-return hook bodies (one per overload so each calls its own trampoline). Allocation-free:
+        // only a pass-through call + two Marshal memory ops. Returns the trampoline's result (the sret pointer)
+        // to preserve RAX for the caller.
+        // ABI CONFIRMED from a crash dump: mono passes an instance method's vtype return buffer AFTER `this`,
+        // i.e. RCX=this, RDX=sret, R8=arg (a *static* sret method like CraftMath has sret first because there
+        // is no `this`). So the SECOND pointer param is the return buffer to mirror into. The hook returns the
+        // trampoline's result (RAX = sret pointer) to preserve the caller's return value.
+        private static IntPtr GetProfileNative0(IntPtr self, IntPtr sret, long arg)
+        {
+            IntPtr ret = getProfileTrampolines[0] != null ? getProfileTrampolines[0](self, sret, arg) : sret;
+            MirrorProfileNameIntoTitle(sret);
+            return ret;
+        }
+
+        private static IntPtr GetProfileNative1(IntPtr self, IntPtr sret, long arg)
+        {
+            IntPtr ret = getProfileTrampolines[1] != null ? getProfileTrampolines[1](self, sret, arg) : sret;
+            MirrorProfileNameIntoTitle(sret);
+            return ret;
+        }
+
+        private static void MirrorProfileNameIntoTitle(IntPtr sret)
+        {
+            // Skip while our own throttled scan is inside GetUserProfile (it invokes the now-detoured method to
+            // build the name cache) — the mirror is only for the game's over-head/card reads, not our reads.
+            if (mapNameReadingSelf || !mapNameActive || sret == IntPtr.Zero || gpNameOffset < 0 || gpTitleStringOffset < 0)
+            {
+                return;
+            }
+            IntPtr namePtr = Marshal.ReadIntPtr(sret, gpNameOffset);
+            if (namePtr == IntPtr.Zero)
+            {
+                return;
+            }
+            // MonoString.length @ 16 (2*IntPtr header). Never replace the title with a blank/partial name —
+            // that would reproduce the empty-nameplate bug. Only mirror a non-empty Name.
+            if (Marshal.ReadInt32(namePtr, 16) <= 0)
+            {
+                return;
+            }
+            Marshal.WriteIntPtr(sret, gpTitleStringOffset, namePtr);
+        }
+
+        // GetPlayerName(self, shortId, title) replacement: return the cached real name for a scanned player,
+        // else the original (friend nickname / stranger title / unknown shortId unchanged). Allocation-free
+        // (fires on the hot UI path — never log or allocate here).
+        private static IntPtr GetPlayerNameNative(IntPtr self, long shortId, long title)
+        {
+            if (mapNameActive && shortId != 0L && mapNameByShortId.TryGetValue(shortId, out IntPtr name) && name != IntPtr.Zero)
+            {
+                return name;
+            }
+            return getPlayerNameTrampoline != null ? getPlayerNameTrampoline(self, shortId, title) : IntPtr.Zero;
+        }
+
+        // Resolve MapSpot.category/usageId field offsets (header-inclusive; MapSpot is a class). Idempotent.
+        private bool TryEnsureMapSpotOffsets(out IntPtr spotCls)
+        {
+            spotCls = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.MapSpots.MapSpot");
+            if (spotCls == IntPtr.Zero)
+            {
+                return false;
+            }
+            if (mapSpotOffCategory >= 0 && mapSpotOffUsageId >= 0)
+            {
+                return true;
+            }
+            if (auraMonoClassGetFieldFromName == null || auraMonoFieldGetOffset == null)
+            {
+                return false;
+            }
+            IntPtr catField = auraMonoClassGetFieldFromName(spotCls, "category");
+            IntPtr useField = auraMonoClassGetFieldFromName(spotCls, "usageId");
+            if (catField == IntPtr.Zero || useField == IntPtr.Zero)
+            {
+                return false;
+            }
+            mapSpotOffCategory = (int)auraMonoFieldGetOffset(catField);
+            mapSpotOffUsageId = (int)auraMonoFieldGetOffset(useField);
+            return true;
+        }
+
+        private bool isTrackedPatchTried;
+        private void EnsureIsTrackedPatch()
+        {
+            try
+            {
+                if (mapSpotIsTrackedDetour != null)
+                {
+                    if (!mapSpotIsTrackedDetour.IsApplied)
+                    {
+                        mapSpotIsTrackedDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.isTrackedPatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+                if (!this.TryEnsureMapSpotOffsets(out IntPtr spotCls))
+                {
+                    return; // class/fields not ready — retry later
+                }
+                IntPtr trackedNative = this.ResolveBuildingMonoNative(spotCls, "get_IsTracked", 0);
+                if (trackedNative == IntPtr.Zero)
+                {
+                    this.isTrackedPatchTried = true;
+                    ModLogger.Msg("[MapSpots] avatar patch: MapSpot.get_IsTracked not resolved");
+                    return;
+                }
+                mapSpotIsTrackedHook = MapSpotIsTrackedNative;
+                mapSpotIsTrackedDetour = new MonoMod.RuntimeDetour.NativeDetour(trackedNative, mapSpotIsTrackedHook);
+                mapSpotIsTrackedTrampoline = mapSpotIsTrackedDetour.GenerateTrampoline<IsFriendGetterDelegate>();
+                this.isTrackedPatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch: tracked-frame suppression installed on MapSpot.get_IsTracked");
+            }
+            catch (Exception ex)
+            {
+                this.isTrackedPatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch: get_IsTracked detour failed: " + ex.Message);
+            }
+        }
+
+        private void UndoIsTrackedPatch()
+        {
+            try
+            {
+                if (mapSpotIsTrackedDetour != null && mapSpotIsTrackedDetour.IsApplied)
+                {
+                    mapSpotIsTrackedDetour.Undo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] avatar patch: get_IsTracked undo failed: " + ex.Message);
+            }
+        }
+
+        private void EnsurePlayerAvatarPatches()
+        {
+            try
+            {
+                if (miniMapIsFriendDetour != null)
+                {
+                    if (!miniMapIsFriendDetour.IsApplied)
+                    {
+                        miniMapIsFriendDetour.Apply();
+                    }
+                    if (mapSpotIsFriendDetour != null && !mapSpotIsFriendDetour.IsApplied)
+                    {
+                        mapSpotIsFriendDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.avatarPatchTried)
+                {
+                    return; // creation already failed permanently
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoClassGetFieldFromName == null || auraMonoFieldGetOffset == null)
+                {
+                    return; // AuraMono not up yet — retry on a later tick
+                }
+
+                IntPtr miniCls = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.MapSpots.MiniMapSpot");
+                IntPtr spotCls = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.MapSpots.MapSpot");
+                if (miniCls == IntPtr.Zero || spotCls == IntPtr.Zero)
+                {
+                    return; // image not loaded yet — retry later
+                }
+
+                if (!this.TryGetTrackFieldRawOffset(miniCls, "trackType", out int offTt)
+                    || !this.TryGetTrackFieldRawOffset(miniCls, "usageId", out int offUse))
+                {
+                    this.avatarPatchTried = true;
+                    ModLogger.Msg("[MapSpots] avatar patch: MiniMapSpot field offsets not resolved");
+                    return;
+                }
+                IntPtr catField = auraMonoClassGetFieldFromName(spotCls, "category");
+                IntPtr useField = auraMonoClassGetFieldFromName(spotCls, "usageId");
+                if (catField == IntPtr.Zero || useField == IntPtr.Zero)
+                {
+                    this.avatarPatchTried = true;
+                    ModLogger.Msg("[MapSpots] avatar patch: MapSpot fields not resolved");
+                    return;
+                }
+
+                // Resolve + JIT-compile via the shared Building helper (mono_compile_method with IntPtr return).
+                IntPtr miniNative = this.ResolveBuildingMonoNative(miniCls, "get_IsFriend", 0);
+                IntPtr spotNative = this.ResolveBuildingMonoNative(spotCls, "get_IsFriend", 0);
+                if (miniNative == IntPtr.Zero || spotNative == IntPtr.Zero)
+                {
+                    this.avatarPatchTried = true;
+                    ModLogger.Msg("[MapSpots] avatar patch: get_IsFriend compile failed (mini="
+                        + (miniNative != IntPtr.Zero) + " spot=" + (spotNative != IntPtr.Zero) + ")");
+                    return;
+                }
+
+                miniMapOffTrackType = offTt;
+                miniMapOffUsageId = offUse;
+                mapSpotOffCategory = (int)auraMonoFieldGetOffset(catField);
+                mapSpotOffUsageId = (int)auraMonoFieldGetOffset(useField);
+
+                miniMapIsFriendHook = MiniMapIsFriendNative;
+                mapSpotIsFriendHook = MapSpotIsFriendNative;
+                miniMapIsFriendDetour = new MonoMod.RuntimeDetour.NativeDetour(miniNative, miniMapIsFriendHook);
+                mapSpotIsFriendDetour = new MonoMod.RuntimeDetour.NativeDetour(spotNative, mapSpotIsFriendHook);
+
+                this.avatarPatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch: detours installed on MiniMapSpot/MapSpot.get_IsFriend"
+                    + " (self=" + mapAvatarSelfNetId + ")");
+            }
+            catch (Exception ex)
+            {
+                this.avatarPatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch failed: " + ex.Message);
+            }
+        }
+
+        private void UndoPlayerAvatarPatches()
+        {
+            avatarForceFriendActive = false;
+            try
+            {
+                if (miniMapIsFriendDetour != null && miniMapIsFriendDetour.IsApplied)
+                {
+                    miniMapIsFriendDetour.Undo();
+                }
+                if (mapSpotIsFriendDetour != null && mapSpotIsFriendDetour.IsApplied)
+                {
+                    mapSpotIsFriendDetour.Undo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] avatar patch undo failed: " + ex.Message);
+            }
+            this.UndoFriendGatePatch();
+        }
+
+        private void UndoFriendGatePatch()
+        {
+            avatarForceFriendActive = false;
+            try
+            {
+                if (friendGateDetour != null && friendGateDetour.IsApplied)
+                {
+                    friendGateDetour.Undo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] friend-gate undo failed: " + ex.Message);
+            }
+        }
+
+        // Detour MapTrackCellModel.SetData + MapTrackWidget.SetData: mark mapTrackWidgetRendering for the
+        // duration so the friend-gate override is scoped to exactly the pointer's icon-build + render calls
+        // (see FriendGateNative). Bodies are allocation-free — a save/restore flag + pass-through.
+        private void EnsureTrackWidgetPatch()
+        {
+            try
+            {
+                if (mapTrackSetDataDetours[0] != null || mapTrackSetDataDetours[1] != null)
+                {
+                    for (int i = 0; i < mapTrackSetDataDetours.Length; i++)
+                    {
+                        if (mapTrackSetDataDetours[i] != null && !mapTrackSetDataDetours[i].IsApplied)
+                        {
+                            mapTrackSetDataDetours[i].Apply();
+                        }
+                    }
+                    if (getAtlasSpriteIdDetour != null && !getAtlasSpriteIdDetour.IsApplied)
+                    {
+                        getAtlasSpriteIdDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.mapTrackSetDataPatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+                IntPtr cellCls = this.FindAuraMonoClassByFullName("XDTGUI.Module.Track.Cells.MapTrackCellModel");
+                if (cellCls == IntPtr.Zero)
+                {
+                    cellCls = this.FindAuraMonoClassInAllLoadedImages("MapTrackCellModel", "XDTGUI.Module.Track.Cells");
+                }
+                IntPtr widgetCls = this.FindAuraMonoClassByFullName("XDTGame.UI.Widget.MapTrackWidget");
+                if (widgetCls == IntPtr.Zero)
+                {
+                    widgetCls = this.FindAuraMonoClassInAllLoadedImages("MapTrackWidget", "XDTGame.UI.Widget");
+                }
+                if (cellCls == IntPtr.Zero || widgetCls == IntPtr.Zero)
+                {
+                    if (!this.mapTrackClassMissLogged)
+                    {
+                        this.mapTrackClassMissLogged = true;
+                        ModLogger.Msg("[MapSpots] avatar patch: SetData class NOT resolved yet (cell="
+                            + (cellCls != IntPtr.Zero) + " widget=" + (widgetCls != IntPtr.Zero) + ") — retrying");
+                    }
+                    return; // images not loaded yet — retry later
+                }
+                IntPtr cellNative = this.ResolveBuildingMonoNative(cellCls, "SetData", 1);
+                IntPtr widgetNative = this.ResolveBuildingMonoNative(widgetCls, "SetData", 1);
+                if (cellNative == IntPtr.Zero || widgetNative == IntPtr.Zero)
+                {
+                    this.mapTrackSetDataPatchTried = true;
+                    ModLogger.Msg("[MapSpots] avatar patch: SetData not resolved (cell=" + (cellNative != IntPtr.Zero)
+                        + " widget=" + (widgetNative != IntPtr.Zero) + ")");
+                    return;
+                }
+                mapTrackSetDataHooks[0] = MapTrackCellSetDataNative;
+                mapTrackSetDataHooks[1] = MapTrackWidgetSetDataNative;
+                IntPtr[] natives = { cellNative, widgetNative };
+                for (int i = 0; i < 2; i++)
+                {
+                    MonoMod.RuntimeDetour.NativeDetour d = new MonoMod.RuntimeDetour.NativeDetour(natives[i], mapTrackSetDataHooks[i]);
+                    try
+                    {
+                        mapTrackSetDataTrampolines[i] = d.GenerateTrampoline<MapTrackSetDataDelegate>();
+                    }
+                    catch
+                    {
+                        try { d.Undo(); } catch { }
+                        mapTrackSetDataTrampolines[i] = null;
+                        throw;
+                    }
+                    mapTrackSetDataDetours[i] = d;
+                }
+                // Bracket TrackingItem.GetAtlasSpriteId (the icon source) so refresh/streaming recomputes at
+                // close range also run under force-friend. sret struct return -> IntPtr-returning delegate.
+                IntPtr trackingItemCls = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.Navigation.TrackingItem");
+                if (trackingItemCls == IntPtr.Zero)
+                {
+                    trackingItemCls = this.FindAuraMonoClassInAllLoadedImages("TrackingItem", "XDTGameSystem.GameplaySystem.Navigation");
+                }
+                IntPtr atlasNative = trackingItemCls != IntPtr.Zero
+                    ? this.ResolveBuildingMonoNative(trackingItemCls, "GetAtlasSpriteId", 1) : IntPtr.Zero;
+                if (atlasNative != IntPtr.Zero)
+                {
+                    getAtlasSpriteIdHook = GetAtlasSpriteIdNative;
+                    MonoMod.RuntimeDetour.NativeDetour ad = new MonoMod.RuntimeDetour.NativeDetour(atlasNative, getAtlasSpriteIdHook);
+                    try
+                    {
+                        getAtlasSpriteIdTrampoline = ad.GenerateTrampoline<GetAtlasSpriteIdDelegate>();
+                    }
+                    catch
+                    {
+                        try { ad.Undo(); } catch { }
+                        getAtlasSpriteIdTrampoline = null;
+                        throw;
+                    }
+                    getAtlasSpriteIdDetour = ad;
+                }
+                this.mapTrackSetDataPatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch: SetData + GetAtlasSpriteId detours installed (atlas="
+                    + (atlasNative != IntPtr.Zero) + ", scoped world-pointer avatars)");
+            }
+            catch (Exception ex)
+            {
+                this.mapTrackSetDataPatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch: SetData detour failed: " + ex.Message);
+            }
+        }
+
+        // sret bracket for TrackingItem.GetAtlasSpriteId: force-friend for the duration so the Player branch
+        // (avatar URL) is taken for our netIds regardless of the calling path. Returns the trampoline's result
+        // (the sret pointer -> RAX). Allocation-free.
+        private static IntPtr GetAtlasSpriteIdNative(IntPtr self, IntPtr sret, int useReason)
+        {
+            bool prev = mapTrackWidgetRendering;
+            mapTrackWidgetRendering = true;
+            try
+            {
+                return getAtlasSpriteIdTrampoline != null ? getAtlasSpriteIdTrampoline(self, sret, useReason) : sret;
+            }
+            finally
+            {
+                mapTrackWidgetRendering = prev;
+            }
+        }
+
+
+        private void UndoTrackWidgetPatch()
+        {
+            try
+            {
+                for (int i = 0; i < mapTrackSetDataDetours.Length; i++)
+                {
+                    if (mapTrackSetDataDetours[i] != null && mapTrackSetDataDetours[i].IsApplied)
+                    {
+                        mapTrackSetDataDetours[i].Undo();
+                    }
+                }
+                if (getAtlasSpriteIdDetour != null && getAtlasSpriteIdDetour.IsApplied)
+                {
+                    getAtlasSpriteIdDetour.Undo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] avatar patch: SetData undo failed: " + ex.Message);
+            }
+            mapTrackWidgetRendering = false;
+        }
+
+        private static void MapTrackCellSetDataNative(IntPtr self, IntPtr message)
+        {
+            bool prev = mapTrackWidgetRendering;
+            mapTrackWidgetRendering = true;
+            try
+            {
+                if (mapTrackSetDataTrampolines[0] != null)
+                {
+                    mapTrackSetDataTrampolines[0](self, message);
+                }
+            }
+            finally
+            {
+                mapTrackWidgetRendering = prev;
+            }
+        }
+
+        private static void MapTrackWidgetSetDataNative(IntPtr self, IntPtr barData)
+        {
+            bool prev = mapTrackWidgetRendering;
+            mapTrackWidgetRendering = true;
+            try
+            {
+                if (mapTrackSetDataTrampolines[1] != null)
+                {
+                    mapTrackSetDataTrampolines[1](self, barData);
+                }
+            }
+            finally
+            {
+                mapTrackWidgetRendering = prev;
+            }
+        }
+
+        // MapSpot.get_IsTracked replacement: keep the real value, but suppress the tracked square
+        // (MapSpotWidget.tracked_go) on OUR radar spots:
+        //  - Collectable category: vanilla never creates Collectable spots, so ALL of them are ours (the
+        //    big-map resource markers) -> always suppress; the icon still resolves via GetAtlasSpriteID.
+        //  - Player category: only our world-pointer players (usageId in the set) -> suppress; they then
+        //    render like normal untracked player pins with just the friend avatar.
+        private static unsafe byte MapSpotIsTrackedNative(IntPtr thisPtr)
+        {
+            byte real = mapSpotIsTrackedTrampoline != null ? mapSpotIsTrackedTrampoline(thisPtr) : (byte)0;
+            if (real == 0 || thisPtr == IntPtr.Zero || mapSpotOffCategory < 0 || mapSpotOffUsageId < 0)
+            {
+                return real;
+            }
+            int category = *(int*)((byte*)thisPtr + mapSpotOffCategory);
+            if (category == SpotEnumCollectable)
+            {
+                return 0; // resource big-map spot (always ours)
+            }
+            if (avatarForceFriendActive && category == SpotEnumPlayer)
+            {
+                int usage = *(int*)((byte*)thisPtr + mapSpotOffUsageId);
+                if (usage != 0 && mapAvatarWorldNetIds.Contains((uint)usage))
+                {
+                    return 0; // our radar player marker
+                }
+            }
+            return 1;
+        }
+
+        // Install (once) the FriendClientService.TryGetFriendByNetId trampoline detour that force-friends the
+        // in-world-pointer player netIds. Needs a trampoline (call original) unlike the constant IsFriend
+        // getters, so it uses GenerateTrampoline like the other conditional detours (PrivacyBlock/Fishing).
+        private bool friendGatePatchTried;
+        private bool friendGateClassMissLogged;
+        private void EnsureFriendGatePatch()
+        {
+            try
+            {
+                if (friendGateDetour != null)
+                {
+                    if (!friendGateDetour.IsApplied)
+                    {
+                        friendGateDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.friendGatePatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+                // Concrete implementer of IFriendService.TryGetFriendByNetId (interface method is Mono-only).
+                // NB the ilspy folder "EcsSystem/ClientSystem.Social.Friend" is the image name, but the C#
+                // NAMESPACE is just "ClientSystem.Social.Friend".
+                IntPtr cls = this.FindAuraMonoClassByFullName("ClientSystem.Social.Friend.FriendClientService");
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassInAllLoadedImages("FriendClientService", "ClientSystem.Social.Friend");
+                }
+                if (cls == IntPtr.Zero)
+                {
+                    if (!this.friendGateClassMissLogged)
+                    {
+                        this.friendGateClassMissLogged = true;
+                        ModLogger.Msg("[MapSpots] avatar patch: FriendClientService class NOT resolved yet (retrying)");
+                    }
+                    return; // image not loaded yet — retry later
+                }
+                IntPtr native = this.ResolveBuildingMonoNative(cls, "TryGetFriendByNetId", 2);
+                if (native == IntPtr.Zero)
+                {
+                    this.friendGatePatchTried = true;
+                    ModLogger.Msg("[MapSpots] avatar patch: FriendClientService.TryGetFriendByNetId(2) not resolved");
+                    return;
+                }
+                friendGateHook = FriendGateNative;
+                friendGateDetour = new MonoMod.RuntimeDetour.NativeDetour(native, friendGateHook);
+                friendGateTrampoline = friendGateDetour.GenerateTrampoline<TryGetFriendByNetIdDelegate>();
+                this.friendGatePatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch: friend-gate detour installed on FriendClientService.TryGetFriendByNetId");
+            }
+            catch (Exception ex)
+            {
+                this.friendGatePatchTried = true;
+                ModLogger.Msg("[MapSpots] avatar patch: friend-gate detour failed: " + ex.Message);
+            }
+        }
+
+        // Trampoline body: run the real check first (this also fills `outFriend` with the real friend or the
+        // default on a miss — so the out is always valid/null-safe). If it's a real friend, keep it. Else,
+        // while the toggle is on, force TRUE for the specific player netIds we render an in-world pointer for
+        // (out stays the original's default -> all readers null-safe) so MapTrackWidget shows the avatar.
+        private static byte FriendGateNative(IntPtr self, uint netId, IntPtr outFriend)
+        {
+            byte real = friendGateTrampoline != null ? friendGateTrampoline(self, netId, outFriend) : (byte)0;
+            if (real != 0)
+            {
+                return 1;
+            }
+            // Only force TRUE while a bracketed pointer render path is on the stack (mapTrackWidgetRendering) —
+            // that confines the override to the in-world pointer's avatar rendering. Every other caller
+            // (dialogs, panels, party, gifts) runs with the flag clear and gets the real (correct) result.
+            if (mapTrackWidgetRendering && avatarForceFriendActive && netId != 0u && netId != mapAvatarSelfNetId
+                && mapAvatarWorldNetIds.Contains(netId))
+            {
+                return 1;
+            }
+            return 0;
+        }
+
+        // MiniMapSpot.get_IsFriend replacement (applied only while the toggle is on): any player with a
+        // real netId except self counts as a friend -> the minimap widget renders the avatar HeadIconWidget.
+        // Non-player spots return false exactly like vanilla. `this` = raw struct pointer.
+        private static unsafe byte MiniMapIsFriendNative(IntPtr thisPtr)
+        {
+            if (thisPtr == IntPtr.Zero || miniMapOffTrackType < 0 || miniMapOffUsageId < 0)
+            {
+                return 0;
+            }
+            if (*((byte*)thisPtr + miniMapOffTrackType) != MapTrackTypePlayer)
+            {
+                return 0;
+            }
+            uint usage = *(uint*)((byte*)thisPtr + miniMapOffUsageId);
+            return (byte)((usage != 0u && usage != mapAvatarSelfNetId) ? 1 : 0);
+        }
+
+        // MapSpot.get_IsFriend replacement (big map + simple map widget). `this` = MapSpot OBJECT pointer.
+        private static unsafe byte MapSpotIsFriendNative(IntPtr thisPtr)
+        {
+            if (thisPtr == IntPtr.Zero || mapSpotOffCategory < 0 || mapSpotOffUsageId < 0)
+            {
+                return 0;
+            }
+            if (*(int*)((byte*)thisPtr + mapSpotOffCategory) != SpotEnumPlayer)
+            {
+                return 0;
+            }
+            int usage = *(int*)((byte*)thisPtr + mapSpotOffUsageId);
+            return (byte)((usage != 0 && (uint)usage != mapAvatarSelfNetId) ? 1 : 0);
+        }
+
         private int GetGameMapSpotUsageId(GameObject marker, string label, Vector3 pos)
         {
             // Tracked, persistent targets (players/birds/insects/meteors) keep a stable id across radar
@@ -1600,6 +3024,7 @@ namespace HeartopiaMod
             this.mapTrackInjected.Clear();
             this.mapTrackInjectedType.Clear();
             this.mapTrackInjectedStaticId.Clear();
+            this.mapTrackInjectedTargetNet.Clear();
             // Keep mapTrackLabelIcon warm so re-enabling the radar shows resolved icons immediately.
             ModLogger.Msg("[MapSpots] clear tracks: total=" + total + " removed=" + removed + " removeFail=" + removeFail);
         }

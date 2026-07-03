@@ -38,6 +38,7 @@ namespace HeartopiaMod
             data.radarDisplayMode = this.radarDisplayMode;
             data.radarGameTrackLimit = this.radarGameTrackLimit;
             data.radarBigMapSpots = this.radarBigMapSpots;
+            data.radarPlayerAvatarsAll = this.radarPlayerAvatarsAll;
             data.resourceVisualEspEnabled = this.resourceVisualEspEnabled;
             data.resourceVisualEspStyle = this.resourceVisualEspStyle;
             data.resourceVisualEspShowDistance = this.resourceVisualEspShowDistance;
@@ -61,6 +62,7 @@ namespace HeartopiaMod
             this.radarDisplayMode = Mathf.Clamp(data.radarDisplayMode, 0, 1);
             this.radarGameTrackLimit = Mathf.Clamp(data.radarGameTrackLimit <= 0 ? 5 : data.radarGameTrackLimit, 1, 30);
             this.radarBigMapSpots = data.radarBigMapSpots;
+            this.radarPlayerAvatarsAll = data.radarPlayerAvatarsAll;
             this.resourceVisualEspEnabled = data.resourceVisualEspEnabled;
             bool showGroundRing = data.resourceVisualEspShowGroundRing;
             int visualEspStyle = data.resourceVisualEspStyle;
@@ -997,6 +999,15 @@ namespace HeartopiaMod
                     this.QueueRadarSettingsSave();
                 }
                 num += 36;
+
+                GUI.Label(new Rect((float)panelX + 16f, (float)num + 6f, 200f, 20f), this.L("Player Avatars (all)"), subStyle);
+                if (this.DrawRadarStyleSegmentButton(new Rect((float)panelX + 190f, (float)num, panelWidth - 206f, 30f),
+                    this.radarPlayerAvatarsAll ? this.L("On") : this.L("Off"), this.radarPlayerAvatarsAll))
+                {
+                    this.radarPlayerAvatarsAll = !this.radarPlayerAvatarsAll;
+                    this.QueueRadarSettingsSave();
+                }
+                num += 36;
             }
 
             Rect visualCard = new Rect(panelX, num, panelWidth, 332f);
@@ -1105,6 +1116,7 @@ namespace HeartopiaMod
             this.radarDisplayMode = 0;
             this.radarGameTrackLimit = 5;
             this.radarBigMapSpots = false;
+            this.radarPlayerAvatarsAll = false;
             this.resourceVisualEspEnabled = true;
             this.resourceVisualEspStyle = 0;
             this.resourceVisualEspShowDistance = true;

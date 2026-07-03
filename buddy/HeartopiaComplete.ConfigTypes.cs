@@ -297,6 +297,7 @@ namespace HeartopiaMod
             public int radarDisplayMode = 0; // 0 = ESP overlay, 1 = in-game map spots
             public int radarGameTrackLimit = 5; // Game mode: max nearest resources tracked on the map
             public bool radarBigMapSpots = false; // Game mode: also show markers on the big map
+            public bool radarPlayerAvatarsAll = false; // real avatar photos on map markers for ALL players (detour)
             public bool resourceVisualEspEnabled = true;
             public int resourceVisualEspStyle = 0;
             public bool resourceVisualEspShowDistance = true;

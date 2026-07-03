@@ -3380,6 +3380,13 @@ namespace HeartopiaMod
         private void Cleanup()
         {
             this.ClearInjectedGameMapSpots();
+            this.UndoPlayerAvatarPatches();
+            this.UndoIsTrackedPatch();
+            this.UndoGetNamePatch();
+            this.UndoGetProfilePatch();
+            this.UndoIsAcquaintancePatch();
+            this.UndoTrackWidgetPatch();
+            this.FreePlayerNamePins();
             bool flag = this.radarContainer != null;
             if (flag)
             {
@@ -5783,6 +5790,9 @@ namespace HeartopiaMod
         // Game mode: also place markers on the BIG map (Collectable spots). Off by default (adds the game's
         // "tracked" rectangle frame to each marker); the minimap markers are unaffected by this.
         private bool radarBigMapSpots = false;
+        // Show the real avatar photo on map player markers for EVERY player, not just friends. Off by
+        // default: opt-in because it installs two NativeDetours on the friend-gate getters (see MapSpots).
+        private bool radarPlayerAvatarsAll = false;
 
         // Token: 0x0400002A RID: 42
         private bool showMushroomRadar = false;
