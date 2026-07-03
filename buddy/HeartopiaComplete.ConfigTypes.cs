@@ -187,6 +187,8 @@ namespace HeartopiaMod
             public bool netCookMiniGameOnly;
             public bool netCookMoveIngredients;
             public bool netCookRememberStoves;
+            public bool netCookCaptureOwnOnly;
+            public bool netCookCaptureRadiusOnly;
             public bool netCookUseAllIngredients;
             public int netCookCookQuantity;
             public float homelandFarmWaterRadius;

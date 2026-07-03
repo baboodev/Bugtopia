@@ -200,6 +200,8 @@ namespace HeartopiaMod
             data.netCookMiniGameOnly = this.netCookMiniGameOnly;
             data.netCookMoveIngredients = this.netCookMoveIngredients;
             data.netCookRememberStoves = this.netCookRememberStoves;
+            data.netCookCaptureOwnOnly = this.netCookCaptureOwnOnly;
+            data.netCookCaptureRadiusOnly = this.netCookCaptureRadiusOnly;
             data.netCookUseAllIngredients = this.netCookUseAllIngredients;
             data.netCookCookQuantity = 1;
             data.homelandFarmWaterRadius = this.homelandFarmWaterRadius;
@@ -368,6 +370,8 @@ namespace HeartopiaMod
             this.netCookMiniGameOnly = data.netCookMiniGameOnly;
             this.netCookMoveIngredients = data.netCookMoveIngredients;
             this.netCookRememberStoves = data.netCookRememberStoves;
+            this.netCookCaptureOwnOnly = data.netCookCaptureOwnOnly;
+            this.netCookCaptureRadiusOnly = data.netCookCaptureRadiusOnly;
             this.netCookUseAllIngredients = data.netCookUseAllIngredients;
             this.ResetNetCookDishLimitToDefault();
             this.homelandFarmWaterRadius = Mathf.Clamp(data.homelandFarmWaterRadius > 0f ? data.homelandFarmWaterRadius : HomelandFarmDefaultWaterRadius, HomelandFarmMinWaterRadius, HomelandFarmMaxWaterRadius);
@@ -638,6 +642,8 @@ namespace HeartopiaMod
             else if (line.Contains("netCookMiniGameOnly")) this.netCookMiniGameOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMiniGameOnly\":") != 0;
             else if (line.Contains("netCookMoveIngredients")) this.netCookMoveIngredients = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMoveIngredients\":") != 0;
             else if (line.Contains("netCookRememberStoves")) this.netCookRememberStoves = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookRememberStoves\":") != 0;
+            else if (line.Contains("netCookCaptureOwnOnly")) this.netCookCaptureOwnOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookCaptureOwnOnly\":") != 0;
+            else if (line.Contains("netCookCaptureRadiusOnly")) this.netCookCaptureRadiusOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookCaptureRadiusOnly\":") != 0;
             else if (line.Contains("netCookUseAllIngredients")) this.netCookUseAllIngredients = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookUseAllIngredients\":") != 0;
             else if (line.Contains("autoFishScanTimeout")) this.saved_autoFishScanTimeout = GetJsonFloat(line, "\"autoFishScanTimeout\":");
                         else if (line.Contains("autoFishTeleportDelay")) this.saved_autoFishTeleportDelay = GetJsonFloat(line, "\"autoFishTeleportDelay\":");

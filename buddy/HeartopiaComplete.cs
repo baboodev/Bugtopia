@@ -4957,7 +4957,10 @@ namespace HeartopiaMod
         private const float NetCookDeferredBroadRefreshStartDelaySeconds = 0.75f;
         private const float NetCookMinimumStartupCaptureDelaySeconds = 12f;
         private const float NetCookRuntimeReadyGraceSeconds = 3f;
-        private const int NetCookMaxCaptureTargets = 32;
+        // Raised from 32: dense town kitchens hold far more stoves and the per-tick action cap
+        // (NetCookMaxActionsPerTick) already bounds the frame cost, so a larger capture set only
+        // lengthens the round-robin, it doesn't spike a frame.
+        private const int NetCookMaxCaptureTargets = 128;
         private const bool NetCookUnsafeBroadAuraMonoExpansionEnabled = true;
         private const bool NetCookUseMagicSpice = false;
         private const int NetCookBackpackStorageType = 1;
@@ -4975,6 +4978,14 @@ namespace HeartopiaMod
         // remembered stoves (not just the last one). The registry (netCookRegisteredTargets) is the
         // in-memory store; this toggle controls reuse. Cleared by Reset Capture.
         private bool netCookRememberStoves = false;
+        // Capture Own: keep only stoves standing inside the player's OWN field/plot
+        // (Entities.fieldSystem.GetFieldByOwnerId(self) -> FieldComponent.CheckInArea) — skip
+        // neighbors' stoves in shared towns.
+        private bool netCookCaptureOwnOnly = false;
+        // Capture Radius: capture strictly from the live radius scans, ignoring the session
+        // registries (registered-cache restore + registered world-cooker/target expansion) — a
+        // fresh "what is around me right now" capture.
+        private bool netCookCaptureRadiusOnly = false;
         // Runtime-only (not saved to config): parallel status probes for remote-cook diagnostics.
         private bool netCookStatusDiagEnabled = false;
         private bool netCookStatusDiagEventHooksRegistered = false;

@@ -157,6 +157,30 @@ namespace HeartopiaMod
             }
             num += 38;
 
+            bool previousNetCookCaptureOwn = this.netCookCaptureOwnOnly;
+            bool nextNetCookCaptureOwn = this.DrawSwitchToggle(new Rect(left, (float)num, controlWidth, 28f), this.netCookCaptureOwnOnly, "Capture Own");
+            if (nextNetCookCaptureOwn != previousNetCookCaptureOwn)
+            {
+                this.netCookCaptureOwnOnly = nextNetCookCaptureOwn;
+                this.netCookStatus = this.netCookCaptureOwnOnly
+                    ? "Capture Own ON: only stoves inside your own field/plot are captured."
+                    : "Capture Own OFF: stoves are captured regardless of plot owner.";
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            num += 38;
+
+            bool previousNetCookCaptureRadius = this.netCookCaptureRadiusOnly;
+            bool nextNetCookCaptureRadius = this.DrawSwitchToggle(new Rect(left, (float)num, controlWidth, 28f), this.netCookCaptureRadiusOnly, "Capture Radius");
+            if (nextNetCookCaptureRadius != previousNetCookCaptureRadius)
+            {
+                this.netCookCaptureRadiusOnly = nextNetCookCaptureRadius;
+                this.netCookStatus = this.netCookCaptureRadiusOnly
+                    ? "Capture Radius ON: capture uses only the live radius scan (session registry ignored)."
+                    : "Capture Radius OFF: capture may reuse the session stove registry.";
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            num += 38;
+
             bool previousNetCookStatusDiag = this.netCookStatusDiagEnabled;
             bool nextNetCookStatusDiag = this.DrawSwitchToggle(new Rect(left, (float)num, controlWidth, 28f), this.netCookStatusDiagEnabled, "Status Diagnostics (log)");
             if (nextNetCookStatusDiag != previousNetCookStatusDiag)
@@ -2921,6 +2945,222 @@ namespace HeartopiaMod
             }
         }
 
+        // Capture-pipeline logging. The detailed NetCookLog stream is compile-time gated
+        // (MasterLogNetCook=false in shipping builds), which made "Capture Stoves found nothing"
+        // undiagnosable in the field. Mirror capture-stage statuses to the diag channel so the
+        // Status Diagnostics toggle alone exposes why each capture source came up empty.
+        private void NetCookCaptureLog(string message)
+        {
+            this.NetCookLog(message);
+            this.NetCookDiagLog("capture: " + message);
+        }
+
+        // --- Capture Own filter -------------------------------------------------------------
+        // "Own" = the stove stands inside the player's own field/plot. Ownership model (from
+        // ilspy GameplayApi/GameCraftMode): Entities.fieldSystem.GetFieldByOwnerId(playerNetId)
+        // -> FieldComponent, and FieldComponent.CheckInArea(Vector3, float safeDis) is the
+        // membership test. Both are non-generic instance calls — safe via AuraMono
+        // (no inflated-generic invoke). The field object IntPtr is used strictly synchronously
+        // (no yields) per the AuraMono pointer rules.
+
+        // Returns true while targets remain (filter off / not applicable counts as pass-through).
+        // Sets a descriptive status and returns false when the filter empties the list.
+        private bool ApplyNetCookCaptureOwnFilter(List<NetCookTargetContext> targets, ref string status)
+        {
+            if (targets == null || targets.Count <= 0)
+            {
+                return false;
+            }
+
+            if (!this.netCookCaptureOwnOnly)
+            {
+                return true;
+            }
+
+            if (!this.TryResolveNetCookSelfFieldAuraMono(out IntPtr fieldObj, out string fieldStatus) || fieldObj == IntPtr.Zero)
+            {
+                // No own field in this location (or resolve failed) — with the toggle on, nothing
+                // qualifies. Explicit status beats silently capturing someone else's stoves.
+                targets.Clear();
+                status = "Capture Own: no own field here (" + fieldStatus + ").";
+                this.NetCookDiagLog("capture: own-filter: " + status);
+                return false;
+            }
+
+            int removed = 0;
+            for (int i = targets.Count - 1; i >= 0; i--)
+            {
+                NetCookTargetContext target = targets[i];
+                Vector3 position = target != null && target.HasWorldPosition ? target.WorldPosition : Vector3.zero;
+                if (position == Vector3.zero
+                    && target != null
+                    && this.TryGetNetCookTargetWorldPosition(target.LevelObjectNetId, target.CookerNetId, out Vector3 resolvedPosition))
+                {
+                    position = resolvedPosition;
+                }
+
+                // Unresolvable position -> can't prove it's ours -> drop (safe default for this mode).
+                if (target == null || position == Vector3.zero || !this.IsNetCookPositionInsideFieldAuraMono(fieldObj, position))
+                {
+                    if (this.netCookStatusDiagEnabled && target != null)
+                    {
+                        this.NetCookDiagLog("capture: own-filter dropped stove=" + target.CookerNetId
+                            + " lo=" + target.LevelObjectNetId
+                            + (position == Vector3.zero ? " (no position)" : " (outside own field)"));
+                    }
+                    targets.RemoveAt(i);
+                    removed++;
+                }
+            }
+
+            if (targets.Count <= 0)
+            {
+                status = "Capture Own: no stoves inside your own field (filtered " + removed + ").";
+                this.NetCookDiagLog("capture: own-filter: " + status);
+                return false;
+            }
+
+            if (removed > 0)
+            {
+                this.NetCookCaptureLog("Capture Own filtered " + removed + " stove(s) outside your field; " + targets.Count + " kept.");
+            }
+
+            return true;
+        }
+
+        private unsafe bool TryResolveNetCookSelfFieldAuraMono(out IntPtr fieldObj, out string status)
+        {
+            fieldObj = IntPtr.Zero;
+            status = "AuraMono unavailable.";
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+                {
+                    return false;
+                }
+
+                if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
+                {
+                    status = "self player netId unavailable";
+                    return false;
+                }
+
+                // Same Entities class the entity-by-netId helper uses (shared cache).
+                IntPtr entitiesClass = this.cachedAuraMonoEntitiesManagerClass;
+                if (entitiesClass == IntPtr.Zero)
+                {
+                    IntPtr levelImage = this.FindAuraMonoImage(new string[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" });
+                    entitiesClass = levelImage != IntPtr.Zero ? auraMonoClassFromName(levelImage, "XDTLevelAndEntity.BaseSystem.EntitiesManager", "Entities") : IntPtr.Zero;
+                    if (entitiesClass == IntPtr.Zero)
+                    {
+                        entitiesClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTLevelAndEntity.BaseSystem.EntitiesManager", "Entities");
+                    }
+                    if (entitiesClass == IntPtr.Zero)
+                    {
+                        status = "Entities class unavailable";
+                        return false;
+                    }
+
+                    this.cachedAuraMonoEntitiesManagerClass = entitiesClass;
+                }
+
+                IntPtr getFieldSystem = this.FindAuraMonoMethodOnHierarchy(entitiesClass, "get_fieldSystem", 0);
+                if (getFieldSystem == IntPtr.Zero)
+                {
+                    status = "Entities.fieldSystem getter unavailable";
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr fieldSystemObj = auraMonoRuntimeInvoke(getFieldSystem, IntPtr.Zero, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || fieldSystemObj == IntPtr.Zero)
+                {
+                    status = "fieldSystem instance unavailable";
+                    return false;
+                }
+
+                IntPtr fieldSystemClass = auraMonoObjectGetClass(fieldSystemObj);
+                IntPtr getFieldMethod = fieldSystemClass != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(fieldSystemClass, "GetFieldByOwnerId", 1)
+                    : IntPtr.Zero;
+                if (getFieldMethod == IntPtr.Zero)
+                {
+                    status = "GetFieldByOwnerId unavailable";
+                    return false;
+                }
+
+                uint ownerId = selfNetId;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&ownerId);
+                exc = IntPtr.Zero;
+                fieldObj = auraMonoRuntimeInvoke(getFieldMethod, fieldSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    fieldObj = IntPtr.Zero;
+                    status = "GetFieldByOwnerId raised exception";
+                    return false;
+                }
+
+                if (fieldObj == IntPtr.Zero)
+                {
+                    status = "no field owned by self in this level";
+                    return false;
+                }
+
+                status = "own field resolved (owner=" + selfNetId + ")";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "own field resolve exception: " + ex.Message;
+                fieldObj = IntPtr.Zero;
+                return false;
+            }
+        }
+
+        private unsafe bool IsNetCookPositionInsideFieldAuraMono(IntPtr fieldObj, Vector3 position)
+        {
+            try
+            {
+                if (fieldObj == IntPtr.Zero || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null || auraMonoObjectUnbox == null)
+                {
+                    return false;
+                }
+
+                IntPtr fieldClass = auraMonoObjectGetClass(fieldObj);
+                if (fieldClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                // FieldComponent.CheckInArea(Vector3 position, float safeDis)
+                IntPtr checkMethod = this.FindAuraMonoMethodOnHierarchy(fieldClass, "CheckInArea", 2);
+                if (checkMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                Vector3 pos = position;
+                float safeDis = 0f;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&pos);
+                args[1] = (IntPtr)(&safeDis);
+                IntPtr exc = IntPtr.Zero;
+                IntPtr boxed = auraMonoRuntimeInvoke(checkMethod, fieldObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr raw = auraMonoObjectUnbox(boxed);
+                return raw != IntPtr.Zero && *(byte*)raw != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private bool IsNetCookBurnerEntityAlive(uint cookerOrOwnerNetId)
         {
             return cookerOrOwnerNetId != 0U
@@ -3281,7 +3521,7 @@ namespace HeartopiaMod
                 }
 
                 this.netCookStatus = multiCaptureStatus;
-                this.NetCookLog("Capture failed: " + multiCaptureStatus);
+                this.NetCookCaptureLog("Capture failed: " + multiCaptureStatus);
                 return false;
             }
             catch (Exception ex)
@@ -6582,16 +6822,41 @@ namespace HeartopiaMod
             }
 
             targets.Clear();
-            if (this.TryResolveNetCookContextsFromRegisteredCache(targets, out status))
+            this.NetCookDiagLog("capture: begin registeredTargets=" + this.netCookRegisteredTargets.Count
+                + " worldCookers=" + this.netCookRegisteredWorldCookers.Count
+                + " ctxStatic=" + this.netCookCookerStaticId
+                + " lastStatic=" + this.netCookLastCapturedCookerStaticId
+                + " radius=" + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m"
+                + " remember=" + this.netCookRememberStoves);
+            if (this.netCookCaptureRadiusOnly)
             {
-                return true;
+                this.NetCookDiagLog("capture: registered-cache skipped (Capture Radius only).");
+            }
+            else if (this.TryResolveNetCookContextsFromRegisteredCache(targets, out status))
+            {
+                if (this.ApplyNetCookCaptureOwnFilter(targets, ref status))
+                {
+                    return true;
+                }
+                // Own-filter emptied the cached set — fall through to the live scans.
+            }
+            else
+            {
+                this.NetCookDiagLog("capture: registered-cache: " + status);
             }
 
             if (this.TryResolveNetCookContextsFromCookBuildComponents(targets, out status))
             {
-                return true;
+                if (this.ApplyNetCookCaptureOwnFilter(targets, ref status))
+                {
+                    return true;
+                }
+                // Own-filter emptied the scan — fall through to the remaining sources.
             }
-            this.NetCookLog("Cook-build registry lookup: " + status);
+            else
+            {
+                this.NetCookCaptureLog("Cook-build registry lookup: " + status);
+            }
 
             List<ulong> candidateLevelObjects = new List<ulong>(32);
             HashSet<ulong> candidateLevelObjectSet = new HashSet<ulong>();
@@ -6602,7 +6867,7 @@ namespace HeartopiaMod
             }
             else
             {
-                this.NetCookLog("Focused target unavailable: " + focusStatus);
+                this.NetCookCaptureLog("Focused target unavailable: " + focusStatus);
             }
 
             if (this.TryGetCurrentInteractTargetLevelObjects(candidateLevelObjects, out string interactStatus, candidateLevelObjectSet))
@@ -6611,7 +6876,7 @@ namespace HeartopiaMod
             }
             else
             {
-                this.NetCookLog("Interact target lookup: " + interactStatus);
+                this.NetCookCaptureLog("Interact target lookup: " + interactStatus);
             }
 
             if (this.TryGetCurrentInteractTargetLevelObjectsViaAuraMono(candidateLevelObjects, out string auraMonoInteractStatus, candidateLevelObjectSet))
@@ -6620,7 +6885,7 @@ namespace HeartopiaMod
             }
             else
             {
-                this.NetCookLog("AuraMono interact lookup: " + auraMonoInteractStatus);
+                this.NetCookCaptureLog("AuraMono interact lookup: " + auraMonoInteractStatus);
             }
 
             if (this.TryGetNearbyCookerLevelObjectsViaWorldScan(candidateLevelObjects, out string scanStatus, candidateLevelObjectSet))
@@ -6629,7 +6894,7 @@ namespace HeartopiaMod
             }
             else
             {
-                this.NetCookLog("Nearby cooker scan: " + scanStatus);
+                this.NetCookCaptureLog("Nearby cooker scan: " + scanStatus);
             }
 
             if (deferOwnerWindowExpansion)
@@ -6672,7 +6937,7 @@ namespace HeartopiaMod
 
                 if (!seenCookerNetIds.Add(cookerNetId))
                 {
-                    this.NetCookLog("Skipped duplicate stove burner " + cookerNetId + " from level object " + candidateLevelObjectNetId + ".");
+                    this.NetCookCaptureLog("Skipped duplicate stove burner " + cookerNetId + " from level object " + candidateLevelObjectNetId + ".");
                     continue;
                 }
 
@@ -6734,16 +6999,16 @@ namespace HeartopiaMod
                         NetCookCandidateOwnerNetIdProbeWindow);
                     if (candidateOwnerWindowAdded > 0)
                     {
-                        this.NetCookLog("Added " + candidateOwnerWindowAdded + " cooker target(s) from candidate owner-window fallback seeds=" + candidateOwnerSeedNetIds.Count + ".");
+                        this.NetCookCaptureLog("Added " + candidateOwnerWindowAdded + " cooker target(s) from candidate owner-window fallback seeds=" + candidateOwnerSeedNetIds.Count + ".");
                     }
                     else
                     {
-                        this.NetCookLog("Candidate owner-window fallback found no cooker targets seeds=" + candidateOwnerSeedNetIds.Count + " skippedDifferentCooker=" + skippedDifferentCooker + " skippedDuplicateCooker=" + skippedDuplicateCooker + ".");
+                        this.NetCookCaptureLog("Candidate owner-window fallback found no cooker targets seeds=" + candidateOwnerSeedNetIds.Count + " skippedDifferentCooker=" + skippedDifferentCooker + " skippedDuplicateCooker=" + skippedDuplicateCooker + ".");
                     }
                 }
                 else
                 {
-                    this.NetCookLog("Candidate owner-window fallback had no packed owner seeds from candidates=" + candidateLevelObjects.Count + ".");
+                    this.NetCookCaptureLog("Candidate owner-window fallback had no packed owner seeds from candidates=" + candidateLevelObjects.Count + ".");
                 }
             }
 
@@ -6779,24 +7044,35 @@ namespace HeartopiaMod
                 }
                 if (ownerWindowAdded > 0)
                 {
-                    this.NetCookLog("Added " + ownerWindowAdded + " nearby cooker target(s) from owner-window expansion.");
+                    this.NetCookCaptureLog("Added " + ownerWindowAdded + " nearby cooker target(s) from owner-window expansion.");
                 }
             }
             else if (deferOwnerWindowExpansion && targets.Count > 0 && targets.Count < NetCookMaxCaptureTargets)
             {
-                this.NetCookLog("Deferred owner-window expansion; using " + targets.Count + " seed cooker target(s) for initial capture.");
+                this.NetCookCaptureLog("Deferred owner-window expansion; using " + targets.Count + " seed cooker target(s) for initial capture.");
             }
 
-            int registeredWorldAdded = this.TryAddRegisteredWorldCookerTargets(targets, seenTargets, seenCookerNetIds, desiredCookerStaticId, desiredCookerType);
+            int registeredWorldAdded = this.netCookCaptureRadiusOnly
+                ? 0
+                : this.TryAddRegisteredWorldCookerTargets(targets, seenTargets, seenCookerNetIds, desiredCookerStaticId, desiredCookerType);
             if (registeredWorldAdded > 0)
             {
-                this.NetCookLog("Added " + registeredWorldAdded + " registered world cooker target(s).");
+                this.NetCookCaptureLog("Added " + registeredWorldAdded + " registered world cooker target(s).");
+            }
+            else if (!this.netCookCaptureRadiusOnly && this.netCookRegisteredWorldCookers.Count > 0)
+            {
+                // The event hook registered cookers but the synth expansion added none — the decisive
+                // clue for "player is next to a registered stove yet capture finds nothing".
+                this.NetCookDiagLog("capture: world-cooker synth added 0 from " + this.netCookRegisteredWorldCookers.Count
+                    + " registered (desiredStatic=" + desiredCookerStaticId + " desiredType=" + desiredCookerType + ")");
             }
 
-            int registeredAdded = this.TryAddRegisteredNetCookTargets(targets, seenTargets, seenCookerNetIds, desiredCookerStaticId, desiredCookerType);
+            int registeredAdded = this.netCookCaptureRadiusOnly
+                ? 0
+                : this.TryAddRegisteredNetCookTargets(targets, seenTargets, seenCookerNetIds, desiredCookerStaticId, desiredCookerType);
             if (registeredAdded > 0)
             {
-                this.NetCookLog("Added " + registeredAdded + " registered cooker target(s) from session cache.");
+                this.NetCookCaptureLog("Added " + registeredAdded + " registered cooker target(s) from session cache.");
             }
 
             string entityScanStatus = null;
@@ -6813,11 +7089,11 @@ namespace HeartopiaMod
             }
             else if (needsEntityScan)
             {
-                this.NetCookLog("Cook build entity scan: " + entityScanStatus);
+                this.NetCookCaptureLog("Cook build entity scan: " + entityScanStatus);
             }
             else
             {
-                this.NetCookLog("Skipped broad cook-build entity scan; using " + targets.Count + " resolved/registered target(s).");
+                this.NetCookCaptureLog("Skipped broad cook-build entity scan; using " + targets.Count + " resolved/registered target(s).");
             }
 
             desiredCookerStaticId = this.GetPreferredNetCookTargetStaticId(targets);
@@ -6830,13 +7106,13 @@ namespace HeartopiaMod
             int removedDifferentCooker = this.RemoveIncompatibleNetCookTargets(targets, seenTargets, seenCookerNetIds, desiredCookerStaticId, desiredCookerType);
             if (removedDifferentCooker > 0)
             {
-                this.NetCookLog("Filtered " + removedDifferentCooker + " incompatible cooker target(s); using cookerStaticId=" + desiredCookerStaticId + " cookerType=" + desiredCookerType + ".");
+                this.NetCookCaptureLog("Filtered " + removedDifferentCooker + " incompatible cooker target(s); using cookerStaticId=" + desiredCookerStaticId + " cookerType=" + desiredCookerType + ".");
             }
 
             int removedOutOfRange = this.RemoveOutOfRangeNetCookTargets(targets, seenTargets, seenCookerNetIds);
             if (removedOutOfRange > 0)
             {
-                this.NetCookLog("Filtered " + removedOutOfRange + " cooker target(s) outside scan radius=" + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m.");
+                this.NetCookCaptureLog("Filtered " + removedOutOfRange + " cooker target(s) outside scan radius=" + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m.");
             }
 
             this.RegisterNetCookTargets(targets);
@@ -6845,11 +7121,17 @@ namespace HeartopiaMod
             if (targets.Count <= 0)
             {
                 status = "Nearby scan found no valid cooker targets.";
+                this.NetCookDiagLog("capture: FAILED — all sources empty (see stage lines above).");
+                return false;
+            }
+
+            if (!this.ApplyNetCookCaptureOwnFilter(targets, ref status))
+            {
                 return false;
             }
 
             status = "Captured " + targets.Count + " nearby stove(s) within " + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m.";
-            this.NetCookLog(status);
+            this.NetCookCaptureLog(status);
             this.LogNetCookTargetSummary(targets);
             return true;
         }
@@ -7355,10 +7637,48 @@ namespace HeartopiaMod
             int preferredCookerStaticId = this.netCookCookerStaticId > 0 ? this.netCookCookerStaticId : this.netCookLastCapturedCookerStaticId;
             int preferredCookerType = this.netCookCookerType > 0 ? this.netCookCookerType : this.netCookLastCapturedCookerType;
             if (targets == null
-                || (this.netCookRegisteredTargets.Count <= 0 && this.netCookRegisteredWorldCookers.Count <= 0)
-                || preferredCookerStaticId <= 0
-                || preferredCookerType <= 0)
+                || (this.netCookRegisteredTargets.Count <= 0 && this.netCookRegisteredWorldCookers.Count <= 0))
             {
+                return false;
+            }
+
+            // First capture of a session: no cooker context yet (both preferred ids 0), but the
+            // UpdateCookingStatusEvent hook may have already registered nearby cookers (e.g. the public
+            // town stove). Derive the preferred cooker from the registry instead of bailing — without
+            // this, standing next to a registered world cooker still produced "no targets" until the
+            // player had captured something else first. Distance culls below still apply (unless
+            // Remember Stoves), so only nearby cookers survive.
+            if (preferredCookerStaticId <= 0)
+            {
+                foreach (NetCookTargetContext registeredTarget in this.netCookRegisteredTargets.Values)
+                {
+                    if (registeredTarget != null && registeredTarget.CookerStaticId > 0)
+                    {
+                        preferredCookerStaticId = registeredTarget.CookerStaticId;
+                        preferredCookerType = registeredTarget.CookerType;
+                        break;
+                    }
+                }
+            }
+            if (preferredCookerStaticId <= 0)
+            {
+                foreach (NetCookRegisteredWorldCooker registeredCooker in this.netCookRegisteredWorldCookers.Values)
+                {
+                    if (registeredCooker != null && registeredCooker.StaticId > 0)
+                    {
+                        preferredCookerStaticId = registeredCooker.StaticId;
+                        preferredCookerType = registeredCooker.CookerType;
+                        break;
+                    }
+                }
+            }
+            if (preferredCookerStaticId > 0 && preferredCookerType <= 0)
+            {
+                this.TryGetCookerTypeForStaticId(preferredCookerStaticId, out preferredCookerType);
+            }
+            if (preferredCookerStaticId <= 0 || preferredCookerType <= 0)
+            {
+                status = "Registered cooker cache: no usable cooker type (static=" + preferredCookerStaticId + " type=" + preferredCookerType + ").";
                 return false;
             }
 
@@ -7633,17 +7953,36 @@ namespace HeartopiaMod
                             continue;
                         }
 
-                        if (levelObjectNetId <= uint.MaxValue)
-                        {
-                            continue;
-                        }
-
                         IntPtr cookingComponentObj = IntPtr.Zero;
                         if ((!this.TryGetMonoObjectMember(entryObj, "Value", out cookingComponentObj) || cookingComponentObj == IntPtr.Zero)
                             && (!this.TryGetMonoObjectMember(entryObj, "value", out cookingComponentObj) || cookingComponentObj == IntPtr.Zero)
                             && (!this.TryGetMonoObjectMember(entryObj, "_value", out cookingComponentObj) || cookingComponentObj == IntPtr.Zero))
                         {
                             continue;
+                        }
+
+                        // Homeland stoves key _cookBurnerMap with the packed (scriptId<<32)|owner wire lo,
+                        // but PUBLIC/WORLD cookers (town square stove) use SMALL unpacked ids. The old
+                        // `<= uint.MaxValue` guard dropped every town burner -> "no nearby burners".
+                        // IMPORTANT: while the burner is IDLE its CookingComponentData.levelObjectNetId is
+                        // a bare owner netId placeholder (scriptId=0) — commands sent with it are silently
+                        // rejected (mass cook stuck phase=2/Idle, mini-game relief missed). The REAL wire
+                        // lo during cooking is (1<<32)|owner, confirmed live via the OnUpdateCookerStatus
+                        // detour. Compose it instead of trusting the idle placeholder.
+                        if (levelObjectNetId <= uint.MaxValue)
+                        {
+                            if (!this.TryGetNetCookCookingComponentDataLevelObjectNetId(cookingComponentObj, out ulong dataLevelObjectNetId)
+                                || dataLevelObjectNetId == 0UL)
+                            {
+                                continue;
+                            }
+
+                            ulong wireLevelObjectNetId = dataLevelObjectNetId <= uint.MaxValue
+                                ? ComposeNetCookLevelObjectId((uint)dataLevelObjectNetId, 1)
+                                : dataLevelObjectNetId;
+                            this.NetCookDiagLog("capture: world-cooker burner accepted mapKey=" + levelObjectNetId
+                                + " dataLo=" + dataLevelObjectNetId + " wireLo=" + wireLevelObjectNetId);
+                            levelObjectNetId = wireLevelObjectNetId;
                         }
 
                         if (!this.TryGetNetCookCookingComponentEntityNetId(cookingComponentObj, out uint burnerCookerNetId) || burnerCookerNetId == 0U)
@@ -8721,11 +9060,25 @@ namespace HeartopiaMod
                                 continue;
                             }
 
+                            // Small map key = public/world cooker (see the GetComponents path note).
+                            // Idle data lo is a bare owner placeholder — compose the real wire lo
+                            // (1<<32)|owner instead (confirmed via the OnUpdateCookerStatus detour).
                             if (levelObjectNetId <= uint.MaxValue)
                             {
-                                skippedOwnerLevelObjectId++;
-                                AddNetCookScanDebugSample(debugSamples, "burnerMap owner=" + ownerCookBuildNetId + " burner=" + burnerCookerNetId + " rejected owner-levelObject id=" + levelObjectNetId);
-                                continue;
+                                if (!this.TryGetNetCookCookingComponentDataLevelObjectNetId(cookingComponentObj, out ulong dataLevelObjectNetId)
+                                    || dataLevelObjectNetId == 0UL)
+                                {
+                                    skippedOwnerLevelObjectId++;
+                                    AddNetCookScanDebugSample(debugSamples, "burnerMap owner=" + ownerCookBuildNetId + " burner=" + burnerCookerNetId + " rejected owner-levelObject id=" + levelObjectNetId);
+                                    continue;
+                                }
+
+                                ulong wireLevelObjectNetId = dataLevelObjectNetId <= uint.MaxValue
+                                    ? ComposeNetCookLevelObjectId((uint)dataLevelObjectNetId, 1)
+                                    : dataLevelObjectNetId;
+                                this.NetCookDiagLog("capture: world-cooker burner accepted (entity-scan) mapKey=" + levelObjectNetId
+                                    + " dataLo=" + dataLevelObjectNetId + " wireLo=" + wireLevelObjectNetId);
+                                levelObjectNetId = wireLevelObjectNetId;
                             }
 
                             int targetCookerType = 0;
@@ -8880,11 +9233,15 @@ namespace HeartopiaMod
                         AddNetCookScanDebugSample(debugSamples, "direct burner=" + burnerCookerNetId + " rejected missing levelObject id");
                         continue;
                     }
+                    // Small data lo = idle public/world cooker placeholder (bare owner netId, scriptId=0).
+                    // The real wire lo during cooking is (1<<32)|owner (confirmed via the
+                    // OnUpdateCookerStatus detour) — compose it, don't send the placeholder.
                     if (levelObjectNetId <= uint.MaxValue)
                     {
-                        skippedOwnerLevelObjectId++;
-                        AddNetCookScanDebugSample(debugSamples, "direct burner=" + burnerCookerNetId + " rejected owner-levelObject id=" + levelObjectNetId);
-                        continue;
+                        ulong wireLevelObjectNetId = ComposeNetCookLevelObjectId((uint)levelObjectNetId, 1);
+                        this.NetCookDiagLog("capture: world-cooker burner accepted (direct) burner=" + burnerCookerNetId
+                            + " dataLo=" + levelObjectNetId + " wireLo=" + wireLevelObjectNetId);
+                        levelObjectNetId = wireLevelObjectNetId;
                     }
 
                     int targetCookerType = 0;
