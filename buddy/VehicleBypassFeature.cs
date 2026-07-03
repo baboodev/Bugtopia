@@ -1094,9 +1094,21 @@ namespace HeartopiaMod
 
         private static void VehicleBypassRemovePlayerVehicleNative(IntPtr self, IntPtr removeEvent)
         {
-            if (VehicleBypassBlockForcedVehicleExit() && removeEvent != IntPtr.Zero)
+            // CRASH FIX (2026-07-03, WER dump coreclr_6932 / coreclr_42020): removeEvent is NOT a pointer.
+            // The hooked method is VehicleManager.RemovePlayerVehicle(RemoveVehicle e), and RemoveVehicle is
+            // an 8-byte VALUE-TYPE struct { uint vehicleNetId@0; bool realDel@4 } (see
+            // ilspy-dumps/.../Events/RemoveVehicle.cs). The Win64 ABI passes a power-of-2-sized struct <= 8
+            // bytes BY VALUE in a register (RDX here), so the delegate surfaces that register as an IntPtr
+            // whose LOW 32 BITS ARE vehicleNetId — it is not an address. The old code did
+            // Marshal.ReadInt32(removeEvent), treating the value as a pointer and dereferencing it → read
+            // from address == the netId → access violation (ExecutionEngineException / heap corruption on
+            // the main thread) whenever that number landed on unmapped memory. It only "worked" the rest of
+            // the time by reading garbage that never matched the latched id. Extract the netId from the low
+            // 32 bits instead — no dereference, no crash. (Ported from branch commit 4e001be, which was
+            // never in quest-assistant.)
+            if (VehicleBypassBlockForcedVehicleExit())
             {
-                uint vehicleNetId = (uint)Marshal.ReadInt32(removeEvent);
+                uint vehicleNetId = unchecked((uint)removeEvent.ToInt64());
                 if (vehicleNetId != 0 && vehicleNetId == vehicleBypassLatchedVehicleNetId)
                 {
                     return;
