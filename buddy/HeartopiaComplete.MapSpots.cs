@@ -106,6 +106,10 @@ namespace HeartopiaMod
         // resource whose produce path fails (mushrooms: produceId=0, entity id 130005 has no sprite) to its
         // real collectable id by matching the radar label (= the item name, e.g. "Shiitake" -> 48002).
         private readonly Dictionary<string, int> mapAtlasNameToId = new Dictionary<string, int>(64);
+        // Every numeric id actually present in the collectable atlas. The produce path can resolve a REAL
+        // drop-item id that has NO collectable sprite (meteor -> Starfall Shard 40034-40036): a MapResource
+        // track would then render blank, so such ids must fall back to Furniture (NormalItem item icon).
+        private readonly HashSet<int> mapAtlasIdSet = new HashSet<int>();
 
         // Live collectable entities: world position + resource ENTITY static id (for the real item icon).
         private IntPtr mapResCollectableClass = IntPtr.Zero;
@@ -498,21 +502,31 @@ namespace HeartopiaMod
                     if (didMatch)
                     {
                         // Resolve the collectable-atlas icon id. Priority:
-                        //  1) produce drop-item id (materials: timber/stone/fruit) — already in the atlas.
+                        //  1) produce drop-item id WITH a collectable sprite (materials: timber/stone/fruit).
                         //  2) atlas item-name == radar label (mushrooms: produceId=0, entity id 130005 has no
                         //     sprite, but "Shiitake" -> 48002 which IS in the atlas).
-                        //  3) entity static id fallback (NormalItem only, minimap via Furniture).
+                        //  3) produce drop-item id WITHOUT a collectable sprite (meteor -> Starfall Shard
+                        //     40034-40036): Furniture track -> the item's NormalItem icon (MapResource would
+                        //     render blank). Until the atlas is enumerated the set is empty -> optimistic (1);
+                        //     self-corrects once the atlas loads (type change re-dispatches the track).
+                        //  4) entity static id fallback (NormalItem only, minimap via Furniture).
                         bool fromProduce = this.TryGetProduceItemId(resProduceId, out int produceItemId);
+                        bool produceInAtlas = fromProduce && produceItemId > 0
+                            && (this.mapAtlasIdSet.Count == 0 || this.mapAtlasIdSet.Contains(produceItemId));
                         bool useMapResource;
                         int iconItemId;
                         string how;
-                        if (fromProduce && produceItemId > 0)
+                        if (produceInAtlas)
                         {
                             iconItemId = produceItemId; useMapResource = true; how = "produce";
                         }
                         else if (this.TryResolveCollectableIdByLabel(cand.Label, out int collId))
                         {
                             iconItemId = collId; useMapResource = true; how = "atlasName";
+                        }
+                        else if (fromProduce && produceItemId > 0)
+                        {
+                            iconItemId = produceItemId; useMapResource = false; how = "produceItem";
                         }
                         else
                         {
@@ -1435,15 +1449,18 @@ namespace HeartopiaMod
                         const string pfx = "ui_dynamic_collectable_";
                         string label = sn;
                         if (sn.StartsWith(pfx, StringComparison.Ordinal)
-                            && int.TryParse(sn.Substring(pfx.Length), out int cid)
-                            && this.TryGetItemName(cid, out string nm) && !string.IsNullOrEmpty(nm))
+                            && int.TryParse(sn.Substring(pfx.Length), out int cid))
                         {
-                            label = cid + "=" + nm;
-                            // Build name -> collectable id (prefer the lowest id so non-"Bizarre" variants win).
-                            string key = nm.Trim().ToLowerInvariant();
-                            if (!this.mapAtlasNameToId.TryGetValue(key, out int existing) || cid < existing)
+                            this.mapAtlasIdSet.Add(cid); // ids with a real sprite (validates the produce path)
+                            if (this.TryGetItemName(cid, out string nm) && !string.IsNullOrEmpty(nm))
                             {
-                                this.mapAtlasNameToId[key] = cid;
+                                label = cid + "=" + nm;
+                                // Build name -> collectable id (prefer the lowest id so non-"Bizarre" variants win).
+                                string key = nm.Trim().ToLowerInvariant();
+                                if (!this.mapAtlasNameToId.TryGetValue(key, out int existing) || cid < existing)
+                                {
+                                    this.mapAtlasNameToId[key] = cid;
+                                }
                             }
                         }
                         sb.Append(label).Append(" | ");

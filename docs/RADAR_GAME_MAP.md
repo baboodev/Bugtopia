@@ -79,18 +79,26 @@ Per matched resource (matched to a live `CollectableObjectComponent` within 3 m,
    Iterate **all** `hitProduce[i][j]` keys; a rare tree lists Timber + Quality + Rare Timber across slots.
    Pick the **highest-tier** = highest id within the primary item's 10000-family (rarity via `GetQuality`
    returns 1 for all tiers, so it can't rank — id does). Ignore out-of-family ids (e.g. bonus boxes 70xxx).
+   **VALIDATE the id against the atlas** (`mapAtlasIdSet`, built from the runtime dump): the produce path can
+   resolve a real drop-item id that has NO collectable sprite — meteors (produce 601/602/603 → Starfall Shard
+   40034/40035/40036) are not in the 32-sprite atlas, and a `MapResource` track with such an id renders
+   BLANK. Empty set (atlas not yet enumerated) = optimistic; self-corrects once the atlas loads because a
+   type change re-dispatches the track.
 2. **atlas-name match** (mushrooms: produceId=0, entity id 130005 has no collectable sprite). The radar
    LABEL is the item name ("Shiitake"); match it to the collectable atlas name→id map (built from the
    runtime atlas dump via `TableData.GetEntity(id).name`, the localized `TableEntity.name` property — use the
    unambiguous 2-param `GetEntity`, NOT `RewardUtility.GetName` which has two 3-param overloads incl. a Guid one).
-3. **entity static id fallback** — `EntityUtil.GetEntityResId(entity)` (managed EntityUtil absent → AuraMono;
+3. **produce drop-item id NOT in the atlas** (meteor → Starfall Shard) — `Furniture` track with that item id:
+   the item's NormalItem icon (`ui_item_normal_*`) exists for inventory items even when the collectable sprite
+   doesn't. Minimap only (`via=produceItem`).
+4. **entity static id fallback** — `EntityUtil.GetEntityResId(entity)` (managed EntityUtil absent → AuraMono;
    enumerate both 1-arg overloads, invoke with the entity object). Works only for mushroom-type gathers via
    NormalItem; trees/stones expose an object prefab (`p_tree_*` absent → blank).
 
 ### Track type chosen from the resolution
 - (1) or (2) succeeded → **`MapResource`** track (icon in collectable atlas → shows on minimap **and** drives
   a big-map spot).
-- (3) only → **`Furniture`** track (NormalItem icon, **minimap only** — no collectable sprite for the big map).
+- (3) or (4) → **`Furniture`** track (NormalItem icon, **minimap only** — no collectable sprite for the big map).
 - Birds/Fish/Insect → `Bird`/`Fish`/`Insect` (theme_107/104/108). Players/morphs → `Player` (native pin).
 
 Resolved icon id is cached per radar label (`mapTrackLabelIcon` + `mapTrackLabelProduce`), so distant /
