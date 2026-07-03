@@ -1211,7 +1211,7 @@ namespace HeartopiaMod
 
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
             headerStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(left, y, 460f, 24f), "Quest Assistant (Phase 0/1 debug)", headerStyle);
+            GUI.Label(new Rect(left, y, 460f, 24f), "Quest Assistant", headerStyle);
             y += 34f;
 
             GUI.enabled = !this.questAssistantBusy;

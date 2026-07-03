@@ -27,9 +27,13 @@ namespace HeartopiaMod
 
             if (this.newFeaturesSubTab == 1)
             {
+                // Daily Quests now also hosts the Quest Assistant (its own tab was removed 2026-07-04,
+                // §54): daily-order submit + claims + bird-photo submit, then the Quest Assistant
+                // section (dump/floating-window/accept-all/submit-ready + the live quest list).
                 float y = this.DrawDailyQuestSubmitControls(startY);
                 y = this.DrawDailyClaimsControls(y);
-                return this.DrawBirdPhotoSubmitControls(y) + 40f;
+                y = this.DrawBirdPhotoSubmitControls(y) + 40f;
+                return this.DrawQuestAssistantTab(y);
             }
 
             if (this.newFeaturesSubTab == 2)
@@ -50,11 +54,6 @@ namespace HeartopiaMod
             if (this.newFeaturesSubTab == 5)
             {
                 return this.DrawExtraFeaturesTab(startY);
-            }
-
-            if (this.newFeaturesSubTab == 6)
-            {
-                return this.DrawQuestAssistantTab(startY);
             }
 
             return startY + 40f;
@@ -387,7 +386,9 @@ namespace HeartopiaMod
 
             if (this.newFeaturesSubTab == 1)
             {
-                return 560f;
+                // Daily Quests + merged Quest Assistant section (§54). The real height is driven by the
+                // returned content bottom (see UiKit scroll view); this is just a first-frame estimate.
+                return 1120f;
             }
 
             if (this.newFeaturesSubTab == 2)
