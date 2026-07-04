@@ -264,6 +264,10 @@ namespace HeartopiaMod
         // Per-crop weed-send throttle so the event-driven weeder (drain) and the poll loop don't double-send.
         private readonly Dictionary<uint, float> homelandFarmAutoWeedSentAt = new Dictionary<uint, float>();
         private float homelandFarmAutoNextSleepLogAt = 0f;
+        // Game-unix time of the last REMOTE sow send. Crops created by it never hit the
+        // UpdateComponentData detour (creation = AddEntity), so the event drain ADOPTS unknown crop
+        // netIds whose sowTime lands in a window after this timestamp as our remote-sown generation.
+        private long homelandFarmAutoRemoteSowSentUnix = 0L;
         private readonly Dictionary<uint, ulong> homelandFarmResolvedPutZoneByPlanterNetId = new Dictionary<uint, ulong>();
         // While set, every radius scan (sow slots, weed, harvest) centers on the captured
         // planter zone instead of the live player position, so the player may drift slightly.
@@ -14980,6 +14984,7 @@ namespace HeartopiaMod
             this.homelandFarmAutoWeedSentAt.Clear();
             this.homelandFarmCapturedSowPointByBoxNetId.Clear();
             this.homelandFarmCapturedCropNetIds.Clear();
+            this.homelandFarmAutoRemoteSowSentUnix = 0L;
             this.homelandFarmRegisteredFarmTargets.Clear();
             // Drop event-fed crop/box state so a new field / run never reads a previous field's netIds.
             this.ClearHomelandFarmEventStateCache();
@@ -15156,17 +15161,38 @@ namespace HeartopiaMod
                 preCollectedNetIds: farmNetIds,
                 logScanSummary: false,
                 includePlantData: true);
+            // Keep ONLY crops that actually occupy a captured planter (position/occupancy match — the
+            // field is loaded here, so the match is reliable). The radius scan also returns ground
+            // plants (flowers/trees, PlantItemData) that are NOT box crops; snapshotting those seeded
+            // the away tracked set with static ghosts that never emit update events, never drain, and
+            // permanently blocked the remote sow ("Auto capture crops: 4" on an empty field).
             this.homelandFarmCapturedCropNetIds.Clear();
-            foreach (uint cropNetId in capturedCrops)
+            int offBoxIgnored = 0;
+            if (capturedCrops.Count > 0)
             {
-                if (cropNetId != 0U)
+                HashSet<uint> occupiedCaptureBoxes = new HashSet<uint>();
+                this.TryHomelandFarmBuildOccupiedCropBoxNetIds(cropBoxNetIds, farmNetIds, occupiedCaptureBoxes);
+                foreach (uint cropNetId in capturedCrops)
                 {
-                    this.homelandFarmCapturedCropNetIds.Add(cropNetId);
+                    if (cropNetId == 0U)
+                    {
+                        continue;
+                    }
+
+                    if (this.TryHomelandFarmIsLiveCropOnCapturedPlanter(cropNetId, occupiedCaptureBoxes, farmNetIds))
+                    {
+                        this.homelandFarmCapturedCropNetIds.Add(cropNetId);
+                    }
+                    else
+                    {
+                        offBoxIgnored++;
+                    }
                 }
             }
 
             this.HomelandFarmLog("Auto capture crops: " + this.homelandFarmCapturedCropNetIds.Count
-                + " live crop(s) saved for a remote start.");
+                + " box crop(s) saved for a remote start"
+                + (offBoxIgnored > 0 ? " (" + offBoxIgnored + " off-box plant(s) ignored)" : string.Empty) + ".");
 
             string radiusNote = excludedOutsideRadius > 0
                 ? " (" + excludedOutsideRadius + " outside radius)"
@@ -15956,9 +15982,20 @@ namespace HeartopiaMod
 
                         if (!this.TryHomelandFarmReadCropState(cropNetId, out int stage, out bool hasWeed, out long remaining))
                         {
-                            // Crop entity gone (harvested elsewhere / unloaded) — drop it.
-                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
-                            prunedThisTick++;
+                            // No state available for this crop. IN HOMELAND the view read is authoritative
+                            // (field loaded) → the crop is genuinely gone (harvested elsewhere / removed) →
+                            // drop it. AWAY a miss usually means no update event has arrived YET: fresh sows
+                            // enter DataCenter via AddEntity (creation), and the UpdateComponentData detour
+                            // only sees them on their FIRST state change — so right after sowing the event
+                            // cache is empty and the view fallback can't see the unloaded field. Pruning here
+                            // wiped the whole freshly-sown generation (pruned=12 → loop idle forever). Keep
+                            // the crop tracked; its first event fills the cache and the poll acts then.
+                            if (inHomeland)
+                            {
+                                this.homelandFarmAutoCropNetIds.RemoveAt(i);
+                                prunedThisTick++;
+                            }
+
                             continue;
                         }
 
@@ -16068,6 +16105,55 @@ namespace HeartopiaMod
                             nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoEmptyRetrySeconds;
                         }
                     }
+                    else if (!seedsExhausted
+                        && !inHomeland
+                        && this.homelandFarmAutoEventDriven
+                        && this.homelandFarmAutoCropNetIds.Count == 0
+                        && this.homelandFarmAutoPendingSowBoxNetIds.Count == 0
+                        && this.homelandFarmCapturedSowPointByBoxNetId.Count > 0
+                        && Time.realtimeSinceStartup >= nextSowAllowedAt)
+                    {
+                        // REMOTE SOW: the whole tracked generation is harvested and the player is away —
+                        // rebuild the CropPlantPoints from the capture-time placement cache and send
+                        // CropSeeding directly (no scan, no loaded field needed). Whether the server
+                        // accepts a remote sow is decided by its response (batch fail / silent reject —
+                        // watch whether crops get adopted afterwards). Also covers the false-negative
+                        // inHomeland gate at home: the captured points are valid there too.
+                        this.RefreshHomelandFarmSeeds();
+                        HomelandFarmInventoryItem seed = this.FindHomelandFarmSeedByStaticId(seedStaticId);
+                        if (seed == null)
+                        {
+                            seedsExhausted = true;
+                            this.HomelandFarmLog("Auto: selected seed exhausted (remote).");
+                        }
+                        else
+                        {
+                            this.homelandFarmLastStatus = "Auto: remote sowing " + seed.Label + "...";
+                            this.homelandFarmAutoSowCount = 0;
+                            IEnumerator remoteSow = this.HomelandFarmAutoRemoteSowPassRoutine(seed);
+                            while (remoteSow.MoveNext())
+                            {
+                                yield return remoteSow.Current;
+                            }
+
+                            if (this.homelandFarmAutoSowCount > 0)
+                            {
+                                totalSown += this.homelandFarmAutoSowCount;
+                                nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoSowCooldownSeconds;
+                                // No discovery away (scan impossible): the new crops are ADOPTED by the
+                                // event drain from their first UpdateComponentData (sowTime-window match).
+                                // sentUnix in the log lets us verify adoption-window math against the
+                                // sowTime values the crop events actually carry.
+                                this.HomelandFarmLog("Auto: remote-sowed " + this.homelandFarmAutoSowCount
+                                    + " captured point(s); awaiting event adoption (sentUnix="
+                                    + this.homelandFarmAutoRemoteSowSentUnix + ").");
+                            }
+                            else
+                            {
+                                nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoEmptyRetrySeconds;
+                            }
+                        }
+                    }
 
                     // 4. DONE / WAIT when no tracked crops remain.
                     if (this.homelandFarmAutoCropNetIds.Count == 0)
@@ -16082,7 +16168,44 @@ namespace HeartopiaMod
                         // elapse. Re-discover (picks up crops once they register) before deciding again.
                         // Away with an empty field nothing can happen until the player returns, so wait
                         // the long interval instead of retrying every few seconds.
-                        this.homelandFarmLastStatus = inHomeland ? "Auto: waiting for crops..." : "Auto: away — waiting to return...";
+                        // Distinguish "remote sow sent, its crops haven't registered yet" (adoption
+                        // pending — NOT waiting for the player) from a genuine "nothing to do until the
+                        // player returns". The old text claimed "waiting to return" in both cases.
+                        bool awaitingRemoteAdoption = !inHomeland
+                            && this.homelandFarmAutoRemoteSowSentUnix > 0L
+                            && this.homelandFarmAutoPendingSowBoxNetIds.Count > 0;
+                        this.homelandFarmLastStatus = inHomeland
+                            ? "Auto: waiting for crops..."
+                            : (awaitingRemoteAdoption
+                                ? "Auto: away — remote sow sent, awaiting crop registration..."
+                                : "Auto: away — waiting to return...");
+                        // Throttled heartbeat: this branch used to spin in total silence, which made
+                        // "auto farm stopped doing anything" undiagnosable from the log.
+                        if (Time.realtimeSinceStartup >= this.homelandFarmAutoNextSleepLogAt)
+                        {
+                            this.homelandFarmAutoNextSleepLogAt = Time.realtimeSinceStartup + HomelandFarmAutoSleepLogIntervalSeconds;
+                            string waitingLabel;
+                            if (inHomeland)
+                            {
+                                waitingLabel = "), waiting for crops...";
+                            }
+                            else if (awaitingRemoteAdoption)
+                            {
+                                long sinceSow = this.TryHomelandFarmGetGameUnixTime(out long nowUnix) && nowUnix > 0L
+                                    ? nowUnix - this.homelandFarmAutoRemoteSowSentUnix
+                                    : -1L;
+                                waitingLabel = "), away — remote sow sent " + (sinceSow >= 0L ? sinceSow + "s" : "?")
+                                    + " ago, awaiting crop registration (no adoption yet = server may have rejected)...";
+                            }
+                            else
+                            {
+                                waitingLabel = "), away — waiting to return...";
+                            }
+
+                            this.HomelandFarmLog("Auto: no tracked crops (pending="
+                                + this.homelandFarmAutoPendingSowBoxNetIds.Count + waitingLabel);
+                        }
+
                         yield return new WaitForSecondsRealtime(inHomeland ? HomelandFarmAutoEmptyRetrySeconds : HomelandFarmAutoMaxIdleSleepSeconds);
                         needDiscovery = true;
                         continue;
@@ -16153,35 +16276,11 @@ namespace HeartopiaMod
         private IEnumerator HomelandFarmAutoSowPassRoutine(HomelandFarmInventoryItem seed)
         {
             this.homelandFarmAutoSowCount = 0;
-            if (seed == null || seed.StaticId <= 0)
-            {
-                yield break;
-            }
-
-            // Aggregate EVERY inventory stack of this seed type — the same crop seed can be split
-            // across several stacks (each a separate item/netId). Sowing one stack per pass filled the
-            // field only over several passes; summing the counts lets ONE pass fill every empty planter,
-            // walking stack→stack for the seed netId as each is consumed (CropSeeding debits the exact
-            // stack it is handed, so we must never send a box more than a stack's remaining count).
             List<HomelandFarmInventoryItem> stacks = new List<HomelandFarmInventoryItem>();
-            int totalSeeds = 0;
-            for (int i = 0; i < this.homelandFarmScannedSeeds.Count; i++)
-            {
-                HomelandFarmInventoryItem s = this.homelandFarmScannedSeeds[i];
-                if (s != null && s.StaticId == seed.StaticId && s.NetId != 0U && s.Count > 0)
-                {
-                    stacks.Add(s);
-                    totalSeeds += s.Count;
-                }
-            }
-
-            if (totalSeeds <= 0)
+            if (!this.TryHomelandFarmCollectSelectedSeedStacks(seed, stacks, out int totalSeeds))
             {
                 yield break;
             }
-
-            int sowBatchSize = Mathf.Clamp(this.TryHomelandFarmGetSprinklerCellCount(), 1, HomelandFarmBatchLimit);
-            int sowedPoints = 0;
 
             // Single radius scan returns every empty planter (up to the total seeds we can plant).
             IEnumerator slotRoutine = this.FindEmptyCropPlanterSlotsRoutine(totalSeeds, useAutoFarmCollectShortcuts: true);
@@ -16199,8 +16298,111 @@ namespace HeartopiaMod
             this.HomelandFarmRememberAutoSowPendingBoxes(plantPoints);
             yield return null;
 
-            // Sow the points, consuming stacks in order. A batch never crosses a stack boundary and
-            // never exceeds a stack's remaining count, so each CropSeeding debits a stack it can cover.
+            IEnumerator send = this.HomelandFarmAutoSendSowBatchesRoutine(stacks, plantPoints);
+            while (send.MoveNext())
+            {
+                yield return send.Current;
+            }
+        }
+
+        // Remote sow pass: rebuilds the CropPlantPoint list from the CAPTURE-time placement cache
+        // (homelandFarmCapturedSowPointByBoxNetId) instead of scanning the field, so it can run while
+        // the player is AWAY (field unloaded — the scan path is impossible there). Only invoked when
+        // the tracked generation is fully harvested (tracked==0 && pending==0), so every captured box
+        // is presumed server-empty; a box that is somehow occupied just fails its batch server-side
+        // (logged), nothing crashes. Whether the server accepts a remote CropSeeding at all is exactly
+        // what this pass tests — watch the sow-result/batch logs.
+        private IEnumerator HomelandFarmAutoRemoteSowPassRoutine(HomelandFarmInventoryItem seed)
+        {
+            this.homelandFarmAutoSowCount = 0;
+            List<HomelandFarmInventoryItem> stacks = new List<HomelandFarmInventoryItem>();
+            if (!this.TryHomelandFarmCollectSelectedSeedStacks(seed, stacks, out int totalSeeds))
+            {
+                yield break;
+            }
+
+            List<object> plantPoints = new List<object>();
+            foreach (KeyValuePair<uint, HomelandFarmCapturedSowPoint> entry in this.homelandFarmCapturedSowPointByBoxNetId)
+            {
+                if (plantPoints.Count >= totalSeeds)
+                {
+                    break;
+                }
+
+                if (entry.Key == 0U
+                    || entry.Value == null
+                    || this.homelandFarmAutoPendingSowBoxNetIds.Contains(entry.Key))
+                {
+                    continue;
+                }
+
+                object point = this.CreateHomelandFarmCropPlantPoint(
+                    entry.Value.FieldLocalPos,
+                    entry.Value.Angle,
+                    entry.Value.LevelObjectNetId,
+                    entry.Key);
+                if (point != null)
+                {
+                    plantPoints.Add(point);
+                }
+            }
+
+            if (plantPoints.Count == 0)
+            {
+                yield break;
+            }
+
+            this.HomelandFarmLog("Remote sow: sending " + plantPoints.Count + " captured point(s) while away"
+                + " — server accept/reject decides remote-sow viability.");
+            this.HomelandFarmRememberAutoSowPendingBoxes(plantPoints);
+            // Remember WHEN we sowed (game clock): freshly created crops never hit the
+            // UpdateComponentData detour (creation goes through AddEntity), so the drain adopts
+            // unknown crop netIds whose sowTime falls in this window as OUR remote-sown crops.
+            this.homelandFarmAutoRemoteSowSentUnix =
+                this.TryHomelandFarmGetGameUnixTime(out long sentUnix) && sentUnix > 0L ? sentUnix : 0L;
+            yield return null;
+
+            IEnumerator send = this.HomelandFarmAutoSendSowBatchesRoutine(stacks, plantPoints);
+            while (send.MoveNext())
+            {
+                yield return send.Current;
+            }
+        }
+
+        // Aggregate EVERY inventory stack of the selected seed type — the same crop seed can be split
+        // across several stacks (each a separate item/netId). Summing the counts lets ONE pass fill
+        // every empty planter, walking stack→stack as each is consumed.
+        private bool TryHomelandFarmCollectSelectedSeedStacks(
+            HomelandFarmInventoryItem seed,
+            List<HomelandFarmInventoryItem> stacks,
+            out int totalSeeds)
+        {
+            totalSeeds = 0;
+            if (seed == null || seed.StaticId <= 0 || stacks == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < this.homelandFarmScannedSeeds.Count; i++)
+            {
+                HomelandFarmInventoryItem s = this.homelandFarmScannedSeeds[i];
+                if (s != null && s.StaticId == seed.StaticId && s.NetId != 0U && s.Count > 0)
+                {
+                    stacks.Add(s);
+                    totalSeeds += s.Count;
+                }
+            }
+
+            return totalSeeds > 0;
+        }
+
+        // Send the sow batches, consuming stacks in order. A batch never crosses a stack boundary and
+        // never exceeds a stack's remaining count, so each CropSeeding debits a stack it can cover.
+        // Accumulates into homelandFarmAutoSowCount.
+        private IEnumerator HomelandFarmAutoSendSowBatchesRoutine(List<HomelandFarmInventoryItem> stacks, List<object> plantPoints)
+        {
+            int sowBatchSize = Mathf.Clamp(this.TryHomelandFarmGetSprinklerCellCount(), 1, HomelandFarmBatchLimit);
+            int sowedPoints = 0;
             int pointIdx = 0;
             for (int si = 0; si < stacks.Count && pointIdx < plantPoints.Count; si++)
             {

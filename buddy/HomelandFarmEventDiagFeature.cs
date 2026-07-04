@@ -112,6 +112,10 @@ namespace HeartopiaMod
             public long RipeGrowTime;
             public long GrowTime;
             public float UpdatedAt;
+            // True when the entry was fed by a PlantItemData event (stage/isPick only — the struct has
+            // no weed or sow-timing fields). A CropItemData event is richer and always overwrites; a
+            // Plant event never overwrites a Crop-fed entry.
+            public bool FromPlantEvent;
         }
 
         private readonly Dictionary<uint, HomelandFarmEventCropState> homelandFarmEventCropStateCache =
@@ -152,6 +156,27 @@ namespace HeartopiaMod
                 entry.RipeGrowTime = v4;
                 entry.GrowTime = v5;
                 entry.UpdatedAt = Time.realtimeSinceStartup;
+                entry.FromPlantEvent = false;
+
+                // Remote-sow adoption: crops created by an away CropSeeding never hit this detour at
+                // creation (that path is AddEntity), so the tracked set can't learn their netIds from a
+                // scan (field unloaded). Adopt unknown crops from their FIRST update event when their
+                // sowTime falls in the window after our remote send — weed/harvest only need the netId.
+                // Bounded by the captured planter count; a wrong adoption (foreign crop sown in the same
+                // seconds) is harmless: harvest is server-own-gated, and returning home re-syncs truth.
+                if (this.homelandFarmAutoRunning
+                    && this.homelandFarmAutoRemoteSowSentUnix > 0L
+                    && this.homelandFarmAutoPendingSowBoxNetIds.Count > 0
+                    && entry.SowTime >= this.homelandFarmAutoRemoteSowSentUnix - 10L
+                    && entry.SowTime <= this.homelandFarmAutoRemoteSowSentUnix + 300L
+                    && !this.homelandFarmAutoCropNetIds.Contains(netId)
+                    && !this.homelandFarmAutoHarvestedNetIds.Contains(netId)
+                    && this.homelandFarmAutoCropNetIds.Count < this.homelandFarmCapturedSowPointByBoxNetId.Count)
+                {
+                    this.homelandFarmAutoCropNetIds.Add(netId);
+                    this.HomelandFarmLog("Auto: adopted remote-sown crop netId=" + netId
+                        + " (sowTime=" + entry.SowTime + ", tracked=" + this.homelandFarmAutoCropNetIds.Count + ").");
+                }
 
                 // Event-driven weeding: the instant a weed appears on one of OUR tracked crops during
                 // auto-farm, send the weed command (throttled). This is what lets the auto loop sleep
@@ -161,6 +186,40 @@ namespace HeartopiaMod
                 {
                     this.TryHomelandFarmAutoWeedThrottled(netId);
                 }
+            }
+            else if (tag == HomelandFarmEventDiagTagPlant)
+            {
+                // v0..v5 = stage, isPick, hasCrossedSeed, masterWater, manureId, plantNetId.
+                // Crop-box crops on this build can surface as PlantItemData, and the capture snapshot
+                // may include stage-4 plants — without a cache entry their state is invisible remotely,
+                // so they sit in the tracked set forever and BLOCK the remote sow (tracked never reaches
+                // 0). Cache stage/isPick from Plant events (the struct has no weed/timing fields —
+                // remaining stays unknown); never overwrite a richer CropItemData-fed entry.
+                if (v0 == HomelandFarmEventDiagUnresolved)
+                {
+                    return;
+                }
+
+                if (this.homelandFarmEventCropStateCache.TryGetValue(netId, out HomelandFarmEventCropState plantEntry))
+                {
+                    if (!plantEntry.FromPlantEvent)
+                    {
+                        return; // CropItemData-fed entry is authoritative.
+                    }
+                }
+                else
+                {
+                    plantEntry = new HomelandFarmEventCropState { FromPlantEvent = true };
+                    this.homelandFarmEventCropStateCache[netId] = plantEntry;
+                }
+
+                plantEntry.Stage = (int)v0;
+                plantEntry.IsPick = v1 == 1L;
+                plantEntry.HasWeed = false;
+                plantEntry.SowTime = 0L;
+                plantEntry.RipeGrowTime = 0L; // no timing on PlantItemData -> remaining stays MaxValue
+                plantEntry.GrowTime = 0L;
+                plantEntry.UpdatedAt = Time.realtimeSinceStartup;
             }
             else if (tag == HomelandFarmEventDiagTagCropBox)
             {
