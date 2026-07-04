@@ -2099,6 +2099,10 @@ namespace HeartopiaMod
         private void SyncBubbleRadarMarkers(Vector3 scanOrigin, Material xRay, Material bg)
         {
             float now = Time.unscaledTime;
+            // Feed the EntityRemoveEvent handler: fresh origin for its <25 m pickup gate + one-time hook install.
+            this.bubbleRadarLastSyncOrigin = scanOrigin;
+            this.bubbleRadarHasLastSyncOrigin = true;
+            this.EnsureBubbleRemoveEventHook();
             float sinceLastRefresh = now - this._cachedBubbleRadarAt;
             bool snapshotEmpty = this.bubbleRadarSnapshotPositions.Count == 0;
             float rescanMoveThresholdSqr = BubbleRadarRescanMoveThreshold * BubbleRadarRescanMoveThreshold;

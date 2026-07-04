@@ -31,6 +31,56 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
+        // Event-driven bubble removal (events-first policy): collecting a bubble removes its ENTITY server-side
+        // -> EntityRemoveEvent(netId). Aura-scan bubble markers are keyed by (int)netId, and those are exactly
+        // the ones with no scene-object liveness check in the 0.75 s marker sync — without this they linger
+        // until the next snapshot refresh (10 s) / aura rescan (40 s cache). Distance-gated to <25 m (same rule
+        // as the scene-target path): near = authoritative pickup, far = could be entity streaming-out, which
+        // must NOT drop the marker (anti-flicker) — the snapshot pipeline handles those.
+        private bool bubbleRemoveEventHookRegistered;
+        private Vector3 bubbleRadarLastSyncOrigin;
+        private bool bubbleRadarHasLastSyncOrigin;
+
+        private void EnsureBubbleRemoveEventHook()
+        {
+            if (this.bubbleRemoveEventHookRegistered)
+            {
+                return;
+            }
+            // Registration is append-only (a second call would add a duplicate handler) -> latch on success.
+            this.bubbleRemoveEventHookRegistered = this.RegisterGameEventHook(
+                "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityRemoveEvent", 32, this.OnBubbleEntityRemoveEvent);
+        }
+
+        private void OnBubbleEntityRemoveEvent(GameEventSnapshot e)
+        {
+            if (!this.showBubbleRadar || !this.bubbleRadarHasLastSyncOrigin)
+            {
+                return;
+            }
+            uint netId = e.ReadUInt32(8);
+            if (netId == 0U)
+            {
+                return;
+            }
+            int markerId = unchecked((int)netId);
+            Vector3 bubblePos;
+            if (!this.bubbleRadarTrackedPositions.TryGetValue(markerId, out bubblePos)
+                && !this.bubbleRadarSnapshotPositions.TryGetValue(markerId, out bubblePos))
+            {
+                return; // not a bubble we track
+            }
+            float retainSqr = BubbleRadarSceneMissingRetainMinDistance * BubbleRadarSceneMissingRetainMinDistance;
+            if ((this.bubbleRadarLastSyncOrigin - bubblePos).sqrMagnitude >= retainSqr)
+            {
+                return; // far away — likely streamed out, keep the marker
+            }
+            this.RemoveBubbleTrackedMarker(markerId);
+            this.bubbleRadarSnapshotPositions.Remove(markerId);
+            this.BubbleRadarLogThrottled("entity-remove",
+                "Bubble netId=" + netId.ToString() + " entity removed nearby (collected) -> marker dropped.", 2f);
+        }
+
         private Type FindLoadedBubbleServiceType()
         {
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
