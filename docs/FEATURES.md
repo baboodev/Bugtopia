@@ -523,7 +523,7 @@ Weighted preference for specific forage types when multiple markers compete (fid
 - Does **not** require opening the in-game bag, warehouse tab, or multi-select UI.
 - Optional **Multi** mode: click stacks to build a batch, set quantity, then **Transfer**.
 - Locked stacks are shown but skipped on send.
-- **Warehouse Anywhere:** while the game bag UI is open, unlocks the warehouse tab client-side (does not move items by itself).
+- **Warehouse Anywhere:** while the game bag UI is open, unlocks the **full** bag/warehouse page away from home: warehouse tab, single-item move, long-press multi-select and the multi-select panel with the full-stack toggle (scoped `IsPlayerInHomeLand` spoof active only while the bag is open; does not move items by itself).
 
 Full pipeline: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#bag--warehouse-transfer-detail).
 

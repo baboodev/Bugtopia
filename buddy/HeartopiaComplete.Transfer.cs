@@ -131,6 +131,33 @@ namespace HeartopiaMod
                     }
                 }
 
+                // InitPanel runs before the homeland spoof window opens and hides the warehouse
+                // tab's unselected-state icon away from home; with ban@btn also hidden the tab
+                // renders as an empty pill while the backpack tab is selected. Tab cells live
+                // under the TabBarWidget's tab@list Content (not as direct children of tabBar@w),
+                // so mirror the game's own chain on the TabWidget we already resolved:
+                // GetChildAt(1).nodes.unselected_img.gameObject.SetActive(true).
+                if (this.TryInvokeAuraMonoZeroArg(tabWidgetObj, out IntPtr tabNodesObj, "get_nodes") && tabNodesObj != IntPtr.Zero
+                    && this.TryReadAuraMonoObjectField(tabNodesObj, out IntPtr unselectedImgObj, "unselected_img") && unselectedImgObj != IntPtr.Zero
+                    && this.TryReadAuraMonoObjectField(unselectedImgObj, out IntPtr unselectedIconGo, "gameObject") && unselectedIconGo != IntPtr.Zero)
+                {
+                    IntPtr iconGoClass = auraMonoObjectGetClass(unselectedIconGo);
+                    IntPtr setActiveMethod = iconGoClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(iconGoClass, "SetActive", 1) : IntPtr.Zero;
+                    if (setActiveMethod != IntPtr.Zero)
+                    {
+                        int iconActive = 1;
+                        exc = IntPtr.Zero;
+                        IntPtr* iconArgs = stackalloc IntPtr[1];
+                        iconArgs[0] = (IntPtr)(&iconActive);
+                        auraMonoRuntimeInvoke(setActiveMethod, unselectedIconGo, (IntPtr)iconArgs, ref exc);
+                        if (exc == IntPtr.Zero && !this.warehouseMonoTabIconLogged)
+                        {
+                            this.warehouseMonoTabIconLogged = true;
+                            ModLogger.Msg("[WarehouseBypass] Warehouse tab unselected icon re-shown (unselected_img.gameObject.SetActive(true)).");
+                        }
+                    }
+                }
+
                 if (!this.warehouseMonoTabUnlockedLogged)
                 {
                     this.warehouseMonoTabUnlockedLogged = true;
@@ -171,6 +198,7 @@ namespace HeartopiaMod
             this.warehouseMonoTabNextAttemptAt = -999f;
             this.warehouseMonoTabUnlockCommitted = false;
             this.warehouseMonoMoveButtonLogged = false;
+            this.warehouseMonoTabIconLogged = false;
             this.warehouseBagOpenBypassCacheFrame = -1;
             WarehouseBypassFeature.ResetWarehouseBagSession();
             WarehouseBypassFeature.ResetWarehouseTabMonoWarmup();

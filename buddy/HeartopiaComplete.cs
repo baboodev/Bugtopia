@@ -2039,6 +2039,7 @@ namespace HeartopiaMod
         private bool warehouseMonoTabUnlockCommitted;
         private bool warehouseMonoTabUnlockedLogged;
         private bool warehouseMonoMoveButtonLogged;
+        private bool warehouseMonoTabIconLogged;
         private IntPtr warehouseAuraBagPanelTypeObj;
         private int warehouseBagOpenBypassCacheFrame = -1;
         private bool warehouseBagOpenBypassCacheValue;

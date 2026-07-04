@@ -1643,6 +1643,7 @@ namespace HeartopiaMod
                 this.warehouseMonoTabUnlockCommitted = false;
                 this.warehouseMonoTabUnlockedLogged = false;
                 this.warehouseMonoMoveButtonLogged = false;
+                this.warehouseMonoTabIconLogged = false;
                 this.warehouseBagOpenBypassCacheFrame = -1;
                 if (!this.warehouseBypassEnabled)
                 {
