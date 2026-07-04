@@ -750,7 +750,9 @@ namespace HeartopiaMod
                 bool flag3 = this.teleportFramesRemaining <= 0;
                 if (flag3)
                 {
-                    HeartopiaComplete.OverridePlayerPosition = false;
+                    // Noclip owns the position pin persistently — releasing it here would drop
+                    // the player out of hover at the teleport destination.
+                    HeartopiaComplete.OverridePlayerPosition = this.noclipEnabled;
                 }
             }
             this.SyncTeleportPosition();

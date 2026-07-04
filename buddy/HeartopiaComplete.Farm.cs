@@ -893,7 +893,7 @@ namespace HeartopiaMod
                 this.autoResourceFarmAutoStopAt = -1f;
                 return;
             }
-            if (!OverridePlayerPosition && !this.resourceJustArrived && Time.unscaledTime - this.lastResourceTeleportTime > this.resourceTeleportCooldown)
+            if (this.teleportFramesRemaining <= 0 && !this.resourceJustArrived && Time.unscaledTime - this.lastResourceTeleportTime > this.resourceTeleportCooldown)
             {
                 if (this.resourceMarkerPositions.Count > 0)
                 {

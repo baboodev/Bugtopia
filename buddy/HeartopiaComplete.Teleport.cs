@@ -84,7 +84,9 @@ namespace HeartopiaMod
         private void TeleportToNextResource()
         {
             if (this.resourceMarkerPositions.Count == 0) return;
-            if (OverridePlayerPosition) return;
+            // "Teleport in flight" is signaled by the frames counter, not the override flag —
+            // noclip holds OverridePlayerPosition true permanently while hovering.
+            if (this.teleportFramesRemaining > 0) return;
             GameObject p = this.FindPlayerRoot();
             if (p == null)
             {
@@ -174,7 +176,7 @@ namespace HeartopiaMod
                     GUI.color = this.autoHomePositionValid ? new Color(0.45f, 1f, 1f) : Color.yellow;
                     GUI.Label(new Rect(20f, (float)num, 340f, 20f), this.autoHomeStatus);
                 }
-                else if (HeartopiaComplete.OverridePlayerPosition)
+                else if (this.teleportFramesRemaining > 0)
                 {
                     GUI.color = Color.yellow;
                     GUI.Label(new Rect(20f, (float)num, 260f, 20f), "Teleporting...");
@@ -1751,7 +1753,8 @@ namespace HeartopiaMod
                 }
                 if (teleportFramesRemaining <= 0)
                 {
-                    OverridePlayerPosition = false;
+                    // Keep the pin while noclip is on so the player stays hovering at the target.
+                    OverridePlayerPosition = this.noclipEnabled;
                     try
                     {
                         if (this.isResourceFarmTeleport)
