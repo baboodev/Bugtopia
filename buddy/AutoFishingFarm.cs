@@ -320,6 +320,11 @@ namespace HeartopiaMod
                 return "Fish escaped";
             }
 
+            if (lower.Contains("paused for auto repair"))
+            {
+                return "Repairing tool";
+            }
+
             if (lower.Contains("recasting") || lower.Contains("idle stall") || lower.Contains("stale"))
             {
                 return "Preparing next cast";
@@ -1030,6 +1035,28 @@ namespace HeartopiaMod
                             nextPressUpdateAt = now + 0.15f;
                         }
 
+                        // Give Auto Repair its execution window: the game ignores the ToolRestorer
+                        // use while the player is casting/fishing, so a repair triggered mid-session
+                        // burns all its use-retries against a busy player and dies — the rod then
+                        // drains to 0 before the depleted toast finally repairs it (casts blocked =
+                        // player idle). Exiting during Waiting only sacrifices the current cast;
+                        // Battle/Hook states resolve naturally and the pre-cast hold takes over.
+                        // Use-phase only: once the kit is consumed the restore aura repairs the rod
+                        // passively and fishing continues through it.
+                        if (host.IsAutoRepairUsePhase())
+                        {
+                            if (host.TryExitFishing(out string repairExitStatus))
+                            {
+                                lastStatus = "Paused for Auto Repair";
+                                lastTargetStatus = repairExitStatus;
+                                sessionStartedAt = -999f;
+                                waitingSinceAt = -999f;
+                                nextActionAt = now + 0.5f;
+                                Log("Waiting cast released for auto repair. status=" + repairExitStatus);
+                                return;
+                            }
+                        }
+
                         if (waitingSinceAt <= 0f)
                         {
                             waitingSinceAt = now;
@@ -1286,6 +1313,18 @@ namespace HeartopiaMod
                 if (lastRequestedPressed != false && host.TrySetFishingPressed(false, out _))
                 {
                     lastRequestedPressed = false;
+                }
+
+                // Hold new casts only while the repair kit USE is active/queued — that idle
+                // window is what lets the kit actually be consumed. Once the restorer lands,
+                // its aura repairs the rod passively and casting resumes immediately (fishing
+                // does not move the player, so they stay inside the aura).
+                if (host.IsAutoRepairUsePhase())
+                {
+                    lastStatus = "Paused for Auto Repair";
+                    lastTargetStatus = "Waiting for repair kit use";
+                    nextActionAt = now + 0.5f;
+                    return;
                 }
 
                 if (!host.TryGetFishingRodToolStatus(out bool rodEquipped, out string toolStatus))

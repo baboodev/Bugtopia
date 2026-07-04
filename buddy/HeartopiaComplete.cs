@@ -1196,6 +1196,13 @@ namespace HeartopiaMod
             {
                 this.EnsureAutoEatRepairEventHooks();
             }
+            if (this.autoRepairOnToastEnabled)
+            {
+                // Aura-window events make IsAutoRepairBusy() cover the restore phase too; without
+                // them only FishingRouteFeature.Start registered these, so standalone Auto Fishing
+                // + Auto Repair resumed casting the moment the kit was consumed.
+                this.EnsureRepairAuraEventHooks();
+            }
             float autoRepairPollInterval = this.GetEffectiveAutoRepairTriggerCheckInterval();
             if (this.autoRepairOnToastEnabled
                 && !bagAutomationBusy

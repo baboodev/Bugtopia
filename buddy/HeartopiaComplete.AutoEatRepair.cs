@@ -2182,6 +2182,16 @@ namespace HeartopiaMod
             return this.IsAutoRepairActiveOrQueued() || this.IsRepairAuraActive();
         }
 
+        // Kit-USE execution phase only (USE/VERIFY steps or a queued start): the window in
+        // which the game must see an idle player or the ToolRestorer use is silently ignored.
+        // Deliberately EXCLUDES the WAIT step between multi-kit uses (18s aura settle) and the
+        // restore aura itself — both repair passively, so activities (fishing casts) may resume;
+        // only position changes must wait for the full window (IsAutoRepairBusy covers that).
+        public bool IsAutoRepairUsePhase()
+        {
+            return (this.isRepairing && !this.autoRepairWaiting) || this.pendingAutoRepairRequest;
+        }
+
         public bool GetAutoEatEnergyPanelEnabled()
         {
             return this.autoEatAutoTriggerEnabled;
