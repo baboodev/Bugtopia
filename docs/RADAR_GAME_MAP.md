@@ -69,7 +69,10 @@ Icons live in two atlases:
   names suffixed `(Clone)`. The atlas only loads once a collectable icon is actually rendered.)
 
 ### Resolving a resource → icon id
-Per matched resource (matched to a live `CollectableObjectComponent` within 3 m, XZ):
+Per matched resource (matched to a live `CollectableObjectComponent` within 3 m, XZ). **"Bubble" is excluded**
+from this matching: bubbles are NavigationPoint tracks but not collectables — a bubble drifting within 3 m (XZ,
+height ignored) of a random bush/tree stole its item icon and, via the `mapTrackLabelIcon["Bubble"]` per-label
+cache (never cleared), poisoned EVERY bubble marker with that random icon. Bubbles stay on the plain flag.
 1. **produce drop-item id** — `CollectableObjectComponent.itemTypeID` (produceId) →
    `TableData.GetMapResourceProduce(produceId)` (sig `(int,bool needException=false)` — **2 params**) →
    `hitProduce` is `string[][]` of **dropGroup KEYS** (e.g. "TREE2031", "BUSH101"), NOT item ids. Resolve a

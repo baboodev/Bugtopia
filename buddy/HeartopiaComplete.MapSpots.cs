@@ -593,7 +593,11 @@ namespace HeartopiaMod
                 // Match to the nearest live collectable entity. Prefer its produced item id (drop material
                 // icon, works for all: wood/stone/bamboo/fruit/mushroom); fall back to the entity static id
                 // (correct for mushroom-type gathers). Furniture track -> NormalItem icon via GetIconName.
-                if (type == MapTrackTypeNavigationPoint)
+                // "Bubble" is NavigationPoint but NOT a collectable: a bubble drifting within the 3 m XZ match
+                // radius of a random bush/tree would steal its item icon and poison mapTrackLabelIcon["Bubble"]
+                // for every other bubble (random icon on the Bubbles radar) — keep bubbles on the plain flag.
+                if (type == MapTrackTypeNavigationPoint
+                    && !string.Equals(cand.Label, "Bubble", StringComparison.Ordinal))
                 {
                     bool didMatch = this.TryMatchCollectable(cand.Position, out int resStaticId, out int resProduceId, out bool resOnCooldown);
                     if (didMatch && resOnCooldown)
