@@ -198,6 +198,7 @@ namespace HeartopiaMod
             this.lastObservedToolId = toolId;
             this.lastObservedToolDurability = durability;
             this.lastObservedToolMaxDurability = maxDurability;
+            this.lastObservedToolDurabilityAt = now;
 
             if (maxDurability <= 0 || now < this.nextLiveDurabilityTriggerAt)
             {
@@ -227,6 +228,22 @@ namespace HeartopiaMod
 
             if (this.liveDurabilityLowLatched || liveDurabilityRatio > repairTriggerRatio)
             {
+                // Re-arm: the latch normally clears when durability recovers past the reset
+                // ratio. If a triggered repair never restored durability (kit ran out mid-way,
+                // the kit was never consumed, or the player left the restore aura before it
+                // finished), durability stays pinned at/below the threshold and the latch would
+                // otherwise disable auto-repair forever. Once the repair machinery is fully idle
+                // (state machine AND restore aura) and the re-arm delay elapsed, drop the latch
+                // so the next poll can trigger a fresh repair.
+                if (this.liveDurabilityLowLatched
+                    && liveDurabilityRatio <= repairTriggerRatio
+                    && now >= this.liveDurabilityLatchRearmAt
+                    && !this.IsAutoRepairActiveOrQueued()
+                    && !this.IsRepairAuraActive())
+                {
+                    this.liveDurabilityLowLatched = false;
+                    this.AutoEatRepairLog($"[AutoRepair] Durability still low ({durability}/{maxDurability}) after a triggered repair went idle; latch re-armed.");
+                }
                 return;
             }
 
@@ -237,6 +254,7 @@ namespace HeartopiaMod
                 this.liveDurabilityLowLatched = true;
                 this.liveDurabilityLatchedToolId = toolId;
                 this.liveDurabilityLatchedToolMaxDurability = maxDurability;
+                this.liveDurabilityLatchRearmAt = now + LiveDurabilityLatchRearmSeconds;
             }
             else
             {
@@ -1743,6 +1761,447 @@ namespace HeartopiaMod
             return this.IsAutoRepairInProgress() || this.pendingAutoRepairRequest;
         }
 
+        // --- Repair-aura window (event-driven) ---
+        // A repair kit is not an instant use: the game places a ToolRestorer ENTITY whose sphere
+        // aura repairs the tool over time while the player stands inside it
+        // (ToolRestorerComponent, SphereShape radius = TableBuffConfig.range). The mod's own
+        // repair state machine finishes at "item consumed", long before the aura is done — so
+        // "repair busy" must also cover the aura phase or a route teleport yanks the player out
+        // of the circle mid-repair.
+        //
+        // Signals (see docs/GAME_EVENTS_LIST.md + ilspy-dumps):
+        //  * ScriptsRefactory.DataAndProtocol.Events.ToolRestorerEvent {itemNetId@0, staticId@4}
+        //    — dispatched by ToolRestorerProtocolManager.CanPutRestorerResult when the server
+        //    approves the kit throw (fires for BOTH the mod's auto path and manual use). Opens
+        //    the window.
+        //  * ScriptsRefactory.DataAndProtocol.Events.ToolRestoreDestroyEvent {ownerNetId@0}
+        //    — dispatched from ToolRestorerComponent.OnSpawned when the restorer entity actually
+        //    lands (ownerNetId = thrower). Refreshes the window at the true aura start.
+        // PRECISE state (no timers) — mirrors the game's own UI: SkillWidget highlights the tool
+        // button by re-querying ToolSystem.HasToolRestoreBuff() on every UpdateBuffUiEvent
+        // {buffId@0} (dispatched for the SELF player only, on every buff add/UPDATE/remove).
+        // Tool-restore buff ids are hardcoded in that method as 701..706
+        // ((uint)(buffId - 701) <= 5u). HasToolRestoreBuff is a plain no-arg instance method on
+        // the ToolSystem module (whose instance the durability reader already resolves/caches),
+        // so it is safe to mono_runtime_invoke — no generic inflation involved.
+        //   ON edge:  buff-add event (id 701-706) → query returns true.
+        //   OFF edge: buff-remove event → query returns false (true→false closes the window).
+        // The throw→land gap and any query failure are bridged by the fallback window below
+        // (durability early close + hard timeout), so timers only bound the failure modes.
+        private const float RepairAuraWindowSeconds = 30f;
+        private const float RepairAuraFullDurabilityRatio = 0.99f;
+        private const int ToolRestoreBuffIdMin = 701;
+        private const int ToolRestoreBuffIdMax = 706;
+        private const float RepairBuffReverifySeconds = 5f;
+        // How long after a triggered repair the low-durability latch may re-arm if durability
+        // never recovered (see the re-arm block in TryHandleLiveDurabilityAutoRepair).
+        private const float LiveDurabilityLatchRearmSeconds = 30f;
+        private bool repairAuraHooksRegistered;
+        private float repairAuraWindowStartedAt = -999f;
+        private float repairAuraWindowUntil = -999f;
+        private float lastObservedToolDurabilityAt = -999f;
+        private bool repairBuffStateKnown;
+        private bool repairBuffActive;
+        private float repairBuffStateAt = -999f;
+        private IntPtr cachedAuraMonoToolSystemHasRestoreBuffMethod = IntPtr.Zero;
+        private float nextRepairBuffResolveAttemptAt = -999f;
+
+        public void EnsureRepairAuraEventHooks()
+        {
+            if (this.repairAuraHooksRegistered)
+            {
+                return;
+            }
+
+            this.repairAuraHooksRegistered = true;
+            this.RegisterGameEventHook("ScriptsRefactory.DataAndProtocol.Events.ToolRestorerEvent", 8, e =>
+            {
+                float now = Time.unscaledTime;
+                this.repairAuraWindowStartedAt = now;
+                this.repairAuraWindowUntil = now + RepairAuraWindowSeconds;
+                this.AutoEatRepairLog("[AutoRepair] ToolRestorerEvent: repair-aura window opened (kit staticId=" + e.ReadInt32(4) + ")");
+            });
+            this.RegisterGameEventHook("ScriptsRefactory.DataAndProtocol.Events.ToolRestoreDestroyEvent", 4, e =>
+            {
+                // Fires when a restorer entity spawns; ownerNetId tells whose. Only OUR restorer
+                // refreshes the window (a neighbour repairing next to us is not our repair).
+                uint ownerNetId = e.ReadUInt32(0);
+                if (ownerNetId != 0
+                    && this.TryGetSelfPlayerNetId(out uint selfNetId)
+                    && selfNetId != 0
+                    && ownerNetId == selfNetId)
+                {
+                    float now = Time.unscaledTime;
+                    if (this.repairAuraWindowStartedAt < 0f)
+                    {
+                        this.repairAuraWindowStartedAt = now;
+                    }
+                    this.repairAuraWindowUntil = now + RepairAuraWindowSeconds;
+                    this.AutoEatRepairLog("[AutoRepair] ToolRestoreDestroyEvent: own restorer landed; repair-aura window refreshed.");
+                }
+            });
+            // The precise channel: every self-buff change dispatches UpdateBuffUiEvent; only the
+            // tool-restore ids matter. The handler runs on the main thread (event drain), so the
+            // AuraMono query is allowed here.
+            this.RegisterGameEventHook("XDTDataAndProtocol.Events.UpdateBuffUiEvent", 4, e =>
+            {
+                int buffId = e.ReadInt32(0);
+                if (buffId < ToolRestoreBuffIdMin || buffId > ToolRestoreBuffIdMax)
+                {
+                    return;
+                }
+
+                if (this.TryQueryToolRestoreBuffActive(out bool active))
+                {
+                    bool wasActive = this.repairBuffStateKnown && this.repairBuffActive;
+                    this.repairBuffStateKnown = true;
+                    this.repairBuffActive = active;
+                    this.repairBuffStateAt = Time.unscaledTime;
+                    if (active)
+                    {
+                        this.AutoEatRepairLog("[AutoRepair] Tool-restore buff ACTIVE (buffId=" + buffId + ").");
+                    }
+                    else if (wasActive)
+                    {
+                        // true→false edge = repair finished; the fallback window is obsolete too.
+                        this.repairAuraWindowUntil = -999f;
+                        this.AutoEatRepairLog("[AutoRepair] Tool-restore buff ended (buffId=" + buffId + "); repair no longer active.");
+                    }
+                }
+                else
+                {
+                    // Query failed — drop to the fallback window until the next buff event.
+                    this.repairBuffStateKnown = false;
+                }
+            });
+        }
+
+        // --- Event-driven Auto Eat / Auto Repair triggers ---
+        // Replaces the poll-only detection (energy = UI-text parse of the energy panel;
+        // durability = timed AuraMono read):
+        //  * XDTDataAndProtocol.Events.PlayerStaminaUpdatedEvent {CurrentValue@0, BaseMaxValue@4,
+        //    BoostedMaxValue@8} — dispatched by PropertySyncSystem on every self energy change
+        //    (the same event the game's EnergyModule renders the panel from). Carries the value,
+        //    so it feeds the energy cache directly and requests an immediate trigger check.
+        //  * XDTDataAndProtocol.Events.Player.HandHoldUpdatedEvent {} — dispatched by ToolSystem
+        //    on every ToolComponent update (durability!), skin change and handhold change. Empty
+        //    payload, so it only marks tool data dirty; the existing AuraMono durability read
+        //    then runs once instead of on a 0.5-1s timer.
+        // The old polls remain as safety nets: energy falls back to the UI parse until the first
+        // stamina event, durability keeps a stretched 45s poll, and the toast scan re-engages if
+        // the event channel goes quiet (game-build drift protection).
+        public void EnsureAutoEatRepairEventHooks()
+        {
+            if (this.autoEatRepairEventHooksRegistered)
+            {
+                return;
+            }
+
+            this.autoEatRepairEventHooksRegistered = true;
+            this.RegisterGameEventHook("XDTDataAndProtocol.Events.PlayerStaminaUpdatedEvent", 12, e =>
+            {
+                int current = e.ReadInt32(0);
+                int baseMax = e.ReadInt32(4);
+                int boostedMax = e.ReadInt32(8);
+                int max = boostedMax > 0 ? boostedMax : baseMax;
+                if (max <= 0 || current < 0)
+                {
+                    return;
+                }
+
+                float now = Time.unscaledTime;
+                this.cachedEnergyCurrent = current;
+                this.cachedEnergyMax = max;
+                this.lastKnownEnergyDisplay = current + "/" + max;
+                this.nextEnergyValueRefreshAt = now + EventDrivenEnergyCacheSeconds;
+                this.staminaEventSeenAt = now;
+                this.autoEatCheckRequestedByEvent = true;
+            });
+            this.RegisterGameEventHook("XDTDataAndProtocol.Events.Player.HandHoldUpdatedEvent", 0, e =>
+            {
+                float now = Time.unscaledTime;
+                this.handholdEventSeenAt = now;
+                // Bursts (durability + skin + handhold updates land together) coalesce into one
+                // durability check per debounce window.
+                if (now >= this.nextEventDurabilityCheckAllowedAt)
+                {
+                    this.nextEventDurabilityCheckAllowedAt = now + 0.25f;
+                    this.durabilityCheckRequestedByEvent = true;
+                }
+            });
+        }
+
+        // --- Silent eat (no animation) ---
+        // The game's own eat flow (BackpackEatCommand.OnExecuteAsync) does TWO independent things:
+        //   base.player.Cast(PlayerParameterEat)            ← client-only eating ANIMATION clip
+        //   CharacterProtocolManager.EatFood(foodNetId)     ← the actual server consume + stamina
+        // The wire command (EatFoodNetworkCommand{FoodNetId}) is sent at cast START, not when the
+        // animation ends — the server cannot tell whether the clip played. So calling EatFood
+        // directly eats the food with NO animation, no pose lock, no ~2.3s clip. Auto Eat uses
+        // this path when enabled; on any resolve/invoke failure — or if the server ignores the
+        // bare command (fertilizer-style silent rejection) — it falls back to the BagModule Eat
+        // function (112, the animated path) for the rest of the session.
+        private const float SilentEatVerifySeconds = 2.5f;
+        private IntPtr cachedCharacterEatFoodMethod = IntPtr.Zero;
+        private bool silentEatPathBroken;
+        private float lastSilentEatSentAt = -999f;
+        private int lastSilentEatEnergyBefore = -1;
+
+        private unsafe bool TryEatFoodDirectNoAnimation(uint foodNetId, out string status)
+        {
+            status = "AuraMono unavailable";
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (this.cachedCharacterEatFoodMethod == IntPtr.Zero)
+            {
+                IntPtr cls = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.GamePlay.Character.CharacterProtocolManager");
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ProtocolService.GamePlay.Character", "CharacterProtocolManager");
+                }
+
+                if (cls == IntPtr.Zero)
+                {
+                    status = "CharacterProtocolManager class unresolved";
+                    return false;
+                }
+
+                this.cachedCharacterEatFoodMethod = this.FindAuraMonoMethodOnHierarchy(cls, "EatFood", 1);
+                if (this.cachedCharacterEatFoodMethod == IntPtr.Zero)
+                {
+                    status = "EatFood method missing";
+                    return false;
+                }
+
+                this.AutoEatRepairLog("[Auto Eat] CharacterProtocolManager.EatFood resolved OK");
+            }
+
+            uint localNetId = foodNetId;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&localNetId);
+
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(this.cachedCharacterEatFoodMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                status = "EatFood exc=0x" + exc.ToInt64().ToString("X");
+                this.cachedCharacterEatFoodMethod = IntPtr.Zero;
+                return false;
+            }
+
+            status = "ok";
+            return true;
+        }
+
+        // Single funnel for Auto Eat's use-item send: silent EatFood when enabled and healthy,
+        // BagModule Eat (112, animated) otherwise.
+        private bool SendEatForAutoEat(uint netId)
+        {
+            if (this.autoEatNoAnimationEnabled && !this.silentEatPathBroken)
+            {
+                float now = Time.unscaledTime;
+                // Health check on the previous silent send: if no stamina event arrived since and
+                // the cached energy never rose, the server ignored the bare command — stop using
+                // the silent path this session (empirical guard; cf. the fertilizer no-equip path
+                // that silently failed).
+                if (this.lastSilentEatSentAt > 0f
+                    && now - this.lastSilentEatSentAt >= SilentEatVerifySeconds
+                    && this.staminaEventSeenAt < this.lastSilentEatSentAt
+                    && this.lastSilentEatEnergyBefore >= 0
+                    && this.cachedEnergyCurrent <= this.lastSilentEatEnergyBefore)
+                {
+                    this.silentEatPathBroken = true;
+                    this.AutoEatRepairLog("[Auto Eat] Silent EatFood produced no stamina change; falling back to the animated BagModule path for this session.");
+                }
+
+                if (!this.silentEatPathBroken)
+                {
+                    int energyBefore = this.cachedEnergyCurrent;
+                    if (this.TryEatFoodDirectNoAnimation(netId, out string silentStatus))
+                    {
+                        this.lastSilentEatSentAt = now;
+                        this.lastSilentEatEnergyBefore = energyBefore;
+                        this.AutoEatRepairLog("[Auto Eat] Silent EatFood sent (no animation) netId=" + netId);
+                        return true;
+                    }
+
+                    this.AutoEatRepairLog("[Auto Eat] Silent EatFood unavailable (" + silentStatus + "); using BagModule Eat function.");
+                }
+            }
+
+            return this.TryExecuteDirectBackpackItemFunc(112, netId);
+        }
+
+        // True once HandHoldUpdatedEvent has fired on this build AND the live durability read
+        // recently produced a value — then the toast UI scan adds nothing and is skipped.
+        private bool IsDurabilityEventChannelHealthy()
+        {
+            return this.handholdEventSeenAt > 0f
+                && this.lastObservedToolDurabilityAt > 0f
+                && Time.unscaledTime - this.lastObservedToolDurabilityAt < ToastScanDurabilityFreshSeconds;
+        }
+
+        // ToolSystem.HasToolRestoreBuff(): no-arg bool instance method on the ToolSystem module
+        // (shares the durability reader's cached instance). Returns false on any resolve/invoke
+        // problem — callers then rely on the fallback window.
+        private bool TryQueryToolRestoreBuffActive(out bool active)
+        {
+            active = false;
+            try
+            {
+                this.ResolveAuraFarmRuntimeMethods();
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null || auraMonoObjectUnbox == null)
+                {
+                    return false;
+                }
+
+                float now = Time.unscaledTime;
+                this.cachedAuraMonoToolSystemObj.TryGet(out IntPtr toolSystemObj);
+                IntPtr method = this.cachedAuraMonoToolSystemHasRestoreBuffMethod;
+                if (toolSystemObj == IntPtr.Zero || method == IntPtr.Zero)
+                {
+                    if (now < this.nextRepairBuffResolveAttemptAt)
+                    {
+                        return false;
+                    }
+                    this.nextRepairBuffResolveAttemptAt = now + 3f;
+
+                    if (toolSystemObj == IntPtr.Zero)
+                    {
+                        if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Tool.ToolSystem", out toolSystemObj) || toolSystemObj == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+                        this.cachedAuraMonoToolSystemObj.Set(toolSystemObj);
+                    }
+
+                    IntPtr toolSystemClass = auraMonoObjectGetClass(toolSystemObj);
+                    if (toolSystemClass == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    method = this.FindAuraMonoMethodOnHierarchy(toolSystemClass, "HasToolRestoreBuff", 0);
+                    if (method == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    this.cachedAuraMonoToolSystemHasRestoreBuffMethod = method;
+                    this.nextRepairBuffResolveAttemptAt = -999f;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr boxed = auraMonoRuntimeInvoke(method, toolSystemObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+                {
+                    // Instance may be stale after a world change — drop it so the next call re-resolves.
+                    this.cachedAuraMonoToolSystemObj.Clear();
+                    this.cachedAuraMonoToolSystemHasRestoreBuffMethod = IntPtr.Zero;
+                    return false;
+                }
+
+                IntPtr raw = auraMonoObjectUnbox(boxed);
+                if (raw == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                active = Marshal.ReadByte(raw) != 0;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool IsRepairAuraActive()
+        {
+            float now = Time.unscaledTime;
+
+            // Primary: exact buff state, updated by the UpdateBuffUiEvent hook (same source the
+            // game's tool-button highlight uses). While the buff reads active, "repairing" holds
+            // with no timer involved; a throttled re-verify self-heals a missed remove event
+            // (world change can eat it, which would otherwise pin the state active forever).
+            if (this.repairBuffStateKnown && this.repairBuffActive)
+            {
+                if (now - this.repairBuffStateAt > RepairBuffReverifySeconds)
+                {
+                    if (this.TryQueryToolRestoreBuffActive(out bool stillActive))
+                    {
+                        this.repairBuffActive = stillActive;
+                        this.repairBuffStateAt = now;
+                        if (!stillActive)
+                        {
+                            this.repairAuraWindowUntil = -999f;
+                            this.AutoEatRepairLog("[AutoRepair] Tool-restore buff re-verify: no longer active.");
+                        }
+                    }
+                    else
+                    {
+                        this.repairBuffStateKnown = false;
+                    }
+                }
+
+                if (this.repairBuffStateKnown && this.repairBuffActive)
+                {
+                    return true;
+                }
+            }
+
+            // Fallback window: bridges the kit-throw → restorer-landing gap and any buff-query
+            // failure. Bounded by the hard timeout; cut early when durability reads full.
+            if (now >= this.repairAuraWindowUntil)
+            {
+                return false;
+            }
+
+            // Early close: the equipped tool reads (near) full durability on a poll taken after
+            // the window opened — the aura has done its job, no need to sit out the timeout.
+            if (this.lastObservedToolDurabilityAt > this.repairAuraWindowStartedAt + 1f
+                && this.lastObservedToolMaxDurability > 0
+                && (float)this.lastObservedToolDurability / this.lastObservedToolMaxDurability >= RepairAuraFullDurabilityRatio)
+            {
+                this.repairAuraWindowUntil = -999f;
+                this.AutoEatRepairLog("[AutoRepair] Repair-aura window closed early: durability restored ("
+                    + this.lastObservedToolDurability + "/" + this.lastObservedToolMaxDurability + ").");
+                return false;
+            }
+
+            return true;
+        }
+
+        // --- Public accessors for FishingRouteFeature (static class; the fields are private) ---
+        public bool IsAutoRepairBusy()
+        {
+            return this.IsAutoRepairActiveOrQueued() || this.IsRepairAuraActive();
+        }
+
+        public bool GetAutoEatEnergyPanelEnabled()
+        {
+            return this.autoEatAutoTriggerEnabled;
+        }
+
+        public void SetAutoEatEnergyPanelEnabled(bool value)
+        {
+            this.autoEatAutoTriggerEnabled = value;
+        }
+
+        public bool GetAutoRepairOnDurabilityEnabled()
+        {
+            return this.autoRepairOnToastEnabled;
+        }
+
+        public void SetAutoRepairOnDurabilityEnabled(bool value)
+        {
+            this.autoRepairOnToastEnabled = value;
+        }
+
         private float GetEffectiveAutoEatTriggerCheckInterval()
         {
             return this.AreHeavyFarmAutomationsActive() ? FarmActiveAutoEatTriggerCheckInterval : AutoEatTriggerCheckInterval;
@@ -1755,6 +2214,13 @@ namespace HeartopiaMod
 
         private float GetEffectiveToolDurabilityPollInterval()
         {
+            // Once the HandHoldUpdatedEvent channel is proven on this build, durability checks
+            // are event-driven and the timed poll is only a safety net.
+            if (this.handholdEventSeenAt > 0f)
+            {
+                return EventDrivenDurabilitySafetyPollSeconds;
+            }
+
             return this.AreHeavyFarmAutomationsActive() ? FarmActiveToolDurabilityPollInterval : ToolDurabilityPollInterval;
         }
 
@@ -1908,8 +2374,8 @@ namespace HeartopiaMod
             this.lastDirectBackpackMatchedCount = currentCount;
             this.cachedFoodCount = currentCount;
 
-            this.AutoEatRepairLog("[Auto Eat] Cached food matched netId=" + this.cachedFoodNetId + " count=" + currentCount + "; sending BagModule Eat function.");
-            if (this.TryExecuteDirectBackpackItemFunc(112, this.cachedFoodNetId))
+            this.AutoEatRepairLog("[Auto Eat] Cached food matched netId=" + this.cachedFoodNetId + " count=" + currentCount + "; sending eat.");
+            if (this.SendEatForAutoEat(this.cachedFoodNetId))
             {
                 return true;
             }
@@ -2117,8 +2583,8 @@ namespace HeartopiaMod
                 }
 
                 this.CacheFoodMatch(foodKey, anyFood);
-                this.AutoEatRepairLog("[Auto Eat] Direct food matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + "; sending BagModule Eat function.");
-                return this.TryExecuteDirectBackpackItemFunc(112, netId);
+                this.AutoEatRepairLog("[Auto Eat] Direct food matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + "; sending eat.");
+                return this.SendEatForAutoEat(netId);
             }
             catch (Exception ex)
             {
@@ -2734,6 +3200,12 @@ namespace HeartopiaMod
 
         private string GetCurrentEnergyDisplay()
         {
+            // Event-fed cache is authoritative while stamina events are fresh — skip the UI read.
+            if (Time.unscaledTime - this.staminaEventSeenAt < EventDrivenEnergyCacheSeconds)
+            {
+                return this.lastKnownEnergyDisplay;
+            }
+
             try
             {
                 string energyText = this.TryGetCurrentEnergyText();

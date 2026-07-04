@@ -168,6 +168,15 @@ namespace HeartopiaMod
 
         public static bool IsEnabled => enabled;
         public static bool IsDebugLoggingEnabled() => debugLoggingEnabled;
+
+        // --- Read-only signals for FishingRouteFeature (location rotation) ---
+        // Last fish-shadow scan result: when it ran and how many shadows were inside the radius.
+        public static float LastScanAt { get; private set; } = -999f;
+        public static int LastInRangeCount { get; private set; }
+        // True while the engine is inside an active fishing session (cast/waiting/battle/hook).
+        public static bool IsInFishingSession { get; private set; }
+        // When Auto Bait last threw a bait/attractor (route restarts its no-fish window on this).
+        public static float LastAutoBaitAt { get; private set; } = -999f;
         public static string GetLastStatus() => GetDisplayStatus(lastStatus);
         public static string GetLastToolStatus() => GetDisplayToolStatus(lastToolStatus);
         public static string GetLastTargetStatus() => GetDisplayTargetStatus(lastTargetStatus);
@@ -251,6 +260,7 @@ namespace HeartopiaMod
                 autoBaitRemaining--;
                 nextAutoBaitAt = now + AutoBaitMinCooldown;
                 noFishSinceAt = now;   // restart the window while the server spawns fish
+                LastAutoBaitAt = now;
                 Log($"Auto Bait thrown ({kind}); remaining={autoBaitRemaining}/{autoBaitMaxCount}");
                 try { host.UI_AddMenuNotification(host.UI_Localize("Auto Bait thrown") + " (" + autoBaitRemaining + ")", new Color(0.45f, 1f, 0.55f)); } catch { }
                 if (autoBaitRemaining == 0)
@@ -538,6 +548,9 @@ namespace HeartopiaMod
             currentTargetNetId = 0U;
             currentTargetPos = Vector3.zero;
             lastRequestedPressed = null;
+            IsInFishingSession = false;
+            LastScanAt = -999f;
+            LastInRangeCount = 0;
             lastStatus = enabled ? "Enabled" : "Disabled";
             lastToolStatus = "Unknown";
             lastTargetStatus = enabled ? "Scanning for fish shadows..." : "Idle";
@@ -668,6 +681,8 @@ namespace HeartopiaMod
                 }
                 num += 32;
             }
+
+            num = Mathf.CeilToInt(FishingRouteFeature.DrawSection(host, num + 10f));
 
             return num + 20f;
         }
@@ -803,6 +818,7 @@ namespace HeartopiaMod
                     lastTargetStatus = $"Stale bait netId={baitingFishNetId}; scanning for next shadow";
                 }
 
+                IsInFishingSession = hasFishingState && inFishingState;
                 if (hasFishingState && inFishingState)
                 {
                     if (sessionStartedAt <= 0f)
@@ -1295,6 +1311,8 @@ namespace HeartopiaMod
                 nextRodEquipAttemptAt = -999f;
 
                 bool foundTarget = host.TryFindNearestFishShadowTarget(fishShadowDetectRange, out uint targetNetId, out Vector3 targetPos, out float targetDistance, out int detectedCount, out int inRangeCount, out string targetStatus);
+                LastScanAt = now;
+                LastInRangeCount = inRangeCount;
 
                 // Auto Bait: track how long the radius has been fish-free and throw a bait/attractor
                 // once that exceeds the configured window. Runs every scan regardless of hit/miss.
@@ -1404,6 +1422,9 @@ namespace HeartopiaMod
             currentTargetNetId = 0U;
             currentTargetPos = Vector3.zero;
             lastRequestedPressed = null;
+            IsInFishingSession = false;
+            LastScanAt = -999f;
+            LastInRangeCount = 0;
             lastStatus = "Disabled";
             lastToolStatus = "Unknown";
             lastTargetStatus = "Idle";

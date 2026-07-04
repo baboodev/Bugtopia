@@ -3955,6 +3955,9 @@ namespace HeartopiaMod
 
         private void StopAllAutoFishing()
         {
+            // Route first: its Stop restores the user's pre-route settings (range/toggles)
+            // before the engine itself is force-stopped below.
+            FishingRouteFeature.ForceStop(this);
             AutoFishingFarm.ForceStop(this);
             this.showFishShadowRadar = false;
         }

@@ -240,6 +240,7 @@ namespace HeartopiaMod
             public bool autoRepairOnToastEnabled;
             public bool autoEatOnToastEnabled;
             public bool autoEatAutoTriggerEnabled;
+            public bool autoEatNoAnimationEnabled = true;
             public int autoRepairTriggerPercent;
             public int autoEatTriggerPercent;
             public bool autoSellEnabled;
@@ -344,6 +345,7 @@ namespace HeartopiaMod
             public TreeFarmPatrolData TreeFarmPatrol = new TreeFarmPatrolData();
             public List<NamedCookingPatrolSave> CookingPatrolSaves = new List<NamedCookingPatrolSave>();
             public List<CustomTeleportEntry> CustomTeleports = new List<CustomTeleportEntry>();
+            public List<CustomTeleportEntry> FishingRouteSpots = new List<CustomTeleportEntry>();
             public string Language = "en";
         }
 

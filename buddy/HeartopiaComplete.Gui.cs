@@ -587,6 +587,14 @@ namespace HeartopiaMod
                 }
                 num += 30;
 
+                bool newAutoEatNoAnimation = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.autoEatNoAnimationEnabled, "Eat Without Animation");
+                if (newAutoEatNoAnimation != this.autoEatNoAnimationEnabled)
+                {
+                    this.autoEatNoAnimationEnabled = newAutoEatNoAnimation;
+                    this.SaveKeybinds(false);
+                }
+                num += 30;
+
                 GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Auto Eat Trigger: {0}% or lower", this.autoEatTriggerPercent));
                 int previousAutoEatTriggerPercent = this.autoEatTriggerPercent;
                 this.autoEatTriggerPercent = Mathf.Clamp(Mathf.RoundToInt(this.DrawAccentSlider(new Rect(20f, (float)num + 18f, 260f, 18f), this.autoEatTriggerPercent, 1f, 100f)), 1, 100);

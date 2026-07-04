@@ -1917,7 +1917,11 @@ namespace HeartopiaMod
 
         private void CheckToastPanel()
         {
-            if (!this.autoRepairOnToastEnabled && !BirdNetFarm.IsAutoScareMaxPhotoEnabled)
+            // For auto repair the toast text scan is only the last-resort trigger: skipped while
+            // the HandHoldUpdatedEvent channel is live and durability reads are fresh (the event
+            // path reacts faster and without UI scraping). Bird farm keeps its own need for it.
+            bool repairNeedsToastScan = this.autoRepairOnToastEnabled && !this.IsDurabilityEventChannelHealthy();
+            if (!repairNeedsToastScan && !BirdNetFarm.IsAutoScareMaxPhotoEnabled)
             {
                 return;
             }

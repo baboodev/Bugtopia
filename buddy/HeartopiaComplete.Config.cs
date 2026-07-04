@@ -72,6 +72,7 @@ namespace HeartopiaMod
                     if (save != null && save.Points == null) save.Points = new List<CookingPatrolPoint>();
                 }
                 if (data.CustomTeleports == null) data.CustomTeleports = new List<CustomTeleportEntry>();
+                if (data.FishingRouteSpots == null) data.FishingRouteSpots = new List<CustomTeleportEntry>();
                 return data;
             }
             catch (Exception ex)
@@ -208,7 +209,9 @@ namespace HeartopiaMod
             data.homelandFarmAutoFertilizeEnabled = this.homelandFarmAutoFertilizeEnabled;
             data.autoFishScanTimeout = -1f;
             data.autoFishTeleportDelay = -1f;
-            data.autoFishFishShadowDetectRange = AutoFishingFarm.GetDetectRange();
+            // While a fishing route is active the live range/toggles are the route's forced
+            // values (200m, both on); persist the user's pre-route snapshot instead.
+            data.autoFishFishShadowDetectRange = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotDetectRange : AutoFishingFarm.GetDetectRange();
             data.autoFishInstantCatchSendHz = -1f; // send rate is not persisted; always 0 at init
             data.autoFishInstantCatch = AutoFishingFarm.GetInstantCatchEnabled();
             data.autoFishAutoBaitEnabled = false;  // auto-bait toggle is not persisted; always off at start
@@ -250,9 +253,10 @@ namespace HeartopiaMod
             data.autoEatFoodType = this.autoEatFoodType;
             data.autoEatCustomFoodName = this.autoEatCustomFoodName ?? "";
             data.repairTeleportBackEnabled = this.repairTeleportBackEnabled;
-            data.autoRepairOnToastEnabled = this.autoRepairOnToastEnabled;
+            data.autoRepairOnToastEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoRepair : this.autoRepairOnToastEnabled;
             data.autoEatOnToastEnabled = this.autoEatOnToastEnabled;
-            data.autoEatAutoTriggerEnabled = this.autoEatAutoTriggerEnabled;
+            data.autoEatAutoTriggerEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoEatPanel : this.autoEatAutoTriggerEnabled;
+            data.autoEatNoAnimationEnabled = this.autoEatNoAnimationEnabled;
             data.autoRepairTriggerPercent = this.autoRepairTriggerPercent;
             data.autoEatTriggerPercent = this.autoEatTriggerPercent;
             data.autoSellEnabled = this.autoSellEnabled;
@@ -452,6 +456,7 @@ namespace HeartopiaMod
             bool hasAutoEatTriggerConfig = data.autoEatTriggerPercent > 0;
             this.autoEatAutoTriggerEnabled = hasAutoEatTriggerConfig && data.autoEatAutoTriggerEnabled;
             this.autoEatTriggerPercent = Mathf.Clamp(hasAutoEatTriggerConfig ? data.autoEatTriggerPercent : 20, 1, 100);
+            this.autoEatNoAnimationEnabled = data.autoEatNoAnimationEnabled;
             bool hasAutoSellConfig = data.autoSellMaxPerStack > 0 || data.autoSellReserveCount > 0 || !string.IsNullOrWhiteSpace(data.autoSellItemKey);
             // Never auto-resume selling on boot/lobby load. The network sell path is only safe after the
             // player is fully in-world, so the user must enable it each session from the panel.
@@ -520,6 +525,8 @@ namespace HeartopiaMod
                     position = entry.position
                 });
             }
+
+            data.FishingRouteSpots = FishingRouteFeature.ExportCustomSpots();
         }
 
         private void SaveKeybinds(bool showNotification = true)

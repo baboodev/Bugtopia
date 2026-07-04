@@ -109,7 +109,7 @@ namespace HeartopiaMod
         internal const bool MasterLogBirdFarmCrashTrace = true;
         internal const bool MasterLogInsectFarm = false;
         internal const bool MasterLogAutoFish = false;
-        internal const bool MasterLogInstantCatch = true;
+        internal const bool MasterLogInstantCatch = false;
         internal const bool MasterLogAutoFarm = false;
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
         // recipe-id probes per active quest) — flip to false once classification is confirmed.
@@ -235,6 +235,9 @@ namespace HeartopiaMod
         private bool autoEatOnToastEnabled = false; // Toggle for auto eat via toast notification
         private const bool AutoEatRepairLogsEnabled = MasterLogAutoEatRepair;
         private bool autoEatAutoTriggerEnabled = true;
+        // Auto Eat sends CharacterProtocolManager.EatFood directly (server consume, no client
+        // animation clip) instead of the BagModule Eat function; falls back automatically.
+        private bool autoEatNoAnimationEnabled = true;
         private int autoRepairTriggerPercent = 10;
         private int autoEatTriggerPercent = 20;
         private const string AUTO_EAT_FOOD_KEY = "food_bluejam";
@@ -378,10 +381,20 @@ namespace HeartopiaMod
         private int cachedEnergyCurrent = 100;
         private int cachedEnergyMax = 100;
         private float nextEnergyValueRefreshAt = 0f;
+        // Event-driven Auto Eat / Auto Repair triggers (see EnsureAutoEatRepairEventHooks):
+        // PlayerStaminaUpdatedEvent feeds the energy cache directly; HandHoldUpdatedEvent marks
+        // tool data (durability) dirty. The timed polls stay as safety nets only.
+        private bool autoEatRepairEventHooksRegistered;
+        private float staminaEventSeenAt = -999f;
+        private bool autoEatCheckRequestedByEvent;
+        private float handholdEventSeenAt = -999f;
+        private bool durabilityCheckRequestedByEvent;
+        private float nextEventDurabilityCheckAllowedAt = -999f;
         private float nextFoodRepairUiStatusRefreshAt = 0f;
         private bool liveDurabilityLowLatched = false;
         private int liveDurabilityLatchedToolId = -1;
         private int liveDurabilityLatchedToolMaxDurability = int.MinValue;
+        private float liveDurabilityLatchRearmAt = -999f;
         private float nextToolDurabilityLogAt = 0f;
         private string lastLoggedAutoRepairNetStatus = string.Empty;
         private float nextLiveDurabilityTriggerAt = 0f;
@@ -437,6 +450,15 @@ namespace HeartopiaMod
         private const bool DirectBackpackUnsafeAuraMonoFallbackEnabled = true;
         private const bool DirectBackpackVerboseLogsEnabled = false;
         private const float EnergyReadCacheInterval = 0.15f;
+        // While PlayerStaminaUpdatedEvent flows, the UI-text energy parse is suppressed this long
+        // after each event (every energy change re-arms it, so the cache stays authoritative).
+        private const float EventDrivenEnergyCacheSeconds = 5f;
+        // Once HandHoldUpdatedEvent is proven on this build, the timed durability poll stretches
+        // to this safety-net interval; the event drives the real checks.
+        private const float EventDrivenDurabilitySafetyPollSeconds = 45f;
+        // Toast scanning for repair is skipped while the event channel is live and durability
+        // reads have produced a value this recently.
+        private const float ToastScanDurabilityFreshSeconds = 90f;
 
 
         // The only sanctioned way to drop the snapshot list — releases the per-item GC pins.
@@ -1166,13 +1188,26 @@ namespace HeartopiaMod
             this.RunAntiAfkTick();
 
             // Check live durability / energy panel triggers on separate lightweight schedules.
+            // Both are primarily event-driven now (PlayerStaminaUpdatedEvent / HandHoldUpdatedEvent
+            // set the *RequestedByEvent flags); the intervals remain as safety nets.
             float autoEatRepairNow = Time.unscaledTime;
             bool bagAutomationBusy = this.IsBagAutomationActiveOrQueued();
+            if (this.autoRepairOnToastEnabled || this.autoEatAutoTriggerEnabled)
+            {
+                this.EnsureAutoEatRepairEventHooks();
+            }
             float autoRepairPollInterval = this.GetEffectiveAutoRepairTriggerCheckInterval();
             if (this.autoRepairOnToastEnabled
                 && !bagAutomationBusy
-                && autoEatRepairNow - this.lastAutoRepairTriggerCheckAt >= autoRepairPollInterval)
+                && (this.durabilityCheckRequestedByEvent
+                    || autoEatRepairNow - this.lastAutoRepairTriggerCheckAt >= autoRepairPollInterval))
             {
+                if (this.durabilityCheckRequestedByEvent)
+                {
+                    this.durabilityCheckRequestedByEvent = false;
+                    // Bypass the internal poll throttle so the event-driven check runs now.
+                    this.lastToolDurabilityPollAt = -999f;
+                }
                 this.lastAutoRepairTriggerCheckAt = autoEatRepairNow;
                 long autoRepairPollStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 this.TryHandleLiveDurabilityAutoRepair();
@@ -1181,8 +1216,10 @@ namespace HeartopiaMod
 
             if (this.autoEatAutoTriggerEnabled
                 && !bagAutomationBusy
-                && autoEatRepairNow - this.lastAutoEatTriggerCheckAt >= this.GetEffectiveAutoEatTriggerCheckInterval())
+                && (this.autoEatCheckRequestedByEvent
+                    || autoEatRepairNow - this.lastAutoEatTriggerCheckAt >= this.GetEffectiveAutoEatTriggerCheckInterval()))
             {
+                this.autoEatCheckRequestedByEvent = false;
                 this.lastAutoEatTriggerCheckAt = autoEatRepairNow;
 
                 if (autoEatRepairNow >= this.nextAutoEatDirectRetryAt && IsEnergyAtOrBelowAutoEatTrigger())
@@ -1305,6 +1342,11 @@ namespace HeartopiaMod
             {
                 try { AutoFishingFarm.Update(this); this.autoFishingFarmBreaker.Success(); }
                 catch (Exception ex) { this.autoFishingFarmBreaker.Failure("AutoFishingFarm", ex, Time.unscaledTime); }
+            }
+            if (this.fishingRouteBreaker.ShouldRun(Time.unscaledTime))
+            {
+                try { FishingRouteFeature.Update(this); this.fishingRouteBreaker.Success(); }
+                catch (Exception ex) { this.fishingRouteBreaker.Failure("FishingRoute", ex, Time.unscaledTime); }
             }
             this.ProcessAutoSell();
             this.RunTreeFarmLogic();
@@ -2443,6 +2485,7 @@ namespace HeartopiaMod
         private FeatureBreakerState puzzleNetBreaker;
         private FeatureBreakerState resourceFarmBreaker;
         private FeatureBreakerState autoFishingFarmBreaker;
+        private FeatureBreakerState fishingRouteBreaker;
 
         // Removes the hot-path Harmony patches once nothing has needed them for a while, so the
         // per-call prefix tax is not paid for the rest of the session after a one-off teleport.

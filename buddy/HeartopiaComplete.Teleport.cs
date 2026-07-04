@@ -1990,6 +1990,7 @@ namespace HeartopiaMod
                     {
                         if (entry != null) this.customTeleportList.Add(entry);
                     }
+                    FishingRouteFeature.ImportCustomSpots(config.FishingRouteSpots);
                     ModLogger.Msg($"Loaded {this.customTeleportList.Count} custom teleports.");
                     return;
                 }
