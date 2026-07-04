@@ -224,7 +224,15 @@ namespace HeartopiaMod
             playerPos = Vector3.zero;
             try
             {
-                GameObject player = this.FindPlayerRoot();
+                // Prefer the skeleton itself: its transform.position stays world-space even when
+                // the game parents the player under a moving platform (sea-fishing ship, vehicles),
+                // where FindPlayerRoot() (= transform.root) is the platform and reports its pivot.
+                GameObject player = GetLocalPlayer();
+                if (player == null)
+                {
+                    player = this.FindPlayerRoot();
+                }
+
                 if (player != null)
                 {
                     playerPos = player.transform.position;

@@ -268,6 +268,11 @@ namespace HeartopiaMod
         // UpdateComponentData detour (creation = AddEntity), so the event drain ADOPTS unknown crop
         // netIds whose sowTime lands in a window after this timestamp as our remote-sown generation.
         private long homelandFarmAutoRemoteSowSentUnix = 0L;
+        // Retry throttle for the managed fallback of the auto-loop homeland gate. On this build the
+        // managed self-player chain ALWAYS fails (types absent from interop) and each failing pass
+        // costs hundreds of ms of type-scan misses — running it every 60s tick was the periodic hitch
+        // that coincided with the EventDiag 60s summary line (same cadence, hence the correlation).
+        private float homelandFarmAutoGateManagedRetryAt = 0f;
         private readonly Dictionary<uint, ulong> homelandFarmResolvedPutZoneByPlanterNetId = new Dictionary<uint, ulong>();
         // While set, every radius scan (sow slots, weed, harvest) centers on the captured
         // planter zone instead of the live player position, so the player may drift slightly.
@@ -15876,12 +15881,30 @@ namespace HeartopiaMod
                     // homeland flag when the captured owner is unknown.
                     // FIX ("harvested but never re-sowed"): the old in-field-owner check was true ONLY while
                     // literally standing on a planter tile, so re-sow was wrongly deferred as "away" after
-                    // harvesting from a step away. Use the scan-free own-homeland flag (allowVisitingFarmArea:
-                    // false does NOT scan) — true anywhere in the OWN homeland, on OR off a field tile.
-                    bool inHomeland = this.TryHomelandFarmIsInHomeland(out _, allowVisitingFarmArea: false, logDecisions: false);
+                    // harvesting from a step away. Scan-free own-homeland flag, AURA READ FIRST: the managed
+                    // LocalPlayer chain is dead on this build (types absent) and each failing pass costs
+                    // hundreds of ms — paying it every 60s tick was the periodic in-game hitch. The aura
+                    // flag is a cheap cached-native read and answers on this build; the full managed gate
+                    // is only a throttled fallback for builds where the aura read is unavailable.
+                    bool inHomeland;
+                    if (this.TryHomelandFarmTryReadInHomelandAura(out bool auraInHomeland, out _))
+                    {
+                        inHomeland = auraInHomeland;
+                    }
+                    else if (Time.realtimeSinceStartup >= this.homelandFarmAutoGateManagedRetryAt)
+                    {
+                        this.homelandFarmAutoGateManagedRetryAt = Time.realtimeSinceStartup + 120f;
+                        inHomeland = this.TryHomelandFarmIsInHomeland(out _, allowVisitingFarmArea: false, logDecisions: false);
+                    }
+                    else
+                    {
+                        inHomeland = false; // aura unavailable, managed gate throttled — treat as away
+                    }
+
                     // Extra guard: if we're demonstrably standing in a DIFFERENT field (current in-field
                     // owner non-zero and != captured owner), we're visiting elsewhere → treat as away so we
-                    // never scan/sow the wrong field.
+                    // never scan/sow the wrong field. Only checked when the cheap gate says "home" (rare),
+                    // so its managed reads never run on the every-tick away path.
                     if (inHomeland
                         && this.homelandFarmAutoFieldOwnerNetId != 0U
                         && this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint currentFieldOwner)

@@ -260,7 +260,10 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                GameObject playerRoot = this.FindPlayerRoot();
+                // Score/jitter from the skeleton, not transform.root: on the sea-fishing ship the
+                // player is parented under the boat, so the root's position/forward are the ship's.
+                GameObject playerSkeleton = HeartopiaComplete.GetLocalPlayer();
+                GameObject playerRoot = playerSkeleton != null ? playerSkeleton : this.FindPlayerRoot();
                 Transform playerTransform = playerRoot != null ? playerRoot.transform : null;
                 Camera mainCamera = Camera.main;
                 GameObject[] candidates = this.GetCachedFishShadowTargetObjects();
@@ -1779,7 +1782,10 @@ namespace HeartopiaMod
                     auraMonoRuntimeInvoke(resetOffsetMethod, handholdObj, IntPtr.Zero, ref exc);
                 }
 
-                GameObject playerRoot = this.FindPlayerRoot();
+                // The offset decomposition must be relative to the player character, not the
+                // hierarchy root (= the boat during sea fishing, whose pivot/forward differ).
+                GameObject playerSkeleton = HeartopiaComplete.GetLocalPlayer();
+                GameObject playerRoot = playerSkeleton != null ? playerSkeleton : this.FindPlayerRoot();
                 if (playerRoot != null)
                 {
                     Vector3 playerPos = playerRoot.transform.position;
@@ -2924,7 +2930,11 @@ namespace HeartopiaMod
                     }
                     else
                     {
-                        GameObject pr = this.FindPlayerRoot();
+                        GameObject pr = HeartopiaComplete.GetLocalPlayer();
+                        if (pr == null)
+                        {
+                            pr = this.FindPlayerRoot();
+                        }
                         heading = pr != null ? pr.transform.forward : Vector3.forward;
                         heading.y = 0f;
                         heading = heading.sqrMagnitude < 0.0004f ? Vector3.forward : heading.normalized;
@@ -2946,7 +2956,11 @@ namespace HeartopiaMod
                 Vector3 direction = playerPos - buoyPos;
                 if (direction.sqrMagnitude < 0.0004f)
                 {
-                    GameObject playerRoot = this.FindPlayerRoot();
+                    GameObject playerRoot = HeartopiaComplete.GetLocalPlayer();
+                    if (playerRoot == null)
+                    {
+                        playerRoot = this.FindPlayerRoot();
+                    }
                     direction = playerRoot != null ? playerRoot.transform.forward : Vector3.forward;
                     direction.y = 0f;
                     if (direction.sqrMagnitude < 0.0004f)

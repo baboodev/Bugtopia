@@ -20,6 +20,7 @@ namespace HeartopiaMod
 
         internal static void ResetState()
         {
+            HeartopiaComplete.warehouseHomelandSpoofActive = false;
             loggedArchitectureNote = false;
             bagWasOpen = false;
             bagCloseSettleFrames = 0;
@@ -53,10 +54,16 @@ namespace HeartopiaMod
         {
             if (host == null || !host.WarehouseBypassEnabled)
             {
+                HeartopiaComplete.warehouseHomelandSpoofActive = false;
                 return;
             }
 
+            // Install (lazily, throttled) the IsPlayerInHomeLand detour so the game's own BagPanel
+            // multi-select / full-stack-panel / move gates open while the bag is open away from home.
+            host.EnsureWarehouseHomelandHook();
+
             host.ModWarehouseBypassTickBagOpenState(out bool monoBagOpen);
+            HeartopiaComplete.warehouseHomelandSpoofActive = monoBagOpen;
             if (!monoBagOpen)
             {
                 if (bagWasOpen)

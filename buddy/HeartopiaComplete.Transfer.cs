@@ -2,6 +2,7 @@
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
+using MonoMod.RuntimeDetour;
 using System;
 using System.IO;
 using System.Collections;
@@ -166,12 +167,141 @@ namespace HeartopiaMod
 
         internal void ModWarehouseOnBagClosed()
         {
+            warehouseHomelandSpoofActive = false;
             this.warehouseMonoTabNextAttemptAt = -999f;
             this.warehouseMonoTabUnlockCommitted = false;
             this.warehouseMonoMoveButtonLogged = false;
             this.warehouseBagOpenBypassCacheFrame = -1;
             WarehouseBypassFeature.ResetWarehouseBagSession();
             WarehouseBypassFeature.ResetWarehouseTabMonoWarmup();
+        }
+
+        // --- Scoped homeland spoof (full bag/warehouse page away from home) ---
+        // BagPanel gates multi-select, the multipleChoose panel (move_mult/cancel_mult/full-stack
+        // toggle, btnFrame frame 2) and the single-item move button on GameplayApi.IsPlayerInHomeLand().
+        // BackPackSystem.MultiSelectItem / MoveMultiBackpackItems have no such gate and the server
+        // accepts MoveBatchBackpackItems from anywhere (the mod's transfer feature relies on that),
+        // so spoofing this one client check while the bag is open unlocks the whole native page.
+        // The detour is installed lazily only while Warehouse Anywhere is enabled; its body is
+        // allocation- and IO-free (PrivacyBlock pattern): read a static flag, else pure trampoline
+        // forward, so world-change teardown calls are as safe as vanilla.
+        private static readonly string[] WarehouseHomelandImageNames =
+        {
+            "XDTLevelAndEntity", "XDTLevelAndEntity.dll",
+            "Client", "Client.dll",
+            "Assembly-CSharp", "Assembly-CSharp.dll"
+        };
+
+        // True only while Warehouse Anywhere is on AND the bag panel is open+visible; maintained
+        // every frame by WarehouseBypassFeature.Update and forced false on close/toggle/reset.
+        internal static volatile bool warehouseHomelandSpoofActive;
+
+        private static NativeDetour warehouseHomelandDetour;
+        private static WarehouseHomelandHookDelegate warehouseHomelandHookKeepAlive;
+        private static WarehouseHomelandHookDelegate warehouseHomelandTrampoline;
+        private bool warehouseHomelandHookTried;
+        private float warehouseHomelandNextHookAttemptAt = -999f;
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate byte WarehouseHomelandHookDelegate();
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr WarehouseHomelandCompileMethodDelegate(IntPtr method);
+
+        internal bool WarehouseHomelandHookInstalled => warehouseHomelandTrampoline != null;
+
+        internal void EnsureWarehouseHomelandHook()
+        {
+            if (warehouseHomelandTrampoline != null || this.warehouseHomelandHookTried)
+            {
+                return;
+            }
+
+            if (Time.unscaledTime < this.warehouseHomelandNextHookAttemptAt)
+            {
+                return;
+            }
+
+            this.warehouseHomelandNextHookAttemptAt = Time.unscaledTime + 5f;
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+
+                IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                WarehouseHomelandCompileMethodDelegate compile = monoModule != IntPtr.Zero
+                    ? this.GetAuraMonoExport<WarehouseHomelandCompileMethodDelegate>(monoModule, "mono_compile_method")
+                    : null;
+                if (compile == null)
+                {
+                    this.warehouseHomelandHookTried = true;
+                    ModLogger.Msg("[WarehouseBypass] mono_compile_method unavailable — homeland spoof off (tab-only bypass stays).");
+                    return;
+                }
+
+                IntPtr cls = this.FindAuraMonoClassInImages("XDTLevelAndEntity.GameplaySystem", "GameplayApi", WarehouseHomelandImageNames);
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.GameplaySystem.GameplayApi");
+                }
+
+                if (cls == IntPtr.Zero)
+                {
+                    // Image not loaded yet (main menu) — retry on the 5s cadence.
+                    return;
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "IsPlayerInHomeLand", 0);
+                if (method == IntPtr.Zero)
+                {
+                    this.warehouseHomelandHookTried = true;
+                    ModLogger.Msg("[WarehouseBypass] GameplayApi.IsPlayerInHomeLand() not found — homeland spoof off (tab-only bypass stays).");
+                    return;
+                }
+
+                IntPtr nativePtr = compile(method);
+                if (nativePtr == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                this.warehouseHomelandHookTried = true;
+                warehouseHomelandHookKeepAlive = WarehouseHomelandDetourBody;
+                warehouseHomelandDetour = new NativeDetour(nativePtr, warehouseHomelandHookKeepAlive);
+                warehouseHomelandTrampoline = warehouseHomelandDetour.GenerateTrampoline<WarehouseHomelandHookDelegate>();
+                if (warehouseHomelandTrampoline == null)
+                {
+                    try { warehouseHomelandDetour?.Undo(); } catch { }
+                    warehouseHomelandDetour = null;
+                    warehouseHomelandHookKeepAlive = null;
+                    ModLogger.Msg("[WarehouseBypass] trampoline unavailable for IsPlayerInHomeLand; detour reverted (tab-only bypass stays).");
+                    return;
+                }
+
+                ModLogger.Msg("[WarehouseBypass] Hooked GameplayApi.IsPlayerInHomeLand @0x" + nativePtr.ToInt64().ToString("X")
+                    + " — full page (multi-select, full-stack panel, move) active while bag is open.");
+            }
+            catch (Exception ex)
+            {
+                this.warehouseHomelandHookTried = true;
+                ModLogger.Msg("[WarehouseBypass] homeland hook install failed: " + ex.Message);
+            }
+        }
+
+        // Reverse-pinvoke body called from mono-compiled game code, including during world-change
+        // teardown. Keep it allocation- and IO-free: read one static flag or forward via trampoline.
+        private static byte WarehouseHomelandDetourBody()
+        {
+            if (warehouseHomelandSpoofActive)
+            {
+                return 1;
+            }
+
+            WarehouseHomelandHookDelegate trampoline = warehouseHomelandTrampoline;
+            return trampoline != null ? trampoline() : (byte)0;
         }
 
         internal static bool ModTryUnityWarehouseBagShouldSkipMonoProbe()
