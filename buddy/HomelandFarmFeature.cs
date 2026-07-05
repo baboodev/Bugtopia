@@ -312,7 +312,14 @@ namespace HeartopiaMod
         // Full farm-entity set (boxes + ground plants + crops) present at capture. While the player is
         // standing on the captured own field, the manual radius buttons use this (plus tracked/registered
         // ids) as their collect source instead of re-running the GetComponents scan every press.
+        // FRESHNESS: the snapshot only substitutes for a scan while younger than
+        // HomelandFarmCapturedFieldFreshSeconds — newly planted flowers/boxes exist only in a REAL scan
+        // (user report: 5 fresh flowers missing from water targets, 95/100). The first action after the
+        // TTL runs one ComponentRadius scan and refreshes this set; actions within the window stay scan-free.
         private readonly HashSet<uint> homelandFarmCapturedFarmNetIds = new HashSet<uint>();
+        private const float HomelandFarmCapturedFieldFreshSeconds = 60f;
+        private float homelandFarmCapturedFieldFreshUntil = 0f;
+        private bool homelandFarmBackpackHookRegistered;
 
         private readonly Dictionary<uint, HomelandFarmPlanterSowAnchor> homelandFarmPlanterSowAnchorByNetId =
             new Dictionary<uint, HomelandFarmPlanterSowAnchor>();
@@ -1232,6 +1239,22 @@ namespace HeartopiaMod
             // visible multi-second hitch exactly when the user opened the tab. Started here, it runs
             // during world-entry settling; by tab-open time everything is resolved. No-op after start.
             this.EnsureHomelandFarmWarmupStarted();
+
+            // Backpack changes invalidate the captured-field snapshot: planting consumes an item and
+            // harvest/collect adds one, so "inventory changed" ≈ "field composition may have changed".
+            // This closes the hole where re-sowing INSIDE the snapshot's freshness window left the weed/
+            // water hotkey filtering the previous generation's netIds (new weedable crops invisible).
+            // Water/weed consume nothing, so their bursts stay scan-free. One-shot registration, same
+            // event AutoSell listens to (the engine supports multiple handlers per event).
+            if (!this.homelandFarmBackpackHookRegistered)
+            {
+                this.homelandFarmBackpackHookRegistered = true;
+                bool hooked = this.RegisterGameEventHook(
+                    "XDTDataAndProtocol.Events.RefreshBackPackEvent",
+                    4,
+                    this.OnHomelandFarmBackpackChanged);
+                this.HomelandFarmLog("Backpack-change snapshot invalidation hook: " + (hooked ? "registered." : "unavailable (60s TTL fallback)."));
+            }
 
             if (this.auraFarmMethodsReady)
             {
@@ -9700,6 +9723,17 @@ namespace HeartopiaMod
                 allowCapturedFieldShortcut: allowCapturedFieldShortcut);
         }
 
+        // Runs on the Unity main thread (event drain). Any backpack mutation (storageType==Backpack)
+        // drops the captured-field snapshot freshness, so the NEXT manual radius action re-scans and
+        // sees freshly planted/removed entities immediately instead of after the TTL.
+        private void OnHomelandFarmBackpackChanged(GameEventSnapshot e)
+        {
+            if (e.ReadInt32(0) == HomelandFarmBackpackStorageType)
+            {
+                this.homelandFarmCapturedFieldFreshUntil = 0f;
+            }
+        }
+
         // True when the player is standing in their OWN homeland inside the captured field zone — the
         // captured planters/plants/crops belong to THIS field, so the manual radius buttons can use
         // them instead of re-scanning. Owner mismatch (visiting someone) or being outside the captured
@@ -9783,8 +9817,12 @@ namespace HeartopiaMod
             // press. Auto-farm discovery does NOT pass this flag: it must keep scanning to pick up
             // freshly-sown crop netIds. Marked as componentRadiusSucceeded so every downstream heavy
             // source (sphere/cylinder/proximity/funnel) skips exactly like on a ComponentRadius hit.
+            // TTL-gated: once the snapshot is older than HomelandFarmCapturedFieldFreshSeconds, this
+            // branch stands down for one action so ComponentRadius runs and re-freshes the snapshot —
+            // that is how newly planted flowers/boxes become visible without a re-capture.
             if (allowCapturedFieldShortcut
                 && spatialScan
+                && Time.realtimeSinceStartup < this.homelandFarmCapturedFieldFreshUntil
                 && this.TryHomelandFarmIsOnCapturedOwnField(scanCenter))
             {
                 int capturedAdded = 0;
@@ -9847,6 +9885,25 @@ namespace HeartopiaMod
             {
                 componentRadiusSucceeded = true;
                 sources.Add("ComponentRadius(" + componentRadiusAdded + ")");
+
+                // Re-fresh the captured-field snapshot from this REAL scan: newly planted flowers/boxes
+                // exist only here, and replacing the set also drops entities the player removed. The
+                // captured shortcut then serves scan-free actions for the next freshness window.
+                if (allowCapturedFieldShortcut
+                    && this.homelandFarmCapturedSowPointByBoxNetId.Count > 0
+                    && this.TryHomelandFarmIsOnCapturedOwnField(scanCenter))
+                {
+                    this.homelandFarmCapturedFarmNetIds.Clear();
+                    foreach (uint refreshedId in output)
+                    {
+                        if (refreshedId != 0U)
+                        {
+                            this.homelandFarmCapturedFarmNetIds.Add(refreshedId);
+                        }
+                    }
+
+                    this.homelandFarmCapturedFieldFreshUntil = Time.realtimeSinceStartup + HomelandFarmCapturedFieldFreshSeconds;
+                }
             }
 
             before = output.Count;
@@ -15089,6 +15146,7 @@ namespace HeartopiaMod
             this.homelandFarmCapturedSowPointByBoxNetId.Clear();
             this.homelandFarmCapturedCropNetIds.Clear();
             this.homelandFarmCapturedFarmNetIds.Clear();
+            this.homelandFarmCapturedFieldFreshUntil = 0f;
             this.homelandFarmAutoRemoteSowSentUnix = 0L;
             this.homelandFarmRegisteredFarmTargets.Clear();
             // Drop event-fed crop/box state so a new field / run never reads a previous field's netIds.
@@ -15308,6 +15366,8 @@ namespace HeartopiaMod
                     this.homelandFarmCapturedFarmNetIds.Add(farmNetId);
                 }
             }
+
+            this.homelandFarmCapturedFieldFreshUntil = Time.realtimeSinceStartup + HomelandFarmCapturedFieldFreshSeconds;
 
             string radiusNote = excludedOutsideRadius > 0
                 ? " (" + excludedOutsideRadius + " outside radius)"

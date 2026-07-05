@@ -48,7 +48,12 @@ namespace HeartopiaMod
         // auraMonoCompileMethod delegate is declared void, so resolve our own IntPtr-returning one.
         private delegate IntPtr EventHookCompileMethodDelegate(IntPtr method);
 
-        private const int MaxEventHookSlots = 16;   // distinct event types we can hook concurrently
+        // Distinct event types we can hook concurrently. Raised 16 -> 32 after the pool ran out in a
+        // real session (AutoEatRepair 5 + ForceLocomotion 4 + NetCook 3 + AutoSell/fishing/PetPlay/...
+        // exceeded 16, and NetCook's EntityRemoveEvent registration was refused). Slots are cheap —
+        // a few small static arrays; a NativeDetour is only installed per event type actually
+        // registered, never per empty slot.
+        private const int MaxEventHookSlots = 32;
         private const int EventPayloadCap = 64;     // max struct bytes snapshotted per dispatch
 
         // Read-only view over a snapshotted event payload, handed to handlers on the main thread.
