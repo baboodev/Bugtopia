@@ -210,6 +210,18 @@ namespace HeartopiaMod
             public bool OnCooldown;  // CollectableObjectComponent.inCold (authoritative; depleted resource)
         }
 
+        // Parallel lightweight snapshot of EVERY positioned collectable (no id filter): the
+        // authoritative cooldown layer consumed by the radar cold-sync and the foraging wait.
+        internal struct LiveCollectableCold
+        {
+            public Vector3 Position;
+            public bool OnCooldown;  // inCold
+            public long ColdEndMs;   // coldEndTime (unix ms; 0 when warm/unreadable)
+        }
+
+        private readonly List<LiveCollectableCold> liveCollectableColds = new List<LiveCollectableCold>(128);
+        private float liveCollectableScanCompletedAt = -1f;
+
         // TableData.GetMapResourceProduce(produceId).hitProduce[0][0] = the drop item id, whose
         // GetIconName gives the real material/item icon (wood/stone/bamboo/fruit/mushroom).
         private IntPtr mapResGetProduceMethod = IntPtr.Zero;
@@ -831,6 +843,7 @@ namespace HeartopiaMod
             this.EnsureProduceMethod();
 
             this.mapResEntities.Clear();
+            this.liveCollectableColds.Clear();
             // Pin the enumerated components, and each derived entity below, across their field reads:
             // GetEntityResId boxes its int return -> allocation -> the moving sgen GC may relocate an
             // unpinned component/entity mid-loop, and reading (or invoking on) a moved object crashes
@@ -891,7 +904,23 @@ namespace HeartopiaMod
                         this.TryGetMonoInt32Member(comp, "itemTypeID", out int produceId);
                         // Authoritative depletion state straight from the live entity (the radar's own cooldown
                         // tracking is local-only and misses resources already depleted by others / before login).
+                        // Some resource families never set inCold when drained — they only zero availableNum
+                        // (their shape also leaves the axe-checker) — so both count as depleted. availableNum
+                        // is trusted only on a successful read: the out param is 0 on failure too.
                         bool onCooldown = this.TryGetMonoBoolMember(comp, "inCold", out bool inCold) && inCold;
+                        if (!onCooldown
+                            && this.TryGetMonoInt32Member(comp, "availableNum", out int liveAvailableNum)
+                            && liveAvailableNum == 0)
+                        {
+                            onCooldown = true;
+                        }
+
+                        long liveColdEndMs = 0L;
+                        if (onCooldown && this.TryGetMonoUInt64Member(comp, "coldEndTime", out ulong coldEndRaw))
+                        {
+                            liveColdEndMs = (long)coldEndRaw;
+                        }
+                        this.liveCollectableColds.Add(new LiveCollectableCold { Position = pos, OnCooldown = onCooldown, ColdEndMs = liveColdEndMs });
 
                         if (!sampled)
                         {
@@ -918,6 +947,8 @@ namespace HeartopiaMod
             {
                 FreeAuraMonoPins(compPins);
             }
+
+            this.liveCollectableScanCompletedAt = Time.unscaledTime;
 
             if (!this.mapResDiagLogged && rawCount > 0)
             {

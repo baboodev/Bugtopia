@@ -562,20 +562,10 @@ namespace HeartopiaMod
 
         private int GetEffectiveResourceVisualEspMarkerLimit()
         {
-            int configured = Mathf.Clamp(this.resourceVisualEspMaxMarkers, 20, 200);
-            if (this.radarMaxDistance >= 900f)
-            {
-                return Mathf.Max(configured, 120);
-            }
-            if (this.radarMaxDistance >= 700f)
-            {
-                return Mathf.Max(configured, 90);
-            }
-            if (this.radarMaxDistance >= 500f)
-            {
-                return Mathf.Max(configured, 60);
-            }
-            return configured;
+            // The slider is authoritative. The old radar-distance floors (500m→60, 700m→90,
+            // 900m→120) silently overrode small explicit values — a user setting 20 still saw
+            // 120 tags on a long-range radar.
+            return Mathf.Clamp(this.resourceVisualEspMaxMarkers, 20, 200);
         }
 
         private GameObject CreateModernRadarMarkerAnchor(Vector3 pos, string canonicalLabel, string icon, string specificIconKey, bool isCooldown, GameObject targetObject)

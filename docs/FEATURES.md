@@ -188,6 +188,31 @@ Server-command style farming **without teleporting** to each node:
   - **Stones** — `SendHitStoneCommand`
 - Throttled scan (80 ms tick, 20 ms per-owner cooldown); merged target cap (32).
 - Toggle independent of teleport foraging; both can conflict — UI warns when radar/foraging preconditions fail.
+- **Foraging + Aura Farm node-hop wait:** when START FORAGING teleports to a radar node with Aura Farm on,
+  the hop to the next node waits for **confirmation of the collect** instead of a fixed 3 s dwell
+  (long teleports need world-streaming time before the aura can even see the target).
+  - **Fast path (`CollectColdEvent`):** the game dispatches
+    `ScriptsRefactory.DataAndProtocol.Events.CollectColdEvent` per resource; multi-charge bushes
+    (3 charges on a ~2.5 s server timer) emit decrementing `availableNum` while being drained and
+    ONE final event with a real `endUnixTimeMs` when they flip to cooldown — that final event is
+    the collect confirmation. The node's bush is bound by the charge-decrement pattern (captured
+    aura owner ids are often aggregate level-object ids that never appear in events). On confirm
+    the real cooldown is stamped into the radar (`ApplyLiveResourceCooldownByPosition`) so the
+    ESP marker flips on the next 2 s rescan; the hop follows 0.25 s later. No aura-quiet gating —
+    the aura re-spams every in-radius bush continuously, so quiet never happens in berry fields.
+    `CollectObjectShowEvent(show=false)` covers despawn-style gathers.
+  - **Authoritative live layer:** the map feature's mono collectable scan (position + `inCold` +
+    `coldEndTime`) runs every ~2 s while the radar or foraging is active and is synced into the
+    radar's local cooldown dicts (`SyncLiveResourceColdStates`) — markers/ESP show REAL server
+    cooldowns shortly after radar enable, already-cold nodes are skipped before teleporting, and
+    after a long teleport the wait resolves the node's true state as soon as its entity streams
+    in (cold → immediate skip; warm → event flow; not streamed yet → keep waiting).
+  - **Radar fallback:** node's marker flips to `[CD]` or is hidden by the cooldown stamp after the
+    aura actually sent a command, with the aura idle ≥1.25 s (covers meteors and captures that
+    never happened). Managed entity probing (`inCold`/`coldEndTime` reflection) is registered but
+    dead on this build — XDT* entity resolution is Mono-only.
+  - Bounded by the **Collect Wait Max** slider (4–30 s, default 12, `auraCollectWaitTimeout`);
+    priority-anchor dwells keep the old fixed delay.
 
 #### Meteorites (starfall rocks)
 

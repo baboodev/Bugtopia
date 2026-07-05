@@ -169,6 +169,7 @@ namespace HeartopiaMod
             data.noclipSpeed = this.noclipSpeed;
             data.noclipBoostMultiplier = this.noclipBoostMultiplier;
             data.areaLoadDelay = this.areaLoadDelay;
+            data.auraCollectWaitTimeout = this.auraCollectWaitTimeout;
             data.resourceTeleportCooldown = this.resourceTeleportCooldown;
             data.resourceClickDuration = this.resourceClickDuration;
             data.resourceAutoRepairPauseSeconds = this.resourceAutoRepairPauseSeconds;
@@ -335,6 +336,10 @@ namespace HeartopiaMod
             this.noclipSpeed = data.noclipSpeed;
             this.noclipBoostMultiplier = data.noclipBoostMultiplier;
             this.areaLoadDelay = data.areaLoadDelay;
+            this.auraCollectWaitTimeout = Mathf.Clamp(
+                data.auraCollectWaitTimeout > 0f ? data.auraCollectWaitTimeout : 12f,
+                4f,
+                30f);
             this.resourceTeleportCooldown = data.resourceTeleportCooldown;
             this.resourceClickDuration = data.resourceClickDuration;
             this.resourceAutoRepairPauseSeconds = data.resourceAutoRepairPauseSeconds;
@@ -617,6 +622,7 @@ namespace HeartopiaMod
                         else if (line.Contains("noclipSpeed")) this.noclipSpeed = GetJsonFloat(line, "\"noclipSpeed\":");
                         else if (line.Contains("noclipBoostMultiplier")) this.noclipBoostMultiplier = GetJsonFloat(line, "\"noclipBoostMultiplier\":");
                         else if (line.Contains("areaLoadDelay")) this.areaLoadDelay = GetJsonInt(line, "\"areaLoadDelay\":");
+                        else if (line.Contains("auraCollectWaitTimeout")) this.auraCollectWaitTimeout = Mathf.Clamp(GetJsonFloat(line, "\"auraCollectWaitTimeout\":"), 4f, 30f);
                         else if (line.Contains("resourceTeleportCooldown")) this.resourceTeleportCooldown = GetJsonFloat(line, "\"resourceTeleportCooldown\":");
                         else if (line.Contains("resourceClickDuration")) this.resourceClickDuration = GetJsonFloat(line, "\"resourceClickDuration\":");
                         else if (line.Contains("resourceAutoRepairPauseSeconds")) this.resourceAutoRepairPauseSeconds = GetJsonFloat(line, "\"resourceAutoRepairPauseSeconds\":");

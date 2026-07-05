@@ -759,6 +759,7 @@ namespace HeartopiaMod
             this.QuestAssistantBirdMonitorTick();
             this.QuestAssistantCraftMonitorTick();
             this.QuestAssistantGoToAreaMonitorTick();
+            this.QuestAssistantFishMonitorTick();
             this.QuestAssistantAutoRefreshOnUpdate();
             this.ProcessPrivacyBlockOnUpdate();
             this.ProcessVehicleBypassOnUpdate();
@@ -1370,6 +1371,7 @@ namespace HeartopiaMod
             }
             this.CheckManualBerryCollectionListeners();
             this.SyncNearbyLiveResourceCooldowns();
+            this.SyncLiveResourceColdStates();
             bool flag8 = this.isRadarActive;
             if (flag8)
             {
@@ -6074,6 +6076,42 @@ namespace HeartopiaMod
 
         // Token: 0x0400004F RID: 79
         private float areaLoadDelay = 4f;
+
+        // Aura foraging: max seconds to hold at a node waiting for the radar to confirm
+        // the collect (marker hidden / cooldown flip) before hopping on anyway.
+        private float auraCollectWaitTimeout = 12f;
+
+        // True when the current Collecting state targets a concrete radar node (set on every
+        // node teleport, cleared for priority-anchor dwells where lastNodePosition is stale).
+        private bool auraCollectWaitArmed = false;
+
+        // Fast collect-confirmation: owner netId of the entity the aura hit at the current
+        // node (captured at send time by position match), polled directly for coldEndTime /
+        // availableNum — the same state the game's interact icon reads — so the hop does not
+        // have to wait for the radar rescan pipeline.
+        private uint auraCollectNodeOwnerNetId = 0U;
+        private bool auraCollectNodeEntitySeen = false;
+        private float auraCollectNodeConfirmedAt = -1f;
+        private float auraNextCollectNodeProbeAt = 0f;
+        private bool auraCollectNodeDiagLogged = false;
+        private readonly HashSet<uint> auraCollectCaptureMissedOwners = new HashSet<uint>();
+        private int auraCollectNodeAbsentTicks = 0;
+        private uint auraCollectNodeResourceNetId = 0U;
+        private bool auraCollectColdHookRegistered = false;
+        // CollectColdEvent bookkeeping for the current node dwell: last availableNum per
+        // resource netId, and the ids bound to this node (id match or charge decrement).
+        private readonly Dictionary<uint, int> auraCollectSeenAvailByNetId = new Dictionary<uint, int>();
+        private readonly HashSet<uint> auraCollectOurNetIds = new HashSet<uint>();
+        // Last RefreshBackPackEvent(Backpack) during the current node dwell: the hop waits 1s
+        // after the loot actually landed in the bag.
+        private float auraCollectLastBackpackAt = -1f;
+        // When the node's OWN object was captured (aura addressed a target ≤3m of the node) —
+        // anchors the zero-progress bail for already-cold nodes. Counting from the capture (not
+        // from arrival or any first send) keeps the bail inert while the world is still
+        // streaming in after a long teleport: neighbors' shapes loading first can't start it.
+        private float auraCollectNodeCapturedAt = -1f;
+        // Throttle for SyncLiveResourceColdStates (mono collectable scan -> radar cooldown dicts).
+        private float nextLiveColdSyncAt = 0f;
 
         // --- AUTO FARM PRIORITIES ---
         private bool priorityOysterMushroom = false;

@@ -477,12 +477,14 @@ namespace HeartopiaMod
             this.auraNextMeteorObjectScanAt = 0f;
             this.auraTargetInfoByOwnerId.Clear();
             this.auraNextAllowedByOwnerId.Clear();
+            this.ArmAuraCollectWait(false);
             this.ResetAuraLootCollectRuntimeState();
 
             if (enabled)
             {
                 this.SetAutoCollectEnabled(false);
                 this.auraNextMeteorObjectScanAt = 0f;
+                this.EnsureAuraCollectColdEventHook();
                 bool ready = this.ResolveAuraFarmRuntimeMethods();
                 this.AddMenuNotification(ready ? "Aura Farm enabled" : "Aura Farm enabled, resolver incomplete", ready ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.75f, 0.45f));
                 if (AuraFarmDebugLogs)
@@ -536,6 +538,9 @@ namespace HeartopiaMod
             if (!this.CollectAuraOwnerTargets(this.auraOwnerTargetBuffer))
             {
                 this.auraLastTargetCount = 0;
+                // An empty scan is also a completed scan: for an isolated node the buffer goes
+                // empty right after the collect, and that absence IS the collected signal.
+                this.UpdateAuraCollectNodePresence();
                 if (AuraFarmDebugLogs && Time.unscaledTime - this.auraLastEmptyStateLogAt >= 1f)
                 {
                     this.auraLastEmptyStateLogAt = Time.unscaledTime;
@@ -545,6 +550,7 @@ namespace HeartopiaMod
             }
 
             this.auraLastTargetCount = this.auraOwnerTargetBuffer.Count;
+            this.UpdateAuraCollectNodePresence();
             float now = Time.unscaledTime;
             int treeHits = 0;
             int stoneHits = 0;
@@ -671,6 +677,7 @@ namespace HeartopiaMod
                 {
                     this.autoCollectClickedSinceArrival = true;
                     this.auraLastSuccessfulCommandAt = now;
+                    this.TryCaptureAuraCollectNodeOwner(ownerNetId, resourceNetId, targetAnchor);
                     if (!isMeteor)
                     {
                         this.StampAuraFallbackNodeCooldown(ownerNetId, targetKind);

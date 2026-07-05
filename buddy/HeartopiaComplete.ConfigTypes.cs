@@ -155,6 +155,7 @@ namespace HeartopiaMod
             public float noclipSpeed;
             public float noclipBoostMultiplier;
             public float areaLoadDelay;
+            public float auraCollectWaitTimeout;
             public float resourceTeleportCooldown;
             public float resourceClickDuration;
             public float resourceAutoRepairPauseSeconds;

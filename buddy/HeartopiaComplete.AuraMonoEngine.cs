@@ -353,6 +353,13 @@ namespace HeartopiaMod
             }
         }
 
+        // True when objects can actually be pinned against the moving sgen GC. When the
+        // mono_gchandle exports are missing, AuraMonoPinNew silently no-ops — callers that rely
+        // on pins for pointer safety MUST fail closed instead of walking movable memory.
+        internal static bool AuraMonoPinningAvailable => auraMonoGcHandleNew != null && auraMonoGcHandleFree != null;
+
+        private static bool auraMonoPinningUnavailableLogged;
+
         internal static uint AuraMonoPinNew(IntPtr obj)
         {
             if (obj == IntPtr.Zero || auraMonoGcHandleNew == null)

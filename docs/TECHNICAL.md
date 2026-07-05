@@ -495,7 +495,7 @@ Integer fields store `(int)KeyCode` values (one per rebindable action — e.g. `
 Notable floats:
 
 - `noclipSpeed`, `noclipBoostMultiplier`
-- `areaLoadDelay`, `resourceTeleportCooldown`, `resourceClickDuration`
+- `areaLoadDelay`, `auraCollectWaitTimeout`, `resourceTeleportCooldown`, `resourceClickDuration`
 - `gameSpeed`, `cameraFOV`, snow/cook intervals
 - `autoFish*` tuning (legacy keys still serialized)
 - `insect*` tuning

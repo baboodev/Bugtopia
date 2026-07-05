@@ -51,7 +51,7 @@ namespace HeartopiaMod
             }
 
             // Main tab content - estimate based on typical layout
-            return 780f; // Conservative estimate for main foraging tab
+            return 820f; // Conservative estimate for main foraging tab
         }
 
         private float CalculateTreeFarmTabHeight()
@@ -252,7 +252,7 @@ namespace HeartopiaMod
             num += (int)statusPanel.height + 14;
 
             float settingsHeight = 184f
-                + (this.auraFarmEnabled ? (this.auraFarmLootCollectEnabled ? 102f : 68f) : 0f)
+                + (this.auraFarmEnabled ? (this.auraFarmLootCollectEnabled ? 136f : 102f) : 0f)
                 + (this.autoFarmEnabled ? 98f : 0f)
                 + (this.autoFarmAutoStopEnabled ? 44f : 0f);
             Rect settingsPanel = new Rect(left, (float)num, panelWidth, settingsHeight);
@@ -324,6 +324,20 @@ namespace HeartopiaMod
 
                     rowY += 34f;
                 }
+
+                GUI.Label(new Rect(settingsPanel.x + 14f, rowY, 170f, 20f), this.LF("Collect Wait Max: {0}s", (int)this.auraCollectWaitTimeout), bodyStyle);
+                float prevAuraCollectWait = this.auraCollectWaitTimeout;
+                this.auraCollectWaitTimeout = Mathf.Round(this.DrawAccentSlider(
+                    new Rect(settingsPanel.x + 192f, rowY + 1f, settingsPanel.width - 220f, 20f),
+                    this.auraCollectWaitTimeout,
+                    4f,
+                    30f));
+                if (this.auraCollectWaitTimeout != prevAuraCollectWait)
+                {
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+
+                rowY += 34f;
             }
 
             float autoCollectToggleWidth = 250f;
@@ -1167,7 +1181,9 @@ namespace HeartopiaMod
             Dictionary<int, float> targetCooldowns = null;
             Dictionary<int, float> targetHideUntil = null;
             int targetIndex = -1;
-            float bestSqr = 25f;
+            // Tight identification (2m): array points sit ~1m from their entity anchors; the old
+            // 5m radius let a cold entity of ANOTHER nearby resource stamp a warm node's slot.
+            float bestSqr = 4f;
 
             if (isTreeType)
             {
@@ -1625,6 +1641,7 @@ namespace HeartopiaMod
                                     this.autoFarmTimer = 0f;
                                     this.autoCollectClickedSinceArrival = false;
                                     this.cameraRotationAttempts = 0;
+                                    this.ArmAuraCollectWait(true);
                                     break;
                                 }
                             }
@@ -1650,6 +1667,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
+                            this.ArmAuraCollectWait(true);
                             break;
                         }
 
@@ -1683,6 +1701,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
+                            this.ArmAuraCollectWait(true);
                         }
                         else
                         {
@@ -1693,6 +1712,11 @@ namespace HeartopiaMod
                     }
                 case HeartopiaComplete.AutoFarmState.Collecting:
                     {
+                        if (this.auraFarmEnabled && this.auraCollectWaitArmed)
+                        {
+                            this.RunAuraCollectWait();
+                            break;
+                        }
                         bool flag3 = this.autoFarmTimer >= 5f;
                         if (flag3)
                         {
@@ -1924,6 +1948,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
+                            this.ArmAuraCollectWait(true);
                         }
                         else
                         {
@@ -1946,11 +1971,13 @@ namespace HeartopiaMod
                         bool flag23 = this.autoFarmTimer >= this.areaLoadDelay;
                         if (flag23)
                         {
-                            // Start collecting at priority location
+                            // Start collecting at priority location. lastNodePosition still points at a
+                            // previous node here, so the radar-confirm wait must stay disarmed.
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
+                            this.ArmAuraCollectWait(false);
                             this.autoFarmStatus = "Farming at priority location...";
                         }
                         else
@@ -1960,6 +1987,627 @@ namespace HeartopiaMod
                         break;
                     }
             }
+        }
+
+        // Aura-mode Collecting: hold the hop to the next radar target until this node is
+        // actually collected. After a long teleport the resource entity streams in late, so
+        // the old fixed 3s dwell hopped away before the aura ever saw the target. Completion
+        // is read from the radar itself: a collected node's marker is hidden by the cooldown
+        // stamp (~10s) and later shown as [CD], while a still-loading node keeps (or regains)
+        // an available marker. The aura-idle window keeps us in place while a tree is still
+        // being chopped or a cluster around the node is still being swept.
+        // Arms/disarms the radar-confirm wait for the next Collecting dwell and resets the
+        // per-node entity tracking captured by TryCaptureAuraCollectNodeOwner.
+        private void ArmAuraCollectWait(bool armed)
+        {
+            this.auraCollectWaitArmed = armed;
+            this.auraCollectNodeOwnerNetId = 0U;
+            this.auraCollectNodeResourceNetId = 0U;
+            this.auraCollectNodeEntitySeen = false;
+            this.auraCollectNodeConfirmedAt = -1f;
+            this.auraNextCollectNodeProbeAt = 0f;
+            this.auraCollectNodeDiagLogged = false;
+            this.auraCollectCaptureMissedOwners.Clear();
+            this.auraCollectNodeAbsentTicks = 0;
+            this.auraCollectSeenAvailByNetId.Clear();
+            this.auraCollectOurNetIds.Clear();
+            this.auraCollectLastBackpackAt = -1f;
+            this.auraCollectNodeCapturedAt = -1f;
+            if (armed)
+            {
+                this.EnsureAuraCollectColdEventHook();
+            }
+        }
+
+        // EventCenter hooks: CollectColdEvent fires the instant a collectable flips to cooldown
+        // (the exact moment the in-game interact icon disappears) and carries the resource netId
+        // the pick command targeted — the only build-independent, per-resource collect signal
+        // (managed XDT* entity resolution is dead on this build, and cold bush shapes stay in
+        // the axe-checker). CollectObjectShowEvent covers despawn-style objects.
+        private void EnsureAuraCollectColdEventHook()
+        {
+            if (this.auraCollectColdHookRegistered)
+            {
+                return;
+            }
+
+            // CollectColdEvent { uint resourceNetId@0; long endUnixTimeMs@8; float totalTime@16;
+            // int availableNum@20; string displayIcon@24 }
+            bool cold = this.RegisterGameEventHook(
+                "ScriptsRefactory.DataAndProtocol.Events.CollectColdEvent",
+                32,
+                this.OnAuraCollectColdEvent);
+
+            // CollectObjectShowEvent { uint netId@0; bool show@4 }
+            bool show = this.RegisterGameEventHook(
+                "ScriptsRefactory.DataAndProtocol.Events.CollectObjectShowEvent",
+                8,
+                this.OnAuraCollectObjectShowEvent);
+
+            // RefreshBackPackEvent (shared with Auto Sell — same detour, extra handler): marks
+            // when the gathered loot actually landed in the backpack.
+            this.RegisterGameEventHook(AutoSellBackpackEventName, AutoSellBackpackEventBytes, this.OnAuraCollectBackpackRefresh);
+
+            this.auraCollectColdHookRegistered = cold || show;
+        }
+
+        private void OnAuraCollectBackpackRefresh(GameEventSnapshot e)
+        {
+            if (!this.autoFarmActive
+                || !this.auraFarmEnabled
+                || this.farmState != HeartopiaComplete.AutoFarmState.Collecting
+                || !this.auraCollectWaitArmed)
+            {
+                return;
+            }
+
+            if (e.ReadInt32(0) != AutoSellBackpackStorageType)
+            {
+                return;
+            }
+
+            this.auraCollectLastBackpackAt = Time.unscaledTime;
+        }
+
+        // CollectColdEvent stream semantics (verified from live logs): while the aura drains a
+        // multi-charge bush the server emits events with endMs=0 and a DECREMENTING availableNum
+        // for the bush actually being picked (charges arrive on a ~2.5s server timer), plus
+        // endMs=0/full-availableNum refreshes for every other spammed in-radius bush; the drain
+        // completes with a single event carrying a real endMs (cooldown start) — that is the
+        // "collected" moment. Captured owner/resource ids can be aggregate level-object ids that
+        // never appear in events, so binding is done by the decrement pattern instead.
+        private void OnAuraCollectColdEvent(GameEventSnapshot e)
+        {
+            if (!this.autoFarmActive || !this.auraFarmEnabled)
+            {
+                return;
+            }
+
+            uint resourceNetId = e.ReadUInt32(0);
+            long endMs = (long)e.ReadUInt64(8);
+            int availableNum = e.ReadInt32(20);
+            this.AutoFarmLog("CollectColdEvent netId=" + resourceNetId
+                + " endMs=" + endMs
+                + " availableNum=" + availableNum
+                + " (captured res=" + this.auraCollectNodeResourceNetId
+                + " owner=" + this.auraCollectNodeOwnerNetId + ")");
+
+            if (resourceNetId == 0U
+                || this.farmState != HeartopiaComplete.AutoFarmState.Collecting
+                || !this.auraCollectWaitArmed)
+            {
+                return;
+            }
+
+            // Direct id match (when the capture yielded a real entity id) marks it as ours too.
+            if (resourceNetId == this.auraCollectNodeResourceNetId
+                || resourceNetId == this.auraCollectNodeOwnerNetId)
+            {
+                this.auraCollectOurNetIds.Add(resourceNetId);
+            }
+
+            int prevAvailable;
+            if (this.auraCollectSeenAvailByNetId.TryGetValue(resourceNetId, out prevAvailable)
+                && availableNum < prevAvailable)
+            {
+                if (this.auraCollectOurNetIds.Add(resourceNetId))
+                {
+                    this.AutoFarmLog($"Aura node bush bound by charge decrement: netId={resourceNetId} ({prevAvailable}->{availableNum})");
+                }
+            }
+            this.auraCollectSeenAvailByNetId[resourceNetId] = availableNum;
+
+            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            // Drained = a real cooldown end in the future OR charges exhausted: some resource
+            // families (event forage) never set endMs/inCold — their drain event only zeroes
+            // availableNum (and their shape leaves the axe-checker).
+            bool eventSaysDrained = endMs > nowUnixMs || availableNum == 0;
+            if (!eventSaysDrained || this.auraCollectNodeConfirmedAt >= 0f || !this.autoCollectClickedSinceArrival)
+            {
+                return;
+            }
+
+            // Cold with a real end time: ours if bound by decrement/id, or the first cold seen
+            // before any binding (single-charge resources go cold on their first pick event).
+            if (!this.auraCollectOurNetIds.Contains(resourceNetId) && this.auraCollectOurNetIds.Count != 0)
+            {
+                return;
+            }
+
+            this.auraCollectNodeConfirmedAt = Time.unscaledTime;
+            this.AutoFarmLog($"Aura collect confirmed by CollectColdEvent (netId={resourceNetId}, endMs={endMs})");
+
+            // Stamp the REAL cooldown onto the node position so the radar/ESP marker flips on
+            // the next rescan instead of only after the hop.
+            try
+            {
+                this.ApplyLiveResourceCooldownByPosition(this.lastNodePosition, endMs, availableNum, string.Empty, nowUnixMs, Time.unscaledTime);
+            }
+            catch { }
+        }
+
+        private void OnAuraCollectObjectShowEvent(GameEventSnapshot e)
+        {
+            if (!this.autoFarmActive || !this.auraFarmEnabled)
+            {
+                return;
+            }
+
+            uint netId = e.ReadUInt32(0);
+            bool show = e.ReadBool(4);
+            if (show || netId == 0U)
+            {
+                return;
+            }
+
+            this.AutoFarmLog("CollectObjectShowEvent netId=" + netId + " show=false"
+                + " (captured res=" + this.auraCollectNodeResourceNetId
+                + " owner=" + this.auraCollectNodeOwnerNetId + ")");
+
+            if (this.farmState != HeartopiaComplete.AutoFarmState.Collecting
+                || !this.auraCollectWaitArmed
+                || this.auraCollectNodeConfirmedAt >= 0f
+                || !this.autoCollectClickedSinceArrival)
+            {
+                return;
+            }
+
+            // Despawn-style objects (single-charge gathers) hide on collect.
+            if (netId == this.auraCollectNodeResourceNetId
+                || netId == this.auraCollectNodeOwnerNetId
+                || this.auraCollectOurNetIds.Contains(netId))
+            {
+                this.auraCollectNodeConfirmedAt = Time.unscaledTime;
+                this.AutoFarmLog($"Aura collect confirmed by CollectObjectShowEvent (netId={netId})");
+            }
+        }
+
+        // Called from the aura tick right after a collect command is sent: remember the owner
+        // netId of the entity standing on the current foraging node so the wait loop can read
+        // its collected state directly instead of waiting for the radar rescan.
+        private void TryCaptureAuraCollectNodeOwner(uint ownerNetId, uint resourceNetId, Vector3 targetAnchor)
+        {
+            if (!this.autoFarmActive
+                || this.farmState != HeartopiaComplete.AutoFarmState.Collecting
+                || !this.auraCollectWaitArmed
+                || this.auraCollectNodeOwnerNetId != 0U
+                || ownerNetId == 0U)
+            {
+                return;
+            }
+
+            // Most discovery paths register targets WITHOUT positions (owner-only), so the
+            // cached anchor is usually zero — resolve the entity position on demand instead
+            // (same chain the live cooldown sync uses). Owners that resolved >3m away are
+            // remembered to avoid re-resolving them every resend tick.
+            Vector3 anchor = targetAnchor;
+            if (anchor == Vector3.zero)
+            {
+                if (this.auraCollectCaptureMissedOwners.Contains(ownerNetId))
+                {
+                    return;
+                }
+
+                object entity = this.TryGetAuraOwnerEntity(ownerNetId);
+                if (entity == null || !this.TryGetAuraEntityPosition(entity, out anchor))
+                {
+                    return;
+                }
+            }
+
+            if ((anchor - this.lastNodePosition).sqrMagnitude > 9f)
+            {
+                this.auraCollectCaptureMissedOwners.Add(ownerNetId);
+                return;
+            }
+
+            this.auraCollectNodeOwnerNetId = ownerNetId;
+            this.auraCollectNodeResourceNetId = resourceNetId != 0U ? resourceNetId : ownerNetId;
+            this.auraCollectNodeCapturedAt = Time.unscaledTime;
+            this.auraCollectNodeEntitySeen = false;
+            this.auraNextCollectNodeProbeAt = 0f;
+            this.auraCollectNodeAbsentTicks = 0;
+            this.AutoFarmLog($"Aura node owner captured netId={ownerNetId} res={this.auraCollectNodeResourceNetId} at {this.lastNodePosition} (anchor {anchor})");
+        }
+
+        // Build-independent collected signal, called from the aura tick right after the target
+        // buffer was refreshed successfully: the captured owner vanishing from the axe-checker
+        // means its physical gather shape was removed/deactivated — which is what actually stops
+        // the aura from re-sending on this build (the managed inCold pre-send check never fires
+        // here because XDT* entity resolution is Mono-only). Three consecutive absent ticks
+        // (~0.25s) confirm, riding over single flaky scans.
+        private void UpdateAuraCollectNodePresence()
+        {
+            if (!this.autoFarmActive
+                || this.farmState != HeartopiaComplete.AutoFarmState.Collecting
+                || !this.auraCollectWaitArmed
+                || this.auraCollectNodeOwnerNetId == 0U
+                || this.auraCollectNodeConfirmedAt >= 0f)
+            {
+                return;
+            }
+
+            if (this.auraOwnerTargetBuffer.Contains(this.auraCollectNodeOwnerNetId))
+            {
+                this.auraCollectNodeAbsentTicks = 0;
+                return;
+            }
+
+            this.auraCollectNodeAbsentTicks++;
+            if (this.auraCollectNodeAbsentTicks >= 3)
+            {
+                this.auraCollectNodeConfirmedAt = Time.unscaledTime;
+                this.AutoFarmLog($"Aura node left axe-checker (netId={this.auraCollectNodeOwnerNetId}) -> collected");
+            }
+        }
+
+        // Polls the captured node entity's CollectableObjectComponent (throttled): coldEndTime
+        // in the future or availableNum==0 is exactly the state the game's interact icon reads,
+        // so it flips within the server round-trip instead of the 2s radar cadence. An entity/
+        // component that despawns after having been seen once counts as collected too.
+        private void ProbeAuraCollectNodeState(float now)
+        {
+            if (this.auraCollectNodeConfirmedAt >= 0f
+                || this.auraCollectNodeOwnerNetId == 0U
+                || now < this.auraNextCollectNodeProbeAt)
+            {
+                return;
+            }
+
+            this.auraNextCollectNodeProbeAt = now + 0.2f;
+            if (!this.ResolveAuraFarmRuntimeMethods())
+            {
+                return;
+            }
+
+            object entity = this.TryGetAuraOwnerEntity(this.auraCollectNodeOwnerNetId);
+            object collectable = entity != null
+                ? this.TryGetAuraEntityComponent(entity, this.auraCollectableObjectComponentType)
+                : null;
+            if (collectable == null)
+            {
+                if (this.auraCollectNodeEntitySeen)
+                {
+                    this.auraCollectNodeConfirmedAt = now;
+                    this.AutoFarmLog($"Aura node probe: entity/component despawned (netId={this.auraCollectNodeOwnerNetId}) -> collected");
+                }
+                else if (!this.auraCollectNodeDiagLogged)
+                {
+                    this.auraCollectNodeDiagLogged = true;
+                    this.AutoFarmLog($"Aura node probe diag: netId={this.auraCollectNodeOwnerNetId} entity={(entity != null ? "ok" : "null")} collectable=null");
+                }
+                return;
+            }
+
+            this.auraCollectNodeEntitySeen = true;
+
+            // inCold is the exact flag the game's interact icon reads; coldEndTime/availableNum
+            // cover builds where the bool member fails to resolve.
+            bool inCold;
+            bool inColdRead = this.TryGetAuraCollectableInCold(collectable, out inCold);
+            long coldEndTimeMs = 0L;
+            int availableNum = -1;
+            string resTypeName = string.Empty;
+            bool cooldownRead = this.TryReadLiveCollectableCooldown(collectable, out coldEndTimeMs, out availableNum, out resTypeName);
+            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            if (!this.auraCollectNodeDiagLogged)
+            {
+                this.auraCollectNodeDiagLogged = true;
+                this.AutoFarmLog("Aura node probe diag: netId=" + this.auraCollectNodeOwnerNetId
+                    + " inCold=" + (inColdRead ? inCold.ToString() : "unreadable")
+                    + " coldEndMs=" + (cooldownRead ? coldEndTimeMs.ToString() : "unreadable")
+                    + " availableNum=" + (cooldownRead ? availableNum.ToString() : "unreadable")
+                    + " resType=" + (string.IsNullOrEmpty(resTypeName) ? "<none>" : resTypeName));
+            }
+
+            if ((inColdRead && inCold)
+                || (cooldownRead && (coldEndTimeMs > nowUnixMs || availableNum == 0)))
+            {
+                this.auraCollectNodeConfirmedAt = now;
+            }
+        }
+
+        private void RunAuraCollectWait()
+        {
+            float now = Time.unscaledTime;
+            float maxWait = Mathf.Max(4f, this.auraCollectWaitTimeout);
+            bool auraIdle = now - this.auraLastSuccessfulCommandAt >= 1.25f;
+            bool markerFound;
+            string nodeMarkerLabel;
+            bool markerOnCooldown = this.TryGetNodeMarkerState(this.lastNodePosition, out markerFound, out nodeMarkerLabel);
+
+
+            // Fast path: the node reported collected (CollectColdEvent / despawn / entity state).
+            // No aura-quiet gate here: the aura keeps re-spamming every in-radius bush (the server
+            // just refuses the far ones), so auraLastSuccessfulCommandAt never goes quiet in berry
+            // fields — a short post-confirm grace is all that's needed.
+            this.ProbeAuraCollectNodeState(now);
+            if (this.auraCollectNodeOwnerNetId == 0U
+                && !this.auraCollectNodeDiagLogged
+                && this.autoCollectClickedSinceArrival
+                && this.autoFarmTimer >= 3f)
+            {
+                this.auraCollectNodeDiagLogged = true;
+                this.AutoFarmLog($"Aura node probe diag: aura sent commands but no owner matched node {this.lastNodePosition} within 3m (missedOwners={this.auraCollectCaptureMissedOwners.Count})");
+            }
+            bool hasCollectProgress = this.auraCollectNodeConfirmedAt >= 0f
+                || this.auraCollectOurNetIds.Count > 0
+                || this.auraCollectLastBackpackAt >= 0f;
+
+            // Authoritative live state of THIS node (tight XZ identification, scan must postdate
+            // arrival). The scan arbitrates the event heuristics both ways below.
+            bool liveNodeFound = this.TryGetLiveNodeColdState(this.lastNodePosition, now - this.autoFarmTimer, out bool liveNodeCold);
+
+            // Scan-driven confirm: we made progress here and the node's entity flipped cold —
+            // collected, even if the event binding missed it (partial event streams).
+            if (liveNodeFound && liveNodeCold && hasCollectProgress && this.auraCollectNodeConfirmedAt < 0f)
+            {
+                this.auraCollectNodeConfirmedAt = now;
+                this.AutoFarmLog($"Aura collect confirmed by live scan (node flipped cold) after {this.autoFarmTimer:F1}s");
+            }
+
+            // "The node exists locally" — the aura addressed an object ≤3m of it (capture) or a
+            // post-arrival scan contains its entity. While the destination is still streaming in
+            // after a long teleport NEITHER holds, and every confirm seen so far can only belong
+            // to already-loaded NEIGHBORS the aura swept in parallel — never hop on those.
+            bool nodePresent = this.auraCollectNodeOwnerNetId != 0U || liveNodeFound;
+
+            if (this.auraCollectNodeConfirmedAt >= 0f && this.autoFarmTimer >= 0.5f && nodePresent)
+            {
+                // The scan is the arbiter against neighbor-misbound event confirms: when a scan
+                // NEWER than the confirmation still sees the node warm, the confirm was for some
+                // other bush — hold until the node truly flips (or the timeout bounds it).
+                bool liveContradictsConfirm = liveNodeFound
+                    && !liveNodeCold
+                    && this.liveCollectableScanCompletedAt >= this.auraCollectNodeConfirmedAt + 0.2f;
+                if (!liveContradictsConfirm)
+                {
+                    // Hop 1s after the loot actually landed in the backpack (RefreshBackPackEvent);
+                    // when no bag refresh was seen this dwell, 1s after the collect confirmation.
+                    // Unrelated bag traffic (Auto Pickup Drops vacuuming, neighbor loot) must not
+                    // slide the anchor forever — 3s after the confirm the hop goes regardless.
+                    float hopAnchor = Mathf.Max(this.auraCollectNodeConfirmedAt, this.auraCollectLastBackpackAt);
+                    if (now - hopAnchor >= 1f || now - this.auraCollectNodeConfirmedAt >= 3f)
+                    {
+                        this.AutoFarmLog($"Aura collect done after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (bagRefresh={(this.auraCollectLastBackpackAt >= 0f ? "yes" : "none")})");
+                        this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                        this.FinishCollectingCycle();
+                        return;
+                    }
+                }
+
+                // Confirmed but the loot is still settling (or the scan says the node is still
+                // active) — hold here so the radar fallbacks can't hop earlier; the shared
+                // timeout below stays as the outer bound.
+                if (this.autoFarmTimer < maxWait)
+                {
+                    this.autoFarmStatus = liveContradictsConfirm
+                        ? "Collecting... node still active"
+                        : "Collecting... securing loot";
+                    return;
+                }
+            }
+
+            // Authoritative live state arrived and says the node is already on server cooldown
+            // -> skip right away. The capture-age guard gives our OWN pick's events 1.25s to
+            // land first, so a node we just drained still goes through the normal completion
+            // path (with its bag-settle wait).
+            if (!hasCollectProgress
+                && this.autoFarmTimer >= 0.75f
+                && (!this.autoCollectClickedSinceArrival
+                    || this.auraCollectNodeCapturedAt < 0f
+                    || now - this.auraCollectNodeCapturedAt >= 1.25f)
+                && liveNodeFound
+                && liveNodeCold)
+            {
+                this.AutoFarmLog($"Aura node is live-cold (mono scan) after {this.autoFarmTimer:F1}s at {this.lastNodePosition} -> skipping");
+                this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                this.FinishCollectingCycle();
+                return;
+            }
+
+            // NOTE: silence-based early bail removed by request — a silent node waits the full
+            // Collect Wait Max slider (the world may still be loading / the server settling our
+            // position after a teleport chain; the collect will happen). Fast skips remain only
+            // for PROVEN cooldown: the live-scan branch above.
+
+            if (this.autoFarmTimer >= 1f && auraIdle)
+            {
+                // Radar shows the node on cooldown -> collected (by us or by someone else).
+                if (markerFound && markerOnCooldown)
+                {
+                    this.AutoFarmLog($"Aura collect confirmed (marker cooldown) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
+                    this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                    this.FinishCollectingCycle();
+                    return;
+                }
+
+                // Marker vanished after the aura actually addressed THIS node (capture): stamped
+                // nodes are hidden from the radar before their [CD] marker appears. The capture
+                // requirement keeps this from firing during world streaming, when clicks belong
+                // to already-loaded neighbors and the node's mesh simply isn't there yet.
+                if (!markerFound && this.autoCollectClickedSinceArrival && this.auraCollectNodeOwnerNetId != 0U)
+                {
+                    this.AutoFarmLog($"Aura collect confirmed (marker gone) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
+                    this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                    this.FinishCollectingCycle();
+                    return;
+                }
+            }
+
+            // One unreachable/bugged node must not stall the loop forever.
+            if (this.autoFarmTimer >= maxWait)
+            {
+                string markerState = markerFound ? (markerOnCooldown ? "cooldown" : "available") : "none";
+                this.AutoFarmLog($"Aura collect wait timed out after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker={markerState}, label={(string.IsNullOrEmpty(nodeMarkerLabel) ? "<none>" : nodeMarkerLabel)}, clicked={this.autoCollectClickedSinceArrival})");
+                this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                this.FinishCollectingCycle();
+                return;
+            }
+
+            float remaining = maxWait - this.autoFarmTimer;
+            if (!auraIdle)
+            {
+                this.autoFarmStatus = $"Collecting... aura working ({remaining:F0}s)";
+            }
+            else if (!markerFound && !this.autoCollectClickedSinceArrival)
+            {
+                this.autoFarmStatus = $"Collecting... waiting for area to load ({remaining:F0}s)";
+            }
+            else
+            {
+                this.autoFarmStatus = $"Collecting... waiting for node ({remaining:F0}s)";
+            }
+        }
+
+        // Reads the radar marker state at a node position: cooldown flag + label of the closest
+        // labeled marker within 2.5m. markerFound=false when no such marker exists (hidden
+        // after a collect stamp, not streamed in yet, or radar container unavailable).
+        private bool TryGetNodeMarkerState(Vector3 nodePosition, out bool markerFound, out string markerLabel)
+        {
+            markerFound = false;
+            markerLabel = string.Empty;
+            bool onCooldown = false;
+            if (!this.isRadarActive || this.radarContainer == null)
+            {
+                return false;
+            }
+
+            float bestSqr = 6.25f;
+            for (int i = 0; i < this.radarContainer.transform.childCount; i++)
+            {
+                Transform child = this.radarContainer.transform.GetChild(i);
+                if (child == null)
+                {
+                    continue;
+                }
+
+                float sqr = (child.position - nodePosition).sqrMagnitude;
+                if (sqr >= bestSqr)
+                {
+                    continue;
+                }
+
+                string label = this.GetMarkerCanonicalLabel(child.gameObject);
+                if (string.IsNullOrEmpty(label))
+                {
+                    continue;
+                }
+
+                bestSqr = sqr;
+                markerFound = true;
+                markerLabel = label;
+                onCooldown = this.IsMarkerOnCooldown(child.gameObject);
+            }
+
+            return onCooldown;
+        }
+
+        // Live authoritative cooldown layer: the mono collectable scan (position + inCold +
+        // coldEndTime, MapSpots.RefreshCollectableScan) synced into the radar's local cooldown
+        // dicts every ~2s while the radar or foraging runs. Gives true server cooldown states
+        // right after radar enable, so markers/ESP are correct and the foraging scanner skips
+        // already-cold nodes BEFORE teleporting. This replaces SyncNearbyLiveResourceCooldowns,
+        // whose managed entity resolution is dead on this build (XDT* types are Mono-only).
+        private void SyncLiveResourceColdStates()
+        {
+            if (!this.isRadarActive && !this.autoFarmActive)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.nextLiveColdSyncAt)
+            {
+                return;
+            }
+            this.nextLiveColdSyncAt = now + 2f;
+
+            // Shared throttle with the game-map feature (mapResNextScanAt) — whoever asks first
+            // runs the scan, the other consumes the same snapshot.
+            this.RefreshCollectableScan();
+            if (this.liveCollectableColds.Count == 0)
+            {
+                return;
+            }
+
+            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                LiveCollectableCold entry = this.liveCollectableColds[i];
+                long endMs;
+                if (entry.OnCooldown)
+                {
+                    // Real end time when readable; otherwise a rolling 30s re-confirmed each scan.
+                    endMs = entry.ColdEndMs > nowUnixMs ? entry.ColdEndMs : nowUnixMs + 30000L;
+                }
+                else
+                {
+                    endMs = 0L;
+                }
+
+                try
+                {
+                    this.ApplyLiveResourceCooldownByPosition(entry.Position, endMs, entry.OnCooldown ? 0 : 1, string.Empty, nowUnixMs, now);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        // Reads the node's authoritative live state from the last mono collectable scan. Returns
+        // false while the node's entity is not in a scan newer than minScanCompletedAt (world
+        // still streaming in / scan stale) — the caller keeps waiting in that case.
+        // IDENTIFICATION, not proximity: XZ-only match within 1.5m (entity anchors sit ~0.5-1m
+        // above marker positions, and a looser 3D radius let a cold NEIGHBOR be attributed to a
+        // warm node — false skips).
+        private bool TryGetLiveNodeColdState(Vector3 nodePosition, float minScanCompletedAt, out bool onCooldown)
+        {
+            onCooldown = false;
+            if (this.liveCollectableScanCompletedAt < minScanCompletedAt)
+            {
+                return false;
+            }
+
+            float bestSqr = 2.25f;
+            bool found = false;
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                Vector3 delta = this.liveCollectableColds[i].Position - nodePosition;
+                float sqr = delta.x * delta.x + delta.z * delta.z;
+                if (sqr >= bestSqr)
+                {
+                    continue;
+                }
+
+                bestSqr = sqr;
+                found = true;
+                onCooldown = this.liveCollectableColds[i].OnCooldown;
+            }
+
+            return found;
         }
 
         // Token: 0x06000016 RID: 22 RVA: 0x0000459C File Offset: 0x0000279C
@@ -2007,6 +2655,13 @@ namespace HeartopiaMod
                             bool flag5 = markerOnCooldown;
                             if (!flag5)
                             {
+                                // Authoritative live check bypassing marker-rebuild/stamp lag:
+                                // a candidate whose entity is known cold is never targeted.
+                                bool liveCandidateCold;
+                                if (this.TryGetLiveNodeColdState(child.position, unscaledTime - 6f, out liveCandidateCold) && liveCandidateCold)
+                                {
+                                    continue;
+                                }
                                 bool flag6 = false;
                                 foreach (Vector3 vector2 in this.recentlyVisitedNodes.Keys)
                                 {
@@ -2648,6 +3303,8 @@ namespace HeartopiaMod
                 this.CheckRadarAutoToggle(); // This won't auto-enable radar, but checks consistency
                 this.autoFarmStatus = "Starting Auto Farm...";
                 this.autoFarmTimer = 0f;
+                this.nextLiveColdSyncAt = 0f; // fresh authoritative cold states before the first hop
+                this.lastScanTime = 0f;       // rebuild radar markers from them in the same frame (sync -> RunRadar -> farm tick order in OnUpdate)
                 this.currentLocationIndex = 0;
                 this.recentlyVisitedNodes.Clear();
                 this.cameraRotationAttempts = 0;

@@ -64,6 +64,22 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Without the mono_gchandle exports nothing can actually be pinned on the moving
+            // sgen GC — AuraMonoPinNew silently no-ops, and both this walk and every member read
+            // on the returned pointers race object relocation → random native AV (field report:
+            // AV in TryGetMonoInt32Member off the loot-collect scan right after enabling Aura
+            // Farm on a build where the export failed to resolve). Fail closed: features degrade
+            // instead of crashing the game.
+            if (!AuraMonoPinningAvailable)
+            {
+                if (!auraMonoPinningUnavailableLogged)
+                {
+                    auraMonoPinningUnavailableLogged = true;
+                    ModLogger.Msg("[AuraMono] mono_gchandle exports unavailable — collection enumeration disabled (pin-less walks would crash).");
+                }
+                return false;
+            }
+
             // Prime suspect for the no-dump crashes: enumerating a live game collection that can be
             // mutated/reallocated mid-walk. Tick (throttled) so the trail shows if death was here.
             Breadcrumbs.Tick("AuraMono.enumerate");
