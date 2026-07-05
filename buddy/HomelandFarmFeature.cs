@@ -44,12 +44,18 @@ namespace HeartopiaMod
         private const int HomelandFarmNetToolTypeId = 5;
         private const int HomelandFarmPadToolTypeId = 6;
         private const int HomelandFarmHolderSystemHoldTool = 3; // EHolderSystem.HoldTool
-        private const float HomelandFarmCommandDelaySeconds = 0.35f;
-        private const float HomelandFarmWaterCommandDelaySeconds = 0.1f;
+        // Inter-batch pacing removed (user request): 0f still yields ONE FRAME per batch
+        // (WaitForSecondsRealtime(0) resumes next frame), so commands never flood a single frame —
+        // 12 sow points / 3 per batch = 4 commands across 4 frames instead of ~1.3s of waits.
+        private const float HomelandFarmCommandDelaySeconds = 0f;
+        private const float HomelandFarmWaterCommandDelaySeconds = 0f;
         private const int HomelandFarmFertilizationTypeCrop = 2;
         private const int HomelandFarmActionErrorSuccess = 0;
         private const int HomelandFarmActionErrorBusy = 1;
-        private const float HomelandFarmActionCooldownSeconds = 1.5f;
+        // Post-action button cooldown. Was 1.5s — with the captured no-scan sources that is pure UX
+        // drag between button presses ("Homeland farm: wait X.Xs"). 0.3s still swallows accidental
+        // double-clicks / key repeat; overlap safety is the coroutine slot, not this timer.
+        private const float HomelandFarmActionCooldownSeconds = 0.3f;
         private const float HomelandFarmHarvestDelaySeconds = 0f;
         private const float HomelandFarmCollectSeedDelaySeconds = 0f;
         private const float HomelandFarmWeedDelaySeconds = 0f;
@@ -303,6 +309,10 @@ namespace HeartopiaMod
         // the field) still maintains the crops that were growing when you captured. The poll loop drops
         // any that turn out stale; discovery refreshes it the moment you're back at the field.
         private readonly HashSet<uint> homelandFarmCapturedCropNetIds = new HashSet<uint>();
+        // Full farm-entity set (boxes + ground plants + crops) present at capture. While the player is
+        // standing on the captured own field, the manual radius buttons use this (plus tracked/registered
+        // ids) as their collect source instead of re-running the GetComponents scan every press.
+        private readonly HashSet<uint> homelandFarmCapturedFarmNetIds = new HashSet<uint>();
 
         private readonly Dictionary<uint, HomelandFarmPlanterSowAnchor> homelandFarmPlanterSowAnchorByNetId =
             new Dictionary<uint, HomelandFarmPlanterSowAnchor>();
@@ -1216,6 +1226,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+
+            // Kick the one-time warmup as soon as the world is ready instead of on the first Farm-tab
+            // open: its heavy resolution steps (dead managed type sweeps, level-object cache) caused a
+            // visible multi-second hitch exactly when the user opened the tab. Started here, it runs
+            // during world-entry settling; by tab-open time everything is resolved. No-op after start.
+            this.EnsureHomelandFarmWarmupStarted();
 
             if (this.auraFarmMethodsReady)
             {
@@ -2737,6 +2753,17 @@ namespace HeartopiaMod
             status = "Homeland state unavailable.";
             try
             {
+                // Cheap aura fast path FIRST: the managed self-player/LocalPlayer chain below is dead on
+                // this build (types absent from interop) and burns ~200ms of type-scan misses per call —
+                // measured as the synchronous stall on every hotkey press. The aura read mirrors the same
+                // inHomeland flag the managed branch reads, so a TRUE here is semantically identical to
+                // the managed success path. FALSE still runs the full chain (visiting detection etc.).
+                if (this.TryHomelandFarmTryReadInHomelandAura(out bool auraFastInHomeland, out _) && auraFastInHomeland)
+                {
+                    status = "Player is in homeland.";
+                    return true;
+                }
+
                 this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
                 if (this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint fieldOwnerNetId) && fieldOwnerNetId != 0U)
                 {
@@ -3021,21 +3048,6 @@ namespace HeartopiaMod
             }
         }
 
-        // Synchronous drain of the sliced water-target scan (used by non-UI / one-shot callers).
-        // Runs the routine to completion in one frame, exactly like before the frame-budget rework.
-        private bool ScanHomelandFarmWaterTargets(out List<HomelandFarmTarget> targets, out string status, bool allowVisitingFarmArea = false, float scanRadiusOverride = 0f)
-        {
-            HomelandFarmWaterScanResult result = new HomelandFarmWaterScanResult();
-            IEnumerator drive = this.ScanHomelandFarmWaterTargetsRoutine(result, allowVisitingFarmArea, scanRadiusOverride);
-            while (drive.MoveNext())
-            {
-            }
-
-            targets = result.Targets;
-            status = result.Status ?? "Homeland farm scan unavailable.";
-            return result.Ok;
-        }
-
         // Frame-budgeted water-target scan. The per-netId build loop (TryHomelandFarmBuildWaterTarget
         // does several component resolves each) yields between fully-resolved entities so it never
         // stalls a frame. Drive it from a coroutine with `while (r.MoveNext()) yield return r.Current;`
@@ -3075,7 +3087,8 @@ namespace HeartopiaMod
                         out scanSource,
                         playerPos,
                         radius,
-                        useAutoFarmCollectShortcuts: false))
+                        useAutoFarmCollectShortcuts: false,
+                        allowCapturedFieldShortcut: true))
                 {
                     result.Status = string.IsNullOrEmpty(scanSource) ? "No homeland farm entities found." : scanSource;
                     yield break;
@@ -3335,7 +3348,12 @@ namespace HeartopiaMod
                         out _,
                         playerPos,
                         collectRadius,
-                        useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
+                        useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts,
+                        // Manual radius buttons (weed/harvest/seeds/flowers/fertilize) on the captured
+                        // own field use the captured set — no per-press GetComponents scan. Auto-farm
+                        // callers pass useAutoFarmCollectShortcuts:true and pre-collected sets, so the
+                        // discovery scans are unaffected.
+                        allowCapturedFieldShortcut: !useAutoFarmCollectShortcuts);
                 }
                 else
                 {
@@ -3366,43 +3384,6 @@ namespace HeartopiaMod
             {
                 yield return filter.Current;
             }
-        }
-
-        // Synchronous drain of the sliced crop-filter loop (non-UI callers).
-        private List<uint> FilterHomelandFarmCropsFromNetIds(
-            HashSet<uint> netIds,
-            Func<object, bool> cropPredicate,
-            string label,
-            bool requireOwn,
-            uint playerNetId,
-            uint effectiveOwnerNetId,
-            bool onOwnField,
-            bool hasPlayerPos,
-            Vector3 playerPos,
-            float radius,
-            bool logScanSummary = true,
-            bool includePlantData = false)
-        {
-            List<uint> result = new List<uint>();
-            IEnumerator drive = this.FilterHomelandFarmCropsFromNetIdsRoutine(
-                result,
-                netIds,
-                cropPredicate,
-                label,
-                requireOwn,
-                playerNetId,
-                effectiveOwnerNetId,
-                onOwnField,
-                hasPlayerPos,
-                playerPos,
-                radius,
-                logScanSummary,
-                includePlantData);
-            while (drive.MoveNext())
-            {
-            }
-
-            return result;
         }
 
         private IEnumerator FilterHomelandFarmCropsFromNetIdsRoutine(
@@ -3740,7 +3721,8 @@ namespace HeartopiaMod
                     out _,
                     playerPos,
                     radius + 2f,
-                    useAutoFarmCollectShortcuts: false);
+                    useAutoFarmCollectShortcuts: false,
+                    allowCapturedFieldShortcut: true);
             }
             else
             {
@@ -9528,6 +9510,15 @@ namespace HeartopiaMod
 
         private bool EnsureHomelandFarmScannerTypes()
         {
+            // Success short-circuit: without it every call re-ran the full type sweeps below for the
+            // managed types that NEVER resolve on this build (homelandFarmEntitiesType etc.) — measured
+            // as ~165ms per hotkey press inside the collect funnel ("ensure=165ms"). Once a scan path
+            // exists (aura or managed) the resolution outcome is final for the session.
+            if (this.homelandFarmScannerTypesResolved)
+            {
+                return true;
+            }
+
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
             this.ResolveAuraFarmRuntimeMethods();
             if (this.homelandFarmEntitiesType == null)
@@ -9692,7 +9683,8 @@ namespace HeartopiaMod
             out string source,
             Vector3 scanCenter,
             float scanRadius,
-            bool useAutoFarmCollectShortcuts = true)
+            bool useAutoFarmCollectShortcuts = true,
+            bool allowCapturedFieldShortcut = false)
         {
             return this.TryHomelandFarmCollectFarmEntityNetIds(
                 output,
@@ -9704,7 +9696,36 @@ namespace HeartopiaMod
                 allowUnsafeAuraMonoGetComponents: HomelandFarmAllowUnsafeAuraMonoGetComponents,
                 proximityBudgetSeconds: HomelandFarmAuraProximityComponentScanBudgetSeconds,
                 allowAuraEntityFunnel: true,
-                useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
+                useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts,
+                allowCapturedFieldShortcut: allowCapturedFieldShortcut);
+        }
+
+        // True when the player is standing in their OWN homeland inside the captured field zone — the
+        // captured planters/plants/crops belong to THIS field, so the manual radius buttons can use
+        // them instead of re-scanning. Owner mismatch (visiting someone) or being outside the captured
+        // zone (a second field area of the same homeland) falls back to the normal scan.
+        private bool TryHomelandFarmIsOnCapturedOwnField(Vector3 scanCenter)
+        {
+            if (this.homelandFarmCapturedSowPointByBoxNetId.Count == 0
+                || this.homelandFarmAutoFieldOwnerNetId == 0U)
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmTryReadInHomelandAura(out bool inHomeland, out _) || !inHomeland)
+            {
+                return false;
+            }
+
+            if (this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint currentFieldOwner)
+                && currentFieldOwner != 0U
+                && currentFieldOwner != this.homelandFarmAutoFieldOwnerNetId)
+            {
+                return false;
+            }
+
+            float margin = this.homelandFarmAutoCaptureRadius + 15f;
+            return (scanCenter - this.homelandFarmAutoCenter).sqrMagnitude <= margin * margin;
         }
 
         private bool TryHomelandFarmCollectFarmEntityNetIds(
@@ -9715,7 +9736,8 @@ namespace HeartopiaMod
             bool allowUnsafeAuraMonoGetComponents,
             float proximityBudgetSeconds = HomelandFarmAuraProximityComponentScanBudgetSeconds,
             bool allowAuraEntityFunnel = true,
-            bool useAutoFarmCollectShortcuts = true)
+            bool useAutoFarmCollectShortcuts = true,
+            bool allowCapturedFieldShortcut = false)
         {
             source = string.Empty;
             if (output == null)
@@ -9754,7 +9776,66 @@ namespace HeartopiaMod
             // just the shortcut path. That walk dereferences arbitrary mono pointers and is what
             // randomly AV-crashes on visiting/streaming fields.
             bool componentRadiusSucceeded = false;
-            if (spatialScan
+
+            // CAPTURED-FIELD FAST PATH (manual radius buttons only — callers opt in): standing on the
+            // captured OWN field, the captured boxes/plants/crops plus the tracked/registered ids ARE
+            // the field content, so use them instead of re-running the GetComponents scan on every
+            // press. Auto-farm discovery does NOT pass this flag: it must keep scanning to pick up
+            // freshly-sown crop netIds. Marked as componentRadiusSucceeded so every downstream heavy
+            // source (sphere/cylinder/proximity/funnel) skips exactly like on a ComponentRadius hit.
+            if (allowCapturedFieldShortcut
+                && spatialScan
+                && this.TryHomelandFarmIsOnCapturedOwnField(scanCenter))
+            {
+                int capturedAdded = 0;
+                foreach (uint capturedId in this.homelandFarmCapturedFarmNetIds)
+                {
+                    if (capturedId != 0U && output.Add(capturedId))
+                    {
+                        capturedAdded++;
+                    }
+                }
+
+                foreach (uint capturedBoxId in this.homelandFarmCapturedSowPointByBoxNetId.Keys)
+                {
+                    if (capturedBoxId == 0U)
+                    {
+                        continue;
+                    }
+
+                    if (output.Add(capturedBoxId))
+                    {
+                        capturedAdded++;
+                    }
+
+                    this.homelandFarmLastScanCropBoxNetIds.Add(capturedBoxId);
+                }
+
+                foreach (uint trackedCropId in this.homelandFarmAutoCropNetIds)
+                {
+                    if (trackedCropId != 0U && output.Add(trackedCropId))
+                    {
+                        capturedAdded++;
+                    }
+                }
+
+                // RegisteredCache is position-keyed and safe here: the owner match in
+                // TryHomelandFarmIsOnCapturedOwnField rules out the foreign-instance hazard.
+                if (this.TryHomelandFarmCollectFarmNetIdsFromRegisteredCache(scanCenter, scanRadius, output, out int capturedRegAdded)
+                    && capturedRegAdded > 0)
+                {
+                    capturedAdded += capturedRegAdded;
+                }
+
+                if (capturedAdded > 0)
+                {
+                    componentRadiusSucceeded = true;
+                    sources.Add("CapturedField(" + capturedAdded + ")");
+                }
+            }
+
+            if (!componentRadiusSucceeded
+                && spatialScan
                 && (allowUnsafeAuraMonoGetComponents || this.homelandFarmEntitiesGetComponentsMethod != null)
                 && this.TryHomelandFarmCollectFarmNetIdsByComponentRadius(
                     scanCenter,
@@ -9769,9 +9850,12 @@ namespace HeartopiaMod
             }
 
             before = output.Count;
-            // For radius scans, try cheap spatial queries first; they usually return nearby
-            // farm entities immediately and avoid a full Aura loaded-entity pass.
+            // ComponentRadius is the authoritative crop-box/crop/plant set (the funnel already skips
+            // AuraProximity/AuraEntities on its success) — the spatial queries below can only re-add
+            // the same ids. Measured: SphereQuery burned 162ms of pure waste per hotkey press. Run
+            // them only when ComponentRadius failed or added nothing.
             if (spatialScan
+                && !componentRadiusSucceeded
                 && this.TryHomelandFarmCollectSphereQueryFarmNetIds(scanCenter, scanRadius, output, out int sphereAdded)
                 && sphereAdded > 0)
             {
@@ -9780,6 +9864,7 @@ namespace HeartopiaMod
 
             before = output.Count;
             if (spatialScan
+                && !componentRadiusSucceeded
                 && this.TryHomelandFarmCollectFarmNetIdsFromAuraCylinder(scanCenter, scanRadius, output, out int cylinderAdded)
                 && cylinderAdded > 0)
             {
@@ -14151,6 +14236,20 @@ namespace HeartopiaMod
         private bool TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint fieldOwnerNetId)
         {
             fieldOwnerNetId = 0U;
+            // AURA FIRST: the managed self-player reads below are dead on this build (types absent)
+            // and burned ~300ms of type-scan misses per call — measured as the hotkey press stall on
+            // visited fields (the gate resolves the field owner). The aura LocalPlayer field read is
+            // a cheap cached-native read and answers on this build; managed stays as a fallback for
+            // builds where aura is unavailable.
+            string[] auraLocalPlayerMembers = { "inFieldOwnerId", "InFieldOwnerId", "inFieldNetId", "InFieldNetId" };
+            if (this.EnsureAuraMonoApiReady()
+                && this.AttachAuraMonoThread()
+                && this.TryHomelandFarmTryReadAuraLocalPlayerUIntField(auraLocalPlayerMembers, out fieldOwnerNetId, out _)
+                && fieldOwnerNetId != 0U)
+            {
+                return true;
+            }
+
             if (this.TryGetManagedSelfPlayerObject(out object localPlayer, out _)
                 && localPlayer != null
                 && this.TryGetUIntMember(localPlayer, "inFieldOwnerId", out fieldOwnerNetId)
@@ -14989,6 +15088,7 @@ namespace HeartopiaMod
             this.homelandFarmAutoWeedSentAt.Clear();
             this.homelandFarmCapturedSowPointByBoxNetId.Clear();
             this.homelandFarmCapturedCropNetIds.Clear();
+            this.homelandFarmCapturedFarmNetIds.Clear();
             this.homelandFarmAutoRemoteSowSentUnix = 0L;
             this.homelandFarmRegisteredFarmTargets.Clear();
             // Drop event-fed crop/box state so a new field / run never reads a previous field's netIds.
@@ -15198,6 +15298,16 @@ namespace HeartopiaMod
             this.HomelandFarmLog("Auto capture crops: " + this.homelandFarmCapturedCropNetIds.Count
                 + " box crop(s) saved for a remote start"
                 + (offBoxIgnored > 0 ? " (" + offBoxIgnored + " off-box plant(s) ignored)" : string.Empty) + ".");
+
+            // Full farm set (boxes + ground plants + crops) for the on-field no-scan collect source.
+            this.homelandFarmCapturedFarmNetIds.Clear();
+            foreach (uint farmNetId in farmNetIds)
+            {
+                if (farmNetId != 0U)
+                {
+                    this.homelandFarmCapturedFarmNetIds.Add(farmNetId);
+                }
+            }
 
             string radiusNote = excludedOutsideRadius > 0
                 ? " (" + excludedOutsideRadius + " outside radius)"
@@ -20646,7 +20756,7 @@ namespace HeartopiaMod
             return this.TryHomelandFarmReadComponentInt(cropBoxData, out int cropCount, "cropCount", "CropCount") && cropCount > 0;
         }
 
-        private bool TryHomelandFarmIsEmptyCropPlanter(uint netId, uint playerNetId, HashSet<uint> occupiedCropBoxNetIds)
+        private bool TryHomelandFarmIsEmptyCropPlanter(uint netId, uint playerNetId, HashSet<uint> occupiedCropBoxNetIds, bool skipLiveBoxValidation = false)
         {
             if (netId == 0U || !this.EnsureHomelandFarmReflectionReady())
             {
@@ -20661,6 +20771,15 @@ namespace HeartopiaMod
             if (this.homelandFarmAutoPendingSowBoxNetIds.Contains(netId))
             {
                 return false;
+            }
+
+            // Captured box on the captured own field: existence and ownership were verified at capture
+            // time, and the occupied/pending guards above already answered "has a crop". The two live
+            // component reads below cost ~40ms/box on a fresh miss cache — with 12 boxes that was the
+            // 538ms sow hitch ("points=538ms/12").
+            if (skipLiveBoxValidation)
+            {
+                return true;
             }
 
             if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out _, out _, "CropBoxItemData"))
@@ -20707,7 +20826,22 @@ namespace HeartopiaMod
             //   levelObjectNetId = boxArg.zoneElement.putZoneId (validated GetLevelObject)
             //   pos              = ReducePrecision(worldToLocal * element.root world position)
             //   angle            = RoundToInt(boxArg.rotation.eulerAngles.y) field-local
-            if (!this.TryHomelandFarmResolveBoxFieldPlacement(netId, out ulong levelObjectNetId, out Vector3 sendPos, out int angle)
+            // Captured-first: capture already resolved this exact box's placement while the field was
+            // loaded — reuse it instead of re-reading the level object / rect matrix / buildWorld per
+            // box on every sow. Keyed by box netId (session-unique), so it can never belong to another
+            // box or field; boxes not in the capture fall back to the live resolve.
+            ulong levelObjectNetId;
+            Vector3 sendPos;
+            int angle;
+            if (this.homelandFarmCapturedSowPointByBoxNetId.TryGetValue(netId, out HomelandFarmCapturedSowPoint capturedPoint)
+                && capturedPoint != null
+                && capturedPoint.LevelObjectNetId != 0UL)
+            {
+                levelObjectNetId = capturedPoint.LevelObjectNetId;
+                sendPos = capturedPoint.FieldLocalPos;
+                angle = capturedPoint.Angle;
+            }
+            else if (!this.TryHomelandFarmResolveBoxFieldPlacement(netId, out levelObjectNetId, out sendPos, out angle)
                 || levelObjectNetId == 0UL)
             {
                 bool hasPutZone = this.TryHomelandFarmResolveCropBoxSowLevelObjectId(netId, out ulong putZoneProbe);
@@ -20863,7 +20997,14 @@ namespace HeartopiaMod
 
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
             this.EnsureHomelandFarmSowManagedReflection();
-            this.TryEnsureHomelandFarmComponentDataManagedReflection();
+            // Managed componentData never resolves on aura-preferred builds — its 30s retry re-paid a
+            // ~100ms dead type sweep here whenever it expired. The aura path is active; managed
+            // upgrade retries still happen in EnsureHomelandFarmReflectionReady's throttle.
+            if (!this.HomelandFarmPrefersAuraComponentData())
+            {
+                this.TryEnsureHomelandFarmComponentDataManagedReflection();
+            }
+
             this.homelandFarmAuraComponentMissCache.Clear();
 
             this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
@@ -20882,7 +21023,12 @@ namespace HeartopiaMod
                     out _,
                     playerPos,
                     radius,
-                    useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
+                    useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts,
+                    // Manual Sow on the captured own field uses the captured set (no GetComponents
+                    // scan). Same young-crop blindness as the scan path (fresh sows are invisible to
+                    // BOTH for a while — that's what the pending-box set guards); occupancy still runs
+                    // on live per-box data below.
+                    allowCapturedFieldShortcut: !useAutoFarmCollectShortcuts);
             }
             else
             {
@@ -20941,6 +21087,10 @@ namespace HeartopiaMod
 
             this.EnsureHomelandFarmScannerTypes();
 
+            // Computed ONCE for the loop: on the captured own field, captured boxes skip the two live
+            // per-box component reads inside the empty check (existence/owner — both settled at capture).
+            bool onCapturedOwnField = hasPlayerPos && this.TryHomelandFarmIsOnCapturedOwnField(playerPos);
+
             // Former mono_gc_disable guard removed: it is a no-op on this sgen build, and this loop
             // holds only netIds (value types) across its yields — never a raw mono pointer. The
             // per-box raw reads happen inside the resolvers below; that is where pinning belongs.
@@ -20951,7 +21101,8 @@ namespace HeartopiaMod
                     break;
                 }
 
-                if (this.TryHomelandFarmIsEmptyCropPlanter(netId, playerNetId, occupiedCropBoxNetIds)
+                bool capturedBox = onCapturedOwnField && this.homelandFarmCapturedSowPointByBoxNetId.ContainsKey(netId);
+                if (this.TryHomelandFarmIsEmptyCropPlanter(netId, playerNetId, occupiedCropBoxNetIds, skipLiveBoxValidation: capturedBox)
                     && this.TryHomelandFarmAppendEmptyPlanterPoint(netId, usedLevelObjectNetIds, plantPoints, maxSlots, ref statusNote))
                 {
                     emptyBoxCount++;
@@ -21723,7 +21874,8 @@ namespace HeartopiaMod
                         out _,
                         playerPos,
                         this.homelandFarmWaterRadius + 2f,
-                        useAutoFarmCollectShortcuts: false);
+                        useAutoFarmCollectShortcuts: false,
+                        allowCapturedFieldShortcut: true);
                 }
 
                 yield return null;
