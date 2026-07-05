@@ -449,6 +449,20 @@ namespace HeartopiaMod
                     GUI.enabled = true;
                 }
 
+                else if (focused.ObjectiveKind == QuestObjectiveKind.CatchFish && focused.ObjectiveAreaId > 0)
+                {
+                    // Location-bound fishing quest ("Catch N fish at <place>", Area trackMark): one
+                    // click teleports into the zone, turns Auto Fish Shadow Net on, and the fish
+                    // monitor turns it back off when the count is reached / the quest completes. §55.
+                    string label = this.questAssistantFishMonitorActive
+                        ? "Auto-fishing for this quest... (click to stop)"
+                        : "Teleport to fishing spot & auto-fish";
+                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
+                    {
+                        this.QuestAssistantOnCatchFishClicked(focused);
+                    }
+                }
+
                 // Phase 5 contextual action buttons (cook) attach the same way once implemented —
                 // the classifier already has everything they need.
             }
@@ -2880,6 +2894,221 @@ namespace HeartopiaMod
 
             status = "ok";
             return true;
+        }
+
+        // ===== CatchFish (location-bound) — teleport to the quest's fishing area + auto-fish (§55) =====
+        //
+        // "Catch N fish at <place>" quests (CaughtFish condition + Area(14) trackMark, e.g. "Seabed
+        // Sediment Rising" area 5277): one click teleports INTO the area and enables the existing Auto
+        // Fish Shadow Net feature (AutoFishingFarm.SetEnabled — it equips the rod and runs the whole
+        // cast/reel loop itself). The fish monitor below (same shape as the Collect monitor) polls the
+        // quest every 5s and turns auto-fishing off when the condition target is reached or the quest
+        // leaves the active list, then tries the shared auto-submit.
+        //
+        // Area position source: EcsService.TryGet<IMetaAreaService> →
+        // GetRandomPositionInArea(areaTriggerId, isTriggerId: true) — the service maps triggerId →
+        // LevelObjectId internally and returns one of its 200 precomputed random points inside the
+        // polygon (MetaAreaClientService, EcsSystem). Deliberately NOT TriggerId2ObjectId.TryGetValue +
+        // GetAreaCenterPos: that needs an `out int` through mono_runtime_invoke — a value-type out slot
+        // is stack corruption ([[auramono-invoke-out-params]]). Vector3.zero return = area unknown in
+        // the current scene (config not loaded / different world).
+        private const float QuestAssistantFishMonitorIntervalSeconds = 5f;
+        private bool questAssistantFishMonitorActive = false;
+        private int questAssistantFishMonitorTaskId = 0;
+        private float questAssistantFishMonitorNextCheckAt = 0f;
+        private IntPtr questAssistantMetaAreaServiceClass = IntPtr.Zero;
+
+        private void QuestAssistantOnCatchFishClicked(QuestSnapshot focused)
+        {
+            if (this.questAssistantFishMonitorActive)
+            {
+                this.QuestAssistantStopFishMonitor("stopped by user");
+                return;
+            }
+
+            int areaId = focused.ObjectiveAreaId;
+            this.QuestAssistantLog("CatchFish: taskId=" + focused.TaskId + " area=" + areaId + " progressBefore=" + QuestAssistantSummarizeProgress(focused));
+            if (!this.QuestAssistantTryGetAreaPositionMono(areaId, out Vector3 areaPos, out string posStatus))
+            {
+                this.questAssistantLastStatus = "Fishing area #" + areaId + " position unavailable: " + posStatus;
+                this.QuestAssistantLog("CatchFish: area position FAILED: " + posStatus);
+                return;
+            }
+
+            this.QuestAssistantLog("CatchFish: teleporting to area pos " + areaPos.ToString("F1"));
+            this.TeleportToLocation(areaPos);
+            AutoFishingFarm.SetEnabled(true, this);
+
+            this.questAssistantFishMonitorActive = true;
+            this.questAssistantFishMonitorTaskId = focused.TaskId;
+            this.questAssistantFishMonitorNextCheckAt = Time.unscaledTime + QuestAssistantFishMonitorIntervalSeconds;
+            this.questAssistantLastStatus =
+                "Teleported to fishing area #" + areaId + " — Auto Fish Shadow Net ON, auto-stops when the "
+                + "quest count is reached (or click the button again to stop).";
+        }
+
+        private unsafe bool QuestAssistantTryGetAreaPositionMono(int areaTriggerId, out Vector3 position, out string status)
+        {
+            position = Vector3.zero;
+            status = "AuraMono unavailable";
+            if (areaTriggerId <= 0)
+            {
+                status = "no area id";
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+
+            if (this.questAssistantMetaAreaServiceClass == IntPtr.Zero)
+            {
+                this.questAssistantMetaAreaServiceClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Modules.Meta.IMetaAreaService");
+                if (this.questAssistantMetaAreaServiceClass == IntPtr.Zero)
+                {
+                    this.questAssistantMetaAreaServiceClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDT.Scene.Shared.Modules.Meta", "IMetaAreaService");
+                }
+
+                if (this.questAssistantMetaAreaServiceClass == IntPtr.Zero)
+                {
+                    this.questAssistantMetaAreaServiceClass = this.FindAuraMonoClassAcrossLoadedAssemblies("ClientSystem.Area", "MetaAreaClientService");
+                }
+
+                this.QuestAssistantLog("  areaPos service class=" + (this.questAssistantMetaAreaServiceClass != IntPtr.Zero ? "resolved" : "NULL"));
+            }
+
+            if (this.questAssistantMetaAreaServiceClass == IntPtr.Zero)
+            {
+                status = "IMetaAreaService/MetaAreaClientService class unresolved";
+                return false;
+            }
+
+            if (!this.TryDailyClaimsAuraMonoEcsTryGet(this.questAssistantMetaAreaServiceClass, true, out IntPtr areaServiceObj, out string ecsStatus)
+                || areaServiceObj == IntPtr.Zero)
+            {
+                status = "EcsService.TryGet<IMetaAreaService> failed: " + ecsStatus;
+                return false;
+            }
+
+            IntPtr runtimeClass = auraMonoObjectGetClass(areaServiceObj);
+            IntPtr method = runtimeClass != IntPtr.Zero
+                ? this.FindAuraMonoMethodOnHierarchy(runtimeClass, "GetRandomPositionInArea", 2)
+                : IntPtr.Zero;
+            if (method == IntPtr.Zero)
+            {
+                status = "GetRandomPositionInArea(2) missing on resolved service";
+                return false;
+            }
+
+            int areaIdValue = areaTriggerId;
+            bool isTriggerId = true;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&areaIdValue);
+            args[1] = (IntPtr)(&isTriggerId);
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(method, areaServiceObj, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                status = "GetRandomPositionInArea invoke failed" + (exc != IntPtr.Zero ? " exc=0x" + exc.ToInt64().ToString("X") : string.Empty);
+                return false;
+            }
+
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                status = "result unbox failed";
+                return false;
+            }
+
+            position = *(Vector3*)raw;
+            if (position == Vector3.zero)
+            {
+                status = "area " + areaTriggerId + " unknown in current scene (zero position)";
+                return false;
+            }
+
+            status = "ok " + position.ToString("F1");
+            return true;
+        }
+
+        // Same shape as the Collect monitor: armed only by the explicit button click, no-op otherwise,
+        // 5s poll. Also disarms silently if the user turns the Auto Fish toggle off by hand.
+        private void QuestAssistantFishMonitorTick()
+        {
+            if (!this.questAssistantFishMonitorActive)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.questAssistantFishMonitorNextCheckAt)
+            {
+                return;
+            }
+
+            this.questAssistantFishMonitorNextCheckAt = now + QuestAssistantFishMonitorIntervalSeconds;
+
+            if (!AutoFishingFarm.IsEnabled)
+            {
+                this.questAssistantFishMonitorActive = false;
+                this.QuestAssistantLog("Fish monitor: Auto Fish Shadow Net was disabled manually — monitor disarmed");
+                return;
+            }
+
+            try
+            {
+                this.QuestAssistantResolveSnapshot(false);
+            }
+            catch (Exception ex)
+            {
+                this.QuestAssistantLog("Fish monitor EXCEPTION, stopping monitor: " + ex);
+                this.questAssistantFishMonitorActive = false;
+                return;
+            }
+
+            QuestSnapshot stillActive = null;
+            for (int i = 0; i < this.questAssistantSnapshot.Count; i++)
+            {
+                if (this.questAssistantSnapshot[i].TaskId == this.questAssistantFishMonitorTaskId)
+                {
+                    stillActive = this.questAssistantSnapshot[i];
+                    break;
+                }
+            }
+
+            // No longer in the active list (submitted/completed/removed) counts as done too.
+            bool done = stillActive == null;
+            if (!done && stillActive.Conditions.Count > 0)
+            {
+                ConditionSnapshot c = stillActive.Conditions[0];
+                done = c.Needed > 0 && c.Current >= c.Needed;
+            }
+
+            if (done)
+            {
+                this.QuestAssistantStopFishMonitor("target reached");
+                this.QuestAssistantTryAutoSubmitIfReady(this.questAssistantFishMonitorTaskId, "Fish monitor");
+            }
+        }
+
+        private void QuestAssistantStopFishMonitor(string reason)
+        {
+            int taskId = this.questAssistantFishMonitorTaskId;
+            this.questAssistantFishMonitorActive = false;
+            try
+            {
+                AutoFishingFarm.SetEnabled(false, this);
+            }
+            catch (Exception ex)
+            {
+                this.QuestAssistantLog("Fish monitor: SetEnabled(false) threw: " + ex.Message);
+            }
+
+            this.questAssistantLastStatus = "Fishing done (" + reason + ") — Auto Fish Shadow Net stopped.";
+            this.QuestAssistantLog("Fish monitor stop: taskId=" + taskId + " reason=" + reason);
         }
 
         // AuraMono NPC-netId resolver — replaces an earlier managed-reflection diagnostic clone that

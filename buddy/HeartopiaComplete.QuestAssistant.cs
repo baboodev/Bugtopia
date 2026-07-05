@@ -26,6 +26,7 @@ namespace HeartopiaMod
         private const int QuestAssistantCategoryTaskOrder = 5; // GameTaskType.TaskOrder (order board "Request: X" quests)
         private const int QuestAssistantMarkCategoryNaviPoint = 1; // CompleteConditionTrackMarkType.NaviPoint
         private const int QuestAssistantMarkCategoryNpc = 2; // CompleteConditionTrackMarkType.Npc
+        private const int QuestAssistantMarkCategoryArea = 14; // CompleteConditionTrackMarkType.Area
 
         private enum QuestObjectiveKind
         {
@@ -92,6 +93,10 @@ namespace HeartopiaMod
             // Drives ObjectiveKind.SubmitToNpc; the submit wire command carries this STATIC id (not a
             // netId), so no streaming/teleport needed. See progress doc §24.
             public int SubmitNpcId;
+            // Area(14) trackMark id of the first incomplete condition, 0 if none — the area-trigger id
+            // of a location-bound objective ("Catch 3 fish at the foot of Whale Mountain" carries the
+            // fishing zone here). Same id space PlayerEnterAreaCommand/GetRandomPositionInArea use. §55.
+            public int ObjectiveAreaId;
         }
 
         // Class/method pointers only — safe to cache raw (image lifetime, per AGENTS.md §9). The
@@ -804,6 +809,22 @@ namespace HeartopiaMod
             snapshot.ObjectiveTargetId = 0;
             snapshot.ObjectiveTargetIds = new List<int>();
             snapshot.ObjectiveTrackMarkCategory = 0;
+            snapshot.ObjectiveAreaId = 0;
+
+            // Location-bound objectives carry an Area(14) trackMark with the area-trigger id (e.g.
+            // "Catch 3 fish at the foot of Whale Mountain" → area 5277). Captured up front,
+            // independent of which tier classifies the quest, so action buttons can teleport to /
+            // report the zone. Skips marks of already-complete conditions like the tier loops do. §55.
+            for (int i = 0; i < trackMarks.Count; i++)
+            {
+                if (trackMarks[i].MarkCategory == QuestAssistantMarkCategoryArea
+                    && trackMarks[i].Id > 0
+                    && !QuestAssistantConditionComplete(snapshot, trackMarks[i].GroupId - 1))
+                {
+                    snapshot.ObjectiveAreaId = trackMarks[i].Id;
+                    break;
+                }
+            }
 
             // CanSubmit + an NPC to hand items to => the actionable step is "submit items to that
             // NPC", regardless of the original objective (already satisfied at CanSubmit). submitNpc
