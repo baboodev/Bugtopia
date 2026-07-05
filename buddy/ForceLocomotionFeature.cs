@@ -496,7 +496,12 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (this.showMenu || ShouldBlockGameplayInput())
+            // GetAsyncKeyState reads the GLOBAL keyboard, so we must gate on window focus ourselves
+            // (keys typed into other apps otherwise still drive the swimmer), and on a focused game
+            // text field (chat/rename/search — same uGUI InputField check the hotkey guard uses).
+            if (this.showMenu || ShouldBlockGameplayInput()
+                || !ForceSwimIsGameWindowFocused()
+                || this.IsGameTextInputFocused())
             {
                 // Release any held vertical intent so the swimmer doesn't keep climbing while typing.
                 this.TryReleaseForceSwimVertical();
@@ -511,6 +516,19 @@ namespace HeartopiaMod
             catch
             {
                 // Never let a per-frame input hiccup escalate; swim state is re-asserted elsewhere.
+            }
+        }
+
+        private static bool ForceSwimIsGameWindowFocused()
+        {
+            try
+            {
+                return Application.isFocused;
+            }
+            catch
+            {
+                // Interop hiccup — fail open so the feature keeps working in the foreground case.
+                return true;
             }
         }
 
