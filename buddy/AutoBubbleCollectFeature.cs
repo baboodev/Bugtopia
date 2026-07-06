@@ -31,7 +31,7 @@ namespace HeartopiaMod
     {
         // -- config (persisted; GUI in the Automation tab bubble block) --
         private bool autoBubbleCollectEnabled = false;
-        private float autoBubbleCollectRadius = 0f; // meters; 0 = unlimited
+        private float autoBubbleCollectRadius = 10f; // meters; 0 = unlimited, default 10m
 
         // -- shared compile helper for the bubble detour pair (A + B) --
         private delegate IntPtr BubbleDetourCompileMethodDelegate(IntPtr method);

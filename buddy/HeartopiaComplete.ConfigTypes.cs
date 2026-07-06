@@ -184,7 +184,7 @@ namespace HeartopiaMod
             public float bubbleBubblesPerMinute;
             public bool bubbleSpawnAtPlayerEnabled;
             public bool autoBubbleCollectEnabled;
-            public float autoBubbleCollectRadius;
+            public float autoBubbleCollectRadius = 10f; // 0 = unlimited, default 10m
             public float cookingAutoSpeed;
             public float cookingWaitAtSpot;
             public float netCookInterval;
