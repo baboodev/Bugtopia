@@ -500,7 +500,7 @@ namespace HeartopiaMod
             // (keys typed into other apps otherwise still drive the swimmer), and on a focused game
             // text field (chat/rename/search — same uGUI InputField check the hotkey guard uses).
             if (this.showMenu || ShouldBlockGameplayInput()
-                || !ForceSwimIsGameWindowFocused()
+                || !IsGameWindowFocused()
                 || this.IsGameTextInputFocused())
             {
                 // Release any held vertical intent so the swimmer doesn't keep climbing while typing.
@@ -519,7 +519,9 @@ namespace HeartopiaMod
             }
         }
 
-        private static bool ForceSwimIsGameWindowFocused()
+        // Shared by every feature that reads input outside Unity's focus-aware path (GetAsyncKeyState,
+        // XInput): swim hotkeys, bunny hop, the analog move bridge.
+        internal static bool IsGameWindowFocused()
         {
             try
             {

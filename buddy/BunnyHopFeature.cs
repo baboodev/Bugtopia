@@ -60,7 +60,11 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (this.noclipEnabled || ShouldBlockGameplayInput())
+            // GetAsyncKeyState reads the GLOBAL keyboard: without these gates, Space typed into
+            // another app (game unfocused) or into a game chat/text field still triggers jumps.
+            if (this.noclipEnabled || ShouldBlockGameplayInput()
+                || !IsGameWindowFocused()
+                || this.IsGameTextInputFocused())
             {
                 return;
             }

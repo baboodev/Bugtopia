@@ -385,7 +385,12 @@ namespace HeartopiaMod
                 this.TryEnsureMovementInputRuntime(logIfPending: true);
 
                 // Respect the mod's menu movement block (the game's IsInputDisabled(Move) state).
-                if (ShouldBlockGameplayInput() || this.menuMoveInputDisabled || this.IsPhysicalMoveInputActive())
+                // Also gate on window focus (XInput reads the pad globally) and on a focused game
+                // text field: the direct SetMoveJoystick path bypasses IsInputDisabled(Move), so
+                // without this check the W/A/S/D letters typed into chat would move the player.
+                if (ShouldBlockGameplayInput() || this.menuMoveInputDisabled || this.IsPhysicalMoveInputActive()
+                    || !IsGameWindowFocused()
+                    || this.IsGameTextInputFocused())
                 {
                     this.ReleaseMovementBridgeIfInjecting();
                     return;
