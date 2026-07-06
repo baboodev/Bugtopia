@@ -207,6 +207,7 @@ namespace HeartopiaMod
             public int autoFishAutoBaitChoice = 1;        // 0 = Bait, 1 = Attractor
             public int autoFishAutoBaitMax = -1;
             public float autoFishAutoBaitNoFishSeconds = -1f;
+            public bool autoFishSkipCatchAnim = false;
             public float autoFishReelMaxDuration = -1f;
             public float autoFishReelHoldDuration = -1f;
             public float autoFishReelPauseDuration = -1f;

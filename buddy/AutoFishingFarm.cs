@@ -122,6 +122,12 @@ namespace HeartopiaMod
         private static float noFishSinceAt = -1f;
         private static float nextAutoBaitAt = -999f;
 
+        // --- Skip Catch Animation: cut the ~2.7s post-catch take-in (and fail-slack) theater ---
+        // Invokes FishingProtocolManager.TakeUpRod → ResetFishState, the game's own instant-reset
+        // path (local-only; the server already concluded the session at battle result).
+        private static bool skipCatchAnimEnabled = false;
+        private static bool skipCatchAnimInvokedForCast = false;
+
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";
@@ -216,6 +222,8 @@ namespace HeartopiaMod
         }
         public static float GetAutoBaitNoFishSeconds() => autoBaitNoFishSeconds;
         public static void SetAutoBaitNoFishSeconds(float value) => autoBaitNoFishSeconds = Mathf.Clamp(value, AutoBaitNoFishSecondsMin, AutoBaitNoFishSecondsMax);
+        public static bool GetSkipCatchAnimEnabled() => skipCatchAnimEnabled;
+        public static void SetSkipCatchAnimEnabled(bool value) => skipCatchAnimEnabled = value;
         public static int GetAutoBaitRemaining() => autoBaitRemaining;
         public static void ResetAutoBaitCounter()
         {
@@ -527,6 +535,7 @@ namespace HeartopiaMod
             nextRodEquipAttemptAt = -999f;
             nextActionAt = -999f;
             instantCatchActiveCached = false;
+            skipCatchAnimInvokedForCast = false;
             sessionStartedAt = -999f;
             waitingSinceAt = -999f;
             hookedSinceAt = -999f;
@@ -613,6 +622,17 @@ namespace HeartopiaMod
 
             // Send Rate slider intentionally hidden: the NotifyFloatInWater detour handles instant catch
             // at the source, so the timed resend stays at 0 Hz (init default). Kept in code as a fallback.
+
+            bool nextSkipAnim = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), skipCatchAnimEnabled, "Skip Catch Animation");
+            if (nextSkipAnim != skipCatchAnimEnabled)
+            {
+                SetSkipCatchAnimEnabled(nextSkipAnim);
+                host.UI_AddMenuNotification(
+                    "Skip Catch Animation " + (nextSkipAnim ? "Enabled" : "Disabled"),
+                    nextSkipAnim ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                try { host.UI_SaveKeybinds(false); } catch { }
+            }
+            num += 30;
 
             GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Status: {0}", GetLastStatus()), small);
             num += 24;
@@ -860,6 +880,25 @@ namespace HeartopiaMod
                                 + " after " + dtCast.ToString("F2") + "s from cast, "
                                 + dtBite.ToString("F2") + "s from bite"
                                 + " | sends=" + instantCatchSendCount + " (~" + effHz.ToString("F0") + " Hz)");
+                        }
+                    }
+
+                    // Skip Catch Animation: on the first tick of a terminal state (catch take-in or the
+                    // fail-slack timers), fire the game's own instant reset once. Local-only; the server
+                    // already concluded the session, and outside the Fishing FSM state it's a no-op.
+                    if (skipCatchAnimEnabled && !skipCatchAnimInvokedForCast
+                        && (string.Equals(fishState, "FishingOnHook", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(fishState, "BattleFailSlack", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(fishState, "FishingFail", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        skipCatchAnimInvokedForCast = true;
+                        if (host.TryInvokeFishingTakeUpRodMono(out string takeUpStatus))
+                        {
+                            Log("Skip catch animation: reset fired at state=" + fishState);
+                        }
+                        else
+                        {
+                            Log("Skip catch animation failed: " + takeUpStatus);
                         }
                     }
 
@@ -1398,6 +1437,7 @@ namespace HeartopiaMod
                     instantCatchCastSeq++;
                     instantCatchBiteLogged = false;
                     instantCatchResultLogged = false;
+                    skipCatchAnimInvokedForCast = false;
                     instantCatchBiteAt = -1f;
                     host.InstantCatchCastSeq = instantCatchCastSeq;
                     host.InstantCatchCastAt = now;

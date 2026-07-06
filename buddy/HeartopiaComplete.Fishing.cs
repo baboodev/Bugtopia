@@ -2859,6 +2859,60 @@ namespace HeartopiaMod
             }
         }
 
+        // Skip the post-catch "take fish out of water" theater (~2.7s local timer, no network at its
+        // end). FishingProtocolManager.TakeUpRod(uint) is the server-reset receive handler: it only
+        // dispatches ResetFishState, whose listener in PlayerStateFishing does ResetFishingStateData()
+        // + CrossFade(Idle) — the game's own instant-reset path. The uint arg is ignored by the body.
+        // Safe outside fishing: the listener is only registered while in the Fishing FSM state.
+        public unsafe bool TryInvokeFishingTakeUpRodMono(out string status)
+        {
+            status = "TakeUpRod Mono unavailable";
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    status = "TakeUpRod Mono runtime unavailable";
+                    return false;
+                }
+
+                IntPtr classPtr = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Fishing.FishingProtocolManager");
+                if (classPtr == IntPtr.Zero)
+                {
+                    status = "FishingProtocolManager Mono class unavailable";
+                    return false;
+                }
+
+                IntPtr methodPtr = this.FindAuraMonoMethodOnHierarchy(classPtr, "TakeUpRod", 1);
+                if (methodPtr == IntPtr.Zero)
+                {
+                    status = "FishingProtocolManager.TakeUpRod(1) Mono method unavailable";
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[1];
+                uint playerNetId = 0u; // ignored by the body (it just dispatches ResetFishState)
+                args[0] = (IntPtr)(&playerNetId);
+                auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "TakeUpRod Mono exception";
+                    this.AutoFishLog("TakeUpRod Mono raised exception ptr=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                status = "TakeUpRod invoked (Mono)";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "TakeUpRod Mono failed: " + ex.Message;
+                this.AutoFishLog("TakeUpRod Mono exception: " + ex.Message);
+                return false;
+            }
+        }
+
         public unsafe bool TryArmFishingInstantCatch(out string status)
         {
             status = "Instant catch unavailable";
