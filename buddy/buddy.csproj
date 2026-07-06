@@ -258,6 +258,7 @@
     <Compile Include="LodSettingsFeature.cs" />
     <Compile Include="HideJumpButtonFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
+    <Compile Include="PersistentHudFeature.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />
     <Compile Include="HomelandFarmEventDiagFeature.cs" />

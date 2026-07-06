@@ -753,6 +753,7 @@ namespace HeartopiaMod
             this.ProcessAutoIceSkatingOnUpdate();
             this.ProcessBubbleFeatureOnUpdate();
             this.ProcessShowOffBypassOnUpdate();
+            this.ProcessPersistentHudOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
             this.QuestAssistantCollectMonitorTick();
             this.QuestAssistantTalkToNpcMonitorTick();

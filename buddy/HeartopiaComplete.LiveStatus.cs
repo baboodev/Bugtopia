@@ -218,6 +218,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Skip Show Off", "Active"));
             }
 
+            if (this.persistentHudEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Persistent HUD", this.persistentHudLastStatus));
+            }
+
             if (this.forceSkateEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Force Skate", "Active"));

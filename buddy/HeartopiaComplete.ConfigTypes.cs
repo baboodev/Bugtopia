@@ -171,6 +171,7 @@ namespace HeartopiaMod
             public bool bunnyHopEnabled;
             public bool analogMoveBridgeEnabled;
             public bool skipShowOffAnimations;
+            public bool persistentHudEnabled;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             public bool autoIceSkatingOnlyX2Ultimate = true;

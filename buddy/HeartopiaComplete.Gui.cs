@@ -413,6 +413,21 @@ namespace HeartopiaMod
                     try { this.SaveKeybinds(false); } catch { }
                 }
                 num += Mathf.CeilToInt(toggleHeight + 8f);
+                bool prevPersistentHud = this.persistentHudEnabled;
+                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Keep HUD in fishing/vehicle modes", 25f);
+                this.persistentHudEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.persistentHudEnabled, "Keep HUD in fishing/vehicle modes", 25f);
+                if (this.persistentHudEnabled != prevPersistentHud)
+                {
+                    if (this.persistentHudEnabled)
+                    {
+                        // Prompt poll so enabling mid-fishing/driving restores the HUD right away.
+                        this.persistentHudNextPollAt = 0f;
+                    }
+
+                    this.AddMenuNotification(this.persistentHudEnabled ? "Persistent HUD on" : "Persistent HUD off", new Color(0.45f, 0.88f, 1f));
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+                num += Mathf.CeilToInt(toggleHeight + 8f);
                 bool prevBunnyHop = this.bunnyHopEnabled;
                 toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Bunny Hop (hold Space)", 25f);
                 this.bunnyHopEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.bunnyHopEnabled, "Bunny Hop (hold Space)", 25f);
@@ -463,6 +478,7 @@ namespace HeartopiaMod
                     this.bypassEnabled = false;
                     this.hideJumpButtonEnabled = false;
                     this.cachedJumpButtonGo = null;
+                    this.persistentHudEnabled = false;
                     this.bunnyHopEnabled = false;
                     this.ResetBunnyHopState();
                     this.analogMoveBridgeEnabled = false;
