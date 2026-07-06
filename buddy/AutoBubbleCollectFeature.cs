@@ -101,13 +101,42 @@ namespace HeartopiaMod
         private float bubbleNextClaimAllowedAt;
         private const int BubblePendingClaimCap = 128;
         private const float BubbleClaimDripSeconds = 0.30f;   // ~3 claims/s max (world-load bursts)
-        private const float BubbleClaimDedupeTtl = 15f;       // weather-unhide re-add guard
-        private const float BubbleClaimPendingTtl = 10f;      // drop stale queue entries
+        private const float BubbleClaimDedupeTtl = 5f;        // reclaim cooldown per netId (AuraFarm LootResendCooldown parity) + weather-unhide re-add guard
+        private const float BubbleClaimPendingTtl = 30f;      // drop stale queue entries (queue can take ~38s to drain at cap)
 
-        // GUI: retry the install immediately when the toggle is flipped on.
+        // -- sweep of PRE-EXISTING bubbles (spawned before the detour installed / toggle enabled).
+        // AuraFarm LootCollect pattern: enumerate BubbleComponent objects via AuraMono
+        // GetComponents (pinned — sgen moving GC), read entity.netId + entity.position, distance-
+        // filter, nearest first, feed the same pending-claim pipeline. NOT the radar bubble scan:
+        // its marker ids fall back to synthetic hashes when netId is unresolvable (Radar.cs
+        // TryResolveAuraMonoBubbleEntityMarker), which must never be sent as claim netIds.
+        //
+        // Cadence = AuraFarm's (AuraScanInterval 0.08s): scan basically every frame so walking up to
+        // a bubble collects it on the next tick from the fresh player position — NO separate
+        // move-trigger needed. GetComponents<T> is cheap enough for this (AuraFarm loots at 0.08s).
+        // The heavy throttle only kicks in when the scan FAILS (type unresolved / GetComponents not
+        // ready), never on the success path. --
+        private struct BubbleSweepCandidate
+        {
+            public uint NetId;
+            public Vector3 Position;
+            public float DistanceSqr;
+        }
+
+        private IntPtr bubbleSweepComponentClass = IntPtr.Zero;
+        private float bubbleSweepNextAt;
+        private float bubbleSweepNextLogAt;
+        private int bubbleSweepConsecutiveFailures;
+        private readonly List<BubbleSweepCandidate> bubbleSweepCandidateBuffer = new List<BubbleSweepCandidate>(32);
+        private const float BubbleSweepInterval = 0.15f;         // success cadence (~AuraFarm's 0.08s scan tick)
+        private const float BubbleSweepFailureBaseSeconds = 2f;  // backoff base when the scan FAILS (not the success interval)
+        private const float BubbleSweepFailureBackoffMax = 120f;  // scan-failure throttle cap
+
+        // GUI: retry the install + sweep immediately when the toggle is flipped on.
         private void RequestAutoBubbleCollectImmediateInstall()
         {
             this.bubbleCreateNextInstallAttemptAt = -999f;
+            this.bubbleSweepNextAt = -999f;
         }
 
         // ================= detour install =================
@@ -230,8 +259,230 @@ namespace HeartopiaMod
             }
 
             this.EnsureBubbleCreateDetourInstalled();
+            this.SweepExistingBubblesOnUpdate();
             this.DrainBubbleRingIntoPendingClaims();
             this.TryIssueOneBubbleClaim();
+        }
+
+        // ================= pre-existing bubble sweep =================
+
+        private void SweepExistingBubblesOnUpdate()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.bubbleSweepNextAt)
+            {
+                return;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                this.bubbleSweepNextAt = now + 5f;
+                return;
+            }
+
+            // Same readiness gate the radar bubble scan uses (GetComponents<T> helper + pinning;
+            // pinning-unavailable setups fail closed inside TryAuraMonoGetComponentObjects).
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                this.bubbleSweepNextAt = now + 10f;
+                return;
+            }
+
+            if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos) || playerPos == Vector3.zero)
+            {
+                this.bubbleSweepNextAt = now + 2f;
+                return;
+            }
+
+            if (this.bubbleSweepComponentClass == IntPtr.Zero)
+            {
+                this.bubbleSweepComponentClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Gameplay.Component.Bubble.BubbleComponent");
+                if (this.bubbleSweepComponentClass == IntPtr.Zero)
+                {
+                    this.bubbleSweepComponentClass = this.FindAuraMonoClassByFullName(
+                        "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Bubble.BubbleComponent");
+                }
+
+                if (this.bubbleSweepComponentClass == IntPtr.Zero)
+                {
+                    this.bubbleSweepNextAt = now + BubbleSweepInterval; // image not loaded yet — retry later
+                    return;
+                }
+            }
+
+            float radius = this.autoBubbleCollectRadius;
+            float maxDistSqr = radius <= 0.01f ? float.MaxValue : radius * radius;
+
+            this.bubbleSweepCandidateBuffer.Clear();
+            bool scanOk;
+            try
+            {
+                scanOk = this.TryCollectExistingBubbleCandidates(playerPos, maxDistSqr, this.bubbleSweepCandidateBuffer);
+            }
+            catch (Exception ex)
+            {
+                scanOk = false;
+                ModLogger.Msg("[AutoBubble] sweep scan exception: " + ex.GetType().Name + ": " + ex.Message);
+            }
+
+            if (!scanOk)
+            {
+                // Failure throttle (missing members / GetComponents not ready on this build):
+                // exponential backoff so a permanently-failing path never becomes a hot loop.
+                // Uses its own base (not the fast success interval) so a real failure actually backs
+                // off: 2s -> 3s -> 4.5s -> ... -> 120s.
+                this.bubbleSweepConsecutiveFailures = Math.Min(this.bubbleSweepConsecutiveFailures + 1, 6);
+                float backoff = Math.Min(
+                    BubbleSweepFailureBaseSeconds * (float)Math.Pow(1.5, this.bubbleSweepConsecutiveFailures - 1),
+                    BubbleSweepFailureBackoffMax);
+                this.bubbleSweepNextAt = now + backoff;
+                return;
+            }
+
+            this.bubbleSweepConsecutiveFailures = 0;
+            this.bubbleSweepNextAt = now + BubbleSweepInterval;
+
+            if (this.bubbleSweepCandidateBuffer.Count == 0)
+            {
+                return;
+            }
+
+            // Nearest first (LootCollect precedent) — the drip limiter serves close bubbles first.
+            this.bubbleSweepCandidateBuffer.Sort((a, b) => a.DistanceSqr.CompareTo(b.DistanceSqr));
+
+            int queued = 0;
+            for (int i = 0; i < this.bubbleSweepCandidateBuffer.Count; i++)
+            {
+                if (this.pendingBubbleClaims.Count >= BubblePendingClaimCap)
+                {
+                    break;
+                }
+
+                BubbleSweepCandidate candidate = this.bubbleSweepCandidateBuffer[i];
+                if (candidate.NetId == 0u)
+                {
+                    continue;
+                }
+
+                if (this.bubbleRecentlyClaimedAt.TryGetValue(candidate.NetId, out float claimedAt)
+                    && now - claimedAt < BubbleClaimDedupeTtl)
+                {
+                    continue;
+                }
+
+                if (this.IsBubbleClaimPending(candidate.NetId))
+                {
+                    continue;
+                }
+
+                this.pendingBubbleClaims.Add(new PendingBubbleClaim
+                {
+                    NetId = candidate.NetId,
+                    Position = candidate.Position,
+                    RefreshType = -1, // sweep-sourced (type unknown; claim needs only netId)
+                    EmptyAward = false,
+                    QueuedAt = now
+                });
+                queued++;
+            }
+
+            // Throttled: the scan now runs ~every frame, so log at most once every few seconds to
+            // avoid flooding (a burst of newly-approached bubbles would otherwise spam every tick).
+            if (queued > 0 && now >= this.bubbleSweepNextLogAt)
+            {
+                this.bubbleSweepNextLogAt = now + 3f;
+                ModLogger.Msg("[AutoBubble] sweep queued " + queued + " existing bubble(s)"
+                    + (radius > 0.01f ? " within " + radius.ToString("F0") + "m" : string.Empty));
+            }
+        }
+
+        private bool IsBubbleClaimPending(uint netId)
+        {
+            for (int i = 0; i < this.pendingBubbleClaims.Count; i++)
+            {
+                if (this.pendingBubbleClaims[i].NetId == netId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Enumerate live BubbleComponent objects and resolve entity netId + world position.
+        // Pin discipline mirrors TryCollectAuraLootCandidatesAuraMono (moving sgen GC: component
+        // list pinned by TryAuraMonoGetComponentObjects, each derived entity pinned across reads).
+        private bool TryCollectExistingBubbleCandidates(Vector3 playerPos, float maxDistSqr, List<BubbleSweepCandidate> output)
+        {
+            List<uint> compPins = new List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(this.bubbleSweepComponentClass, out List<IntPtr> components, compPins)
+                    || components == null)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr comp = components[i];
+                    if (comp == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    // Skip bubbles already popping — the game's own trigger condition
+                    // (PlayerTriggerBubbleCase: !target.dying, dying == _dieInTime > 0).
+                    if (this.TryGetMonoSingleMember(comp, "_dieInTime", out float dieInTime) && dieInTime > 0f)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetMonoObjectMember(comp, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        // Real network id only — netId==0 is a local view entity, unclaimable.
+                        if (!this.TryGetMonoUInt32Member(entityObj, "netId", out uint netId) || netId == 0u)
+                        {
+                            continue;
+                        }
+
+                        if (!this.TryGetMonoVector3Member(entityObj, "position", out Vector3 bubblePos))
+                        {
+                            continue;
+                        }
+
+                        float distSqr = (bubblePos - playerPos).sqrMagnitude;
+                        if (distSqr > maxDistSqr)
+                        {
+                            continue;
+                        }
+
+                        output.Add(new BubbleSweepCandidate
+                        {
+                            NetId = netId,
+                            Position = bubblePos,
+                            DistanceSqr = distSqr
+                        });
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
+                }
+
+                return true;
+            }
+            finally
+            {
+                FreeAuraMonoPins(compPins);
+            }
         }
 
         private void DrainBubbleRingIntoPendingClaims()
