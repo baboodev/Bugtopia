@@ -15,9 +15,9 @@ namespace HeartopiaMod
     //   iconName -> "ui_item_normal_" + iconName                      (asset key, same as BagPanel)
     //   key      -> ScriptsRefactory.ResSystem.ResManager.LoadSpriteAsync(key, cb)   (interop side)
     // The loaded Sprite is refcounted by the game, so the texture is copied
-    // (CopySpriteTexture) into the existing autoSellBagItemTextures dictionary and the load
-    // token is released. Tile lookups never read the disk PNG cache; SaveCachedItemIcon still
-    // writes fresh copies because the radar ESP icon path reads that cache.
+    // (CopySpriteTexture) into the shared autoSellBagItemTextures dictionary and the load
+    // token is released. No disk involvement — the radar/ESP icon path consumes the same
+    // in-memory dictionary (plus the dll-embedded tree/rare_tree icons).
     public partial class HeartopiaComplete
     {
         internal static bool MasterLogGameIcons = false;
@@ -307,6 +307,22 @@ namespace HeartopiaMod
                 storeKeys.Add(storeKey);
             }
             this.RequestGameItemIconLoad(iconName, storeKeys, staticId);
+        }
+
+        // Icon-name-keyed variant for callers that already hold a resolved sprite/icon key
+        // (radar ESP candidates are normalized icon names without the ui_item_ prefix).
+        internal void RequestGameItemIconByIconName(string iconName, string storeKey)
+        {
+            if (string.IsNullOrWhiteSpace(iconName))
+            {
+                return;
+            }
+            List<string> storeKeys = new List<string>();
+            if (!string.IsNullOrWhiteSpace(storeKey))
+            {
+                storeKeys.Add(storeKey);
+            }
+            this.RequestGameItemIconLoad(iconName, storeKeys, 0);
         }
 
         private void RequestGameItemIconLoad(string iconName, List<string> storeKeys, int staticId)
@@ -605,18 +621,9 @@ namespace HeartopiaMod
                     Texture2D copy = this.CopySpriteTexture(sprite, "[GameIcons]");
                     if (copy != null)
                     {
-                        string primaryKey = null;
                         foreach (string key in pending.StoreKeys)
                         {
                             this.autoSellBagItemTextures[key] = copy;
-                            if (primaryKey == null)
-                            {
-                                primaryKey = key;
-                            }
-                        }
-                        if (primaryKey != null)
-                        {
-                            this.SaveCachedItemIcon(primaryKey, copy);
                         }
                         ok = true;
                     }

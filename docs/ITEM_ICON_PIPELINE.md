@@ -8,10 +8,10 @@ grid) and the pet-feed icon resolver, always-on (no toggle). The in-game probe v
 research risks — the `DelegateSupport` callback mode delivers sprites and table-cased keys resolve —
 after which the temporary `TEST ICONS` probe, the `Direct Game Icons` toggle, the legacy
 `CACHE ICONS` open-bag harvest (`ScanBagForAutoSellItems` + star/stack UI readers) and the
-loaded-sprite prime pass (`PrimeAutoSellItemTextureCache`) were all removed. Tile lookups no longer
-read the disk PNG cache; `SaveCachedItemIcon` still writes fresh copies because the radar ESP icon
-path reads that cache. §1 below is the pre-removal state (historical); §2–§3 record the verified
-game pipeline the implementation follows.
+loaded-sprite prime pass (`PrimeAutoSellItemTextureCache`) were all removed. The disk PNG cache was
+then deleted entirely (reads AND writes) and the radar / Resource Visual ESP icon path was switched
+to the same direct loader (see §4). §1 below is the pre-removal state (historical); §2–§3 record the
+verified game pipeline the implementation follows.
 
 See also: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md), [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md),
 [DECOMPILED_SOURCE_MAP.md](./DECOMPILED_SOURCE_MAP.md).
@@ -153,14 +153,19 @@ Cancel pending tokens on world change.
   the callback fires. First conversion failure flips the session to **poll pickup** mode
   (`LoadSpriteAsync(key, null)` + name-prefix scan of `Resources.FindObjectsOfTypeAll<Sprite>` every
   0.6 s while anything is pending).
-- Completion: `CopySpriteTexture` copy → stored under all alias keys in `autoSellBagItemTextures` +
-  `SaveCachedItemIcon` (disk stays as L2) → `UnLoadAsync(token)`. World-epoch change cancels and
-  releases all pending tokens.
+- Completion: `CopySpriteTexture` copy → stored under all alias keys in `autoSellBagItemTextures` →
+  `UnLoadAsync(token)`. No disk anywhere: the whole PNG cache (`TryLoadCachedItemIcon` /
+  `SaveCachedItemIcon` / `%LocalAppDataLow%\Bugtopia\Cache\ItemIcons`) was deleted; the leftover
+  folder on user machines is inert. World-epoch change cancels and releases all pending tokens.
 - `RewardUtility.GetIconName` results are cached per staticId and fed into
-  `RememberRadarStaticIdIconMapping` (so radar/pet-feed alias lookups benefit).
-- Always-on, no config. Tile lookups are memory-dict → direct request (no disk reads); the
-  `SaveCachedItemIcon` PNG write stays because radar ESP reads that cache. The UI-star cache
-  readers (`TryGetAutoSellCachedUiStar`) remain in the sell path but their only writer (the bag-UI
-  scanner) is gone, so they always miss and star detection uses the direct-scan `starRate` /
-  `step` / `QualityComponent` sources. `MasterLogGameIcons = true` re-enables verbose `[GameIcons]`
-  per-load logging if a future build needs re-diagnosis.
+  `RememberRadarStaticIdIconMapping` (so radar/pet-feed alias lookups benefit;
+  `radar_species_icons.txt` stays — it is the staticId→key index, not the PNG cache).
+- **Radar / Resource Visual ESP** resolve through the same engine (`TryGetRadarIconTexture`,
+  Radar.cs): per candidate key — `radarIconEspTextures` → shared `autoSellBagItemTextures` (where
+  direct loads land) → dll-embedded `tree`/`rare_tree` (`TryLoadEmbeddedItemIcon`) →
+  `RequestGameItemIconByIconName` (async, radar keys are prefix-less icon names) → loaded-sprite
+  scan fallback → 5 s retry + procedural fallback icon.
+- Always-on, no config. The UI-star cache readers (`TryGetAutoSellCachedUiStar`) remain in the sell
+  path but their only writer (the bag-UI scanner) is gone, so they always miss and star detection
+  uses the direct-scan `starRate` / `step` / `QualityComponent` sources. `MasterLogGameIcons = true`
+  re-enables verbose `[GameIcons]` per-load logging if a future build needs re-diagnosis.

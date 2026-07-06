@@ -2772,9 +2772,11 @@ namespace HeartopiaMod
                         seenItems.Add(spriteName);
                         foodList.Add(spriteName);
                         this.CacheScannedBagFoodDisplayName(spriteName);
-                        if (!this.scannedBagFoodTextures.ContainsKey(spriteName) && this.TryLoadCachedItemIcon(spriteName, out Texture2D cachedFoodTexture))
+                        if (!this.scannedBagFoodTextures.ContainsKey(spriteName)
+                            && this.autoSellBagItemTextures.TryGetValue(spriteName, out Texture2D directFoodTexture)
+                            && directFoodTexture != null)
                         {
-                            this.scannedBagFoodTextures[spriteName] = cachedFoodTexture;
+                            this.scannedBagFoodTextures[spriteName] = directFoodTexture;
                             continue;
                         }
                         // Copy the sprite texture for UI display (copy to survive bag scrolling)
@@ -2798,7 +2800,6 @@ namespace HeartopiaMod
                                 RenderTexture.ReleaseTemporary(rt);
                                 
                                 this.scannedBagFoodTextures[spriteName] = copy;
-                                this.SaveCachedItemIcon(spriteName, copy);
                             }
                             catch (Exception texEx)
                             {

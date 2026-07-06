@@ -627,7 +627,6 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    this.SaveCachedItemIcon(normalizedTarget, copy);
                     texture = copy;
                     return true;
                 }
@@ -655,15 +654,28 @@ namespace HeartopiaMod
                     return true;
                 }
 
+                // Direct game loads land in the shared texture dictionary under the same
+                // normalized keys — pick them up as soon as the async load completes.
+                if (this.autoSellBagItemTextures.TryGetValue(normalizedKey, out texture) && texture != null)
+                {
+                    this.radarIconEspTextures[normalizedKey] = texture;
+                    this.radarIconEspRetryAt.Remove(normalizedKey);
+                    return true;
+                }
+
                 float nextRetryAt;
                 if (!this.radarIconEspRetryAt.TryGetValue(normalizedKey, out nextRetryAt) || Time.unscaledTime >= nextRetryAt)
                 {
-                    if (this.TryLoadCachedItemIcon(normalizedKey, out texture) && texture != null)
+                    if (this.TryLoadEmbeddedItemIcon(normalizedKey, out texture) && texture != null)
                     {
                         this.radarIconEspTextures[normalizedKey] = texture;
                         this.radarIconEspRetryAt.Remove(normalizedKey);
                         return true;
                     }
+
+                    // Async direct load from the game's asset pipeline (request-once, throttled
+                    // inside); the shared-dict check above picks it up on a later pass.
+                    this.RequestGameItemIconByIconName(normalizedKey, normalizedKey);
 
                     if (this.TryResolveRadarIconFromLoadedSprites(normalizedKey, out texture) && texture != null)
                     {
@@ -4054,65 +4066,6 @@ namespace HeartopiaMod
             }
         }
 
-        private string GetItemIconCacheDirectory()
-        {
-            return HelperPaths.GetDirectory("Cache", ITEM_ICON_CACHE_FOLDER);
-        }
-
-        private string GetItemIconCachePath(string key)
-        {
-            string safeName = this.SanitizeCacheFileName(this.NormalizeAutoSellMatchKey(key));
-            if (string.IsNullOrWhiteSpace(safeName))
-            {
-                safeName = this.SanitizeCacheFileName(key);
-            }
-            if (string.IsNullOrWhiteSpace(safeName))
-            {
-                safeName = "unknown";
-            }
-
-            return Path.Combine(this.GetItemIconCacheDirectory(), safeName + ".png");
-        }
-
-        private bool TryLoadCachedItemIcon(string key, out Texture2D texture)
-        {
-            texture = null;
-            try
-            {
-                string path = this.GetItemIconCachePath(key);
-                if (!File.Exists(path))
-                {
-                    if (this.TryLoadEmbeddedItemIcon(key, out texture) && texture != null)
-                    {
-                        this.SaveCachedItemIcon(key, texture);
-                        return true;
-                    }
-
-                    return false;
-                }
-
-                byte[] bytes = File.ReadAllBytes(path);
-                if (bytes == null || bytes.Length == 0)
-                {
-                    return false;
-                }
-
-                Texture2D loaded = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                if (!loaded.LoadImage(bytes))
-                {
-                    Object.Destroy(loaded);
-                    return false;
-                }
-
-                texture = loaded;
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private bool TryLoadEmbeddedItemIcon(string key, out Texture2D texture)
         {
             texture = null;
@@ -4181,35 +4134,6 @@ namespace HeartopiaMod
             catch
             {
                 return false;
-            }
-        }
-
-        private void SaveCachedItemIcon(string key, Texture2D texture)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(key) || texture == null)
-                {
-                    return;
-                }
-
-                string path = this.GetItemIconCachePath(key);
-                if (File.Exists(path))
-                {
-                    return;
-                }
-
-                byte[] png = texture.EncodeToPNG();
-                if (png == null || png.Length == 0)
-                {
-                    return;
-                }
-
-                File.WriteAllBytes(path, png);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[IconCache] Failed to save item icon: " + ex.Message);
             }
         }
 

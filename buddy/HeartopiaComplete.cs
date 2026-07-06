@@ -271,7 +271,6 @@ namespace HeartopiaMod
         private readonly Dictionary<string, string> scannedBagFoodDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private Vector2 customFoodScrollPos = Vector2.zero;
         private float customFoodScanRetryTime = 0f;
-        private const string ITEM_ICON_CACHE_FOLDER = "ItemIcons";
 
 
         private List<AutoSellBagItemEntry> autoSellBagItems = null;
@@ -4333,20 +4332,6 @@ namespace HeartopiaMod
 
 
 
-        private string SanitizeCacheFileName(string value)
-        {
-            string safe = (value ?? string.Empty).Trim().ToLowerInvariant();
-            foreach (char c in Path.GetInvalidFileNameChars())
-            {
-                safe = safe.Replace(c, '_');
-            }
-            safe = safe.Replace(' ', '_');
-            while (safe.Contains("__"))
-            {
-                safe = safe.Replace("__", "_");
-            }
-            return safe.Trim('_');
-        }
 
 
 
