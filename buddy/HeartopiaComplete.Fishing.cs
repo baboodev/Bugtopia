@@ -284,11 +284,11 @@ namespace HeartopiaMod
 
                     detectedCount++;
 
-                    Vector3 candidatePos = candidate.transform.position;
+                    Vector3 livePos = candidate.transform.position;
                     // Cylinder check: horizontal (XZ) distance only, ignore Y — the fish/player height
                     // gap shouldn't shrink the reachable radius (e.g. on a boat or raised ground).
-                    float candidateDistance = new Vector2(candidatePos.x - playerPos.x, candidatePos.z - playerPos.z).magnitude;
-                    if (scanRange > 0f && candidateDistance > scanRange)
+                    float liveDistance = new Vector2(livePos.x - playerPos.x, livePos.z - playerPos.z).magnitude;
+                    if (scanRange > 0f && liveDistance > scanRange)
                     {
                         continue;
                     }
@@ -297,13 +297,43 @@ namespace HeartopiaMod
                     // the auto-bait "no fish nearby" gate (a fish being battled still counts as present).
                     inRangeCount++;
 
-                    if (this.TryGetFishShadowOccupancy(candidate, out uint occupiedBuoyNetId, out uint occupiedPlayerNetId, out string occupiedState)
+                    if (this.TryGetFishShadowOccupancy(candidate, out uint occupiedBuoyNetId, out uint occupiedPlayerNetId, out string occupiedState, out Vector3 moveTargetPos)
                         && (occupiedBuoyNetId != 0U
                             || occupiedPlayerNetId != 0U
                             || string.Equals(occupiedState, "Battle", StringComparison.OrdinalIgnoreCase)
                             || string.Equals(occupiedState, "FindBuoyWaiting", StringComparison.OrdinalIgnoreCase)))
                     {
                         continue;
+                    }
+
+                    // Fleeing fish (someone's failed catch) is moving fast and will be gone before the
+                    // buoy lands — never target it.
+                    if (string.Equals(occupiedState, "Escape", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(occupiedState, "RunAway", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    // Lead-aim: an IdleMove fish travels a server bezier ending at ComponentData.targetPos.
+                    // Cast at the END of its path (re-based to the live height; the wire y is 0) so the
+                    // buoy lands where the fish will be, not where it was at cast time.
+                    Vector3 candidatePos = livePos;
+                    bool leadAim = false;
+                    if (string.Equals(occupiedState, "IdleMove", StringComparison.OrdinalIgnoreCase)
+                        && moveTargetPos != Vector3.zero)
+                    {
+                        Vector3 leadPos = new Vector3(moveTargetPos.x, livePos.y, moveTargetPos.z);
+                        if (new Vector2(leadPos.x - livePos.x, leadPos.z - livePos.z).sqrMagnitude > 0.09f)
+                        {
+                            candidatePos = leadPos;
+                            leadAim = true;
+                        }
+                    }
+
+                    float candidateDistance = new Vector2(candidatePos.x - playerPos.x, candidatePos.z - playerPos.z).magnitude;
+                    if (scanRange > 0f && candidateDistance > scanRange)
+                    {
+                        continue; // the lead point must be castable too
                     }
 
                     int candidatePriority = this.GetFishShadowVisualPriority(candidate, out int candidateFishId, out string candidatePrioritySource);
@@ -322,7 +352,7 @@ namespace HeartopiaMod
                     bestPriority = candidatePriority;
                     bestFishId = candidateFishId;
                     bestPrioritySource = candidatePrioritySource;
-                    bestOccupancy = occupiedState;
+                    bestOccupancy = leadAim ? occupiedState + " [lead +" + new Vector2(candidatePos.x - livePos.x, candidatePos.z - livePos.z).magnitude.ToString("F1") + "m]" : occupiedState;
                     netId = candidateNetId;
                     position = candidatePos;
                 }
@@ -537,9 +567,15 @@ namespace HeartopiaMod
 
         private bool TryGetFishShadowOccupancy(GameObject candidate, out uint buoyNetId, out uint playerNetId, out string state)
         {
+            return this.TryGetFishShadowOccupancy(candidate, out buoyNetId, out playerNetId, out state, out _);
+        }
+
+        private bool TryGetFishShadowOccupancy(GameObject candidate, out uint buoyNetId, out uint playerNetId, out string state, out Vector3 moveTargetPos)
+        {
             buoyNetId = 0U;
             playerNetId = 0U;
             state = string.Empty;
+            moveTargetPos = Vector3.zero;
             if (candidate == null)
             {
                 return false;
@@ -630,6 +666,14 @@ namespace HeartopiaMod
                             {
                                 this.TryReadMemberText(dataType, dataObj, "AiState", out state);
                             }
+                        }
+
+                        // FishComponentData.targetPos = end point of the fish's current move (server
+                        // bezier path). Used to lead-aim casts at IdleMove fish. y comes back 0 on the
+                        // wire — callers must re-base it to the live fish height.
+                        if (moveTargetPos == Vector3.zero)
+                        {
+                            this.TryReadVector3Member(dataObj, "targetPos", out moveTargetPos);
                         }
                     }
                 }
@@ -2909,6 +2953,142 @@ namespace HeartopiaMod
             {
                 status = "TakeUpRod Mono failed: " + ex.Message;
                 this.AutoFishLog("TakeUpRod Mono exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Skip the rod cast/throw animation. The Free→Fishing FSM transition only completes when the
+        // throw action clip ends (IsLocomotion gate), and ONLY THEN does OnStateEnter send
+        // ActivateRodBuoy — i.e. the cast animation gates the server-side buoy activation (~1.5-2s).
+        //
+        // v1 used ActorActionGraph.Stop() and BROKE fishing: the game only calls Stop() on player
+        // despawn (teardown API) — killing the clip mid-cast strands the animator/buoy state.
+        // v2 instead drives the clip to its OWN finish line early: PlayerFishThrowSuccessAction polls
+        // IsAnimState(Fishing) to end, so CrossFade(Fishing, 0) makes it finish naturally (same
+        // pattern the game uses in ResetFishingStateFromServer with IdleOne). The clip has a Pre
+        // phase that first waits for SpinningRod — crossfading during Pre would strand it until its
+        // 3s timeout, so we only fire when the animator is ALREADY in SpinningRod, and the caller
+        // additionally requires two consecutive sightings so the clip itself has ticked into its
+        // Playing phase before we pull the state out from under it.
+        private static int skipCastSpinningRodHash;
+        private static int skipCastFishingHash;
+
+        public unsafe bool TrySkipFishingCastAnimMono(bool allowCrossfade, out bool inSpinningRod, out string status)
+        {
+            inSpinningRod = false;
+            status = "cast-skip Mono unavailable";
+
+            try
+            {
+                if (skipCastSpinningRodHash == 0)
+                {
+                    skipCastSpinningRodHash = Animator.StringToHash("SpinningRod");
+                    skipCastFishingHash = Animator.StringToHash("Fishing");
+                }
+
+                if (!this.EnsureAuraMonoApiReady()
+                    || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null
+                    || auraMonoObjectGetClass == null
+                    || auraMonoObjectUnbox == null)
+                {
+                    status = "cast-skip Mono runtime unavailable";
+                    return false;
+                }
+
+                IntPtr interactObj = this.GetAuraMonoInteractSystemInstance();
+                if (interactObj == IntPtr.Zero || this.auraMonoInteractGetPlayerMethodPtr == IntPtr.Zero)
+                {
+                    status = "cast-skip interact unavailable";
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr playerObj = auraMonoRuntimeInvoke(this.auraMonoInteractGetPlayerMethodPtr, interactObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || playerObj == IntPtr.Zero)
+                {
+                    status = "cast-skip player unavailable";
+                    return false;
+                }
+
+                IntPtr playerClass = auraMonoObjectGetClass(playerObj);
+                IntPtr getAnimMethod = playerClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(playerClass, "get_animationComponent", 0) : IntPtr.Zero;
+                if (getAnimMethod == IntPtr.Zero)
+                {
+                    status = "get_animationComponent unavailable";
+                    return false;
+                }
+
+                exc = IntPtr.Zero;
+                IntPtr animObj = auraMonoRuntimeInvoke(getAnimMethod, playerObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || animObj == IntPtr.Zero)
+                {
+                    status = "animationComponent instance unavailable";
+                    return false;
+                }
+
+                IntPtr animClass = auraMonoObjectGetClass(animObj);
+                IntPtr isAnimStateMethod = animClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(animClass, "IsAnimState", 1) : IntPtr.Zero;
+                if (isAnimStateMethod == IntPtr.Zero)
+                {
+                    status = "IsAnimState(1) unavailable";
+                    return false;
+                }
+
+                int spinHash = skipCastSpinningRodHash;
+                IntPtr* checkArgs = stackalloc IntPtr[1];
+                checkArgs[0] = (IntPtr)(&spinHash);
+                exc = IntPtr.Zero;
+                IntPtr boolBoxed = auraMonoRuntimeInvoke(isAnimStateMethod, animObj, (IntPtr)checkArgs, ref exc);
+                if (exc != IntPtr.Zero || boolBoxed == IntPtr.Zero)
+                {
+                    status = "IsAnimState invoke failed";
+                    return false;
+                }
+
+                inSpinningRod = *(byte*)auraMonoObjectUnbox(boolBoxed) != 0;
+                if (!inSpinningRod)
+                {
+                    status = "not in SpinningRod yet";
+                    return false;
+                }
+
+                if (!allowCrossfade)
+                {
+                    status = "SpinningRod seen; confirming";
+                    return false;
+                }
+
+                IntPtr crossFadeMethod = this.FindAuraMonoMethodOnHierarchy(animClass, "CrossFade", 3);
+                if (crossFadeMethod == IntPtr.Zero)
+                {
+                    status = "CrossFade(3) unavailable";
+                    return false;
+                }
+
+                int fishHash = skipCastFishingHash;
+                float duration = 0f;
+                int layerIndex = -1;
+                IntPtr* fadeArgs = stackalloc IntPtr[3];
+                fadeArgs[0] = (IntPtr)(&fishHash);
+                fadeArgs[1] = (IntPtr)(&duration);
+                fadeArgs[2] = (IntPtr)(&layerIndex);
+                exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(crossFadeMethod, animObj, (IntPtr)fadeArgs, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "CrossFade exception";
+                    this.AutoFishLog("cast-skip CrossFade Mono raised exception ptr=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                status = "CrossFade(Fishing) invoked (Mono)";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "cast-skip Mono failed: " + ex.Message;
+                this.AutoFishLog("cast-skip Mono exception: " + ex.Message);
                 return false;
             }
         }

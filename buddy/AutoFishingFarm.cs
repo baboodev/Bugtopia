@@ -128,6 +128,20 @@ namespace HeartopiaMod
         private static bool skipCatchAnimEnabled = false;
         private static bool skipCatchAnimInvokedForCast = false;
 
+        // --- Skip Cast Animation: finish the throw clip early so ActivateRodBuoy goes out sooner ---
+        // The cast clip gates the FSM transition, which gates FloatInWater/ActivateRodBuoy (the
+        // server-side buoy activation, ~1.5-2s). We poll the animator after each cast: once it's in
+        // SpinningRod for TWO consecutive polls (the clip has ticked into its Playing phase),
+        // CrossFade(Fishing, 0) makes the clip hit its own natural end condition immediately.
+        private const float SkipCastPollStartDelay = 0.10f;
+        private const float SkipCastPollInterval = 0.07f;
+        private const float SkipCastWindowSeconds = 1.5f;
+        private static bool skipCastAnimEnabled = false;
+        private static float skipCastWindowUntil = -999f;
+        private static float nextSkipCastPollAt = -999f;
+        private static int skipCastSpinSeenCount = 0;
+        private static bool skipCastDoneForCast = false;
+
         private static float fishShadowDetectRange = 60f;
         private static string lastStatus = "Idle";
         private static string lastToolStatus = "Unknown";
@@ -224,6 +238,15 @@ namespace HeartopiaMod
         public static void SetAutoBaitNoFishSeconds(float value) => autoBaitNoFishSeconds = Mathf.Clamp(value, AutoBaitNoFishSecondsMin, AutoBaitNoFishSecondsMax);
         public static bool GetSkipCatchAnimEnabled() => skipCatchAnimEnabled;
         public static void SetSkipCatchAnimEnabled(bool value) => skipCatchAnimEnabled = value;
+        public static bool GetSkipCastAnimEnabled() => skipCastAnimEnabled;
+        public static void SetSkipCastAnimEnabled(bool value)
+        {
+            skipCastAnimEnabled = value;
+            if (!value)
+            {
+                skipCastWindowUntil = -999f;
+            }
+        }
         public static int GetAutoBaitRemaining() => autoBaitRemaining;
         public static void ResetAutoBaitCounter()
         {
@@ -536,6 +559,10 @@ namespace HeartopiaMod
             nextActionAt = -999f;
             instantCatchActiveCached = false;
             skipCatchAnimInvokedForCast = false;
+            skipCastWindowUntil = -999f;
+            nextSkipCastPollAt = -999f;
+            skipCastSpinSeenCount = 0;
+            skipCastDoneForCast = false;
             sessionStartedAt = -999f;
             waitingSinceAt = -999f;
             hookedSinceAt = -999f;
@@ -630,6 +657,17 @@ namespace HeartopiaMod
                 host.UI_AddMenuNotification(
                     "Skip Catch Animation " + (nextSkipAnim ? "Enabled" : "Disabled"),
                     nextSkipAnim ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                try { host.UI_SaveKeybinds(false); } catch { }
+            }
+            num += 30;
+
+            bool nextSkipCast = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), skipCastAnimEnabled, "Skip Cast Animation");
+            if (nextSkipCast != skipCastAnimEnabled)
+            {
+                SetSkipCastAnimEnabled(nextSkipCast);
+                host.UI_AddMenuNotification(
+                    "Skip Cast Animation " + (nextSkipCast ? "Enabled" : "Disabled"),
+                    nextSkipCast ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 try { host.UI_SaveKeybinds(false); } catch { }
             }
             num += 30;
@@ -758,6 +796,28 @@ namespace HeartopiaMod
                 // High-frequency buoy resend — runs EVERY frame (not gated by nextActionAt), so the
                 // collapsed successLength is refreshed within ~1 frame of the bite/buoy-activation.
                 // Uses the active flag cached by the decision loop; harmlessly no-ops if not fishing.
+                // Skip Cast Animation polling — must run OUTSIDE the nextActionAt gate (the window
+                // opens 0.1s after cast, while the decision loop may be sleeping). Waits for the
+                // animator to be in SpinningRod on two consecutive polls, then crossfades to Fishing
+                // so the throw clip finishes naturally and ActivateRodBuoy goes out immediately.
+                if (skipCastAnimEnabled && !skipCastDoneForCast && now < skipCastWindowUntil && now >= nextSkipCastPollAt)
+                {
+                    nextSkipCastPollAt = now + SkipCastPollInterval;
+                    if (host.TrySkipFishingCastAnimMono(skipCastSpinSeenCount >= 1, out bool inSpinningRod, out string skipStatus))
+                    {
+                        skipCastDoneForCast = true;
+                        Log("Skip cast animation: crossfade to Fishing fired (t=" + (now - lastCastSentAt).ToString("F2") + "s)");
+                    }
+                    else if (inSpinningRod)
+                    {
+                        skipCastSpinSeenCount++;
+                    }
+                    else if (now + SkipCastPollInterval >= skipCastWindowUntil)
+                    {
+                        Log("Skip cast animation window expired: " + skipStatus);
+                    }
+                }
+
                 // Send Rate 0 = disable our timed buoy resend entirely (the NotifyFloatInWater detour
                 // already rewrites successLength to -2 at source). Avoids a divide-by-zero too.
                 if (instantCatchEnabled && (instantCatchActiveCached || now < instantCatchEventActiveUntil) && instantCatchSendHz > 0f && now >= nextHighFreqInstantAt)
@@ -1438,6 +1498,12 @@ namespace HeartopiaMod
                     instantCatchBiteLogged = false;
                     instantCatchResultLogged = false;
                     skipCatchAnimInvokedForCast = false;
+                    // Skip Cast Animation: open the animator poll window (the clip starts on the next
+                    // FSM tick, so the first poll waits a beat).
+                    skipCastWindowUntil = skipCastAnimEnabled ? now + SkipCastWindowSeconds : -999f;
+                    nextSkipCastPollAt = now + SkipCastPollStartDelay;
+                    skipCastSpinSeenCount = 0;
+                    skipCastDoneForCast = false;
                     instantCatchBiteAt = -1f;
                     host.InstantCatchCastSeq = instantCatchCastSeq;
                     host.InstantCatchCastAt = now;

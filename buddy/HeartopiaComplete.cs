@@ -292,7 +292,10 @@ namespace HeartopiaMod
         private int repairUsesTarget = 1; 
         private bool autoRepairWaiting = false;
         private float autoRepairWaitTimer = 0f;
-        private float autoRepairWaitDuration = 18f;
+        // Hard cap for the between-kits wait. The WAIT step itself is event-driven — it releases
+        // the moment IsRepairAuraActive() goes false (buff ended / durability-full early close);
+        // this cap only rescues a missed buff-end event so the machine can't hang.
+        private float autoRepairWaitDuration = 25f;
         private bool lastStartWasAutoRepair = false;
         private bool isAutoEating = false;
         private int autoEatStep = 0;
@@ -3812,7 +3815,8 @@ namespace HeartopiaMod
                         this.lastRepairUseCountBefore = this.lastDirectBackpackMatchedCount;
                         this.repairVerifyChecks = 0;
                         repairStep = DIRECT_REPAIR_STEP_VERIFY;
-                        stepTimer = Time.unscaledTime + 1.25f;
+                        // Direct send hits the wire instantly; the bag delta lands in a few hundred ms.
+                        stepTimer = Time.unscaledTime + 0.5f;
                         this.AutoEatRepairLog($"[AutoRepair] Direct repair kit use sent; verifying inventory before counting ({autoRepairUseCount}/{repairUsesTarget}, countBefore={this.lastRepairUseCountBefore}).");
                     }
                     else
@@ -3833,8 +3837,8 @@ namespace HeartopiaMod
                         if (autoRepairUseCount < repairUsesTarget)
                         {
                             autoRepairWaiting = true;
-                            autoRepairWaitTimer = Time.unscaledTime + autoRepairWaitDuration;
-                            stepTimer = autoRepairWaitTimer;
+                            autoRepairWaitTimer = Time.unscaledTime + autoRepairWaitDuration; // hard cap, not the wait itself
+                            stepTimer = Time.unscaledTime + 0.25f;                            // poll the aura state
                             repairStep = DIRECT_REPAIR_STEP_WAIT;
                         }
                         else
@@ -3846,7 +3850,7 @@ namespace HeartopiaMod
                     else if (repairVerifyChecks < 2)
                     {
                         this.AutoEatRepairLog("[AutoRepair] Repair kit use not reflected yet; checking again.");
-                        stepTimer = Time.unscaledTime + 1.25f;
+                        stepTimer = Time.unscaledTime + 0.5f;
                     }
                     else if (repairUseRetryAttempts < 3)
                     {
@@ -3854,7 +3858,7 @@ namespace HeartopiaMod
                         repairVerifyChecks = 0;
                         this.AutoEatRepairLog($"[AutoRepair] Repair kit was not consumed; retrying use ({repairUseRetryAttempts}/3). Avoid jumping/vehicle while retrying.");
                         repairStep = DIRECT_REPAIR_STEP_USE;
-                        stepTimer = Time.unscaledTime + 0.75f;
+                        stepTimer = Time.unscaledTime + 0.5f;
                     }
                     else
                     {
@@ -3865,11 +3869,37 @@ namespace HeartopiaMod
                     break;
 
                 case DIRECT_REPAIR_STEP_WAIT:
-                    if (autoRepairWaiting && Time.unscaledTime >= autoRepairWaitTimer)
+                    if (autoRepairWaiting)
                     {
+                        // Event-driven pacing: the next kit goes the moment the current aura ends
+                        // (buff true→false edge, or the durability-full early close inside
+                        // IsRepairAuraActive). If the tool already reads full, the remaining kits
+                        // are unnecessary — finish instead of wasting them.
+                        bool auraActive = false;
+                        try { auraActive = this.IsRepairAuraActive(); } catch { }
+                        bool capHit = Time.unscaledTime >= autoRepairWaitTimer;
+                        if (auraActive && !capHit)
+                        {
+                            stepTimer = Time.unscaledTime + 0.25f; // keep polling
+                            break;
+                        }
+
                         autoRepairWaiting = false;
-                        repairStep = DIRECT_REPAIR_STEP_USE;
-                        stepTimer = Time.unscaledTime;
+                        bool toolFull = this.lastObservedToolMaxDurability > 0
+                            && Time.unscaledTime - this.lastObservedToolDurabilityAt <= 3f
+                            && (float)this.lastObservedToolDurability / this.lastObservedToolMaxDurability >= RepairAuraFullDurabilityRatio;
+                        if (toolFull)
+                        {
+                            this.AutoEatRepairLog($"[AutoRepair] Tool reads full after {autoRepairUseCount}/{repairUsesTarget} kit(s); skipping the remaining throws.");
+                            isRepairing = false;
+                            repairStep = 0;
+                        }
+                        else
+                        {
+                            this.AutoEatRepairLog("[AutoRepair] Aura wait released (" + (capHit && auraActive ? "hard cap" : "aura ended") + "); throwing next kit.");
+                            repairStep = DIRECT_REPAIR_STEP_USE;
+                            stepTimer = Time.unscaledTime;
+                        }
                     }
                     break;
 

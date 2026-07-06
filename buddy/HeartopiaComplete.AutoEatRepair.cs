@@ -2287,6 +2287,109 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Direct repair-kit throw: send PutRecoverToolCommand immediately via the game's own static
+        // wrapper ToolRestorerProtocolManager.NotifyThrowToolRestorer(uint, Vector3, Quaternion, uint).
+        // Skips the CanPut server round-trip, the Free-state interaction gate and the ~1.5-2s throw
+        // animation + flight — the command is on the wire instantly; the server spawns the device and
+        // applies the repair buff exactly as with the normal path.
+        private unsafe bool TryThrowToolRestorerDirectMono(uint itemNetId, out string status)
+        {
+            status = "direct restorer throw unavailable";
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    status = "direct restorer Mono runtime unavailable";
+                    return false;
+                }
+
+                IntPtr cls = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.ItemDisplay.ToolRestorerProtocolManager");
+                if (cls == IntPtr.Zero)
+                {
+                    status = "ToolRestorerProtocolManager class unavailable";
+                    return false;
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "NotifyThrowToolRestorer", 4);
+                if (method == IntPtr.Zero)
+                {
+                    status = "NotifyThrowToolRestorer(4) unavailable";
+                    return false;
+                }
+
+                if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+                {
+                    status = "player position unavailable";
+                    return false;
+                }
+
+                Vector3 forward = Vector3.forward;
+                Quaternion rotation = Quaternion.identity;
+                GameObject playerRoot = this.FindPlayerRoot();
+                if (playerRoot != null)
+                {
+                    forward = playerRoot.transform.forward;
+                    forward.y = 0f;
+                    forward = forward.sqrMagnitude < 0.0004f ? Vector3.forward : forward.normalized;
+                    rotation = playerRoot.transform.rotation;
+                }
+
+                // Mimic the game's own aim: just ahead of the player. The device's repair trigger is a
+                // sphere around the landing point, so near-feet placement is ideal.
+                Vector3 targetPos = playerPos + forward * 1.5f;
+
+                uint netIdArg = itemNetId;
+                Vector3 posArg = targetPos;
+                Quaternion rotArg = rotation;
+                uint parentArg = 0u; // ground placement; ship/platform parenting not handled here
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[4];
+                args[0] = (IntPtr)(&netIdArg);
+                args[1] = (IntPtr)(&posArg);
+                args[2] = (IntPtr)(&rotArg);
+                args[3] = (IntPtr)(&parentArg);
+                auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "NotifyThrowToolRestorer exception";
+                    this.AutoEatRepairLog("[AutoRepair] Direct restorer Mono exception ptr=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                // Open the repair-aura fallback window ourselves: the legacy path got this from
+                // ToolRestorerEvent (the CanPut reply we skip). Keeps IsRepairAuraActive() /
+                // IsAutoRepairBusy() continuous across the send → device-landing gap; the precise
+                // buff channel takes over once the device lands.
+                float windowNow = Time.unscaledTime;
+                this.repairAuraWindowStartedAt = windowNow;
+                this.repairAuraWindowUntil = windowNow + RepairAuraWindowSeconds;
+
+                status = "PutRecoverToolCommand sent (direct) target=" + targetPos;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "direct restorer failed: " + ex.Message;
+                return false;
+            }
+        }
+
+        // Direct throw first (instant, no animation); legacy bag-function path (func 113: CanPut
+        // round-trip + Free-state gate + throw animation) only as a fallback if the Mono send fails.
+        private bool TryUseRepairKitByNetId(uint netId)
+        {
+            if (this.TryThrowToolRestorerDirectMono(netId, out string directStatus))
+            {
+                this.AutoEatRepairLog("[AutoRepair] Direct restorer throw: " + directStatus);
+                return true;
+            }
+
+            this.AutoEatRepairLog("[AutoRepair] Direct restorer throw failed (" + directStatus + "); falling back to BagModule func 113.");
+            return this.TryExecuteDirectBackpackItemFunc(113, netId);
+        }
+
         private bool TryDirectUseRepairKit()
         {
             try
@@ -2306,8 +2409,8 @@ namespace HeartopiaMod
                 }
 
                 this.CacheRepairKitMatch(repairKey);
-                this.AutoEatRepairLog("[AutoRepair] Direct repair matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending BagModule ToolRestorer function.");
-                return this.TryExecuteDirectBackpackItemFunc(113, netId);
+                this.AutoEatRepairLog("[AutoRepair] Direct repair matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; throwing restorer directly.");
+                return this.TryUseRepairKitByNetId(netId);
             }
             catch (Exception ex)
             {
@@ -2337,8 +2440,8 @@ namespace HeartopiaMod
             this.lastDirectBackpackMatchedCount = currentCount;
             this.cachedRepairKitCount = currentCount;
 
-            this.AutoEatRepairLog("[AutoRepair] Cached repair kit matched netId=" + this.cachedRepairKitNetId + " count=" + currentCount + "; sending BagModule ToolRestorer function.");
-            if (this.TryExecuteDirectBackpackItemFunc(113, this.cachedRepairKitNetId))
+            this.AutoEatRepairLog("[AutoRepair] Cached repair kit matched netId=" + this.cachedRepairKitNetId + " count=" + currentCount + "; throwing restorer directly.");
+            if (this.TryUseRepairKitByNetId(this.cachedRepairKitNetId))
             {
                 return true;
             }
