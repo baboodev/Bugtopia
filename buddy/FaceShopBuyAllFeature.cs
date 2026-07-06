@@ -302,34 +302,62 @@ namespace HeartopiaMod
             return this.TryReadAuraMonoStructIntField(faceValue, fieldName);
         }
 
-        private unsafe bool TryReadAuraTableCoinPrice(IntPtr tableDataClass, string methodName, int id, out int price, out int currency)
+        // TableData.GetHair/GetBeard/GetFace/GetAvatarcolors are (int id, bool needException = false)
+        // on this build; the default is compiler sugar, so the exact-count mono lookup needs 2 params
+        // and an explicit false argument.
+        private unsafe bool TryInvokeAuraFaceTableGetter(IntPtr tableDataClass, string methodName, int id, out IntPtr row)
         {
-            price = 0;
-            currency = 0;
-            if (tableDataClass == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            row = IntPtr.Zero;
+            if (tableDataClass == IntPtr.Zero || id <= 0 || auraMonoRuntimeInvoke == null)
             {
                 return false;
             }
 
-            IntPtr getter = this.FindAuraMonoMethodOnHierarchy(tableDataClass, methodName, 1);
+            IntPtr getter = this.FindAuraMonoMethodOnHierarchy(tableDataClass, methodName, 2);
             if (getter == IntPtr.Zero)
             {
                 return false;
             }
 
             int idValue = id;
-            IntPtr* args = stackalloc IntPtr[1];
+            bool needException = false;
+            IntPtr* args = stackalloc IntPtr[2];
             args[0] = (IntPtr)(&idValue);
+            args[1] = (IntPtr)(&needException);
             IntPtr exc = IntPtr.Zero;
-            IntPtr row = auraMonoRuntimeInvoke(getter, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero || row == IntPtr.Zero)
+            row = auraMonoRuntimeInvoke(getter, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                row = IntPtr.Zero;
+            }
+
+            return row != IntPtr.Zero;
+        }
+
+        private bool TryReadAuraRowIntMethod(IntPtr rowObj, string methodName, out int value)
+        {
+            value = 0;
+            return this.TryInvokeAuraMonoZeroArg(rowObj, out IntPtr boxed, methodName)
+                && this.TryUnboxMonoInt32(boxed, out value);
+        }
+
+        private bool TryReadAuraTableCoinPrice(IntPtr tableDataClass, string methodName, int id, out int price, out int currency)
+        {
+            price = 0;
+            currency = 0;
+            if (!this.TryInvokeAuraFaceTableGetter(tableDataClass, methodName, id, out IntPtr row))
             {
                 return false;
             }
 
-            price = this.TryReadAuraMonoStructIntField(row, "price");
-            currency = this.TryReadAuraMonoStructIntField(row, "moneyValue");
-            return true;
+            // price/moneyValue are get-only properties on the avatar tables (fields are _price/_moneyValue),
+            // so read them through the IAvatarOriginalTable methods all four tables implement. Pin the row
+            // across the invokes: boxing their returns can trigger a moving-GC pass.
+            uint rowPin = AuraMonoPinNew(row);
+            bool ok = this.TryReadAuraRowIntMethod(row, "GetPrice", out price)
+                && this.TryReadAuraRowIntMethod(row, "GetCurrencyType", out currency);
+            AuraMonoPinFree(rowPin);
+            return ok;
         }
 
         private unsafe int TryInvokeAuraRowValidColor(IntPtr rowObj, string methodName, int colorId)
@@ -395,8 +423,13 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> entries = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries))
+            // Pin like the skin-color loop below: the table-price reads allocate (mono_runtime_invoke
+            // boxes the returns), so unpinned entries/values could be relocated mid-loop on this
+            // moving sgen build -> native AV.
+            List<uint> pins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries, pins))
             {
+                FreeAuraMonoPins(pins);
                 return;
             }
 
@@ -408,7 +441,10 @@ namespace HeartopiaMod
                     partData = entries[i];
                 }
 
-                if (!this.TryReadAuraPartDataUnlock(partData, out int styleId))
+                uint partDataPin = AuraMonoPinNew(partData);
+                bool unlocked = this.TryReadAuraPartDataUnlock(partData, out int styleId);
+                AuraMonoPinFree(partDataPin);
+                if (!unlocked)
                 {
                     continue;
                 }
@@ -428,6 +464,8 @@ namespace HeartopiaMod
                     FacePartType = facePartType
                 });
             }
+
+            FreeAuraMonoPins(pins);
         }
 
         private bool TryCollectFaceShopCoinItemsAura(in FaceShopRuntime runtime, List<FaceShopBuyAllCandidate> items, out string error)
@@ -455,10 +493,16 @@ namespace HeartopiaMod
 
             IntPtr exc = IntPtr.Zero;
             IntPtr faceDataResult = auraMonoRuntimeInvoke(getFaceDataResult, runtime.AuraFaceSystem, IntPtr.Zero, ref exc);
+            // RefreshShopData rebuilt these containers moments ago (fresh nursery objects) and the scan
+            // below allocates on the mono heap constantly - pin every raw container pointer held across
+            // allocating calls, starting before the second invoke can trigger a GC pass.
+            List<uint> containerPins = new List<uint> { AuraMonoPinNew(faceDataResult) };
             exc = IntPtr.Zero;
             IntPtr colorDataResult = auraMonoRuntimeInvoke(getColorDataResult, runtime.AuraFaceSystem, IntPtr.Zero, ref exc);
+            containerPins.Add(AuraMonoPinNew(colorDataResult));
             if (faceDataResult == IntPtr.Zero || colorDataResult == IntPtr.Zero)
             {
+                FreeAuraMonoPins(containerPins);
                 error = "Aura face shop data empty.";
                 return false;
             }
@@ -467,15 +511,21 @@ namespace HeartopiaMod
                 || !this.TryGetMonoObjectMember(faceDataResult, "beardData", out IntPtr beardData)
                 || !this.TryGetMonoObjectMember(faceDataResult, "faceData", out IntPtr faceData))
             {
+                FreeAuraMonoPins(containerPins);
                 error = "Aura FaceData fields missing.";
                 return false;
             }
 
+            containerPins.Add(AuraMonoPinNew(hairData));
+            containerPins.Add(AuraMonoPinNew(beardData));
+            containerPins.Add(AuraMonoPinNew(faceData));
             this.TryCollectFaceShopAuraPartDictionary(hairData, "hair", "GetHair", runtime.AuraTableDataClass, 0, items);
             this.TryCollectFaceShopAuraPartDictionary(beardData, "beard", "GetBeard", runtime.AuraTableDataClass, 0, items);
 
             List<IntPtr> facePartEntries = new List<IntPtr>();
-            if (this.TryEnumerateAuraMonoCollectionItems(faceData, facePartEntries))
+            // Entries survive across the allocating per-part collect calls below - pin them (moving sgen).
+            List<uint> facePartPins = new List<uint>();
+            if (this.TryEnumerateAuraMonoCollectionItems(faceData, facePartEntries, facePartPins))
             {
                 for (int i = 0; i < facePartEntries.Count; i++)
                 {
@@ -494,14 +544,20 @@ namespace HeartopiaMod
                         styleDictionary = valueObj;
                     }
 
+                    uint styleDictionaryPin = AuraMonoPinNew(styleDictionary);
                     this.TryCollectFaceShopAuraPartDictionary(styleDictionary, "face", "GetFace", runtime.AuraTableDataClass, facePartType, items);
+                    AuraMonoPinFree(styleDictionaryPin);
                 }
             }
 
+            FreeAuraMonoPins(facePartPins);
+
             if (this.TryGetMonoObjectMember(faceDataResult, "skinData", out IntPtr skinData))
             {
+                containerPins.Add(AuraMonoPinNew(skinData));
                 List<IntPtr> skinIds = new List<IntPtr>();
-                if (this.TryEnumerateAuraMonoCollectionItems(skinData, skinIds))
+                List<uint> skinPins = new List<uint>();
+                if (this.TryEnumerateAuraMonoCollectionItems(skinData, skinIds, skinPins))
                 {
                     for (int i = 0; i < skinIds.Count; i++)
                     {
@@ -564,8 +620,11 @@ namespace HeartopiaMod
                         FreeAuraMonoPins(colorPins);
                     }
                 }
+
+                FreeAuraMonoPins(skinPins);
             }
 
+            FreeAuraMonoPins(containerPins);
             if (items.Count <= 0)
             {
                 error = "No purchasable Coin face shop items.";
@@ -598,20 +657,16 @@ namespace HeartopiaMod
 
             if (string.Equals(candidate.Kind, "hair", StringComparison.Ordinal))
             {
-                int idValue = candidate.StyleId;
-                IntPtr getHair = this.FindAuraMonoMethodOnHierarchy(runtime.AuraTableDataClass, "GetHair", 1);
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&idValue);
-                IntPtr exc = IntPtr.Zero;
-                IntPtr hairRow = auraMonoRuntimeInvoke(getHair, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero || hairRow == IntPtr.Zero)
+                if (!this.TryInvokeAuraFaceTableGetter(runtime.AuraTableDataClass, "GetHair", candidate.StyleId, out IntPtr hairRow))
                 {
                     error = "hair row missing.";
                     return false;
                 }
 
+                uint hairRowPin = AuraMonoPinNew(hairRow);
                 int mainColor = this.TryInvokeAuraRowValidColor(hairRow, "GetValidMainColor", this.TryGetAuraFaceValueIntField(baselineFace, "HairColorMain"));
                 int subColor = this.TryInvokeAuraRowValidColor(hairRow, "GetValidSubColor", this.TryGetAuraFaceValueIntField(baselineFace, "HairColorSub"));
+                AuraMonoPinFree(hairRowPin);
                 this.TrySetAuraFaceValueIntField(purchaseFace, "HairStyle", candidate.StyleId);
                 this.TrySetAuraFaceValueIntField(purchaseFace, "HairColorMain", mainColor);
                 this.TrySetAuraFaceValueIntField(purchaseFace, "HairColorSub", subColor);
@@ -620,20 +675,16 @@ namespace HeartopiaMod
 
             if (string.Equals(candidate.Kind, "beard", StringComparison.Ordinal))
             {
-                int idValue = candidate.StyleId;
-                IntPtr getBeard = this.FindAuraMonoMethodOnHierarchy(runtime.AuraTableDataClass, "GetBeard", 1);
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&idValue);
-                IntPtr exc = IntPtr.Zero;
-                IntPtr beardRow = auraMonoRuntimeInvoke(getBeard, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero || beardRow == IntPtr.Zero)
+                if (!this.TryInvokeAuraFaceTableGetter(runtime.AuraTableDataClass, "GetBeard", candidate.StyleId, out IntPtr beardRow))
                 {
                     error = "beard row missing.";
                     return false;
                 }
 
+                uint beardRowPin = AuraMonoPinNew(beardRow);
                 int mainColor = this.TryInvokeAuraRowValidColor(beardRow, "GetValidMainColor", this.TryGetAuraFaceValueIntField(baselineFace, "BeardColorMain"));
                 int subColor = this.TryInvokeAuraRowValidColor(beardRow, "GetValidSubColor", this.TryGetAuraFaceValueIntField(baselineFace, "BeardColorSub"));
+                AuraMonoPinFree(beardRowPin);
                 this.TrySetAuraFaceValueIntField(purchaseFace, "BeardStyle", candidate.StyleId);
                 this.TrySetAuraFaceValueIntField(purchaseFace, "BeardColorMain", mainColor);
                 this.TrySetAuraFaceValueIntField(purchaseFace, "BeardColorSub", subColor);
@@ -646,25 +697,24 @@ namespace HeartopiaMod
                 return false;
             }
 
-            int faceId = candidate.StyleId;
-            IntPtr getFace = this.FindAuraMonoMethodOnHierarchy(runtime.AuraTableDataClass, "GetFace", 1);
-            IntPtr* faceArgs = stackalloc IntPtr[1];
-            faceArgs[0] = (IntPtr)(&faceId);
-            IntPtr faceExc = IntPtr.Zero;
-            IntPtr faceRow = auraMonoRuntimeInvoke(getFace, IntPtr.Zero, (IntPtr)faceArgs, ref faceExc);
-            if (faceExc != IntPtr.Zero || faceRow == IntPtr.Zero)
+            if (!this.TryInvokeAuraFaceTableGetter(runtime.AuraTableDataClass, "GetFace", candidate.StyleId, out IntPtr faceRow))
             {
                 error = "face row missing.";
                 return false;
             }
 
-            int defaultColor = this.TryReadAuraMonoStructIntField(faceRow, "defaultColor");
-            int defaultColor2 = this.TryReadAuraMonoStructIntField(faceRow, "defaultColor2");
+            // defaultColor/defaultColor2/type are get-only properties on TableFace (fields are
+            // _defaultColor/_defaultColor2/_type) - go through the property getters.
+            uint faceRowPin = AuraMonoPinNew(faceRow);
+            this.TryReadAuraRowIntMethod(faceRow, "get_defaultColor", out int defaultColor);
+            this.TryReadAuraRowIntMethod(faceRow, "get_defaultColor2", out int defaultColor2);
             int facePartType = candidate.FacePartType;
             if (facePartType <= 0)
             {
-                facePartType = this.TryReadAuraMonoStructIntField(faceRow, "type");
+                this.TryReadAuraRowIntMethod(faceRow, "get_type", out facePartType);
             }
+
+            AuraMonoPinFree(faceRowPin);
 
             switch (facePartType)
             {
