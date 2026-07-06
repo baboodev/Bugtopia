@@ -471,6 +471,49 @@ namespace HeartopiaMod
                     num += 28;
                 }
 
+                bool prevBubbleSpawnAtPlayer = this.bubbleSpawnAtPlayerEnabled;
+                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Bubbles Spawn At Player", 25f);
+                this.bubbleSpawnAtPlayerEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.bubbleSpawnAtPlayerEnabled, "Bubbles Spawn At Player", 25f);
+                if (this.bubbleSpawnAtPlayerEnabled != prevBubbleSpawnAtPlayer)
+                {
+                    if (this.bubbleSpawnAtPlayerEnabled)
+                    {
+                        this.RequestBubbleSpawnRewriteImmediateInstall();
+                    }
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+                num += Mathf.CeilToInt(toggleHeight + 8f);
+
+                bool prevAutoBubbleCollect = this.autoBubbleCollectEnabled;
+                toggleHeight = this.GetSwitchToggleHeight(automationToggleWidth, "Auto Collect Bubbles", 25f);
+                this.autoBubbleCollectEnabled = this.DrawWrappedSwitchToggle(new Rect(20f, (float)num, automationToggleWidth, toggleHeight), this.autoBubbleCollectEnabled, "Auto Collect Bubbles", 25f);
+                if (this.autoBubbleCollectEnabled != prevAutoBubbleCollect)
+                {
+                    if (this.autoBubbleCollectEnabled)
+                    {
+                        this.RequestAutoBubbleCollectImmediateInstall();
+                    }
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+                num += Mathf.CeilToInt(toggleHeight + 8f);
+
+                if (this.autoBubbleCollectEnabled)
+                {
+                    string collectRadiusText = this.autoBubbleCollectRadius <= 0.01f
+                        ? "unlimited"
+                        : string.Format("{0:F0} m", this.autoBubbleCollectRadius);
+                    GUI.Label(new Rect(20f, (float)num, 260f, 20f), "Collect radius: " + collectRadiusText);
+                    num += 22;
+                    float prevCollectRadius = this.autoBubbleCollectRadius;
+                    float newCollectRadius = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.autoBubbleCollectRadius, 0f, 100f);
+                    if (Math.Abs(newCollectRadius - prevCollectRadius) > 0.01f)
+                    {
+                        this.autoBubbleCollectRadius = Mathf.Clamp(newCollectRadius, 0f, 100f);
+                        try { this.SaveKeybinds(false); } catch { }
+                    }
+                    num += 28;
+                }
+
                 bool flag2 = this.DrawDangerActionButton(new Rect(20f, (float)num, 260f, 35f), "DISABLE ALL");
                 if (flag2)
                 {

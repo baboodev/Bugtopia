@@ -203,6 +203,16 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Fast Bubble Gen", "Active"));
             }
 
+            if (this.bubbleSpawnAtPlayerEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Bubbles Spawn At Player", "Active"));
+            }
+
+            if (this.autoBubbleCollectEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Auto Collect Bubbles", "Active"));
+            }
+
             if (this.bunnyHopEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Bunny Hop", "Active"));

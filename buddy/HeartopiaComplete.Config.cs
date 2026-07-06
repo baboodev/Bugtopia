@@ -196,6 +196,9 @@ namespace HeartopiaMod
             data.shopBuyAllMaxPerItem = this.shopBuyAllMaxPerItem;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
             data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
+            data.bubbleSpawnAtPlayerEnabled = this.bubbleSpawnAtPlayerEnabled;
+            data.autoBubbleCollectEnabled = this.autoBubbleCollectEnabled;
+            data.autoBubbleCollectRadius = this.autoBubbleCollectRadius;
             data.cookingAutoSpeed = this.cookingAutoSpeed;
             data.cookingWaitAtSpot = this.cookingWaitAtSpot;
             data.netCookInterval = this.netCookInterval;
@@ -374,6 +377,9 @@ namespace HeartopiaMod
                 999999);
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
+            this.bubbleSpawnAtPlayerEnabled = data.bubbleSpawnAtPlayerEnabled;
+            this.autoBubbleCollectEnabled = data.autoBubbleCollectEnabled;
+            this.autoBubbleCollectRadius = Mathf.Clamp(data.autoBubbleCollectRadius, 0f, 100f);
             this.cookingAutoSpeed = data.cookingAutoSpeed;
             this.cookingWaitAtSpot = data.cookingWaitAtSpot;
             this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
@@ -651,6 +657,9 @@ namespace HeartopiaMod
                         else if (line.Contains("autoIceSkatingEnabled")) this.autoIceSkatingEnabled = GetJsonInt(line, "\"autoIceSkatingEnabled\":") != 0;
                         else if (line.Contains("fastBubbleGenEnabled")) this.fastBubbleGenEnabled = GetJsonInt(line, "\"fastBubbleGenEnabled\":") != 0;
                         else if (line.Contains("bubbleBubblesPerMinute")) this.bubbleBubblesPerMinute = Mathf.Clamp(GetJsonFloat(line, "\"bubbleBubblesPerMinute\":"), 0f, 100f);
+                        else if (line.Contains("bubbleSpawnAtPlayerEnabled")) this.bubbleSpawnAtPlayerEnabled = GetJsonInt(line, "\"bubbleSpawnAtPlayerEnabled\":") != 0;
+                        else if (line.Contains("autoBubbleCollectEnabled")) this.autoBubbleCollectEnabled = GetJsonInt(line, "\"autoBubbleCollectEnabled\":") != 0;
+                        else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = Mathf.Clamp(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"), 0f, 100f);
             else if (line.Contains("cookingAutoSpeed")) this.cookingAutoSpeed = GetJsonFloat(line, "\"cookingAutoSpeed\":");
             else if (line.Contains("cookingWaitAtSpot")) this.cookingWaitAtSpot = GetJsonFloat(line, "\"cookingWaitAtSpot\":");
             else if (line.Contains("netCookInterval")) this.netCookInterval = GetJsonFloat(line, "\"netCookInterval\":");

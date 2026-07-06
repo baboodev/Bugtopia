@@ -272,6 +272,8 @@
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
+    <Compile Include="BubbleSpawnRewriteFeature.cs" />
+    <Compile Include="AutoBubbleCollectFeature.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />

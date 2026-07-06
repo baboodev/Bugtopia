@@ -182,6 +182,9 @@ namespace HeartopiaMod
             public int shopBuyAllMaxPerItem = 200;
             public bool fastBubbleGenEnabled;
             public float bubbleBubblesPerMinute;
+            public bool bubbleSpawnAtPlayerEnabled;
+            public bool autoBubbleCollectEnabled;
+            public float autoBubbleCollectRadius;
             public float cookingAutoSpeed;
             public float cookingWaitAtSpot;
             public float netCookInterval;
