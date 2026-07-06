@@ -248,6 +248,10 @@ namespace HeartopiaMod
             data.snowballUseLimit = this.snowballUseLimit;
             data.snowQteSuccessCount = this.snowQteSuccessCount;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
+            data.musicPlayerLoop = this.musicPlayerLoop;
+            data.musicPlayerNetworkMode = this.musicPlayerNetworkMode;
+            data.musicPlayerSourceGameRecords = this.musicPlayerSourceGameRecords;
+            data.musicPlayerSelectedTrack = this.musicPlayerSelectedTrackName ?? string.Empty;
             data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
             data.bubbleSpawnAtPlayerEnabled = this.bubbleSpawnAtPlayerEnabled;
             data.autoBubbleCollectEnabled = this.autoBubbleCollectEnabled;
@@ -525,6 +529,10 @@ namespace HeartopiaMod
             this.snowballUseLimit = Mathf.Max(0, data.snowballUseLimit);
             this.snowQteSuccessCount = Mathf.Clamp(data.snowQteSuccessCount, SnowQteSuccessMin, SnowQteSuccessMax);
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
+            this.musicPlayerLoop = data.musicPlayerLoop;
+            this.musicPlayerNetworkMode = data.musicPlayerNetworkMode;
+            this.musicPlayerSourceGameRecords = data.musicPlayerSourceGameRecords;
+            this.musicPlayerSelectedTrackName = data.musicPlayerSelectedTrack ?? string.Empty;
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
             this.bubbleSpawnAtPlayerEnabled = data.bubbleSpawnAtPlayerEnabled;
             this.autoBubbleCollectEnabled = data.autoBubbleCollectEnabled;

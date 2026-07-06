@@ -323,6 +323,7 @@
     <Compile Include="HeartopiaComplete.UguiIceSkatingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiExtraContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSeaCleanContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiMusicContent.cs" />
     <Compile Include="HeartopiaComplete.UguiHomelandFarmContent.cs" />
     <Compile Include="HeartopiaComplete.UguiDailyQuestsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiQuestAssistantWindowContent.cs" />
@@ -394,6 +395,7 @@
     <Compile Include="TutorialBlockFeature.cs" />
     <Compile Include="PersistentHudFeature.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
+    <Compile Include="MusicPlayerFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />
     <Compile Include="HomelandFarmEventDiagFeature.cs" />
     <Compile Include="IceSkatingSequenceFeature.cs" />

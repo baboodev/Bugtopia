@@ -128,6 +128,7 @@ namespace HeartopiaMod
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
         // recipe-id probes per active quest) — flip to false once classification is confirmed.
         internal static bool MasterLogQuestAssistant = true;
+        internal static bool MasterLogMusicPlayer = false;
         private static bool MasterLogAutoEatRepair = false;
         private static bool MasterLogNpcTeleport = false;
         private static bool MasterLogNetCook = false;
@@ -708,6 +709,7 @@ namespace HeartopiaMod
             this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
             this.ProcessPersistentHudOnUpdate();
+            this.ProcessMusicPlayerOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
             // Daily Claims auto-claim drain — must run AFTER the hook drain so a red point that
             // arrived this frame is already queued (DailyClaimsAutoClaimFeature.cs).

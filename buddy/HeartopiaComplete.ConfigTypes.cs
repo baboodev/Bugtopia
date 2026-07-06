@@ -234,6 +234,10 @@ namespace HeartopiaMod
             public int snowballUseLimit = 0;                // sculptures per run; 0 = unlimited
             public int snowQteSuccessCount = 20;            // perfect QTE reports per sculpture (0-20)
             public bool fastBubbleGenEnabled;
+            public bool musicPlayerLoop;
+            public bool musicPlayerNetworkMode;
+            public bool musicPlayerSourceGameRecords;
+            public string musicPlayerSelectedTrack = string.Empty;
             public float bubbleBubblesPerMinute;
             public bool bubbleSpawnAtPlayerEnabled;
             public bool autoBubbleCollectEnabled;

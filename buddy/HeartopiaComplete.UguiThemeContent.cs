@@ -16,7 +16,7 @@ namespace HeartopiaMod
     //    sanctioned backend change this round: the IMGUI Reset button's 24-field body moved into
     //    the shared ResetUiThemeToDefaults() (HeartopiaComplete.UiKit.cs) so both surfaces run ONE
     //    implementation (the Fishing round's RemoveCustomSpotAt precedent).
-    //  - Wiring is by STATIC display-position index (UguiShellSettingsTabIndex = 8 +
+    //  - Wiring is by STATIC display-position index (UguiShellSettingsTabIndex = 9 +
     //    UguiShellSettingsUiThemeSubIndex = 2 — Settings' sub array {"Main","Keybinds","UI Theme",
     //    "About","Logging"}, matching settingsSubTab == 2, HeartopiaComplete.cs:2425), never by
     //    localized label comparison. NOTE: every display string here ("UI THEME", "DISPLAY",

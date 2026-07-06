@@ -398,6 +398,33 @@ namespace HeartopiaMod
         // still carries the expected parameter count first. Returns true when validation is
         // impossible on this build (missing exports) so working paths are never blocked.
 
+        // Preferred invoke API for new code: explicit success flag + readable error, result is
+        // always Zero on failure. Existing sites reach the same guard via the delegate binding.
+        //
+        // Deleted by the 2026-08-09 reachability sweep (6e6b883) as unreachable, and restored
+        // here with the Music player: MusicPlayerFeature.cs is its caller (Wwise bank load/unload
+        // + the three MusicProtocolManager sends), and it lived on a side branch at sweep time,
+        // so "zero references" was true of main only. Verbatim — not a rewrite.
+        internal static bool TryAuraInvoke(IntPtr method, IntPtr obj, IntPtr args, out IntPtr result, out string error)
+        {
+            result = IntPtr.Zero;
+            error = null;
+            if (method == IntPtr.Zero || auraMonoRuntimeInvokeRaw == null)
+            {
+                error = "AuraMono invoke unavailable (method or export missing).";
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            result = InvokeAuraMonoChecked(method, obj, args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                error = "AuraMono invoke of " + auraInvokeLastExceptionSite + " raised " + auraInvokeLastExceptionName + ".";
+                return false;
+            }
+            return true;
+        }
+
         // Cross-frame cache for a MonoObject*: rooted via GC handle when the gchandle exports are
         // available, raw-pointer fallback otherwise (pre-existing behavior), invalidated on world
         // epoch change. Mutable struct — keep instances as fields, never copy into locals to Set/Clear.

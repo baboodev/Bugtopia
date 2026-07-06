@@ -1273,6 +1273,34 @@ Behind the scenes (no UI, automatic): the level spoof NativeDetours `ResearchSys
 
 ---
 
+## Music Tab
+
+Plays **RECM `.bin` note timelines** — the gramophone recording format (`tools/bgm_to_bin.py`
+converts MIDI/sheet text into it; the game's own recordings use the same bytes).
+
+| Control | Behavior |
+|---------|----------|
+| PLAY / STOP | Plays the selected track; stop releases all held notes |
+| Loop | Restart after a 1 s gap when the clip duration elapses |
+| Network mode (experimental) | Streams `PlayInstrumentNetworkCommand` batches via `MusicProtocolManager.PlayInstrument` (AuraMono) so others hear the notes at the player entity — no instrument needed. Local Wwise echo plays in both modes (`AkSoundEngine.PostEvent` on the player; the server never echoes your own notes back) |
+| TEST NETWORK ECHO | Sends one press/release standing still and watches `InstrumentInfoFromServer` for our own `playerNetId` — echo proves the server relays standless notes (see `memory/instrument-play-protocol.md`) |
+| Source | `%LocalLow%/Bugtopia/Music/*.bin` (drop converter output here) ⇄ game records `<persistentDataPath>/record/**` |
+| Rescan / Open folder | Refresh the catalog / open the active source folder in Explorer |
+| Track list | One row per `.bin`: `>` marks the selected track, the row label selects, the trailing Play/Stop button drives that track directly. Capped at 60 rows; any overflow is reported in the catalog line |
+
+Scheduling is main-thread in `OnUpdate` (frame-quantized — same fidelity as the game's own
+gramophone player); note-ons that come due >150 ms late (frame hitches) are dropped instead of
+burst-played, note-offs always fire. On play the feature loads the Wwise instrument banks for the
+track's instrument types itself (mono `AudioManager.LoadStaticBank`, unloaded on stop) and
+registers/positions the player GameObject with the AK engine — raw `PostEvent` bypasses the game's
+lazy bank loading, so without this the notes are silent (`playingId 0`). Verbose diagnostics via
+`MasterLogMusicPlayer` (`[MusicPlayer]` log lines). Persisted: loop, mode, source, selected track.
+
+The tab is its own top-level sidebar entry (display position 8, ahead of Settings) —
+`HeartopiaComplete.UguiMusicContent.cs`; playback itself lives in `MusicPlayerFeature.cs`.
+
+---
+
 ## Settings Tab
 
 Sections typically include:

@@ -886,6 +886,15 @@ namespace HeartopiaMod
 
         private bool TryGetSelfPlayerNetId(out uint netId)
         {
+            // AuraMono PlayerDataCenter.GetSelfNetPlayerId first — the managed ViewModule walk
+            // below is dead on this build (XDTLevelAndEntity types are Mono-only, absent from
+            // interop; memory/self-player-netid-managed-path-dead.md), so every caller of this
+            // helper was silently getting `false` until now.
+            if (this.TryResolveSelfPlayerNetId(out netId) && netId != 0)
+            {
+                return true;
+            }
+
             netId = 0;
             try
             {

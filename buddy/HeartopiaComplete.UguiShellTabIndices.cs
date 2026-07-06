@@ -29,7 +29,13 @@ namespace HeartopiaMod
         // Display-position wiring constants — see file header for the re-derivation. These match
         // positions in BuildUguiShell's tabLabels/subTabLabels arrays, NOT internal selectedTab ids.
         private const int UguiShellResearchTabIndex = 7;        // Research (internal id 9)
-        private const int UguiShellSettingsTabIndex = 8;        // Settings (internal id 7)
+        // Music (HeartopiaComplete.UguiMusicContent.cs) — a .bin note-track player with NO IMGUI
+        // ancestor. Inserted at display position 8, ahead of Settings (which conventionally stays
+        // last), so Settings moved 8 → 9. Nothing hardcodes those positions: every consumer reads
+        // these constants, and the sidebar nav icon array (HeartopiaComplete.NavIcons.cs) is
+        // indexed by display position, so a music-note glyph was inserted at 8 to match.
+        private const int UguiShellMusicTabIndex = 8;           // Music (internal id 10)
+        private const int UguiShellSettingsTabIndex = 9;        // Settings (internal id 7)
         private const int UguiShellSettingsMainSubIndex = 0;    // "Main" within Settings' subs (round 2)
         private const int UguiShellSettingsKeybindsSubIndex = 1; // "Keybinds" within Settings' subs — matches
                                                                  // settingsSubTab == 1 (HeartopiaComplete.cs:2424;
@@ -121,7 +127,7 @@ namespace HeartopiaMod
 
         // New Features (Phase 3 item 12 — split into rounds like Resource Gathering; round 1 =
         // Animal Care, HeartopiaComplete.UguiNewFeaturesContent.cs): display position 3 carries
-        // internal id 8 (UguiShellInternalTabIds[3] — the array literal is {0,2,3,8,4,5,6,9,7},
+        // internal id 8 (UguiShellInternalTabIds[3] — the array literal is {0,2,3,8,4,5,6,9,10,7},
         // UguiShell.cs) = IMGUI selectedTab 8 = DrawNewFeaturesTab, whose sub array
         // {"Animal Care","Daily Quests",homeland_farm.title,pictures.title,"Ice Skating",
         // extra.title,"Sand Sculpture","Sea Clean"} display indices match newFeaturesSubTab's
@@ -159,7 +165,7 @@ namespace HeartopiaMod
 
         // Features (Phase 3 item 11 — split into rounds like Resource Gathering; round 1 = Main,
         // HeartopiaComplete.UguiFeaturesMainContent.cs): display position 2 carries internal id 3
-        // (UguiShellInternalTabIds[2] — the array literal is {0,2,3,8,4,5,6,9,7}, UguiShell.cs) =
+        // (UguiShellInternalTabIds[2] — the array literal is {0,2,3,8,4,5,6,9,10,7}, UguiShell.cs) =
         // IMGUI selectedTab 3 = DrawAutomationTab, whose sub array {"Main","Food & Repair",
         // "Snow Sculpting","Auto Buy","Auto Sell","Mass Cook","Puzzle","Pet Care"} display
         // indices match automationSubTab's own 0-7 exactly (GetActiveTopSubTabs,

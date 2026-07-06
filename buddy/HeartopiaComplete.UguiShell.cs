@@ -109,7 +109,10 @@ namespace HeartopiaMod
         // Internal selectedTab id per display position (navIndices) — unused by the placeholder
         // chrome itself, but Phase 3 binds real content per INTERNAL id, so the mapping ships
         // with the shell instead of being rediscovered later.
-        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 4, 5, 6, 9, 7 };
+        // Music (display position 8) has NO IMGUI ancestor — it arrived after the menu was
+        // retired — so it takes the next free internal id, 10. Its m2-era draft used 9, which is
+        // Research's here; that collision is why it is renumbered rather than carried over.
+        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 4, 5, 6, 9, 10, 7 };
 
         private const float UguiShellWindowW = 960f;
         private const float UguiShellWindowH = 640f;
@@ -225,6 +228,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellFeaturesPetCareOnUpdate();
             this.ProcessUguiShellRadarMainOnUpdate();
             this.ProcessUguiShellRadarSettingsOnUpdate();
+            this.ProcessUguiShellMusicOnUpdate();
         }
 
         // Phase 2e: live re-sync of the shell scale while the (still-IMGUI) Settings→Main
@@ -419,7 +423,8 @@ namespace HeartopiaMod
                 {
                     this.L("Self"), this.L("Resource Gathering"), this.L("Features"),
                     this.L("New Features"), this.L("Radar"), this.L("Teleport"),
-                    this.L("Bag / Warehouse"), this.L("Research"), this.L("Settings")
+                    this.L("Bag / Warehouse"), this.L("Research"), this.L("Music"),
+                    this.L("Settings")
                 };
                 string[] tabSubtitles = new string[]
                 {
@@ -427,6 +432,7 @@ namespace HeartopiaMod
                     this.L("Automation and helpers"), this.L("Experiments"),
                     this.L("World scanner"), this.L("Locations and travel"),
                     this.L("Bulk item tools"), this.L("Institute tools"),
+                    this.L("Play .bin note tracks"),
                     this.L("Menu, theme and hotkeys")
                 };
                 string[][] subTabLabels = new string[][]
@@ -439,6 +445,7 @@ namespace HeartopiaMod
                     new string[] { this.L("Home"), this.L("Animal Care"), this.L("NPCs"), this.L("Locations"), this.L("Events"), this.L("House"), this.L("Custom"), this.L("XYZ"), this.L("Spawn Vehicle") },
                     new string[0], // Bag / Warehouse — no sub-tabs
                     new string[0], // Research — no sub-tabs
+                    new string[0], // Music — no sub-tabs
                     new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging"), this.L("Game Keys") }
                 };
 
@@ -889,6 +896,10 @@ namespace HeartopiaMod
                             else if (i == UguiShellBagWarehouseTabIndex)
                             {
                                 this.BuildUguiShellBagWarehouseContent(container.transform, 0f, 0f, contentColW, contentH);
+                            }
+                            else if (i == UguiShellMusicTabIndex)
+                            {
+                                this.BuildUguiShellMusicContent(container.transform, 0f, 0f, contentColW, contentH);
                             }
                             // Every sub-less tab has a real builder above (the migration is
                             // complete); an unmatched tab would simply show an empty container.
