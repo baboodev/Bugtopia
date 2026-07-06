@@ -627,6 +627,8 @@ namespace HeartopiaMod
             }
             this.EnsureStrangerChatBypassPatch();
             WarehouseBypassFeature.Update(this);
+            this.EnsureSpawnVehicleResultHooks();
+            this.TickSpawnVehicleResultTimeout();
             this.UpdateTransferQtyHoldRepeat();
             this.ProcessPendingTransferListRescan();
             this.ProcessPendingAutoSellListRescan();
@@ -2358,6 +2360,7 @@ namespace HeartopiaMod
                 tabs.Add((this.L("Sand Sculpture"), () => this.newFeaturesSubTab == 6, () => this.SetNewFeaturesSubTab(6)));
                 tabs.Add(("Sea Clean", () => this.newFeaturesSubTab == 7, () => this.SetNewFeaturesSubTab(7)));
                 // "Quest Assistant" sub-tab removed 2026-07-04 (§54) — its content moved into "Daily Quests".
+                // "Spawn Vehicle" sub-tab moved to the Teleport tab 2026-07-16 (didn't fit here).
             }
             else if (this.selectedTab == 4)
             {
@@ -2374,6 +2377,7 @@ namespace HeartopiaMod
                 tabs.Add(("House", () => this.teleportSubTab == 5, () => this.SetTeleportSubTab(5)));
                 tabs.Add(("Custom", () => this.teleportSubTab == 6, () => this.SetTeleportSubTab(6)));
                 tabs.Add(("XYZ", () => this.teleportSubTab == 7, () => this.SetTeleportSubTab(7)));
+                tabs.Add(("Spawn Vehicle", () => this.teleportSubTab == 8, () => this.SetTeleportSubTab(8)));
             }
             else if (this.selectedTab == 6)
             {

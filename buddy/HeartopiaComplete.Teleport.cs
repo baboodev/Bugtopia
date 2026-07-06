@@ -42,6 +42,14 @@ namespace HeartopiaMod
             if (this.teleportSubTab == 5) return 80f + (this.houseLocations.Length * 45f);
             if (this.teleportSubTab == 6) return 180f + (this.customTeleportList.Count * 38f);
             if (this.teleportSubTab == 7) return 180f;
+            if (this.teleportSubTab == 8)
+            {
+                // Garage/TableCar block (~256 + 30/row, row count per the current owned-only filter) +
+                // Live Vehicles block (~200 + 36/row).
+                float garageBlock = 256f + Mathf.Max(0, this.CountVisibleSpawnVehicleRows()) * 30f;
+                float liveBlock = 200f + Mathf.Max(0, this.liveVehicleRows.Count) * 36f;
+                return garageBlock + liveBlock + 40f;
+            }
             return 420f; // XYZ fallback
         }
 
@@ -330,6 +338,11 @@ namespace HeartopiaMod
                     }
                 }
                 return panelY + 130f;
+            }
+
+            if (this.teleportSubTab == 8)
+            {
+                return this.DrawSpawnVehicleTab(num);
             }
 
             return panelY + 20f;
