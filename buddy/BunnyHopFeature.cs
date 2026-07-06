@@ -17,6 +17,9 @@ namespace HeartopiaMod
         private IntPtr bunnyHopMonoSetJumpInputMethod;
         private IntPtr bunnyHopMonoOnJumpButtonMethod;
         private bool bunnyHopMonoJumpMethodsResolved;
+        private IntPtr bunnyHopMonoIsGroundedMethod;
+        private IntPtr bunnyHopMonoIsSlidingMethod;
+        private float bunnyHopGroundedRetryAt;
 
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
@@ -77,26 +80,41 @@ namespace HeartopiaMod
                 return;
             }
 
-            GameObject skeleton = GetLocalPlayer();
-            if (skeleton == null)
+            bool landing;
+            if (this.TryReadBunnyHopSurfaceState(out bool grounded, out bool sliding))
             {
-                return;
+                // MovementComponent.IsGrounded is the flag the game's own PreJumpButton gate reads
+                // (ground distance, recomputed every locomotion tick). Unlike the height heuristic it
+                // registers landings ON elevations, where touchdown happens near the jump apex and the
+                // fall phase is too slow to cross a fall-speed threshold.
+                // Steep (near-vertical) surfaces never report grounded (CantStand) — the game puts the
+                // player into SlideLocomotion instead, and jumping out of a slide is officially
+                // supported: FreeLocomotion.SetJumpData kicks Slide->Stand and forwards the jump. So a
+                // slide contact counts as a hoppable landing too.
+                if (!grounded)
+                {
+                    this.bunnyHopWasAirborne = true;
+                }
+
+                bool onHoppableSurface = grounded || sliding;
+
+                // The airborne->surface transition gives the snappy cadence, but it is not enough on
+                // its own: hopping up a slope pressed into it never breaks ground contact
+                // (GroundAirbornThreshold is 0.15 m, the feet stay within it the whole hop), and any
+                // Stand<->Slide flip wipes StandLocomotion's queued jump input — either way one missed
+                // hop would end the chain with Space still held. The stall retry replicates what a
+                // manual Space re-press does: an unconditional fresh input edge on a hoppable surface.
+                // Free fall stays pulse-free: a mid-air SetJumpInput(false) would zero _jumpStartTime
+                // and cut hold-jump gravity.
+                landing = onHoppableSurface
+                    && (this.bunnyHopWasAirborne
+                        || Time.unscaledTime - this.bunnyHopLastJumpAt >= 0.6f);
+                this.bunnyHopLastPlayerY = float.NaN;
             }
-
-            float y = skeleton.transform.position.y;
-            float verticalDelta = float.IsNaN(this.bunnyHopLastPlayerY) ? 0f : y - this.bunnyHopLastPlayerY;
-            this.bunnyHopLastPlayerY = y;
-
-            if (verticalDelta < -0.04f)
+            else
             {
-                this.bunnyHopWasAirborne = true;
-                this.bunnyHopFallSeen = true;
+                landing = this.DetectBunnyHopLandingByHeight();
             }
-
-            bool landing = this.bunnyHopFallSeen
-                && this.bunnyHopWasAirborne
-                && verticalDelta >= -0.012f
-                && verticalDelta <= 0.02f;
 
             if (!landing
                 || Time.unscaledTime - this.bunnyHopLastJumpAt < 0.35f
@@ -111,12 +129,113 @@ namespace HeartopiaMod
             this.TryBunnyHopJumpViaMono();
         }
 
+        private bool TryReadBunnyHopSurfaceState(out bool grounded, out bool sliding)
+        {
+            grounded = false;
+            sliding = false;
+
+            float now = Time.unscaledTime;
+            if (now < this.bunnyHopGroundedRetryAt)
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                this.bunnyHopGroundedRetryAt = now + 5f;
+                return false;
+            }
+
+            if (!this.TryGetAuraMonoLocalPlayerObject(out IntPtr playerObj) || playerObj == IntPtr.Zero
+                || !this.TryGetBunnyHopMonoMoveComponent(playerObj, out IntPtr moveObj) || moveObj == IntPtr.Zero)
+            {
+                // Normal transient while loading/changing worlds — retry soon, not every frame.
+                this.bunnyHopGroundedRetryAt = now + 1f;
+                return false;
+            }
+
+            if (this.bunnyHopMonoIsGroundedMethod == IntPtr.Zero)
+            {
+                IntPtr moveClass = auraMonoObjectGetClass(moveObj);
+                this.bunnyHopMonoIsGroundedMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "get_IsGrounded", 0);
+                if (this.bunnyHopMonoIsGroundedMethod == IntPtr.Zero)
+                {
+                    this.bunnyHopGroundedRetryAt = now + 10f;
+                    return false;
+                }
+
+                // Optional: SlideLocomotion.OnEnter sets it, StandLocomotion clears it. Missing on a
+                // build just means steep-surface landings degrade to grounded-only.
+                this.bunnyHopMonoIsSlidingMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "get_IsSliding", 0);
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(this.bunnyHopMonoIsGroundedMethod, moveObj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxed, out grounded))
+            {
+                this.bunnyHopMonoIsGroundedMethod = IntPtr.Zero;
+                this.bunnyHopGroundedRetryAt = now + 5f;
+                return false;
+            }
+
+            if (this.bunnyHopMonoIsSlidingMethod != IntPtr.Zero)
+            {
+                exc = IntPtr.Zero;
+                boxed = auraMonoRuntimeInvoke(this.bunnyHopMonoIsSlidingMethod, moveObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || boxed == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxed, out sliding))
+                {
+                    sliding = false;
+                    this.bunnyHopMonoIsSlidingMethod = IntPtr.Zero;
+                }
+            }
+
+            return true;
+        }
+
+        // Fallback when the game's grounded flag is unavailable. Thresholds are velocities (m/s),
+        // not per-frame deltas: per-frame constants assumed ~60 fps and stopped seeing falls at
+        // higher frame rates. Still misses near-apex landings on elevations — the grounded flag is
+        // the fix for those.
+        private bool DetectBunnyHopLandingByHeight()
+        {
+            GameObject skeleton = GetLocalPlayer();
+            if (skeleton == null)
+            {
+                return false;
+            }
+
+            float dt = Time.deltaTime;
+            if (dt <= 0.0001f)
+            {
+                return false;
+            }
+
+            float y = skeleton.transform.position.y;
+            float verticalSpeed = float.IsNaN(this.bunnyHopLastPlayerY) ? 0f : (y - this.bunnyHopLastPlayerY) / dt;
+            this.bunnyHopLastPlayerY = y;
+
+            if (verticalSpeed < -2.4f)
+            {
+                this.bunnyHopWasAirborne = true;
+                this.bunnyHopFallSeen = true;
+            }
+
+            return this.bunnyHopFallSeen
+                && this.bunnyHopWasAirborne
+                && verticalSpeed >= -0.72f
+                && verticalSpeed <= 1.2f;
+        }
+
         private void ResetBunnyHopState()
         {
             this.bunnyHopWasAirborne = false;
             this.bunnyHopFallSeen = false;
             this.bunnyHopLastPlayerY = float.NaN;
             this.bunnyHopMonoJumpMethodsResolved = false;
+            this.bunnyHopMonoIsGroundedMethod = IntPtr.Zero;
+            this.bunnyHopMonoIsSlidingMethod = IntPtr.Zero;
+            this.bunnyHopGroundedRetryAt = 0f;
         }
 
         private unsafe bool TryBunnyHopJumpViaMono()
