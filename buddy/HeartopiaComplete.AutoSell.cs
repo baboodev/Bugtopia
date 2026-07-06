@@ -204,7 +204,6 @@ namespace HeartopiaMod
             float sourceDropdownWidth = 120f;
             float actionGap = 10f;
             float actionRowHeight = 34f;
-            float actionRowSpacing = 8f;
             Rect sourceDropdownRect = new Rect(sourceDropdownX, sourceRowY, sourceDropdownWidth, 28f);
 
             GUI.Box(sourceDropdownRect, "", this.themeTopTabStyle ?? this.themePanelStyle ?? GUI.skin.box);
@@ -219,7 +218,6 @@ namespace HeartopiaMod
             float primaryStartX = sourceDropdownRect.xMax + 12f;
             float primaryAvailableWidth = panelWidth - (primaryStartX - left);
             float primaryButtonWidth = Mathf.Max(110f, (primaryAvailableWidth - actionGap) * 0.5f);
-            float secondaryRowY = sourceRowY + actionRowHeight + actionRowSpacing;
             bool blockRowActions = this.autoSellScanSourceDropdownOpen;
             GUI.enabled = !blockRowActions;
             if (GUI.Button(new Rect(primaryStartX, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), this.L("SELL SELECTED"), this.themePrimaryButtonStyle))
@@ -233,46 +231,12 @@ namespace HeartopiaMod
                     ? (this.GetAutoSellScanSourceLabel() + " list refreshed")
                     : ("No " + this.GetAutoSellScanSourceLabel().ToLowerInvariant() + " items found");
             }
-            if (GUI.Button(new Rect(left, secondaryRowY - 3f, 160f, actionRowHeight), this.L("CACHE ICONS"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                OpenInventory();
-                this.autoSellBagScanRetryTime = Time.time + 0.35f;
-                this.autoSellBagScanDeadline = Time.time + 4f;
-                this.autoSellStatus = "Open bag icon cache scheduled";
-            }
             GUI.enabled = true;
-            num += Mathf.CeilToInt((secondaryRowY - sourceRowY) + actionRowHeight + 6f);
+            num += Mathf.CeilToInt(actionRowHeight + 6f);
             if (this.autoSellScanSourceDropdownOpen)
             {
                 float panelHeight = this.autoSellScanSourceLabels.Length * 30f + 8f;
                 num = Mathf.Max(num, Mathf.CeilToInt(sourceDropdownRect.yMax + 4f + panelHeight + 8f));
-            }
-
-            if (this.autoSellBagScanRetryTime > 0f && Time.time >= this.autoSellBagScanRetryTime)
-            {
-                if (IsBagOpen())
-                {
-                    int cachedBefore = this.autoSellBagItemTextures.Count;
-                    this.CacheAutoSellIconsFromOpenBag();
-                    int cachedAfter = this.autoSellBagItemTextures.Count;
-                    int added = Math.Max(0, cachedAfter - cachedBefore);
-                    this.autoSellStatus = added > 0
-                        ? ("Icon cache refreshed +" + added)
-                        : (cachedAfter > 0 ? "Icon cache refreshed" : "No bag icons found to cache");
-                    this.autoSellBagScanRetryTime = 0f;
-                    this.autoSellBagScanDeadline = 0f;
-                }
-                else if (this.autoSellBagScanDeadline > 0f && Time.time < this.autoSellBagScanDeadline)
-                {
-                    this.autoSellBagScanRetryTime = Time.time + 0.35f;
-                    this.autoSellStatus = "Waiting for bag to open...";
-                }
-                else
-                {
-                    this.autoSellBagScanRetryTime = 0f;
-                    this.autoSellBagScanDeadline = 0f;
-                    this.autoSellStatus = "Cache Icons timed out - open bag and try again";
-                }
             }
 
             Rect statusCard = new Rect(left, (float)num, panelWidth, 52f);
@@ -371,7 +335,7 @@ namespace HeartopiaMod
             }
             else
             {
-                GUI.Label(new Rect(left, (float)num, 560f, 24f), "Press Scan Items to read " + this.GetAutoSellScanSourceLabel().ToLowerInvariant() + " data. Cache Icons is optional and still uses the bag UI.");
+                GUI.Label(new Rect(left, (float)num, 560f, 24f), "Press Scan Items to read " + this.GetAutoSellScanSourceLabel().ToLowerInvariant() + " data. Icons load automatically from the game.");
                 num += 30;
             }
 
@@ -4277,134 +4241,6 @@ namespace HeartopiaMod
             return string.Join(" ", parts);
         }
 
-        private List<AutoSellBagItemEntry> ScanBagForAutoSellItems()
-        {
-            List<AutoSellBagItemEntry> items = new List<AutoSellBagItemEntry>();
-            HashSet<string> seenItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            this.autoSellUiStarByMatchKey.Clear();
-            this.autoSellUiStarByMatchKeyAndCount.Clear();
-            int starCached = 0;
-            int starAmbiguous = 0;
-
-            foreach (Image img in GetBagPanelImages())
-            {
-                if (img == null || img.sprite == null || !img.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                string spriteName = (img.sprite.name ?? string.Empty).ToLowerInvariant();
-                if (!this.IsLikelyBagItemSprite(spriteName))
-                {
-                    continue;
-                }
-
-                string matchKey = this.NormalizeAutoSellMatchKey(spriteName);
-                int uiStar = this.TryGetAutoSellStarCountFromBagItemImage(img);
-                int uiCount = this.TryGetAutoSellStackCountFromBagItemImage(img);
-                if (uiStar > 0)
-                {
-                    if (this.CacheAutoSellUiStar(matchKey, uiCount, uiStar))
-                    {
-                        starCached++;
-                    }
-                    else
-                    {
-                        starAmbiguous++;
-                    }
-                }
-
-                if (!seenItems.Add(spriteName))
-                {
-                    continue;
-                }
-
-                AutoSellBagItemEntry entry = new AutoSellBagItemEntry
-                {
-                    SpriteName = spriteName,
-                    MatchKey = matchKey,
-                    DisplayName = this.GetAutoSellItemDisplayName(spriteName),
-                    Count = Math.Max(1, uiCount),
-                    StarRate = uiStar
-                };
-                if (uiStar > 0 && uiStar < entry.StarCounts.Length)
-                {
-                    entry.StarCounts[uiStar] = 1;
-                }
-                items.Add(entry);
-
-                if (!this.autoSellBagItemTextures.ContainsKey(spriteName) && img.sprite.texture != null)
-                {
-                    if (this.TryLoadCachedItemIcon(spriteName, out Texture2D cachedTexture))
-                    {
-                        this.autoSellBagItemTextures[spriteName] = cachedTexture;
-                    }
-                    else
-                    {
-                        Texture2D copy = this.CopySpriteTexture(img.sprite, "[AutoSell]");
-                        if (copy != null)
-                        {
-                            this.autoSellBagItemTextures[spriteName] = copy;
-                            this.SaveCachedItemIcon(spriteName, copy);
-                        }
-                    }
-                }
-            }
-
-            this.PrimeAutoSellItemTextureCache(items);
-            items.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
-            this.AutoSellLog("Bag UI item list scan found " + items.Count + " item icon(s), star cached=" + starCached + (starAmbiguous > 0 ? ", ambiguous=" + starAmbiguous : "") + ".");
-            return items;
-        }
-
-        private bool CacheAutoSellUiStar(string matchKey, int stackCount, int starRate)
-        {
-            string key = this.ExtractAutoSellMatchKeyFromDescriptor(matchKey);
-            if (string.IsNullOrWhiteSpace(key))
-            {
-                key = this.NormalizeAutoSellMatchKey(matchKey);
-            }
-            starRate = this.NormalizeAutoSellStarRate(starRate);
-            if (string.IsNullOrWhiteSpace(key) || starRate <= 0)
-            {
-                return false;
-            }
-
-            bool specificCached = true;
-            if (stackCount > 0)
-            {
-                string countKey = this.GetAutoSellStarCountCacheKey(key, stackCount);
-                if (this.autoSellUiStarByMatchKeyAndCount.TryGetValue(countKey, out int existingCountStar))
-                {
-                    if (existingCountStar != starRate)
-                    {
-                        this.autoSellUiStarByMatchKeyAndCount[countKey] = -1;
-                        specificCached = false;
-                    }
-                }
-                else
-                {
-                    this.autoSellUiStarByMatchKeyAndCount[countKey] = starRate;
-                }
-            }
-
-            if (this.autoSellUiStarByMatchKey.TryGetValue(key, out int existing))
-            {
-                if (existing == starRate)
-                {
-                    return specificCached;
-                }
-
-                // Same item icon can appear in multiple star versions. Mark ambiguous instead
-                // of guessing, so the star filter never sells a mixed stack blindly.
-                this.autoSellUiStarByMatchKey[key] = -1;
-                return false;
-            }
-
-            this.autoSellUiStarByMatchKey[key] = starRate;
-            return specificCached;
-        }
-
         private bool TryGetAutoSellCachedUiStar(string descriptorOrKey, out int starRate)
         {
             return this.TryGetAutoSellCachedUiStar(descriptorOrKey, 0, out starRate);
@@ -4500,214 +4336,10 @@ namespace HeartopiaMod
             return "Bag";
         }
 
-        private int TryGetAutoSellStarCountFromBagItemImage(Image itemImage)
-        {
-            try
-            {
-                Transform packRoot = this.FindAutoSellPackWidgetRoot(itemImage != null ? itemImage.transform : null);
-                if (packRoot != null)
-                {
-                    Transform starRoot = packRoot.Find("star@w");
-                    if (starRoot != null)
-                    {
-                        int exactStar = this.CountActiveAutoSellStars(starRoot);
-                        if (exactStar > 0)
-                        {
-                            return exactStar;
-                        }
-                    }
-                }
-
-                Transform current = itemImage != null ? itemImage.transform : null;
-                for (int depth = 0; current != null && depth < 7; depth++, current = current.parent)
-                {
-                    int itemSpriteCount = this.CountLikelyAutoSellItemSprites(current);
-                    if (itemSpriteCount != 1)
-                    {
-                        continue;
-                    }
-
-                    int star = this.CountActiveAutoSellStars(current);
-                    if (star > 0)
-                    {
-                        return star;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return 0;
-        }
-
-        private int TryGetAutoSellStackCountFromBagItemImage(Image itemImage)
-        {
-            try
-            {
-                Transform packRoot = this.FindAutoSellPackWidgetRoot(itemImage != null ? itemImage.transform : null);
-                if (packRoot == null)
-                {
-                    packRoot = itemImage != null ? itemImage.transform : null;
-                }
-
-                int count = this.TryReadAutoSellCountText(packRoot != null ? packRoot.Find("quantity/numBg@img/num@txt") : null);
-                if (count > 0)
-                {
-                    return count;
-                }
-
-                count = this.TryReadAutoSellCountText(packRoot != null ? packRoot.Find("topNumBg@img/leftTopNum@txt") : null);
-                if (count > 0)
-                {
-                    return count;
-                }
-
-                if (packRoot != null)
-                {
-                    Text[] texts = packRoot.GetComponentsInChildren<Text>(true);
-                    foreach (Text text in texts)
-                    {
-                        if (text == null || !text.gameObject.activeInHierarchy)
-                        {
-                            continue;
-                        }
-
-                        string name = (text.name ?? string.Empty).ToLowerInvariant();
-                        if (!name.Contains("num") && !name.Contains("count"))
-                        {
-                            continue;
-                        }
-
-                        count = this.ParseAutoSellCountText(text.text);
-                        if (count > 0)
-                        {
-                            return count;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return 0;
-        }
-
-        private int TryReadAutoSellCountText(Transform textTransform)
-        {
-            if (textTransform == null || !textTransform.gameObject.activeInHierarchy)
-            {
-                return 0;
-            }
-
-            Text text = textTransform.GetComponent<Text>();
-            return text != null ? this.ParseAutoSellCountText(text.text) : 0;
-        }
-
-        private int ParseAutoSellCountText(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return 0;
-            }
-
-            string digits = new string(text.Where(char.IsDigit).ToArray());
-            if (string.IsNullOrWhiteSpace(digits))
-            {
-                return 0;
-            }
-
-            return int.TryParse(digits, out int value) ? value : 0;
-        }
-
-        private Transform FindAutoSellPackWidgetRoot(Transform start)
-        {
-            Transform current = start;
-            for (int depth = 0; current != null && depth < 8; depth++, current = current.parent)
-            {
-                string name = current.name ?? string.Empty;
-                if (name == "Root" && current.Find("star@w") != null)
-                {
-                    return current;
-                }
-            }
-
-            return null;
-        }
-
-        private int CountLikelyAutoSellItemSprites(Transform root)
-        {
-            if (root == null)
-            {
-                return 0;
-            }
-
-            int count = 0;
-            Image[] images = root.GetComponentsInChildren<Image>(true);
-            foreach (Image img in images)
-            {
-                if (img == null || img.sprite == null || !img.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                string spriteName = (img.sprite.name ?? string.Empty).ToLowerInvariant();
-                if (this.IsLikelyBagItemSprite(spriteName))
-                {
-                    count++;
-                }
-            }
-            return count;
-        }
-
-        private int CountActiveAutoSellStars(Transform root)
-        {
-            if (root == null)
-            {
-                return 0;
-            }
-
-            int star = 0;
-            Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
-            foreach (Transform t in transforms)
-            {
-                if (t == null || !t.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                string name = (t.name ?? string.Empty).ToLowerInvariant();
-                for (int i = 1; i <= 5; i++)
-                {
-                    if (name.Contains("star" + i) || name.Contains("star_" + i))
-                    {
-                        star = Math.Max(star, i);
-                    }
-                }
-            }
-
-            return Mathf.Clamp(star, 0, 5);
-        }
-
-        private void CacheAutoSellIconsFromOpenBag()
-        {
-            List<AutoSellBagItemEntry> iconEntries = this.ScanBagForAutoSellItems();
-            if ((this.autoSellBagItems == null || this.autoSellBagItems.Count == 0) && iconEntries.Count > 0)
-            {
-                this.autoSellBagItems = iconEntries;
-            }
-        }
-
         private List<AutoSellBagItemEntry> ScanBackpackForAutoSellItems()
         {
             try
             {
-                if (this.autoSellScanSource != 1 && this.IsBagOpen())
-                {
-                    this.CacheAutoSellIconsFromOpenBag();
-                }
-
                 List<AutoSellBagItemEntry> items = new List<AutoSellBagItemEntry>();
                 Dictionary<string, AutoSellBagItemEntry> byKey = new Dictionary<string, AutoSellBagItemEntry>(StringComparer.OrdinalIgnoreCase);
                 int inspected = 0;
@@ -4717,7 +4349,6 @@ namespace HeartopiaMod
                 this.CollectAutoSellBackpackEntriesManaged(items, byKey, ref inspected);
                 this.CollectAutoSellBackpackEntriesMono(items, byKey, ref inspected, !usedRuntimeSnapshot);
 
-                this.PrimeAutoSellItemTextureCache(items);
                 items.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
                 this.AutoSellLog(this.GetAutoSellScanSourceLabel() + " item list scan found " + items.Count + " unique item(s), inspected=" + inspected + ".");
                 return items;
@@ -5014,130 +4645,6 @@ namespace HeartopiaMod
             keys.Add(normalized);
         }
 
-        private void PrimeAutoSellItemTextureCache(List<AutoSellBagItemEntry> items)
-        {
-            if (items == null || items.Count == 0)
-            {
-                return;
-            }
-
-            Dictionary<string, List<string>> aliasesByTarget = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            int missingBeforeResolve = 0;
-
-            foreach (AutoSellBagItemEntry entry in items)
-            {
-                List<string> keys = this.GetAutoSellItemTextureKeys(entry);
-                bool hasTexture = false;
-
-                foreach (string key in keys)
-                {
-                    if (this.autoSellBagItemTextures.TryGetValue(key, out Texture2D existing) && existing != null)
-                    {
-                        hasTexture = true;
-                        break;
-                    }
-
-                    if (this.TryLoadCachedItemIcon(key, out Texture2D cached) && cached != null)
-                    {
-                        this.autoSellBagItemTextures[key] = cached;
-                        hasTexture = true;
-                        break;
-                    }
-                }
-
-                if (hasTexture)
-                {
-                    continue;
-                }
-
-                missingBeforeResolve++;
-                foreach (string key in keys)
-                {
-                    if (!aliasesByTarget.TryGetValue(key, out List<string> aliases))
-                    {
-                        aliases = new List<string>();
-                        aliasesByTarget[key] = aliases;
-                    }
-
-                    foreach (string alias in keys)
-                    {
-                        if (!aliases.Contains(alias))
-                        {
-                            aliases.Add(alias);
-                        }
-                    }
-                }
-            }
-
-            if (aliasesByTarget.Count == 0)
-            {
-                return;
-            }
-
-            int resolved = 0;
-            try
-            {
-                Sprite[] sprites = Resources.FindObjectsOfTypeAll<Sprite>();
-                if (sprites == null || sprites.Length == 0)
-                {
-                    return;
-                }
-
-                for (int i = 0; i < sprites.Length; i++)
-                {
-                    Sprite sprite = sprites[i];
-                    if (sprite == null || string.IsNullOrWhiteSpace(sprite.name))
-                    {
-                        continue;
-                    }
-
-                    string normalizedName = this.NormalizeAutoSellMatchKey(sprite.name);
-                    if (!aliasesByTarget.TryGetValue(normalizedName, out List<string> aliases))
-                    {
-                        continue;
-                    }
-
-                    Texture2D copy = this.CopySpriteTexture(sprite, "[AutoSell]");
-                    if (copy == null)
-                    {
-                        continue;
-                    }
-
-                    foreach (string alias in aliases)
-                    {
-                        this.autoSellBagItemTextures[alias] = copy;
-                        this.SaveCachedItemIcon(alias, copy);
-                        this.autoSellLoadedSpriteResolveFailures.Remove(alias);
-                    }
-
-                    resolved++;
-                    aliasesByTarget.Remove(normalizedName);
-                    if (aliasesByTarget.Count == 0)
-                    {
-                        break;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            if (resolved > 0)
-            {
-                this.AutoSellLog("Resolved " + resolved + " missing auto-sell icon(s) from loaded sprites.");
-            }
-
-            foreach (string unresolved in aliasesByTarget.Keys)
-            {
-                this.autoSellLoadedSpriteResolveFailures.Add(unresolved);
-            }
-
-            if (resolved == 0 && missingBeforeResolve > 0)
-            {
-                this.AutoSellLog("Loaded sprite fallback could not resolve " + aliasesByTarget.Count + " icon key(s) yet.");
-            }
-        }
-
         private bool TryGetAutoSellItemTexture(AutoSellBagItemEntry entry, out Texture2D texture)
         {
             texture = null;
@@ -5152,13 +4659,11 @@ namespace HeartopiaMod
                 {
                     return true;
                 }
-                if (this.TryLoadCachedItemIcon(key, out texture) && texture != null)
-                {
-                    this.autoSellBagItemTextures[key] = texture;
-                    return true;
-                }
             }
 
+            // Not in memory yet: ask the game's asset pipeline directly (request-once, throttled
+            // inside). The grid shows initials until the async load lands.
+            this.RequestGameItemIconForEntry(entry);
             return false;
         }
 

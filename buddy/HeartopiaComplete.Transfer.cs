@@ -700,7 +700,6 @@ namespace HeartopiaMod
                 List<TransferItemEntry> items = new List<TransferItemEntry>();
                 int inspected = 0;
                 this.CollectTransferItemEntriesMono(items, ref inspected);
-                this.PrimeTransferItemTextureCache(items);
                 items.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
                 if (updateStatus)
                 {
@@ -849,40 +848,6 @@ namespace HeartopiaMod
                 IsLocked = isLocked,
                 FromBackpack = fromBackpack
             });
-        }
-
-        private void PrimeTransferItemTextureCache(List<TransferItemEntry> items)
-        {
-            if (items == null || items.Count == 0)
-            {
-                return;
-            }
-
-            List<AutoSellBagItemEntry> proxy = new List<AutoSellBagItemEntry>(items.Count);
-            for (int i = 0; i < items.Count; i++)
-            {
-                TransferItemEntry entry = items[i];
-                if (entry == null)
-                {
-                    continue;
-                }
-
-                proxy.Add(new AutoSellBagItemEntry
-                {
-                    SpriteName = entry.SpriteName,
-                    MatchKey = entry.MatchKey,
-                    DisplayName = entry.DisplayName,
-                    NetId = entry.NetId,
-                    Count = entry.Count,
-                    StaticId = entry.StaticId,
-                    EntityType = entry.EntityType,
-                    StarRate = entry.StarRate,
-                    FromBackpack = entry.FromBackpack,
-                    FromWarehouse = !entry.FromBackpack
-                });
-            }
-
-            this.PrimeAutoSellItemTextureCache(proxy);
         }
 
         private bool TryGetTransferItemTexture(TransferItemEntry entry, out Texture2D texture)

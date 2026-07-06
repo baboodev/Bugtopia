@@ -428,6 +428,12 @@ Same mapping as `TryResolveForceOpenShopStoreId` in `HeartopiaComplete.cs` (e.g.
 - **Filter:** configured item key (descriptor substring / `p_` photo prefix); **star filter** (0 = any, 1–5 = exact star); **skip 5★**; reserve count per group; max per stack; sell full stack.
 - **Sort:** none — all matching `netId` stacks are aggregated and sold.
 - Interval-based loop; can hide bag items from normal UI while running.
+- **Icons:** item tiles (Auto Sell grid + Bag / Warehouse transfer grid + pet-feed food list) load
+  icons **directly from the game**, always-on: staticId → `RewardUtility.GetIconName` →
+  `ResManager.LoadSpriteAsync("ui_item_normal_…")`, copied into the in-memory texture cache on
+  arrival (confirmed in-game July 2026). The legacy `CACHE ICONS` open-bag harvest and the disk
+  PNG reads were removed from the tile path. Details:
+  [ITEM_ICON_PIPELINE.md](./ITEM_ICON_PIPELINE.md).
 
 See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#auto-sell-detail).
 

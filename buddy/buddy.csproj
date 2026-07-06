@@ -206,6 +206,7 @@
     <Compile Include="HeartopiaComplete.UiKit.cs" />
     <Compile Include="HeartopiaComplete.NetCook.cs" />
     <Compile Include="HeartopiaComplete.AutoSell.cs" />
+    <Compile Include="HeartopiaComplete.GameIcons.cs" />
     <Compile Include="HeartopiaComplete.AutoEatRepair.cs" />
     <Compile Include="HeartopiaComplete.BirdFarm.cs" />
     <Compile Include="HeartopiaComplete.Radar.cs" />

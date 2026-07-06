@@ -278,14 +278,11 @@ namespace HeartopiaMod
         private Dictionary<string, Texture2D> autoSellBagItemTextures = new Dictionary<string, Texture2D>();
         private readonly Dictionary<string, int> autoSellUiStarByMatchKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> autoSellUiStarByMatchKeyAndCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> autoSellLoadedSpriteResolveFailures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private MethodInfo cachedAutoSellTryGetQualityComponentMethod = null;
         private Type cachedAutoSellNetIdType = null;
         private MethodInfo cachedAutoSellNetIdFromUIntMethod = null;
         private bool autoSellQualityLookupResolved = false;
         private Vector2 autoSellBagItemScrollPos = Vector2.zero;
-        private float autoSellBagScanRetryTime = 0f;
-        private float autoSellBagScanDeadline = 0f;
         private float autoSellPendingRescanAt = 0f;
         private int autoSellPendingRescanRetries = 0;
         private bool isRepairing = false;
@@ -629,6 +626,9 @@ namespace HeartopiaMod
             Breadcrumbs.Tick("OnUpdate");
             // World-epoch poll: invalidates AuraMono object caches after a scene/world change.
             this.UpdateAuraMonoWorldEpoch();
+            // Direct game-icon loads (docs/ITEM_ICON_PIPELINE.md): drain completed sprite loads,
+            // time out stuck ones. No-op (two dictionary count checks) while idle.
+            this.ProcessGameIconLoads();
             // Lazily install the hot-path patches only while a feature that needs them is active.
             // This is the safety net for sustained, multi-frame effects; one-shot writers that
             // touch a transform in the same call (teleport, camera) also Ensure directly at the site.

@@ -136,7 +136,7 @@ Vanilla game reference (ILSpy): `BackPackSystem.CompareSubmitItem` — price asc
 
 **Reserve / grouping:** `reserveGroupsByNetId` uses descriptor + star so the mod can keep N stacks per group (`autoSellReserveCount`).
 
-**Star on photos:** bird-photo descriptors may use cached UI star, `step` field (1–5), or `QualityComponent` via `DataCenter.TryGetComponentData`.
+**Star on photos:** bird-photo descriptors use the `step` field (1–5) or `QualityComponent` via `DataCenter.TryGetComponentData`. (The bag-UI star cache and its scanner were removed with the CACHE ICONS harvest in July 2026 — `TryGetAutoSellCachedUiStar` still exists but always misses.)
 
 ---
 

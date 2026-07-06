@@ -70,7 +70,6 @@ namespace HeartopiaMod
         private int petFeedAuraDogEntityTypeValue = int.MinValue;
         private readonly Dictionary<int, string> petFeedFoodNameByStaticId = new Dictionary<int, string>();
         private readonly Dictionary<int, Texture2D> petFeedFoodIconByStaticId = new Dictionary<int, Texture2D>();
-        private readonly HashSet<int> petFeedFoodIconLoadAttempted = new HashSet<int>();
         private readonly Dictionary<uint, float> petFeedProbeAttemptedAt = new Dictionary<uint, float>();
         private readonly Dictionary<int, int> petFeedEntityTypeByStaticId = new Dictionary<int, int>();
         private List<PetFeedFoodOption> petFeedFoodOptions = null;
@@ -2983,33 +2982,12 @@ namespace HeartopiaMod
                     this.petFeedFoodIconByStaticId[staticId] = texture;
                     return true;
                 }
-
-                if (this.TryLoadCachedItemIconForPetFeed(staticId, key, out texture) && texture != null)
-                {
-                    this.autoSellBagItemTextures[key] = texture;
-                    this.petFeedFoodIconByStaticId[staticId] = texture;
-                    return true;
-                }
             }
 
+            // Not in memory yet: request the icon from the game's asset pipeline; the next
+            // resolve pass picks it up from autoSellBagItemTextures once the load lands.
+            this.RequestGameItemIconByStaticId(staticId, null);
             return false;
-        }
-
-        private bool TryLoadCachedItemIconForPetFeed(int staticId, string key, out Texture2D texture)
-        {
-            texture = null;
-            if (staticId <= 0 || string.IsNullOrWhiteSpace(key))
-            {
-                return false;
-            }
-
-            int attemptKey = (staticId * 397) ^ key.GetHashCode();
-            if (!this.petFeedFoodIconLoadAttempted.Add(attemptKey))
-            {
-                return false;
-            }
-
-            return this.TryLoadCachedItemIcon(key, out texture) && texture != null;
         }
 
         private void CachePetFeedFoodIconTexture(int staticId, string spriteName, string matchKey)

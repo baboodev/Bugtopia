@@ -635,6 +635,18 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Features:** Warehouse bypass, bulk selector, Win32 click automation
 - **Access:** **A** (`UIManager.GetView`), **W**, **H** (sprite postfix on `Image.set_sprite` for bulk selector)
 
+#### `RewardUtility` (item icon names)
+- **Dump:** `XDTDataAndProtocol/XDTGameSystem.Utilities/RewardUtility.cs` (namespace `XDTGameSystem.Utilities`, image **XDTDataAndProtocol**)
+- **Features:** Direct item-icon loading — `GetIconName(int staticId, int step)` = the exact resolver BagPanel cells use; full chain in [ITEM_ICON_PIPELINE.md](./ITEM_ICON_PIPELINE.md)
+- **Access:** **A** — static invoke, two int args, string return
+- **File:** `HeartopiaComplete.GameIcons.cs`
+
+#### `ResManager` (IL2CPP asset loader)
+- **Dump:** `gameassembly-dumps/ResManager/ScriptsRefactory.ResSystem/ResManager.cs`; interop stub `BepInEx/interop/ResManager.dll` / `Il2CppResManager.dll` (Mono-side `XDTBaseService.ResourceManager` just icalls into it via EngineWrapper)
+- **Features:** Direct item-icon loading — `HasAsset(string)`, `LoadSpriteAsync(string, Action<Sprite>)` (async-only, key `ui_item_normal_<iconName>`), `UnLoadAsync(int token)`
+- **Access:** **R** (interop static reflection) + Il2CppInterop `DelegateSupport` callback (rooted until fired)
+- **File:** `HeartopiaComplete.GameIcons.cs`
+
 ---
 
 ### 3.9 Quests and tasks
