@@ -5494,9 +5494,7 @@ namespace HeartopiaMod
         private int cachedBirdEscapeMonoMethodParamCount = 0;
         private IntPtr cachedBirdRemoveMonoMethod = IntPtr.Zero;
         private int cachedBirdRemoveMonoMethodParamCount = 0;
-        private bool birdFarmMaxPhotoPatchApplied = false;
-        private bool birdFarmMaxPhotoPatchUnavailableLogged = false;
-        private float nextBirdFarmMaxPhotoPatchAttemptAt = -999f;
+        private bool birdFarmMaxPhotoHookRegistered = false;
         private bool warehouseBypassEnabled = false;
         internal bool WarehouseBypassEnabled => this.warehouseBypassEnabled;
         // Stranger Chat Bypass

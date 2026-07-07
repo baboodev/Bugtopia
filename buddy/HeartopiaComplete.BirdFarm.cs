@@ -5202,104 +5202,42 @@ namespace HeartopiaMod
             }
         }
 
-        public void TryEnsureBirdFarmMaxPhotoPatch()
+        // MaxPhoto auto-scare detection — anti-cheat-safe path.
+        // The game dispatches TakingBirdPhotoResultEvent through EventCenter (BirdProtocolManager.InformTakingPhotoResult
+        // -> EventCenter.DispatchEvent(in evt)), so we subscribe via the embedded-Mono dispatch-detour engine
+        // (RegisterGameEventHook) instead of the old IL2CPP Harmony postfixes on BirdWatchingSystem.InformUiResult /
+        // BirdManager.BirdPhotoErrorToast — those wrote GameAssembly .text and were visible to the Themis integrity hash.
+        // Payload: { BirdErrorCode errorCode @0 (int32); bool IsTriggerPassive @4 }.
+        private const string BirdFarmMaxPhotoResultEventName = "ScriptsRefactory.DataAndProtocol.Events.TakingBirdPhotoResultEvent";
+        private const int BirdErrorCodeMaxPhoto = 15; // BirdErrorCode.MaxPhoto (enum ordinal)
+
+        public void TryEnsureBirdFarmMaxPhotoEventHook()
         {
-            if (this.birdFarmMaxPhotoPatchApplied || Time.unscaledTime < this.nextBirdFarmMaxPhotoPatchAttemptAt)
+            if (this.birdFarmMaxPhotoHookRegistered)
             {
                 return;
             }
 
-            this.nextBirdFarmMaxPhotoPatchAttemptAt = Time.unscaledTime + 5f;
-
-            try
+            // RegisterGameEventHook only records handler metadata here; the native detour installs lazily.
+            if (this.RegisterGameEventHook(BirdFarmMaxPhotoResultEventName, 8, this.OnTakingBirdPhotoResultMaxPhotoEvent))
             {
-                MethodInfo directPostfix = typeof(HeartopiaComplete).GetMethod(nameof(TakingBirdPhotoResultPostfix), BindingFlags.Static | BindingFlags.NonPublic);
-                Type birdWatchingType = this.FindLoadedType(
-                    "XDTGameSystem.GameplaySystem.Bird.BirdWatchingSystem",
-                    "BirdWatchingSystem");
-                MethodInfo directTarget = birdWatchingType?.GetMethod("InformUiResult", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (directTarget != null && directPostfix != null && HeartopiaComplete.harmonyInstance != null)
-                {
-                    HeartopiaComplete.harmonyInstance.Patch(directTarget, null, new HarmonyMethod(directPostfix), null, null, null);
-                    this.birdFarmMaxPhotoPatchApplied = true;
-                    ModLogger.Msg("[BirdFarm] Patched BirdWatchingSystem.InformUiResult for direct MaxPhoto auto-scare.");
-                    return;
-                }
-
-                Type birdManagerType = this.FindLoadedType(
-                    "XDTGameSystem.GameplaySystem.Bird.BirdManager",
-                    "XDTLevelAndEntity.XDTGameSystem.GameplaySystem.Bird.BirdManager",
-                    "BirdManager");
-                MethodInfo toastTarget = birdManagerType?.GetMethod("BirdPhotoErrorToast", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                MethodInfo toastPostfix = typeof(HeartopiaComplete).GetMethod(nameof(BirdPhotoErrorToastPostfix), BindingFlags.Static | BindingFlags.NonPublic);
-                if (toastTarget == null || toastPostfix == null || HeartopiaComplete.harmonyInstance == null)
-                {
-                    if (!this.birdFarmMaxPhotoPatchUnavailableLogged)
-                    {
-                        this.BirdFarmNetLog($"MaxPhoto direct patch unavailable. birdWatchingType={(birdWatchingType != null)} directTarget={(directTarget != null)} directPostfix={(directPostfix != null)} birdManagerType={(birdManagerType != null)} toastTarget={(toastTarget != null)} toastPostfix={(toastPostfix != null)} harmony={(HeartopiaComplete.harmonyInstance != null)}; using toast fallback.");
-                        this.birdFarmMaxPhotoPatchUnavailableLogged = true;
-                    }
-
-                    this.nextBirdFarmMaxPhotoPatchAttemptAt = Time.unscaledTime + 30f;
-                    return;
-                }
-
-                HeartopiaComplete.harmonyInstance.Patch(toastTarget, null, new HarmonyMethod(toastPostfix), null, null, null);
-                this.birdFarmMaxPhotoPatchApplied = true;
-                ModLogger.Msg("[BirdFarm] Patched BirdPhotoErrorToast for MaxPhoto auto-scare.");
-            }
-            catch (Exception ex)
-            {
-                this.BirdFarmNetLog("MaxPhoto direct patch failed: " + ex.Message);
+                this.birdFarmMaxPhotoHookRegistered = true;
+                ModLogger.Msg("[BirdFarm] Subscribed to TakingBirdPhotoResultEvent for MaxPhoto auto-scare (EventCenter, no IL2CPP patch).");
             }
         }
 
-        private static void TakingBirdPhotoResultPostfix(object[] __args)
+        // Runs on the Unity main thread during the EventCenter drain (same thread the old Harmony postfix used),
+        // so the AuraMono escape/remove invokes in TryHandleBirdFarmMaxPhotoAutoScare stay main-thread-safe.
+        private void OnTakingBirdPhotoResultMaxPhotoEvent(GameEventSnapshot e)
         {
-            try
-            {
-                object evt = (__args != null && __args.Length > 0) ? __args[0] : null;
-                HeartopiaComplete.Instance?.OnTakingBirdPhotoResult(evt);
-            }
-            catch
-            {
-            }
-        }
-
-        private static void BirdPhotoErrorToastPostfix(object[] __args)
-        {
-            try
-            {
-                object errorCode = (__args != null && __args.Length > 0) ? __args[0] : null;
-                HeartopiaComplete.Instance?.OnBirdPhotoErrorToast(errorCode);
-            }
-            catch
-            {
-            }
-        }
-
-        private void OnTakingBirdPhotoResult(object evt)
-        {
-            object errorCode = this.TryGetFieldOrPropertyValue(evt, "errorCode", "ErrorCode");
-            string errorName = errorCode != null ? errorCode.ToString() : string.Empty;
-            if (!string.Equals(errorName, "MaxPhoto", StringComparison.Ordinal))
+            // errorCode @0 (BirdErrorCode, int32-backed). Only MaxPhoto triggers the auto-scare.
+            if (e.ReadInt32(0) != BirdErrorCodeMaxPhoto)
             {
                 return;
             }
 
-            this.BirdFarmNetLog("[MaxPhotoDirect] Result event observed: " + errorName);
+            this.BirdFarmNetLog("[MaxPhotoDirect] TakingBirdPhotoResultEvent observed: MaxPhoto");
             this.TryHandleBirdFarmMaxPhotoAutoScare("TakingBirdPhotoResultEvent");
-        }
-
-        private void OnBirdPhotoErrorToast(object errorCode)
-        {
-            string errorName = errorCode != null ? errorCode.ToString() : string.Empty;
-            if (!string.Equals(errorName, "MaxPhoto", StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            this.TryHandleBirdFarmMaxPhotoAutoScare("BirdPhotoErrorToast");
         }
 
         private void TryHandleBirdFarmMaxPhotoAutoScare(string source)

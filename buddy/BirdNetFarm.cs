@@ -488,7 +488,7 @@ namespace HeartopiaMod
             if (enabled)
             {
                 Breadcrumbs.Tick("BirdFarm.update");
-                try { host.TryEnsureBirdFarmMaxPhotoPatch(); } catch { }
+                try { host.TryEnsureBirdFarmMaxPhotoEventHook(); } catch { }
             }
 
             // Flush any pending slider-change config save (debounced 2s after last change)
