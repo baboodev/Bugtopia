@@ -73,68 +73,6 @@ namespace HeartopiaMod
             }
         }
 
-        public void OnTeleportArrivedResource()
-        {
-            this.isResourceFarmTeleport = false;
-            this.resourceJustArrived = true;
-            this.resourceArrivalTime = Time.unscaledTime;
-            ModLogger.Msg($"[ResourceFarm] Arrived! Will press F for {this.resourceClickDuration}s (after {this.resourceArrivalDelay}s delay)");
-        }
-
-        private void TeleportToNextResource()
-        {
-            if (this.resourceMarkerPositions.Count == 0) return;
-            // "Teleport in flight" is signaled by the frames counter, not the override flag —
-            // noclip holds OverridePlayerPosition true permanently while hovering.
-            if (this.teleportFramesRemaining > 0) return;
-            GameObject p = this.FindPlayerRoot();
-            if (p == null)
-            {
-                ModLogger.Warning("[ResourceFarm] Cannot find player!");
-                return;
-            }
-            Vector3 pos = p.transform.position;
-            if (!this.hasResourceStartPosition)
-            {
-                this.resourceStartPosition = pos;
-                this.hasResourceStartPosition = true;
-            }
-            Vector3 targetPos;
-            if (this.isResourceReturningToStart)
-            {
-                targetPos = this.resourceStartPosition;
-                this.isResourceReturningToStart = false;
-                this.visitedResourceMarkerIndices.Clear();
-                this.resourceMarkersNeedShuffle = true;
-                this.currentResourceMarkerIndex = -1;
-                ModLogger.Msg("[ResourceFarm] Returning to start position...");
-            }
-            else
-            {
-                List<int> notVisited = new List<int>();
-                for (int i=0;i<this.resourceMarkerPositions.Count;i++) if (!this.visitedResourceMarkerIndices.Contains(i)) notVisited.Add(i);
-                if (notVisited.Count == 0)
-                {
-                    this.isResourceReturningToStart = true;
-                    this.visitedResourceMarkerIndices.Clear();
-                    this.resourceMarkersNeedShuffle = true;
-                    this.currentResourceMarkerIndex = -1;
-                    ModLogger.Msg($"[ResourceFarm] All {this.resourceMarkerPositions.Count} resources visited! Returning to start...");
-                    return;
-                }
-                int idx = this.instanceRng.Next(0, notVisited.Count);
-                int chosen = notVisited[idx];
-                this.visitedResourceMarkerIndices.Add(chosen);
-                this.currentResourceMarkerIndex = chosen;
-                targetPos = this.resourceMarkerPositions[chosen];
-                ModLogger.Msg($"[ResourceFarm] Teleporting to resource {this.visitedResourceMarkerIndices.Count}/{this.resourceMarkerPositions.Count} (index:{chosen})");
-            }
-
-            this.isResourceFarmTeleport = true;
-            this.TeleportToLocation(targetPos);
-            this.teleportFramesRemaining = 10;
-        }
-
         // Token: 0x06000021 RID: 33 RVA: 0x000062EC File Offset: 0x000044EC
         private float DrawTeleportTab(int startY)
         {
@@ -1830,14 +1768,6 @@ namespace HeartopiaMod
                 {
                     // Keep the pin while noclip is on so the player stays hovering at the target.
                     OverridePlayerPosition = this.noclipEnabled;
-                    try
-                    {
-                        if (this.isResourceFarmTeleport)
-                        {
-                            this.OnTeleportArrivedResource();
-                        }
-                    }
-                    catch { }
                 }
             }
         }

@@ -515,12 +515,9 @@ namespace HeartopiaMod
         // auto-enable it when a category is checked ("You must manually press the ENABLE RADAR
         // button to activate"), confirmed in-game 2026-07-02 (button alone did nothing without this).
         //
-        // Similarly, autoFarmEnabled is only the "Auto Collect" MODE checkbox, not the run state —
-        // the actual Foraging state machine only starts inside ToggleAutoFarm() (Farm.cs), which the
+        // The Foraging state machine only starts inside ToggleAutoFarm() (Farm.cs), which the
         // real "START FORAGING" button calls, and which itself enforces preconditions (a loot toggle,
-        // a mode selected, isRadarActive) before flipping autoFarmActive. A bare `autoFarmEnabled =
-        // true` (the original Phase 3 code) satisfied none of that and never actually started
-        // foraging — confirmed in-game 2026-07-02.
+        // Aura Farm enabled, isRadarActive) before flipping autoFarmActive.
         private void QuestAssistantStartCollect(List<int> itemStaticIds, int taskId)
         {
             if (!this.isRadarActive)
@@ -547,7 +544,6 @@ namespace HeartopiaMod
             }
 
             this.SetAuraFarmEnabled(true);
-            this.autoFarmEnabled = true;
             if (!this.autoFarmActive)
             {
                 this.ToggleAutoFarm();
@@ -672,7 +668,6 @@ namespace HeartopiaMod
                 this.ToggleAutoFarm(); // real STOP FORAGING — also resets game speed to 1x, clears farm state
             }
 
-            this.autoFarmEnabled = false;
             this.questAssistantLastStatus = "Collect done (" + reason + ") — Aura Farm/Foraging stopped.";
             this.QuestAssistantLog("Collect monitor stop: taskId=" + taskId + " reason=" + reason);
         }

@@ -37,7 +37,6 @@ namespace HeartopiaMod
         // Keybinds Management
         private KeyCode keyToggleMenu = KeyCode.Insert;
         private KeyCode keyToggleRadar = KeyCode.None;
-        private KeyCode keyAutoForaging = KeyCode.None;
         private KeyCode keyAuraFarm = KeyCode.None;
         private KeyCode keyWaterWeedRadius = KeyCode.None;
         private KeyCode keyAutoFish = KeyCode.None;
@@ -154,8 +153,6 @@ namespace HeartopiaMod
         [DllImport("user32.dll", SetLastError = true)]
         static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
         [DllImport("user32.dll", SetLastError = true)]
-        static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-        [DllImport("user32.dll", SetLastError = true)]
         static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr GetConsoleWindow();
@@ -171,12 +168,10 @@ namespace HeartopiaMod
         const uint WM_KEYUP = 0x0101;
         const uint WM_LBUTTONDOWN = 0x0201;
         const uint WM_LBUTTONUP = 0x0202;
-        const uint KEYEVENTF_KEYUP = 0x0002;
         const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
         const uint MOUSEEVENTF_LEFTUP = 0x0004;
         const int MK_LBUTTON = 0x0001;
         const int VK_ESCAPE = 0x1B;
-        const int VK_F = 0x46;
 
         // --- PATROL SYSTEM VARIABLES ---
 
@@ -239,7 +234,6 @@ namespace HeartopiaMod
         private const string USE_BUTTON_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Scene/BagPanel(Clone)/tip@w@t/operate@go/operate1@btn";
         private const string CLOSE_BUTTON_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Scene/BagPanel(Clone)/close@btn";
         private const string SELECTED_ITEM_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Scene/BagPanel(Clone)/bag1@unbreakscroll/Content/NewPackWidget/Root/select@go"; // Selection indicator that appears when item is clicked
-        private const string INTERACT_PROMPT_BUTTON_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn";
         private const string LOGIN_PANEL_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Full/LoginPanel(Clone)";
         private const string LOGIN_ROOM_PANEL_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Full/LoginRoomPanel(Clone)";
         private const string START_GAME_BUTTON_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Full/LoginPanel(Clone)/AniRoot@queueanimation/startGame@btn";
@@ -655,12 +649,10 @@ namespace HeartopiaMod
             // so no hot-path Harmony patch is installed for this.
             this.UpdateMenuMovementInputBlock();
             // Simulated F-key (Input.GetKey* patches). NOTE: fishing (AutoFishingFarm) and insect
-            // (InsectNetFarm) are net-based and do NOT use F-sim, so they are not gated here. Real
-            // users: resource farm + auto-forage (set SimulateFKey* directly) and the SimulateFKeyPulse
-            // callers (camera-toggle interact, meteor auto-interact, SendFMessage), which also call
+            // (InsectNetFarm) are net-based and do NOT use F-sim, so they are not gated here. Only
+            // SimulateFKeyPulse callers (camera-toggle interact) remain, which also call
             // EnsureInputSimPatched() at their own site.
-            if (this.autoResourceFarmEnabled || this.autoFarmActive
-                || HeartopiaComplete.SimulateFKeyHeld || HeartopiaComplete.SimulateFKeyDown || HeartopiaComplete.SimulateFKeyUp)
+            if (HeartopiaComplete.SimulateFKeyHeld || HeartopiaComplete.SimulateFKeyDown || HeartopiaComplete.SimulateFKeyUp)
             {
                 this.EnsureInputSimPatched();
                 this.inputSimPatchLastNeededAt = hotPatchNow;
@@ -821,10 +813,6 @@ namespace HeartopiaMod
                     this.ToggleRadar();
                     this.AddMenuNotification($"Radar {(this.isRadarActive ? "Enabled" : "Disabled")}", this.isRadarActive ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
-                if (this.TryGetModHotkeyDown(this.keyAutoForaging))
-                {
-                    this.SetAutoCollectEnabled(!this.autoFarmEnabled);
-                }
                 if (this.TryGetModHotkeyDown(this.keyAuraFarm))
                 {
                     this.SetAuraFarmEnabled(!this.auraFarmEnabled);
@@ -933,8 +921,6 @@ namespace HeartopiaMod
                 }
                 if (this.TryGetModHotkeyDown(this.keyDisableAll))
                 {
-                    this.StopMeteorAutoInteractSequence();
-                    this.autoFarmEnabled = false;
                     this.autoFarmActive = false;
                     this.farmState = HeartopiaComplete.AutoFarmState.Idle;
                     this.autoFarmAutoStopAt = -1f;
@@ -943,7 +929,6 @@ namespace HeartopiaMod
                     this.antiAfkEnabled = false;
                     this.StopAutoCookInternal("Disabled");
                     this.isAutoEating = false;
-                    this.StopTreeFarm("Stopped");
                     this.mouseLookEnabled = false;
                     this.noclipEnabled = false;
                     this.UpdateMouseLookState();
@@ -956,11 +941,7 @@ namespace HeartopiaMod
                     this.lodOverrideMode = 0;
                     this.RevertLodOverride();
                     this.StopAllAutoFishing();
-                    this.autoResourceFarmEnabled = false;
                     this.autoSellEnabled = false;
-                    this.autoResourceFarmAutoStopAt = -1f;
-                    this.ResetResourceFarmState();
-                    this.resourceJustArrived = false;
                     this.netCookEnabled = false;
                     this.netCookDrainAfterIngredientsRunOut = false;
                     this.netCookDrainReason = null;
@@ -972,7 +953,6 @@ namespace HeartopiaMod
                     SimulateFKeyHeld = false;
                     SimulateFKeyDown = false;
                     SimulateFKeyUp = false;
-                    this.fKeySimFrame = 0;
                     try { InsectNetFarm.ForceStop(); } catch (Exception ex) { ModLogger.Msg("[DisableAll] Failed to stop Insect Farm: " + ex.Message); }
                     try { BirdNetFarm.ForceStop(this); } catch (Exception ex) { ModLogger.Msg("[DisableAll] Failed to stop Bird Farm: " + ex.Message); }
                     try { this.ForceStopPuzzleAuto(); } catch (Exception ex) { ModLogger.Msg("[DisableAll] Failed to stop Puzzle: " + ex.Message); }
@@ -1280,12 +1260,6 @@ namespace HeartopiaMod
             }
 
             this.ApplyGameSpeed();
-            bool flag5 = this.autoFarmEnabled && Time.unscaledTime > this.nextFarmTime;
-            if (flag5)
-            {
-                this.nextFarmTime = Time.unscaledTime + this.farmPeriod;
-                this.RunAutoCollectLogic();
-            }
             bool flag6 = this.autoCookEnabled;
             if (flag6)
             {
@@ -1351,7 +1325,6 @@ namespace HeartopiaMod
                 catch (Exception ex) { this.fishingRouteBreaker.Failure("FishingRoute", ex, Time.unscaledTime); }
             }
             this.ProcessAutoSell();
-            this.RunTreeFarmLogic();
             this.RunLobbyAutoActions();
             this.CloseAnnouncementPanelIfPresent();
             if (this.bypassEnabled || this.bypassObjectsHidden)
@@ -1422,12 +1395,6 @@ namespace HeartopiaMod
                 try { this.UpdatePuzzleAutomation(); this.puzzleNetBreaker.Success(); }
                 catch (Exception ex) { this.puzzleNetBreaker.Failure("PuzzleNet", ex, farmTickNow); }
             }
-            if (this.resourceFarmBreaker.ShouldRun(farmTickNow))
-            {
-                try { this.UpdateResourceFarm(); this.resourceFarmBreaker.Success(); }
-                catch (Exception ex) { this.resourceFarmBreaker.Failure("ResourceFarm", ex, farmTickNow); }
-            }
-
             this.UpdateVisualDebugEsp();
             Breadcrumbs.Drop("ou.end");
         }
@@ -2414,10 +2381,9 @@ namespace HeartopiaMod
             else if (this.selectedTab == 2)
             {
                 tabs.Add(("Foraging", () => this.autoFarmSubTab == 0, () => this.SetAutoFarmSubTab(0)));
-                tabs.Add(("Chop & Mine", () => this.autoFarmSubTab == 1, () => this.SetAutoFarmSubTab(1)));
-                tabs.Add(("Fishing", () => this.autoFarmSubTab == 2, () => this.SetAutoFarmSubTab(2)));
-                tabs.Add(("Insects", () => this.autoFarmSubTab == 3, () => this.SetAutoFarmSubTab(3)));
-                tabs.Add(("Birds", () => this.autoFarmSubTab == 4, () => this.SetAutoFarmSubTab(4)));
+                tabs.Add(("Fishing", () => this.autoFarmSubTab == 1, () => this.SetAutoFarmSubTab(1)));
+                tabs.Add(("Insects", () => this.autoFarmSubTab == 2, () => this.SetAutoFarmSubTab(2)));
+                tabs.Add(("Birds", () => this.autoFarmSubTab == 3, () => this.SetAutoFarmSubTab(3)));
                 // Auto Draw quick link removed
             }
             else if (this.selectedTab == 3)
@@ -2487,7 +2453,6 @@ namespace HeartopiaMod
         private FeatureBreakerState birdNetFarmBreaker;
         private FeatureBreakerState insectNetFarmBreaker;
         private FeatureBreakerState puzzleNetBreaker;
-        private FeatureBreakerState resourceFarmBreaker;
         private FeatureBreakerState autoFishingFarmBreaker;
         private FeatureBreakerState fishingRouteBreaker;
 
@@ -2895,55 +2860,6 @@ namespace HeartopiaMod
 
 
 
-        private void MarkNearestCooldownEntry(Vector3 playerPos,
-            Vector3[][] positionSets,
-            Dictionary<int, float>[] cooldownSets,
-            Dictionary<int, float>[] hideSets,
-            float[] cooldownDurations,
-            string[] labels,
-            bool[] enabledSets)
-        {
-            int bestGroup = -1;
-            int bestIndex = -1;
-            float bestSqr = 25f;
-
-            for (int group = 0; group < positionSets.Length; group++)
-            {
-                if (!enabledSets[group])
-                {
-                    continue;
-                }
-
-                int idx = this.FindClosestItemIndexLocal(playerPos, positionSets[group]);
-                if (idx < 0)
-                {
-                    continue;
-                }
-
-                float sqr = (positionSets[group][idx] - playerPos).sqrMagnitude;
-                if (sqr < bestSqr)
-                {
-                    bestSqr = sqr;
-                    bestGroup = group;
-                    bestIndex = idx;
-                }
-            }
-
-            if (bestGroup < 0 || bestIndex < 0)
-            {
-                return;
-            }
-
-            float now = Time.unscaledTime;
-            cooldownSets[bestGroup][bestIndex] = now + cooldownDurations[bestGroup];
-            hideSets[bestGroup][bestIndex] = now + 10f;
-            ModLogger.Msg($"[AutoFarm] {labels[bestGroup]} #{bestIndex} marked collected; cooldown {cooldownDurations[bestGroup]:F1}s");
-        }
-
-
-        // Checks if ANY interact prompt button is visible in the tracking panel,
-        // regardless of whether its resource type is enabled for auto-collect.
-        // Used for camera-stuck detection only.
 
 
 
@@ -2989,27 +2905,6 @@ namespace HeartopiaMod
 
 
 
-        // Resource-farm helpers
-
-
-        public void ResetAllCooldowns()
-        {
-            this.rockCooldowns.Clear();
-            this.rockHideUntil.Clear();
-            this.oreCooldowns.Clear();
-            this.oreHideUntil.Clear();
-            this.treeCooldowns.Clear();
-            this.treeHideUntil.Clear();
-            this.rareTreeCooldowns.Clear();
-            this.rareTreeHideUntil.Clear();
-            this.appleTreeCooldowns.Clear();
-            this.appleTreeHideUntil.Clear();
-            this.orangeTreeCooldowns.Clear();
-            this.orangeTreeHideUntil.Clear();
-            this.resourceMarkersNeedShuffle = true;
-            this.visitedResourceMarkerIndices.Clear();
-            ModLogger.Msg("[ResourceFarm] All cooldowns reset!");
-        }
 
 
 
@@ -3161,7 +3056,6 @@ namespace HeartopiaMod
 
 
 
-        // Removed blocking WaitForSwingConfirm in favor of non-blocking polling handled in RunTreeFarmLogic
 
 
 
@@ -4692,8 +4586,6 @@ namespace HeartopiaMod
             "Bottom Right"
         };
 
-        private List<GameObject> meteorList = new List<GameObject>();
-
         // Token: 0x0400000B RID: 11
         // ========== GUI SIZE AND POSITION ==========
         // Format: new Rect(X, Y, Width, Height)
@@ -4955,9 +4847,6 @@ namespace HeartopiaMod
 
         private string autoHomeStatus = "Auto home: resolving...";
 
-        // Token: 0x04000019 RID: 25
-        private bool autoFarmEnabled;
-
         // Token: 0x0400001A RID: 26
         private bool autoCookEnabled;
 
@@ -5178,28 +5067,6 @@ namespace HeartopiaMod
         private float cachedNearestPlayerDistance = 999f;
         private float nextNearestPlayerDistanceRefreshAt = 0f;
         private bool enablePlayerDetection = false;
-        private bool treeFarmEnabled = false;
-        private List<TreeFarmPatrolPoint> treeFarmPoints = new List<TreeFarmPatrolPoint>();
-        private int treeFarmCurrentIndex = 0;
-        private TreeFarmState treeFarmState = TreeFarmState.Idle;
-        private float treeFarmNextActionAt = 0f;
-        private int treeFarmChopSent = 0;
-        private int treeFarmNoPromptAttempts = 0;
-        private int treeFarmChopPressCount = 3;
-        private float treeFarmChopPressGap = 0.5f;
-        private float lastAutoSwingTime = 0f;
-        private float swingCooldown = 1.2f;
-        // Non-blocking swing confirmation state
-        private bool awaitingSwingConfirm = false;
-        private float swingConfirmDeadline = 0f;
-        private int swingConfirmStartAnimHash = 0;
-        private bool swingConfirmStartBtnInteract = false;
-        private readonly string swingButtonPath = "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_sand_swing@go@w/root_visible@go/swing@btn";
-        private float treeFarmArrivalDelay = 3f;
-        private float treeFarmNextLocationWait = 1.5f;
-        private string treeFarmStatus = "Idle";
-        // If true, tree farm will use hardcoded map positions (like Resource farm)
-        private bool treeFarmUseHardcoded = false;
 
         // Auto Buy fields
         private bool autoBuyEnabled = false;
@@ -5564,34 +5431,6 @@ namespace HeartopiaMod
             new Vector3(-92.8f, 19.3f, -95.2f)
         };
 
-        // Tree cooldown bookkeeping for hardcoded resource-style mode
-        private Dictionary<int, float> treeCooldowns = new Dictionary<int, float>();
-        private Dictionary<int, float> rareTreeCooldowns = new Dictionary<int, float>();
-        private Dictionary<int, float> appleTreeCooldowns = new Dictionary<int, float>();
-        private Dictionary<int, float> orangeTreeCooldowns = new Dictionary<int, float>();
-
-        private Dictionary<int, float> treeHideUntil = new Dictionary<int, float>();
-        private Dictionary<int, float> rareTreeHideUntil = new Dictionary<int, float>();
-        private Dictionary<int, float> appleTreeHideUntil = new Dictionary<int, float>();
-        private Dictionary<int, float> orangeTreeHideUntil = new Dictionary<int, float>();
-
-        private float treeCooldownDuration = 300f;
-        private float rareTreeCooldownDuration = 600f;
-        private float appleTreeCooldownDuration = 300f;
-        private float orangeTreeCooldownDuration = 300f;
-
-        private float treeHideDelay = 10f;
-
-        private System.Random instanceRng = new System.Random();
-        // Auto Resource Farm fields (ported and adapted)
-        private bool autoResourceFarmEnabled = false;
-        private bool farmRocks = false;
-        private bool farmOres = false;
-        private bool farmTrees = true;
-        private bool farmRareTrees = false;
-        private bool farmAppleTrees = false;
-        private bool farmOrangeTrees = false;
-
         public Dictionary<int, float> rockCooldowns = new Dictionary<int, float>();
         public Dictionary<int, float> oreCooldowns = new Dictionary<int, float>();
         public Dictionary<int, float> treeCooldowns_res = new Dictionary<int, float>();
@@ -5615,41 +5454,9 @@ namespace HeartopiaMod
         private float nextLiveResourceCooldownSyncAt = 0f;
         private float liveResourceCooldownSyncInterval = 1f;
 
-        private List<Vector3> resourceMarkerPositions = new List<Vector3>();
-        private readonly List<Vector3> resourceMarkerBuffer = new List<Vector3>(512);
-        private int currentResourceMarkerIndex = 0;
-        private bool resourceMarkersNeedShuffle = true;
-        private HashSet<int> visitedResourceMarkerIndices = new HashSet<int>();
-        private int lastResourceMarkerCount = 0;
-        private bool isResourceFarmTeleport = false;
-        // Auto Resource Farm auto-stop fields
-        private bool autoResourceFarmAutoStopEnabled = false;
-        private int autoResourceFarmAutoStopHours = 0;
-        private int autoResourceFarmAutoStopMinutes = 0;
-        private int autoResourceFarmAutoStopSeconds = 0;
-        private string autoResourceFarmAutoStopHoursInput = "0";
-        private string autoResourceFarmAutoStopMinutesInput = "0";
-        private string autoResourceFarmAutoStopSecondsInput = "0";
-        private float autoResourceFarmAutoStopAt = -1f;
-        private bool resourceJustArrived = false;
-        private float resourceArrivalTime = 0f;
-        private float lastResourceTeleportTime = 0f;
-        private Vector3 resourceStartPosition = Vector3.zero;
-        private bool hasResourceStartPosition = false;
-        private bool isResourceReturningToStart = false;
-        private float resourceTeleportCooldown = 3f;
-        private float resourceClickDuration = 1.0f;
-        private float resourceArrivalDelay = 0.5f;
-        private int fKeySimFrame = 0;
-        private int resourceClickCount = 0;
         private float bottomDialogClickTimer = 0f;
         private GameObject cachedBottomDialogObject = null;
         private float nextBottomDialogLookupAt = 0f;
-        // When enabling resource farm, wait for axe equip if needed
-        private bool resourceWaitingForEquip = false;
-        private float resourceWaitingForEquipUntil = 0f;
-        private int resourceEquipAttempts = 0;
-        private const int resourceEquipMaxAttempts = 3;
         public static bool SimulateFKeyHeld = false;
         public static bool SimulateFKeyDown = false;
         public static bool SimulateFKeyUp = false;
@@ -5823,18 +5630,9 @@ namespace HeartopiaMod
         private float lobbyNextAutoJoinAttemptAt = 0f;
         private float lobbyNextAutoStartClickAt = 0f;
         private string lobbyAutoJoinStatus = "Idle";
-        // Token: 0x0400001E RID: 30
-        private float nextFarmTime;
 
         // Token: 0x0400001F RID: 31
         private float nextCookTime;
-
-        // Token: 0x04000020 RID: 32
-        private readonly float farmPeriod = 1f;
-        private bool meteorAutoInteractActive = false;
-        private int meteorAutoInteractClicksRemaining = 0;
-        private float meteorAutoInteractTimer = 0f;
-        private const float meteorAutoInteractInterval = 0.2f;
 
         // Token: 0x04000022 RID: 34
         private GameObject cacheStatusAnim;
@@ -5845,19 +5643,6 @@ namespace HeartopiaMod
         // Token: 0x04000024 RID: 36
         private GameObject cacheSkeletonBody;
         private bool bypassObjectsHidden = false;
-        private string lastLoggedInteractSpriteName = string.Empty;
-        private float nextInteractSpriteDebugAt = 0f;
-
-        // Token: 0x04000025 RID: 37
-        private bool collectMushrooms = true;
-
-        // Token: 0x04000026 RID: 38
-        private bool collectBerries = true;
-
-        private bool collectEventResources = true;
-
-        // Token: 0x04000027 RID: 39
-        private bool collectOther = false;
 
         // Token: 0x04000028 RID: 40
         private GameObject radarContainer;

@@ -63,8 +63,6 @@ namespace HeartopiaMod
                 if (data.BirdFarm == null) data.BirdFarm = new BirdFarmConfigData();
                 if (data.Patrol == null) data.Patrol = new PatrolData();
                 if (data.Patrol.Points == null) data.Patrol.Points = new List<SerializableVector3>();
-                if (data.TreeFarmPatrol == null) data.TreeFarmPatrol = new TreeFarmPatrolData();
-                if (data.TreeFarmPatrol.Points == null) data.TreeFarmPatrol.Points = new List<TreeFarmPatrolPoint>();
                 if (string.IsNullOrWhiteSpace(data.Language)) data.Language = "en";
                 if (data.CustomTeleports == null) data.CustomTeleports = new List<CustomTeleportEntry>();
                 if (data.FishingRouteSpots == null) data.FishingRouteSpots = new List<CustomTeleportEntry>();
@@ -112,7 +110,6 @@ namespace HeartopiaMod
         {
             data.keyToggleMenu = (int)this.keyToggleMenu;
             data.keyToggleRadar = (int)this.keyToggleRadar;
-            data.keyAutoForaging = (int)this.keyAutoForaging;
             data.keyAuraFarm = (int)this.keyAuraFarm;
             data.keyWaterWeedRadius = (int)this.keyWaterWeedRadius;
             data.keyAutoFish = (int)this.keyAutoFish;
@@ -165,8 +162,6 @@ namespace HeartopiaMod
             data.noclipBoostMultiplier = this.noclipBoostMultiplier;
             data.areaLoadDelay = this.areaLoadDelay;
             data.auraCollectWaitTimeout = this.auraCollectWaitTimeout;
-            data.resourceTeleportCooldown = this.resourceTeleportCooldown;
-            data.resourceClickDuration = this.resourceClickDuration;
             data.resourceAutoRepairPauseSeconds = this.resourceAutoRepairPauseSeconds;
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
@@ -274,7 +269,6 @@ namespace HeartopiaMod
             data.autoSellInterval = this.autoSellInterval;
             data.autoSellScanSource = this.autoSellScanSource;
             data.autoSellFestivalTokensEnabled = this.autoSellFestivalTokensEnabled;
-            data.collectEventResources = this.collectEventResources;
             data.auraFarmLootCollectEnabled = this.auraFarmLootCollectEnabled;
             data.auraFarmLootCollectDistance = this.auraFarmLootCollectDistance;
         }
@@ -284,7 +278,6 @@ namespace HeartopiaMod
             if (data == null) return;
             this.keyToggleMenu = (KeyCode)data.keyToggleMenu;
             this.keyToggleRadar = (KeyCode)data.keyToggleRadar;
-            this.keyAutoForaging = (KeyCode)data.keyAutoForaging;
             this.keyAuraFarm = (KeyCode)data.keyAuraFarm;
             this.keyWaterWeedRadius = (KeyCode)data.keyWaterWeedRadius;
             this.keyAutoFish = (KeyCode)data.keyAutoFish;
@@ -340,8 +333,6 @@ namespace HeartopiaMod
                 data.auraCollectWaitTimeout > 0f ? data.auraCollectWaitTimeout : 12f,
                 4f,
                 30f);
-            this.resourceTeleportCooldown = data.resourceTeleportCooldown;
-            this.resourceClickDuration = data.resourceClickDuration;
             this.resourceAutoRepairPauseSeconds = data.resourceAutoRepairPauseSeconds;
             this.gameSpeed = data.gameSpeed;
             this.fpsBypassEnabled = data.fpsBypassEnabled;
@@ -484,7 +475,6 @@ namespace HeartopiaMod
             this.autoSellInterval = Mathf.Clamp(data.autoSellInterval > 0f ? data.autoSellInterval : 5f, 1f, 120f);
             this.autoSellScanSource = Mathf.Clamp(data.autoSellScanSource, 0, 2);
             this.autoSellFestivalTokensEnabled = data.autoSellFestivalTokensEnabled;
-            this.collectEventResources = data.collectEventResources;
             this.auraFarmLootCollectDistance = Mathf.Clamp(
                 data.auraFarmLootCollectDistance > 0f ? data.auraFarmLootCollectDistance : 100f,
                 1f,
@@ -509,9 +499,6 @@ namespace HeartopiaMod
             {
                 data.Patrol.Points.Add(new SerializableVector3(p));
             }
-
-            data.TreeFarmPatrol = new TreeFarmPatrolData();
-            data.TreeFarmPatrol.Points = new List<TreeFarmPatrolPoint>(treeFarmPoints);
 
             data.CustomTeleports = new List<CustomTeleportEntry>();
             foreach (CustomTeleportEntry entry in this.customTeleportList)
@@ -585,7 +572,6 @@ namespace HeartopiaMod
                     {
                         if (line.Contains("keyToggleMenu")) this.keyToggleMenu = (KeyCode)GetJsonInt(line, "\"keyToggleMenu\":");
                         else if (line.Contains("keyToggleRadar")) this.keyToggleRadar = (KeyCode)GetJsonInt(line, "\"keyToggleRadar\":");
-                        else if (line.Contains("keyAutoFarm") || line.Contains("keyAutoForaging")) this.keyAutoForaging = (KeyCode)GetJsonInt(line, line.Contains("keyAutoFarm") ? "\"keyAutoFarm\":" : "\"keyAutoForaging\":");
                         else if (line.Contains("keyAuraFarm")) this.keyAuraFarm = (KeyCode)GetJsonInt(line, "\"keyAuraFarm\":");
                         else if (line.Contains("keyAutoFishFarm") || line.Contains("keyAutoFishingTeleport")) this.keyAutoFishingTeleport = (KeyCode)GetJsonInt(line, line.Contains("keyAutoFishFarm") ? "\"keyAutoFishFarm\":" : "\"keyAutoFishingTeleport\":");
                         else if (line.Contains("keyAutoFish")) this.keyAutoFish = (KeyCode)GetJsonInt(line, "\"keyAutoFish\":");
@@ -616,8 +602,6 @@ namespace HeartopiaMod
                         else if (line.Contains("noclipBoostMultiplier")) this.noclipBoostMultiplier = GetJsonFloat(line, "\"noclipBoostMultiplier\":");
                         else if (line.Contains("areaLoadDelay")) this.areaLoadDelay = GetJsonInt(line, "\"areaLoadDelay\":");
                         else if (line.Contains("auraCollectWaitTimeout")) this.auraCollectWaitTimeout = Mathf.Clamp(GetJsonFloat(line, "\"auraCollectWaitTimeout\":"), 4f, 30f);
-                        else if (line.Contains("resourceTeleportCooldown")) this.resourceTeleportCooldown = GetJsonFloat(line, "\"resourceTeleportCooldown\":");
-                        else if (line.Contains("resourceClickDuration")) this.resourceClickDuration = GetJsonFloat(line, "\"resourceClickDuration\":");
                         else if (line.Contains("resourceAutoRepairPauseSeconds")) this.resourceAutoRepairPauseSeconds = GetJsonFloat(line, "\"resourceAutoRepairPauseSeconds\":");
                         else if (line.Contains("gameSpeed")) this.gameSpeed = GetJsonFloat(line, "\"gameSpeed\":");
                         else if (line.Contains("fpsBypassEnabled")) this.fpsBypassEnabled = GetJsonInt(line, "\"fpsBypassEnabled\":") != 0;
@@ -701,11 +685,6 @@ namespace HeartopiaMod
                         else if (line.Contains("autoRepairTriggerPercent")) this.autoRepairTriggerPercent = Mathf.Clamp(GetJsonInt(line, "\"autoRepairTriggerPercent\":"), 1, 100);
                         else if (line.Contains("autoEatFoodType")) this.autoEatFoodType = Mathf.Clamp(GetJsonInt(line, "\"autoEatFoodType\":"), 0, this.autoEatFoodOptions.Length - 1);
                         else if (line.Contains("repairTeleportBackEnabled")) this.repairTeleportBackEnabled = GetJsonInt(line, "\"repairTeleportBackEnabled\":") != 0;
-                        else if (line.Contains("collectEventResources")) this.collectEventResources = GetJsonInt(line, "\"collectEventResources\":") != 0;
-                        else if (line.Contains("collectFiddlehead")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectFiddlehead\":") != 0);
-                        else if (line.Contains("collectTallMustard")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectTallMustard\":") != 0);
-                        else if (line.Contains("collectBurdock")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectBurdock\":") != 0);
-                        else if (line.Contains("collectMustardGreens")) this.collectEventResources = this.collectEventResources || (GetJsonInt(line, "\"collectMustardGreens\":") != 0);
                         else if (line.Contains("auraFarmLootCollectEnabled")) this.auraFarmLootCollectEnabled = GetJsonInt(line, "\"auraFarmLootCollectEnabled\":") != 0;
                         else if (line.Contains("auraFarmLootCollectDistance")) this.auraFarmLootCollectDistance = Mathf.Clamp(GetJsonFloat(line, "\"auraFarmLootCollectDistance\":"), 1f, 500f);
                     }
@@ -930,8 +909,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Inspect Move", ref this.keyInspectMove);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 20, subHeaderStyle, accent, panelFill, panelLine);
-            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Foraging", ref this.keyAutoForaging);
+            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 19, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Aura Farm", ref this.keyAuraFarm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Water + Weed Radius", ref this.keyWaterWeedRadius);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Insect Farm", ref this.keyAutoInsectFarm);
@@ -984,7 +962,6 @@ namespace HeartopiaMod
             {
                 this.keyToggleMenu = KeyCode.Insert;
                 this.keyToggleRadar = KeyCode.None;
-                this.keyAutoForaging = KeyCode.None;
                 this.keyAuraFarm = KeyCode.None;
                 this.keyWaterWeedRadius = KeyCode.None;
                 this.keyAutoFish = KeyCode.None;
@@ -1438,7 +1415,6 @@ namespace HeartopiaMod
             {
                 case "Toggle Menu": this.keyToggleMenu = newKey; break;
                 case "Toggle Radar": this.keyToggleRadar = newKey; break;
-                case "Auto Foraging": this.keyAutoForaging = newKey; break;
                 case "Aura Farm": this.keyAuraFarm = newKey; break;
                 case "Water + Weed Radius": this.keyWaterWeedRadius = newKey; break;
                 case "Auto Fish Farm (Auto Teleport)": this.keyAutoFishingTeleport = newKey; break;

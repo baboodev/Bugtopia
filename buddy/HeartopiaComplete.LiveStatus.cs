@@ -46,11 +46,6 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Aura Farm", "Running"));
             }
 
-            if (this.autoResourceFarmEnabled)
-            {
-                entries.Add(this.CreateLiveFeatureEntry("Chop & Mine", this.GetResourceFarmStatus()));
-            }
-
             if (AutoFishingFarm.IsEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry(

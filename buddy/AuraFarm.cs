@@ -434,11 +434,6 @@ namespace HeartopiaMod
             }
 
             this.auraFarmEnabled = enabled;
-            if (enabled)
-            {
-                this.StopMeteorAutoInteractSequence();
-            }
-
             this.auraEnabledAt = Time.unscaledTime;
             this.auraLastScanAt = 0f;
             this.auraNextMonoFallbackScanAt = 0f;
@@ -482,7 +477,6 @@ namespace HeartopiaMod
 
             if (enabled)
             {
-                this.SetAutoCollectEnabled(false);
                 this.auraNextMeteorObjectScanAt = 0f;
                 this.EnsureAuraCollectColdEventHook();
                 bool ready = this.ResolveAuraFarmRuntimeMethods();

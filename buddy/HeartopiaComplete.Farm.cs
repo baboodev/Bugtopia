@@ -35,17 +35,13 @@ namespace HeartopiaMod
         {
             if (this.autoFarmSubTab == 1)
             {
-                return this.CalculateTreeFarmTabHeight();
+                return this.CalculateNewSubTabHeight();
             }
             if (this.autoFarmSubTab == 2)
             {
-                return this.CalculateNewSubTabHeight();
-            }
-            if (this.autoFarmSubTab == 3)
-            {
                 return 980f; // Insect farm tab height estimate
             }
-            if (this.autoFarmSubTab == 4)
+            if (this.autoFarmSubTab == 3)
             {
                 return 980f; // Bird farm tab height estimate
             }
@@ -54,26 +50,9 @@ namespace HeartopiaMod
             return 820f; // Conservative estimate for main foraging tab
         }
 
-        private float CalculateTreeFarmTabHeight()
-        {
-            // Chop & Mine now includes a larger Aura section; keep scroll content tall enough
-            // so status rows (targets/tree hits/bush picks/last) are always reachable.
-            return 1500f;
-        }
-
         private string GetForagingModeLabel()
         {
-            if (this.auraFarmEnabled)
-            {
-                return "Aura Farm";
-            }
-
-            if (this.autoFarmEnabled)
-            {
-                return "Auto Collect";
-            }
-
-            return "No mode";
+            return this.auraFarmEnabled ? "Aura Farm" : "No mode";
         }
 
         private string GetForagingStatusDisplayText(bool compact)
@@ -138,17 +117,13 @@ namespace HeartopiaMod
         {
             if (this.autoFarmSubTab == 1)
             {
-                return this.DrawTreeFarmTab(startY);
+                return this.DrawNewSubTab(startY);
             }
             if (this.autoFarmSubTab == 2)
             {
-                return this.DrawNewSubTab(startY);
-            }
-            if (this.autoFarmSubTab == 3)
-            {
                 return InsectNetFarm.DrawSection(this, startY);
             }
-            if (this.autoFarmSubTab == 4)
+            if (this.autoFarmSubTab == 3)
             {
                 return BirdNetFarm.DrawSection(this, startY);
             }
@@ -165,12 +140,7 @@ namespace HeartopiaMod
             bodyStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f);
             GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontSize = 12, fontStyle = FontStyle.Bold, wordWrap = true };
 
-            if (this.auraFarmEnabled && this.autoFarmEnabled)
-            {
-                this.SetAutoCollectEnabled(false, false);
-            }
-
-            bool hasForagingMode = this.auraFarmEnabled || this.autoFarmEnabled;
+            bool hasForagingMode = this.auraFarmEnabled;
             bool hasRadarLoot = this.AnyRadarLootToggleEnabled();
             string actionText = this.autoFarmActive ? "STOP FORAGING" : "START FORAGING";
             Rect statusPanel = new Rect(left, (float)num, panelWidth, 112f);
@@ -190,7 +160,6 @@ namespace HeartopiaMod
                 if (this.autoFarmActive)
                 {
                     this.autoFarmActive = false;
-                    this.autoFarmEnabled = false;
                     this.SetGameSpeed(1f);
                     this.farmState = HeartopiaComplete.AutoFarmState.Idle;
                     this.autoFarmAutoStopAt = -1f;
@@ -198,7 +167,7 @@ namespace HeartopiaMod
             }
             else if (!hasForagingMode)
             {
-                statusText = "Choose Aura Farm or Auto Collect";
+                statusText = "Enable Aura Farm";
                 statusColor = new Color(1f, 0.7f, 0.45f);
                 if (this.autoFarmActive)
                 {
@@ -220,7 +189,7 @@ namespace HeartopiaMod
             }
             else if (this.autoFarmStatus == "MODE_REQUIRED_ERROR")
             {
-                statusText = "Choose Aura Farm or Auto Collect";
+                statusText = "Enable Aura Farm";
                 statusColor = new Color(1f, 0.7f, 0.45f);
             }
             else if (!this.autoFarmActive && (this.autoFarmStatus == "READY" || this.autoFarmStatus == "Idle" || this.autoFarmStatus == "NO_TOGGLES"))
@@ -237,7 +206,7 @@ namespace HeartopiaMod
             Rect statusBox = new Rect(statusPanel.x + 224f, statusPanel.y + 36f, statusPanel.width - 238f, 60f);
             this.DrawRoundedPanel(statusBox, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, new Color(accent.r, accent.g, accent.b, 0.35f));
             GUI.Label(new Rect(statusBox.x + 12f, statusBox.y + 7f, 92f, 18f), this.L("STATUS"), sectionStyle);
-            string modeText = this.auraFarmEnabled ? "Aura Farm" : (this.autoFarmEnabled ? "Auto Collect" : "No mode");
+            string modeText = this.auraFarmEnabled ? "Aura Farm" : "No mode";
             GUIStyle modeStyle = new GUIStyle(bodyStyle) { alignment = TextAnchor.MiddleRight, fontSize = 11 };
             modeStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.9f);
             GUI.Label(new Rect(statusBox.x + 108f, statusBox.y + 7f, statusBox.width - 120f, 18f), modeText, modeStyle);
@@ -253,7 +222,6 @@ namespace HeartopiaMod
 
             float settingsHeight = 184f
                 + (this.auraFarmEnabled ? (this.auraFarmLootCollectEnabled ? 136f : 102f) : 0f)
-                + (this.autoFarmEnabled ? 98f : 0f)
                 + (this.autoFarmAutoStopEnabled ? 44f : 0f);
             Rect settingsPanel = new Rect(left, (float)num, panelWidth, settingsHeight);
             this.DrawExentriSectionPanel(settingsPanel, accent, panelFill, panelLine);
@@ -340,30 +308,6 @@ namespace HeartopiaMod
                 rowY += 34f;
             }
 
-            float autoCollectToggleWidth = 250f;
-            float autoCollectToggleHeight = this.GetSwitchToggleHeight(autoCollectToggleWidth, "Auto Collect", 25f);
-            bool newAutoCollectEnabled = this.DrawWrappedSwitchToggle(new Rect(settingsPanel.x + 14f, rowY, autoCollectToggleWidth, autoCollectToggleHeight), this.autoFarmEnabled, "Auto Collect", 25f);
-            if (newAutoCollectEnabled != this.autoFarmEnabled)
-            {
-                this.SetAutoCollectEnabled(newAutoCollectEnabled);
-            }
-            rowY += Mathf.Ceil(autoCollectToggleHeight + 8f);
-            if (this.autoFarmEnabled)
-            {
-                GUI.Label(new Rect(settingsPanel.x + 34f, rowY, 160f, 20f), this.L("Collect Types:"), bodyStyle);
-                rowY += 24f;
-                float collectToggleWidth = 240f;
-                float collectHeight = this.GetSwitchToggleHeight(collectToggleWidth, "Mushrooms", 20f);
-                this.collectMushrooms = this.DrawWrappedSwitchToggle(new Rect(settingsPanel.x + 34f, rowY, collectToggleWidth, collectHeight), this.collectMushrooms, "Mushrooms", 20f);
-                rowY += Mathf.Ceil(collectHeight + 4f);
-                collectHeight = this.GetSwitchToggleHeight(collectToggleWidth, "Berries / Bushes / Plants", 20f);
-                this.collectBerries = this.DrawWrappedSwitchToggle(new Rect(settingsPanel.x + 34f, rowY, collectToggleWidth, collectHeight), this.collectBerries, "Berries / Bushes / Plants", 20f);
-                rowY += Mathf.Ceil(collectHeight + 4f);
-                collectHeight = this.GetSwitchToggleHeight(collectToggleWidth, "Event Resources", 20f);
-                this.collectEventResources = this.DrawWrappedSwitchToggle(new Rect(settingsPanel.x + 34f, rowY, collectToggleWidth, collectHeight), this.collectEventResources, "Event Resources", 20f);
-                rowY += Mathf.Ceil(collectHeight + 8f);
-            }
-
             this.autoFarmAutoStopEnabled = this.DrawSwitchToggle(new Rect(settingsPanel.x + 14f, rowY, 250f, 25f), this.autoFarmAutoStopEnabled, "Auto Stop Timer");
             if (this.autoFarmAutoStopEnabled)
             {
@@ -444,141 +388,6 @@ namespace HeartopiaMod
             GUI.Label(new Rect(priorityPanel.x + 18f, priorityPanel.yMax - 34f, priorityPanel.width - 36f, 20f), priorityText, bodyStyle);
 
             return priorityPanel.yMax + 22f;
-        }
-
-        private float DrawTreeFarmTab(int startY)
-        {
-            int num = startY;
-            if (this.DrawPrimaryActionButton(new Rect(20f, (float)num, 260f, 35f), "Equip Axe"))
-            {
-                this.EquipHandTool(1);
-            }
-            num += 45;
-            string toggleText = this.autoResourceFarmEnabled ? "DISABLE CHOP & MINE" : "ENABLE CHOP & MINE";
-            if (this.DrawPrimaryActionButton(new Rect(20f, (float)num, 260f, 40f), toggleText))
-            {
-                this.ToggleResourceFarm();
-            }
-            num += 50;
-
-            GUI.Label(new Rect(20f, (float)num, 320f, 24f), this.LF("Status: {0}", this.L(this.GetResourceFarmStatus())));
-            num += 28;
-            GUI.Label(new Rect(20f, (float)num, 320f, 24f), this.LF("Available: {0}", this.GetTotalAvailableResources()));
-            num += 28;
-            GUI.Label(new Rect(20f, (float)num, 320f, 24f), this.LF("Markers: {0}", this.resourceMarkerPositions.Count));
-            num += 32;
-
-            // --- AUTO STOP TIMER for Resource Farm (moved above Teleport Cooldown) ---
-            this.autoResourceFarmAutoStopEnabled = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.autoResourceFarmAutoStopEnabled, "Auto Stop Timer");
-            num += 30;
-
-            if (this.autoResourceFarmAutoStopEnabled)
-            {
-                GUIStyle timerSmall = new GUIStyle(GUI.skin.label) { fontSize = 12 };
-
-                GUI.Label(new Rect(20f, (float)num, 260f, 18f), "Timer (HH:MM:SS)", timerSmall);
-                num += 20;
-
-                GUI.Label(new Rect(20f, (float)num, 45f, 20f), "H", timerSmall);
-                this.autoResourceFarmAutoStopHoursInput = GUI.TextField(new Rect(35f, (float)num, 55f, 22f), this.autoResourceFarmAutoStopHoursInput, 2);
-                GUI.Label(new Rect(95f, (float)num, 10f, 20f), ":", timerSmall);
-
-                GUI.Label(new Rect(108f, (float)num, 45f, 20f), "M", timerSmall);
-                this.autoResourceFarmAutoStopMinutesInput = GUI.TextField(new Rect(123f, (float)num, 55f, 22f), this.autoResourceFarmAutoStopMinutesInput, 2);
-                GUI.Label(new Rect(183f, (float)num, 10f, 20f), ":", timerSmall);
-
-                GUI.Label(new Rect(196f, (float)num, 45f, 20f), "S", timerSmall);
-                this.autoResourceFarmAutoStopSecondsInput = GUI.TextField(new Rect(211f, (float)num, 55f, 22f), this.autoResourceFarmAutoStopSecondsInput, 2);
-                num += 28;
-
-                int parsed;
-                if (int.TryParse(this.autoResourceFarmAutoStopHoursInput, out parsed))
-                {
-                    this.autoResourceFarmAutoStopHours = Mathf.Clamp(parsed, 0, 23);
-                    this.autoResourceFarmAutoStopHoursInput = this.autoResourceFarmAutoStopHours.ToString();
-                }
-                if (int.TryParse(this.autoResourceFarmAutoStopMinutesInput, out parsed))
-                {
-                    this.autoResourceFarmAutoStopMinutes = Mathf.Clamp(parsed, 0, 59);
-                    this.autoResourceFarmAutoStopMinutesInput = this.autoResourceFarmAutoStopMinutes.ToString();
-                }
-                if (int.TryParse(this.autoResourceFarmAutoStopSecondsInput, out parsed))
-                {
-                    this.autoResourceFarmAutoStopSeconds = Mathf.Clamp(parsed, 0, 59);
-                    this.autoResourceFarmAutoStopSecondsInput = this.autoResourceFarmAutoStopSeconds.ToString();
-                }
-
-                int asSeconds = this.GetAutoResourceFarmAutoStopSeconds();
-                if (asSeconds <= 0)
-                {
-                    Color prev = GUI.color;
-                    GUI.color = new Color(1f, 0.45f, 0.45f);
-                    GUI.Label(new Rect(20f, (float)num, 300f, 20f), "Set at least 1 second to enable auto-stop.", timerSmall);
-                    GUI.color = prev;
-                    num += 24;
-                }
-                else
-                {
-                    GUI.Label(new Rect(20f, (float)num, 320f, 20f), "Auto-stop after: " + this.FormatDurationHms(asSeconds), timerSmall);
-                    num += 22;
-
-                    if (this.autoResourceFarmEnabled && this.autoResourceFarmAutoStopAt > 0f)
-                    {
-                        int remaining = Mathf.Max(0, Mathf.CeilToInt(this.autoResourceFarmAutoStopAt - Time.unscaledTime));
-                        GUI.Label(new Rect(20f, (float)num, 320f, 20f), "Time remaining: " + this.FormatDurationHms(remaining), timerSmall);
-                        num += 22;
-                    }
-                }
-            }
-
-            GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Teleport Cooldown: {0:F1}s", this.resourceTeleportCooldown));
-            num += 22;
-            float prevResourceTp = this.resourceTeleportCooldown;
-            this.resourceTeleportCooldown = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.resourceTeleportCooldown, 0f, 10f);
-            if (Math.Abs(this.resourceTeleportCooldown - prevResourceTp) > 0.0001f) { try { this.SaveKeybinds(false); } catch { } }
-            num += 30;
-
-            GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Click Duration: {0:F1}s", this.resourceClickDuration));
-            num += 22;
-            float prevResourceClick = this.resourceClickDuration;
-            this.resourceClickDuration = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.resourceClickDuration, 0.1f, 5f);
-            if (Math.Abs(this.resourceClickDuration - prevResourceClick) > 0.0001f) { try { this.SaveKeybinds(false); } catch { } }
-            num += 30;
-            // Auto Repair pause slider: how long to pause teleports after a repair toast
-            GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Auto-Repair Tool (Paused TP FARM): {0:F0}s", this.resourceAutoRepairPauseSeconds));
-            num += 22;
-            float prevResourcePause = this.resourceAutoRepairPauseSeconds;
-            this.resourceAutoRepairPauseSeconds = this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.resourceAutoRepairPauseSeconds, 0f, 60f);
-            if (Math.Abs(this.resourceAutoRepairPauseSeconds - prevResourcePause) > 0.0001f) { try { this.SaveKeybinds(false); } catch { } }
-            num += 30;
-
-            
-            this.farmRocks = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.farmRocks, "Farm Rocks");
-            num += 25;
-            this.farmOres = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.farmOres, "Farm Ores");
-            num += 25;
-            this.farmTrees = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.farmTrees, "Farm Trees");
-            num += 25;
-            this.farmRareTrees = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.farmRareTrees, "Farm Rare Trees");
-            num += 25;
-            this.farmAppleTrees = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.farmAppleTrees, "Farm Apple Trees");
-            num += 25;
-            this.farmOrangeTrees = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.farmOrangeTrees, "Farm Mandarin Trees");
-            num += 28;
-
-            if (this.DrawDangerActionButton(new Rect(20f, (float)num, 260f, 35f), "Reset Cooldowns"))
-            {
-                this.ResetAllCooldowns();
-            }
-            num += 45;
-            GUI.Label(
-                new Rect(20f, (float)num, 360f, 120f),
-                this.L("Chop & Mine flow:")
-                + "\n" + this.L("- Build list of available markers")
-                + "\n" + this.L("- Shuffle and teleport to markers")
-                + "\n" + this.L("- Simulate F key for configured duration")
-                + "\n" + this.L("- Mark resource collected and set cooldowns"));
-            return (float)num + 120f;
         }
 
         private void AutoFarmLog(string message)
@@ -756,7 +565,7 @@ namespace HeartopiaMod
 
         private void CheckManualBerryCollectionListeners()
         {
-            if (!this.isRadarActive && !this.autoFarmActive && !this.autoResourceFarmEnabled && !this.auraFarmEnabled)
+            if (!this.isRadarActive && !this.autoFarmActive && !this.auraFarmEnabled)
             {
                 return;
             }
@@ -773,321 +582,11 @@ namespace HeartopiaMod
             this.CheckManualRaspberryCollection(interactButton);
         }
 
-        private void TryMarkNearestNodeCollectedFromPrompt()
-        {
-            Vector3 playerPos;
-            if (!this.TryGetLocalPlayerPosition(out playerPos))
-            {
-                return;
-            }
-
-            bool hasMinePrompt = this.IsPromptButtonReady("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_mine@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
-            bool hasChopPrompt = this.IsPromptButtonReady("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_chop@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
-
-            if (hasMinePrompt)
-            {
-                this.MarkNearestCooldownEntry(playerPos,
-                    new Vector3[][] { HeartopiaComplete.RockPositions, HeartopiaComplete.OrePositions },
-                    new Dictionary<int, float>[] { this.rockCooldowns, this.oreCooldowns },
-                    new Dictionary<int, float>[] { this.rockHideUntil, this.oreHideUntil },
-                    new float[] { this.rockCooldownDuration, this.oreCooldownDuration },
-                    new string[] { "Stone", "Ore" },
-                    new bool[] { this.showStoneRadar || this.farmRocks, this.showOreRadar || this.farmOres });
-            }
-
-            if (hasChopPrompt)
-            {
-                this.MarkNearestCooldownEntry(playerPos,
-                    new Vector3[][] { HeartopiaComplete.TreePositions, HeartopiaComplete.RareTreePositions, HeartopiaComplete.AppleTreePositions, HeartopiaComplete.OrangeTreePositions },
-                    new Dictionary<int, float>[] { this.treeCooldowns_res, this.rareTreeCooldowns_res, this.appleTreeCooldowns_res, this.orangeTreeCooldowns_res },
-                    new Dictionary<int, float>[] { this.treeHideUntil_res, this.rareTreeHideUntil_res, this.appleTreeHideUntil_res, this.orangeTreeHideUntil_res },
-                    new float[] { this.treeCooldownDuration_res, this.rareTreeCooldownDuration_res, this.appleTreeCooldownDuration_res, this.orangeTreeCooldownDuration_res },
-                    new string[] { "Tree", "Rare Tree", "Apple Tree", "Mandarin Tree" },
-                    new bool[] { this.showTreeRadar || this.farmTrees, this.showRareTreeRadar || this.farmRareTrees, this.showAppleTreeRadar || this.farmAppleTrees, this.showOrangeTreeRadar || this.farmOrangeTrees });
-            }
-        }
-
-        private void StartTreeFarm()
-        {
-            if (this.autoFarmActive)
-            {
-                this.autoFarmActive = false;
-                this.autoFarmEnabled = false;
-                this.farmState = HeartopiaComplete.AutoFarmState.Idle;
-                this.autoFarmStatus = "READY";
-            }
-            this.treeFarmEnabled = true;
-            this.treeFarmState = HeartopiaComplete.TreeFarmState.EquipAxe;
-            this.treeFarmCurrentIndex = Mathf.Clamp(this.treeFarmCurrentIndex, 0, Math.Max(0, this.treeFarmPoints.Count - 1));
-            this.treeFarmChopSent = 0;
-            this.treeFarmNextActionAt = Time.time;
-            this.treeFarmStatus = "Equipping Axe...";
-            this.EquipHandTool(1);
-            // If using hardcoded positions, populate the patrol points list from static arrays
-            if (this.treeFarmUseHardcoded)
-            {
-                this.treeFarmPoints.Clear();
-                foreach (Vector3 v in TreePositions) this.treeFarmPoints.Add(new TreeFarmPatrolPoint(v, Quaternion.identity));
-                foreach (Vector3 v2 in RareTreePositions) this.treeFarmPoints.Add(new TreeFarmPatrolPoint(v2, Quaternion.identity));
-                foreach (Vector3 v3 in AppleTreePositions) this.treeFarmPoints.Add(new TreeFarmPatrolPoint(v3, Quaternion.identity));
-                foreach (Vector3 v4 in OrangeTreePositions) this.treeFarmPoints.Add(new TreeFarmPatrolPoint(v4, Quaternion.identity));
-                // Shuffle the points to avoid predictable order
-                int n = this.treeFarmPoints.Count;
-                while (n > 1)
-                {
-                    n--;
-                    int k = this.instanceRng.Next(n + 1);
-                    TreeFarmPatrolPoint tmp = this.treeFarmPoints[k];
-                    this.treeFarmPoints[k] = this.treeFarmPoints[n];
-                    this.treeFarmPoints[n] = tmp;
-                }
-                this.treeFarmCurrentIndex = 0;
-                this.AddMenuNotification($"Tree farm points populated ({this.treeFarmPoints.Count})", new Color(0.45f, 1f, 0.55f));
-            }
-
-            this.AddMenuNotification("Tree Farm enabled", new Color(0.45f, 1f, 0.55f));
-        }
-
-        private void ToggleResourceFarm()
-        {
-            this.autoResourceFarmEnabled = !this.autoResourceFarmEnabled;
-            if (this.autoResourceFarmEnabled)
-            {
-                ModLogger.Msg("[ResourceFarm] ENABLED! Make sure you're holding an axe/pickaxe!");
-                this.ResetResourceFarmState();
-                int autoStopSeconds = this.GetAutoResourceFarmAutoStopSeconds();
-                if (this.autoResourceFarmAutoStopEnabled && autoStopSeconds > 0)
-                {
-                    this.autoResourceFarmAutoStopAt = Time.unscaledTime + autoStopSeconds;
-                    this.AddMenuNotification("Resource Farm auto-stop set: " + this.FormatDurationHms(autoStopSeconds), new Color(0.55f, 0.88f, 1f));
-                }
-                else
-                {
-                    this.autoResourceFarmAutoStopAt = -1f;
-                }
-            }
-            else
-            {
-                ModLogger.Msg("[ResourceFarm] DISABLED!");
-                this.ResetResourceFarmState();
-                this.resourceJustArrived = false;
-                SimulateFKeyHeld = false;
-                SimulateFKeyDown = false;
-                SimulateFKeyUp = false;
-                this.fKeySimFrame = 0;
-                this.autoResourceFarmAutoStopAt = -1f;
-            }
-        }
-
-        private void ResetResourceFarmState()
-        {
-            this.hasResourceStartPosition = false;
-            this.currentResourceMarkerIndex = 0;
-            this.isResourceReturningToStart = false;
-            this.visitedResourceMarkerIndices.Clear();
-            this.resourceMarkersNeedShuffle = true;
-        }
-
-        public void UpdateResourceFarm()
-        {
-            if (!this.autoResourceFarmEnabled) return;
-            this.UpdateResourceMarkerPositions();
-            // Auto-stop check
-            if (this.autoResourceFarmAutoStopEnabled && this.autoResourceFarmAutoStopAt > 0f && Time.unscaledTime >= this.autoResourceFarmAutoStopAt)
-            {
-                ModLogger.Msg("[ResourceFarm] Auto-stop timer reached. Stopping resource farm.");
-                this.AddMenuNotification("Resource Farm auto-stopped", new Color(0.9f, 0.55f, 0.55f));
-                this.autoResourceFarmEnabled = false;
-                this.ResetResourceFarmState();
-                this.resourceJustArrived = false;
-                SimulateFKeyHeld = false;
-                SimulateFKeyDown = false;
-                SimulateFKeyUp = false;
-                this.fKeySimFrame = 0;
-                this.autoResourceFarmAutoStopAt = -1f;
-                return;
-            }
-            if (this.teleportFramesRemaining <= 0 && !this.resourceJustArrived && Time.unscaledTime - this.lastResourceTeleportTime > this.resourceTeleportCooldown)
-            {
-                if (this.resourceMarkerPositions.Count > 0)
-                {
-                    // If paused due to auto-repair, skip starting a teleport until pause expires
-                    if (Time.time < this.resourceRepairPauseUntil)
-                    {
-                        return;
-                    }
-                    this.TeleportToNextResource();
-                    this.lastResourceTeleportTime = Time.unscaledTime;
-                }
-            }
-            if (this.resourceJustArrived)
-            {
-                float dt = Time.unscaledTime - this.resourceArrivalTime;
-                if (dt > this.resourceClickDuration)
-                {
-                    this.resourceJustArrived = false;
-                    SimulateFKeyHeld = false;
-                    SimulateFKeyDown = false;
-                    SimulateFKeyUp = false;
-                    this.fKeySimFrame = 0;
-                    GameObject player = this.FindPlayerRoot();
-                    if (player != null)
-                    {
-                        this.MarkResourceCollected(player.transform.position);
-                    }
-                    ModLogger.Msg("[ResourceFarm] Done pressing F, ready for next resource");
-                }
-                else if (dt > this.resourceArrivalDelay)
-                {
-                    // Wait until the gather UI is present before attempting interaction
-                    if (!this.IsGatherWidgetVisible())
-                    {
-                        this.autoFarmStatus = "Waiting for gather UI...";
-                        return;
-                    }
-                    this.fKeySimFrame++;
-                    int m = this.fKeySimFrame % 6;
-                    if (m == 0)
-                    {
-                        SimulateFKeyDown = true;
-                        SimulateFKeyHeld = true;
-                        SimulateFKeyUp = false;
-                        this.resourceClickCount++;
-                    }
-                    else if (m <= 3)
-                    {
-                        SimulateFKeyDown = false;
-                        SimulateFKeyHeld = true;
-                        SimulateFKeyUp = false;
-                    }
-                    else if (m == 4)
-                    {
-                        SimulateFKeyDown = false;
-                        SimulateFKeyHeld = false;
-                        SimulateFKeyUp = true;
-                    }
-                    else
-                    {
-                        SimulateFKeyDown = false;
-                        SimulateFKeyHeld = false;
-                        SimulateFKeyUp = false;
-                    }
-                    this.DirectClickInteractButton();
-                }
-            }
-            else
-            {
-                if (SimulateFKeyHeld || SimulateFKeyDown)
-                {
-                    SimulateFKeyHeld = false;
-                    SimulateFKeyDown = false;
-                    SimulateFKeyUp = false;
-                    this.fKeySimFrame = 0;
-                }
-            }
-        }
-
-        public int GetResourceAvailableCount(Dictionary<int,float> cooldowns, int total)
-        {
-            int c = 0;
-            float t = Time.time;
-            for (int i=0;i<total;i++)
-            {
-                float until;
-                if (cooldowns.TryGetValue(i,out until) && until > t) continue;
-                c++;
-            }
-            return c;
-        }
-
-        public int GetTotalAvailableResources()
-        {
-            return GetResourceAvailableCount(this.rockCooldowns, HeartopiaComplete.RockPositions.Length)
-                + GetResourceAvailableCount(this.oreCooldowns, HeartopiaComplete.OrePositions.Length)
-                + GetResourceAvailableCount(this.treeCooldowns_res, HeartopiaComplete.TreePositions.Length)
-                + GetResourceAvailableCount(this.rareTreeCooldowns_res, HeartopiaComplete.RareTreePositions.Length)
-                + GetResourceAvailableCount(this.appleTreeCooldowns_res, HeartopiaComplete.AppleTreePositions.Length)
-                + GetResourceAvailableCount(this.orangeTreeCooldowns_res, HeartopiaComplete.OrangeTreePositions.Length);
-        }
-
-        public string GetResourceFarmStatus()
-        {
-            if (!this.autoResourceFarmEnabled) return "DISABLED";
-            if (this.resourceJustArrived) return "GATHERING...";
-            if (this.isResourceFarmTeleport) return "TELEPORTING...";
-            return "IDLE";
-        }
-
-        private void MarkResourceCollected(Vector3 playerPos)
-        {
-            float hide = 10f;
-            if (this.farmRocks)
-            {
-                int idx = this.FindClosestItemIndexLocal(playerPos, HeartopiaComplete.RockPositions);
-                if (idx >= 0)
-                {
-                    this.rockCooldowns[idx] = Time.time + this.rockCooldownDuration;
-                    this.rockHideUntil[idx] = Time.time + hide;
-                    ModLogger.Msg($"[ResourceFarm] Rock #{idx} collected, cooldown {this.rockCooldownDuration}s");
-                }
-            }
-            if (this.farmOres)
-            {
-                int idx = this.FindClosestItemIndexLocal(playerPos, HeartopiaComplete.OrePositions);
-                if (idx >= 0)
-                {
-                    this.oreCooldowns[idx] = Time.time + this.oreCooldownDuration;
-                    this.oreHideUntil[idx] = Time.time + hide;
-                    ModLogger.Msg($"[ResourceFarm] Ore #{idx} collected, cooldown {this.oreCooldownDuration}s");
-                }
-            }
-            if (this.farmTrees)
-            {
-                int idx = this.FindClosestItemIndexLocal(playerPos, HeartopiaComplete.TreePositions);
-                if (idx >= 0)
-                {
-                    this.treeCooldowns_res[idx] = Time.time + this.treeCooldownDuration_res;
-                    this.treeHideUntil_res[idx] = Time.time + hide;
-                    ModLogger.Msg($"[ResourceFarm] Tree #{idx} collected, cooldown {this.treeCooldownDuration_res}s");
-                }
-            }
-            if (this.farmRareTrees)
-            {
-                int idx = this.FindClosestItemIndexLocal(playerPos, HeartopiaComplete.RareTreePositions);
-                if (idx >= 0)
-                {
-                    this.rareTreeCooldowns_res[idx] = Time.time + this.rareTreeCooldownDuration_res;
-                    this.rareTreeHideUntil_res[idx] = Time.time + hide;
-                    ModLogger.Msg($"[ResourceFarm] Rare Tree #{idx} collected, cooldown {this.rareTreeCooldownDuration_res}s");
-                }
-            }
-            if (this.farmAppleTrees)
-            {
-                int idx = this.FindClosestItemIndexLocal(playerPos, HeartopiaComplete.AppleTreePositions);
-                if (idx >= 0)
-                {
-                    this.appleTreeCooldowns_res[idx] = Time.time + this.appleTreeCooldownDuration_res;
-                    this.appleTreeHideUntil_res[idx] = Time.time + hide;
-                    ModLogger.Msg($"[ResourceFarm] Apple Tree #{idx} collected, cooldown {this.appleTreeCooldownDuration_res}s");
-                }
-            }
-            if (this.farmOrangeTrees)
-            {
-                int idx = this.FindClosestItemIndexLocal(playerPos, HeartopiaComplete.OrangeTreePositions);
-                if (idx >= 0)
-                {
-                    this.orangeTreeCooldowns_res[idx] = Time.time + this.orangeTreeCooldownDuration_res;
-                    this.orangeTreeHideUntil_res[idx] = Time.time + hide;
-                    ModLogger.Msg($"[ResourceFarm] Mandarin Tree #{idx} collected, cooldown {this.orangeTreeCooldownDuration_res}s");
-                }
-            }
-        }
-
         private void SyncNearbyLiveResourceCooldowns()
         {
             // Only sync when farming features are active - NOT when just radar is enabled
             // This prevents Mono API from activating when only Radar ESP is on
-            bool shouldSync = this.autoFarmActive || this.autoResourceFarmEnabled || this.auraFarmEnabled;
+            bool shouldSync = this.autoFarmActive || this.auraFarmEnabled;
             if (!shouldSync)
             {
                 return;
@@ -1233,365 +732,12 @@ namespace HeartopiaMod
             }
         }
 
-        private void StopTreeFarm(string reason = "Idle")
-        {
-            this.treeFarmEnabled = false;
-            this.treeFarmState = HeartopiaComplete.TreeFarmState.Idle;
-            this.treeFarmChopSent = 0;
-            this.treeFarmStatus = reason;
-            this.CloseToolboxIfOpen();
-        }
-
-        private void RunTreeFarmLogic()
-        {
-            if (!this.treeFarmEnabled)
-            {
-                this.awaitingSwingConfirm = false;
-                return;
-            }
-
-            // If we're waiting for a recent swing attempt to be confirmed, poll for confirmation non-blocking
-            if (this.awaitingSwingConfirm)
-            {
-                try
-                {
-                    bool confirmed = false;
-                    // Check animator change
-                    // Animator checks removed (not available in this build); rely on swing button state only
-
-                    // Check swing button change
-                    if (!confirmed)
-                    {
-                        GameObject swingBtn = GameObject.Find(this.swingButtonPath);
-                        if (swingBtn != null)
-                        {
-                            Button b = swingBtn.GetComponent<Button>();
-                            bool nowInteract = (b != null) ? b.interactable : swingBtn.activeInHierarchy;
-                            if (nowInteract != this.swingConfirmStartBtnInteract)
-                            {
-                                confirmed = true;
-                                ModLogger.Msg("[TreeFarm] Swing confirmed by button interactable change (async)");
-                            }
-                        }
-                    }
-
-                    if (confirmed)
-                    {
-                        this.treeFarmChopSent++;
-                        this.treeFarmNoPromptAttempts = 0;
-                        this.awaitingSwingConfirm = false;
-                        this.treeFarmStatus = $"Chopping {this.treeFarmChopSent}/{this.treeFarmChopPressCount}...";
-                        this.treeFarmNextActionAt = Time.time + this.treeFarmChopPressGap;
-                        return;
-                    }
-
-                    if (Time.time > this.swingConfirmDeadline)
-                    {
-                        // confirmation timed out
-                        this.awaitingSwingConfirm = false;
-                        this.treeFarmNoPromptAttempts++;
-                        this.treeFarmNextActionAt = Time.time + 0.15f;
-                        ModLogger.Msg("[TreeFarm] Swing confirmation timed out (async)");
-                        return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Msg("[TreeFarm] Async confirm error: " + ex.Message);
-                    this.awaitingSwingConfirm = false;
-                }
-            }
-
-            if (this.treeFarmPoints.Count == 0)
-            {
-                this.StopTreeFarm("No points");
-                return;
-            }
-
-            if (Time.time < this.treeFarmNextActionAt)
-            {
-                return;
-            }
-
-            switch (this.treeFarmState)
-            {
-                case HeartopiaComplete.TreeFarmState.EquipAxe:
-                    this.EquipHandTool(1);
-                    this.treeFarmStatus = "Waiting after axe equip...";
-                    this.treeFarmState = HeartopiaComplete.TreeFarmState.WaitAfterEquip;
-                    this.treeFarmNextActionAt = Time.time + 2f;
-                    break;
-
-                case HeartopiaComplete.TreeFarmState.WaitAfterEquip:
-                    this.treeFarmState = HeartopiaComplete.TreeFarmState.TeleportToPoint;
-                    this.treeFarmNextActionAt = Time.time;
-                    break;
-
-                case HeartopiaComplete.TreeFarmState.TeleportToPoint:
-                    if (this.treeFarmCurrentIndex < 0 || this.treeFarmCurrentIndex >= this.treeFarmPoints.Count)
-                    {
-                        this.treeFarmCurrentIndex = 0;
-                    }
-                    TreeFarmPatrolPoint point = this.treeFarmPoints[this.treeFarmCurrentIndex];
-                    Vector3 targetPos = point.Position.ToVector3();
-                    Quaternion targetRot = point.Rotation.ToQuaternion();
-                    // If hardcoded resource-style mode is active, skip points that are on cooldown
-                    if (this.treeFarmUseHardcoded)
-                    {
-                        int attempts = 0;
-                        bool found = false;
-                        while (attempts < this.treeFarmPoints.Count)
-                        {
-                            Vector3 checkPos = this.treeFarmPoints[this.treeFarmCurrentIndex].Position.ToVector3();
-                            int tIdx = this.FindClosestItemIndexLocal(checkPos, TreePositions);
-                            if (tIdx >= 0)
-                            {
-                                float until;
-                                if (this.treeCooldowns.TryGetValue(tIdx, out until) && until > Time.time)
-                                {
-                                    // skip
-                                    this.treeFarmCurrentIndex++;
-                                    if (this.treeFarmCurrentIndex >= this.treeFarmPoints.Count) this.treeFarmCurrentIndex = 0;
-                                    attempts++;
-                                    continue;
-                                }
-                            }
-                            int rIdx = this.FindClosestItemIndexLocal(checkPos, RareTreePositions);
-                            if (rIdx >= 0)
-                            {
-                                float until2;
-                                if (this.rareTreeCooldowns.TryGetValue(rIdx, out until2) && until2 > Time.time)
-                                {
-                                    this.treeFarmCurrentIndex++;
-                                    if (this.treeFarmCurrentIndex >= this.treeFarmPoints.Count) this.treeFarmCurrentIndex = 0;
-                                    attempts++;
-                                    continue;
-                                }
-                            }
-                            int aIdx = this.FindClosestItemIndexLocal(checkPos, AppleTreePositions);
-                            if (aIdx >= 0)
-                            {
-                                float until3;
-                                if (this.appleTreeCooldowns.TryGetValue(aIdx, out until3) && until3 > Time.time)
-                                {
-                                    this.treeFarmCurrentIndex++;
-                                    if (this.treeFarmCurrentIndex >= this.treeFarmPoints.Count) this.treeFarmCurrentIndex = 0;
-                                    attempts++;
-                                    continue;
-                                }
-                            }
-                            int oIdx = this.FindClosestItemIndexLocal(checkPos, OrangeTreePositions);
-                            if (oIdx >= 0)
-                            {
-                                float until4;
-                                if (this.orangeTreeCooldowns.TryGetValue(oIdx, out until4) && until4 > Time.time)
-                                {
-                                    this.treeFarmCurrentIndex++;
-                                    if (this.treeFarmCurrentIndex >= this.treeFarmPoints.Count) this.treeFarmCurrentIndex = 0;
-                                    attempts++;
-                                    continue;
-                                }
-                            }
-                            found = true;
-                            break;
-                        }
-                        if (!found)
-                        {
-                            this.StopTreeFarm("No available tree positions");
-                            return;
-                        }
-                        point = this.treeFarmPoints[this.treeFarmCurrentIndex];
-                        targetPos = point.Position.ToVector3();
-                        targetRot = point.Rotation.ToQuaternion();
-                    }
-                    ModLogger.Msg($"[TreeFarm] Teleporting to point {this.treeFarmCurrentIndex + 1}/{this.treeFarmPoints.Count} at {targetPos}");
-                    this.TeleportToLocation(targetPos, targetRot);
-                    this.treeFarmStatus = $"Teleported to tree point {this.treeFarmCurrentIndex + 1}/{this.treeFarmPoints.Count}";
-                    this.treeFarmState = HeartopiaComplete.TreeFarmState.WaitAfterTeleport;
-                    this.treeFarmNextActionAt = Time.time + this.treeFarmArrivalDelay;
-                    break;
-
-                case HeartopiaComplete.TreeFarmState.WaitAfterTeleport:
-                    GameObject player = GameObject.Find("p_player_skeleton(Clone)");
-                    if (player != null)
-                    {
-                        Vector3 currentPos = player.transform.position;
-                        ModLogger.Msg($"[TreeFarm] After teleport, current position: {currentPos}");
-                    }
-                    this.treeFarmChopSent = 0;
-                    this.treeFarmNoPromptAttempts = 0;
-                    this.treeFarmState = HeartopiaComplete.TreeFarmState.ChopAtPoint;
-                    this.treeFarmNextActionAt = Time.time;
-                    break;
-
-                case HeartopiaComplete.TreeFarmState.ChopAtPoint:
-                    bool chopped = false;
-                    // Respect a cooldown so we don't spam triggers too quickly
-                    if (Time.time - this.lastAutoSwingTime >= this.swingCooldown)
-                    {
-                        bool attempted = false;
-                        // Prefer direct trigger activation
-                        if (this.PerformAutoSwing())
-                        {
-                            attempted = true;
-                            this.lastAutoSwingTime = Time.time;
-                            // Start async confirmation window; actual counting happens in the async poll above
-                            this.awaitingSwingConfirm = true;
-                            this.swingConfirmDeadline = Time.time + 0.9f;
-                            // clear anim-hash baseline (anim not relied upon)
-                            this.swingConfirmStartAnimHash = 0;
-                            GameObject swingBtnObj = GameObject.Find(this.swingButtonPath);
-                            if (swingBtnObj != null)
-                            {
-                                Button bb = swingBtnObj.GetComponent<Button>();
-                                this.swingConfirmStartBtnInteract = (bb != null) ? bb.interactable : swingBtnObj.activeInHierarchy;
-                            }
-                        }
-                        else
-                        {
-                            // Fallback to existing TryClickInteractPrompt
-                            if (this.TryClickInteractPrompt())
-                            {
-                                attempted = true;
-                                this.lastAutoSwingTime = Time.time;
-                                this.awaitingSwingConfirm = true;
-                                this.swingConfirmDeadline = Time.time + 0.9f;
-                                this.swingConfirmStartAnimHash = 0;
-                                GameObject swingBtnObj2 = GameObject.Find(this.swingButtonPath);
-                                if (swingBtnObj2 != null)
-                                {
-                                    Button bb2 = swingBtnObj2.GetComponent<Button>();
-                                    this.swingConfirmStartBtnInteract = (bb2 != null) ? bb2.interactable : swingBtnObj2.activeInHierarchy;
-                                }
-                            }
-                        }
-
-                        if (!attempted)
-                        {
-                            this.treeFarmNoPromptAttempts++;
-                        }
-                        else if (!chopped)
-                        {
-                            // Attempted but no confirmed swing
-                            this.treeFarmNoPromptAttempts++;
-                        }
-                    }
-
-                    ModLogger.Msg($"[TreeFarm] Chop attempt {this.treeFarmChopSent}/{this.treeFarmChopPressCount} - Success: {chopped}, NoPromptAttempts: {this.treeFarmNoPromptAttempts}");
-                    this.treeFarmStatus = chopped
-                        ? $"Chopping {this.treeFarmChopSent}/{this.treeFarmChopPressCount}..."
-                        : "Waiting for chop prompt...";
-
-                    if (this.treeFarmChopSent >= Math.Max(1, this.treeFarmChopPressCount))
-                    {
-                        ModLogger.Msg($"[TreeFarm] Finished chopping at point {this.treeFarmCurrentIndex + 1}, moving to next");
-                        // If using hardcoded resource-style mode, mark the closest tree as collected so cooldowns apply
-                        if (this.treeFarmUseHardcoded)
-                        {
-                            try
-                            {
-                                GameObject playerObj = GameObject.Find("p_player_skeleton(Clone)");
-                                if (playerObj != null)
-                                {
-                                    this.MarkTreeCollected(playerObj.transform.position);
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                ModLogger.Msg("[TreeFarm] MarkTreeCollected error: " + ex.Message);
-                            }
-                        }
-                        this.treeFarmState = HeartopiaComplete.TreeFarmState.WaitNextPoint;
-                        this.treeFarmNextActionAt = Time.time + this.treeFarmNextLocationWait;
-                    }
-                    else if (this.treeFarmNoPromptAttempts >= 20)
-                    {
-                        ModLogger.Msg($"[TreeFarm] No chop action after 20 attempts at point {this.treeFarmCurrentIndex + 1}, skipping");
-                        this.treeFarmStatus = "No chop action, skipping point...";
-                        this.treeFarmState = HeartopiaComplete.TreeFarmState.WaitNextPoint;
-                        this.treeFarmNextActionAt = Time.time + 0.3f;
-                    }
-                    else
-                    {
-                        this.treeFarmNextActionAt = Time.time + (chopped ? this.treeFarmChopPressGap : 0.15f);
-                    }
-                    break;
-
-                case HeartopiaComplete.TreeFarmState.WaitNextPoint:
-                    this.treeFarmCurrentIndex++;
-                    if (this.treeFarmCurrentIndex >= this.treeFarmPoints.Count)
-                    {
-                        this.treeFarmCurrentIndex = 0;
-                    }
-                    this.treeFarmState = HeartopiaComplete.TreeFarmState.TeleportToPoint;
-                    this.treeFarmNextActionAt = Time.time;
-                    this.treeFarmStatus = "Moving to next point...";
-                    break;
-            }
-        }
-
-        private void MarkTreeCollected(Vector3 playerPos)
-        {
-            float hideDelay = this.treeHideDelay;
-
-            int idx = this.FindClosestItemIndexLocal(playerPos, TreePositions);
-            if (idx >= 0)
-            {
-                this.treeCooldowns[idx] = Time.time + this.treeCooldownDuration;
-                this.treeHideUntil[idx] = Time.time + hideDelay;
-                ModLogger.Msg($"[TreeFarm] Tree #{idx} collected, cooldown {this.treeCooldownDuration}s");
-            }
-
-            int idx2 = this.FindClosestItemIndexLocal(playerPos, RareTreePositions);
-            if (idx2 >= 0)
-            {
-                this.rareTreeCooldowns[idx2] = Time.time + this.rareTreeCooldownDuration;
-                this.rareTreeHideUntil[idx2] = Time.time + hideDelay;
-                ModLogger.Msg($"[TreeFarm] Rare Tree #{idx2} collected, cooldown {this.rareTreeCooldownDuration}s");
-            }
-
-            int idx3 = this.FindClosestItemIndexLocal(playerPos, AppleTreePositions);
-            if (idx3 >= 0)
-            {
-                this.appleTreeCooldowns[idx3] = Time.time + this.appleTreeCooldownDuration;
-                this.appleTreeHideUntil[idx3] = Time.time + hideDelay;
-                ModLogger.Msg($"[TreeFarm] Apple Tree #{idx3} collected, cooldown {this.appleTreeCooldownDuration}s");
-            }
-
-            int idx4 = this.FindClosestItemIndexLocal(playerPos, OrangeTreePositions);
-            if (idx4 >= 0)
-            {
-                this.orangeTreeCooldowns[idx4] = Time.time + this.orangeTreeCooldownDuration;
-                this.orangeTreeHideUntil[idx4] = Time.time + hideDelay;
-                ModLogger.Msg($"[TreeFarm] Mandarin Tree #{idx4} collected, cooldown {this.orangeTreeCooldownDuration}s");
-            }
-        }
-
-        private bool CanHarvestTree()
-        {
-            // Removed world-object checks - allow auto-chop unconditionally
-            // This will let the bot attempt swings at each point regardless of unknown in-game object names
-            return true;
-        }
-
         // Token: 0x06000015 RID: 21 RVA: 0x00003ECC File Offset: 0x000020CC
         private void RunAutoFarmLogic()
         {
             this.RefreshActivePriorityLocations();
             this.autoFarmTimer += Time.unscaledDeltaTime;
             this.priorityRecheckTimer += Time.unscaledDeltaTime;
-            if (this.ShouldRunMeteorAutoInteract())
-            {
-                if (!this.meteorAutoInteractActive)
-                {
-                    this.StartMeteorAutoInteractSequence();
-                }
-                this.UpdateMeteorAutoInteractSequence();
-            }
-            else if (this.meteorAutoInteractActive)
-            {
-                this.StopMeteorAutoInteractSequence();
-            }
             bool flag = this.cameraStuckDisplayTimer > 0f;
             if (flag)
             {
@@ -1733,8 +879,7 @@ namespace HeartopiaMod
                             }
                             else
                             {
-                                bool hasReadyPrompt = this.HasReadyAutoCollectPrompt();
-                                bool hasAnyPrompt = hasReadyPrompt || this.HasAnyVisibleInteractPrompt();
+                                bool hasAnyPrompt = this.HasAnyVisibleInteractPrompt();
                                 bool auraHasRecentCommand = this.auraFarmEnabled && Time.unscaledTime - this.auraLastSuccessfulCommandAt <= 1.2f;
                                 bool flag5 = !this.autoCollectClickedSinceArrival && (!this.auraFarmEnabled || this.auraLastTargetCount <= 0 || !auraHasRecentCommand) && !HeartopiaComplete.OverrideCameraPosition && !hasAnyPrompt;
                                 if (flag5)
@@ -3282,10 +2427,10 @@ namespace HeartopiaMod
                     this.autoFarmStatus = "NO_TOGGLES_ERROR";
                     return;
                 }
-                if (!this.auraFarmEnabled && !this.autoFarmEnabled)
+                if (!this.auraFarmEnabled)
                 {
                     this.autoFarmStatus = "MODE_REQUIRED_ERROR";
-                    this.AddMenuNotification("Select Aura Farm or Auto Collect first", new Color(1f, 0.75f, 0.45f));
+                    this.AddMenuNotification("Enable Aura Farm first", new Color(1f, 0.75f, 0.45f));
                     return;
                 }
                 if (!this.isRadarActive)
@@ -3345,7 +2490,6 @@ namespace HeartopiaMod
             }
             else
             {
-                this.StopMeteorAutoInteractSequence();
                 this.farmState = HeartopiaComplete.AutoFarmState.Idle;
                 this.autoFarmStatus = "READY";
                 this.autoFarmTimer = 0f;
@@ -3365,13 +2509,6 @@ namespace HeartopiaMod
             return Math.Max(0, this.autoFarmAutoStopHours) * 3600
                 + Math.Max(0, this.autoFarmAutoStopMinutes) * 60
                 + Math.Max(0, this.autoFarmAutoStopSeconds);
-        }
-
-        private int GetAutoResourceFarmAutoStopSeconds()
-        {
-            return Math.Max(0, this.autoResourceFarmAutoStopHours) * 3600
-                + Math.Max(0, this.autoResourceFarmAutoStopMinutes) * 60
-                + Math.Max(0, this.autoResourceFarmAutoStopSeconds);
         }
 
         private void StartPatrol()
@@ -3468,130 +2605,6 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 ModLogger.Msg("Error loading patrol points: " + ex.Message);
-            }
-        }
-
-        private string GetTreeFarmPatrolPath()
-        {
-            return HelperPaths.GetFile("tree_farm_patrol_points.json");
-        }
-
-        private void SaveTreeFarmPatrolPoints()
-        {
-            try
-            {
-                UnifiedConfigData config = this.LoadOrCreateUnifiedConfig();
-                this.PopulateAllConfigSections(config);
-                this.SaveUnifiedConfig(config);
-                ModLogger.Msg($"Tree farm patrol points saved! ({treeFarmPoints.Count} points with rotations)");
-                this.AddMenuNotification($"Tree farm points saved ({treeFarmPoints.Count})", new Color(0.55f, 0.88f, 1f));
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("Error saving tree farm patrol points: " + ex.Message);
-                this.AddMenuNotification("Failed to save tree farm points", new Color(1f, 0.4f, 0.4f));
-            }
-        }
-
-        private void LoadTreeFarmPatrolPoints()
-        {
-            try
-            {
-                UnifiedConfigData config = this.LoadUnifiedConfig();
-                if (config != null)
-                {
-                    treeFarmPoints.Clear();
-                    foreach (TreeFarmPatrolPoint point in config.TreeFarmPatrol.Points)
-                    {
-                        if (point != null) treeFarmPoints.Add(point);
-                    }
-                    ModLogger.Msg($"Loaded {treeFarmPoints.Count} tree farm patrol points (with rotations: true).");
-                    return;
-                }
-                string path = this.GetTreeFarmPatrolPath();
-                if (!File.Exists(path))
-                {
-                    ModLogger.Msg("Tree farm patrol points file not found.");
-                    this.AddMenuNotification("No saved tree farm points found", new Color(1f, 0.55f, 0.55f));
-                    return;
-                }
-                treeFarmPoints.Clear();
-                string json = File.ReadAllText(path);
-
-                // Check if this is the new format (with Rotation) or old format (just Vector3)
-                bool hasRotation = json.Contains("\"Rotation\"");
-
-                // Parse JSON manually - find all coordinate blocks
-                int pointsStart = json.IndexOf("[");
-                int pointsEnd = json.LastIndexOf("]");
-                if (pointsStart == -1 || pointsEnd == -1) return;
-
-                string pointsSection = json.Substring(pointsStart + 1, pointsEnd - pointsStart - 1);
-
-                if (hasRotation)
-                {
-                    // New format with Position and Rotation
-                    string[] pointBlocks = pointsSection.Split(new string[] { "    }" }, StringSplitOptions.RemoveEmptyEntries);
-
-                    foreach (string block in pointBlocks)
-                    {
-                        if (!block.Contains("Position")) continue;
-
-                        // Extract Position block (between "Position": { and })
-                        int posStart = block.IndexOf("\"Position\"");
-                        if (posStart == -1) continue;
-                        int posObjStart = block.IndexOf("{", posStart);
-                        int posObjEnd = block.IndexOf("}", posObjStart);
-                        string posBlock = block.Substring(posObjStart, posObjEnd - posObjStart + 1);
-
-                        float px = ExtractCoordinate(posBlock, "x");
-                        float py = ExtractCoordinate(posBlock, "y");
-                        float pz = ExtractCoordinate(posBlock, "z");
-
-                        // Extract Rotation block (between "Rotation": { and })
-                        int rotStart = block.IndexOf("\"Rotation\"");
-                        Quaternion rotation = Quaternion.identity;
-                        if (rotStart != -1)
-                        {
-                            int rotObjStart = block.IndexOf("{", rotStart);
-                            int rotObjEnd = block.IndexOf("}", rotObjStart);
-                            string rotBlock = block.Substring(rotObjStart, rotObjEnd - rotObjStart + 1);
-
-                            float rx = ExtractCoordinate(rotBlock, "x");
-                            float ry = ExtractCoordinate(rotBlock, "y");
-                            float rz = ExtractCoordinate(rotBlock, "z");
-                            float rw = ExtractCoordinate(rotBlock, "w");
-                            rotation = new Quaternion(rx, ry, rz, rw);
-                        }
-
-                        treeFarmPoints.Add(new TreeFarmPatrolPoint(new Vector3(px, py, pz), rotation));
-                    }
-                }
-                else
-                {
-                    // Old format - just Vector3 positions, use default rotation
-                    string[] pointBlocks = pointsSection.Split(new string[] { "}," }, StringSplitOptions.RemoveEmptyEntries);
-
-                    foreach (string block in pointBlocks)
-                    {
-                        string cleanBlock = block.Trim().Trim('{').Trim('}').Trim(',');
-                        if (string.IsNullOrEmpty(cleanBlock)) continue;
-
-                        // Extract x, y, z values
-                        float x = ExtractCoordinate(cleanBlock, "\"x\"");
-                        float y = ExtractCoordinate(cleanBlock, "\"y\"");
-                        float z = ExtractCoordinate(cleanBlock, "\"z\"");
-
-                        treeFarmPoints.Add(new TreeFarmPatrolPoint(new Vector3(x, y, z), Quaternion.identity));
-                    }
-                }
-                ModLogger.Msg($"Loaded {treeFarmPoints.Count} tree farm patrol points (with rotations: {hasRotation}).");
-                this.AddMenuNotification($"Tree farm points loaded ({treeFarmPoints.Count})", new Color(0.45f, 1f, 0.55f));
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("Error loading tree farm patrol points: " + ex.Message);
-                this.AddMenuNotification("Failed to load tree farm points", new Color(1f, 0.4f, 0.4f));
             }
         }
 
@@ -3707,17 +2720,6 @@ namespace HeartopiaMod
             WaitingForNodes,
             // Token: 0x0400005D RID: 93
             WaitingForPriorityArea
-        }
-
-        private enum TreeFarmState
-        {
-            Idle,
-            EquipAxe,
-            WaitAfterEquip,
-            TeleportToPoint,
-            WaitAfterTeleport,
-            ChopAtPoint,
-            WaitNextPoint
         }
 
     }

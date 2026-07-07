@@ -517,7 +517,6 @@ namespace HeartopiaMod
                 bool flag2 = this.DrawDangerActionButton(new Rect(20f, (float)num, 260f, 35f), "DISABLE ALL");
                 if (flag2)
                 {
-                    this.autoFarmEnabled = false;
                     this.bypassEnabled = false;
                     this.hideJumpButtonEnabled = false;
                     this.cachedJumpButtonGo = null;
@@ -532,7 +531,6 @@ namespace HeartopiaMod
                     this.isAutoEating = false;
                     this.autoSellEnabled = false;
                     this.SetAuraFarmEnabled(false);
-                    this.StopTreeFarm("Stopped");
                     this.cookingCleanupMode = false;
                     this.SetGameSpeed(1f);
                     this.customCameraFOVEnabled = false;

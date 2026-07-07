@@ -51,19 +51,6 @@ namespace HeartopiaMod
             public Quaternion ToQuaternion() { return new Quaternion(x, y, z, w); }
         }
 
-        [Serializable]
-        public class TreeFarmPatrolPoint
-        {
-            public SerializableVector3 Position;
-            public SerializableQuaternion Rotation;
-            public TreeFarmPatrolPoint() { }
-            public TreeFarmPatrolPoint(Vector3 pos, Quaternion rot)
-            {
-                Position = new SerializableVector3(pos);
-                Rotation = new SerializableQuaternion(rot);
-            }
-        }
-
         private class MenuNotification
         {
             public string Key;
@@ -75,17 +62,11 @@ namespace HeartopiaMod
             public bool Force;
         }
 
-        public class TreeFarmPatrolData
-        {
-            public List<TreeFarmPatrolPoint> Points = new List<TreeFarmPatrolPoint>();
-        }
-
         [Serializable]
         public class KeybindConfigData
         {
             public int keyToggleMenu;
             public int keyToggleRadar;
-            public int keyAutoForaging;
             public int keyAuraFarm;
             public int keyWaterWeedRadius;
             public int keyAutoFish;
@@ -138,8 +119,6 @@ namespace HeartopiaMod
             public float noclipBoostMultiplier;
             public float areaLoadDelay;
             public float auraCollectWaitTimeout;
-            public float resourceTeleportCooldown;
-            public float resourceClickDuration;
             public float resourceAutoRepairPauseSeconds;
             public float gameSpeed;
             public bool fpsBypassEnabled;
@@ -245,7 +224,6 @@ namespace HeartopiaMod
             public float autoSellInterval;
             public int autoSellScanSource;
             public bool autoSellFestivalTokensEnabled;
-            public bool collectEventResources;
             public bool auraFarmLootCollectEnabled;
             public float auraFarmLootCollectDistance;
         }
@@ -323,7 +301,6 @@ namespace HeartopiaMod
             public RadarConfigData Radar = new RadarConfigData();
             public BirdFarmConfigData BirdFarm = new BirdFarmConfigData();
             public PatrolData Patrol = new PatrolData();
-            public TreeFarmPatrolData TreeFarmPatrol = new TreeFarmPatrolData();
             public List<CustomTeleportEntry> CustomTeleports = new List<CustomTeleportEntry>();
             public List<CustomTeleportEntry> FishingRouteSpots = new List<CustomTeleportEntry>();
             public string Language = "en";
