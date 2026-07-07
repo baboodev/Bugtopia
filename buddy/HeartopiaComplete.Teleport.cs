@@ -1637,6 +1637,63 @@ namespace HeartopiaMod
             return this.cachedNpcTeleportEntries;
         }
 
+        // --- Game-native teleport (EntityHelper.AutoMoveTransfer / TransferAndLookAtForEditor) ---
+        // Warps the self-player via the game's OWN Mono API (checkCollision=false, server-syncs itself
+        // through BasePlayerComponent.TrySendSelfTransform) instead of Harmony-patching
+        // Transform.set_position (an anti-cheat-detectable module .text patch). AuraMono-invoke,
+        // mirrors TryVehicleTeleportSendTransform in VehicleTeleportFeature.cs. Returns true on success;
+        // callers then SKIP Ensure*OverridePatched (the .text patch) but keep the direct-write hold /
+        // resource-farm arrival bookkeeping (plain transform writes, not a patch).
+        private IntPtr gameTeleportAutoMoveMethod = IntPtr.Zero;
+        private IntPtr gameTeleportLookAtEditorMethod = IntPtr.Zero;
+
+        private bool TryEnsureGameTeleportMethods()
+        {
+            if (this.gameTeleportAutoMoveMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+            IntPtr cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Utils.EntityHelper");
+            if (cls == IntPtr.Zero)
+            {
+                return false; // Mono image not ready yet — retry on the next teleport
+            }
+            this.gameTeleportAutoMoveMethod = this.FindAuraMonoMethodOnHierarchy(cls, "AutoMoveTransfer", 1);
+            this.gameTeleportLookAtEditorMethod = this.FindAuraMonoMethodOnHierarchy(cls, "TransferAndLookAtForEditor", 2);
+            return this.gameTeleportAutoMoveMethod != IntPtr.Zero;
+        }
+
+        private unsafe bool TryGameTeleportAuraMono(Vector3 target, bool hasRot, Quaternion rot)
+        {
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+            if (!this.TryEnsureGameTeleportMethods())
+            {
+                return false;
+            }
+            IntPtr exc = IntPtr.Zero;
+            if (hasRot && this.gameTeleportLookAtEditorMethod != IntPtr.Zero)
+            {
+                Vector3 pos = target;
+                Vector3 euler = rot.eulerAngles;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&pos);
+                args[1] = (IntPtr)(&euler);
+                auraMonoRuntimeInvoke(this.gameTeleportLookAtEditorMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                return exc == IntPtr.Zero;
+            }
+            else
+            {
+                Vector3 pos = target;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&pos);
+                auraMonoRuntimeInvoke(this.gameTeleportAutoMoveMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                return exc == IntPtr.Zero;
+            }
+        }
+
         // Token: 0x06000025 RID: 37 RVA: 0x00006E00 File Offset: 0x00005000
         private void TeleportToLocation(Vector3 targetPos)
         {
@@ -1652,16 +1709,23 @@ namespace HeartopiaMod
                 return;
             }
 
+            bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
             GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (flag)
             {
-                ModLogger.Msg("Player not found!");
+                if (!warped)
+                {
+                    ModLogger.Msg("Player not found!");
+                }
             }
             else
             {
                 Vector3 position = gameObject.transform.position;
-                this.EnsurePositionOverridePatched();
+                if (!warped)
+                {
+                    this.EnsurePositionOverridePatched();
+                }
                 HeartopiaComplete.OverridePosition = targetPos;
                 HeartopiaComplete.OverridePlayerPosition = true;
                 CharacterController component = gameObject.GetComponent<CharacterController>();
@@ -1693,17 +1757,24 @@ namespace HeartopiaMod
                 return;
             }
 
+            bool warped = this.TryGameTeleportAuraMono(targetPos, true, targetRot);
             GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (flag)
             {
-                ModLogger.Msg("Player not found!");
+                if (!warped)
+                {
+                    ModLogger.Msg("Player not found!");
+                }
             }
             else
             {
                 Vector3 position = gameObject.transform.position;
-                this.EnsurePositionOverridePatched();
-                this.EnsureRotationOverridePatched();
+                if (!warped)
+                {
+                    this.EnsurePositionOverridePatched();
+                    this.EnsureRotationOverridePatched();
+                }
                 HeartopiaComplete.OverridePosition = targetPos;
                 HeartopiaComplete.OverridePlayerPosition = true;
                 HeartopiaComplete.PlayerOverrideRot = targetRot;
@@ -1728,7 +1799,11 @@ namespace HeartopiaMod
 
         private void TeleportTo(Vector3 targetPos)
         {
-            this.EnsurePositionOverridePatched();
+            bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
+            if (!warped)
+            {
+                this.EnsurePositionOverridePatched();
+            }
             OverridePosition = targetPos;
             OverridePlayerPosition = true;
             teleportFramesRemaining = 10;
