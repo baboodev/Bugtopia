@@ -30,6 +30,8 @@ $interopDlls = @(
     "Il2CppClient.dll",
     "Il2Cppmscorlib.dll",
     "UnityEngine.dll",
+  # HeartopiaComplete.Fishing.cs cast-skip (Animator.StringToHash)
+    "UnityEngine.AnimationModule.dll",
     "UnityEngine.AssetBundleModule.dll",
     "UnityEngine.CoreModule.dll",
     "UnityEngine.ImageConversionModule.dll",
