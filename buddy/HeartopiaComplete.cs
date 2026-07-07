@@ -931,9 +931,6 @@ namespace HeartopiaMod
                 if (this.TryGetModHotkeyDown(this.keyBypassOverlap))
                 {
                     this.bypassOverlapEnabled = !this.bypassOverlapEnabled;
-                    HeartopiaComplete.bypassOverlapEnabledStatic = this.bypassOverlapEnabled;
-                    if (this.bypassOverlapEnabled && !this.bypassOverlapPatched)
-                        this.EnsureBypassPatched();
                     this.AddMenuNotification($"Bypass Overlap {(this.bypassOverlapEnabled ? "Enabled" : "Disabled")}", this.bypassOverlapEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
                 if (this.TryGetModHotkeyDown(this.keyBirdVacuum))
@@ -5811,11 +5808,8 @@ namespace HeartopiaMod
         // because the mod menu is open with "block game input" on. Must be balanced 1:1 with EnableInput.
         private bool menuMoveInputDisabled = false;
 
-        // Bypass overlap building state
+        // Bypass overlap building state (patch = Mono NativeDetours in BuildingFreeRotateFeature.cs)
         private bool bypassOverlapEnabled = false;
-        private bool bypassOverlapPatched = false;
-        private HarmonyLib.Harmony bypassHarmony = null;
-        private static bool bypassOverlapEnabledStatic = false;
 
         private bool autoJoinFriendEnabled = false;
         private bool autoClickStartEnabled = false;

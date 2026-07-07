@@ -156,6 +156,30 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate int OutOfBoundsTestDelegate(IntPtr ctx);
 
+        // Overlap bypass — replaces the old IL2CPP Harmony PhysicsManager.Overlap* patch (GameAssembly
+        // .text) with two Mono NativeDetours (Mono JIT heap, NOT a module .text → off the anti-cheat
+        // integrity surface). The IL2CPP PhysicsManager.Overlap* is reached only via icalls from the
+        // Mono craft path, so hooking the Mono decision gate lifts collision the same way. Apply/Undo per
+        // toggle; callback-free constant hooks (see the surface-patch freeze/crash lesson above).
+        //  1) IntersectionTesting.Test(in ctx, List, List) -> ErrorCode ⇒ 0 (Success): the SINGLE
+        //     collision chokepoint under BOTH the preview gate (Alignment/IsPlacingCollisionSafe) and the
+        //     confirm gate (Gen*ConfirmOption -> IsCollisionSafe). Do NOT hook TestAndCollectElements
+        //     (AggressiveInlining forwarder — may inline and orphan the detour).
+        //  2) BuildSingle.OverlapCompleteWithSlab(out IBuildBoxElement) -> bool ⇒ out null + true: kills
+        //     the slab-on-slab confirm deny (ErrorCode.WallOverlapFail). Guarded independently so a
+        //     slab-resolve miss still leaves the primary hook active.
+        private bool buildingOverlapPatchTried;
+        private static MonoMod.RuntimeDetour.NativeDetour buildingOverlapDetour;
+        private static IntersectionTestDelegate buildingOverlapHook;         // anti-GC
+        private bool buildingSlabOverlapPatchTried;
+        private static MonoMod.RuntimeDetour.NativeDetour buildingSlabOverlapDetour;
+        private static SlabOverlapDelegate buildingSlabOverlapHook;          // anti-GC
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int IntersectionTestDelegate(IntPtr ctx, IntPtr collectElements, IntPtr collectColliders);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate byte SlabOverlapDelegate(IntPtr self, IntPtr outOverlapElement);
+
         // AuraMono send cache. BuildMoveData/BuildTransformData/HomelandProtocolManager are NOT in
         // the managed interop (verified: move=False xf=False proto=False), so build + send via Mono.
         private static readonly string[] BuildOpImageNames =
@@ -229,11 +253,7 @@ namespace HeartopiaMod
             y += 26f;
 
             this.bypassOverlapEnabled = GUI.Toggle(new Rect(left, y, 320f, 22f), this.bypassOverlapEnabled, " " + this.L("Bypass Overlap"));
-            HeartopiaComplete.bypassOverlapEnabledStatic = this.bypassOverlapEnabled;
-            if (this.bypassOverlapEnabled && !this.bypassOverlapPatched)
-            {
-                this.EnsureBypassPatched();
-            }
+            // Apply/undo of the overlap detours is driven from UpdateBuildingFreeSnapOverrides (OnUpdate), not here.
             y += 26f;
 
             // X/Y/Z jog of the FOCUSED object — god-mode only (drives GodControl._dstPosition), so the
@@ -1556,6 +1576,16 @@ namespace HeartopiaMod
                 this.RemoveBuildingRangePatch();
             }
 
+            // Overlap bypass: Mono detours applied while the toggle is on, undone when off.
+            if (this.bypassOverlapEnabled)
+            {
+                this.EnsureBuildingOverlapPatch();
+            }
+            else if (buildingOverlapDetour != null || buildingSlabOverlapDetour != null)
+            {
+                this.RemoveBuildingOverlapPatch();
+            }
+
             bool anyOn = this.buildingFreeAngleEnabled || this.buildingFreeGridEnabled;
             bool anyCached = this.buildingAngleOriginals.Count > 0 || this.buildingGridOriginals.Count > 0;
             if (!anyOn && !anyCached)
@@ -2043,6 +2073,146 @@ namespace HeartopiaMod
         private static int BuildingOutOfBoundsTestNative(IntPtr ctx)
         {
             return 0;
+        }
+
+        // Overlap bypass: install BOTH detours (each guarded independently) and ensure APPLIED. Same
+        // lazy-create-once + Apply pattern as the surface/range detours (see the field-block comment).
+        private void EnsureBuildingOverlapPatch()
+        {
+            // Primary: IntersectionTesting.Test -> Success (the single preview+confirm collision gate).
+            try
+            {
+                if (buildingOverlapDetour != null)
+                {
+                    if (!buildingOverlapDetour.IsApplied)
+                    {
+                        buildingOverlapDetour.Apply();
+                    }
+                }
+                else if (!this.buildingOverlapPatchTried && this.EnsureAuraMonoApiReady() && this.AttachAuraMonoThread())
+                {
+                    IntPtr cls = this.FindAuraMonoClassInImages(
+                        "XDTLevelAndEntity.Core.Craft", "IntersectionTesting",
+                        new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+                    if (cls == IntPtr.Zero)
+                    {
+                        cls = this.FindAuraMonoClassInAllLoadedImages("IntersectionTesting", "XDTLevelAndEntity.Core.Craft");
+                    }
+                    if (cls != IntPtr.Zero)
+                    {
+                        IntPtr testPtr = this.ResolveBuildingMonoNative(cls, "Test", 3);
+                        if (testPtr != IntPtr.Zero)
+                        {
+                            buildingOverlapHook = BuildingIntersectionTestNative;
+                            buildingOverlapDetour = new MonoMod.RuntimeDetour.NativeDetour(testPtr, buildingOverlapHook);
+                            this.buildingOverlapPatchTried = true;
+                            this.BuildingLog("overlap-patch: detour installed on IntersectionTesting.Test (applied)");
+                        }
+                        else
+                        {
+                            this.buildingOverlapPatchTried = true;
+                            this.BuildingLog("overlap-patch: IntersectionTesting.Test(3) not resolved");
+                        }
+                    }
+                    // cls == 0 ⇒ image not loaded yet: leave tried=false and retry on a later frame.
+                }
+            }
+            catch (Exception ex)
+            {
+                this.buildingOverlapPatchTried = true;
+                this.BuildingLog("overlap-patch failed: " + ex.Message);
+            }
+
+            // Secondary: BuildSingle.OverlapCompleteWithSlab -> out null, true (slab-on-slab confirm deny).
+            try
+            {
+                if (buildingSlabOverlapDetour != null)
+                {
+                    if (!buildingSlabOverlapDetour.IsApplied)
+                    {
+                        buildingSlabOverlapDetour.Apply();
+                    }
+                }
+                else if (!this.buildingSlabOverlapPatchTried && this.EnsureAuraMonoApiReady() && this.AttachAuraMonoThread())
+                {
+                    IntPtr cls = this.FindAuraMonoClassInImages(
+                        "XDTLevelAndEntity.Core.Craft", "BuildSingle",
+                        new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+                    if (cls == IntPtr.Zero)
+                    {
+                        cls = this.FindAuraMonoClassInAllLoadedImages("BuildSingle", "XDTLevelAndEntity.Core.Craft");
+                    }
+                    if (cls != IntPtr.Zero)
+                    {
+                        IntPtr slabPtr = this.ResolveBuildingMonoNative(cls, "OverlapCompleteWithSlab", 1);
+                        if (slabPtr != IntPtr.Zero)
+                        {
+                            buildingSlabOverlapHook = BuildingSlabOverlapNative;
+                            buildingSlabOverlapDetour = new MonoMod.RuntimeDetour.NativeDetour(slabPtr, buildingSlabOverlapHook);
+                            this.buildingSlabOverlapPatchTried = true;
+                            this.BuildingLog("overlap-patch: detour installed on BuildSingle.OverlapCompleteWithSlab (applied)");
+                        }
+                        else
+                        {
+                            this.buildingSlabOverlapPatchTried = true;
+                            this.BuildingLog("overlap-patch: BuildSingle.OverlapCompleteWithSlab(1) not resolved");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                this.buildingSlabOverlapPatchTried = true;
+                this.BuildingLog("overlap-patch (slab) failed: " + ex.Message);
+            }
+        }
+
+        // Undo both detours (toggle off) — leaves the NativeDetour objects reusable for a later Apply.
+        private void RemoveBuildingOverlapPatch()
+        {
+            try
+            {
+                if (buildingOverlapDetour != null && buildingOverlapDetour.IsApplied)
+                {
+                    buildingOverlapDetour.Undo();
+                    this.BuildingLog("overlap-patch: detour undone (overlap re-enforced)");
+                }
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("overlap-patch undo failed: " + ex.Message);
+            }
+            try
+            {
+                if (buildingSlabOverlapDetour != null && buildingSlabOverlapDetour.IsApplied)
+                {
+                    buildingSlabOverlapDetour.Undo();
+                    this.BuildingLog("overlap-patch: slab detour undone");
+                }
+            }
+            catch (Exception ex)
+            {
+                this.BuildingLog("overlap-patch (slab) undo failed: " + ex.Message);
+            }
+        }
+
+        // Detour bodies — callback-free constants (only applied while the toggle is on).
+        // IntersectionTesting.Test -> ErrorCode.Success(0): the collision test always passes.
+        private static int BuildingIntersectionTestNative(IntPtr ctx, IntPtr collectElements, IntPtr collectColliders)
+        {
+            return 0;
+        }
+
+        // BuildSingle.OverlapCompleteWithSlab(out IBuildBoxElement) -> true + out null: mirrors the old
+        // num==0 outcome so slab-on-slab confirm no longer denies. Writing null into a reference-type out
+        // slot (a caller stack local) is barrier-free and safe.
+        private static unsafe byte BuildingSlabOverlapNative(IntPtr self, IntPtr outOverlapElement)
+        {
+            if (outOverlapElement != IntPtr.Zero)
+            {
+                *(IntPtr*)outOverlapElement = IntPtr.Zero;
+            }
+            return 1;
         }
     }
 }

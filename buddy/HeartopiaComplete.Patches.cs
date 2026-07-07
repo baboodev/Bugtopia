@@ -216,42 +216,6 @@ namespace HeartopiaMod
             }
         }
 
-        private void EnsureBypassPatched()
-        {
-            if (this.bypassOverlapPatched) return;
-
-            var t = System.AppDomain.CurrentDomain.GetAssemblies()
-                .Select(a => a.GetType("XDT.Physics.PhysicsManager") ?? a.GetType("Il2CppXDT.Physics.PhysicsManager"))
-                .FirstOrDefault(x => x != null);
-
-            if (t != null)
-            {
-                try
-                {
-                    this.bypassHarmony = new HarmonyLib.Harmony("HeartopiaMod.bypass");
-                    var p = new HarmonyMethod(typeof(HeartopiaComplete).GetMethod(nameof(BypassPrefix), System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public));
-                    string[] methods = { "OverlapBoxNonAlloc", "OverlapSphereNonAlloc" };
-                    foreach (var m in t.GetMethods().Where(x => methods.Contains(x.Name))) this.bypassHarmony.Patch(m, p);
-                    this.bypassOverlapPatched = true;
-                    ModLogger.Msg("Bypass overlap patch applied.");
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Msg("Bypass patch failed: " + ex.Message);
-                }
-            }
-        }
-
-        private static bool BypassPrefix(ref int __result)
-        {
-            if (bypassOverlapEnabledStatic)
-            {
-                __result = 0;
-                return false;
-            }
-            return true;
-        }
-
         // Token: 0x06000013 RID: 19 RVA: 0x00003E34 File Offset: 0x00002034
         private void RunBypassLogic(bool shouldHide)
         {
