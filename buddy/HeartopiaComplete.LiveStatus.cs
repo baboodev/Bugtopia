@@ -137,12 +137,9 @@ namespace HeartopiaMod
                 entries.Add(petCare);
             }
 
-            if (this.autoCookEnabled || this.isCookingPatrolActive)
+            if (this.autoCookEnabled)
             {
-                string cookingStatus = this.isCookingPatrolActive
-                    ? "Patrol active"
-                    : "Auto cook enabled";
-                entries.Add(this.CreateLiveFeatureEntry("Cooking Patrol", cookingStatus));
+                entries.Add(this.CreateLiveFeatureEntry("Auto Cook", "Enabled"));
             }
 
             if (this.autoIceSkatingEnabled)

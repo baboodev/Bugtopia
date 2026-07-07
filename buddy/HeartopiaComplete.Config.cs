@@ -65,12 +65,7 @@ namespace HeartopiaMod
                 if (data.Patrol.Points == null) data.Patrol.Points = new List<SerializableVector3>();
                 if (data.TreeFarmPatrol == null) data.TreeFarmPatrol = new TreeFarmPatrolData();
                 if (data.TreeFarmPatrol.Points == null) data.TreeFarmPatrol.Points = new List<TreeFarmPatrolPoint>();
-                if (data.CookingPatrolSaves == null) data.CookingPatrolSaves = new List<NamedCookingPatrolSave>();
                 if (string.IsNullOrWhiteSpace(data.Language)) data.Language = "en";
-                foreach (NamedCookingPatrolSave save in data.CookingPatrolSaves)
-                {
-                    if (save != null && save.Points == null) save.Points = new List<CookingPatrolPoint>();
-                }
                 if (data.CustomTeleports == null) data.CustomTeleports = new List<CustomTeleportEntry>();
                 if (data.FishingRouteSpots == null) data.FishingRouteSpots = new List<CustomTeleportEntry>();
                 return data;
@@ -200,7 +195,6 @@ namespace HeartopiaMod
             data.autoBubbleCollectEnabled = this.autoBubbleCollectEnabled;
             data.autoBubbleCollectRadius = this.autoBubbleCollectRadius;
             data.cookingAutoSpeed = this.cookingAutoSpeed;
-            data.cookingWaitAtSpot = this.cookingWaitAtSpot;
             data.netCookInterval = this.netCookInterval;
             data.netCookScanRadiusMeters = this.netCookScanRadiusMeters;
             data.netCookMiniGameOnly = this.netCookMiniGameOnly;
@@ -383,7 +377,6 @@ namespace HeartopiaMod
             this.autoBubbleCollectEnabled = data.autoBubbleCollectEnabled;
             this.autoBubbleCollectRadius = Mathf.Clamp(data.autoBubbleCollectRadius, 0f, 100f);
             this.cookingAutoSpeed = data.cookingAutoSpeed;
-            this.cookingWaitAtSpot = data.cookingWaitAtSpot;
             this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
             this.netCookScanRadiusMeters = Mathf.Clamp(data.netCookScanRadiusMeters > 0f ? data.netCookScanRadiusMeters : NetCookDefaultScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
             this.netCookMiniGameOnly = data.netCookMiniGameOnly;
@@ -520,18 +513,6 @@ namespace HeartopiaMod
             data.TreeFarmPatrol = new TreeFarmPatrolData();
             data.TreeFarmPatrol.Points = new List<TreeFarmPatrolPoint>(treeFarmPoints);
 
-            if (data.CookingPatrolSaves == null) data.CookingPatrolSaves = new List<NamedCookingPatrolSave>();
-            string currentCookingName = this.SanitizeCookingPatrolSaveName(this.cookingPatrolSaveName);
-            if (!string.IsNullOrEmpty(currentCookingName))
-            {
-                data.CookingPatrolSaves.RemoveAll(s => string.Equals(this.SanitizeCookingPatrolSaveName(s?.Name), currentCookingName, StringComparison.OrdinalIgnoreCase));
-                data.CookingPatrolSaves.Add(new NamedCookingPatrolSave
-                {
-                    Name = currentCookingName,
-                    Points = new List<CookingPatrolPoint>(cookingPatrolPoints)
-                });
-            }
-
             data.CustomTeleports = new List<CustomTeleportEntry>();
             foreach (CustomTeleportEntry entry in this.customTeleportList)
             {
@@ -665,7 +646,6 @@ namespace HeartopiaMod
                         else if (line.Contains("autoBubbleCollectEnabled")) this.autoBubbleCollectEnabled = GetJsonInt(line, "\"autoBubbleCollectEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = Mathf.Clamp(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"), 0f, 100f);
             else if (line.Contains("cookingAutoSpeed")) this.cookingAutoSpeed = GetJsonFloat(line, "\"cookingAutoSpeed\":");
-            else if (line.Contains("cookingWaitAtSpot")) this.cookingWaitAtSpot = GetJsonFloat(line, "\"cookingWaitAtSpot\":");
             else if (line.Contains("netCookInterval")) this.netCookInterval = GetJsonFloat(line, "\"netCookInterval\":");
             else if (line.Contains("netCookScanRadiusMeters")) this.netCookScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"netCookScanRadiusMeters\":"), NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
             else if (line.Contains("netCookMiniGameOnly")) this.netCookMiniGameOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMiniGameOnly\":") != 0;

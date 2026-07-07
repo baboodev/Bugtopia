@@ -198,13 +198,6 @@ namespace HeartopiaMod
         private float waitAtSpot = 0.3f;
         private object patrolCoroutine;
 
-        // --- COOKING PATROL VARIABLES ---
-        private List<CookingPatrolPoint> cookingPatrolPoints = new List<CookingPatrolPoint>();
-        private float cookingWaitAtSpot = 0.3f;
-        private bool isCookingPatrolActive = false;
-        private object cookingPatrolCoroutine;
-        private string cookingPatrolSaveName = "";
-        private Vector2 cookingPatrolSaveScrollPos = Vector2.zero;
         private bool antiAfkEnabled = false;
         private bool mouseLookEnabled = false;
         private bool showMouseLookCrosshair = true;
@@ -5001,7 +4994,6 @@ namespace HeartopiaMod
         private const float cookingPlayerAlertRadius = 25f;
         private float lastPlayerDetectionCheckAt = -999f;
         private float cookingAutoSpeed = 7f;
-        private bool cookingPatrolEnabled = false;
         private bool cookingPanelClosed = false;
         private float cookingPanelClosedTime = 0f;
         private float lastConfirmClickTime = -999f;

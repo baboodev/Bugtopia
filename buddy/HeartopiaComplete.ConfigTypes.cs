@@ -52,19 +52,6 @@ namespace HeartopiaMod
         }
 
         [Serializable]
-        public class CookingPatrolPoint
-        {
-            public SerializableVector3 Position;
-            public SerializableQuaternion Rotation;
-            public CookingPatrolPoint() { }
-            public CookingPatrolPoint(Vector3 pos, Quaternion rot)
-            {
-                Position = new SerializableVector3(pos);
-                Rotation = new SerializableQuaternion(rot);
-            }
-        }
-
-        [Serializable]
         public class TreeFarmPatrolPoint
         {
             public SerializableVector3 Position;
@@ -86,11 +73,6 @@ namespace HeartopiaMod
             public float ExpireAt;
             public float Duration;
             public bool Force;
-        }
-
-        public class CookingPatrolData
-        {
-            public List<CookingPatrolPoint> Points = new List<CookingPatrolPoint>();
         }
 
         public class TreeFarmPatrolData
@@ -186,7 +168,6 @@ namespace HeartopiaMod
             public bool autoBubbleCollectEnabled;
             public float autoBubbleCollectRadius = 10f; // 0 = unlimited, default 10m
             public float cookingAutoSpeed;
-            public float cookingWaitAtSpot;
             public float netCookInterval;
             public float netCookScanRadiusMeters;
             public bool netCookMiniGameOnly;
@@ -324,13 +305,6 @@ namespace HeartopiaMod
         }
 
         [Serializable]
-        public class NamedCookingPatrolSave
-        {
-            public string Name;
-            public List<CookingPatrolPoint> Points = new List<CookingPatrolPoint>();
-        }
-
-        [Serializable]
         public class BirdFarmConfigData
         {
             public bool perfectPhotoEnabled = false;
@@ -350,7 +324,6 @@ namespace HeartopiaMod
             public BirdFarmConfigData BirdFarm = new BirdFarmConfigData();
             public PatrolData Patrol = new PatrolData();
             public TreeFarmPatrolData TreeFarmPatrol = new TreeFarmPatrolData();
-            public List<NamedCookingPatrolSave> CookingPatrolSaves = new List<NamedCookingPatrolSave>();
             public List<CustomTeleportEntry> CustomTeleports = new List<CustomTeleportEntry>();
             public List<CustomTeleportEntry> FishingRouteSpots = new List<CustomTeleportEntry>();
             public string Language = "en";
