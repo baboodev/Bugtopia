@@ -382,7 +382,9 @@ Exact enforcement (rollback, kick, ban) is not visible in the client dump.
 | Movement | **High** for speed/fly/teleport | Server sampling; ≥50% of 5 s window over 4.3 / 9.0 m/s (§4.2) |
 | Collect | **High** for remote collect / CD bypass | `dist ≤ 2 m`, reachability `8.6×1.1×dt+2`, CD rules (§3.2) |
 | Collect (`WarnOnly=true`) | **Medium** | Server may log without rejecting — gray rollout |
-| Loader / injector detection | **Not in managed dump** | Native Themis present (§9); treat as potentially active |
+| Loader / injector detection | **High (active)** | Native Themis: generic module-enum + memory scan + integrity hash — detects injected modules regardless of name; no loader blocklist (§10.4) |
+| Native user-mode hooks (ntdll/WinAPI) | **High** | Code integrity-hash + clean-ntdll unhook/compare (§10.5); managed Mono-method detours are **not** hashed |
+| Debugging the live game | **High** | HW-breakpoint (DR regs), ThreadHideFromDebugger, kernel-debugger, IsDebuggerPresent, Wine/Sandboxie/VM (§10.4) — use dead snapshots, not live attach |
 
 ---
 
@@ -461,7 +463,9 @@ Native config ships as `<Game>/themis.res`.
 ### Detection model & implications
 
 - The actual detection (memory/tamper/injection/hook/debugger/speed checks) lives in **native Themis**
-  and is **not** in the managed dump — the exact checks cannot be enumerated from `ilspy-dumps/`.
+  (`themis_x64.dll`) — not in the managed dump, but now **reverse-engineered directly from the binary**:
+  see **§10** for the enumerated detection surface, the recovered string cipher, the integrity-heartbeat
+  model, the server-exchange visibility, and the unpacking workflow.
 - **The dump's managed callback leaks game state into AC reports:** `ExtraEntityMsg` reads
   `entity.position` and `playerState` directly. Teleport / fly / speed / state-spoof mods that mutate
   these are captured *at report time* and correlated server-side — independent of the §2 input layer.
@@ -474,9 +478,10 @@ Native config ships as `<Game>/themis.res`.
 ### Updated risk note
 
 §6's "Loader / injector detection: **Not found**" should read: **not found in managed code; a native
-anti-cheat (Themis) is present** whose detection logic is out of dump scope. Treat process integrity,
-injected modules, and memory edits as potentially observed by the native layer even though no managed
-scan exists.
+anti-cheat (Themis) is present and has now been reverse-engineered** (§10). Process integrity, injected
+modules, memory edits, hooks, and debuggers are **actively observed** by the native layer via **generic
+module/memory scanning + integrity hashing** — *not* a loader name blocklist (there are no
+`BepInEx`/`doorstop`/`winhttp` strings; renaming the loader does not help).
 
 ### Key source paths
 
@@ -490,4 +495,145 @@ scan exists.
 
 ---
 
-*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review.*
+## 10. Native Themis — Binary Reverse Engineering (`themis_x64.dll`)
+
+> Added from static + memory-dump analysis of the shipped native binary in Ghidra (Ghidra-MCP).
+> This supersedes §9's "detection logic is out of dump scope": the detection **surface** and the
+> **architecture** are now enumerated. The exact per-check *logic* remains behind code obfuscation (§10.8).
+
+### 10.1 Binary identity & layout
+
+| Property | Value |
+|----------|-------|
+| Path | `<Game>/xdt_Data/Plugins/x86_64/themis_x64.dll` |
+| Size / arch | 16.7 MB, x86-64 PE, on-disk ImageBase `0x180000000` |
+| Vendor | TapTap / XD **Themis** anti-cheat SDK |
+| Exports | 25 named (map 1:1 to `ThemisSDKManager` icalls, §9) |
+| Config | `<Game>/themis.res` (read via export `ReadCfgFile`) |
+| Aux SDK | `taptap_api.dll` (156 KB — not the AC core) |
+
+**Exports** → managed API: `init_themis`/`init_themis_by_appid`/`tminit`/`tminit_windows`/`tmcr` (bring-up), `get_themis_heartbeat` (integrity challenge), `get_oneid`/`get_oneid_data` (device fingerprint), `input_data` (native input feed), `add_custom_field` (context tags), `report_exception`/`report_custom_exception`/`report_custom_exception_ex`/`report_hang_info` (reporting; `isQuitApp` force-closes), `set_exception_callback`/`set_native_callback`/`set_themis_callback`/`set_extra_callback_ex`/`set_use_extend_callback` (native→managed callback reg), `OutOfProcessException{,DebuggerLaunch,Signature}EventCallback`, `ReadCfgFile`, `event_tracking`, `enable_debug_mode`.
+
+**Section table (empirical) — note which sections are empty on disk:**
+
+| Section | RVA | VSize | On-disk raw | Role |
+|---------|-----|-------|-------------|------|
+| `.text` | 0x1000 | 0x164E2A | **0 (empty)** | code — **unpacked at load** |
+| `.rdata` | 0x166000 | 0x7BF4A | **0** | unpacked at load |
+| `.data` | 0x1E2000 | 0xA8A37C (10.8 M) | **0** | unpacked at load |
+| `.pdata` | 0xC6D000 | 0xE4A8 | **0** | unpacked at load |
+| `.TH0` | 0xC7E000 | 0xB0A7E7 (11.5 M) | **0** | code — unpacked at load; **heartbeat body lives here** |
+| `.TH1` | 0x1789000 | 0xB98 | 0xC00 | resolved-import (IAT) table |
+| `.TH2` | 0x178A000 | 0xFF8358 (16 M) | 0xFF8400 | **shipped bulk**: engine code + encrypted strings |
+| `.reloc` / `.rsrc` / `.mdata` | … | … | small | — |
+
+**Packer model:** the file ships the bulk engine + all encrypted strings in **`.TH2`** (present on disk → a plain Ghidra load already shows ~28 k functions there). The loader **unpacks `.text`/`.rdata`/`.data`/`.pdata`/`.TH0` at runtime** (empty on disk). Therefore export entry points and the ~11.5 MB `.TH0` the heartbeat calls into are **only visible in a memory image** of the running process (§10.7).
+
+### 10.2 Obfuscation layers & static walls
+
+| Layer | Effect | Status |
+|-------|--------|--------|
+| Packing (empty `.text`/`.TH0`/…) | export bodies + `.TH0` unreadable from file | ✅ defeated by memory dump (§10.7) |
+| Function shredding | funcs split into fragments, register-passed args (`unaff_` everywhere) | partial |
+| CFF + junk + opaque predicates | e.g. `if ((x & 0x2928458a) != 0) return;`, "bad instruction data", dead blocks | ⛔ blocks reading exact logic |
+| Dynamic API resolution | all non-bootstrap APIs via `GetProcAddress`; static import table = **16 bootstrap only** | ✅ names recovered (§10.3–10.4) |
+| String cipher `0x75A007BE` | every string encrypted | ✅ **cracked** (§10.3) |
+| Encrypted pointer cache | resolved detection-API pointers stored non-cleartext (**not** fixed XOR/ADD) | ⛔ per-routine API attribution blocked |
+
+Anti-analysis instructions (~170 sites, **all in `.TH2`**): heavy **RDTSC** (timing anti-debug), **CPUID** (VM/hypervisor detect), **INT3 / INT1 (ICEBP) / INT 0x2D** (debugger-interrupt tricks).
+
+### 10.3 String / API-name cipher — RECOVERED
+
+All strings use a **data-independent keystream** keyed by `0x75A007BE`:
+
+```
+key[i]   = LOBYTE( ROL32(0x75A007BE, i & 31) ) + i     # i = byte index from string start
+plain[i] = enc[i] XOR key[i]                            # NUL-terminated; the terminator is encrypted too (raw = key[len])
+# keystream = BE 7D FB F6 EB D3 A3 41 7D F4 E0 B8 66 C1 76 DF ...
+```
+
+Decryptors are in the `.TH2` bootstrap cluster (`FUN_1824e2e5e` = decrypt-name → `GetProcAddress`; `FUN_1824e28b6(enc, plain, flag)` = decrypt-compare; a `#`+digits name ⇒ GetProcAddress-by-ordinal). Dump every string offline by applying the keystream across `.TH2` (brute-decode each offset, keep printable NUL-terminated runs ≥ 4). Verified against live bytes (encrypted `IsDebuggerPresent`, `CreateToolhelp32Snapshot` byte-found in `.TH2`).
+
+### 10.4 Detection surface (decoded — 568 strings)
+
+The concrete "what Themis looks at", by category:
+
+| Category | APIs |
+|----------|------|
+| **Anti-debug** | IsDebuggerPresent · OutputDebugStringW · GetThreadContext/SetThreadContext (DR0–7 / hardware breakpoints) · ZwQueryInformationProcess (DebugPort/DebugObject/DebugFlags) · ZwQueryInformationThread + **ZwSetInformationThread (ThreadHideFromDebugger)** · ZwQuerySystemInformation (kernel debugger) |
+| **Environment / VM** | **wine_get_version** (Wine) · **sbiedll.dll** (Sandboxie) · CPUID + RDTSC (hypervisor / timing) |
+| **Process / thread / module scan** | CreateToolhelp32Snapshot · Process32First/NextW · Module32First/NextW · Thread32First/Next · OpenThread · ReadProcessMemory |
+| **Memory integrity** | VirtualQuery · VirtualProtect · VirtualAlloc/Free · ZwQueryVirtualMemory · ZwProtectVirtualMemory |
+| **ntdll unhook / baseline** | ZwOpenFile + ZwCreateSection + ZwMapViewOfSection + `ntdll.dll` (maps a clean ntdll from disk → bypass user-mode hooks & compare vs in-memory copy) |
+| **Self-report machinery** | dbghelp!StackWalk/SymFromAddr/SymInitialize + **dbgcore!MiniDumpWriteDump** (reports carry a symbolized stack / minidump) |
+| **Native input AC** | hid!HidP_*/HidD_* + user32!GetRawInputData/GetRawInputDeviceInfoW (raw-HID monitoring, parallel to managed InputCheatManager §2) |
+| **Threading / kill** | ntdll!ZwCreateThreadEx (watchdog threads via syscall wrapper — bypasses CreateThread hooks) · ZwRaiseHardError · ExitProcess |
+| **Misc** | RegOpenKeyExW/RegQueryValueExW (registry / VM artifacts) · GetForegroundWindow · CheckTokenMembership |
+
+Modules touched: `ntdll`, `kernel32`/`KERNELBASE`, `user32`, `advapi32`, `ole32`/`oleaut32` (WMI fingerprint), `ws2_32`, `shell32`, `shlwapi`, `winmm`, `version`, `dbghelp`/`dbgcore`, `hid`, **`sbiedll`**.
+
+> **Key finding for modders:** there are **no** `BepInEx` / `doorstop` / `winhttp` / `version.dll` / `hook` / `inject` name strings. Themis does **generic module/memory scanning + integrity hashing** — it detects *the fact of* an injected module / patched code, **not** a blocklist of known loaders. Renaming the loader does not help.
+
+### 10.5 Integrity heartbeat model
+
+`get_themis_heartbeat(index, random)` → managed `ThemisSDKManager.GetHeartbeat(int index, long random) → string token`.
+
+- **Model (inferred from the resolved API set):** server issues a challenge (`index` selects a module/region, `random` = nonce); native computes `token = keyed_hash(code_region[index], nonce, embedded_secret)`; server validates against a known-good baseline. It hashes module `.text` (ntdll / kernel32 / game / self) via the scan/memory APIs above; the ntdll-unhook path supplies a clean baseline. The nonce prevents replay.
+- **Crypto:** **no Windows CryptoAPI is resolved at all** (no SHA / MD5 / HMAC / BCrypt) → the hash/MAC is a **custom inline** routine; only `SystemFunction036` (RtlGenRandom) is used, for nonces.
+- **Body:** `get_themis_heartbeat` (RVA 0x81340) = three `CALL` into `.TH0` + INT3; the `.TH0` target is CFF/junk-obfuscated (§10.2) → exact region descriptors are **not** statically recoverable without deobfuscation.
+
+### 10.6 Server exchange / wire visibility
+
+The Themis integrity heartbeat is **native-only**: `GetHeartbeat` has **no managed caller**, so the challenge/token never traverse the game protocol. Native Themis talks to its own backend (TapTap/XD) via `ws2_32!send`; those messages (heartbeat token, detection reports, `ExtraEntityMsg` snapshots) are **not** in the managed dump and are composed by walled code (likely encrypted) — capturing them needs a network trace of Themis's own traffic.
+
+**What IS visible on the wire (managed, readable):**
+
+| Exchange | Client → server | Server → client |
+|----------|-----------------|-----------------|
+| Pre-login risk check (HTTP) | `LoginRiskCheckRequest{ ClientId, OsType, XdId, FingerPrint = GetOneidData() }` → `WorldClusterLoginRiskCheckUrl` (`ClientSession.cs`) | `LoginState` — `RiskControlBan` ⇒ device banned |
+| Scene connect (TCP) | `ConnectScene_CS{ …, Device = GetOneID() }` (`SceneTcpConnectionHandler.cs`) | — |
+| Input AC (managed) | raw touch `.bin` + aggregate `.idx` → OBS `Cheats` bucket, `{Gateway}/sazabi/world/obs` (§2) | backend scoring |
+| Context tags | `AddCustomPlayer(xdid / playerinfo / shortid / PlayerState / SceneState / playerPos / LevelState)` → attached to **native** reports | — |
+
+`FingerPrint` / `Device` payloads are opaque native-computed blobs (device fingerprint via WMI / HID / version); the message envelopes are fully clear.
+
+### 10.7 Unpacking workflow (memory dump → Ghidra)
+
+Because `.text`/`.TH0`/`.rdata`/`.data` are empty on disk, the export bodies and the heartbeat's `.TH0` code are only analyzable from a **running-process image**:
+
+1. Launch the game, enter the world (Themis fully up: `InitTHEMIS` done, `.TH1` IAT filled, heartbeat active).
+2. Full-memory dump of `xdt.exe`: `MiniDumpWriteDump(…, MiniDumpWithFullMemory)` (or `rundll32 comsvcs.dll,MiniDump <pid> <out> full`). ~5 GB, ~12 s. **This is an external dump, not a debugger attach** — Themis anti-debug targets a debugger on *itself*; only the ~2 s thread-suspend is a small residual timing risk.
+3. Carve `themis_x64.dll`'s module range (ModuleList → runtime base `0x7FFF…` under ASLR; Memory64List → bytes) → ~39.5 MB flat image (100 % captured).
+4. Ghidra: `import_file` raw `x86:LE:64:default` (finds 0 funcs — no PE seed) → `set_image_base <runtime-base>` → seed functions (from `.pdata` or manually at export addresses) → analyze.
+5. Now `.text`/`.TH0` are live code and `.TH1` holds resolved WinAPI pointers.
+
+### 10.8 What remains behind the wall
+
+Even with the unpacked image, the deepest layer resists static analysis:
+
+- **Exact heartbeat hashed regions** — the `.TH0` body is CFF + junk + opaque-predicate obfuscated.
+- **Per-routine detection-API attribution** — the detection APIs' resolved pointers are cached **encrypted** (not a fixed XOR/ADD transform → position-dependent or resolved on-demand), so "which routine calls which API" can't be read from the pointer tables. (`.TH1` holds only the 16 bootstrap loader imports; the `.data`/`.rdata` cleartext pointer tables are MSVC-CRT + a few peripheral tables — dbghelp/MiniDumpWriteDump, Toolhelp/Thread32, HID, ZwCreateThreadEx.)
+
+Both need a **CFF/junk deobfuscator** (large effort) or a **dynamic trace** (which Themis actively resists — account risk). The detection *surface* (§10.4) and *model* (§10.5) are, however, fully established.
+
+### 10.9 Implications for mod / cheat authors (native layer)
+
+- **Native user-mode hooks are high-risk.** Themis integrity-hashes module code and maps a clean ntdll to unhook/compare → `NativeDetour`/MinHook on ntdll/WinAPI are observable. Managed (Mono-method) detours are **not** hashed by this layer.
+- **Injected-module presence is detectable generically** (module enumeration + memory scan), independent of the loader's name.
+- **Debugging the live game will be caught** (DR-register/hardware-breakpoint checks, ThreadHideFromDebugger, kernel-debugger, IsDebuggerPresent, Wine, Sandboxie, VM/RDTSC). Use dead snapshots, not live attach.
+- **Reports can force-close the client** (`report_custom_exception(…, isQuitApp:true)` / `ZwRaiseHardError` → `ExitProcess`) and carry a symbolized stack / minidump.
+- Native input is fed to Themis (`input_data`) in parallel to managed `InputCheatManager` — absent/synthetic input around actions is observable on both channels; prefer game-API calls over `Input` simulation.
+
+### 10.10 Key source paths (native)
+
+| Topic | Location |
+|-------|----------|
+| Native AC binary | `<Game>/xdt_Data/Plugins/x86_64/themis_x64.dll` |
+| Native config | `<Game>/themis.res` |
+| Managed binding / game wrapper | `ilspy-dumps/EngineWrapper/ThemisSDKManager.cs`, `ilspy-dumps/XDTBaseService/ThemisManager.cs` |
+| Login fingerprint / device id | `ilspy-dumps/XDTGameSystem/XDTGameSystem/ClientSession.cs`, `ilspy-dumps/EcsSystem/Network/SceneTcpConnectionHandler.cs` |
+| Ghidra project | `themis` (Ghidra-MCP `ghidra-mcp-http`); on-disk program at base `0x180000000`, unpacked image at ASLR base |
+
+---
+
+*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review. §10 (native Themis binary reverse engineering) added from Ghidra + memory-dump analysis of `themis_x64.dll`.*
