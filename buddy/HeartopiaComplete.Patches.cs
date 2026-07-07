@@ -102,11 +102,11 @@ namespace HeartopiaMod
 
         private void MaybeUnpatchIdleHotPathPatches(float now)
         {
-            if (this.positionOverridePatched && now - this.positionOverridePatchLastNeededAt > HotPathPatchIdleUnpatchSeconds)
+            if (this.positionOverridePatched && now - this.positionOverridePatchLastNeededAt > HotPathOverrideIdleUnpatchSeconds)
             {
                 this.UnpatchPositionOverride();
             }
-            if (this.rotationOverridePatched && now - this.rotationOverridePatchLastNeededAt > HotPathPatchIdleUnpatchSeconds)
+            if (this.rotationOverridePatched && now - this.rotationOverridePatchLastNeededAt > HotPathOverrideIdleUnpatchSeconds)
             {
                 this.UnpatchRotationOverride();
             }

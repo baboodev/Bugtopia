@@ -2501,6 +2501,14 @@ namespace HeartopiaMod
         // Removes the hot-path Harmony patches once nothing has needed them for a while, so the
         // per-call prefix tax is not paid for the rest of the session after a one-off teleport.
         private const float HotPathPatchIdleUnpatchSeconds = 60f;
+        // Held Transform-setter overrides (noclip / mouse-look free-cam) unpatch on a SHORT idle grace.
+        // Teleport — the old reason for the long tail (teleport-heavy auto-farm kept re-needing the
+        // position patch) — now warps via the game API (EntityHelper.AutoMoveTransfer), so the
+        // position/rotation .text patch should not linger for a minute after the feature turns off.
+        // A small grace (not 0) coalesces bursts so Patch/Unpatch (itself a .text write) doesn't thrash;
+        // noclip/mouse-look are HELD (refresh lastNeededAt every frame) so they never churn. InputSim
+        // keeps the long 60s tail on purpose (auto-farm pulses the F-sim and would thrash on a short one).
+        private const float HotPathOverrideIdleUnpatchSeconds = 2f;
         private float positionOverridePatchLastNeededAt;
         private float rotationOverridePatchLastNeededAt;
         private float inputSimPatchLastNeededAt;
