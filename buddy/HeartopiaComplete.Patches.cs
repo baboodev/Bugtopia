@@ -71,148 +71,17 @@ namespace HeartopiaMod
             this.lastAppliedGameSpeed = speed;
         }
 
-        private void UpdateHotPathOverrideTargetIds()
-        {
-            try
-            {
-                if (HeartopiaComplete.OverridePlayerPosition || HeartopiaComplete.OverridePlayerRotation || this.noclipEnabled)
-                {
-                    GameObject local = HeartopiaComplete.GetLocalPlayer();
-                    HeartopiaComplete.OverridePlayerTransformId = local != null ? local.transform.GetInstanceID() : 0;
-                }
-                else
-                {
-                    HeartopiaComplete.OverridePlayerTransformId = 0;
-                }
-
-                if (HeartopiaComplete.OverrideCameraPosition || this.mouseLookEnabled)
-                {
-                    Camera cam = Camera.main;
-                    HeartopiaComplete.OverrideCameraTransformId = cam != null ? cam.transform.GetInstanceID() : 0;
-                }
-                else
-                {
-                    HeartopiaComplete.OverrideCameraTransformId = 0;
-                }
-            }
-            catch
-            {
-            }
-        }
-
+        // NOTE: the Transform.position / Transform.rotation setter prefixes that used to live
+        // here (anti-cheat surface #4 — module .text writes, Themis-hashable) are GONE. Player
+        // teleport/noclip drives the game's own PlayerMoveComponent (NoclipFeature.cs) and the
+        // camera drives the game camera controller's axis (HeartopiaComplete.CameraRig.cs), both
+        // embedded-Mono via AuraMono. Only the Input.GetKey* postfixes (surface #1, separate
+        // cleanup) still Harmony-patch IL2CPP code.
         private void MaybeUnpatchIdleHotPathPatches(float now)
         {
-            if (this.positionOverridePatched && now - this.positionOverridePatchLastNeededAt > HotPathOverrideIdleUnpatchSeconds)
-            {
-                this.UnpatchPositionOverride();
-            }
-            if (this.rotationOverridePatched && now - this.rotationOverridePatchLastNeededAt > HotPathOverrideIdleUnpatchSeconds)
-            {
-                this.UnpatchRotationOverride();
-            }
             if (this.inputSimPatched && now - this.inputSimPatchLastNeededAt > HotPathPatchIdleUnpatchSeconds)
             {
                 this.UnpatchInputSim();
-            }
-        }
-
-        private void UnpatchPositionOverride()
-        {
-            this.positionOverridePatched = false;
-            try
-            {
-                var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) return;
-                MethodInfo posSetter = typeof(Transform).GetProperty("position").GetSetMethod();
-                MethodInfo posPrefix = typeof(TransformPositionPatch).GetMethod("SetPositionPrefix");
-                if (posSetter != null && posPrefix != null)
-                {
-                    harmony.Unpatch(posSetter, posPrefix);
-                }
-                ModLogger.Msg("[Patch] Position override removed (idle).");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Patch] Position override unpatch failed: " + ex.Message);
-            }
-        }
-
-        private void UnpatchRotationOverride()
-        {
-            this.rotationOverridePatched = false;
-            try
-            {
-                var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) return;
-                MethodInfo rotSetter = typeof(Transform).GetProperty("rotation").GetSetMethod();
-                MethodInfo camRotPrefix = typeof(TransformRotationPatch).GetMethod("SetRotationPrefix");
-                MethodInfo playerRotPrefix = typeof(CharacterRotationPatch).GetMethod("SetRotationPrefix");
-                if (rotSetter != null && camRotPrefix != null)
-                {
-                    harmony.Unpatch(rotSetter, camRotPrefix);
-                }
-                if (rotSetter != null && playerRotPrefix != null)
-                {
-                    harmony.Unpatch(rotSetter, playerRotPrefix);
-                }
-                ModLogger.Msg("[Patch] Rotation override removed (idle).");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Patch] Rotation override unpatch failed: " + ex.Message);
-            }
-        }
-
-        private void EnsurePositionOverridePatched()
-        {
-            if (this.positionOverridePatched) return;
-            this.positionOverridePatched = true; // set first so a failed attempt is not retried every frame
-            try
-            {
-                var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) { this.positionOverridePatched = false; return; }
-
-                MethodInfo posSetter = typeof(Transform).GetProperty("position").GetSetMethod();
-                MethodInfo posPrefix = typeof(TransformPositionPatch).GetMethod("SetPositionPrefix");
-                if (posSetter != null && posPrefix != null)
-                {
-                    harmony.Patch(posSetter, new HarmonyMethod(posPrefix), null, null, null, null);
-                }
-
-                ModLogger.Msg("[Patch] Position override installed (Transform.position setter).");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Patch] Position override patch failed: " + ex.Message);
-            }
-        }
-
-        private void EnsureRotationOverridePatched()
-        {
-            if (this.rotationOverridePatched) return;
-            this.rotationOverridePatched = true;
-            try
-            {
-                var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) { this.rotationOverridePatched = false; return; }
-
-                MethodInfo rotSetter = typeof(Transform).GetProperty("rotation").GetSetMethod();
-                MethodInfo camRotPrefix = typeof(TransformRotationPatch).GetMethod("SetRotationPrefix");
-                MethodInfo playerRotPrefix = typeof(CharacterRotationPatch).GetMethod("SetRotationPrefix");
-                if (rotSetter != null && camRotPrefix != null)
-                {
-                    harmony.Patch(rotSetter, new HarmonyMethod(camRotPrefix), null, null, null, null);
-                }
-                if (rotSetter != null && playerRotPrefix != null)
-                {
-                    harmony.Patch(rotSetter, new HarmonyMethod(playerRotPrefix), null, null, null, null);
-                }
-
-                ModLogger.Msg("[Patch] Rotation override installed (Transform.rotation setter).");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Patch] Rotation override patch failed: " + ex.Message);
             }
         }
 

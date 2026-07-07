@@ -207,11 +207,13 @@ namespace HeartopiaMod
         private void ResetMouseLookOrbitState()
         {
             this.mouseLookOrbitInitialized = false;
-            HeartopiaComplete.OverrideCameraPosition = false;
-            this.cameraOverrideFramesRemaining = 0;
-            this.mouseLookOrbitPivotLocalOffset = new Vector3(0f, this.mouseLookOrbitPivotHeight, 0f);
         }
 
+        // Mouse-look free-cam: drives the game camera controller's yaw/pitch axis (see
+        // HeartopiaComplete.CameraRig.cs) instead of writing Camera.main.transform. Runs from
+        // OnUpdate so the axis values land before the game's XDTCameraManager.LateUpdate, which
+        // then poses Camera.main from them itself — no Transform setter patches, no direct
+        // camera writes, no pin frames.
         private void UpdateDirectMouseLookCamera(bool shouldCapture)
         {
             if (!shouldCapture)
@@ -220,92 +222,59 @@ namespace HeartopiaMod
                 return;
             }
 
-            Camera cam = Camera.main;
-            GameObject player = HeartopiaComplete.GetLocalPlayer();
-            if (cam == null || player == null || player.transform == null)
+            if (!this.TryResolveCameraControllerAxis(
+                    out IntPtr controllerObj,
+                    out IntPtr getAxisX,
+                    out IntPtr getAxisY,
+                    out IntPtr setAxisX,
+                    out IntPtr setAxisY))
             {
+                // Current camera state is not axis-capable (fixed/cutscene/transition camera) —
+                // mouse-look correctly does not apply; re-seed once an axis controller returns.
+                this.mouseLookOrbitInitialized = false;
                 return;
             }
 
-            Transform playerTransform = player.transform;
-            Vector3 currentCameraPos = cam.transform.position;
-            Vector3 playerPos = playerTransform.position;
-
+            // Seed the accumulators from the live axis on the capture edge (and after any camera
+            // state that took the axis away) so the first mouse move continues from the current
+            // camera pose instead of snapping.
             if (!this.mouseLookOrbitInitialized)
             {
-                Vector3 referenceCameraPos = this.mouseLookHasDefaultCameraSnapshot ? this.mouseLookDefaultCameraPos : currentCameraPos;
-                Quaternion referenceCameraRot = this.mouseLookHasDefaultCameraSnapshot ? this.mouseLookDefaultCameraRot : cam.transform.rotation;
-                Vector3 referenceForward = referenceCameraRot * Vector3.forward;
-                Vector3 playerToCamera = referenceCameraPos - playerPos;
-                float playerDistance = playerToCamera.magnitude;
-                if (playerDistance > 0.25f)
+                if (!this.TryReadCameraAxisValue(controllerObj, getAxisX, out float seedYaw)
+                    || !this.TryReadCameraAxisValue(controllerObj, getAxisY, out float seedPitch))
                 {
-                    this.mouseLookOrbitDistance = Mathf.Clamp(playerDistance, 1.25f, 8f);
+                    return;
                 }
 
-                Vector3 seededPivot = referenceCameraPos + referenceForward * this.mouseLookOrbitDistance;
-                Vector3 pivotOffset = seededPivot - playerPos;
-                if (pivotOffset.magnitude > 3f || float.IsNaN(pivotOffset.x) || float.IsNaN(pivotOffset.y) || float.IsNaN(pivotOffset.z))
-                {
-                    pivotOffset = new Vector3(0f, this.mouseLookOrbitPivotHeight, 0f);
-                    seededPivot = playerPos + pivotOffset;
-                }
-
-                this.mouseLookOrbitPivotHeight = Mathf.Clamp(pivotOffset.y, 1f, 2.2f);
-                this.mouseLookOrbitPivotLocalOffset = new Vector3(0f, this.mouseLookOrbitPivotHeight, 0f);
-
-                Vector3 pivotToCamera = referenceCameraPos - seededPivot;
-                float pivotDistance = pivotToCamera.magnitude;
-                if (pivotDistance > 0.25f)
-                {
-                    this.mouseLookOrbitDistance = Mathf.Clamp(pivotDistance, 1.25f, 8f);
-                }
-
-                Vector3 lookDir = (seededPivot - referenceCameraPos).normalized;
-                if (lookDir.sqrMagnitude > 0.0001f)
-                {
-                    Vector3 lookEuler = Quaternion.LookRotation(lookDir, Vector3.up).eulerAngles;
-                    this.mouseLookOrbitYaw = lookEuler.y;
-                    this.mouseLookOrbitPitch = lookEuler.x;
-                    if (this.mouseLookOrbitPitch > 180f)
-                    {
-                        this.mouseLookOrbitPitch -= 360f;
-                    }
-                }
-                else
-                {
-                    this.mouseLookOrbitYaw = playerTransform.eulerAngles.y;
-                    this.mouseLookOrbitPitch = 12f;
-                }
-
-                this.mouseLookOrbitPitch = Mathf.Clamp(this.mouseLookOrbitPitch, -70f, 70f);
+                this.mouseLookOrbitYaw = seedYaw;
+                this.mouseLookOrbitPitch = seedPitch;
                 this.mouseLookOrbitInitialized = true;
             }
 
+            // axisX = camera yaw (tracks euler Y 1:1). axisY runs opposite to camera euler X
+            // (pitch = 90 - axisValue), so mouse-up ADDS to the axis to keep the old
+            // "mouse up looks up" feel. SetAxis*value Warp-clamps to the axis min/max.
             this.mouseLookOrbitYaw += Input.GetAxis("Mouse X") * 3f;
-            this.mouseLookOrbitPitch -= Input.GetAxis("Mouse Y") * 2.2f;
-            this.mouseLookOrbitPitch = Mathf.Clamp(this.mouseLookOrbitPitch, -70f, 70f);
-
-            Vector3 pivot = playerPos + this.mouseLookOrbitPivotLocalOffset;
-            Quaternion orbitRotation = Quaternion.Euler(this.mouseLookOrbitPitch, this.mouseLookOrbitYaw, 0f);
-            Vector3 desiredCameraPos = pivot - orbitRotation * Vector3.forward * this.mouseLookOrbitDistance;
-            Vector3 desiredLookDir = pivot - desiredCameraPos;
-            Quaternion desiredCameraRot = desiredLookDir.sqrMagnitude > 0.0001f
-                ? Quaternion.LookRotation(desiredLookDir, Vector3.up)
-                : cam.transform.rotation;
-
-            cam.transform.position = desiredCameraPos;
-            cam.transform.rotation = desiredCameraRot;
-            if (!this.customCameraFOVEnabled && this.mouseLookHasDefaultCameraSnapshot)
+            this.mouseLookOrbitPitch += Input.GetAxis("Mouse Y") * 2.2f;
+            if (!this.TryWriteCameraAxisValue(controllerObj, setAxisX, this.mouseLookOrbitYaw)
+                || !this.TryWriteCameraAxisValue(controllerObj, setAxisY, this.mouseLookOrbitPitch))
             {
-                cam.fieldOfView = this.mouseLookDefaultCameraFov;
+                this.mouseLookOrbitInitialized = false;
+                return;
             }
-            this.EnsurePositionOverridePatched();
-            this.EnsureRotationOverridePatched();
-            HeartopiaComplete.CameraOverridePos = desiredCameraPos;
-            HeartopiaComplete.CameraOverrideRot = desiredCameraRot;
-            HeartopiaComplete.OverrideCameraPosition = true;
-            this.cameraOverrideFramesRemaining = 2;
+
+            // Re-sync the accumulators to the Warp-clamped axis values so the pitch accumulator
+            // can't wind up past the clamp (which would take miles of reverse mouse travel to
+            // unwind while the on-screen camera sits pinned at the limit).
+            if (this.TryReadCameraAxisValue(controllerObj, getAxisX, out float warpedYaw))
+            {
+                this.mouseLookOrbitYaw = warpedYaw;
+            }
+
+            if (this.TryReadCameraAxisValue(controllerObj, getAxisY, out float warpedPitch))
+            {
+                this.mouseLookOrbitPitch = warpedPitch;
+            }
         }
 
         private void UpdateMouseLookState()
@@ -316,16 +285,6 @@ namespace HeartopiaMod
             if (!shouldCapture && !this.mouseLookEnabled && !this.mouseLookWasCaptureActive && !this.mouseLookCaptureActive)
             {
                 return;
-            }
-
-            Camera cam = Camera.main;
-
-            if (!shouldCapture && cam != null)
-            {
-                this.mouseLookDefaultCameraPos = cam.transform.position;
-                this.mouseLookDefaultCameraRot = cam.transform.rotation;
-                this.mouseLookDefaultCameraFov = cam.fieldOfView;
-                this.mouseLookHasDefaultCameraSnapshot = true;
             }
 
             if (shouldCapture && !this.mouseLookWasCaptureActive)
@@ -470,37 +429,14 @@ namespace HeartopiaMod
             this.lastAppliedCustomCameraFOV = -1f;
         }
 
-        // Token: 0x06000024 RID: 36 RVA: 0x00006CE8 File Offset: 0x00004EE8
+        // Auto-farm camera nudge: adds `degrees` to the game camera controller's yaw axis and
+        // lets the game's own LateUpdate swing Camera.main around the player — replaces the old
+        // manual orbit math + Transform setter patches + 60-frame pin (anti-cheat surface #4).
         private void RotateCameraAroundPlayer(float degrees = 180f)
         {
-            GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
-            GameObject gameObject2 = GameObject.Find("GameApp/startup_root(Clone)/Main Camera");
-            bool flag = gameObject == null || gameObject2 == null;
-            if (flag)
+            if (!this.TryNudgeCameraAxisYaw(degrees))
             {
-                ModLogger.Msg("[CAMERA] Failed to rotate - player or camera not found");
-            }
-            else
-            {
-                Vector3 position = gameObject.transform.position;
-                Vector3 position2 = gameObject2.transform.position;
-                Vector3 vector = position2 - position;
-                float num = degrees * Mathf.Deg2Rad;
-                float num2 = vector.x * Mathf.Cos(num) - vector.z * Mathf.Sin(num);
-                float num3 = vector.x * Mathf.Sin(num) + vector.z * Mathf.Cos(num);
-                Vector3 vector2 = new Vector3(num2, vector.y, num3);
-                Vector3 vector3 = position + vector2;
-                Vector3 vector4 = position - vector3;
-                bool flag2 = vector4.sqrMagnitude > 0.0001f;
-                if (flag2)
-                {
-                    HeartopiaComplete.CameraOverrideRot = Quaternion.LookRotation(vector4);
-                }
-                this.EnsurePositionOverridePatched();
-                this.EnsureRotationOverridePatched();
-                HeartopiaComplete.CameraOverridePos = vector3;
-                HeartopiaComplete.OverrideCameraPosition = true;
-                this.cameraOverrideFramesRemaining = 60;
+                ModLogger.Msg("[CAMERA] Failed to rotate - camera controller axis unavailable");
             }
         }
 

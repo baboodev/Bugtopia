@@ -536,7 +536,6 @@ namespace HeartopiaMod
                     this.customCameraFOVEnabled = false;
                     this.cameraFOV = 60f;
                     this.noclipEnabled = false;
-                    HeartopiaComplete.OverridePlayerPosition = false;
                     this.ClearNoclipVehicleOverride();
                     this.noclipBoostMultiplier = 2f;
                     this.RestoreCameraFOV();
@@ -1576,11 +1575,10 @@ namespace HeartopiaMod
                 this.noclipEnabled = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.noclipEnabled, "Noclip");
                 if (this.noclipEnabled)
                 {
-                    this.InitializeNoclipOverridePosition();
+                    this.InitializeNoclipDriveState();
                 }
                 else
                 {
-                    HeartopiaComplete.OverridePlayerPosition = false;
                     this.ClearNoclipVehicleOverride();
                 }
                 num += 30;

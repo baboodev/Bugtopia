@@ -80,8 +80,6 @@ namespace HeartopiaMod
 
             this.TryVehicleTeleportSendTransform(vehicleNetId, targetPos, yAxis);
 
-            HeartopiaComplete.OverridePlayerPosition = false;
-            HeartopiaComplete.OverridePlayerRotation = false;
             this.vehicleTeleportComponentCache.Set(vehicleComponentObj);
             this.vehicleTeleportControllerCache.Set(vehicleControllerObj);
             this.vehicleTeleportTargetPos = targetPos;

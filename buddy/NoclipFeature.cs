@@ -51,6 +51,17 @@ namespace HeartopiaMod
         private IntPtr noclipAuraEnableInputMethod;
         private bool noclipVehicleJumpInputSuppressed;
 
+        // Foot noclip hold: the pinned hover position/facing, driven through the game's own
+        // PlayerMoveComponent every frame (no Transform setter patch). Seeded from the live
+        // player when noclip engages, advanced by input, invalidated on disable / vehicle /
+        // teleport so it re-seeds from wherever the player actually is.
+        private bool noclipFootHoldValid;
+        private Vector3 noclipFootHoldPosition;
+        private Quaternion noclipFootHoldRotation = Quaternion.identity;
+        private AuraMonoObjectCache cachedNoclipPlayerObj;
+        private AuraMonoObjectCache cachedNoclipPlayerMoveObj;
+        private float noclipPlayerResolveRetryAt;
+
         private void EnsureNoclipVehicleAuraMono(bool logIfPending = false)
         {
             if (this.noclipVehicleAuraReady)
@@ -272,7 +283,6 @@ namespace HeartopiaMod
         private void ClearNoclipVehicleOverride()
         {
             NoclipFeature.OverrideVehiclePosition = false;
-            HeartopiaComplete.OverridePlayerRotation = false;
 
             this.cachedNoclipVehicleComponentObj.TryGet(out IntPtr vehicleComponentObj);
             this.cachedNoclipVehicleControllerObj.TryGet(out IntPtr vehicleControllerObj);
@@ -286,12 +296,10 @@ namespace HeartopiaMod
             this.cachedNoclipVehicleControllerObj.Clear();
         }
 
-        private void InitializeNoclipOverridePosition()
+        private void InitializeNoclipDriveState()
         {
-            this.EnsurePositionOverridePatched();
             if (this.TryResolveNoclipVehicleContext(out IntPtr vehicleComponentObj, out IntPtr vehicleControllerObj, out Vector3 vehiclePosition))
             {
-                HeartopiaComplete.OverridePlayerPosition = false;
                 NoclipFeature.OverrideVehiclePosition = true;
                 NoclipFeature.OverrideVehicleTarget = vehiclePosition;
                 this.cachedNoclipVehicleComponentObj.Set(vehicleComponentObj);
@@ -300,13 +308,9 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Foot noclip needs no setup here: ProcessNoclipMovementOnUpdate seeds the hold from
+            // the live player on its next tick (noclipFootHoldValid resets whenever noclip is off).
             this.ClearNoclipVehicleOverride();
-            GameObject player = GetPlayer();
-            if (player != null)
-            {
-                HeartopiaComplete.OverridePosition = player.transform.position;
-            }
-            HeartopiaComplete.OverridePlayerPosition = true;
         }
 
         private void ProcessNoclipMovementOnUpdate()
@@ -314,6 +318,7 @@ namespace HeartopiaMod
             if (!this.noclipEnabled)
             {
                 this.ClearNoclipVehicleOverride();
+                this.noclipFootHoldValid = false;
                 return;
             }
 
@@ -324,7 +329,7 @@ namespace HeartopiaMod
 
             if (this.TryResolveNoclipVehicleContext(out IntPtr vehicleComponentObj, out IntPtr vehicleControllerObj, out Vector3 vehiclePosition))
             {
-                HeartopiaComplete.OverridePlayerPosition = false;
+                this.noclipFootHoldValid = false;
                 this.cachedNoclipVehicleComponentObj.Set(vehicleComponentObj);
                 this.cachedNoclipVehicleControllerObj.Set(vehicleControllerObj);
                 this.ActivateNoclipVehicleDrivingOverride(vehicleComponentObj, vehicleControllerObj);
@@ -342,7 +347,7 @@ namespace HeartopiaMod
                 NoclipFeature.OverrideVehiclePosition = true;
                 NoclipFeature.OverrideVehicleTarget = targetPosition;
                 this.ApplyNoclipVehicleWorldPlace(vehicleComponentObj, targetPosition);
-                this.ApplyNoclipMovementFacing(moveDirection, onVehicle: true, vehicleComponentObj, targetPosition);
+                this.ApplyNoclipMovementFacing(moveDirection, vehicleComponentObj, targetPosition);
                 return;
             }
 
@@ -350,22 +355,42 @@ namespace HeartopiaMod
             GameObject player = GetPlayer();
             if (player == null)
             {
+                this.noclipFootHoldValid = false;
                 return;
+            }
+
+            // Foot noclip: drive the game's own move component EVERY frame — horizontal, the
+            // vertical-only (space/ctrl) case AND the idle hover. SetPositionAndRotation /
+            // WorldPlaceTo disable the native XDCharacterController around the write (no
+            // collision sweep) and ResetMove() zeroes accumulated gravity, so the per-frame
+            // call pins the hover with no Transform.position setter patch. entity.position
+            // feeds TrySendSelfTransform, so the server sees it like normal movement.
+            if (!this.noclipFootHoldValid)
+            {
+                this.noclipFootHoldPosition = player.transform.position;
+                this.noclipFootHoldRotation = Quaternion.Euler(0f, player.transform.eulerAngles.y, 0f);
+                this.noclipFootHoldValid = true;
             }
 
             Vector3 playerMoveDirection = this.BuildNoclipMoveDirection();
             float playerSpeed = this.GetNoclipSpeed(false);
+            Vector3 newPosition = this.noclipFootHoldPosition;
             if (playerMoveDirection != Vector3.zero)
             {
                 playerMoveDirection.Normalize();
-                Vector3 newPosition = player.transform.position + playerMoveDirection * playerSpeed * Time.deltaTime;
-                HeartopiaComplete.OverridePlayerPosition = true;
-                HeartopiaComplete.OverridePosition = newPosition;
-                this.ApplyNoclipMovementFacing(playerMoveDirection, onVehicle: false, IntPtr.Zero, newPosition);
+                newPosition += playerMoveDirection * playerSpeed * Time.deltaTime;
             }
-            else
+
+            bool hasFlatDir = this.TryGetNoclipFlatMoveDirection(playerMoveDirection, out Vector3 flatDir);
+            if (hasFlatDir)
             {
-                HeartopiaComplete.OverridePlayerRotation = false;
+                flatDir.Normalize();
+                this.noclipFootHoldRotation = Quaternion.LookRotation(flatDir, Vector3.up);
+            }
+
+            if (this.TryDrivePlayerNoclipTransformMono(newPosition, this.noclipFootHoldRotation, hasFlatDir, flatDir))
+            {
+                this.noclipFootHoldPosition = newPosition;
             }
         }
 
@@ -391,7 +416,7 @@ namespace HeartopiaMod
             this.ActivateNoclipVehicleDrivingOverride(vehicleComponentObj, vehicleControllerObj);
             Vector3 vehicleMoveDirection = this.BuildNoclipMoveDirection();
             this.ApplyNoclipVehicleWorldPlace(vehicleComponentObj, NoclipFeature.OverrideVehicleTarget);
-            this.ApplyNoclipMovementFacing(vehicleMoveDirection, onVehicle: true, vehicleComponentObj, NoclipFeature.OverrideVehicleTarget);
+            this.ApplyNoclipMovementFacing(vehicleMoveDirection, vehicleComponentObj, NoclipFeature.OverrideVehicleTarget);
         }
 
         private void ActivateNoclipVehicleDrivingOverride(IntPtr vehicleComponentObj, IntPtr vehicleControllerObj)
@@ -417,45 +442,29 @@ namespace HeartopiaMod
             return flatDir.sqrMagnitude >= 0.04f;
         }
 
-        private void ApplyNoclipMovementFacing(Vector3 moveDirection, bool onVehicle, IntPtr vehicleComponentObj, Vector3 anchorPosition)
+        // Vehicle-only facing (foot noclip facing is folded into TryDrivePlayerNoclipTransformMono).
+        private void ApplyNoclipMovementFacing(Vector3 moveDirection, IntPtr vehicleComponentObj, Vector3 anchorPosition)
         {
             if (!this.TryGetNoclipFlatMoveDirection(moveDirection, out Vector3 flatDir))
             {
-                if (!onVehicle)
-                {
-                    HeartopiaComplete.OverridePlayerRotation = false;
-                }
-
                 return;
             }
 
             flatDir.Normalize();
             Quaternion faceRot = Quaternion.LookRotation(flatDir, Vector3.up);
-            Vector3 eulerAngles = new Vector3(0f, faceRot.eulerAngles.y, 0f);
-
-            if (onVehicle)
-            {
-                this.ApplyNoclipVehicleFacing(vehicleComponentObj, anchorPosition, faceRot, flatDir);
-                return;
-            }
-
-            this.EnsureRotationOverridePatched();
-            HeartopiaComplete.PlayerOverrideRot = faceRot;
-            HeartopiaComplete.OverridePlayerRotation = true;
-
-            GameObject skeleton = HeartopiaComplete.GetLocalPlayer();
-            if (this.TrySyncNoclipPlayerFacingMono(anchorPosition, eulerAngles, faceRot, flatDir))
-            {
-                return;
-            }
-
-            if (skeleton != null)
-            {
-                skeleton.transform.rotation = faceRot;
-            }
+            this.ApplyNoclipVehicleFacing(vehicleComponentObj, anchorPosition, faceRot, flatDir);
         }
 
-        private unsafe bool TrySyncNoclipPlayerFacingMono(Vector3 playerPos, Vector3 eulerAngles, Quaternion faceRot, Vector3 flatDir)
+        // Drives the self player's position AND facing through the game's OWN embedded-Mono move
+        // component (image XDTLevelAndEntity, invisible to the IL2CPP .text surface). Ladder:
+        // PlayerMoveComponent.SetPositionAndRotation(pos, rot, worldSpace) →
+        // WorldPlaceTo(pos) + WorldFaceTo(rot) → BasePlayerComponent.Transfer(pos, euler, 0, false).
+        // All three disable the native XDCharacterController around the write (no collision sweep)
+        // and end in ResetMove(), which zeroes accumulated gravity — so a per-frame call holds a
+        // hover. Server sync is automatic: they set entity.position/rotation, which
+        // BasePlayerComponent.TrySendSelfTransform broadcasts every frame like legit movement.
+        // Replaces the Transform.position/rotation setter prefixes (anti-cheat surface #4).
+        private unsafe bool TryDrivePlayerNoclipTransformMono(Vector3 pos, Quaternion faceRot, bool hasFlatDir, Vector3 flatDir)
         {
             if (!this.EnsureAuraMonoApiReady()
                 || !this.AttachAuraMonoThread()
@@ -465,12 +474,93 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr playerObj = IntPtr.Zero;
-            if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj) || playerObj == IntPtr.Zero)
+            if (!this.cachedNoclipPlayerObj.TryGet(out IntPtr playerObj)
+                || playerObj == IntPtr.Zero
+                || !this.cachedNoclipPlayerMoveObj.TryGet(out IntPtr moveObj)
+                || moveObj == IntPtr.Zero)
             {
+                if (Time.unscaledTime < this.noclipPlayerResolveRetryAt)
+                {
+                    return false;
+                }
+
+                if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj)
+                    || playerObj == IntPtr.Zero
+                    || !this.TryGetBunnyHopMonoMoveComponent(playerObj, out moveObj)
+                    || moveObj == IntPtr.Zero)
+                {
+                    // Failure throttle: don't re-walk the character/player members every frame
+                    // while the world is loading.
+                    this.noclipPlayerResolveRetryAt = Time.unscaledTime + 1f;
+                    return false;
+                }
+
+                this.cachedNoclipPlayerObj.Set(playerObj);
+                this.cachedNoclipPlayerMoveObj.Set(moveObj);
+            }
+
+            IntPtr moveClass = auraMonoObjectGetClass(moveObj);
+            if (moveClass == IntPtr.Zero)
+            {
+                this.InvalidateNoclipPlayerDriveCache();
                 return false;
             }
 
+            // Rung 1: position + facing in one call.
+            IntPtr setPosRotMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetPositionAndRotation", 3);
+            if (setPosRotMethod != IntPtr.Zero)
+            {
+                Vector3 posValue = pos;
+                Quaternion rotValue = faceRot;
+                bool worldSpace = true;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* setArgs = stackalloc IntPtr[3];
+                setArgs[0] = (IntPtr)(&posValue);
+                setArgs[1] = (IntPtr)(&rotValue);
+                setArgs[2] = (IntPtr)(&worldSpace);
+                auraMonoRuntimeInvoke(setPosRotMethod, moveObj, (IntPtr)setArgs, ref exc);
+                if (exc == IntPtr.Zero)
+                {
+                    this.SyncNoclipPlayerMoveForward(moveObj, hasFlatDir, flatDir);
+                    return true;
+                }
+
+                // Exception usually means a stale/dead component — drop the cache so the next
+                // frame re-resolves a live one instead of failing forever.
+                this.InvalidateNoclipPlayerDriveCache();
+                return false;
+            }
+
+            // Rung 2: WorldPlaceTo + WorldFaceTo.
+            IntPtr worldPlaceToMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "WorldPlaceTo", 1);
+            if (worldPlaceToMethod != IntPtr.Zero)
+            {
+                Vector3 posValue = pos;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* placeArgs = stackalloc IntPtr[1];
+                placeArgs[0] = (IntPtr)(&posValue);
+                auraMonoRuntimeInvoke(worldPlaceToMethod, moveObj, (IntPtr)placeArgs, ref exc);
+                if (exc == IntPtr.Zero)
+                {
+                    IntPtr worldFaceMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "WorldFaceTo", 1);
+                    if (worldFaceMethod != IntPtr.Zero)
+                    {
+                        Quaternion rotValue = faceRot;
+                        exc = IntPtr.Zero;
+                        IntPtr* faceArgs = stackalloc IntPtr[1];
+                        faceArgs[0] = (IntPtr)(&rotValue);
+                        auraMonoRuntimeInvoke(worldFaceMethod, moveObj, (IntPtr)faceArgs, ref exc);
+                    }
+
+                    this.SyncNoclipPlayerMoveForward(moveObj, hasFlatDir, flatDir);
+                    return true;
+                }
+
+                this.InvalidateNoclipPlayerDriveCache();
+                return false;
+            }
+
+            // Rung 3: BasePlayerComponent.Transfer(pos, euler, parentNetId: 0, checkCollision: false).
             IntPtr playerClass = auraMonoObjectGetClass(playerObj);
             IntPtr transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 4);
             if (transferMethod == IntPtr.Zero)
@@ -478,79 +568,62 @@ namespace HeartopiaMod
                 transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 2);
             }
 
-            if (transferMethod != IntPtr.Zero)
-            {
-                int transferArgCount = this.TryGetAuraMonoMethodParamCount(transferMethod);
-                IntPtr exc = IntPtr.Zero;
-                if (transferArgCount >= 4)
-                {
-                    Vector3 posValue = playerPos;
-                    Vector3 eulerValue = eulerAngles;
-                    uint parentNetId = 0U;
-                    bool checkCollision = false;
-                    IntPtr* transferArgs = stackalloc IntPtr[4];
-                    transferArgs[0] = (IntPtr)(&posValue);
-                    transferArgs[1] = (IntPtr)(&eulerValue);
-                    transferArgs[2] = (IntPtr)(&parentNetId);
-                    transferArgs[3] = (IntPtr)(&checkCollision);
-                    auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
-                }
-                else
-                {
-                    Vector3 posValue = playerPos;
-                    Vector3 eulerValue = eulerAngles;
-                    IntPtr* transferArgs = stackalloc IntPtr[2];
-                    transferArgs[0] = (IntPtr)(&posValue);
-                    transferArgs[1] = (IntPtr)(&eulerValue);
-                    auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref exc);
-                }
-
-                if (exc == IntPtr.Zero)
-                {
-                    return true;
-                }
-            }
-
-            if (!this.TryGetBunnyHopMonoMoveComponent(playerObj, out IntPtr moveObj) || moveObj == IntPtr.Zero)
+            if (transferMethod == IntPtr.Zero)
             {
                 return false;
             }
 
-            IntPtr moveClass = auraMonoObjectGetClass(moveObj);
-            IntPtr worldFaceMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "WorldFaceTo", 1);
-            if (worldFaceMethod == IntPtr.Zero)
+            int transferArgCount = this.TryGetAuraMonoMethodParamCount(transferMethod);
+            Vector3 transferPos = pos;
+            Vector3 transferEuler = new Vector3(0f, faceRot.eulerAngles.y, 0f);
+            IntPtr transferExc = IntPtr.Zero;
+            if (transferArgCount >= 4)
             {
+                uint parentNetId = 0U;
+                bool checkCollision = false;
+                IntPtr* transferArgs = stackalloc IntPtr[4];
+                transferArgs[0] = (IntPtr)(&transferPos);
+                transferArgs[1] = (IntPtr)(&transferEuler);
+                transferArgs[2] = (IntPtr)(&parentNetId);
+                transferArgs[3] = (IntPtr)(&checkCollision);
+                auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref transferExc);
+            }
+            else
+            {
+                IntPtr* transferArgs = stackalloc IntPtr[2];
+                transferArgs[0] = (IntPtr)(&transferPos);
+                transferArgs[1] = (IntPtr)(&transferEuler);
+                auraMonoRuntimeInvoke(transferMethod, playerObj, (IntPtr)transferArgs, ref transferExc);
+            }
+
+            if (transferExc != IntPtr.Zero)
+            {
+                this.InvalidateNoclipPlayerDriveCache();
                 return false;
             }
 
-            Quaternion rotValue = faceRot;
-            IntPtr exc2 = IntPtr.Zero;
-            IntPtr* faceArgs = stackalloc IntPtr[1];
-            faceArgs[0] = (IntPtr)(&rotValue);
-            auraMonoRuntimeInvoke(worldFaceMethod, moveObj, (IntPtr)faceArgs, ref exc2);
-            if (exc2 != IntPtr.Zero)
-            {
-                return false;
-            }
+            this.SyncNoclipPlayerMoveForward(moveObj, hasFlatDir, flatDir);
+            return true;
+        }
 
-            IntPtr setPosRotMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetPositionAndRotation", 3);
-            if (setPosRotMethod != IntPtr.Zero)
+        private void InvalidateNoclipPlayerDriveCache()
+        {
+            this.cachedNoclipPlayerObj.Clear();
+            this.cachedNoclipPlayerMoveObj.Clear();
+        }
+
+        // Keeps the move component's internal 2D forward aligned with the driven facing while
+        // there is horizontal input (mirrors the vehicle facing path).
+        private void SyncNoclipPlayerMoveForward(IntPtr moveObj, bool hasFlatDir, Vector3 flatDir)
+        {
+            if (!hasFlatDir || moveObj == IntPtr.Zero)
             {
-                Vector3 posValue = playerPos;
-                Quaternion rotArg = faceRot;
-                bool worldSpace = true;
-                IntPtr* setArgs = stackalloc IntPtr[3];
-                setArgs[0] = (IntPtr)(&posValue);
-                setArgs[1] = (IntPtr)(&rotArg);
-                setArgs[2] = (IntPtr)(&worldSpace);
-                exc2 = IntPtr.Zero;
-                auraMonoRuntimeInvoke(setPosRotMethod, moveObj, (IntPtr)setArgs, ref exc2);
+                return;
             }
 
             Vector2 forward2D = new Vector2(flatDir.x, flatDir.z);
             this.TrySetMonoVector2Member(moveObj, "_Forward", forward2D);
             this.TrySetMonoVector2Member(moveObj, "Forward", forward2D);
-            return true;
         }
 
         private unsafe void ApplyNoclipVehicleFacing(IntPtr vehicleComponentObj, Vector3 targetPosition, Quaternion faceRot, Vector3 flatDir)

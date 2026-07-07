@@ -202,7 +202,6 @@
     <Compile Include="BirdNetFarm.cs" />
     <Compile Include="CrashDumpHandler.cs" />
     <Compile Include="MovementInputFeature.cs" />
-    <Compile Include="CharacterRotationPatch.cs" />
     <Compile Include="Breadcrumbs.cs" />
     <Compile Include="MonoAssemblyDump.cs" />
     <Compile Include="HeartopiaComplete.cs" />
@@ -220,6 +219,7 @@
     <Compile Include="HeartopiaComplete.Teleport.cs" />
     <Compile Include="HeartopiaComplete.Transfer.cs" />
     <Compile Include="HeartopiaComplete.CameraInput.cs" />
+    <Compile Include="HeartopiaComplete.CameraRig.cs" />
     <Compile Include="HeartopiaComplete.Meteor.cs" />
     <Compile Include="HeartopiaComplete.Fishing.cs" />
     <Compile Include="HeartopiaComplete.EventHook.cs" />
@@ -298,8 +298,6 @@
     <Compile Include="ShopQuickBuyFeature.cs" />
     <Compile Include="ShopQuickSellFeature.cs" />
     <Compile Include="ItemDumpFeature.cs" />
-    <Compile Include="TransformPositionPatch.cs" />
-    <Compile Include="TransformRotationPatch.cs" />
     <Compile Include="NoclipFeature.cs" />
     <Compile Include="VehicleBypassFeature.cs" />
     <Compile Include="VehicleTeleportFeature.cs" />

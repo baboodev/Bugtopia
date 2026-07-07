@@ -881,7 +881,7 @@ namespace HeartopiaMod
                             {
                                 bool hasAnyPrompt = this.HasAnyVisibleInteractPrompt();
                                 bool auraHasRecentCommand = this.auraFarmEnabled && Time.unscaledTime - this.auraLastSuccessfulCommandAt <= 1.2f;
-                                bool flag5 = !this.autoCollectClickedSinceArrival && (!this.auraFarmEnabled || this.auraLastTargetCount <= 0 || !auraHasRecentCommand) && !HeartopiaComplete.OverrideCameraPosition && !hasAnyPrompt;
+                                bool flag5 = !this.autoCollectClickedSinceArrival && (!this.auraFarmEnabled || this.auraLastTargetCount <= 0 || !auraHasRecentCommand) && !this.mouseLookCaptureActive && !hasAnyPrompt;
                                 if (flag5)
                                 {
                                     bool flag6 = this.autoFarmTimer >= 1f && this.cameraRotationAttempts == 0;
@@ -2494,8 +2494,6 @@ namespace HeartopiaMod
                 this.autoFarmStatus = "READY";
                 this.autoFarmTimer = 0f;
                 this.SetGameSpeed(1f);
-                HeartopiaComplete.OverrideCameraPosition = false;
-                this.cameraOverrideFramesRemaining = 0;
                 this.currentPriorityLocation = null;
                 this.lastTeleportWasPriorityLocation = false;
                 this.autoFarmAutoStopAt = -1f;

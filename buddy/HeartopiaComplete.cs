@@ -197,17 +197,13 @@ namespace HeartopiaMod
         private bool mouseLookEnabled = false;
         private bool showMouseLookCrosshair = true;
         private bool mouseLookCaptureActive = false;
+        // Mouse-look accumulators, in the game camera controller's AXIS units (axisX = yaw,
+        // axisY = pitch; see HeartopiaComplete.CameraRig.cs). Seeded from GetAxis*value on the
+        // capture edge, re-synced to the Warp-clamped values after each write.
         private bool mouseLookOrbitInitialized = false;
         private float mouseLookOrbitYaw = 0f;
         private float mouseLookOrbitPitch = 12f;
-        private float mouseLookOrbitDistance = 3.5f;
-        private float mouseLookOrbitPivotHeight = 1.45f;
-        private Vector3 mouseLookOrbitPivotLocalOffset = new Vector3(0f, 1.45f, 0f);
-        private bool mouseLookHasDefaultCameraSnapshot = false;
         private bool mouseLookWasCaptureActive = false;
-        private Vector3 mouseLookDefaultCameraPos = Vector3.zero;
-        private Quaternion mouseLookDefaultCameraRot = Quaternion.identity;
-        private float mouseLookDefaultCameraFov = 60f;
         private float nextCameraToggleInteractAt = 0f;
         private float antiAfkInterval = 9f;
         private float lastAntiAfkPulseAt = -999f;
@@ -535,11 +531,11 @@ namespace HeartopiaMod
             this.LoadPatrolPoints();
             this.LoadRadarSettings();
             this.LoadBirdFarmSettings();
-            // NOTE: The hot Unity methods (CharacterController.Move, Transform.position/rotation
-            // setters, Input.GetKey*) are intentionally NOT patched here. Patching them globally
-            // taxes every frame of normal gameplay even when no mod feature is active, and is a
-            // known source of periodic native crashes. They are now installed lazily on first use
-            // via EnsurePositionOverridePatched / EnsureRotationOverridePatched / EnsureInputSimPatched.
+            // NOTE: No Transform.position/rotation setter patches exist anymore (anti-cheat
+            // surface #4 eliminated): noclip/teleport drive the game's PlayerMoveComponent and
+            // mouse-look drives the game camera controller's axis, both embedded-Mono via
+            // AuraMono. The only remaining IL2CPP hot-path patch is Input.GetKey* (F-sim), still
+            // installed lazily on first use via EnsureInputSimPatched.
             ModLogger.Msg("=== Hot-path patches deferred (installed on demand) ===");
 
             ModLogger.Msg("AutoFish subsystem disabled.");
@@ -566,7 +562,6 @@ namespace HeartopiaMod
         {
             this.ProcessNoclipVehicleOnLateUpdate();
             this.ProcessVehicleTeleportOnLateUpdate();
-            this.UpdateDirectMouseLookCamera(this.mouseLookCaptureActive);
 
             bool flag = this.monitorPosition;
             if (flag)
@@ -584,24 +579,6 @@ namespace HeartopiaMod
                     }
                 }
             }
-            bool flag4 = HeartopiaComplete.OverrideCameraPosition && this.cameraOverrideFramesRemaining > 0;
-            if (flag4)
-            {
-                GameObject gameObject2 = GameObject.Find("GameApp/startup_root(Clone)/Main Camera");
-                bool flag5 = gameObject2 != null;
-                if (flag5)
-                {
-                    gameObject2.transform.position = HeartopiaComplete.CameraOverridePos;
-                    gameObject2.transform.rotation = HeartopiaComplete.CameraOverrideRot;
-                }
-                this.cameraOverrideFramesRemaining--;
-                bool flag6 = this.cameraOverrideFramesRemaining <= 0;
-                if (flag6)
-                {
-                    HeartopiaComplete.OverrideCameraPosition = false;
-                }
-            }
-
             // Only force FOV while the custom override is enabled.
             if (this.customCameraFOVEnabled)
             {
@@ -618,32 +595,11 @@ namespace HeartopiaMod
             // Direct game-icon loads (docs/ITEM_ICON_PIPELINE.md): drain completed sprite loads,
             // time out stuck ones. No-op (two dictionary count checks) while idle.
             this.ProcessGameIconLoads();
-            // Lazily install the hot-path patches only while a feature that needs them is active.
-            // This is the safety net for sustained, multi-frame effects; one-shot writers that
-            // touch a transform in the same call (teleport, camera) also Ensure directly at the site.
-            // Player teleport / noclip: pin position via the Transform.position setter. (The
-            // CharacterController.Move patch was removed — the local player isn't driven by it.)
+            // NOTE: the Transform.position/rotation setter patches and their per-frame "needed"
+            // gates are GONE (anti-cheat surface #4 eliminated). Noclip/teleport drive the game's
+            // own PlayerMoveComponent; mouse-look drives the camera controller's axis. The only
+            // remaining lazily-installed IL2CPP patch is Input.GetKey* (F-sim, surface #1).
             float hotPatchNow = Time.unscaledTime;
-            if (this.noclipEnabled || HeartopiaComplete.OverridePlayerPosition || this.teleportFramesRemaining > 0)
-            {
-                this.EnsurePositionOverridePatched();
-                this.positionOverridePatchLastNeededAt = hotPatchNow;
-            }
-            // Camera mouse-look: pin camera position + rotation. Does NOT need CharacterController.Move.
-            if (this.mouseLookEnabled || HeartopiaComplete.OverrideCameraPosition || this.cameraOverrideFramesRemaining > 0)
-            {
-                this.EnsurePositionOverridePatched();
-                this.EnsureRotationOverridePatched();
-                this.positionOverridePatchLastNeededAt = hotPatchNow;
-                this.rotationOverridePatchLastNeededAt = hotPatchNow;
-            }
-            // Player rotation override.
-            if (HeartopiaComplete.OverridePlayerRotation || this.playerRotationFramesRemaining > 0 || this.noclipEnabled)
-            {
-                this.EnsureRotationOverridePatched();
-                this.rotationOverridePatchLastNeededAt = hotPatchNow;
-            }
-            this.UpdateHotPathOverrideTargetIds();
             // Menu input-block: stop player movement while the menu is open. Routed through the
             // game's MonoInputManager (the player isn't driven by Unity's CharacterController.Move),
             // so no hot-path Harmony patch is installed for this.
@@ -687,6 +643,10 @@ namespace HeartopiaMod
             this.UpdateGameUiClickBlockState();
             Breadcrumbs.Drop("ou.uiblock");
             this.UpdateMouseLookState();
+            // Drive the game camera controller's axis from Update: the game's
+            // XDTCameraManager.LateUpdate reads the axis LATER this same frame and poses
+            // Camera.main from it (see HeartopiaComplete.CameraRig.cs).
+            this.UpdateDirectMouseLookCamera(this.mouseLookCaptureActive);
             this.UpdateCameraToggleInteractClick();
             float instantFps = (Time.unscaledDeltaTime > 0.0001f) ? (1f / Time.unscaledDeltaTime) : this.fpsBypassObservedFps;
             if (this.fpsBypassEnabled)
@@ -755,18 +715,6 @@ namespace HeartopiaMod
             this.ProcessEntityEventDebugOnUpdate();
             this.FlushPendingGameSpeedConfigSave();
             this.FlushPendingRadarSettingsSave();
-            bool flag2 = HeartopiaComplete.OverridePlayerPosition && this.teleportFramesRemaining > 0;
-            if (flag2)
-            {
-                this.teleportFramesRemaining--;
-                bool flag3 = this.teleportFramesRemaining <= 0;
-                if (flag3)
-                {
-                    // Noclip owns the position pin persistently — releasing it here would drop
-                    // the player out of hover at the teleport destination.
-                    HeartopiaComplete.OverridePlayerPosition = this.noclipEnabled;
-                }
-            }
             this.SyncTeleportPosition();
 
             // Periodic toast-panel scan fallback (in case UIManager hook isn't available)
@@ -776,22 +724,17 @@ namespace HeartopiaMod
             }
             try { this.UpdateBottomDialogAutoClicker(); } catch { }
 
-            // Handle player rotation override
-            bool flagRotation = HeartopiaComplete.OverridePlayerRotation && this.playerRotationFramesRemaining > 0;
-            if (flagRotation)
+            // Post-teleport facing settle: plain transform writes for a few frames (not a patch).
+            if (this.playerRotationFramesRemaining > 0)
             {
                 this.playerRotationFramesRemaining--;
                 GameObject player = GetPlayer();
                 if (player != null)
                 {
-                    player.transform.rotation = HeartopiaComplete.PlayerOverrideRot;
-                }
-                if (this.playerRotationFramesRemaining <= 0)
-                {
-                    HeartopiaComplete.OverridePlayerRotation = false;
+                    player.transform.rotation = this.teleportSyncRotation;
                 }
             }
-            
+
             this.ProcessNoclipMovementOnUpdate();
 
             if (!string.IsNullOrEmpty(this.keyBindingActive))
@@ -932,7 +875,6 @@ namespace HeartopiaMod
                     this.mouseLookEnabled = false;
                     this.noclipEnabled = false;
                     this.UpdateMouseLookState();
-                    HeartopiaComplete.OverridePlayerPosition = false;
                     this.ClearNoclipVehicleOverride();
                     this.noclipBoostMultiplier = 2f;
                     this.SetGameSpeed(1f);
@@ -1081,12 +1023,11 @@ namespace HeartopiaMod
                     this.noclipEnabled = !this.noclipEnabled;
                     if (this.noclipEnabled)
                     {
-                        this.InitializeNoclipOverridePosition();
+                        this.InitializeNoclipDriveState();
                         this.AddMenuNotification("Noclip: ENABLED", new Color(0.45f, 1f, 0.55f));
                     }
                     else
                     {
-                        HeartopiaComplete.OverridePlayerPosition = false;
                         this.ClearNoclipVehicleOverride();
                         this.AddMenuNotification("Noclip: DISABLED", new Color(1f, 0.55f, 0.55f));
                     }
@@ -2456,32 +2397,14 @@ namespace HeartopiaMod
         private FeatureBreakerState autoFishingFarmBreaker;
         private FeatureBreakerState fishingRouteBreaker;
 
-        // Removes the hot-path Harmony patches once nothing has needed them for a while, so the
-        // per-call prefix tax is not paid for the rest of the session after a one-off teleport.
+        // Removes the Input.GetKey* hot-path Harmony patches once nothing has needed them for a
+        // while, so the per-call postfix tax is not paid for the rest of the session. The long
+        // 60s tail is on purpose (auto-farm pulses the F-sim and would thrash on a short one).
+        // The Transform.position/rotation setter overrides that used to share this idle-unpatch
+        // are gone — noclip/teleport/camera now drive game-engine (embedded Mono) methods.
         private const float HotPathPatchIdleUnpatchSeconds = 60f;
-        // Held Transform-setter overrides (noclip / mouse-look free-cam) unpatch on a SHORT idle grace.
-        // Teleport — the old reason for the long tail (teleport-heavy auto-farm kept re-needing the
-        // position patch) — now warps via the game API (EntityHelper.AutoMoveTransfer), so the
-        // position/rotation .text patch should not linger for a minute after the feature turns off.
-        // A small grace (not 0) coalesces bursts so Patch/Unpatch (itself a .text write) doesn't thrash;
-        // noclip/mouse-look are HELD (refresh lastNeededAt every frame) so they never churn. InputSim
-        // keeps the long 60s tail on purpose (auto-farm pulses the F-sim and would thrash on a short one).
-        private const float HotPathOverrideIdleUnpatchSeconds = 2f;
-        private float positionOverridePatchLastNeededAt;
-        private float rotationOverridePatchLastNeededAt;
         private float inputSimPatchLastNeededAt;
 
-
-
-
-
-        // Installs the Transform.position setter patch (player teleport/noclip pinning and
-        // camera position override) on first use. This is the hotter of the movement patches,
-        // so it is kept separate from the lighter CharacterController.Move patch below and is
-        // NOT pulled in by the menu input-block (which only needs Move).
-
-        // Installs the rotation patches (Transform.rotation setter, used by both the camera
-        // mouse-look override and the player-rotation override) on first use.
 
         // Installs the Input.GetKey* postfixes used for simulated F-key presses (fishing,
         // insect net, auto-cook interact) on first use.
@@ -4440,34 +4363,9 @@ namespace HeartopiaMod
         private new static HarmonyLib.Harmony harmonyInstance;
         internal static HarmonyLib.Harmony ModHarmony => harmonyInstance;
 
-        // Token: 0x04000004 RID: 4
-        public static bool OverridePlayerPosition;
-
-        // Token: 0x04000005 RID: 5
-        public static Vector3 OverridePosition;
-
-        // Token: 0x04000006 RID: 6
-        public static bool OverrideCameraPosition;
-
-        // Token: 0x04000007 RID: 7
-        public static Vector3 CameraOverridePos;
-
-        // Token: 0x04000008 RID: 8
-        public static Quaternion CameraOverrideRot;
-
-        // Token: 0x04000009 RID: 9
-        private int cameraOverrideFramesRemaining = 0;
-
-        // Player Rotation Override
-        public static bool OverridePlayerRotation = false;
-        public static Quaternion PlayerOverrideRot = Quaternion.identity;
+        // The Override{Player,Camera}Position/Rotation static pins and their Transform-setter
+        // prefixes are gone (anti-cheat surface #4). Post-teleport facing settle countdown:
         private int playerRotationFramesRemaining = 0;
-
-        // Transform.GetInstanceID of the hot-path patch targets. Refreshed once per frame in
-        // OnUpdate (and lazily by the prefixes when still 0) so the Transform setter prefixes
-        // compare ints instead of fetching gameObject.name (native call + string alloc) per set.
-        public static int OverridePlayerTransformId;
-        public static int OverrideCameraTransformId;
 
         // IMGUI Theme
         private bool themeInitialized = false;
@@ -4611,6 +4509,11 @@ namespace HeartopiaMod
 
         // Token: 0x0400000E RID: 14
         private int teleportFramesRemaining = 0;
+
+        // Post-teleport settle target (plain per-frame transform writes while
+        // teleportFramesRemaining / playerRotationFramesRemaining count down — not a patch).
+        private Vector3 teleportSyncPosition;
+        private Quaternion teleportSyncRotation = Quaternion.identity;
 
         // Token: 0x0400000F RID: 15
         private Vector3 lastKnownPosition;
@@ -5602,11 +5505,9 @@ namespace HeartopiaMod
         private const string BOTTOM_DIALOG_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Popup/BottomDialogPanel(Clone)";
         private const float BOTTOM_DIALOG_CLICK_INTERVAL = 0.3f;
 
-        // Lazy patch state for the hot Unity methods (Transform.position/rotation setters,
-        // CharacterController.Move, Input.GetKey*). These are only installed once the
-        // corresponding in-game feature is actually used, so they cost nothing when idle.
-        private bool positionOverridePatched = false;
-        private bool rotationOverridePatched = false;
+        // Lazy patch state for the Input.GetKey* postfixes (the last hot Unity methods the mod
+        // still Harmony-patches — surface #1). Installed only once F-key simulation is actually
+        // used, so they cost nothing when idle.
         private bool inputSimPatched = false;
 
         // True while we have an outstanding DisableInput(Move) on the game's MonoInputManager

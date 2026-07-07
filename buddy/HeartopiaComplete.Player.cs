@@ -880,9 +880,9 @@ namespace HeartopiaMod
             }
 
             // Throttle re-resolves to once per interval REGARDLESS of cache state, so a missing player
-            // (world loading, between worlds, despawned) doesn't hit GameObject.Find every call from the
-            // hot Transform.position / CharacterController.Move patches. A miss returns the (null/stale)
-            // cache and retries at most once per second.
+            // (world loading, between worlds, despawned) doesn't hit GameObject.Find every call from
+            // per-frame callers (noclip drive, radar, ESP). A miss returns the (null/stale) cache and
+            // retries at most once per second.
             if (Time.unscaledTime - lastLocalPlayerCheckTime < LOCAL_PLAYER_CACHE_INTERVAL)
             {
                 return cachedLocalPlayer;

@@ -1578,10 +1578,10 @@ namespace HeartopiaMod
         // --- Game-native teleport (EntityHelper.AutoMoveTransfer / TransferAndLookAtForEditor) ---
         // Warps the self-player via the game's OWN Mono API (checkCollision=false, server-syncs itself
         // through BasePlayerComponent.TrySendSelfTransform) instead of Harmony-patching
-        // Transform.set_position (an anti-cheat-detectable module .text patch). AuraMono-invoke,
-        // mirrors TryVehicleTeleportSendTransform in VehicleTeleportFeature.cs. Returns true on success;
-        // callers then SKIP Ensure*OverridePatched (the .text patch) but keep the direct-write hold /
-        // resource-farm arrival bookkeeping (plain transform writes, not a patch).
+        // Transform.set_position (an anti-cheat-detectable module .text patch — surface #4, removed).
+        // AuraMono-invoke, mirrors TryVehicleTeleportSendTransform in VehicleTeleportFeature.cs. The
+        // warp is the primary path; callers keep only a short direct-write settle nudge
+        // (SyncTeleportPosition — plain transform writes for a few frames, not a patch).
         private IntPtr gameTeleportAutoMoveMethod = IntPtr.Zero;
         private IntPtr gameTeleportLookAtEditorMethod = IntPtr.Zero;
 
@@ -1659,13 +1659,8 @@ namespace HeartopiaMod
             }
             else
             {
-                Vector3 position = gameObject.transform.position;
-                if (!warped)
-                {
-                    this.EnsurePositionOverridePatched();
-                }
-                HeartopiaComplete.OverridePosition = targetPos;
-                HeartopiaComplete.OverridePlayerPosition = true;
+                this.teleportSyncPosition = targetPos;
+                this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
                 CharacterController component = gameObject.GetComponent<CharacterController>();
                 bool flag2 = component != null;
                 if (flag2)
@@ -1707,16 +1702,9 @@ namespace HeartopiaMod
             }
             else
             {
-                Vector3 position = gameObject.transform.position;
-                if (!warped)
-                {
-                    this.EnsurePositionOverridePatched();
-                    this.EnsureRotationOverridePatched();
-                }
-                HeartopiaComplete.OverridePosition = targetPos;
-                HeartopiaComplete.OverridePlayerPosition = true;
-                HeartopiaComplete.PlayerOverrideRot = targetRot;
-                HeartopiaComplete.OverridePlayerRotation = true;
+                this.teleportSyncPosition = targetPos;
+                this.teleportSyncRotation = targetRot;
+                this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
                 CharacterController component = gameObject.GetComponent<CharacterController>();
                 bool flag2 = component != null;
                 if (flag2)
@@ -1737,13 +1725,9 @@ namespace HeartopiaMod
 
         private void TeleportTo(Vector3 targetPos)
         {
-            bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
-            if (!warped)
-            {
-                this.EnsurePositionOverridePatched();
-            }
-            OverridePosition = targetPos;
-            OverridePlayerPosition = true;
+            this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
+            this.teleportSyncPosition = targetPos;
+            this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
             teleportFramesRemaining = 10;
             GameObject p = GetPlayer();
             if (p != null)
@@ -1753,21 +1737,19 @@ namespace HeartopiaMod
             }
         }
 
+        // Short post-warp settle nudge: plain transform writes for a few frames (NOT a patch).
+        // The game warp (TryGameTeleportAuraMono) is the primary teleport; this only smooths the
+        // landing while streaming/animation settles.
         private void SyncTeleportPosition()
         {
-            if (OverridePlayerPosition && teleportFramesRemaining > 0)
+            if (teleportFramesRemaining > 0)
             {
                 teleportFramesRemaining--;
                 GameObject p = GetPlayer();
                 if (p != null)
                 {
-                    p.transform.position = OverridePosition;
-                    if (p.transform.root != null) p.transform.root.position = OverridePosition;
-                }
-                if (teleportFramesRemaining <= 0)
-                {
-                    // Keep the pin while noclip is on so the player stays hovering at the target.
-                    OverridePlayerPosition = this.noclipEnabled;
+                    p.transform.position = this.teleportSyncPosition;
+                    if (p.transform.root != null) p.transform.root.position = this.teleportSyncPosition;
                 }
             }
         }
