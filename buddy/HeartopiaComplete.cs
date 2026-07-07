@@ -687,7 +687,6 @@ namespace HeartopiaMod
             this.UpdateNetCookStatusDiagnosticsOnUpdate();
             if (this.netCookEnabled || this.netCookTargets.Count > 0 || (this.showMenu && this.selectedTab == 3 && this.automationSubTab == 5))
             {
-                this.EnsureNetCookWorldCookerRegistrationPatch();
                 this.UpdateNetCookRuntimeReadiness();
             }
             if (this.petPlayAutoCatEnabled || this.petPlayAutoDogEnabled || this.petPlayAutoWashEnabled)
@@ -5131,13 +5130,6 @@ namespace HeartopiaMod
         private readonly Dictionary<int, int> netCookCookerTypeCache = new Dictionary<int, int>(8);
         private readonly HashSet<int> netCookCookerTypeFailedStaticIds = new HashSet<int>();
         private readonly Dictionary<ulong, long> netCookAuraMonoLevelObjectPtrs = new Dictionary<ulong, long>(64);
-        private bool netCookWorldCookerRegistrationPatched = false;
-        private bool netCookCookBuildSpawnPatched = false;
-        private bool netCookCookBuildUpdatePatched = false;
-        private bool netCookCookBuildHookWarned = false;        // logged once if the OnSpawned/OnComponentUpdated patch can't install
-        private int netCookCookBuildSpawnHookCount = 0;         // runtime OnSpawned hook fire count
-        private int netCookCookBuildUpdateHookCount = 0;        // runtime OnComponentUpdated hook fire count
-        private float nextNetCookWorldCookerPatchAttemptAt = 0f;
         private bool birdPhotoAuraMonoDiscoveryComplete = false;
         private float nextBirdPhotoRuntimeProbePatchAttemptAt = 0f;
         private int netCookCookerType = 0;
