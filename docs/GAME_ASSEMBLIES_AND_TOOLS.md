@@ -149,9 +149,33 @@ Checks you can run locally:
 | Goal | Approach |
 |------|----------|
 | Know module names | Use file names (`EcsClient`, `XDTDataAndProtocol`, …) — matches mod search lists |
-| Decompile game logic | Prefer **IL2CPP** dump (Cpp2IL / ILSpy on interop) or repo `ilspy-dumps/`; decode XDENCODE only if you have the game’s decoder |
+| Decompile game logic | Decode XDENCODE **offline** with [`tools/XdUnpack`](#decrypting-dotnetassemblies-offline-toolsxdunpack) → `ilspycmd`; or use the runtime dumper, IL2CPP dump, or repo `ilspy-dumps/` |
 | Fix mod `ItemNetPair missing` | Regenerate **loader interop** from `<Game>` or rely on **IL2CPP runtime** in mod v10+ |
 | Copy into `BepInEx/interop` | **Do not** — will not replace `Il2CppInterop` stubs |
+
+---
+
+## Decrypting DotnetAssemblies offline (`tools/XdUnpack`)
+
+**Preferred path — no game launch, no runtime dump.** [`tools/XdUnpack`](../tools/XdUnpack) decodes
+the on-disk `%LocalLow%\xd\Heartopia\DotnetAssemblies\*.dll` straight to plaintext .NET PEs, offline.
+Output is **100 % byte-exact on method IL** vs the runtime dumper and decompiles to **byte-identical
+C#** (verified with `ilspycmd`). Because it reads the on-disk blobs it always matches the
+**installed** build (no stale-dump drift), and it auto-detects which modules need extra work, so a
+future patch needs no changes.
+
+```powershell
+# decode all modules, then decompile per-assembly into ilspy-dumps/
+dotnet run -c Release --project tools\XdUnpack -- --out C:\tmp\decoded
+foreach ($dll in Get-ChildItem "C:\tmp\decoded\*.dll") {
+    ilspycmd -p -o "ilspy-dumps\$([IO.Path]::GetFileNameWithoutExtension($dll.Name))" $dll.FullName
+}
+```
+
+Options (`--in`, `--out`, `--only`, `--copy-plain`, `--quiet`) are in
+[tools/XdUnpack/README.md](../tools/XdUnpack/README.md); the decode itself is documented in the
+tool's source comments. The **runtime dumper below** remains a cross-check (dumps exactly the image
+currently loaded in Mono) and the only option if you lack the on-disk `DotnetAssemblies` folder.
 
 ---
 
