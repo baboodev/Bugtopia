@@ -233,52 +233,82 @@ namespace HeartopiaMod
                         break;
                     }
 
-                    bool moveNextThrew = false;
-                    int safety = 0;
-                    while (safety < maxItems)
+                    // Struct enumerators (Dictionary<K,V>.Enumerator & co.) come back BOXED, and
+                    // mono_runtime_invoke on a valuetype instance method takes the UNBOXED value as
+                    // 'this' — invoking with the box shifts 'this' by the object header, so MoveNext
+                    // reads/writes through garbage state → native heap corruption with no crashlog
+                    // (hit via the battle-pass static-table walk with Festival For Tokens on and no
+                    // active festival). Unbox structs for the invoke; if the valuetype check isn't
+                    // available, skip the enumerator path entirely rather than risk the boxed call.
+                    if (auraMonoClassIsValueType == null || auraMonoObjectUnbox == null)
                     {
-                        exc = IntPtr.Zero;
-                        IntPtr moved = auraMonoRuntimeInvoke(moveNextMethod, enumeratorObj, IntPtr.Zero, ref exc);
-                        if (exc != IntPtr.Zero)
-                        {
-                            moveNextThrew = true;
-                            break;
-                        }
+                        break;
+                    }
+                    IntPtr enumeratorSelf = this.TryAuraMonoBoxedIsValueType(enumeratorObj)
+                        ? auraMonoObjectUnbox(enumeratorObj)
+                        : enumeratorObj;
+                    if (enumeratorSelf == IntPtr.Zero)
+                    {
+                        break;
+                    }
 
-                        bool hasNext = false;
-                        if (moved == IntPtr.Zero || auraMonoObjectUnbox == null)
+                    bool moveNextThrew = false;
+                    // Pin the enumerator box for the walk: MoveNext/get_Current allocate boxed
+                    // returns on every call, and a moving-GC pass would relocate an unpinned box
+                    // (and invalidate the unboxed interior pointer above).
+                    uint enumeratorPin = AuraMonoPinNew(enumeratorObj);
+                    try
+                    {
+                        int safety = 0;
+                        while (safety < maxItems)
                         {
-                            break;
-                        }
+                            exc = IntPtr.Zero;
+                            IntPtr moved = auraMonoRuntimeInvoke(moveNextMethod, enumeratorSelf, IntPtr.Zero, ref exc);
+                            if (exc != IntPtr.Zero)
+                            {
+                                moveNextThrew = true;
+                                break;
+                            }
 
-                        try
-                        {
-                            IntPtr rawMoved = auraMonoObjectUnbox(moved);
-                            if (rawMoved == IntPtr.Zero)
+                            bool hasNext = false;
+                            if (moved == IntPtr.Zero)
                             {
                                 break;
                             }
 
-                            hasNext = Marshal.ReadByte(rawMoved) != 0;
-                        }
-                        catch
-                        {
-                            break;
-                        }
+                            try
+                            {
+                                IntPtr rawMoved = auraMonoObjectUnbox(moved);
+                                if (rawMoved == IntPtr.Zero)
+                                {
+                                    break;
+                                }
 
-                        if (!hasNext)
-                        {
-                            break;
-                        }
+                                hasNext = Marshal.ReadByte(rawMoved) != 0;
+                            }
+                            catch
+                            {
+                                break;
+                            }
 
-                        exc = IntPtr.Zero;
-                        IntPtr currentObj = auraMonoRuntimeInvoke(getCurrentMethod, enumeratorObj, IntPtr.Zero, ref exc);
-                        if (exc == IntPtr.Zero && currentObj != IntPtr.Zero)
-                        {
-                            AddEnumeratedItem(currentObj);
-                        }
+                            if (!hasNext)
+                            {
+                                break;
+                            }
 
-                        safety++;
+                            exc = IntPtr.Zero;
+                            IntPtr currentObj = auraMonoRuntimeInvoke(getCurrentMethod, enumeratorSelf, IntPtr.Zero, ref exc);
+                            if (exc == IntPtr.Zero && currentObj != IntPtr.Zero)
+                            {
+                                AddEnumeratedItem(currentObj);
+                            }
+
+                            safety++;
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(enumeratorPin);
                     }
 
                     if (!moveNextThrew)

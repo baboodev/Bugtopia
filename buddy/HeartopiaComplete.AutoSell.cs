@@ -158,6 +158,7 @@ namespace HeartopiaMod
             this.autoSellFestivalTokensEnabled = this.DrawSwitchToggle(new Rect(settingsCard.x + 12f, settingsCard.y + 130f, colWidth, 26f), this.autoSellFestivalTokensEnabled, "Festival For Tokens");
             if (this.autoSellFestivalTokensEnabled != prevFestivalTokens)
             {
+                this.autoSellFestivalCurrencyNextProbeAt = 0f; // re-probe the currency right away
                 try { this.SaveKeybinds(false); } catch { }
             }
 
@@ -1881,6 +1882,9 @@ namespace HeartopiaMod
             return total;
         }
 
+        private int autoSellFestivalCurrencyCachedId;
+        private float autoSellFestivalCurrencyNextProbeAt;
+
         private bool TryGetFestivalSellCurrencyId(out int currencyId)
         {
             currencyId = 0;
@@ -1889,7 +1893,22 @@ namespace HeartopiaMod
                 return false;
             }
 
-            return this.TryResolveBattlePassPeriodCurrencyId(out currencyId, out _);
+            // The battle-pass currency resolve walks game systems/tables via AuraMono — far too
+            // heavy (and historically crashy with no active festival) to re-run on every sell
+            // tick. Probe on a timer: a live festival's currency is stable, and "no festival"
+            // doesn't flip often either.
+            float now = Time.unscaledTime;
+            if (now < this.autoSellFestivalCurrencyNextProbeAt)
+            {
+                currencyId = this.autoSellFestivalCurrencyCachedId;
+                return currencyId > 0;
+            }
+
+            bool resolved = this.TryResolveBattlePassPeriodCurrencyId(out currencyId, out string status) && currencyId > 0;
+            this.autoSellFestivalCurrencyCachedId = resolved ? currencyId : 0;
+            this.autoSellFestivalCurrencyNextProbeAt = now + (resolved ? 300f : 120f);
+            this.AutoSellLog("Festival currency probe: " + (resolved ? ("currency=" + currencyId) : "unavailable") + " (" + status + ")");
+            return resolved;
         }
 
         private string FormatAutoSellIdSample(HashSet<int> ids, int maxCount)
@@ -2397,6 +2416,11 @@ namespace HeartopiaMod
                 }
 
                 int periodId = Convert.ToInt32(getCurrentPeriodId.Invoke(battlePassSystem, null));
+                if (periodId <= 0)
+                {
+                    status = "no active battle pass period";
+                    return false;
+                }
                 if (this.TryResolveBattlePassCurrencyIl2Cpp(periodId, out currencyId, out string il2CppStatus))
                 {
                     status = il2CppStatus;
@@ -2570,6 +2594,13 @@ namespace HeartopiaMod
                 }
 
                 int periodId = Marshal.ReadInt32(auraMonoObjectUnbox(periodObj));
+                if (periodId <= 0)
+                {
+                    // No active battle pass/festival period — nothing to resolve. Bail before the
+                    // IL2CPP/table fallbacks: the static-table walk can only match a positive id.
+                    status = "no active battle pass period";
+                    return false;
+                }
                 if (this.TryResolveBattlePassCurrencyIl2Cpp(periodId, out currencyId, out string il2CppStatus))
                 {
                     status = il2CppStatus;
