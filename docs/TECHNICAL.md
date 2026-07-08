@@ -29,10 +29,10 @@ flowchart TB
     HC --> Aura[AuraFarm partial]
     HC --> Features[Pet / Puzzle partials]
 
-    HC --> Harmony[Harmony com.heartopia.teleport]
-    Harmony --> CC[CharacterController.Move]
-    Harmony --> TP[Transform position/rotation]
-    Harmony --> SP[Image.set_sprite]
+    HC --> Hooks[Game hooks — no Harmony/.text patches]
+    Hooks --> ND[Mono NativeDetour on embedded-Mono]
+    Hooks --> EV[EventCenter dispatch-detours]
+    Hooks --> AM2[AuraMono invoke / field writes]
 
     HC --> Paths[HelperPaths LocalLow]
     HC --> Loc[LocalizationManager]
@@ -112,11 +112,14 @@ public partial class HeartopiaComplete  // NOT MelonMod
 
 1. `ApplyMasterConsoleVisibility()` (MelonLoader console hide flag).
 2. `Instance = this`.
-3. `harmonyInstance = new Harmony("com.heartopia.teleport")`.
-4. Load config: localization, radar icons, teleports, keybinds, theme, patrols, radar, bird farm.
-5. Apply Harmony patches (manual `Patch()` calls).
-6. Log legacy auto-fish disabled message.
-7. `ModCoroutines.Start(NetCookCoroutineWarmupRoutine())`.
+3. Load config: localization, radar icons, teleports, keybinds, theme, patrols, radar, bird farm.
+4. Log legacy auto-fish disabled message.
+5. `ModCoroutines.Start(NetCookCoroutineWarmupRoutine())`.
+
+The mod installs **no** Harmony / IL2CPP `.text` patches — game code is reached via Mono
+`NativeDetour`, AuraMono, EventCenter dispatch-detours, and `SendCommand`. Do not add new
+`[HarmonyPatch]` / `harmony.Patch(...)` on IL2CPP methods (Themis integrity-hashes module `.text`);
+see [TYPE_RESOLUTION.md §Integration strategies](./TYPE_RESOLUTION.md#integration-strategies-after-type-is-found).
 
 ### Logging (`ModLogger.cs`)
 
@@ -146,32 +149,31 @@ BepInEx requires `ModCoroutines.SetHost(this)` in `HeartopiaBehaviour.Awake` bef
 
 ---
 
-## Harmony Patches
+## Hooking game code (no Harmony patches)
 
-### Movement / input patches (installed lazily — see below, not in `OnInitializeMelon`)
+**The mod installs ZERO Harmony / IL2CPP `.text` patches.** Do **not** add new
+`[HarmonyPatch]` / `harmony.Patch(...)` on IL2CPP methods (`GameAssembly` / `UnityPlayer` /
+Il2Cpp-interop) — a Harmony detour rewrites the target module's `.text`, which the native **Themis**
+anti-cheat can integrity-hash. Hook game behaviour with a Mono `NativeDetour` (embedded-Mono
+methods), AuraMono invoke/read, or an EventCenter dispatch-detour instead. See the hard rule in
+[AGENTS.md](../AGENTS.md) and the channel table in
+[TYPE_RESOLUTION.md §Integration strategies](./TYPE_RESOLUTION.md#integration-strategies-after-type-is-found).
 
-| Patch class | Target | Type | Purpose |
-|-------------|--------|------|---------|
-| `CharacterControllerPatch` | `CharacterController.Move` | Prefix | When `OverridePlayerPosition`, replaces motion with delta to override pos (teleport/noclip). NOTE: the local player isn't actually driven by this method — see menu-block note below |
-| `TransformPositionPatch` | `Transform.position` setter | Prefix | Blocks or redirects unauthorized position writes during teleport/noclip |
-| `TransformRotationPatch` | `Transform.rotation` setter | Prefix | Guards rotation during controlled movement |
-| `CharacterRotationPatch` | `Transform.rotation` setter | Prefix | Additional character-specific rotation guard (second patch on same setter) |
-| `SpriteDetectionPatch` | `UI.Image.sprite` setter | Postfix | Bulk selector live item discovery |
+Every patch this section used to list was deleted or migrated during the anti-cheat surface cleanup:
 
-Patches are applied with explicit `MethodInfo` lookup — failures log `[ERR]` with null method diagnostics.
+| Former Harmony patch (IL2CPP `.text`) | Replaced by |
+|---------------------------------------|-------------|
+| `Transform.position` / `Transform.rotation` setters (teleport / noclip / camera) | Teleport → game warp `EntityHelper.AutoMoveTransfer` (AuraMono) + a short direct-write hold on `OverridePosition`; noclip → the game's `PlayerMoveComponent`; camera → `XDTCameraManager` controller axis |
+| `CharacterController.Move` (menu input block) | `MonoInputManager.DisableInput(InputEvent.Move)` via AuraMono (refcounted) |
+| `Input.GetKey*` ×6 (F-sim interact) | Click the game's interact button directly (`DirectClickInteractButton`) |
+| `Image.sprite` setter (bulk-selector discovery) | removed |
+| Building overlap bypass | Mono `NativeDetour` on the embedded-Mono craft collision gate (`BuildingFreeRotateFeature.cs`) |
+| BirdFarm max-photo detect | EventCenter dispatch-detour on `TakingBirdPhotoResultEvent` |
 
-### Lazily installed (not at startup)
-
-The movement/input patches above are **NOT** patched in `OnInitializeMelon` — they are installed on first feature use via `EnsurePositionOverridePatched` / `EnsureMovePatched` / `EnsureRotationOverridePatched` / `EnsureInputSimPatched`, gated at the top of `OnUpdate` plus direct calls at same-frame transform writers. This avoids taxing every frame of normal gameplay (a prior cause of periodic native crashes).
-
-The 6 `InputGetKey*Patch.cs` (KeyCode + string variants) are postfixes that inject `HeartopiaComplete.SimulateFKeyDown/Hold/Up` into Unity `Input` queries. Installed by `EnsureInputSimPatched` when the **resource farm / interact F-sim** path is active. **`AutoFishingFarm` does NOT rely on this** — fishing and insect (`InsectNetFarm`) are net-based (network commands), not key simulation.
-
-**Menu movement block:** "block input while menu open" does NOT use the `CharacterController.Move` patch (the local player isn't driven by it). `UpdateMenuMovementInputBlock` disables `InputEvent.Move` on the game's `MonoInputManager` instead (refcounted Disable/Enable).
-
-### Dynamic patches
-
-- **Bypass overlap:** `EnsureBypassPatched()` applies building overlap bypass when user enables it (Self → Building).
-- **Bird photo runtime:** `EnsureBirdPhotoRuntimeProbePatch()` when bird farm enabled.
+Remaining native hooks are all **Mono `NativeDetour` + `mono_compile_method`** on embedded-Mono
+methods (e.g. building bypasses, bubble spawn/collect, name/profile surfaces, fishing) — the Mono
+JIT heap, not a module `.text`, so off the Themis integrity-hash surface. `EnsureBirdPhotoRuntimeProbePatch`
+is an AuraMono discovery probe, not a Harmony patch.
 
 ---
 
@@ -192,11 +194,11 @@ public static int cameraOverrideFramesRemaining;
 
 ### Flow
 
-1. Teleport sets player transform position **and** `OverridePosition` + frame count (~10 frames).
-2. `CharacterControllerPatch.MovePrefix` steers controller motion toward override each frame.
-3. Prevents server/client controller from immediately snapping back.
+1. Teleport calls the game's own warp first (`EntityHelper.AutoMoveTransfer`, AuraMono), then sets `OverridePosition` + a short frame count (~10 frames).
+2. During those frames the mod re-writes the player transform toward `OverridePosition` — a plain transform write, **not** a Harmony patch — so the server/client controller can't immediately snap it back.
+3. If the game warp is unavailable, only the direct-write hold applies.
 
-Noclip uses the same override path with continuous position updates from WASD logic in `OnUpdate`.
+Noclip uses the same override-position hold with continuous updates from WASD logic in `OnUpdate`, driving the game's `PlayerMoveComponent`.
 
 ### Analog movement bridge (`MovementInputFeature.cs`)
 
@@ -244,7 +246,8 @@ For bag automation and some interactions, the mod uses:
 - `PostMessage` with `WM_KEYDOWN` / `WM_LBUTTONDOWN` for targeted window messages
 - `VK_F` (0x46) for interact key simulation where UI paths are unavailable
 
-Separate from Harmony Input patches.
+The mod no longer installs Harmony `Input` patches — this Win32 `VK_F` path and
+`DirectClickInteractButton` (clicking the game's own interact button) are the interact mechanisms now.
 
 ---
 
@@ -621,7 +624,6 @@ Extended fishing debug / ECS work may live on the **`test`** git branch.
 | Topic | Detail |
 |-------|--------|
 | Startup log | `AutoFish subsystem disabled` refers to legacy `AutoFishLogic`, not `AutoFishingFarm` |
-| Input Harmony patches | Compiled but not registered at runtime |
 | Plugin version | Metadata `1.0.0` may differ from git release tag |
 | One loader only | Do not run MelonLoader + BepInEx on the same install |
 
@@ -631,7 +633,7 @@ Extended fishing debug / ECS work may live on the **`test`** git branch.
 
 Recommended workflow:
 
-1. Launch game with your loader; check which Harmony patches fail.
+1. Launch game with your loader; check the log for hook / type-resolution failures (Mono `NativeDetour` installs, AuraMono resolves, EventCenter hooks) — the mod uses no Harmony patches.
 2. Regenerate interop (MelonLoader Il2CppAssemblies or BepInEx interop) after game updates.
 3. Rebuild both targets: `build-all.bat` or `-p:Loader=...` for the loader you use.
 4. For aura/fish/insect/bird: enable `MasterLog*` flags; fix type names per [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md).

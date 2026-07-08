@@ -115,10 +115,14 @@ Daily quest preload (optional disk load):
 - **Used for:** Resource pick, net cook, pet feed `List<uint>`, daily quest Aura fallback, store/table data when managed types fail.
 - **Not used for:** Binding `List<ItemNetPair>` via `mono_class_bind_generic_parameters` (crashes on this game).
 
-### 5. Harmony patches
+### 5. Hooking game code (NOT Harmony on IL2CPP)
 
-- Patch IL2CPP methods after resolving `Type` + `MethodInfo` from interop/reflection.
-- See [TECHNICAL.md](./TECHNICAL.md).
+- **Do not add IL2CPP Harmony patches** (`[HarmonyPatch]` / `harmony.Patch(...)` on
+  GameAssembly / UnityPlayer / interop methods) — they rewrite module `.text`, which the native
+  Themis anti-cheat can integrity-hash. The mod ships **zero** such patches.
+- Use a safe channel instead: EventCenter dispatch-detour (`RegisterGameEventHook`), Mono
+  `NativeDetour` + `mono_compile_method` on embedded-Mono methods, AuraMono invoke/read, or
+  `SendCommand<T>`. See [TYPE_RESOLUTION.md §Integration strategies](./TYPE_RESOLUTION.md#integration-strategies-after-type-is-found).
 
 ---
 

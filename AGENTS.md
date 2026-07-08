@@ -12,8 +12,9 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | Output | Single assembly **`bugtopia.dll`** |
 | Loaders | **MelonLoader** or **BepInEx IL2CPP** — one per build, never both in-game |
 | Core code | `partial class HeartopiaComplete` split **by domain** across ~39 `buddy/HeartopiaComplete*.cs` files (`HeartopiaComplete.cs` is now ~6k lines of lifecycle glue) |
-| Game access | Reflection, Harmony, `WebRequestUtility.SendCommand`, IL2CPP native API, **AuraMono** (`mono_runtime_invoke`) |
+| Game access | Reflection, Mono `NativeDetour`, EventCenter hooks, `WebRequestUtility.SendCommand`, IL2CPP native API, **AuraMono** (`mono_runtime_invoke`) |
 | Hard rule | **No RVA / offset patching** — resolve types and methods at runtime |
+| Hard rule | **No new IL2CPP `.text` patches** — never `[HarmonyPatch]` / `harmony.Patch(...)` on GameAssembly / UnityPlayer / Il2Cpp-interop methods (native **Themis** integrity-hashes module `.text`; the mod ships **zero**). Hook via Mono `NativeDetour`, AuraMono, or an EventCenter dispatch-detour — see [TYPE_RESOLUTION.md §Integration strategies](docs/TYPE_RESOLUTION.md#integration-strategies-after-type-is-found) |
 
 ---
 
@@ -126,7 +127,7 @@ Shipping build (hides loader console): `-c ReleaseShip`
 ## 5. Game runtime model (three layers)
 
 ```
-IL2CPP (GameAssembly.dll)     ← Harmony targets, Il2CppInterop stubs
+IL2CPP (GameAssembly.dll)     ← Il2CppInterop stubs, IL2CPP native API
         ↓
 Interop (BepInEx/interop or MelonLoader/Il2CppAssemblies)  ← compile-time refs, FindLoadedType
         ↓
@@ -135,7 +136,7 @@ Embedded Mono (mono-2.0-bdwgc.dll, images EcsClient, XDT*)  ← AuraMono for man
 
 | Layer | Use for |
 |-------|---------|
-| **Interop + reflection** | Most `FindLoadedType`, Harmony on Unity/known stubs, `SendCommand` |
+| **Interop + reflection** | Most `FindLoadedType`, Unity types, `SendCommand` |
 | **IL2CPP native** | Types missing from interop (`TryFindIl2CppClass`, `ItemNetPair` v10 path) |
 | **AuraMono** | Backpack, aura farm, pets, bubbles, daily claims, UI open via `mono_runtime_invoke` |
 
@@ -229,7 +230,7 @@ flowchart TD
   B -->|yes| C[Find command struct in EcsClient dump]
   C --> D[WebRequestUtility.SendCommand T]
   B -->|no| E{Type in interop AppDomain?}
-  E -->|yes| F[FindLoadedType + Invoke / Harmony]
+  E -->|yes| F[FindLoadedType + Invoke]
   E -->|no| G{UI panel / gameplay module?}
   G -->|UI open| H[AuraMono mono_runtime_invoke]
   G -->|ECS components| I[AuraMono GetComponents T inflate]
@@ -244,7 +245,7 @@ flowchart TD
 | **ProtocolManager static invoke** | `ResourceProtocolManager.SendHitStoneCommand`, `MailProtocolManager.*` |
 | **EcsService.TryGet&lt;T&gt;** (AuraMono inflate) | Daily claims services |
 | **DataModule&lt;T&gt;.Instance** (AuraMono) | `BattlePassSystem`, `BackPackSystem` reads |
-| **Harmony** | Movement, `SendCommand` prefix rewrite, input patches |
+| **Mono `NativeDetour`** (+ `mono_compile_method`) | Hook/redirect an embedded-Mono method off the `.text` surface — building bypass, bubble spawn/collect, name/profile, fishing (never Harmony on IL2CPP) |
 | **GameObject scan** | Radar, meteor props `p_rock_meteorite*`, player `p_player_skeleton(Clone)` |
 
 ### Aura Farm specifics
@@ -293,7 +294,7 @@ See [FEATURES.md § Aura Farm](docs/FEATURES.md), [TECHNICAL.md § Aura Farm](do
 | Large farm loop | `*Farm.cs` static class + tick from `HeartopiaComplete.OnUpdate` |
 | Aura / Mono **bridge** infra | `HeartopiaComplete.AuraMonoEngine.cs` (mono_* delegates, `EnsureAuraMonoApiReady`, GC pinning) |
 | Generic AuraMono helpers | `HeartopiaComplete.AuraMono.cs` (`TryInvokeAuraMono*`, `FindAuraMonoClass*`, field readers) |
-| Harmony patch | Dedicated `*Patch.cs` or feature file |
+| Mono `NativeDetour` hook | Feature file (e.g. `BuildingFreeRotateFeature.cs`, `BubbleSpawnRewriteFeature.cs`) — never a Harmony/IL2CPP `.text` patch |
 
 ### Code style (project)
 
@@ -319,7 +320,7 @@ Only files listed in `buddy/buddy.csproj` `<Compile Include="...">` ship. Adding
    [docs/GAME_EVENTS_LIST.md](docs/GAME_EVENTS_LIST.md) and prefer an `EventCenter` hook over polling
    (§7 "Events first" + [docs/GAME_EVENTS.md](docs/GAME_EVENTS.md)). Only fall back to polling for
    continuous per-frame values or where the poll is already cheap/build-independent.
-4. **Pick access channel** — Event hook vs SendCommand vs Invoke vs AuraMono vs Harmony (§7).
+4. **Pick access channel** — Event hook vs SendCommand vs Invoke vs AuraMono vs Mono `NativeDetour` (§7). Never a Harmony / IL2CPP `.text` patch (§1 hard rule).
 5. **Implement resolver** — reuse existing helpers; add shape check if short name collides.
 6. **Gate on readiness** — retry in `Update` after world load; separate managed vs AuraMono ready flags.
 7. **Build both loaders** — `build-all.bat`.
@@ -333,7 +334,7 @@ Only files listed in `buddy/buddy.csproj` `<Compile Include="...">` ship. Adding
 | Symptom | Action |
 |---------|--------|
 | `type unavailable` / `null` | [TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md) pitfalls; enter town; check interop folder |
-| Harmony `[ERR]` | Game update broke signature — re-dump, fix patch target |
+| Mono `NativeDetour` / hook install fails | Game update moved the target — re-dump, fix the resolved method signature |
 | Silent crash | Last AuraMono breadcrumb; check generic `method_inst` and `ref` args |
 | Feature idle | `MasterLog*` flag + rebuild; read `auraLastError` / feature status fields |
 | Wrong behavior, no error | Wrong type patched — add shape validation |

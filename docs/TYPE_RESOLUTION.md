@@ -395,13 +395,26 @@ The farm follows a consistent **managed-first, AuraMono-fallback** policy: `Ensu
 
 ## Integration strategies (after type is found)
 
-### 1. Harmony patch
+### 1. Hooking or redirecting a game method — do NOT use Harmony on IL2CPP
 
-Resolve `Type` → `GetMethod` → `harmonyInstance.Patch(...)`.
+**Prohibited:** do not add `[HarmonyPatch]` / `harmony.Patch(...)` on IL2CPP methods
+(`GameAssembly.dll` / `UnityPlayer.dll` / Il2Cpp interop stubs). A Harmony detour rewrites the
+target module's `.text`, which the native **Themis** anti-cheat can integrity-hash. The mod
+deliberately installs **zero** such patches — don't reintroduce one. Pick a channel that stays off
+the `.text` surface:
 
-Used for movement, transforms, bubble spawn helpers, net cook world registration, etc.
+| You want to… | Use | Reference |
+|--------------|-----|-----------|
+| React when a game event fires | **EventCenter dispatch-detour** (`RegisterGameEventHook`) — first choice | [GAME_EVENTS.md](./GAME_EVENTS.md), `EventLog.cs` |
+| Intercept / rewrite a game method | **Mono `NativeDetour` + `mono_compile_method`** on the embedded-Mono (`XDT*`/`EcsClient`) method — patches the Mono JIT heap, not module `.text` | `BuildingFreeRotateFeature.cs`, `BubbleSpawnRewriteFeature.cs` |
+| Call a game method / read state | **AuraMono** `mono_runtime_invoke` + field reads | §4 below |
+| Send a network command | **`WebRequestUtility.SendCommand<T>`** | §2 below |
+| Drive movement / camera / build | the game's own controllers via field-writes/invokes | `PlayerMoveComponent`, `XDTCameraManager` axis, `GodControl` |
+| Trigger a UI action | click the game's own button directly (`DirectClickInteractButton`) — never fake Unity input | `HeartopiaComplete.Interaction.cs` |
 
-Requires a stable method signature. IL2CPP generic/instance methods may need exact parameter types (`Vector3`, not `object`).
+Harmony on **embedded-Mono** methods is also unnecessary — use `NativeDetour`. If you believe a new
+IL2CPP patch is truly unavoidable, **stop and raise it first**; the entire Harmony surface was
+removed on purpose (see [anti-cheat cleanup]).
 
 ### 2. `WebRequestUtility.SendCommand<T>` (network commands)
 
