@@ -1405,9 +1405,13 @@ namespace HeartopiaMod
             return autoSellAuraMonoSearchResult;
         }
 
-        private unsafe bool TryCreateAuraMonoUIntIntDictionary(Dictionary<uint, int> itemsToSell, out IntPtr dictObj)
+        // On success dictPin is a pinned gchandle rooting dictObj — the Add/set_Item invokes below
+        // and the caller's protocol invoke all allocate mono-side, so an unpinned dictionary could
+        // be moved by the sgen GC mid-use. The caller MUST AuraMonoPinFree(dictPin) when done.
+        private unsafe bool TryCreateAuraMonoUIntIntDictionary(Dictionary<uint, int> itemsToSell, out IntPtr dictObj, out uint dictPin)
         {
             dictObj = IntPtr.Zero;
+            dictPin = 0U;
             if (itemsToSell == null || itemsToSell.Count == 0)
             {
                 return false;
@@ -1462,6 +1466,8 @@ namespace HeartopiaMod
                 return false;
             }
 
+            dictPin = AuraMonoPinNew(dictObj);
+
             IntPtr dictClass = this.autoSellMonoUIntIntDictionaryClass;
             if (dictClass == IntPtr.Zero)
             {
@@ -1481,6 +1487,9 @@ namespace HeartopiaMod
             }
             if (setItemMethod == IntPtr.Zero)
             {
+                AuraMonoPinFree(dictPin);
+                dictPin = 0U;
+                dictObj = IntPtr.Zero;
                 return false;
             }
 
@@ -1501,6 +1510,9 @@ namespace HeartopiaMod
                 if (exc != IntPtr.Zero)
                 {
                     this.AutoSellLog("AuraMono dictionary set failed for netId=" + netId + " ptr=0x" + exc.ToInt64().ToString("X"));
+                    AuraMonoPinFree(dictPin);
+                    dictPin = 0U;
+                    dictObj = IntPtr.Zero;
                     return false;
                 }
             }

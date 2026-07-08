@@ -261,11 +261,11 @@ namespace HeartopiaMod
             data.autoSellReserveCount = this.autoSellReserveCount;
             data.autoSellAllMatchingStacks = this.autoSellAllMatchingStacks;
             data.autoSellFullStack = this.autoSellFullStack;
-            data.autoSellSkipFiveStar = this.autoSellSkipFiveStar;
             data.dailyQuestSubmitSkipFiveStar = this.dailyQuestSubmitSkipFiveStar;
             data.autoSellMatchFamily = this.autoSellMatchFamily;
             data.autoSellHideBagItems = this.autoSellHideBagItems;
-            data.autoSellStarFilter = this.autoSellStarFilter;
+            data.autoSellSelectedStaticId = this.autoSellSelectedStaticId;
+            data.autoSellSelectedStar = this.autoSellSelectedStar;
             data.autoSellInterval = this.autoSellInterval;
             data.autoSellScanSource = this.autoSellScanSource;
             data.autoSellFestivalTokensEnabled = this.autoSellFestivalTokensEnabled;
@@ -467,11 +467,11 @@ namespace HeartopiaMod
             this.autoSellReserveCount = Mathf.Clamp(data.autoSellReserveCount, 0, 200);
             this.autoSellAllMatchingStacks = hasAutoSellConfig ? data.autoSellAllMatchingStacks : true;
             this.autoSellFullStack = hasAutoSellConfig ? data.autoSellFullStack : true;
-            this.autoSellSkipFiveStar = hasAutoSellConfig ? data.autoSellSkipFiveStar : true;
             this.dailyQuestSubmitSkipFiveStar = data.dailyQuestSubmitSkipFiveStar;
             this.autoSellMatchFamily = hasAutoSellConfig ? data.autoSellMatchFamily : true;
             this.autoSellHideBagItems = hasAutoSellConfig && data.autoSellHideBagItems;
-            this.autoSellStarFilter = Mathf.Clamp(data.autoSellStarFilter, 0, 5);
+            this.autoSellSelectedStaticId = Mathf.Max(0, data.autoSellSelectedStaticId);
+            this.autoSellSelectedStar = Mathf.Clamp(data.autoSellSelectedStar, 0, 5);
             this.autoSellInterval = Mathf.Clamp(data.autoSellInterval > 0f ? data.autoSellInterval : 5f, 1f, 120f);
             this.autoSellScanSource = Mathf.Clamp(data.autoSellScanSource, 0, 2);
             this.autoSellFestivalTokensEnabled = data.autoSellFestivalTokensEnabled;

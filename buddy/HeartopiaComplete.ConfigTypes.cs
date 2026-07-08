@@ -216,11 +216,11 @@ namespace HeartopiaMod
             public int autoSellReserveCount;
             public bool autoSellAllMatchingStacks;
             public bool autoSellFullStack;
-            public bool autoSellSkipFiveStar;
             public bool dailyQuestSubmitSkipFiveStar;
             public bool autoSellMatchFamily;
             public bool autoSellHideBagItems;
-            public int autoSellStarFilter;
+            public int autoSellSelectedStaticId;
+            public int autoSellSelectedStar;
             public float autoSellInterval;
             public int autoSellScanSource;
             public bool autoSellFestivalTokensEnabled;

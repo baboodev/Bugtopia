@@ -826,7 +826,7 @@ namespace HeartopiaMod
                 matchKey = staticId > 0 ? staticId.ToString() : netId.ToString();
             }
 
-            int normalizedStar = this.NormalizeAutoSellStarRateForDescriptor(starRate, descriptor);
+            int normalizedStar = this.NormalizeAutoSellStarRate(starRate);
             if (normalizedStar <= 0 && this.TryGetAutoSellCachedUiStar(matchKey, count, out int uiStar))
             {
                 normalizedStar = uiStar;

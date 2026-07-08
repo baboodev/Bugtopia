@@ -113,7 +113,7 @@ namespace HeartopiaMod
             string selectedKey = this.GetActiveAutoSellMatchKey();
             if (string.IsNullOrWhiteSpace(selectedKey)) selectedKey = "Choose from scanned items or type a key below";
             GUI.Label(new Rect(selectedCard.x + 78f, selectedCard.y + 10f, 300f, 22f), selectedTitle, fieldLabelStyle);
-            GUI.Label(new Rect(selectedCard.x + 78f, selectedCard.y + 32f, 360f, 18f), (this.autoSellMatchFamily ? "Similar: " : "Exact: ") + selectedKey, tinyStyle);
+            GUI.Label(new Rect(selectedCard.x + 78f, selectedCard.y + 32f, 360f, 18f), (this.autoSellMatchFamily ? "Similar: " : "Exact: ") + selectedKey + (this.autoSellSelectedStar > 0 ? ("  " + this.autoSellSelectedStar + "*") : ""), tinyStyle);
             string selectedMeta = selectedEntry != null && selectedEntry.Count > 0
                 ? ("Source: " + this.GetAutoSellStorageLabel(selectedEntry.FromBackpack, selectedEntry.FromWarehouse) + "  Count: " + selectedEntry.Count + (selectedEntry.StackCount > 1 ? (" in " + selectedEntry.StackCount + " stacks") : "") + this.GetAutoSellStarSummary(selectedEntry) + (selectedEntry.StaticId > 0 ? ("  staticId: " + selectedEntry.StaticId) : ""))
                 : (this.autoSellLastMatchSummary ?? "No scan yet");
@@ -143,6 +143,9 @@ namespace HeartopiaMod
             if (newKey != this.autoSellItemKey)
             {
                 this.autoSellItemKey = newKey ?? "";
+                // Hand-typed key = plain text matching: no item identity, no star constraint.
+                this.autoSellSelectedStaticId = 0;
+                this.autoSellSelectedStar = 0;
                 try { this.SaveKeybinds(false); } catch { }
             }
 
@@ -151,19 +154,18 @@ namespace HeartopiaMod
             float prevInterval = this.autoSellInterval;
             this.autoSellInterval = Mathf.Clamp(this.UI_DrawAccentSlider(new Rect(settingsCard.x + 12f, settingsCard.y + 103f, colWidth, 16f), this.autoSellInterval, 1f, 120f), 1f, 120f);
             if (Math.Abs(this.autoSellInterval - prevInterval) > 0.001f) { try { this.SaveKeybinds(false); } catch { } }
-            GUI.Label(new Rect(settingsCard.x + 12f, settingsCard.y + 126f, 96f, 18f), "Stars", fieldLabelStyle);
-            int prevStarFilter = this.autoSellStarFilter;
-            this.autoSellStarFilter = this.UI_DrawAccentIntSlider(new Rect(settingsCard.x + 84f, settingsCard.y + 128f, colWidth - 84f, 16f), this.autoSellStarFilter, 0, 5);
-            if (this.autoSellStarFilter != prevStarFilter) { try { this.SaveKeybinds(false); } catch { } }
-            string starLabel = this.autoSellStarFilterLabels[Mathf.Clamp(this.autoSellStarFilter, 0, this.autoSellStarFilterLabels.Length - 1)];
-            GUI.Label(new Rect(settingsCard.x + 12f, settingsCard.y + 146f, colWidth, 18f), "Filter: " + starLabel, tinyStyle);
-
             bool prevFestivalTokens = this.autoSellFestivalTokensEnabled;
-            this.autoSellFestivalTokensEnabled = this.DrawSwitchToggle(new Rect(settingsCard.x + 12f, settingsCard.y + 166f, colWidth, 26f), this.autoSellFestivalTokensEnabled, "Festival For Tokens");
+            this.autoSellFestivalTokensEnabled = this.DrawSwitchToggle(new Rect(settingsCard.x + 12f, settingsCard.y + 130f, colWidth, 26f), this.autoSellFestivalTokensEnabled, "Festival For Tokens");
             if (this.autoSellFestivalTokensEnabled != prevFestivalTokens)
             {
                 try { this.SaveKeybinds(false); } catch { }
             }
+
+            // No global star slider anymore: the star constraint travels with the clicked cell.
+            string starInfo = this.autoSellSelectedStar > 0
+                ? "Stars: " + this.autoSellSelectedStar + "* only (from selected item)"
+                : "Stars: any (star comes from the clicked item)";
+            GUI.Label(new Rect(settingsCard.x + 12f, settingsCard.y + 164f, colWidth, 18f), starInfo, tinyStyle);
 
             float toggleX = settingsCard.x + 304f;
             bool prevFullStack = this.autoSellFullStack;
@@ -287,8 +289,12 @@ namespace HeartopiaMod
                     int row = i / columns;
                     Rect cellRect = new Rect(col * cellW + 2f, row * cellH + 2f, cellW - 8f, cellH - 8f);
                     string entrySelectKey = this.autoSellMatchFamily ? this.GetAutoSellFamilyKey(entry.MatchKey) : entry.MatchKey;
-                    bool isSelected = string.Equals(activeAutoSellKey, entrySelectKey, StringComparison.OrdinalIgnoreCase)
-                        && (this.autoSellStarFilter <= 0 || entry.StarRate <= 0 || entry.StarRate == this.autoSellStarFilter);
+                    // Highlight must mirror the sell-time match exactly: identity (staticId + star)
+                    // in exact mode, key + star in family/typed mode.
+                    bool isSelected = !this.autoSellMatchFamily && this.autoSellSelectedStaticId > 0
+                        ? (entry.StaticId == this.autoSellSelectedStaticId && Math.Max(0, entry.StarRate) == this.autoSellSelectedStar)
+                        : (string.Equals(activeAutoSellKey, entrySelectKey, StringComparison.OrdinalIgnoreCase)
+                            && (this.autoSellSelectedStar <= 0 || entry.StarRate == this.autoSellSelectedStar));
                     GUI.Box(cellRect, "", isSelected ? (this.themeTopTabActiveStyle ?? this.themePanelStyle ?? GUI.skin.box) : (this.themeContentStyle ?? this.themePanelStyle ?? GUI.skin.box));
                     this.DrawCardOutline(cellRect, isSelected ? 2f : 1f);
 
@@ -314,10 +320,10 @@ namespace HeartopiaMod
                     if (GUI.Button(cellRect, GUIContent.none, GUIStyle.none))
                     {
                         this.autoSellItemKey = this.autoSellMatchFamily ? this.GetAutoSellFamilyKey(entry.MatchKey) : entry.MatchKey;
-                        if (entry.StarRate > 0)
-                        {
-                            this.autoSellStarFilter = entry.StarRate;
-                        }
+                        // The clicked cell IS the selection: its staticId (exact mode) and its star
+                        // (including "no star") replace any previous constraint entirely.
+                        this.autoSellSelectedStaticId = this.autoSellMatchFamily ? 0 : Math.Max(0, entry.StaticId);
+                        this.autoSellSelectedStar = Math.Max(0, entry.StarRate);
                         this.autoSellStatus = "Selected: " + entry.DisplayName + (this.autoSellMatchFamily ? " family" : "");
                         this.autoSellLastMatchSummary = "Selection changed. Use Sell Selected or wait for Auto Sell.";
                         try { this.SaveKeybinds(false); } catch { }
@@ -342,6 +348,8 @@ namespace HeartopiaMod
             if (GUI.Button(new Rect(left, (float)num, 120f, 32f), this.L("CLEAR"), this.themeDangerButtonStyle ?? GUI.skin.button))
             {
                 this.autoSellItemKey = "";
+                this.autoSellSelectedStaticId = 0;
+                this.autoSellSelectedStar = 0;
                 this.autoSellStatus = "Selection cleared";
                 this.autoSellLastMatchSummary = "No scan yet";
                 try { this.SaveKeybinds(false); } catch { }
@@ -754,7 +762,7 @@ namespace HeartopiaMod
             }
 
             Breadcrumbs.Drop("AutoSell.scan");
-            if (string.IsNullOrWhiteSpace(this.GetActiveAutoSellMatchKey()) || this.GetActiveAutoSellMatchKey().Length < 2)
+            if (!this.HasAutoSellSelection())
             {
                 this.autoSellStatus = "Waiting for item selection";
                 return; // don't consume the dirty flag — retry once ready
@@ -786,6 +794,7 @@ namespace HeartopiaMod
 
         private bool autoSellEventHooksRegistered;
         private bool autoSellBackpackDirty = true; // scan on the first run
+        private bool autoSellListDirty; // UI item list wants a refresh (set by the bag-change event)
 
         private void EnsureAutoSellEventHooks()
         {
@@ -798,10 +807,12 @@ namespace HeartopiaMod
             this.RegisterGameEventHook(AutoSellBackpackEventName, AutoSellBackpackEventBytes, this.OnAutoSellRefreshBackPackEvent);
         }
 
-        // Runs on the Unity main thread (event drain). Marks the player backpack dirty so the next
-        // Auto Sell tick scans; mutations of other storages (warehouse, garage, …) are ignored.
+        // Runs on the Unity main thread (event drain). Any storage mutation marks the UI item list
+        // dirty (it can show warehouse items too); only player-backpack mutations mark the Auto Sell
+        // scan dirty — other storages (garage, …) never feed the periodic sell.
         private void OnAutoSellRefreshBackPackEvent(GameEventSnapshot e)
         {
+            this.autoSellListDirty = true;
             if (e.ReadInt32(0) == AutoSellBackpackStorageType)
             {
                 this.autoSellBackpackDirty = true;
@@ -821,18 +832,13 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.autoSellFestivalTokensEnabled)
-            {
-                this.TryRefreshDirectBackpackRuntimeSnapshot(false);
-            }
-
             Dictionary<uint, int> sellItems = this.BuildDirectSellItemMap(out int matchedBagTotal, out int reservedKept);
             if (sellItems.Count == 0)
             {
                 bool reservedAll = matchedBagTotal > 0 && reservedKept > 0 && this.autoSellReserveCount > 0 && matchedBagTotal <= reservedKept;
                 this.autoSellStatus = reservedAll
                     ? "Keep Per Item reserved all matches"
-                    : string.IsNullOrWhiteSpace(this.NormalizeAutoSellMatchKey(this.autoSellItemKey))
+                    : !this.HasAutoSellSelection()
                     ? "Select or type an item first"
                     : "No matching sellable items";
                 if (reservedAll && !fromAuto)
@@ -848,7 +854,9 @@ namespace HeartopiaMod
                 totalCount += Math.Max(0, count);
             }
 
-            this.AutoSellLogSellResult("QuickSell request. stacks=" + sellItems.Count + " totalCount=" + totalCount + " key=" + this.GetActiveAutoSellMatchKey());
+            this.AutoSellLogSellResult("QuickSell request. stacks=" + sellItems.Count + " totalCount=" + totalCount + " key=" + this.GetActiveAutoSellMatchKey()
+                + (!this.autoSellMatchFamily && this.autoSellSelectedStaticId > 0 ? " staticId=" + this.autoSellSelectedStaticId : "")
+                + (this.autoSellSelectedStar > 0 ? " star=" + this.autoSellSelectedStar : ""));
             if (!string.IsNullOrWhiteSpace(this.autoSellSelectedDetails))
             {
                 this.AutoSellLog("QuickSell items: " + this.autoSellSelectedDetails);
@@ -974,8 +982,13 @@ namespace HeartopiaMod
 
         private void ScheduleAutoSellListRescan()
         {
+            // One event-gated rescan instead of blind retry polling: wait for the server's
+            // RefreshBackPackEvent (the bag actually changed) with a deadline fallback for the
+            // time before the event hook installs.
+            this.EnsureAutoSellEventHooks();
+            this.autoSellListDirty = false;
             this.autoSellPendingRescanAt = Time.unscaledTime + 0.35f;
-            this.autoSellPendingRescanRetries = 6;
+            this.autoSellPendingRescanRetries = 1;
         }
 
         private void ProcessPendingAutoSellListRescan()
@@ -996,11 +1009,18 @@ namespace HeartopiaMod
                 return;
             }
 
+            bool hookLive = this.IsGameEventHookInstalled(AutoSellBackpackEventName);
+            bool deadlinePassed = Time.unscaledTime >= this.autoSellPendingRescanAt + 2f;
+            if (hookLive && !this.autoSellListDirty && !deadlinePassed)
+            {
+                return; // bag unchanged so far — wait for the event (or the deadline)
+            }
+
             string statusMessage = this.autoSellStatus;
             this.autoSellBagItems = this.ScanBackpackForAutoSellItems();
             this.autoSellStatus = statusMessage;
-            this.autoSellPendingRescanRetries--;
-            this.autoSellPendingRescanAt = Time.unscaledTime + 0.3f;
+            this.autoSellPendingRescanRetries = 0;
+            this.autoSellListDirty = false;
         }
 
         private bool IsAutoSellWorldReady()
@@ -1052,25 +1072,24 @@ namespace HeartopiaMod
             Dictionary<uint, string> reserveGroupsByNetId = new Dictionary<uint, string>();
             Dictionary<uint, string> sellDetailsByNetId = new Dictionary<uint, string>();
             this.autoSellCollectedStaticIdsByNetId.Clear();
+
+            // Exact mode sells by the clicked entry's identity (staticId + its star); family mode
+            // and hand-typed keys match descriptors by text with no identity.
+            int selectedStaticId = this.autoSellMatchFamily ? 0 : Math.Max(0, this.autoSellSelectedStaticId);
+            int selectedStar = Mathf.Clamp(this.autoSellSelectedStar, 0, 5);
             string key = this.GetActiveAutoSellMatchKey();
-            if (string.IsNullOrWhiteSpace(key) || key.Length < 2)
+            if (selectedStaticId <= 0 && (string.IsNullOrWhiteSpace(key) || key.Length < 2))
             {
-                this.autoSellLastMatchSummary = "Safety: match item is empty/too short.";
+                this.autoSellLastMatchSummary = "Safety: no item selected (match key empty/too short).";
                 this.autoSellSelectedDetails = "";
-                this.AutoSellLog("Scan blocked because match item is empty or too short.");
+                this.AutoSellLog("Scan blocked because no item is selected.");
                 return sellItems;
             }
 
             List<string> skippedSamples = new List<string>();
             int inspected = 0;
-            int skippedStarFilter = 0;
-            bool includeWarehouse = Mathf.Clamp(this.autoSellScanSource, 0, 2) != 0;
-
-            this.TryRefreshDirectBackpackRuntimeSnapshot(true);
-            int runtimeSnapshotItems = this.directBackpackRuntimeItems.Count;
-            this.CollectDirectSellItemsFromRuntimeSnapshot(key, bagCountsByNetId, reserveGroupsByNetId, sellDetailsByNetId, skippedSamples, ref inspected, ref skippedStarFilter);
-            this.CollectDirectSellItemsManaged(key, bagCountsByNetId, reserveGroupsByNetId, sellDetailsByNetId, skippedSamples, ref inspected, ref skippedStarFilter, true, includeWarehouse);
-            this.CollectDirectSellItemsMono(key, bagCountsByNetId, reserveGroupsByNetId, sellDetailsByNetId, skippedSamples, ref inspected, ref skippedStarFilter, true, includeWarehouse);
+            int skippedStar = 0;
+            this.CollectDirectSellItemsMono(selectedStaticId, selectedStar, key, bagCountsByNetId, reserveGroupsByNetId, sellDetailsByNetId, skippedSamples, ref inspected, ref skippedStar);
 
             int matchedStacks = bagCountsByNetId.Count;
             foreach (int count in bagCountsByNetId.Values)
@@ -1096,7 +1115,7 @@ namespace HeartopiaMod
                 finalSellSamples.Add("netId=" + kv.Key + " x" + Math.Max(0, kv.Value) + (string.IsNullOrWhiteSpace(detail) ? "" : " " + detail));
             }
 
-            this.autoSellLastMatchSummary = "Selected stacks=" + sellItems.Count + ", matchedStacks=" + matchedStacks + ", bag=" + matchedBagTotal + ", sell=" + totalCount + ", inspected=" + inspected + ", runtimeItems=" + runtimeSnapshotItems + (reservedKept > 0 ? ", kept=" + reservedKept : "") + (skippedStarFilter > 0 ? ", skipped star filter=" + skippedStarFilter : "");
+            this.autoSellLastMatchSummary = "Selected stacks=" + sellItems.Count + ", matchedStacks=" + matchedStacks + ", bag=" + matchedBagTotal + ", sell=" + totalCount + ", inspected=" + inspected + (selectedStaticId > 0 ? ", staticId=" + selectedStaticId : "") + (reservedKept > 0 ? ", kept=" + reservedKept : "") + (skippedStar > 0 ? ", skipped star=" + skippedStar : "");
             this.autoSellSelectedDetails = finalSellSamples.Count > 0 ? string.Join("; ", finalSellSamples.ToArray()) : "";
             if (finalSellSamples.Count > 0)
             {
@@ -1108,6 +1127,10 @@ namespace HeartopiaMod
                 this.autoSellLastMatchSummary += matchedBagTotal <= keep
                     ? "\nKeep Per Item reserved all matching items. Set Keep Per Item to 0 to sell them."
                     : "\nNo sellable quantity after Keep Per Item (single-count stacks are skipped). Lower Keep or raise Cap.";
+            }
+            else if (matchedStacks == 0 && skippedStar > 0 && selectedStar > 0)
+            {
+                this.autoSellLastMatchSummary += "\nAll matches have a different star than the selected " + selectedStar + "*. Click the list cell with the star you want to sell.";
             }
             if (skippedSamples.Count > 0)
             {
@@ -1126,52 +1149,6 @@ namespace HeartopiaMod
             }
 
             this.autoSellCollectedStaticIdsByNetId[netId] = staticId;
-        }
-
-        private bool CollectDirectSellItemsFromRuntimeSnapshot(string normalizedKey, Dictionary<uint, int> bagCountsByNetId, Dictionary<uint, string> reserveGroupsByNetId, Dictionary<uint, string> sellDetailsByNetId, List<string> skippedSamples, ref int inspected, ref int skippedStarFilter)
-        {
-            if (Mathf.Clamp(this.autoSellScanSource, 0, 2) == 1)
-            {
-                return false;
-            }
-
-            if (!this.TryRefreshDirectBackpackRuntimeSnapshot(false))
-            {
-                return false;
-            }
-
-            foreach (DirectBackpackRuntimeItem item in this.directBackpackRuntimeItems)
-            {
-                if (item == null || item.NetId == 0U)
-                {
-                    continue;
-                }
-
-                inspected++;
-                string descriptor = item.Descriptor ?? string.Empty;
-                if (!this.AutoSellDescriptorMatches(descriptor, normalizedKey))
-                {
-                    continue;
-                }
-
-                int count = Math.Max(1, item.Count);
-                if (!this.AutoSellRuntimeSnapshotItemStarMatches(item, descriptor, count, out int starRate))
-                {
-                    skippedStarFilter++;
-                    if (skippedSamples.Count < 6)
-                    {
-                        skippedSamples.Add("skip star=" + starRate + " " + descriptor);
-                    }
-                    continue;
-                }
-
-                this.MergeAutoSellBagCount(bagCountsByNetId, item.NetId, count);
-                this.RememberAutoSellCollectedStaticId(item.NetId, item.StaticId);
-                reserveGroupsByNetId[item.NetId] = this.GetAutoSellReserveGroupKey(descriptor, starRate);
-                sellDetailsByNetId[item.NetId] = (starRate > 0 ? starRate + "* " : "") + descriptor;
-            }
-
-            return true;
         }
 
         private void MergeAutoSellBagCount(Dictionary<uint, int> bagCountsByNetId, uint netId, int stackCount)
@@ -1328,7 +1305,7 @@ namespace HeartopiaMod
                 matchKey = "unknown";
             }
 
-            int normalizedStar = this.NormalizeAutoSellStarRateForDescriptor(starRate, descriptor);
+            int normalizedStar = this.NormalizeAutoSellStarRate(starRate);
             return this.NormalizeAutoSellMatchKey(matchKey) + "|star:" + Mathf.Clamp(normalizedStar, 0, 5);
         }
 
@@ -1344,108 +1321,11 @@ namespace HeartopiaMod
             return Math.Min(count, cap);
         }
 
-        private void CollectDirectSellItemsManaged(string normalizedKey, Dictionary<uint, int> bagCountsByNetId, Dictionary<uint, string> reserveGroupsByNetId, Dictionary<uint, string> sellDetailsByNetId, List<string> skippedSamples, ref int inspected, ref int skippedStarFilter, bool includeBackpack = true, bool includeWarehouse = true)
-        {
-            try
-            {
-                Type backPackType = this.FindLoadedType("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", "BackPackSystem");
-                if (backPackType == null)
-                {
-                    this.AutoSellLog("Managed backpack unavailable.");
-                    return;
-                }
-
-                if (!this.TryGetManagedModule(backPackType, out object backPackObj) || backPackObj == null)
-                {
-                    backPackObj = this.TryGetStaticObjectAcrossHierarchy(backPackType, "Instance", "_instance");
-                }
-                if (backPackObj == null)
-                {
-                    this.AutoSellLog("Managed backpack instance unavailable.");
-                    return;
-                }
-
-                Type storageType = this.FindLoadedType("EcsClient.XDT.Scene.Shared.Data.StaticPartial.EStorageType", "EStorageType");
-                object storageProbe = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, 1) : (object)1;
-                MethodInfo getAllItem = backPackObj.GetType().GetMethod("GetAllItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { storageProbe.GetType() }, null);
-                if (getAllItem == null)
-                {
-                    getAllItem = backPackObj.GetType().GetMethod("GetAllItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
-                }
-                if (getAllItem == null)
-                {
-                    return;
-                }
-
-                foreach (int storageTypeValue in this.GetAutoSellStorageTypeValues())
-                {
-                    if ((storageTypeValue == 1 && !includeBackpack) || (storageTypeValue != 1 && !includeWarehouse))
-                    {
-                        continue;
-                    }
-
-                    object storageArg = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, storageTypeValue) : (object)storageTypeValue;
-                    object itemListObj = getAllItem.GetParameters().Length == 1
-                        ? getAllItem.Invoke(backPackObj, new[] { storageArg })
-                        : getAllItem.Invoke(backPackObj, null);
-                    IEnumerable items = itemListObj as IEnumerable;
-                    if (items == null)
-                    {
-                        continue;
-                    }
-
-                    foreach (object item in items)
-                    {
-                        if (item == null)
-                        {
-                            continue;
-                        }
-                        inspected++;
-                        if (!this.TryGetManagedUInt32Member(item, "netId", out uint netId) || netId == 0U)
-                        {
-                            continue;
-                        }
-
-                        string descriptor = this.GetManagedBackpackItemDescriptor(item);
-                        if (!this.AutoSellDescriptorMatches(descriptor, normalizedKey))
-                        {
-                            continue;
-                        }
-
-                        int count = 1;
-                        int staticId = 0;
-                        this.TryGetManagedBackpackItemCount(item, out count);
-                        this.TryGetManagedInt32Member(item, "staticId", out staticId);
-                        if (staticId <= 0)
-                        {
-                            this.TryGetManagedInt32Member(item, "StaticId", out staticId);
-                        }
-                        if (!this.AutoSellManagedItemStarMatches(item, netId, descriptor, count, out int starRate))
-                        {
-                            skippedStarFilter++;
-                            if (skippedSamples.Count < 6)
-                            {
-                                string photoId = this.GetManagedBackpackItemPhotoId(item);
-                                int step = this.GetManagedBackpackItemStep(item);
-                                skippedSamples.Add("skip star=" + starRate + " step=" + step + (string.IsNullOrWhiteSpace(photoId) ? "" : " photo=" + photoId) + " " + descriptor);
-                            }
-                            continue;
-                        }
-
-                        this.MergeAutoSellBagCount(bagCountsByNetId, netId, count);
-                        this.RememberAutoSellCollectedStaticId(netId, staticId);
-                        reserveGroupsByNetId[netId] = this.GetAutoSellReserveGroupKey(descriptor, starRate);
-                        sellDetailsByNetId[netId] = (starRate > 0 ? starRate + "* " : "") + descriptor;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                this.AutoSellLog("Managed scan exception: " + ex.GetType().Name + ": " + ex.Message);
-            }
-        }
-
-        private void CollectDirectSellItemsMono(string normalizedKey, Dictionary<uint, int> bagCountsByNetId, Dictionary<uint, string> reserveGroupsByNetId, Dictionary<uint, string> sellDetailsByNetId, List<string> skippedSamples, ref int inspected, ref int skippedStarFilter, bool includeBackpack = true, bool includeWarehouse = true)
+        // Single sell-scan collector over the live mono backpack/warehouse lists. Matching is by
+        // the selection identity (staticId) when set, otherwise by descriptor text (typed key or
+        // family mode). Star data is resolved only for already-matched items and only when the
+        // selection carries a star — the rest of the bag never pays the star-lookup invoke cost.
+        private void CollectDirectSellItemsMono(int selectedStaticId, int selectedStar, string normalizedKey, Dictionary<uint, int> bagCountsByNetId, Dictionary<uint, string> reserveGroupsByNetId, Dictionary<uint, string> sellDetailsByNetId, List<string> skippedSamples, ref int inspected, ref int skippedStar)
         {
             try
             {
@@ -1472,17 +1352,13 @@ namespace HeartopiaMod
                 bool sawItems = false;
                 foreach (int storageTypeValue in this.GetAutoSellStorageTypeValues())
                 {
-                    if ((storageTypeValue == 1 && !includeBackpack) || (storageTypeValue != 1 && !includeWarehouse))
-                    {
-                        continue;
-                    }
-
                     IntPtr exc = IntPtr.Zero;
                     IntPtr itemListObj;
                     unsafe
                     {
+                        int storageValue = storageTypeValue;
                         IntPtr* args = stackalloc IntPtr[1];
-                        args[0] = (IntPtr)(&storageTypeValue);
+                        args[0] = (IntPtr)(&storageValue);
                         itemListObj = auraMonoRuntimeInvoke(getAllItemMethod, backPackSystemObj, getAllItemNeedsStorageType ? (IntPtr)args : IntPtr.Zero, ref exc);
                     }
                     if (exc != IntPtr.Zero || itemListObj == IntPtr.Zero)
@@ -1513,31 +1389,50 @@ namespace HeartopiaMod
                                 continue;
                             }
 
-                            string descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
-                            if (!this.AutoSellDescriptorMatches(descriptor, normalizedKey))
+                            this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId);
+                            string descriptor = null;
+                            bool matched;
+                            if (selectedStaticId > 0)
+                            {
+                                matched = staticId == selectedStaticId;
+                            }
+                            else
+                            {
+                                descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
+                                matched = this.AutoSellDescriptorMatches(descriptor, normalizedKey);
+                            }
+                            if (!matched)
                             {
                                 continue;
                             }
 
-                            int count = 1;
-                            int staticId = 0;
-                            this.TryGetDirectBackpackItemCount(itemObj, out count);
-                            this.TryGetDirectBackpackItemStaticId(itemObj, out staticId);
-                            if (!this.AutoSellMonoItemStarMatches(itemObj, netId, descriptor, count, out int starRate))
+                            this.TryGetDirectBackpackItemCount(itemObj, out int count);
+                            count = Math.Max(1, count);
+                            if (descriptor == null)
                             {
-                                skippedStarFilter++;
-                                if (skippedSamples.Count < 6)
+                                descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
+                            }
+
+                            int starRate = 0;
+                            if (selectedStar > 0)
+                            {
+                                this.TryResolveAutoSellMonoItemStar(netId, itemObj, descriptor, count, out starRate);
+                                if (starRate != selectedStar)
                                 {
-                                    string photoId = this.GetDirectBackpackItemPhotoId(itemObj);
-                                    int step = this.GetDirectBackpackItemStep(itemObj);
-                                    skippedSamples.Add("skip star=" + starRate + " step=" + step + (string.IsNullOrWhiteSpace(photoId) ? "" : " photo=" + photoId) + " " + descriptor);
+                                    skippedStar++;
+                                    if (skippedSamples.Count < 6)
+                                    {
+                                        skippedSamples.Add("skip star=" + starRate + " want=" + selectedStar + " " + descriptor);
+                                    }
+                                    continue;
                                 }
-                                continue;
                             }
 
                             this.MergeAutoSellBagCount(bagCountsByNetId, netId, count);
                             this.RememberAutoSellCollectedStaticId(netId, staticId);
-                            reserveGroupsByNetId[netId] = this.GetAutoSellReserveGroupKey(descriptor, starRate);
+                            reserveGroupsByNetId[netId] = selectedStaticId > 0
+                                ? ("sid:" + staticId + "|star:" + starRate)
+                                : this.GetAutoSellReserveGroupKey(descriptor, starRate);
                             sellDetailsByNetId[netId] = (starRate > 0 ? starRate + "* " : "") + descriptor;
                         }
                     }
@@ -1595,110 +1490,47 @@ namespace HeartopiaMod
             return key;
         }
 
-        private bool AutoSellManagedItemStarMatches(object item, uint netId, string descriptor, int stackCount, out int starRate)
+        // A selection exists when either the clicked identity (exact mode) or a usable text key
+        // (typed key / family mode) is present.
+        private bool HasAutoSellSelection()
         {
-            starRate = 0;
-            bool hasStarRate = this.TryGetAutoSellQualityComponentStar(netId, out starRate)
-                || this.TryGetManagedBackpackItemStarRate(item, out starRate);
-            starRate = this.NormalizeAutoSellStarRateForDescriptor(starRate, descriptor);
-            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
+            if (!this.autoSellMatchFamily && this.autoSellSelectedStaticId > 0)
             {
-                if (this.TryGetAutoSellCachedUiStar(descriptor, stackCount, out int uiStar))
-                {
-                    starRate = uiStar;
-                    hasStarRate = true;
-                }
+                return true;
             }
-            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-            {
-                int step = this.GetManagedBackpackItemStep(item);
-                if (step >= 1 && step <= 5)
-                {
-                    starRate = step;
-                    hasStarRate = true;
-                }
-            }
-            if (Mathf.Clamp(this.autoSellStarFilter, 0, 5) > 0 && (!hasStarRate || starRate <= 0))
-            {
-                return false;
-            }
-            return this.AutoSellStarMatches(starRate);
+
+            string key = this.GetActiveAutoSellMatchKey();
+            return !string.IsNullOrWhiteSpace(key) && key.Length >= 2;
         }
 
-        private bool AutoSellMonoItemStarMatches(IntPtr itemObj, uint netId, string descriptor, int stackCount, out int starRate)
+        // Single star resolver for mono backpack items: QualityComponent by netId first, then the
+        // item's own star fields, then the bird-photo fallbacks (UI star cache, step field).
+        // starRate is 0 when the item carries no star data.
+        private bool TryResolveAutoSellMonoItemStar(uint netId, IntPtr itemObj, string descriptor, int stackCount, out int starRate)
         {
-            starRate = 0;
-            bool hasStarRate = this.TryGetAutoSellQualityComponentStar(netId, out starRate)
-                || this.TryGetDirectBackpackItemStarRate(itemObj, out starRate);
-            starRate = this.NormalizeAutoSellStarRateForDescriptor(starRate, descriptor);
+            if (!this.TryGetAutoSellQualityComponentStar(netId, out starRate))
+            {
+                this.TryGetDirectBackpackItemStarRate(itemObj, out starRate);
+            }
+
+            starRate = this.NormalizeAutoSellStarRate(starRate);
             if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
             {
                 if (this.TryGetAutoSellCachedUiStar(descriptor, stackCount, out int uiStar))
                 {
-                    starRate = uiStar;
-                    hasStarRate = true;
+                    starRate = this.NormalizeAutoSellStarRate(uiStar);
                 }
-            }
-            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-            {
-                int step = this.GetDirectBackpackItemStep(itemObj);
-                if (step >= 1 && step <= 5)
+                else
                 {
-                    starRate = step;
-                    hasStarRate = true;
+                    int step = this.GetDirectBackpackItemStep(itemObj);
+                    if (step >= 1 && step <= 5)
+                    {
+                        starRate = step;
+                    }
                 }
             }
-            if (Mathf.Clamp(this.autoSellStarFilter, 0, 5) > 0 && (!hasStarRate || starRate <= 0))
-            {
-                return false;
-            }
-            return this.AutoSellStarMatches(starRate);
-        }
 
-        private bool AutoSellRuntimeSnapshotItemStarMatches(DirectBackpackRuntimeItem item, string descriptor, int stackCount, out int starRate)
-        {
-            starRate = 0;
-            if (item == null)
-            {
-                return this.AutoSellStarMatches(starRate);
-            }
-
-            bool hasStarRate = this.TryGetAutoSellQualityComponentStar(item.NetId, out starRate);
-            if (!hasStarRate && item.ManagedItem != null)
-            {
-                hasStarRate = this.TryGetManagedBackpackItemStarRate(item.ManagedItem, out starRate);
-            }
-            if (!hasStarRate && item.MonoItem != IntPtr.Zero)
-            {
-                hasStarRate = this.TryGetDirectBackpackItemStarRate(item.MonoItem, out starRate);
-            }
-
-            starRate = this.NormalizeAutoSellStarRateForDescriptor(starRate, descriptor);
-            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-            {
-                if (this.TryGetAutoSellCachedUiStar(descriptor, stackCount, out int uiStar))
-                {
-                    starRate = uiStar;
-                    hasStarRate = true;
-                }
-            }
-            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-            {
-                int step = item.ManagedItem != null
-                    ? this.GetManagedBackpackItemStep(item.ManagedItem)
-                    : (item.MonoItem != IntPtr.Zero ? this.GetDirectBackpackItemStep(item.MonoItem) : 0);
-                if (step >= 1 && step <= 5)
-                {
-                    starRate = step;
-                    hasStarRate = true;
-                }
-            }
-            if (Mathf.Clamp(this.autoSellStarFilter, 0, 5) > 0 && (!hasStarRate || starRate <= 0))
-            {
-                return false;
-            }
-
-            return this.AutoSellStarMatches(starRate);
+            return starRate > 0;
         }
 
         private bool IsAutoSellBirdPhotoDescriptor(string descriptor)
@@ -1776,55 +1608,66 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                IntPtr dictClass = auraMonoObjectGetClass(itemDataDictObj);
-                // Gate with ContainsKey so the indexer below never throws KeyNotFoundException
-                // for absent netIds (this lookup runs per frame and used to spam the invoke
-                // guard). NOTE: deliberately NOT TryGetValue — its out-parameter writes the raw
-                // value into caller storage, which smashes the stack when the dictionary value
-                // is a struct wider than a pointer. ContainsKey + get_Item only ever returns
-                // boxed objects, which is safe for any value type.
-                if (auraMonoObjectUnbox != null)
+                // Pin the dictionary across the two invokes below: each mono_runtime_invoke
+                // allocates (boxed return values), which can trigger a moving-GC pass that would
+                // relocate an unpinned dictionary between ContainsKey and get_Item.
+                uint itemDataPin = AuraMonoPinNew(itemDataDictObj);
+                try
                 {
-                    IntPtr containsKeyMethod = this.FindAuraMonoMethodOnHierarchy(dictClass, "ContainsKey", 1);
-                    if (containsKeyMethod != IntPtr.Zero)
+                    IntPtr dictClass = auraMonoObjectGetClass(itemDataDictObj);
+                    // Gate with ContainsKey so the indexer below never throws KeyNotFoundException
+                    // for absent netIds (this lookup runs per frame and used to spam the invoke
+                    // guard). NOTE: deliberately NOT TryGetValue — its out-parameter writes the raw
+                    // value into caller storage, which smashes the stack when the dictionary value
+                    // is a struct wider than a pointer. ContainsKey + get_Item only ever returns
+                    // boxed objects, which is safe for any value type.
+                    if (auraMonoObjectUnbox != null)
                     {
-                        IntPtr excContains = IntPtr.Zero;
-                        IntPtr* containsArgs = stackalloc IntPtr[1];
-                        containsArgs[0] = (IntPtr)(&netId);
-                        IntPtr boxedHas = auraMonoRuntimeInvoke(containsKeyMethod, itemDataDictObj, (IntPtr)containsArgs, ref excContains);
-                        if (excContains != IntPtr.Zero || boxedHas == IntPtr.Zero)
+                        IntPtr containsKeyMethod = this.FindAuraMonoMethodOnHierarchy(dictClass, "ContainsKey", 1);
+                        if (containsKeyMethod != IntPtr.Zero)
                         {
-                            return false;
-                        }
+                            IntPtr excContains = IntPtr.Zero;
+                            IntPtr* containsArgs = stackalloc IntPtr[1];
+                            containsArgs[0] = (IntPtr)(&netId);
+                            IntPtr boxedHas = auraMonoRuntimeInvoke(containsKeyMethod, itemDataDictObj, (IntPtr)containsArgs, ref excContains);
+                            if (excContains != IntPtr.Zero || boxedHas == IntPtr.Zero)
+                            {
+                                return false;
+                            }
 
-                        IntPtr rawHas = auraMonoObjectUnbox(boxedHas);
-                        if (rawHas == IntPtr.Zero || Marshal.ReadByte(rawHas) == 0)
-                        {
-                            return false;
+                            IntPtr rawHas = auraMonoObjectUnbox(boxedHas);
+                            if (rawHas == IntPtr.Zero || Marshal.ReadByte(rawHas) == 0)
+                            {
+                                return false;
+                            }
                         }
                     }
-                }
 
-                IntPtr getItemMethod = this.FindAuraMonoMethodOnHierarchy(dictClass, "get_Item", 1);
-                if (getItemMethod == IntPtr.Zero)
-                {
-                    return false;
-                }
+                    IntPtr getItemMethod = this.FindAuraMonoMethodOnHierarchy(dictClass, "get_Item", 1);
+                    if (getItemMethod == IntPtr.Zero)
+                    {
+                        return false;
+                    }
 
-                IntPtr itemDataObj;
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&netId);
-                itemDataObj = auraMonoRuntimeInvoke(getItemMethod, itemDataDictObj, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero || itemDataObj == IntPtr.Zero)
-                {
-                    return false;
-                }
+                    IntPtr itemDataObj;
+                    IntPtr exc = IntPtr.Zero;
+                    IntPtr* args = stackalloc IntPtr[1];
+                    args[0] = (IntPtr)(&netId);
+                    itemDataObj = auraMonoRuntimeInvoke(getItemMethod, itemDataDictObj, (IntPtr)args, ref exc);
+                    if (exc != IntPtr.Zero || itemDataObj == IntPtr.Zero)
+                    {
+                        return false;
+                    }
 
-                if (this.TryGetMonoInt32Member(itemDataObj, "starRate", out int rawStar))
+                    if (this.TryGetMonoInt32Member(itemDataObj, "starRate", out int rawStar))
+                    {
+                        starRate = this.NormalizeAutoSellStarRate(rawStar);
+                        return starRate > 0;
+                    }
+                }
+                finally
                 {
-                    starRate = this.NormalizeAutoSellStarRate(rawStar);
-                    return starRate > 0;
+                    AuraMonoPinFree(itemDataPin);
                 }
             }
             catch
@@ -1938,16 +1781,6 @@ namespace HeartopiaMod
             return null;
         }
 
-        private bool AutoSellStarMatches(int starRate)
-        {
-            int filter = Mathf.Clamp(this.autoSellStarFilter, 0, 5);
-            if (filter <= 0)
-            {
-                return true;
-            }
-            return this.NormalizeAutoSellStarRate(starRate) == filter;
-        }
-
         private int NormalizeAutoSellStarRate(int starRate)
         {
             if (starRate <= 0)
@@ -1955,11 +1788,6 @@ namespace HeartopiaMod
                 return 0;
             }
             return Mathf.Clamp(starRate, 1, 5);
-        }
-
-        private int NormalizeAutoSellStarRateForDescriptor(int rawStarRate, string descriptor)
-        {
-            return this.NormalizeAutoSellStarRate(rawStarRate);
         }
 
         private bool AutoSellDescriptorMatches(string descriptor, string normalizedKey)
@@ -2917,61 +2745,68 @@ namespace HeartopiaMod
 
                 this.ResolveAuraFarmRuntimeMethodsViaMono();
 
-                if (!this.TryCreateAuraMonoUIntIntDictionary(itemsToSell, out IntPtr dictObj) || dictObj == IntPtr.Zero)
+                if (!this.TryCreateAuraMonoUIntIntDictionary(itemsToSell, out IntPtr dictObj, out uint dictPin) || dictObj == IntPtr.Zero)
                 {
                     this.AutoSellLog("AuraMono sell dictionary creation failed.");
                     return false;
                 }
 
-                bool useAltCurrency = currencyTypeId > 0;
-                if (useAltCurrency)
+                try
                 {
-                    if (!this.TryResolveAuraMonoBattlePassSellMethod(out IntPtr altMethod) || altMethod == IntPtr.Zero)
+                    bool useAltCurrency = currencyTypeId > 0;
+                    if (useAltCurrency)
                     {
-                        this.AutoSellLog("AuraMono CmdBattlePassSell method unavailable.");
+                        if (!this.TryResolveAuraMonoBattlePassSellMethod(out IntPtr altMethod) || altMethod == IntPtr.Zero)
+                        {
+                            this.AutoSellLog("AuraMono CmdBattlePassSell method unavailable.");
+                            return false;
+                        }
+
+                        unsafe
+                        {
+                            int currency = currencyTypeId;
+                            IntPtr exc = IntPtr.Zero;
+                            IntPtr* args = stackalloc IntPtr[2];
+                            args[0] = (IntPtr)(&currency);
+                            args[1] = dictObj;
+                            auraMonoRuntimeInvoke(altMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                            if (exc != IntPtr.Zero)
+                            {
+                                this.AutoSellLog("AuraMono CmdBattlePassSell raised exception ptr=0x" + exc.ToInt64().ToString("X"));
+                                return false;
+                            }
+                        }
+
+                        this.AutoSellLog("AuraMono CmdBattlePassSell sent. currency=" + currencyTypeId + " stacks=" + itemsToSell.Count);
+                        return true;
+                    }
+
+                    if (!this.TryResolveAuraMonoQuickSellMethod(out IntPtr methodPtr) || methodPtr == IntPtr.Zero)
+                    {
+                        this.AutoSellLog("AuraMono CmdQuickSell method unavailable.");
                         return false;
                     }
 
                     unsafe
                     {
-                        int currency = currencyTypeId;
                         IntPtr exc = IntPtr.Zero;
-                        IntPtr* args = stackalloc IntPtr[2];
-                        args[0] = (IntPtr)(&currency);
-                        args[1] = dictObj;
-                        auraMonoRuntimeInvoke(altMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                        IntPtr* args = stackalloc IntPtr[1];
+                        args[0] = dictObj;
+                        auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
                         if (exc != IntPtr.Zero)
                         {
-                            this.AutoSellLog("AuraMono CmdBattlePassSell raised exception ptr=0x" + exc.ToInt64().ToString("X"));
+                            this.AutoSellLog("AuraMono CmdQuickSell raised exception ptr=0x" + exc.ToInt64().ToString("X"));
                             return false;
                         }
                     }
 
-                    this.AutoSellLog("AuraMono CmdBattlePassSell sent. currency=" + currencyTypeId + " stacks=" + itemsToSell.Count);
+                    this.AutoSellLog("AuraMono CmdQuickSell sent. stacks=" + itemsToSell.Count);
                     return true;
                 }
-
-                if (!this.TryResolveAuraMonoQuickSellMethod(out IntPtr methodPtr) || methodPtr == IntPtr.Zero)
+                finally
                 {
-                    this.AutoSellLog("AuraMono CmdQuickSell method unavailable.");
-                    return false;
+                    AuraMonoPinFree(dictPin);
                 }
-
-                unsafe
-                {
-                    IntPtr exc = IntPtr.Zero;
-                    IntPtr* args = stackalloc IntPtr[1];
-                    args[0] = dictObj;
-                    auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-                    if (exc != IntPtr.Zero)
-                    {
-                        this.AutoSellLog("AuraMono CmdQuickSell raised exception ptr=0x" + exc.ToInt64().ToString("X"));
-                        return false;
-                    }
-                }
-
-                this.AutoSellLog("AuraMono CmdQuickSell sent. stacks=" + itemsToSell.Count);
-                return true;
             }
             catch (Exception ex)
             {
@@ -3118,33 +2953,40 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryCreateAuraMonoUIntIntDictionary(netIdToCounts, out IntPtr dictObj) || dictObj == IntPtr.Zero)
+                if (!this.TryCreateAuraMonoUIntIntDictionary(netIdToCounts, out IntPtr dictObj, out uint dictPin) || dictObj == IntPtr.Zero)
                 {
                     ModLogger.Msg("[TRANSFER] AuraMono dictionary creation failed.");
                     return false;
                 }
 
-                if (!this.TryResolveAuraMonoMoveBatchBackpackItemsMethod(out IntPtr methodPtr) || methodPtr == IntPtr.Zero)
+                try
                 {
-                    ModLogger.Msg("[TRANSFER] AuraMono MoveBatchBackpackItems unavailable.");
-                    return false;
-                }
-
-                unsafe
-                {
-                    IntPtr exc = IntPtr.Zero;
-                    IntPtr* args = stackalloc IntPtr[2];
-                    args[0] = dictObj;
-                    args[1] = (IntPtr)(&targetStorageType);
-                    auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-                    if (exc != IntPtr.Zero)
+                    if (!this.TryResolveAuraMonoMoveBatchBackpackItemsMethod(out IntPtr methodPtr) || methodPtr == IntPtr.Zero)
                     {
-                        ModLogger.Msg("[TRANSFER] AuraMono MoveBatchBackpackItems exception ptr=0x" + exc.ToInt64().ToString("X"));
+                        ModLogger.Msg("[TRANSFER] AuraMono MoveBatchBackpackItems unavailable.");
                         return false;
                     }
-                }
 
-                return true;
+                    unsafe
+                    {
+                        IntPtr exc = IntPtr.Zero;
+                        IntPtr* args = stackalloc IntPtr[2];
+                        args[0] = dictObj;
+                        args[1] = (IntPtr)(&targetStorageType);
+                        auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
+                        if (exc != IntPtr.Zero)
+                        {
+                            ModLogger.Msg("[TRANSFER] AuraMono MoveBatchBackpackItems exception ptr=0x" + exc.ToInt64().ToString("X"));
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+                finally
+                {
+                    AuraMonoPinFree(dictPin);
+                }
             }
             catch (Exception ex)
             {
@@ -3714,40 +3556,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private string GetDirectBackpackItemPhotoId(IntPtr itemObj)
-        {
-            if (itemObj == IntPtr.Zero)
-            {
-                return string.Empty;
-            }
-
-            string[] members = { "photoId", "_photoId", "PhotoId", "serverPhotoId", "_serverPhotoId", "ServerPhotoId" };
-            foreach (string member in members)
-            {
-                if (this.TryGetMonoStringMember(itemObj, member, out string value) && !string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-
-            string[] nestedMembers = { "packItem", "_packItem", "item", "_item", "itemData", "_itemData", "baseData", "_baseData", "bagData", "_bagData" };
-            foreach (string member in nestedMembers)
-            {
-                if (this.TryGetMonoObjectMember(itemObj, member, out IntPtr nestedObj) && nestedObj != IntPtr.Zero && nestedObj != itemObj)
-                {
-                    foreach (string nestedMember in members)
-                    {
-                        if (this.TryGetMonoStringMember(nestedObj, nestedMember, out string value) && !string.IsNullOrWhiteSpace(value))
-                        {
-                            return value;
-                        }
-                    }
-                }
-            }
-
-            return string.Empty;
-        }
-
         private string GetDirectBackpackItemDescriptor(IntPtr itemObj)
         {
             string[] stringMembers = { "icon", "_icon", "Icon", "iconName", "itemIcon", "name", "_name", "itemName", "templateId", "id" };
@@ -4083,145 +3891,6 @@ namespace HeartopiaMod
                 || this.TryGetManagedInt32Member(item, "CounterNum", out count);
         }
 
-        private int GetManagedBackpackItemStep(object item)
-        {
-            if (item == null)
-            {
-                return 0;
-            }
-
-            return this.TryGetManagedInt32Member(item, "step", out int step)
-                || this.TryGetManagedInt32Member(item, "_step", out step)
-                || this.TryGetManagedInt32Member(item, "Step", out step)
-                ? step
-                : 0;
-        }
-
-        private bool TryGetManagedBackpackItemStarRate(object item, out int starRate)
-        {
-            return this.TryGetManagedBackpackItemStarRate(item, out starRate, 0);
-        }
-
-        private bool TryGetManagedBackpackItemStarRate(object item, out int starRate, int depth)
-        {
-            starRate = 0;
-            if (item == null || depth > 3)
-            {
-                return false;
-            }
-
-            if (this.TryInvokeZeroArgMember(item, out object runtimeStarObj, "get_starRate", "GetStarRate") && runtimeStarObj != null)
-            {
-                try
-                {
-                    starRate = this.NormalizeAutoSellStarRate(Convert.ToInt32(runtimeStarObj));
-                    return true;
-                }
-                catch
-                {
-                }
-            }
-
-            string[] intMembers = { "starRate", "_starRate", "StarRate", "star", "_star", "Star", "quality", "_quality", "Quality" };
-            foreach (string member in intMembers)
-            {
-                if (this.TryGetManagedInt32Member(item, member, out int rawStar))
-                {
-                    starRate = this.NormalizeAutoSellStarRate(rawStar);
-                    return true;
-                }
-            }
-
-            string[] nestedMembers = { "packItem", "_packItem", "item", "_item", "itemData", "_itemData", "baseData", "_baseData", "bagData", "_bagData", "PetFoodItem", "petFoodItem" };
-            foreach (string member in nestedMembers)
-            {
-                if (this.TryGetObjectMember(item, member, out object nested) && nested != null && !object.ReferenceEquals(nested, item))
-                {
-                    if (this.TryGetManagedBackpackItemStarRate(nested, out starRate, depth + 1))
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            MethodInfo getItem = item.GetType().GetMethod("GetItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
-            if (getItem != null)
-            {
-                try
-                {
-                    object nested = getItem.Invoke(item, null);
-                    if (nested != null && this.TryGetManagedBackpackItemStarRate(nested, out starRate, depth + 1))
-                    {
-                        return true;
-                    }
-                }
-                catch { }
-            }
-
-            MethodInfo getItems = item.GetType().GetMethod("GetItems", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
-            if (getItems != null)
-            {
-                try
-                {
-                    if (getItems.Invoke(item, null) is IEnumerable nestedItems)
-                    {
-                        foreach (object nested in nestedItems)
-                        {
-                            if (this.TryGetManagedBackpackItemStarRate(nested, out starRate, depth + 1))
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            return false;
-        }
-
-        private string GetManagedBackpackItemPhotoId(object item)
-        {
-            if (item == null)
-            {
-                return string.Empty;
-            }
-
-            string[] members = { "photoId", "_photoId", "PhotoId", "serverPhotoId", "_serverPhotoId", "ServerPhotoId" };
-            foreach (string member in members)
-            {
-                if (this.TryGetObjectMember(item, member, out object raw) && raw != null)
-                {
-                    string value = raw.ToString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        return value;
-                    }
-                }
-            }
-
-            string[] nestedMembers = { "packItem", "_packItem", "item", "_item", "itemData", "_itemData", "baseData", "_baseData", "bagData", "_bagData" };
-            foreach (string member in nestedMembers)
-            {
-                if (this.TryGetObjectMember(item, member, out object nested) && nested != null && !object.ReferenceEquals(nested, item))
-                {
-                    foreach (string nestedMember in members)
-                    {
-                        if (this.TryGetObjectMember(nested, nestedMember, out object raw) && raw != null)
-                        {
-                            string value = raw.ToString();
-                            if (!string.IsNullOrWhiteSpace(value))
-                            {
-                                return value;
-                            }
-                        }
-                    }
-                }
-            }
-
-            return string.Empty;
-        }
-
         private string GetManagedBackpackItemDescriptor(object item)
         {
             string[] members = { "icon", "_icon", "Icon", "iconName", "itemIcon", "name", "_name", "itemName", "templateId", "id", "staticId", "description" };
@@ -4344,10 +4013,9 @@ namespace HeartopiaMod
                 Dictionary<string, AutoSellBagItemEntry> byKey = new Dictionary<string, AutoSellBagItemEntry>(StringComparer.OrdinalIgnoreCase);
                 int inspected = 0;
 
-                // Runtime snapshot occasionally hard-crashes in some game states; prefer the safer mono scan path for manual Scan Items.
-                bool usedRuntimeSnapshot = false;
-                this.CollectAutoSellBackpackEntriesManaged(items, byKey, ref inspected);
-                this.CollectAutoSellBackpackEntriesMono(items, byKey, ref inspected, !usedRuntimeSnapshot);
+                // The mono scan is the single path: managed game assemblies are embedded-mono only
+                // on this build, and the runtime snapshot hard-crashed in some game states.
+                this.CollectAutoSellBackpackEntriesMono(items, byKey, ref inspected);
 
                 items.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
                 this.AutoSellLog(this.GetAutoSellScanSourceLabel() + " item list scan found " + items.Count + " unique item(s), inspected=" + inspected + ".");
@@ -4360,71 +4028,7 @@ namespace HeartopiaMod
             }
         }
 
-        private void CollectAutoSellBackpackEntriesManaged(List<AutoSellBagItemEntry> items, Dictionary<string, AutoSellBagItemEntry> byKey, ref int inspected)
-        {
-            // The generated managed backpack assembly is not available in this game build; the Mono
-            // scanner below is the reliable path and does not require the bag UI to be open.
-        }
-
-        private bool CollectAutoSellBackpackEntriesFromRuntimeSnapshot(List<AutoSellBagItemEntry> items, Dictionary<string, AutoSellBagItemEntry> byKey, ref int inspected)
-        {
-            if (Mathf.Clamp(this.autoSellScanSource, 0, 2) == 1)
-            {
-                return false;
-            }
-
-            if (!this.TryRefreshDirectBackpackRuntimeSnapshot(false))
-            {
-                return false;
-            }
-
-            foreach (DirectBackpackRuntimeItem item in this.directBackpackRuntimeItems)
-            {
-                if (item == null || item.NetId == 0U)
-                {
-                    continue;
-                }
-
-                inspected++;
-                string descriptor = item.Descriptor ?? string.Empty;
-                int count = Math.Max(1, item.Count);
-                int starRate = 0;
-                if (!this.TryGetAutoSellQualityComponentStar(item.NetId, out starRate))
-                {
-                    if (item.ManagedItem != null)
-                    {
-                        this.TryGetManagedBackpackItemStarRate(item.ManagedItem, out starRate);
-                    }
-                    else if (item.MonoItem != IntPtr.Zero)
-                    {
-                        this.TryGetDirectBackpackItemStarRate(item.MonoItem, out starRate);
-                    }
-                }
-                if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-                {
-                    if (this.TryGetAutoSellCachedUiStar(descriptor, count, out int uiStar))
-                    {
-                        starRate = uiStar;
-                    }
-                }
-                if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-                {
-                    int step = item.ManagedItem != null
-                        ? this.GetManagedBackpackItemStep(item.ManagedItem)
-                        : (item.MonoItem != IntPtr.Zero ? this.GetDirectBackpackItemStep(item.MonoItem) : 0);
-                    if (step >= 1 && step <= 5)
-                    {
-                        starRate = step;
-                    }
-                }
-
-                this.AddOrMergeAutoSellBackpackEntry(items, byKey, descriptor, item.NetId, count, item.StaticId, item.EntityType, starRate, true);
-            }
-
-            return true;
-        }
-
-        private void CollectAutoSellBackpackEntriesMono(List<AutoSellBagItemEntry> items, Dictionary<string, AutoSellBagItemEntry> byKey, ref int inspected, bool includeBackpack = true)
+        private void CollectAutoSellBackpackEntriesMono(List<AutoSellBagItemEntry> items, Dictionary<string, AutoSellBagItemEntry> byKey, ref int inspected)
         {
             try
             {
@@ -4449,17 +4053,13 @@ namespace HeartopiaMod
                 foreach (int storageTypeValue in this.GetAutoSellStorageTypeValues())
                 {
                     bool fromBackpack = storageTypeValue == 1;
-                    if (fromBackpack && !includeBackpack)
-                    {
-                        continue;
-                    }
-
                     IntPtr exc = IntPtr.Zero;
                     IntPtr itemListObj;
                     unsafe
                     {
+                        int storageValue = storageTypeValue;
                         IntPtr* args = stackalloc IntPtr[1];
-                        args[0] = (IntPtr)(&storageTypeValue);
+                        args[0] = (IntPtr)(&storageValue);
                         itemListObj = auraMonoRuntimeInvoke(getAllItemMethod, backPackSystemObj, getAllItemNeedsStorageType ? (IntPtr)args : IntPtr.Zero, ref exc);
                     }
                     if (exc != IntPtr.Zero || itemListObj == IntPtr.Zero)
@@ -4488,30 +4088,11 @@ namespace HeartopiaMod
                             int count = 1;
                             int staticId = 0;
                             int entityType = 0;
-                            int starRate = 0;
                             this.TryGetDirectBackpackItemCount(itemObj, out count);
                             this.TryGetDirectBackpackItemStaticId(itemObj, out staticId);
                             this.TryGetDirectBackpackItemEntityType(itemObj, out entityType);
-                            if (!this.TryGetAutoSellQualityComponentStar(netId, out starRate))
-                            {
-                                this.TryGetDirectBackpackItemStarRate(itemObj, out starRate);
-                            }
                             string descriptor = this.GetDirectBackpackItemDescriptor(itemObj);
-                            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-                            {
-                                if (this.TryGetAutoSellCachedUiStar(descriptor, count, out int uiStar))
-                                {
-                                    starRate = uiStar;
-                                }
-                            }
-                            if (starRate <= 0 && this.IsAutoSellBirdPhotoDescriptor(descriptor))
-                            {
-                                int step = this.GetDirectBackpackItemStep(itemObj);
-                                if (step >= 1 && step <= 5)
-                                {
-                                    starRate = step;
-                                }
-                            }
+                            this.TryResolveAutoSellMonoItemStar(netId, itemObj, descriptor, Math.Max(1, count), out int starRate);
                             this.AddOrMergeAutoSellBackpackEntry(items, byKey, descriptor, netId, count, staticId, entityType, starRate, fromBackpack);
                         }
                     }
@@ -4535,7 +4116,7 @@ namespace HeartopiaMod
                 matchKey = staticId > 0 ? staticId.ToString() : netId.ToString();
             }
 
-            int normalizedStar = this.NormalizeAutoSellStarRateForDescriptor(starRate, descriptor);
+            int normalizedStar = this.NormalizeAutoSellStarRate(starRate);
             if (normalizedStar <= 0 && this.TryGetAutoSellCachedUiStar(matchKey, count, out int uiStar))
             {
                 normalizedStar = uiStar;
@@ -4716,20 +4297,44 @@ namespace HeartopiaMod
                 return null;
             }
 
+            AutoSellBagItemEntry fallback = null;
+            if (!this.autoSellMatchFamily && this.autoSellSelectedStaticId > 0)
+            {
+                for (int i = 0; i < this.autoSellBagItems.Count; i++)
+                {
+                    AutoSellBagItemEntry entry = this.autoSellBagItems[i];
+                    if (entry == null || entry.StaticId != this.autoSellSelectedStaticId)
+                    {
+                        continue;
+                    }
+                    if (Math.Max(0, entry.StarRate) == this.autoSellSelectedStar)
+                    {
+                        return entry;
+                    }
+                    if (fallback == null)
+                    {
+                        fallback = entry;
+                    }
+                }
+                if (fallback != null)
+                {
+                    return fallback;
+                }
+            }
+
             string key = this.GetActiveAutoSellMatchKey();
             if (string.IsNullOrWhiteSpace(key))
             {
                 return null;
             }
 
-            AutoSellBagItemEntry fallback = null;
             for (int i = 0; i < this.autoSellBagItems.Count; i++)
             {
                 AutoSellBagItemEntry entry = this.autoSellBagItems[i];
                 string entryKey = entry != null && this.autoSellMatchFamily ? this.GetAutoSellFamilyKey(entry.MatchKey) : (entry != null ? entry.MatchKey : "");
                 if (entry != null && string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (this.autoSellStarFilter > 0 && entry.StarRate == this.autoSellStarFilter)
+                    if (this.autoSellSelectedStar > 0 && entry.StarRate == this.autoSellSelectedStar)
                     {
                         return entry;
                     }

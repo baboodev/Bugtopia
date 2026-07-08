@@ -4987,12 +4987,15 @@ namespace HeartopiaMod
         private int autoSellReserveCount = 0;
         private bool autoSellAllMatchingStacks = true;
         private bool autoSellFullStack = true;
-        private bool autoSellSkipFiveStar = true;
         private bool dailyQuestSubmitSkipFiveStar = true;
         private bool autoSellMatchFamily = true;
         private bool autoSellHideBagItems = false;
-        private int autoSellStarFilter = 0;
-        private readonly string[] autoSellStarFilterLabels = new string[] { "Any Star", "1 Star", "2 Star", "3 Star", "4 Star", "5 Star" };
+        // Selection identity of the clicked list cell: staticId + that cell's star.
+        // staticId 0 = text matching via autoSellItemKey (typed key or family mode);
+        // star 0 = no star constraint. The star always travels with the selection —
+        // there is no separate global star filter.
+        private int autoSellSelectedStaticId = 0;
+        private int autoSellSelectedStar = 0;
         private bool autoSellFestivalTokensEnabled = false;
         private readonly Dictionary<uint, int> autoSellCollectedStaticIdsByNetId = new Dictionary<uint, int>();
         private Dictionary<uint, string> autoSellLastSellDetailsByNetId = new Dictionary<uint, string>();
