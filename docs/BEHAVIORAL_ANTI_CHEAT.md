@@ -674,6 +674,15 @@ exports are anti-disasm stubs (`0x180081220`/`0x180081230` → `.TH0` return-thu
 dispatch): `get_oneid_data` → the full `FingerPrint` container, `get_oneid` → `ConnectScene_CS.Device`
 (the short `oneid`). *(Exact field-cipher constants kept out of this doc — see project memory.)*
 
+**Persistence:** the `oneid` is computed **once at first run and cached** (in the registry,
+per-install-stable, with a first-run timestamp seed folded in) — **not** recomputed from live hardware
+each launch. So the exact ordered hardware inputs to the MD5 ran once inside the CFF collector and only
+the cached token survives; an exhaustive offline MD5 search over the known identifiers did not
+reproduce it, consistent with the seeded/cached model. The MD5 style is confirmed **byte-exact** on a
+sibling hash (`MD5(machineId ‖ login-JWT sub)`, raw-ASCII, no separator). A co-resident **TapTap TDS**
+analytics fingerprint (SHA-1 `device_id` + `mac_list` + a persisted uuid) is a *separate* subsystem —
+do not conflate it with the Themis MD5 `oneid`.
+
 **Where it goes:** `GetOneidData()` → `LoginRiskCheckRequest.FingerPrint` → pre-login JSON HTTP POST
 to `WorldClusterLoginRiskCheckUrl` (`ClientSession.cs`); `LoginState.RiskControlBan` ⇒ device ban.
 `GetOneID()` → `ConnectScene_CS.Device` (scene connect). See §10.6.
