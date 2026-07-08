@@ -595,7 +595,7 @@ The Themis integrity heartbeat is **native-only**: `GetHeartbeat` has **no manag
 | Input AC (managed) | raw touch `.bin` + aggregate `.idx` → OBS `Cheats` bucket, `{Gateway}/sazabi/world/obs` (§2) | backend scoring |
 | Context tags | `AddCustomPlayer(xdid / playerinfo / shortid / PlayerState / SceneState / playerPos / LevelState)` → attached to **native** reports | — |
 
-`FingerPrint` / `Device` payloads are opaque native-computed blobs (device fingerprint via WMI / HID / version); the message envelopes are fully clear.
+`FingerPrint` / `Device` payloads are opaque native-computed blobs (device fingerprint — see §10.10 for the enumerated sources); the message envelopes are fully clear.
 
 ### 10.7 Unpacking workflow (memory dump → Ghidra)
 
@@ -624,16 +624,76 @@ Both need a **CFF/junk deobfuscator** (large effort) or a **dynamic trace** (whi
 - **Reports can force-close the client** (`report_custom_exception(…, isQuitApp:true)` / `ZwRaiseHardError` → `ExitProcess`) and carry a symbolized stack / minidump.
 - Native input is fed to Themis (`input_data`) in parallel to managed `InputCheatManager` — absent/synthetic input around actions is observable on both channels; prefer game-API calls over `Input` simulation.
 
-### 10.10 Key source paths (native)
+### 10.10 Device fingerprint (`oneid`) — sources & composition
+
+> What the `get_oneid` / `get_oneid_data` exports gather. **Fingerprint source strings are plaintext**
+> in the unpacked `.rdata`/`.data` — the `0x75A007BE` cipher (§10.3) protects only the sensitive
+> dynamic-resolve API names + anti-debug driver names, **not** ordinary literals (a UTF-16 keystream
+> re-decode of `.TH2` returned 0 wide strings, confirming this). RTTI in the dump names the aggregator
+> classes **`CThemisDeviceInfo`** / **`CDeviceInfo`** (PDB `THEMIS-SDK-Windows`).
+
+**Identifiers collected** — CONFIRMED (API name / WQL string found verbatim in the unpacked image):
+
+| Class | Identifier | Mechanism |
+|-------|------------|-----------|
+| Disk / volume | system-volume serial | `GetVolumeInformationW` |
+| | physical-disk serial | `QueryDosDeviceW` → `\Device\HarddiskVolume` → `DeviceIoControl` (storage IOCTL) |
+| Network | adapter MAC(s) | `GetAdaptersInfo` |
+| Firmware / board | SMBIOS / BIOS UUID + serial | `GetSystemFirmwareTable` |
+| PnP / peripherals | hardware / device-instance IDs | SetupAPI (`SetupDiGetClassDevs` / `SetupDiEnumDeviceInfo` / `SetupDiGetDeviceRegistryProperty`) |
+| | monitors | `EnumDisplayDevices` |
+| | HID kbd/mouse mfr + product | `GetRawInputDeviceInfoW` + `HidD_GetManufacturerString` / `HidD_GetProductString` |
+| CPU / RAM / OS | arch, cores, RAM, locale, timezone | `GetNativeSystemInfo`, `GlobalMemoryStatusEx`, `Get*DefaultLCID`, `GetTimeZoneInformation` |
+| WMI (`root\CIMV2`) | OS identity + boot time | WQL `SELECT LastBootUpTime FROM Win32_OperatingSystem` |
+| | GPU / video adapter | WQL `SELECT * FROM Win32_VideoController` |
+
+WMI path = `CoInitializeSecurity` → `CoCreateInstance` (WbemLocator) → `CoSetProxyBlanket` →
+`IWbemServices::ExecQuery` (error string `WMI ExecQuery Error: 0x%08X-%lld`). `root\CIMV2` is
+runtime-built (not verbatim), but the COM triad is the textbook CIMV2 fingerprint sequence.
+
+**Notably NOT used:** `MachineGuid`, `ProductId`, `DigitalProductId`, `InstallDate`, `HardwareID` —
+none appear in any decoded set (plaintext, narrow-keystream, or wide). So the classic
+`HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` is **not** an evidenced input; the strong IDs are
+hardware/firmware-anchored (volume + disk-IOCTL serial + MAC + SMBIOS UUID). `RegQueryValueExW` /
+`RegQueryInfoKeyW` are present but their fingerprint key paths are CFF-hidden. CPUID/RDTSC here feed
+primarily VM/sandbox detection (`VBoxVBoxVBox`, `VMwareVMware`, `Can't run in virtual machine
+environment!`, `Kaspersky Lab\Sandbox`), not the id directly.
+
+**Composition (structure CONFIRMED; hardware→id hashing CFF-walled):** `get_oneid_data` returns
+**`FingerPrint`** = a **base64 TLV container** of up to 35 `label`/`value` fields, each field
+individually encrypted (a small byte-wise block cipher) then base64-encoded, assembled by the
+`CDeviceInfo` aggregator (RTTI `CDeviceInfo : CThemisDeviceInfo : IUtils`; an `AddField` registrar; a
+`Serialize` vtable method). Fields recovered on an analyzed machine: device-scoped **`oneid`** (a
+token embedding a 32-hex **MD5**), `permit` (`v1-`+MD5), `displaycard_list` (GPU names + driver
+versions), `CompiledShaderInfo` (shader-compile probe), plus runtime context added via
+`AddCustomPlayer` (`version`, `LevelState`, `xdid`, `shortid`). **The hardware IDs above are folded
+into `oneid`'s embedded MD5 inside the CFF collectors** — so the ordered hardware inputs to that MD5
+stay CFF-walled, though the container format and the derived `oneid` value are recovered. Output form
+= 32-lowercase-hex MD5 (the same primitive that names `%AppData%\Roaming\THEMIS\<md5>\`). Both
+exports are anti-disasm stubs (`0x180081220`/`0x180081230` → `.TH0` return-thunk → flattened
+dispatch): `get_oneid_data` → the full `FingerPrint` container, `get_oneid` → `ConnectScene_CS.Device`
+(the short `oneid`). *(Exact field-cipher constants kept out of this doc — see project memory.)*
+
+**Where it goes:** `GetOneidData()` → `LoginRiskCheckRequest.FingerPrint` → pre-login JSON HTTP POST
+to `WorldClusterLoginRiskCheckUrl` (`ClientSession.cs`); `LoginState.RiskControlBan` ⇒ device ban.
+`GetOneID()` → `ConnectScene_CS.Device` (scene connect). See §10.6.
+
+**Passive verification (no debugger → no AC trip):** during a normal login, capture
+**WMI-Activity/Operational** (Event Viewer → Applications and Services Logs → Microsoft → Windows →
+WMI-Activity) — shows the exact WQL + namespace — plus **Process Monitor** (Include filters:
+`RegQueryValue`; `DeviceIoControl` where Path contains `HarddiskVolume` / `PhysicalDrive`; `\Device\`
+`CreateFile`; Process is `xdt.exe` + `wmiprvse.exe`). Confirms every source with no debugger attach.
+
+### 10.11 Key source paths (native)
 
 | Topic | Location |
 |-------|----------|
 | Native AC binary | `<Game>/xdt_Data/Plugins/x86_64/themis_x64.dll` |
 | Native config | `<Game>/themis.res` |
 | Managed binding / game wrapper | `ilspy-dumps/EngineWrapper/ThemisSDKManager.cs`, `ilspy-dumps/XDTBaseService/ThemisManager.cs` |
-| Login fingerprint / device id | `ilspy-dumps/XDTGameSystem/XDTGameSystem/ClientSession.cs`, `ilspy-dumps/EcsSystem/Network/SceneTcpConnectionHandler.cs` |
+| Login fingerprint / device id | `ilspy-dumps/XDTGameSystem/XDTGameSystem/ClientSession.cs` (`LoginRiskCheckRequest.FingerPrint`), `.../LoginProtocolManager.cs` (`CheckDeviceIsForbidden`), `ilspy-dumps/EcsClient/Sazabi.Login.Shared/LoginRiskCheckResponse.cs`, `ilspy-dumps/EcsSystem/Network/SceneTcpConnectionHandler.cs` (`ConnectScene_CS.Device`) |
 | Ghidra project | `themis` (Ghidra-MCP `ghidra-mcp-http`); on-disk program at base `0x180000000`, unpacked image at ASLR base |
 
 ---
 
-*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review. §10 (native Themis binary reverse engineering) added from Ghidra + memory-dump analysis of `themis_x64.dll`.*
+*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review. §10 (native Themis binary reverse engineering) added from Ghidra + memory-dump analysis of `themis_x64.dll`; §10.10 device-fingerprint (`oneid`) sources added from a plaintext-string sweep of the unpacked image.*
