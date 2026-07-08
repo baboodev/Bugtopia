@@ -200,7 +200,6 @@ namespace HeartopiaMod
             }
 
             this.nextCameraToggleInteractAt = Time.unscaledTime + 0.15f;
-            this.SimulateFKeyPulse(0.12f);
             this.DirectClickInteractButton();
         }
 
@@ -305,73 +304,6 @@ namespace HeartopiaMod
 
             this.mouseLookCaptureActive = shouldCapture;
             this.mouseLookWasCaptureActive = shouldCapture;
-        }
-
-        private void UnpatchInputSim()
-        {
-            this.inputSimPatched = false;
-            try
-            {
-                var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) return;
-
-                Action<string, Type[], Type> unpatchInputPostfix = (methodName, args, patchType) =>
-                {
-                    MethodInfo target = typeof(Input).GetMethod(methodName, args);
-                    MethodInfo patch = patchType.GetMethod("Postfix", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    if (target != null && patch != null)
-                    {
-                        harmony.Unpatch(target, patch);
-                    }
-                };
-
-                unpatchInputPostfix("GetKey", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyPatch));
-                unpatchInputPostfix("GetKey", new Type[] { typeof(string) }, typeof(InputGetKeyStringPatch));
-                unpatchInputPostfix("GetKeyDown", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyDownPatch));
-                unpatchInputPostfix("GetKeyDown", new Type[] { typeof(string) }, typeof(InputGetKeyDownStringPatch));
-                unpatchInputPostfix("GetKeyUp", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyUpPatch));
-                unpatchInputPostfix("GetKeyUp", new Type[] { typeof(string) }, typeof(InputGetKeyUpStringPatch));
-
-                ModLogger.Msg("[Patch] Input simulation removed (idle).");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Patch] Input simulation unpatch failed: " + ex.Message);
-            }
-        }
-
-        private void EnsureInputSimPatched()
-        {
-            if (this.inputSimPatched) return;
-            this.inputSimPatched = true;
-            try
-            {
-                var harmony = HeartopiaComplete.harmonyInstance;
-                if (harmony == null) { this.inputSimPatched = false; return; }
-
-                Action<string, Type[], Type> patchInputPostfix = (methodName, args, patchType) =>
-                {
-                    MethodInfo target = typeof(Input).GetMethod(methodName, args);
-                    MethodInfo patch = patchType.GetMethod("Postfix", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    if (target != null && patch != null)
-                    {
-                        harmony.Patch(target, null, new HarmonyMethod(patch), null, null, null);
-                    }
-                };
-
-                patchInputPostfix("GetKey", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyPatch));
-                patchInputPostfix("GetKey", new Type[] { typeof(string) }, typeof(InputGetKeyStringPatch));
-                patchInputPostfix("GetKeyDown", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyDownPatch));
-                patchInputPostfix("GetKeyDown", new Type[] { typeof(string) }, typeof(InputGetKeyDownStringPatch));
-                patchInputPostfix("GetKeyUp", new Type[] { typeof(KeyCode) }, typeof(InputGetKeyUpPatch));
-                patchInputPostfix("GetKeyUp", new Type[] { typeof(string) }, typeof(InputGetKeyUpStringPatch));
-
-                ModLogger.Msg("[Patch] Input simulation installed (Input.GetKey*).");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Patch] Input simulation patch failed: " + ex.Message);
-            }
         }
 
         private void ApplyCameraFOV()

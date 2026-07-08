@@ -254,12 +254,6 @@
     <Compile Include="HeartopiaDebugEsp.cs" />
     <Compile Include="HeartopiaResourceVisualEsp.cs" />
     <Compile Include="HelperPaths.cs" />
-    <Compile Include="InputGetKeyDownPatch.cs" />
-    <Compile Include="InputGetKeyDownStringPatch.cs" />
-    <Compile Include="InputGetKeyPatch.cs" />
-    <Compile Include="InputGetKeyStringPatch.cs" />
-    <Compile Include="InputGetKeyUpPatch.cs" />
-    <Compile Include="InputGetKeyUpStringPatch.cs" />
     <Compile Include="InsectNetFarm.cs" />
     <Compile Include="LocalizationManager.cs" />
     <Compile Include="LodSettingsFeature.cs" />

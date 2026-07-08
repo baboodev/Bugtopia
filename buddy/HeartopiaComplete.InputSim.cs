@@ -59,19 +59,6 @@ namespace HeartopiaMod
             catch { }
         }
 
-        private void SimulateFKeyPulse(float holdSeconds = 0.12f)
-        {
-            try
-            {
-                this.EnsureInputSimPatched();
-                HeartopiaComplete.SimulateFKeyDown = true;
-                HeartopiaComplete.SimulateFKeyHeld = true;
-                HeartopiaComplete.SimulateFKeyUp = false;
-                this.nextSimulatedFKeyClearAt = Time.unscaledTime + Mathf.Max(0.02f, holdSeconds);
-            }
-            catch { }
-        }
-
         private void SendLeftClickMessage()
         {
             try

@@ -71,19 +71,11 @@ namespace HeartopiaMod
             this.lastAppliedGameSpeed = speed;
         }
 
-        // NOTE: the Transform.position / Transform.rotation setter prefixes that used to live
-        // here (anti-cheat surface #4 — module .text writes, Themis-hashable) are GONE. Player
-        // teleport/noclip drives the game's own PlayerMoveComponent (NoclipFeature.cs) and the
-        // camera drives the game camera controller's axis (HeartopiaComplete.CameraRig.cs), both
-        // embedded-Mono via AuraMono. Only the Input.GetKey* postfixes (surface #1, separate
-        // cleanup) still Harmony-patch IL2CPP code.
-        private void MaybeUnpatchIdleHotPathPatches(float now)
-        {
-            if (this.inputSimPatched && now - this.inputSimPatchLastNeededAt > HotPathPatchIdleUnpatchSeconds)
-            {
-                this.UnpatchInputSim();
-            }
-        }
+        // The mod installs NO IL2CPP-.text Harmony patches anymore — surfaces #1 (Input.GetKey*
+        // F-sim), #2 (NetCook) and #3 (Physics) are deleted, and #4 (Transform.position/rotation
+        // setters) was migrated to embedded-Mono drivers (NoclipFeature.cs teleport/noclip via the
+        // game's PlayerMoveComponent, HeartopiaComplete.CameraRig.cs camera via the camera
+        // controller's axis, both through AuraMono). Nothing here to unpatch.
 
         // Token: 0x06000013 RID: 19 RVA: 0x00003E34 File Offset: 0x00002034
         private void RunBypassLogic(bool shouldHide)

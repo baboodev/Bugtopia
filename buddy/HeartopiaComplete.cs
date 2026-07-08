@@ -521,7 +521,6 @@ namespace HeartopiaMod
             Breadcrumbs.Init();
             this.ApplyMasterConsoleVisibility();
             HeartopiaComplete.Instance = this;
-            HeartopiaComplete.harmonyInstance = new HarmonyLib.Harmony("com.heartopia.teleport");
             ModLogger.Msg("Bugtopia initialized!");
             this.InitializeLocalization();
             this.LoadRadarSpeciesIconIndex();
@@ -531,12 +530,11 @@ namespace HeartopiaMod
             this.LoadPatrolPoints();
             this.LoadRadarSettings();
             this.LoadBirdFarmSettings();
-            // NOTE: No Transform.position/rotation setter patches exist anymore (anti-cheat
-            // surface #4 eliminated): noclip/teleport drive the game's PlayerMoveComponent and
-            // mouse-look drives the game camera controller's axis, both embedded-Mono via
-            // AuraMono. The only remaining IL2CPP hot-path patch is Input.GetKey* (F-sim), still
-            // installed lazily on first use via EnsureInputSimPatched.
-            ModLogger.Msg("=== Hot-path patches deferred (installed on demand) ===");
+            // NOTE: the mod installs NO IL2CPP-.text Harmony patches anymore. Noclip/teleport drive
+            // the game's PlayerMoveComponent, mouse-look drives the game camera controller's axis,
+            // and the camera-toggle interact clicks the interact button directly — all embedded-Mono
+            // via AuraMono, nothing Themis-hashable.
+            ModLogger.Msg("=== No IL2CPP hot-path patches installed ===");
 
             ModLogger.Msg("AutoFish subsystem disabled.");
 
@@ -595,25 +593,15 @@ namespace HeartopiaMod
             // Direct game-icon loads (docs/ITEM_ICON_PIPELINE.md): drain completed sprite loads,
             // time out stuck ones. No-op (two dictionary count checks) while idle.
             this.ProcessGameIconLoads();
-            // NOTE: the Transform.position/rotation setter patches and their per-frame "needed"
-            // gates are GONE (anti-cheat surface #4 eliminated). Noclip/teleport drive the game's
-            // own PlayerMoveComponent; mouse-look drives the camera controller's axis. The only
-            // remaining lazily-installed IL2CPP patch is Input.GetKey* (F-sim, surface #1).
-            float hotPatchNow = Time.unscaledTime;
+            // NOTE: the mod installs NO IL2CPP-.text Harmony patches anymore. Surfaces #2 (NetCook)
+            // and #3 (Physics) were deleted; #4 (Transform.position/rotation setters) was migrated —
+            // noclip/teleport drive the game's own PlayerMoveComponent and mouse-look drives the
+            // camera controller's axis; #1 (Input.GetKey* F-sim) is gone — the camera-toggle interact
+            // now drives the interact button directly (DirectClickInteractButton).
             // Menu input-block: stop player movement while the menu is open. Routed through the
             // game's MonoInputManager (the player isn't driven by Unity's CharacterController.Move),
             // so no hot-path Harmony patch is installed for this.
             this.UpdateMenuMovementInputBlock();
-            // Simulated F-key (Input.GetKey* patches). NOTE: fishing (AutoFishingFarm) and insect
-            // (InsectNetFarm) are net-based and do NOT use F-sim, so they are not gated here. Only
-            // SimulateFKeyPulse callers (camera-toggle interact) remain, which also call
-            // EnsureInputSimPatched() at their own site.
-            if (HeartopiaComplete.SimulateFKeyHeld || HeartopiaComplete.SimulateFKeyDown || HeartopiaComplete.SimulateFKeyUp)
-            {
-                this.EnsureInputSimPatched();
-                this.inputSimPatchLastNeededAt = hotPatchNow;
-            }
-            this.MaybeUnpatchIdleHotPathPatches(hotPatchNow);
             Breadcrumbs.Drop("ou.patched");
 
             if (BirdNetFarm.IsEnabled)
@@ -892,9 +880,6 @@ namespace HeartopiaMod
                     this.petPlayAutoDogEnabled = false;
                     this.petPlayAutoWashEnabled = false;
                     this.StopWildAnimalFeedCoroutine();
-                    SimulateFKeyHeld = false;
-                    SimulateFKeyDown = false;
-                    SimulateFKeyUp = false;
                     try { InsectNetFarm.ForceStop(); } catch (Exception ex) { ModLogger.Msg("[DisableAll] Failed to stop Insect Farm: " + ex.Message); }
                     try { BirdNetFarm.ForceStop(this); } catch (Exception ex) { ModLogger.Msg("[DisableAll] Failed to stop Bird Farm: " + ex.Message); }
                     try { this.ForceStopPuzzleAuto(); } catch (Exception ex) { ModLogger.Msg("[DisableAll] Failed to stop Puzzle: " + ex.Message); }
@@ -1184,21 +1169,6 @@ namespace HeartopiaMod
             this.ProcessPendingBagAutomation();
 
             // Camera FOV will be applied in OnLateUpdate to avoid competing with game camera updates
-
-            // Clear scheduled simulated F-key states
-            if (this.nextSimulatedFKeyClearAt > 0f && Time.unscaledTime >= this.nextSimulatedFKeyClearAt)
-            {
-                HeartopiaComplete.SimulateFKeyDown = false;
-                HeartopiaComplete.SimulateFKeyHeld = false;
-                HeartopiaComplete.SimulateFKeyUp = true;
-                this.nextSimulatedFKeyClearAt = 0f;
-                this.nextSimulatedFKeyUpClearAt = Time.unscaledTime + 0.05f;
-            }
-            if (this.nextSimulatedFKeyUpClearAt > 0f && Time.unscaledTime >= this.nextSimulatedFKeyUpClearAt)
-            {
-                HeartopiaComplete.SimulateFKeyUp = false;
-                this.nextSimulatedFKeyUpClearAt = 0f;
-            }
 
             this.ApplyGameSpeed();
             bool flag6 = this.autoCookEnabled;
@@ -2396,18 +2366,6 @@ namespace HeartopiaMod
         private FeatureBreakerState puzzleNetBreaker;
         private FeatureBreakerState autoFishingFarmBreaker;
         private FeatureBreakerState fishingRouteBreaker;
-
-        // Removes the Input.GetKey* hot-path Harmony patches once nothing has needed them for a
-        // while, so the per-call postfix tax is not paid for the rest of the session. The long
-        // 60s tail is on purpose (auto-farm pulses the F-sim and would thrash on a short one).
-        // The Transform.position/rotation setter overrides that used to share this idle-unpatch
-        // are gone — noclip/teleport/camera now drive game-engine (embedded Mono) methods.
-        private const float HotPathPatchIdleUnpatchSeconds = 60f;
-        private float inputSimPatchLastNeededAt;
-
-
-        // Installs the Input.GetKey* postfixes used for simulated F-key presses (fishing,
-        // insect net, auto-cook interact) on first use.
 
 
 
@@ -4359,10 +4317,6 @@ namespace HeartopiaMod
         // Token: 0x04000002 RID: 2
         public static HeartopiaComplete Instance;
 
-        // Token: 0x04000003 RID: 3
-        private new static HarmonyLib.Harmony harmonyInstance;
-        internal static HarmonyLib.Harmony ModHarmony => harmonyInstance;
-
         // The Override{Player,Camera}Position/Rotation static pins and their Transform-setter
         // prefixes are gone (anti-cheat surface #4). Post-teleport facing settle countdown:
         private int playerRotationFramesRemaining = 0;
@@ -4941,9 +4895,6 @@ namespace HeartopiaMod
         private Type netCookInteractCommandType = null;
         private object netCookReliableChannelValue = null;
         private bool netCookTypeDiagnosticsLogged = false;
-        // Simulated F-key helper scheduling
-        private float nextSimulatedFKeyClearAt = 0f;
-        private float nextSimulatedFKeyUpClearAt = 0f;
         // Auto-cook diagnostics
         private int autoCookLoopTicks = 0;
         private float lastAutoCookHeartbeatAt = -999f;
@@ -5360,9 +5311,6 @@ namespace HeartopiaMod
         private float bottomDialogClickTimer = 0f;
         private GameObject cachedBottomDialogObject = null;
         private float nextBottomDialogLookupAt = 0f;
-        public static bool SimulateFKeyHeld = false;
-        public static bool SimulateFKeyDown = false;
-        public static bool SimulateFKeyUp = false;
         
         // Noclip/Flying Variables
         private bool noclipEnabled = false;
@@ -5504,11 +5452,6 @@ namespace HeartopiaMod
         private readonly Queue<uint> pendingBirdFarmAttemptedNetIds = new Queue<uint>();
         private const string BOTTOM_DIALOG_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Popup/BottomDialogPanel(Clone)";
         private const float BOTTOM_DIALOG_CLICK_INTERVAL = 0.3f;
-
-        // Lazy patch state for the Input.GetKey* postfixes (the last hot Unity methods the mod
-        // still Harmony-patches — surface #1). Installed only once F-key simulation is actually
-        // used, so they cost nothing when idle.
-        private bool inputSimPatched = false;
 
         // True while we have an outstanding DisableInput(Move) on the game's MonoInputManager
         // because the mod menu is open with "block game input" on. Must be balanced 1:1 with EnableInput.
