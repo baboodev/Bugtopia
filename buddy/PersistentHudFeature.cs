@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace HeartopiaMod
@@ -48,10 +49,65 @@ namespace HeartopiaMod
             "XDTGame.UI.Panel.SightseeingStatusPanel",
         };
 
+        // Scene path of the Status physical layer that hosts every status panel instance.
+        private const string PersistentHudStatusLayerPath = "GameApp/startup_root(Clone)/XDUIRoot/Status/";
+        private const float PersistentHudDedupeInterval = 0.3f;
+
+        // Duplicate-widget suppression: with StatusPanel reopened on top, the mode panels' own
+        // copies of the shared HUD widgets (energy bar, minimap, task bar, chat) double up on
+        // screen. Paths are relative to each panel's root instance and were taken from the
+        // XDTGame.Auto/*_Auto.cs node tables; only blocks whose EVERY child duplicates a
+        // StatusPanel widget are listed (e.g. SkateStatusPanel's top_left holds the unique skate
+        // exit button, so only its chat block is hidden; FishingPanel's buff list lives inside
+        // energy_bar@go, so only the progress bar underneath it is hidden).
+        private static readonly KeyValuePair<string, string[]>[] PersistentHudDuplicateNodesByPanel =
+        {
+            new KeyValuePair<string, string[]>("VehicleStatusPanel", new[]
+            {
+                "AniRoot@ani@queueanimation/top_left_layout@go",    // map + energy + self-room timer
+                "AniRoot@ani@queueanimation/middle_left_layout@go", // taskbar
+                "AniRoot@ani@queueanimation/bottom_left_layout@go", // chat
+            }),
+            new KeyValuePair<string, string[]>("FishingPanel", new[]
+            {
+                "energy_bar@go/energy_progress@go", // keep buff@go@list (fishing buffs) visible
+            }),
+            new KeyValuePair<string, string[]>("SkateStatusPanel", new[]
+            {
+                "AniRoot@ani@queueanimation/bottom_left_layout@go", // chat
+            }),
+            new KeyValuePair<string, string[]>("RollerCoasterStatusPanel", new[]
+            {
+                "AniRoot@ani@queueanimation/top_left_layout@go",
+                "AniRoot@ani@queueanimation/middle_left_layout@go",
+                "AniRoot@ani@queueanimation/bottom_left_layout@go",
+            }),
+            new KeyValuePair<string, string[]>("WaterCorridorStatusPanel", new[]
+            {
+                "AniRoot@ani/top_left_layout@go",    // note: no @queueanimation on this prefab
+                "AniRoot@ani/bottom_left_layout@go",
+            }),
+            new KeyValuePair<string, string[]>("CarouselStatusPanel", new[]
+            {
+                "AniRoot@ani@queueanimation/top_left_layout@go",
+                "AniRoot@ani@queueanimation/middle_left_layout@go",
+                "AniRoot@ani@queueanimation/bottom_left_layout@go",
+            }),
+            // SightseeingStatusPanel: no duplicated widgets.
+        };
+
         private bool persistentHudEnabled;
         private bool persistentHudHookRegistered;
         private float persistentHudNextPollAt;
+        private float persistentHudNextDedupeAt;
         private string persistentHudLastStatus = "Idle.";
+
+        // Nodes we disabled on the mode panels, with the panel root they belong to. Restored the
+        // moment StatusPanel is no longer up (reopen failed, full-screen view stole focus, mode
+        // exited) so the native panels are never left stripped without the full HUD on screen —
+        // panel instances are cached by the UI layer, a leaked SetActive(false) would persist
+        // into the next vanilla open.
+        private readonly List<KeyValuePair<GameObject, GameObject>> persistentHudHiddenNodes = new List<KeyValuePair<GameObject, GameObject>>();
 
         // Image-lifetime AuraMono handles (class/method pointers only — safe to cache raw). The
         // UIManager instance and System.Type objects are managed heap objects on the moving sgen GC:
@@ -86,12 +142,33 @@ namespace HeartopiaMod
         {
             if (!this.persistentHudEnabled)
             {
+                if (this.persistentHudHiddenNodes.Count > 0)
+                {
+                    try { this.PersistentHudRestoreHiddenNodes(); } catch { }
+                }
+
                 return;
             }
 
             this.EnsurePersistentHudHookRegistered();
 
             float now = Time.unscaledTime;
+            if (now >= this.persistentHudNextDedupeAt)
+            {
+                this.persistentHudNextDedupeAt = now + PersistentHudDedupeInterval;
+                try
+                {
+                    this.PersistentHudApplyDedupe();
+                }
+                catch (Exception ex)
+                {
+                    if (MasterLogPersistentHud)
+                    {
+                        ModLogger.Msg("[PersistentHud] dedupe failed: " + ex.Message);
+                    }
+                }
+            }
+
             if (now < this.persistentHudNextPollAt)
             {
                 return;
@@ -106,6 +183,115 @@ namespace HeartopiaMod
             {
                 this.persistentHudLastStatus = "Poll failed: " + ex.Message;
             }
+        }
+
+        // GameObject.Find with a full path only matches ACTIVE objects — exactly the semantics we
+        // want: a closed/unfocused panel (root deactivated) reads as "not there".
+        private static GameObject PersistentHudFindPanelRoot(string panelName)
+        {
+            return GameObject.Find(PersistentHudStatusLayerPath + panelName + "(Clone)")
+                ?? GameObject.Find(PersistentHudStatusLayerPath + panelName);
+        }
+
+        // Hide the mode panels' duplicated HUD widgets while our reopened StatusPanel is visible;
+        // restore them the moment it is not. Runs every 0.3 s: the game's own widget refreshes
+        // (HudEntryWidget.Refresh on feature events) can re-enable inner nodes, and panels are
+        // toggled active/inactive on focus changes — re-asserting beats chasing every code path.
+        private void PersistentHudApplyDedupe()
+        {
+            GameObject statusRoot = PersistentHudFindPanelRoot("StatusPanel");
+            if (statusRoot == null)
+            {
+                // Full HUD not on screen (reopen pending/failed, full-screen view has focus, or a
+                // non-wanted mode) — never leave the native panels stripped in that state.
+                this.PersistentHudRestoreHiddenNodes();
+                return;
+            }
+
+            // Drop destroyed entries; restore entries whose panel went away or inactive (mode
+            // exited / lost focus) so cached panel instances reopen pristine.
+            for (int i = this.persistentHudHiddenNodes.Count - 1; i >= 0; i--)
+            {
+                GameObject panelRoot = this.persistentHudHiddenNodes[i].Key;
+                GameObject node = this.persistentHudHiddenNodes[i].Value;
+                if (node == null)
+                {
+                    this.persistentHudHiddenNodes.RemoveAt(i);
+                    continue;
+                }
+
+                if (panelRoot == null || !panelRoot.activeInHierarchy)
+                {
+                    node.SetActive(true);
+                    this.persistentHudHiddenNodes.RemoveAt(i);
+                }
+            }
+
+            foreach (KeyValuePair<string, string[]> entry in PersistentHudDuplicateNodesByPanel)
+            {
+                GameObject panelRoot = PersistentHudFindPanelRoot(entry.Key);
+                if (panelRoot == null)
+                {
+                    continue;
+                }
+
+                foreach (string childPath in entry.Value)
+                {
+                    Transform child = panelRoot.transform.Find(childPath);
+                    if (child == null)
+                    {
+                        continue;
+                    }
+
+                    GameObject node = child.gameObject;
+                    if (node.activeSelf)
+                    {
+                        node.SetActive(false);
+                        if (!this.PersistentHudIsNodeTracked(node))
+                        {
+                            this.persistentHudHiddenNodes.Add(new KeyValuePair<GameObject, GameObject>(panelRoot, node));
+                        }
+
+                        if (MasterLogPersistentHud)
+                        {
+                            ModLogger.Msg("[PersistentHud] hid duplicate " + entry.Key + "/" + childPath);
+                        }
+                    }
+                }
+            }
+        }
+
+        private bool PersistentHudIsNodeTracked(GameObject node)
+        {
+            for (int i = 0; i < this.persistentHudHiddenNodes.Count; i++)
+            {
+                if (ReferenceEquals(this.persistentHudHiddenNodes[i].Value, node)
+                    || this.persistentHudHiddenNodes[i].Value == node)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void PersistentHudRestoreHiddenNodes()
+        {
+            for (int i = this.persistentHudHiddenNodes.Count - 1; i >= 0; i--)
+            {
+                GameObject node = this.persistentHudHiddenNodes[i].Value;
+                if (node != null)
+                {
+                    node.SetActive(true);
+                }
+            }
+
+            if (MasterLogPersistentHud && this.persistentHudHiddenNodes.Count > 0)
+            {
+                ModLogger.Msg("[PersistentHud] restored " + this.persistentHudHiddenNodes.Count + " hidden duplicate node(s)");
+            }
+
+            this.persistentHudHiddenNodes.Clear();
         }
 
         private void EnsurePersistentHudHookRegistered()
