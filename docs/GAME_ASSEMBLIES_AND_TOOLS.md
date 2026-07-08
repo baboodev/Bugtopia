@@ -513,6 +513,44 @@ Missing file does **not** block the build.
 
 ---
 
+## Game data tables & content index (`tools/HeartopiaTables`)
+
+Offline decode + full-text **search of the game's static data** — no game launch, no runtime dump.
+Two encrypted/encoded layers are recovered and merged into one searchable FTS5 index:
+
+- **Layer A — SQLite** (`xdt_Data/StreamingAssets/Others/db/` and the `%LocalLow%\xd\Heartopia\Others\db\`
+  runtime copy: `designTable.db` = localization in 11 languages, `dialogueTable.db`, `ResIndex.db` =
+  asset-path→bundle index). String columns use the **SecureStorage** column cipher.
+- **Layer B — `cn.bytes` design tables** (~880 tables / ~308k rows: item / stat / rarity / price /
+  recipe / store / entity / task / drop / …) — a custom binary packed in AssetBundle `cn.ab`, read at
+  runtime by `EcsClient.TableData.Init`. Design rows store display names in native **zh-Hans**; the
+  builder cross-resolves them to every language via Layer A, so rows are searchable in English too.
+
+### Usage
+
+```powershell
+cd tools\HeartopiaTables
+pip install -r requirements.txt      # UnityPy — only needed for `decode`
+python htables.py decode             # cn.ab -> cn.bytes -> cn_tables.db   (needs ilspy-dumps present)
+python htables.py index              # decrypt A + load B -> heartopia_index.db (FTS5, ~3.2M docs)
+python htables.py search "Pickaxe" --source B   # cross-language: Pickaxe / 곡괭이 / Топор-мотыга …
+python htables.py search "金币"                 # native zh-Hans
+python htables.py search 410082                 # an item id across every table (Recipe/Bagitem/Pedia/…)
+python htables.py all                # decode + index
+```
+
+`decode` needs **UnityPy + `ilspy-dumps/EcsClient`** (row schemas are parsed live from the decompiled
+`Table*` ctors for the current build); `index`/`search` are stdlib-only (need the SQLite DBs + a
+`cn_tables.db`). Generated DBs are gitignored (the ~424 MB index regenerates in ~16 s). Keys, the
+container/row format, and the Steam-vs-TapTap caveat are documented in
+[`tools/HeartopiaTables/README.md`](../tools/HeartopiaTables/README.md).
+
+> The AB decryptor `heartopia_ab.py` (UnityCN key + the XD `0x6f`-per-block cap fix) opens **any**
+> Heartopia bundle, so the same toolchain extracts arbitrary `StreamingAssets/AssetBundle/*.ab`
+> content (icons, prefabs, audio); use `ResIndex.db` (asset path → bundle) to locate an asset.
+
+---
+
 ## Tools checklist
 
 | Tool | Purpose | Required for playing with mod? |
@@ -525,6 +563,8 @@ Missing file does **not** block the build.
 | [Il2CppInterop](https://github.com/BepInEx/Il2CppInterop) | Comes with BepInEx/MelonLoader — generates `interop/` | Automatic with loader |
 | Ghidra / IDA + `script.json` | Native disassembly at IL2CPP RVAs | Optional; for `GetSession`, launcher logic |
 | In-game / LocalLow dump to `DotnetAssemblies` | Lists loaded module names; **XDENCODE** blobs | Optional research only |
+| [`tools/XdUnpack`](../tools/XdUnpack) | Offline-decrypt `DotnetAssemblies` (XDENCODE) → plaintext PEs | Optional research |
+| [`tools/HeartopiaTables`](../tools/HeartopiaTables) (+ `UnityPy`) | Offline-decode game data tables + build the FTS content-search index | Optional research |
 | Repo `ilspy-dumps/` | Mono module decompilation (full bodies) | Optional |
 | Repo `gameassembly-dumps/` | IL2CPP decompilation (signatures + RVAs) | Optional |
 | Harmony (via loader) | Patches | Bundled |
