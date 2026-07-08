@@ -169,3 +169,28 @@ Cancel pending tokens on world change.
   path but their only writer (the bag-UI scanner) is gone, so they always miss and star detection
   uses the direct-scan `starRate` / `step` / `QualityComponent` sources. `MasterLogGameIcons = true`
   re-enables verbose `[GameIcons]` per-load logging if a future build needs re-diagnosis.
+
+## 5. Offline icon-name catalogue (`icon_index.tsv`)
+
+The runtime loader above needs the game running. For **offline** work (knowing an icon exists,
+picking a replacement icon name, or pre-extracting a PNG) there is now a full catalogue of every
+icon the game can load, recovered from the encrypted resource index — no game launch.
+
+- **Source:** `ResIndex.db` (`%LocalLow%\xd\Heartopia\Others\db\`) maps every shipped asset →
+  its AssetBundle; its columns use the SecureStorage cipher, decrypted by the HeartopiaTables tool.
+- **Generate:** `python tools/HeartopiaTables/htables.py icons` → `icon_index.tsv`
+  (3 columns: `iconName · assetPath · bundle`). Needs only `ResIndex.db`. A materialized copy for
+  the current build lives at `.research-record/heartopia-tables/icon_index.tsv`.
+- **Contents (current build):** 25,497 icon/sprite entries out of 148,246 total asset paths —
+  23,857 `.png`, 264 `.spriteatlas`, incl. **18,911 `ui_item_normal_*` item icons**.
+- **Key alignment:** `iconName` is the path basename without extension, so the mod's runtime key
+  `"ui_item_normal_" + RewardUtility.GetIconName(staticId, step)` (§2.2) matches column 1 **directly**
+  — grep the TSV by icon name to confirm an asset exists / find its bundle.
+- **Item → icon mapping** is independently confirmed in the decoded design tables (`cn_tables.db`):
+  129 tables carry an icon column (`iconspecial` for equip/furniture, `icon` / `itemIcon` /
+  `avatarIcon` / `showPath` elsewhere) — searchable via `htables.py search`.
+- **Extract the PNG offline:** feed the row's `bundle` to `tools/HeartopiaTables/heartopia_ab.py`,
+  closing the whole `staticId → iconName → assetPath → bundle → PNG` chain. This is the offline
+  route for the outstanding "replace the two embedded radar tree PNGs (`tree` / `rare_tree`) with
+  the real Quality/Rare Timber item icons" follow-up (§4 loads them at runtime; this pre-extracts
+  them for embedding as a robust fallback).
