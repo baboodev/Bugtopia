@@ -277,6 +277,17 @@ namespace HeartopiaMod
                 Transform playerTransform = playerRoot != null ? playerRoot.transform : null;
                 Camera mainCamera = Camera.main;
                 GameObject[] candidates = this.GetCachedFishShadowTargetObjects();
+
+                // Live fish-state snapshot via AuraMono GetComponents<FishComponent> (primary).
+                // Supplies each shadow's REAL state (netId/shadowState/floatNetId/playerNetId/
+                // fishResId/targetPos) and identifies PHANTOM shadows: a just-caught fish's
+                // GameObject lingers ~1 scan with no live fish entity behind it — casting at it
+                // lands in empty water. When the snapshot is unavailable (class unresolved, infra
+                // not ready, pinning unavailable, empty/failed query) the scan DEGRADES to the
+                // legacy name-based behavior below — fishing must never break on this path.
+                bool auraSnapshotReady = candidates.Length > 0
+                    && this.TryBuildFishShadowAuraSnapshot(this.fishShadowAuraSnapshot);
+
                 float bestDistance = float.MaxValue;
                 float bestScore = float.MaxValue;
                 string bestName = string.Empty;
@@ -308,19 +319,54 @@ namespace HeartopiaMod
                     // the auto-bait "no fish nearby" gate (a fish being battled still counts as present).
                     inRangeCount++;
 
-                    if (this.TryGetFishShadowOccupancy(candidate, out uint occupiedBuoyNetId, out uint occupiedPlayerNetId, out string occupiedState, out Vector3 moveTargetPos)
-                        && (occupiedBuoyNetId != 0U
-                            || occupiedPlayerNetId != 0U
-                            || string.Equals(occupiedState, "Battle", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(occupiedState, "FindBuoyWaiting", StringComparison.OrdinalIgnoreCase)))
+                    uint occupiedBuoyNetId = 0U;
+                    uint occupiedPlayerNetId = 0U;
+                    string occupiedState = string.Empty;
+                    Vector3 moveTargetPos = Vector3.zero;
+                    uint snapshotNetId = 0U;
+                    int snapshotFishResId = 0;
+                    if (auraSnapshotReady)
+                    {
+                        // Snapshot primary: no live FishComponent entity at this shadow's XZ means
+                        // the GameObject is a lingering phantom (just-caught fish) — never cast at it.
+                        if (!this.TryMatchFishShadowAuraSnapshotEntry(this.fishShadowAuraSnapshot, livePos, out FishShadowAuraFishEntry snapshotEntry))
+                        {
+                            this.AutoFishLog($"Fish shadow scan: no live fish at ({livePos.x:F1},{livePos.z:F1}) -> phantom skipped (obj={candidate.name})");
+                            continue;
+                        }
+
+                        occupiedBuoyNetId = snapshotEntry.FloatNetId;
+                        occupiedPlayerNetId = snapshotEntry.PlayerNetId;
+                        occupiedState = GetFishShadowAiStateName(snapshotEntry.ShadowState);
+                        moveTargetPos = snapshotEntry.TargetPos;
+                        snapshotNetId = snapshotEntry.NetId;
+                        snapshotFishResId = snapshotEntry.FishResId;
+                        this.AutoFishLog($"Fish shadow scan: matched netId={snapshotNetId} state={occupiedState} fishResId={snapshotFishResId} obj={candidate.name}");
+                    }
+                    else
+                    {
+                        // Degrade path: legacy interop component walk. FishComponent is an
+                        // entity-system ViewComponent (not a Unity Component), so on this build the
+                        // walk finds no state — identical to the pre-snapshot behavior.
+                        this.TryGetFishShadowOccupancy(candidate, out occupiedBuoyNetId, out occupiedPlayerNetId, out occupiedState, out moveTargetPos);
+                    }
+
+                    // Occupied: attracted to someone's buoy (FindBuoyWaiting/AttemptForward carry
+                    // floatNetId) or already being reeled (Battle carries playerNetId).
+                    if (occupiedBuoyNetId != 0U
+                        || occupiedPlayerNetId != 0U
+                        || string.Equals(occupiedState, "Battle", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(occupiedState, "FindBuoyWaiting", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(occupiedState, "AttemptForward", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
 
                     // Fleeing fish (someone's failed catch) is moving fast and will be gone before the
-                    // buoy lands — never target it.
+                    // buoy lands — never target it. Succeed = already caught (despawning).
                     if (string.Equals(occupiedState, "Escape", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(occupiedState, "RunAway", StringComparison.OrdinalIgnoreCase))
+                        || string.Equals(occupiedState, "RunAway", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(occupiedState, "Succeed", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -355,6 +401,13 @@ namespace HeartopiaMod
                     }
 
                     int candidatePriority = this.GetFishShadowVisualPriority(candidate, out int candidateFishId, out string candidatePrioritySource);
+                    if (snapshotFishResId > 0)
+                    {
+                        // Exact fish id from live FishComponentData (rarity lookup no longer relies
+                        // on the prefab-name heuristic alone).
+                        candidateFishId = snapshotFishResId;
+                    }
+
                     float candidateScore = this.GetFishShadowTargetScore(candidate, candidatePos, candidateDistance, playerTransform, mainCamera, candidatePriority)
                         + this.GetFishShadowCoopJitter(candidate, playerRoot);
                     if (candidateScore >= bestScore)
@@ -362,8 +415,13 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    uint candidateNetId = 0U;
-                    this.TryResolveNetIdFromGameObject(candidate, out candidateNetId, out _);
+                    // netId: snapshot entity netId when matched (the GameObject resolve below never
+                    // finds one on this build — FishComponent is not a Unity Component).
+                    uint candidateNetId = snapshotNetId;
+                    if (candidateNetId == 0U)
+                    {
+                        this.TryResolveNetIdFromGameObject(candidate, out candidateNetId, out _);
+                    }
                     bestScore = candidateScore;
                     bestDistance = candidateDistance;
                     bestName = candidate.name;
@@ -503,6 +561,297 @@ namespace HeartopiaMod
             {
                 this.AutoFishLog("FishComponent narrowed shadow scan failed: " + ex.Message);
                 return null;
+            }
+        }
+
+        // ===== AuraMono live fish-state snapshot (phantom-shadow filter + real netId/state) =====
+        //
+        // FishComponent is NOT a Unity Component — it is an entity-system ViewComponent
+        // (XDTLevelAndEntity.Gameplay.Component.Fish.FishComponent, held by Entity._components),
+        // invisible to GameObject.GetComponents. The legacy interop walk in TryGetFishShadowOccupancy
+        // therefore reads NO state on this build (occupancy always empty, netId always 0). This
+        // snapshot enumerates live FishComponent instances via the game's own Entities.GetComponents<T>
+        // (AuraMono inflate — TryAuraMonoGetComponentObjects, the insect/bubble/loot template) and
+        // scalarizes every fish's state IMMEDIATELY: raw mono pointers live on the moving sgen GC, so
+        // each pointer is pinned for exactly the reads it needs and nothing raw survives this method.
+        //
+        // Liveness = component `running` (ViewComponent lifecycle — false while spawning/despawning)
+        // AND entity `!WillDie` (true during FadeOut/UnSpawn — the just-caught lingering window; the
+        // shadow stays VISIBLE through FadeOut, so entity-exists alone is not a phantom test).
+        // A shadow GameObject with no live snapshot entry at its XZ is a PHANTOM — skip, don't cast.
+        //
+        // Fail-closed rules:
+        // - Any member-read failure on a component marks the snapshot unreliable and the WHOLE scan
+        //   degrades to the legacy name-based behavior (read failures must never become "every
+        //   shadow is a phantom" = broken fishing).
+        // - State comes from the `_componentData` STRUCT FIELD read (mono_field_get_value_object
+        //   returns a boxed COPY; field offsets on the box are header-relative and correct). NEVER
+        //   invoke get_ComponentData (ref readonly return = unsafe under mono_runtime_invoke) and
+        //   NEVER DataCenter.TryGetComponentData<FishComponentData> (generic over a struct = crash).
+        private struct FishShadowAuraFishEntry
+        {
+            public uint NetId;
+            public Vector3 Position;
+            public int ShadowState;   // FishShadowAiState: 0 IdleDrift, 1 IdleMove, 2 FindBuoyWaiting, 3 AttemptForward, 4 Battle, 5 Escape, 6 Succeed, 7 RunAway
+            public uint FloatNetId;
+            public uint PlayerNetId;
+            public int FishResId;
+            public Vector3 TargetPos; // IdleMove bezier end point (y arrives 0 on the wire)
+        }
+
+        // Shadow GameObject <-> live fish entity match radius (XZ-only; the fish entity sits below
+        // the water surface, so Y always differs). View and entity move together within a frame —
+        // 0.75m absorbs hierarchy offsets without gluing school-mates together.
+        private const float FishShadowAuraSnapshotMatchRadius = 0.75f;
+        private IntPtr fishShadowAuraComponentClass; // mono class ptr (image lifetime — raw IntPtr ok)
+        private float nextFishShadowAuraSnapshotRetryAt = -999f;
+        private string lastFishShadowAuraSnapshotFailReason = string.Empty;
+        private readonly List<FishShadowAuraFishEntry> fishShadowAuraSnapshot = new List<FishShadowAuraFishEntry>(16);
+
+        private bool TryBuildFishShadowAuraSnapshot(List<FishShadowAuraFishEntry> snapshot)
+        {
+            snapshot.Clear();
+            float now = Time.unscaledTime;
+            if (now < this.nextFishShadowAuraSnapshotRetryAt)
+            {
+                return false; // recent failure — degrade quietly, retry later (throttled)
+            }
+
+            try
+            {
+                // Shared Entities.GetComponents infra gate (Entities class + generic inflate +
+                // kill-switch) — deliberately NOT the farm-specific readiness (crop component
+                // classes are irrelevant to fishing).
+                if (!this.TryAuraMonoEntitiesGetComponentsInfraReady(out string infraStatus))
+                {
+                    this.NoteFishShadowAuraSnapshotFailure(now, 5f, "infra not ready: " + infraStatus);
+                    return false;
+                }
+
+                // Fail closed when the gchandle exports are unresolved: an unpinned enumeration
+                // would walk movable sgen memory (memory: auramono-pinning-fail-closed).
+                if (!AuraMonoPinningAvailable)
+                {
+                    this.NoteFishShadowAuraSnapshotFailure(now, 60f, "mono_gchandle exports unavailable");
+                    return false;
+                }
+
+                if (this.fishShadowAuraComponentClass == IntPtr.Zero)
+                {
+                    this.fishShadowAuraComponentClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.Fish.FishComponent");
+                    if (this.fishShadowAuraComponentClass == IntPtr.Zero)
+                    {
+                        this.fishShadowAuraComponentClass = this.FindAuraMonoClassByFullName("ScriptsRefactory.LevelAndEntity.Gameplay.Component.Fish.FishComponent");
+                    }
+
+                    if (this.fishShadowAuraComponentClass == IntPtr.Zero)
+                    {
+                        this.NoteFishShadowAuraSnapshotFailure(now, 10f, "FishComponent mono class unavailable");
+                        return false;
+                    }
+                }
+
+                int totalComponents = 0;
+                int readFailures = 0;
+                List<uint> compPins = new List<uint>();
+                try
+                {
+                    // Returns false on empty too — an empty snapshot must NOT phantom-skip every
+                    // candidate, so empty degrades to the legacy scan like any other failure.
+                    if (!this.TryAuraMonoGetComponentObjects(this.fishShadowAuraComponentClass, out List<IntPtr> components, compPins) || components == null)
+                    {
+                        this.NoteFishShadowAuraSnapshotFailure(now, 5f, "GetComponents<FishComponent> failed or empty");
+                        return false;
+                    }
+
+                    totalComponents = components.Count;
+                    for (int i = 0; i < components.Count; i++)
+                    {
+                        IntPtr componentObj = components[i];
+                        if (componentObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        // running == false => ViewComponent not in its Running phase (spawning or
+                        // despawning — the phantom window). A read FAILURE is not "not live": count
+                        // it and reject the whole snapshot below.
+                        if (!this.TryGetMonoBoolMember(componentObj, "running", out bool compRunning))
+                        {
+                            readFailures++;
+                            continue;
+                        }
+
+                        if (!compRunning)
+                        {
+                            continue;
+                        }
+
+                        if ((!this.TryGetMonoObjectMember(componentObj, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+                            && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                        {
+                            readFailures++;
+                            continue;
+                        }
+
+                        uint entityPin = AuraMonoPinNew(entityObj);
+                        try
+                        {
+                            // Entity teardown window (FadeOut/UnSpawning/Destroyed): the shadow is
+                            // still rendered but the fish is already gone.
+                            if (!this.TryGetMonoBoolMember(entityObj, "WillDie", out bool willDie))
+                            {
+                                readFailures++;
+                                continue;
+                            }
+
+                            if (willDie)
+                            {
+                                continue;
+                            }
+
+                            if (!this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 entityPos))
+                            {
+                                readFailures++;
+                                continue;
+                            }
+
+                            // netId 0 / read miss keeps the entry: LIVENESS decides the phantom
+                            // filter, not identity — the scan then just reports netId=0 as before.
+                            uint entityNetId = 0U;
+                            this.TryGetAuraMonoEntityNetId(entityObj, out entityNetId);
+
+                            // Boxed COPY of the FishComponentData struct field (see header comment).
+                            if (!this.TryGetMonoObjectMember(componentObj, "_componentData", out IntPtr boxedData) || boxedData == IntPtr.Zero)
+                            {
+                                readFailures++;
+                                continue;
+                            }
+
+                            uint dataPin = AuraMonoPinNew(boxedData);
+                            try
+                            {
+                                if (!this.TryGetMonoIntMember(boxedData, "shadowState", out int shadowState))
+                                {
+                                    readFailures++;
+                                    continue;
+                                }
+
+                                this.TryGetMonoUInt32Member(boxedData, "floatNetId", out uint floatNetId);
+                                this.TryGetMonoUInt32Member(boxedData, "playerNetId", out uint playerNetId);
+                                this.TryGetMonoIntMember(boxedData, "fishResId", out int fishResId);
+                                this.TryGetMonoVector3Member(boxedData, "targetPos", out Vector3 targetPos);
+
+                                snapshot.Add(new FishShadowAuraFishEntry
+                                {
+                                    NetId = entityNetId,
+                                    Position = entityPos,
+                                    ShadowState = shadowState,
+                                    FloatNetId = floatNetId,
+                                    PlayerNetId = playerNetId,
+                                    FishResId = fishResId,
+                                    TargetPos = targetPos
+                                });
+                            }
+                            finally
+                            {
+                                AuraMonoPinFree(dataPin);
+                            }
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(entityPin);
+                        }
+                    }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(compPins);
+                }
+
+                if (readFailures > 0)
+                {
+                    // Unreliable snapshot (member rename after a game patch, transient invoke
+                    // failures): using it could phantom-skip REAL fish. Degrade instead.
+                    snapshot.Clear();
+                    this.NoteFishShadowAuraSnapshotFailure(now, 10f, "member read failures on " + readFailures + "/" + totalComponents + " component(s)");
+                    return false;
+                }
+
+                if (!string.IsNullOrEmpty(this.lastFishShadowAuraSnapshotFailReason))
+                {
+                    this.lastFishShadowAuraSnapshotFailReason = string.Empty;
+                    this.AutoFishLog("AuraMono fish snapshot available again");
+                }
+
+                this.AutoFishLog("AuraMono fish snapshot: " + totalComponents + " comps, " + snapshot.Count + " live");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                snapshot.Clear();
+                this.NoteFishShadowAuraSnapshotFailure(now, 10f, "exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        private void NoteFishShadowAuraSnapshotFailure(float now, float retryDelay, string reason)
+        {
+            this.nextFishShadowAuraSnapshotRetryAt = now + retryDelay;
+            if (!string.Equals(this.lastFishShadowAuraSnapshotFailReason, reason, StringComparison.Ordinal))
+            {
+                this.lastFishShadowAuraSnapshotFailReason = reason;
+                this.AutoFishLog("AuraMono fish snapshot unavailable (" + reason + ") -> name-based scan fallback");
+            }
+        }
+
+        private bool TryMatchFishShadowAuraSnapshotEntry(List<FishShadowAuraFishEntry> snapshot, Vector3 livePos, out FishShadowAuraFishEntry match)
+        {
+            match = default(FishShadowAuraFishEntry);
+            if (snapshot == null || snapshot.Count == 0)
+            {
+                return false;
+            }
+
+            float maxSqr = FishShadowAuraSnapshotMatchRadius * FishShadowAuraSnapshotMatchRadius;
+            float bestSqr = float.MaxValue;
+            int bestIndex = -1;
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                float dx = snapshot[i].Position.x - livePos.x;
+                float dz = snapshot[i].Position.z - livePos.z;
+                float distSqr = (dx * dx) + (dz * dz);
+                if (distSqr <= maxSqr && distSqr < bestSqr)
+                {
+                    bestSqr = distSqr;
+                    bestIndex = i;
+                }
+            }
+
+            if (bestIndex < 0)
+            {
+                return false;
+            }
+
+            match = snapshot[bestIndex];
+            return true;
+        }
+
+        // Names mirror the FishShadowAiState enum (EcsClient XDT.Scene.Shared.Creatures) and the
+        // strings the legacy interop path produced — the state checks in the scan compare on these.
+        private static string GetFishShadowAiStateName(int state)
+        {
+            switch (state)
+            {
+                case 0: return "IdleDrift";
+                case 1: return "IdleMove";
+                case 2: return "FindBuoyWaiting";
+                case 3: return "AttemptForward";
+                case 4: return "Battle";
+                case 5: return "Escape";
+                case 6: return "Succeed";
+                case 7: return "RunAway";
+                default: return "State" + state;
             }
         }
 
