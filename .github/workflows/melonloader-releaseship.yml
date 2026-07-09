@@ -1,4 +1,9 @@
-name: MelonLoader ReleaseShip
+# MelonLoader ReleaseShip is built and (on v* tags) published to the GitHub release.
+# BepInEx ReleaseShip is built as a WORKFLOW ARTIFACT ONLY — deliberately never
+# attached to the release. It self-skips (with a warning) until the deps zip on the
+# `deps` release is regenerated with ci/prepare-melonloader-deps.ps1 from an install
+# that has BepInEx, so refreshing the zip is what activates it.
+name: ReleaseShip
 
 on:
   push:
@@ -109,6 +114,41 @@ jobs:
           path: |
             buddy/bin/MelonLoader/ReleaseShip/bugtopia.dll
             buddy/bin/MelonLoader/ReleaseShip/bugtopia.pdb
+          if-no-files-found: error
+
+      - name: Check BepInEx CI deps
+        id: bepinex_deps
+        shell: pwsh
+        run: |
+          $core = Join-Path $env:GITHUB_WORKSPACE "ci\heartopia\BepInEx\core\BepInEx.Core.dll"
+          $interop = Join-Path $env:GITHUB_WORKSPACE "ci\heartopia\BepInEx\interop\Client.dll"
+          $present = (Test-Path $core) -and (Test-Path $interop)
+          "present=$($present.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if (-not $present) {
+            Write-Host "::warning::BepInEx deps missing from melonloader-ci-deps.zip - skipping the BepInEx ReleaseShip build. Regenerate the zip with ci/prepare-melonloader-deps.ps1 (from an install that has BepInEx) and re-upload it to the 'deps' release."
+          }
+
+      - name: Build ReleaseShip (BepInEx)
+        if: steps.bepinex_deps.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          dotnet build buddy/buddy.csproj `
+            -c ReleaseShip `
+            -p:Loader=BepInEx `
+            -p:HeartopiaDir="${{ github.workspace }}\ci\heartopia" `
+            -p:ContinuousIntegrationBuild=true `
+            --nologo
+
+      # Artifacts only by design: the BepInEx flavor is NOT attached to the GitHub
+      # release below (the release stays MelonLoader-only).
+      - name: Upload bugtopia.dll artifact (BepInEx)
+        if: steps.bepinex_deps.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bugtopia-bepinex-releaseship
+          path: |
+            buddy/bin/BepInEx/ReleaseShip/bugtopia.dll
+            buddy/bin/BepInEx/ReleaseShip/bugtopia.pdb
           if-no-files-found: error
 
       - name: Publish release
