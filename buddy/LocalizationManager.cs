@@ -470,6 +470,8 @@ namespace HeartopiaMod
             { "Sculpture collected", "Sculpture collected" },
             { "Sand base placed", "Sand base placed" },
             { "no sand bases left", "no sand bases left in backpack" },
+            { "Prefer rare / uncollected models", "Prefer rare / uncollected models" },
+            { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "When a draft allows several models, pick the one missing from your 5★ collection (rarest first)." },
         };
 
         // Built-in Spanish fallback strings.
@@ -909,6 +911,8 @@ namespace HeartopiaMod
             { "Sculpture collected", "Escultura recogida" },
             { "Sand base placed", "Base de arena colocada" },
             { "no sand bases left", "no quedan bases de arena en la mochila" },
+            { "Prefer rare / uncollected models", "Preferir modelos raros / no coleccionados" },
+            { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "Cuando un borrador permite varios modelos, elige el que falte en tu colección 5★ (los más raros primero)." },
             // Backfilled translations
             { "Auto Pickup Drops", "Auto recoger objetos" },
             { "Pickup Distance: {0}m", "Distancia de recogida: {0}m" },
@@ -1359,6 +1363,8 @@ namespace HeartopiaMod
             { "Sculpture collected", "已收取沙雕" },
             { "Sand base placed", "已放置沙雕底座" },
             { "no sand bases left", "背包中没有沙雕底座了" },
+            { "Prefer rare / uncollected models", "优先稀有/未收集的模型" },
+            { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "当草稿可做出多个模型时，优先选择你5星图鉴中缺失的（稀有优先）。" },
             // Backfilled translations
             { "Auto Pickup Drops", "自动拾取掉落物" },
             { "Pickup Distance: {0}m", "拾取距离：{0}m" },
@@ -1797,6 +1803,8 @@ namespace HeartopiaMod
             { "Sculpture collected", "Escultura coletada" },
             { "Sand base placed", "Base de areia colocada" },
             { "no sand bases left", "sem bases de areia na mochila" },
+            { "Prefer rare / uncollected models", "Preferir modelos raros / não coletados" },
+            { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "Quando um rascunho permite vários modelos, escolhe o que falta na sua coleção 5★ (mais raros primeiro)." },
             // Backfilled translations
             { "Auto Pickup Drops", "Coleta automática de itens" },
             { "Pickup Distance: {0}m", "Distância de coleta: {0}m" },
@@ -2245,6 +2253,8 @@ namespace HeartopiaMod
             { "Sculpture collected", "เก็บประติมากรรมแล้ว" },
             { "Sand base placed", "วางฐานทรายแล้ว" },
             { "no sand bases left", "ไม่มีฐานทรายในกระเป๋าแล้ว" },
+            { "Prefer rare / uncollected models", "เลือกแบบหายาก/ยังไม่เก็บก่อน" },
+            { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "เมื่อร่างทำได้หลายแบบ ให้เลือกแบบที่ยังไม่มีในคอลเลกชัน 5★ (หายากก่อน)" },
             // Backfilled translations
             { "Auto Pickup Drops", "เก็บไอเทมที่ตกอัตโนมัติ" },
             { "Pickup Distance: {0}m", "ระยะเก็บ: {0}m" },

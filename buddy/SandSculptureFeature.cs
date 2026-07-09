@@ -43,6 +43,32 @@ namespace HeartopiaMod
         // SandfinishedItem ids 1..14 are the real sculptures; ids >14 are decoy answers that
         // produce sandfinished 600299 (a spoiled/failure sculpture). Verified vs cn_tables.db.
         private const int SandValidModelMaxId = 14;
+
+        // SandfinishedItem id (1..14) -> Sandfinished model staticId, and the model's rarity (1..5,
+        // from Entity._rarity). Semantically-forced 1:1 map, verified vs cn_tables.db + designTable
+        // (see .research-record/sand-5star-priority.md). Index 0 is unused (item ids are 1-based).
+        private static readonly int[] SandItemToModelStaticId =
+        {
+            0,
+            600100, // 1 car
+            600101, // 2 frog
+            600108, // 3 hermit crab (time-gated 6-18h)
+            600113, // 4 duck
+            600102, // 5 rabbit
+            600103, // 6 lighthouse (time-gated 12-24h)
+            600104, // 7 ship
+            600111, // 8 bear
+            600107, // 9 whale
+            600109, // 10 muscle cat (weather rainbow only)
+            600112, // 11 seagull
+            600105, // 12 polar bear
+            600106, // 13 moai
+            600110, // 14 cactus (weather rain/rainbow)
+        };
+        private static readonly int[] SandItemRarity =
+        {
+            0, 1, 1, 2, 1, 1, 2, 3, 3, 4, 5, 4, 4, 4, 5,
+        };
         private const int SandMaxBaseFailures = 3;
         private const int SandMaxOptionCount = 64;
 
@@ -86,6 +112,9 @@ namespace HeartopiaMod
         private int sandPlannedPerfectCount;
         private int sandSculpturesDone;
         private float sandFinishDelaySeconds = 3f;
+        // When a rough offers 2+ valid models, prefer the one whose Pictorial 5★ (or current
+        // hobby-level star cap) is still missing, tie-broken by rarity. Off = smallest valid id.
+        private bool sandPreferRareUncollected = true;
         private readonly Dictionary<uint, int> sandBaseFailCounts = new Dictionary<uint, int>();
         private readonly HashSet<uint> sandBaseBlacklist = new HashSet<uint>();
 
@@ -112,6 +141,8 @@ namespace HeartopiaMod
         private IntPtr sandCollectFinishComponentClass; // SandFinishComponent
         private IntPtr sandCollectCharacterProtocolClass; // CharacterProtocolManager
         private IntPtr sandCollectPoseDeleteMethod;     // PoseDeleteBuild(uint) — 1 param
+        private IntPtr sandPictorialTryGetMethod;       // PictorialSystem.TryGetPictorialData(int,out) — 2 params
+        private IntPtr sandHobbyGetLevelMethod;         // HobbySystem.GetHobbyLevel(HobbyId) — 1 param
 
         private static readonly string[] SandAuraProtocolTypeNames =
         {
@@ -607,11 +638,12 @@ namespace HeartopiaMod
             this.sandApiNextActionAt = now + SandApiWaitRoughPollSeconds;
         }
 
-        // Picks which model option to choose. The rough's option list is [one real model + 2
-        // decoys]: the 14 real sculptures are SandfinishedItem ids 1..14, decoys are >14, and
-        // choosing a decoy yields sandfinished 600299 = a SPOILED sculpture (confirmed 2026-07-09
-        // by cross-referencing the QTE log with cn_tables.db, agent-verified). The correct option
-        // is the smallest id (the only id <= SandValidModelMaxId).
+        // Picks which model option to choose. The 14 real sculptures are SandfinishedItem ids
+        // 1..14; ids >14 are decoys that yield sandfinished 600299 (a SPOILED sculpture). A rough's
+        // option list carries one OR MORE valid ids (≤14) + decoy fillers (confirmed live). When
+        // exactly one is valid there is no choice; when 2–3 are valid the mod prefers the one that
+        // best advances the Pictorial collection (a model whose 5★ / current-cap record is still
+        // missing), tie-broken by rarity, then smallest id — see .research-record/sand-5star-priority.md.
         private int SandPickModelOptionIndex(int[] options)
         {
             if (options == null || options.Length == 0)
@@ -619,11 +651,9 @@ namespace HeartopiaMod
                 return 0;
             }
 
-            // Prefer a real model (id <= SandValidModelMaxId); among those (normally exactly one)
-            // take the smallest. Fall back to the overall smallest id if none look like a model.
-            int bestValid = -1;
+            int bestValid = -1;      // index of the smallest valid id (baseline / fallback)
             int bestValidId = int.MaxValue;
-            int bestAny = 0;
+            int bestAny = 0;         // index of the smallest id overall (decoy fallback if no valid)
             int validCount = 0;
             for (int i = 0; i < options.Length; i++)
             {
@@ -643,17 +673,225 @@ namespace HeartopiaMod
                 }
             }
 
-            // The server always sends exactly one valid model (id<=14) + 2 decoys. Anything else is
-            // an anomaly worth surfacing (game data changed / more models added / a table update
-            // moved the id boundary). We still pick the smallest valid id; if there is none we are
-            // forced onto a decoy (spoil) — log loudly so it is visible in bugtopia.log.
-            if (validCount != 1)
+            if (validCount == 0)
             {
-                this.SandLogStatus("model-pick anomaly: validCount=" + validCount + " (expected 1) options=[" + string.Join(",", options) + "]"
-                                   + (bestValid < 0 ? " -> NO valid model, forced decoy (will spoil)" : " -> picking smallest valid id=" + bestValidId));
+                // No real model in the set — forced onto a decoy (will spoil). Should not happen;
+                // log loudly so it is visible in bugtopia.log.
+                this.SandLogStatus("model-pick: NO valid model in options=[" + string.Join(",", options) + "] -> forced decoy (will spoil)");
+                return bestAny;
             }
 
-            return bestValid >= 0 ? bestValid : bestAny;
+            // One valid id, or preference off, or a null model map -> the smallest valid id (the
+            // long-standing safe pick). Backwards-compatible fast path.
+            if (validCount == 1 || !this.sandPreferRareUncollected)
+            {
+                return bestValid;
+            }
+
+            // 2+ valid ids: rank by (collection value DESC, rarity DESC, id ASC). Fail-closed — any
+            // Pictorial/hobby resolve failure just leaves collectValue at 0 so rarity+id decide.
+            int starCap = this.SandCurrentStarCap();
+            int chosen = bestValid;
+            long bestKey = long.MinValue;
+            bool anyPictorial = false;
+            for (int i = 0; i < options.Length; i++)
+            {
+                int id = options[i];
+                if (id < 1 || id > SandValidModelMaxId)
+                {
+                    continue;
+                }
+
+                int modelStaticId = SandItemToModelStaticId[id];
+                int rarity = SandItemRarity[id];
+                int collectValue = 0;
+                if (this.TryGetSandModelCollectValue(modelStaticId, starCap, out int cv))
+                {
+                    collectValue = cv;
+                    anyPictorial = true;
+                }
+
+                // Lexicographic key: collectValue (0..2) then rarity (1..5) then smaller id wins.
+                long key = ((long)collectValue << 40) | ((long)rarity << 32) | (uint)(int.MaxValue - id);
+                if (key > bestKey)
+                {
+                    bestKey = key;
+                    chosen = i;
+                }
+            }
+
+            this.SandLog("model-pick: validCount=" + validCount + " options=[" + string.Join(",", options) + "] cap=" + starCap
+                         + " pictorial=" + anyPictorial + " -> id=" + options[chosen] + " (model " + SandItemToModelStaticId[options[chosen]] + ")");
+            return chosen;
+        }
+
+        // Star cap at the current sand-hobby (theme 140) level: L1-2 -> 3, L3-4 -> 4, L5 -> 5.
+        // Quality feature closed -> 1 (no stars). Level unreadable -> 5 (optimistic; then only
+        // NotGot entries drive the pick). Read once per multi-valid pick.
+        private int SandCurrentStarCap()
+        {
+            if (!this.IsSandQualityFeatureOpen(out _))
+            {
+                return 1;
+            }
+            if (this.TryGetSandHobbyLevel(out int lvl) && lvl > 0)
+            {
+                if (lvl >= 5) return 5;
+                if (lvl >= 3) return 4;
+                return 3;
+            }
+            return 5;
+        }
+
+        // collectValue: 2 = pedia entry not collected yet (NotGot); 1 = collected but its star
+        // record is below the current cap (still improvable at this level); 0 = nothing to gain.
+        private bool TryGetSandModelCollectValue(int modelStaticId, int starCap, out int collectValue)
+        {
+            collectValue = 0;
+            if (!this.TryReadSandPictorialState(modelStaticId, out int state, out int starRate))
+            {
+                return false;
+            }
+
+            if (state != 2) // EPictorialNewState.Got == 2
+            {
+                collectValue = 2;
+            }
+            else if (starRate < Math.Min(5, starCap))
+            {
+                collectValue = 1;
+            }
+            else
+            {
+                collectValue = 0;
+            }
+            return true;
+        }
+
+        // PictorialSystem.TryGetPictorialData(staticId, out PictorialBase) -> read the _state and
+        // _starRate FIELDS directly (the virtual GetStarRate() returns 0 when the feature is closed
+        // or the entry is not Got, which would misreport progress). Reference-type out slot is the
+        // safe mono_runtime_invoke out case. Fail-closed.
+        private unsafe bool TryReadSandPictorialState(int staticId, out int state, out int starRate)
+        {
+            state = 0;
+            starRate = 0;
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+                {
+                    return false;
+                }
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Pictorial.PictorialSystem", out IntPtr sysObj)
+                    || sysObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                uint sysPin = AuraMonoPinNew(sysObj);
+                try
+                {
+                    if (this.sandPictorialTryGetMethod == IntPtr.Zero)
+                    {
+                        IntPtr sysClass = auraMonoObjectGetClass(sysObj);
+                        this.sandPictorialTryGetMethod = this.FindAuraMonoMethodOnHierarchy(sysClass, "TryGetPictorialData", 2);
+                    }
+                    if (this.sandPictorialTryGetMethod == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    IntPtr exc = IntPtr.Zero;
+                    int id = staticId;
+                    IntPtr outSlot = IntPtr.Zero; // out PictorialBase (reference type)
+                    IntPtr* args = stackalloc IntPtr[2];
+                    args[0] = (IntPtr)(&id);
+                    args[1] = (IntPtr)(&outSlot);
+                    IntPtr boxedOk = auraMonoRuntimeInvoke(this.sandPictorialTryGetMethod, sysObj, (IntPtr)args, ref exc);
+                    if (exc != IntPtr.Zero || outSlot == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+                    if (boxedOk != IntPtr.Zero && this.TryUnboxMonoBoolean(boxedOk, out bool ok) && !ok)
+                    {
+                        return false;
+                    }
+
+                    uint pin = AuraMonoPinNew(outSlot);
+                    try
+                    {
+                        bool gotState = this.TryGetMonoInt32Member(outSlot, "_state", out state);
+                        this.TryGetMonoInt32Member(outSlot, "_starRate", out starRate);
+                        return gotState;
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(pin);
+                    }
+                }
+                finally
+                {
+                    AuraMonoPinFree(sysPin);
+                }
+            }
+            catch (Exception ex)
+            {
+                this.SandLog("pictorial read exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // HobbySystem.GetHobbyLevel(HobbyId=140) -> int (enum arg passes as a 4-byte int). Fail-closed.
+        private unsafe bool TryGetSandHobbyLevel(out int level)
+        {
+            level = 0;
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+                {
+                    return false;
+                }
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Hobby.HobbySystem", out IntPtr sysObj)
+                    || sysObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                uint pin = AuraMonoPinNew(sysObj);
+                try
+                {
+                    if (this.sandHobbyGetLevelMethod == IntPtr.Zero)
+                    {
+                        IntPtr cls = auraMonoObjectGetClass(sysObj);
+                        this.sandHobbyGetLevelMethod = this.FindAuraMonoMethodOnHierarchy(cls, "GetHobbyLevel", 1);
+                    }
+                    if (this.sandHobbyGetLevelMethod == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    IntPtr exc = IntPtr.Zero;
+                    int themeId = 140; // sand-sculpting hobby theme
+                    IntPtr* args = stackalloc IntPtr[1];
+                    args[0] = (IntPtr)(&themeId);
+                    IntPtr boxed = auraMonoRuntimeInvoke(this.sandHobbyGetLevelMethod, sysObj, (IntPtr)args, ref exc);
+                    if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+                    return this.TryUnboxMonoInt32(boxed, out level);
+                }
+                finally
+                {
+                    AuraMonoPinFree(pin);
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void SandTickCloseDialog(float now)
@@ -2371,6 +2609,17 @@ namespace HeartopiaMod
                 this.AddMenuNotification(this.L("Auto-collect finished sculptures") + ": " + (this.sandAutoCollect ? this.L("On") : this.L("Off")),
                     this.sandAutoCollect ? okColor : offColor);
             }
+            y += 38f;
+
+            bool prevPrefer = this.sandPreferRareUncollected;
+            this.sandPreferRareUncollected = this.DrawSwitchToggle(new Rect(left, y, 460f, 30f), this.sandPreferRareUncollected, this.L("Prefer rare / uncollected models"));
+            if (this.sandPreferRareUncollected != prevPrefer)
+            {
+                this.AddMenuNotification(this.L("Prefer rare / uncollected models") + ": " + (this.sandPreferRareUncollected ? this.L("On") : this.L("Off")),
+                    this.sandPreferRareUncollected ? okColor : offColor);
+            }
+            y += 30f;
+            GUI.Label(new Rect(left, y, 540f, 32f), this.L("When a draft allows several models, pick the one missing from your 5★ collection (rarest first)."), mutedStyle);
             y += 38f;
 
             GUI.Label(new Rect(left, y, 220f, 22f), this.L("Finish delay") + $": {this.sandFinishDelaySeconds:F1}s", bodyStyle);
