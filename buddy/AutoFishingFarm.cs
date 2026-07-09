@@ -39,6 +39,9 @@ namespace HeartopiaMod
         private static float fishBattleResultAt = -999f;     // CmdFishBattleResult
         private static bool fishBattleResultSuccess;
         private static int fishBattleResultFishId;
+        private static int fishBattleResultFailReason; // FailReason@8: 0=None 1=Distance 2=LineBreak 3=TimeOut
+        private const float FishScanAvoidSeconds = 1.6f; // skip the just-caught object this long (ghost despawn)
+        private static int castTargetInstanceId; // Unity instance id of the fish object this cast targeted
         private static float fishCatchEventAt = -999f;        // PlayerCatchFish
         private static uint fishCatchFishNetId;
         // Instant-catch active window opened by the buoy-active / bite events and closed by the
@@ -86,12 +89,34 @@ namespace HeartopiaMod
             }
         }
 
+        // FailReason enum (EcsClient/.../FailReason.cs): None/Distance/LineBreak/TimeOut.
+        private static string FailReasonName(int r)
+        {
+            switch (r)
+            {
+                case 0: return "None";
+                case 1: return "Distance";
+                case 2: return "LineBreak";
+                case 3: return "TimeOut";
+                default: return "?" + r;
+            }
+        }
+
         private static void OnFishBattleResultEvent(HeartopiaComplete.GameEventSnapshot e)
         {
             fishBattleResultAt = Time.unscaledTime;
             fishBattleResultSuccess = e.ReadBool(0);
             fishBattleResultFishId = e.ReadInt32(4);
+            fishBattleResultFailReason = e.ReadInt32(8); // 0=None 1=Distance 2=LineBreak 3=TimeOut
             instantCatchEventActiveUntil = -999f; // cycle ended
+
+            // On a catch, mark the exact caught fish object (its instance id, captured at cast) so the
+            // next scan skips only its lingering ghost — not the rest of a clustered school.
+            if (fishBattleResultSuccess && castTargetInstanceId != 0)
+            {
+                HeartopiaComplete.fishScanGhostInstanceId = castTargetInstanceId;
+                HeartopiaComplete.fishScanGhostUntil = Time.unscaledTime + FishScanAvoidSeconds;
+            }
         }
 
         private static void OnPlayerCatchFishEvent(HeartopiaComplete.GameEventSnapshot e)
@@ -788,7 +813,8 @@ namespace HeartopiaMod
                         float dtResCast = host.InstantCatchCastAt > 0f ? fishBattleResultAt - host.InstantCatchCastAt : -1f;
                         float dtResBite = fishBiteEventAt > 0f ? fishBattleResultAt - fishBiteEventAt : -1f;
                         host.InstantCatchDiag("cast#" + instantCatchCastSeq + " EVENT-RESULT success=" + fishBattleResultSuccess
-                            + " fishId=" + fishBattleResultFishId + " after " + dtResCast.ToString("F2") + "s from cast, "
+                            + " fishId=" + fishBattleResultFishId + " reason=" + FailReasonName(fishBattleResultFailReason)
+                            + " after " + dtResCast.ToString("F2") + "s from cast, "
                             + dtResBite.ToString("F2") + "s from bite");
                     }
                 }
@@ -1495,6 +1521,8 @@ namespace HeartopiaMod
 
                     // Per-cast diagnostics: start a new cast window.
                     instantCatchCastSeq++;
+                    // Remember the fish object this cast targeted (for post-catch ghost skip).
+                    castTargetInstanceId = host.GetLastFishShadowTargetInstanceId();
                     instantCatchBiteLogged = false;
                     instantCatchResultLogged = false;
                     skipCatchAnimInvokedForCast = false;

@@ -243,6 +243,16 @@ namespace HeartopiaMod
                 || this.TryGetObjectMember(obj, "_invalidTargetFXProxy", out marker);
         }
 
+        // Just-caught-fish ghost avoidance: right after a catch the caught fish's shadow GameObject
+        // lingers a moment at the catch spot before despawning, and the scan would re-target it (empty
+        // water). We skip EXACTLY that object by its Unity instance id for a short window — so other
+        // fish in the same school are NOT excluded (a radius/position block would stall school farming).
+        // AutoFishingFarm stamps the caught object's id (= the last scan's winner) + a window here.
+        internal static int fishScanGhostInstanceId;
+        internal static float fishScanGhostUntil = -999f;
+        private int lastFishShadowTargetInstanceId;
+        public int GetLastFishShadowTargetInstanceId() => this.lastFishShadowTargetInstanceId;
+
         public bool TryFindNearestFishShadowTarget(float scanRange, out uint netId, out Vector3 position, out float distance, out int detectedCount, out int inRangeCount, out string status)
         {
             netId = 0U;
@@ -272,6 +282,7 @@ namespace HeartopiaMod
                 string bestName = string.Empty;
                 int bestPriority = 0;
                 int bestFishId = 0;
+                int bestInstanceId = 0;
                 string bestPrioritySource = string.Empty;
                 string bestOccupancy = string.Empty;
                 for (int i = 0; i < candidates.Length; i++)
@@ -314,6 +325,13 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    // Just-caught ghost: skip ONLY the exact fish object we just reeled in, until it
+                    // despawns (window). School-mates keep their own instance ids, so they're unaffected.
+                    if (Time.unscaledTime < fishScanGhostUntil && candidate.GetInstanceID() == fishScanGhostInstanceId)
+                    {
+                        continue;
+                    }
+
                     // Lead-aim: an IdleMove fish travels a server bezier ending at ComponentData.targetPos.
                     // Cast at the END of its path (re-based to the live height; the wire y is 0) so the
                     // buoy lands where the fish will be, not where it was at cast time.
@@ -351,6 +369,7 @@ namespace HeartopiaMod
                     bestName = candidate.name;
                     bestPriority = candidatePriority;
                     bestFishId = candidateFishId;
+                    bestInstanceId = candidate.GetInstanceID();
                     bestPrioritySource = candidatePrioritySource;
                     bestOccupancy = leadAim ? occupiedState + " [lead +" + new Vector2(candidatePos.x - livePos.x, candidatePos.z - livePos.z).magnitude.ToString("F1") + "m]" : occupiedState;
                     netId = candidateNetId;
@@ -367,6 +386,7 @@ namespace HeartopiaMod
                 }
 
                 distance = bestDistance;
+                this.lastFishShadowTargetInstanceId = bestInstanceId;
                 status = $"Selected fish shadow {(netId != 0U ? "netId=" + netId + " " : string.Empty)}dist={bestDistance:F1}m";
                 string priorityInfo = bestFishId > 0 ? " fishId=" + bestFishId : string.Empty;
                 if (!string.IsNullOrEmpty(bestPrioritySource))
@@ -2781,6 +2801,12 @@ namespace HeartopiaMod
         private delegate IntPtr InstantCatchMonoCompileMethodDelegate(IntPtr method);
 
         internal static bool instantCatchSuccessSpoofActive;
+
+        // Spoofed successLength sent in ActivateRodBuoy / the buoy re-send. -2 (old exploit) now FAILS
+        // the battle after the 2026-07-09 patch; a small POSITIVE value WINS (live-confirmed: +1.0 and
+        // +0.01 → no misses incl. previously-failing fish, reels faster). Single knob for BOTH the
+        // NotifyFloatInWater detour body and the periodic re-send TryArmFishingInstantCatch.
+        private const float InstantCatchSpoofedSuccessLength = 0.01f;
         private static MonoMod.RuntimeDetour.NativeDetour instantCatchNotifyDetour;
         private static NotifyFloatInWaterHookDelegate instantCatchNotifyHookKeepAlive; // anti-GC
         private static NotifyFloatInWaterHookDelegate instantCatchNotifyTrampoline;
@@ -2894,7 +2920,7 @@ namespace HeartopiaMod
 
             try
             {
-                float spoofed = instantCatchSuccessSpoofActive ? -2f : successLength;
+                float spoofed = instantCatchSuccessSpoofActive ? InstantCatchSpoofedSuccessLength : successLength;
                 orig(floatNetId, buoyPos, direction, spoofed, failureLength);
             }
             catch
@@ -3209,7 +3235,7 @@ namespace HeartopiaMod
                     this.InstantCatchLog("resolve complete: first floatData " + floatStatus, true);
                 }
 
-                const float collapsedSuccessLength = -2f;
+                const float collapsedSuccessLength = InstantCatchSpoofedSuccessLength;
                 const float spoofedFailureLength = 30f;
 
                 if (!IsFiniteVector(buoyPos) || !IsFiniteVector(direction))

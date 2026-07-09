@@ -107,8 +107,8 @@ namespace HeartopiaMod
         internal const bool MasterLogBirdFarm = false;
         internal const bool MasterLogBirdFarmCrashTrace = true;
         internal const bool MasterLogInsectFarm = false;
-        internal const bool MasterLogAutoFish = false;
-        internal const bool MasterLogInstantCatch = false;
+        internal const bool MasterLogAutoFish = true;
+        internal const bool MasterLogInstantCatch = true;
         internal const bool MasterLogAutoFarm = false;
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
         // recipe-id probes per active quest) — flip to false once classification is confirmed.
