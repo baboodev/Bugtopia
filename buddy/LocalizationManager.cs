@@ -909,6 +909,19 @@ namespace HeartopiaMod
             { "Sculpture collected", "Escultura recogida" },
             { "Sand base placed", "Base de arena colocada" },
             { "no sand bases left", "no quedan bases de arena en la mochila" },
+            // Backfilled translations
+            { "Auto Pickup Drops", "Auto recoger objetos" },
+            { "Pickup Distance: {0}m", "Distancia de recogida: {0}m" },
+            { "Use Bait", "Usar cebo" },
+            { "Use Attractor", "Usar atrayente" },
+            { "Bait used", "Cebo usado" },
+            { "Attractor used", "Atrayente usado" },
+            { "No bait found in bag", "No se encontró cebo en la mochila" },
+            { "No attractor found in bag", "No se encontró atrayente en la mochila" },
+            { "Use Bait spreads bait near water (not while fishing). Assign a hotkey in Settings.", "Usar cebo esparce cebo cerca del agua (no mientras pescas). Asigna una tecla en Ajustes." },
+            { "Use Attractor places a fish attractor near water (not while fishing). Assign a hotkey in Settings.", "Usar atrayente coloca un atrayente de peces cerca del agua (no mientras pescas). Asigna una tecla en Ajustes." },
+            { "Vehicle Bypass", "Bypass de vehículo" },
+            { "Vehicle Bypass Server Events", "Bypass de vehículo (eventos del servidor)" },
         };
 
         // Built-in Simplified Chinese fallback strings.
@@ -1346,6 +1359,21 @@ namespace HeartopiaMod
             { "Sculpture collected", "已收取沙雕" },
             { "Sand base placed", "已放置沙雕底座" },
             { "no sand bases left", "背包中没有沙雕底座了" },
+            // Backfilled translations
+            { "Auto Pickup Drops", "自动拾取掉落物" },
+            { "Pickup Distance: {0}m", "拾取距离：{0}m" },
+            { "Bag automation already running", "背包自动化已在运行" },
+            { "Auto Repair: open bag → find {0} → Use → close bag\nAuto Eat: open bag → find {1} → Use → close bag", "自动修理：打开背包 → 找到 {0} → 使用 → 关闭背包\n自动进食：打开背包 → 找到 {1} → 使用 → 关闭背包" },
+            { "Use Bait", "使用鱼饵" },
+            { "Use Attractor", "使用诱鱼器" },
+            { "Bait used", "已使用鱼饵" },
+            { "Attractor used", "已使用诱鱼器" },
+            { "No bait found in bag", "背包中没有鱼饵" },
+            { "No attractor found in bag", "背包中没有诱鱼器" },
+            { "Use Bait spreads bait near water (not while fishing). Assign a hotkey in Settings.", "使用鱼饵会在水边撒下鱼饵（非钓鱼时）。请在设置中分配快捷键。" },
+            { "Use Attractor places a fish attractor near water (not while fishing). Assign a hotkey in Settings.", "使用诱鱼器会在水边放置诱鱼器（非钓鱼时）。请在设置中分配快捷键。" },
+            { "Vehicle Bypass", "载具绕过" },
+            { "Vehicle Bypass Server Events", "载具绕过（服务器事件）" },
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -1769,6 +1797,25 @@ namespace HeartopiaMod
             { "Sculpture collected", "Escultura coletada" },
             { "Sand base placed", "Base de areia colocada" },
             { "no sand bases left", "sem bases de areia na mochila" },
+            // Backfilled translations
+            { "Auto Pickup Drops", "Coleta automática de itens" },
+            { "Pickup Distance: {0}m", "Distância de coleta: {0}m" },
+            { "Bird", "Pássaro" },
+            { "Birds", "Pássaros" },
+            { "Equip Bird Scanner", "Equipar scanner de pássaros" },
+            { "DISABLE BIRD CATCHING", "DESATIVAR CAPTURA DE PÁSSAROS" },
+            { "ENABLE BIRD CATCHING", "ATIVAR CAPTURA DE PÁSSAROS" },
+            { "Auto Bird Farm", "Farm automático de pássaros" },
+            { "Use Bait", "Usar isca" },
+            { "Use Attractor", "Usar atrator" },
+            { "Bait used", "Isca usada" },
+            { "Attractor used", "Atrator usado" },
+            { "No bait found in bag", "Nenhuma isca encontrada na mochila" },
+            { "No attractor found in bag", "Nenhum atrator encontrado na mochila" },
+            { "Use Bait spreads bait near water (not while fishing). Assign a hotkey in Settings.", "Usar isca espalha isca perto da água (não durante a pesca). Defina uma tecla nas Configurações." },
+            { "Use Attractor places a fish attractor near water (not while fishing). Assign a hotkey in Settings.", "Usar atrator coloca um atrator de peixes perto da água (não durante a pesca). Defina uma tecla nas Configurações." },
+            { "Vehicle Bypass", "Bypass de veículo" },
+            { "Vehicle Bypass Server Events", "Bypass de veículo (eventos do servidor)" },
         };
 
         // Built-in Thai fallback strings.
@@ -2198,6 +2245,19 @@ namespace HeartopiaMod
             { "Sculpture collected", "เก็บประติมากรรมแล้ว" },
             { "Sand base placed", "วางฐานทรายแล้ว" },
             { "no sand bases left", "ไม่มีฐานทรายในกระเป๋าแล้ว" },
+            // Backfilled translations
+            { "Auto Pickup Drops", "เก็บไอเทมที่ตกอัตโนมัติ" },
+            { "Pickup Distance: {0}m", "ระยะเก็บ: {0}m" },
+            { "Use Bait", "ใช้เหยื่อ" },
+            { "Use Attractor", "ใช้ตัวล่อปลา" },
+            { "Bait used", "ใช้เหยื่อแล้ว" },
+            { "Attractor used", "ใช้ตัวล่อปลาแล้ว" },
+            { "No bait found in bag", "ไม่พบเหยื่อในกระเป๋า" },
+            { "No attractor found in bag", "ไม่พบตัวล่อปลาในกระเป๋า" },
+            { "Use Bait spreads bait near water (not while fishing). Assign a hotkey in Settings.", "ใช้เหยื่อจะโปรยเหยื่อใกล้น้ำ (ไม่ใช่ขณะตกปลา) กำหนดปุ่มลัดในการตั้งค่า" },
+            { "Use Attractor places a fish attractor near water (not while fishing). Assign a hotkey in Settings.", "ใช้ตัวล่อปลาจะวางตัวล่อปลาใกล้น้ำ (ไม่ใช่ขณะตกปลา) กำหนดปุ่มลัดในการตั้งค่า" },
+            { "Vehicle Bypass", "ข้ามยานพาหนะ" },
+            { "Vehicle Bypass Server Events", "ข้ามยานพาหนะ (อีเวนต์เซิร์ฟเวอร์)" },
         };
 
         // Runtime localization state.
