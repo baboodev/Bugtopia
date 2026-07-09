@@ -2431,9 +2431,11 @@ namespace HeartopiaMod
             // Step 2: NPC not streamed -> teleport to its map-spot position and wait for streaming.
             // Position source: TryGetLiveNpcPositionByIdMono (Teleport.cs — the SAME proven helper
             // the NPC-teleport page uses for its list): AuraMono static
-            // MapSpotProtocolManager.TryGetMapSpotPosition(SpotEnum.Npc=2, npcId, out Vector3) —
-            // reads the server-synced map-spot entity, works for non-streamed NPCs. See
-            // docs/NPC_ACCESS.md before adding any new NPC position/netId path.
+            // MapSpotProtocolManager.TryGetMapSpotPosition(SpotEnum.Npc=2, npcId, out Vector3,
+            // GameSceneId) — since the 2026-07-09 update spots are keyed per scene; the helper
+            // resolves the current scene itself (StarTown fallback). Reads the server-synced
+            // map-spot entity, works for non-streamed NPCs. See docs/NPC_ACCESS.md before adding
+            // any new NPC position/netId path.
             bool teleported = false;
             if (npcNetId == 0U)
             {

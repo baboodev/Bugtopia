@@ -868,13 +868,49 @@ namespace HeartopiaMod
             }
 
             IntPtr getter = this.FindAuraMonoMethodOnHierarchy(klass, "get_" + memberName, 0);
-            if (getter == IntPtr.Zero)
+            if (getter == IntPtr.Zero || auraMonoRuntimeInvoke == null)
             {
                 return false;
             }
-            IntPtr exc = IntPtr.Zero;
-            valueObj = auraMonoRuntimeInvoke(getter, obj, IntPtr.Zero, ref exc);
-            return exc == IntPtr.Zero && valueObj != IntPtr.Zero;
+
+            // mono_runtime_invoke on a VALUE-TYPE instance method takes the UNBOXED struct as
+            // `this`; passing the box shifts every field read by the 16-byte object header —
+            // get_Key on a boxed KeyValuePair returns the vtable pointer's low dword (the
+            // constant NPC-id=371743616 bug, 2026-07-09). Unbox for the invoke and pin the box
+            // across it; fail closed when the value/ref classification export is missing.
+            IntPtr self = obj;
+            uint pin = 0;
+            if (auraMonoClassIsValueType == null)
+            {
+                return false;
+            }
+            if (auraMonoClassIsValueType(klass) != 0)
+            {
+                if (auraMonoObjectUnbox == null)
+                {
+                    return false;
+                }
+                pin = AuraMonoPinNew(obj);
+                self = auraMonoObjectUnbox(obj);
+                if (self == IntPtr.Zero)
+                {
+                    AuraMonoPinFree(pin);
+                    return false;
+                }
+            }
+            try
+            {
+                IntPtr exc = IntPtr.Zero;
+                valueObj = auraMonoRuntimeInvoke(getter, self, IntPtr.Zero, ref exc);
+                return exc == IntPtr.Zero && valueObj != IntPtr.Zero;
+            }
+            finally
+            {
+                if (pin != 0)
+                {
+                    AuraMonoPinFree(pin);
+                }
+            }
         }
 
         private unsafe bool TryGetMonoVector3Member(IntPtr obj, string memberName, out Vector3 value)

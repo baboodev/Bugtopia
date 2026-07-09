@@ -784,39 +784,50 @@ namespace HeartopiaMod
             int inspected = 0;
             List<string> samples = new List<string>();
             List<IntPtr> items = new List<IntPtr>();
-            if (this.TryEnumerateAuraMonoCollectionItems(tableNpcsObj, items))
+            // Pin the enumerated items: for a Dictionary they are freshly boxed KeyValuePairs
+            // that nothing roots once they land in this raw-pointer list — an sgen GC pass
+            // between enumeration and the reads below would move/collect them.
+            List<uint> itemPins = new List<uint>();
+            try
             {
-                foreach (IntPtr itemObj in items)
+                if (this.TryEnumerateAuraMonoCollectionItems(tableNpcsObj, items, itemPins))
                 {
-                    inspected++;
-                    int npcId;
-                    string name;
-                    if (!this.TryReadNpcTableEntryMono(itemObj, out npcId, out name))
+                    foreach (IntPtr itemObj in items)
                     {
-                        continue;
-                    }
-
-                    string key = this.NormalizeNpcTeleportName(name);
-                    if (!string.IsNullOrEmpty(key) && !dictionary.ContainsKey(key))
-                    {
-                        dictionary[key] = npcId;
-                        idNames[npcId] = name.Trim();
-                        hits++;
-                        if (samples.Count < 8)
+                        inspected++;
+                        int npcId;
+                        string name;
+                        if (!this.TryReadNpcTableEntryMono(itemObj, out npcId, out name))
                         {
-                            samples.Add(npcId + ":" + name);
+                            continue;
                         }
-                        targets.Remove(key);
-                        if (targets.Count == 0)
+
+                        string key = this.NormalizeNpcTeleportName(name);
+                        if (!string.IsNullOrEmpty(key) && !dictionary.ContainsKey(key))
                         {
-                            break;
+                            dictionary[key] = npcId;
+                            idNames[npcId] = name.Trim();
+                            hits++;
+                            if (samples.Count < 8)
+                            {
+                                samples.Add(npcId + ":" + name);
+                            }
+                            targets.Remove(key);
+                            if (targets.Count == 0)
+                            {
+                                break;
+                            }
                         }
                     }
                 }
+                else
+                {
+                    this.npcTeleportIdResolveStatus = "TableData.TableNpcs mono enumeration failed";
+                }
             }
-            else
+            finally
             {
-                this.npcTeleportIdResolveStatus = "TableData.TableNpcs mono enumeration failed";
+                FreeAuraMonoPins(itemPins);
             }
 
             foreach (string preferredName in this.GetNpcTeleportPreferredNames())
@@ -838,6 +849,10 @@ namespace HeartopiaMod
             this.LogNpcTeleportDebug("Mono TableNpcs scan: inspected=" + inspected + " matches=" + hits + " missing=" + targets.Count + (samples.Count > 0 ? " samples=" + string.Join(", ", samples) : string.Empty) + " status=" + this.npcTeleportIdResolveStatus, true);
             return dictionary;
         }
+
+        // Table static ids are <= 8 digits; anything larger is header/pointer garbage from a
+        // bad boxed-struct read (the constant-371743616-id bug) — reject it instead of caching.
+        private const int NpcTeleportMaxPlausibleId = 100000000;
 
         private bool TryReadNpcTableEntryMono(IntPtr itemObj, out int npcId, out string name)
         {
@@ -862,21 +877,25 @@ namespace HeartopiaMod
                 valueObj = itemObj;
             }
 
-            if (hasKey && keyObj != IntPtr.Zero)
+            // TableNpc.id (plain public int field on a class object) is the reliable source; the
+            // KVP Key goes through boxed-struct member reads that used to return header garbage
+            // (constant id 371743616 for every row) — keep it as a range-gated fallback only.
+            this.TryGetMonoInt32Member(valueObj, "id", out npcId);
+            if (npcId <= 0)
+            {
+                this.TryGetMonoInt32Member(valueObj, "Id", out npcId);
+            }
+            if ((npcId <= 0 || npcId >= NpcTeleportMaxPlausibleId) && hasKey && keyObj != IntPtr.Zero)
             {
                 this.TryUnboxMonoInt32(keyObj, out npcId);
             }
-
-            if (npcId <= 0)
+            if (npcId <= 0 || npcId >= NpcTeleportMaxPlausibleId)
             {
-                this.TryGetMonoInt32Member(valueObj, "id", out npcId);
-                if (npcId <= 0)
-                {
-                    this.TryGetMonoInt32Member(valueObj, "Id", out npcId);
-                }
+                npcId = 0;
+                return false;
             }
 
-            return npcId > 0 && this.TryGetMonoStringMember(valueObj, "name", out name) && !string.IsNullOrWhiteSpace(name);
+            return this.TryGetMonoStringMember(valueObj, "name", out name) && !string.IsNullOrWhiteSpace(name);
         }
 
         private void LogNpcTeleportDebug(string message, bool force = false)
@@ -987,12 +1006,46 @@ namespace HeartopiaMod
             return false;
         }
 
-        private unsafe bool TryGetLiveNpcPositionByIdMono(int npcId, out Vector3 position)
+        // --- Live NPC position via MapSpotProtocolManager.TryGetMapSpotPosition (AuraMono) ---
+        // 2026-07-09 update: map spots are keyed per scene (MapSpotKeyComponent(category, useId,
+        // gameSceneId)) and TryGetMapSpotPosition grew a 4th GameSceneId param. Resolve the
+        // 4-param signature first (3-param fallback for older builds), query the player's current
+        // scene, then retry StarTown — the game itself keys TargetLevelId==0 NPC spots there.
+        private IntPtr npcSpotPositionMethod = IntPtr.Zero;
+        private int npcSpotPositionParamCount;
+        private bool npcSpotPositionMethodUnavailable;
+        private IntPtr npcSceneLevelIdField = IntPtr.Zero;
+        private IntPtr npcSceneDataCenterVtable = IntPtr.Zero;
+        private string npcTeleportMonoDiag = "not attempted";
+        private string npcTeleportUnityScanDiag = "not attempted";
+        private bool npcUnityScanUnavailableLogged;
+        private readonly HashSet<string> npcTeleportLoggedErrors = new HashSet<string>(StringComparer.Ordinal);
+
+        // Unconditional error reporter for NPC-teleport infrastructure failures — NOT gated by
+        // NpcTeleportDebugLogsEnabled, so "list is empty" is diagnosable from a normal log.
+        // Latched per distinct message so the per-NPC refresh loop cannot spam; callers keep
+        // per-NPC detail in the diag fields and pass a stable message here.
+        private void NpcTeleportError(string message)
         {
-            position = Vector3.zero;
-            if (npcId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null || auraMonoClassGetMethodFromName == null || auraMonoRuntimeInvoke == null)
+            if (this.npcTeleportLoggedErrors.Count > 32)
             {
-                return false;
+                this.npcTeleportLoggedErrors.Clear();
+            }
+            if (this.npcTeleportLoggedErrors.Add(message))
+            {
+                ModLogger.Msg("[NpcTeleport] ERROR: " + message);
+            }
+        }
+
+        private bool TryEnsureNpcSpotPositionMethod()
+        {
+            if (this.npcSpotPositionMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+            if (this.npcSpotPositionMethodUnavailable)
+            {
+                return false; // class was found but the method wasn't — permanent until a game update
             }
 
             IntPtr dataImage = this.FindAuraMonoImage(new string[]
@@ -1007,25 +1060,152 @@ namespace HeartopiaMod
             }
             if (protocolClass == IntPtr.Zero)
             {
+                this.npcTeleportMonoDiag = "MapSpotProtocolManager class not found (Mono image not loaded yet?)";
+                this.NpcTeleportError(this.npcTeleportMonoDiag);
+                return false; // retry later — the image may not be loaded yet
+            }
+
+            IntPtr methodPtr = auraMonoClassGetMethodFromName(protocolClass, "TryGetMapSpotPosition", 4);
+            int paramCount = 4;
+            if (methodPtr == IntPtr.Zero)
+            {
+                methodPtr = auraMonoClassGetMethodFromName(protocolClass, "TryGetMapSpotPosition", 3);
+                paramCount = 3;
+            }
+            if (methodPtr == IntPtr.Zero)
+            {
+                this.npcSpotPositionMethodUnavailable = true;
+                this.npcTeleportMonoDiag = "TryGetMapSpotPosition not found with 4 or 3 params — game API changed, re-check the MapSpotProtocolManager dump";
+                this.NpcTeleportError(this.npcTeleportMonoDiag);
                 return false;
             }
 
-            IntPtr methodPtr = auraMonoClassGetMethodFromName(protocolClass, "TryGetMapSpotPosition", 3);
-            if (methodPtr == IntPtr.Zero)
+            this.npcSpotPositionMethod = methodPtr;
+            this.npcSpotPositionParamCount = paramCount;
+            ModLogger.Msg("[NpcTeleport] TryGetMapSpotPosition resolved, paramCount=" + paramCount);
+            return true;
+        }
+
+        // DataCenter.LevelId (static RoomLevelId field) -> GameSceneId, replicating the game's
+        // LevelConst.ToGameSceneId switch + the GetMaxMapGameSceneId StarTown default.
+        private unsafe int ResolveCurrentNpcGameSceneId()
+        {
+            try
+            {
+                if (auraMonoClassGetFieldFromName == null || auraMonoClassVtable == null || auraMonoFieldStaticGetValue == null || this.auraMonoRootDomain == IntPtr.Zero)
+                {
+                    return GameSceneIdStarTown;
+                }
+                if (this.npcSceneLevelIdField == IntPtr.Zero || this.npcSceneDataCenterVtable == IntPtr.Zero)
+                {
+                    IntPtr image = this.FindAuraMonoImage(new string[]
+                    {
+                        "XDTDataAndProtocol",
+                        "XDTDataAndProtocol.dll"
+                    });
+                    IntPtr classPtr = image != IntPtr.Zero ? auraMonoClassFromName(image, "XDTDataAndProtocol.ComponentsData", "DataCenter") : IntPtr.Zero;
+                    if (classPtr == IntPtr.Zero)
+                    {
+                        classPtr = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ComponentsData", "DataCenter");
+                    }
+                    if (classPtr == IntPtr.Zero)
+                    {
+                        this.NpcTeleportError("DataCenter class not found — falling back to StarTown scene for map-spot lookups");
+                        return GameSceneIdStarTown;
+                    }
+                    IntPtr fieldPtr = auraMonoClassGetFieldFromName(classPtr, "LevelId");
+                    IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, classPtr);
+                    if (fieldPtr == IntPtr.Zero || vtable == IntPtr.Zero)
+                    {
+                        this.NpcTeleportError("DataCenter.LevelId field not found — falling back to StarTown scene for map-spot lookups");
+                        return GameSceneIdStarTown;
+                    }
+                    this.npcSceneLevelIdField = fieldPtr;
+                    this.npcSceneDataCenterVtable = vtable;
+                }
+
+                int levelId = 0;
+                auraMonoFieldStaticGetValue(this.npcSceneDataCenterVtable, this.npcSceneLevelIdField, (IntPtr)(&levelId));
+                switch (levelId)
+                {
+                    case 1:   // RoomLevelId.StarTown
+                    case 100: // RoomLevelId.BluePrintRoom
+                        return GameSceneIdStarTown;
+                    case 2: return 2; // MusicRoom
+                    case 3: return 3; // SeaWorld
+                    case 4: return 5; // BuildCompetition
+                    case 5: return 6; // BuildCompetitionView
+                    case 6: return 8; // SystemPartyFestival
+                    default:
+                        return GameSceneIdStarTown; // TargetLevelId==0 spots are keyed StarTown by the game
+                }
+            }
+            catch (Exception ex)
+            {
+                this.NpcTeleportError("current-scene resolve failed: " + ex.Message + " — falling back to StarTown");
+                return GameSceneIdStarTown;
+            }
+        }
+
+        private unsafe bool TryGetLiveNpcPositionByIdMono(int npcId, out Vector3 position)
+        {
+            position = Vector3.zero;
+            if (npcId <= 0)
+            {
+                return false;
+            }
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null || auraMonoClassGetMethodFromName == null || auraMonoRuntimeInvoke == null)
+            {
+                this.npcTeleportMonoDiag = "AuraMono API not ready for map-spot position lookup";
+                this.NpcTeleportError(this.npcTeleportMonoDiag);
+                return false;
+            }
+            if (!this.TryEnsureNpcSpotPositionMethod())
             {
                 return false;
             }
 
-            int npcSpotEnum = 2;
+            int sceneId = this.npcSpotPositionParamCount >= 4 ? this.ResolveCurrentNpcGameSceneId() : GameSceneIdStarTown;
+            if (this.TryInvokeNpcSpotPosition(npcId, sceneId, out position))
+            {
+                return true;
+            }
+            if (this.npcSpotPositionParamCount >= 4 && sceneId != GameSceneIdStarTown && this.TryInvokeNpcSpotPosition(npcId, GameSceneIdStarTown, out position))
+            {
+                return true;
+            }
+
+            this.npcTeleportMonoDiag = "no map spot (last npcId=" + npcId + ", scene=" + sceneId + ")";
+            return false;
+        }
+
+        private unsafe bool TryInvokeNpcSpotPosition(int npcId, int gameSceneId, out Vector3 position)
+        {
+            position = Vector3.zero;
+            int npcSpotEnum = 2; // SpotEnum.Npc
+            int useId = npcId;
+            int sceneId = gameSceneId;
             Vector3 resolvedPosition = Vector3.zero;
             IntPtr exc = IntPtr.Zero;
-            IntPtr boxedResult;
-            IntPtr* args = stackalloc IntPtr[3];
+            IntPtr* args = stackalloc IntPtr[4];
             args[0] = (IntPtr)(&npcSpotEnum);
-            args[1] = (IntPtr)(&npcId);
-            args[2] = (IntPtr)(&resolvedPosition);
-            boxedResult = auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero || boxedResult == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxedResult, out bool ok) || !ok)
+            args[1] = (IntPtr)(&useId);
+            args[2] = (IntPtr)(&resolvedPosition); // out Vector3 -> pointer to real 12-byte storage
+            args[3] = (IntPtr)(&sceneId);          // extra slot is ignored by the legacy 3-param signature
+            IntPtr boxedResult = auraMonoRuntimeInvoke(this.npcSpotPositionMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                this.npcTeleportMonoDiag = "TryGetMapSpotPosition threw (npcId=" + npcId + ", scene=" + gameSceneId + ")";
+                this.NpcTeleportError("TryGetMapSpotPosition threw a Mono exception (scene=" + gameSceneId + ")");
+                return false;
+            }
+            if (boxedResult == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxedResult, out bool ok))
+            {
+                this.npcTeleportMonoDiag = "TryGetMapSpotPosition result unreadable (npcId=" + npcId + ")";
+                this.NpcTeleportError("TryGetMapSpotPosition returned an unreadable result");
+                return false;
+            }
+            if (!ok)
             {
                 return false;
             }
@@ -1204,13 +1384,23 @@ namespace HeartopiaMod
                     "NpcComponent");
                 if (il2CppType == null)
                 {
-                    this.LogNpcTeleportDebug("Unity NPC scan: NpcComponent Il2CppType unavailable");
+                    // Known post-2026-07-09 condition: NpcComponent is Mono-side and no longer
+                    // IL2CPP-visible, so this secondary scan cannot run. The map-spot Mono path
+                    // is the primary position source — informational, not an error.
+                    this.npcTeleportUnityScanDiag = "NpcComponent not IL2CPP-visible (scan off)";
+                    if (!this.npcUnityScanUnavailableLogged)
+                    {
+                        this.npcUnityScanUnavailableLogged = true;
+                        ModLogger.Msg("[NpcTeleport] Unity NPC scan unavailable on this build (NpcComponent not IL2CPP-visible) — using the map-spot path only");
+                    }
                     return 0;
                 }
 
                 UnityObject[] objects = Object.FindObjectsOfType(il2CppType);
                 if (objects == null || objects.Length == 0)
                 {
+                    // Legit when no NPC is streamed near the player — a miss, not an error.
+                    this.npcTeleportUnityScanDiag = "0 NpcComponent objects in scene";
                     this.LogNpcTeleportDebug("Unity NPC scan: found 0 NpcComponent objects");
                     return 0;
                 }
@@ -1256,11 +1446,13 @@ namespace HeartopiaMod
                     }
                 }
 
+                this.npcTeleportUnityScanDiag = "objects=" + objects.Length + " matched=" + liveMatches;
                 this.LogNpcTeleportDebug("Unity NPC scan: objects=" + objects.Length + " liveMatches=" + liveMatches + (samples.Count > 0 ? " samples=" + string.Join(", ", samples) : string.Empty));
             }
             catch (Exception ex)
             {
-                this.LogNpcTeleportDebug("Unity NPC scan exception: " + ex.Message);
+                this.npcTeleportUnityScanDiag = "exception: " + ex.Message;
+                this.NpcTeleportError("Unity NPC scan exception: " + ex.Message);
             }
 
             return liveMatches;
@@ -1544,6 +1736,8 @@ namespace HeartopiaMod
 
             List<KeyValuePair<string, Vector3>> list = new List<KeyValuePair<string, Vector3>>();
             Dictionary<string, int> dictionary = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            this.npcTeleportMonoDiag = "not attempted";
+            this.npcTeleportUnityScanDiag = "not attempted";
             int liveMatches = this.PopulateLiveNpcEntriesFromUnityObjects(list, dictionary);
             Dictionary<string, int> npcTeleportIdMap = this.GetNpcTeleportIdMap();
             this.LogNpcTeleportDebug("GetTeleportNpcEntries: idMapCount=" + npcTeleportIdMap.Count + " cacheReady=" + this.npcTeleportIdCacheReady + " resolveStatus=" + this.npcTeleportIdResolveStatus);
@@ -1571,6 +1765,13 @@ namespace HeartopiaMod
                 : (resolvedIds > 0
                     ? string.Format("No live NPC positions found ({0}/{1} ids resolved)", resolvedIds, totalTargets)
                     : ("No NPC ids resolved" + (string.IsNullOrEmpty(this.npcTeleportIdResolveStatus) ? string.Empty : (" [" + this.npcTeleportIdResolveStatus + "]"))));
+            // Refresh is user-triggered (button click), so one unconditional summary line per
+            // refresh keeps empty results diagnosable without the NpcTeleportDebugLogsEnabled build.
+            ModLogger.Msg("[NpcTeleport] refresh: live=" + liveMatches + "/" + totalTargets
+                + " idsResolved=" + resolvedIds
+                + " unityScan=[" + this.npcTeleportUnityScanDiag + "]"
+                + " monoPath=[" + this.npcTeleportMonoDiag + "]"
+                + (string.IsNullOrEmpty(this.npcTeleportIdResolveStatus) ? string.Empty : " idResolve=[" + this.npcTeleportIdResolveStatus + "]"));
             this.LogNpcTeleportDebug("GetTeleportNpcEntries: built entries count=" + list.Count + " resolvedIds=" + resolvedIds + " liveMatches=" + liveMatches + " status=" + this.npcTeleportStatus);
             return this.cachedNpcTeleportEntries;
         }
