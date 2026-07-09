@@ -4858,15 +4858,27 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr getCropFertilizerMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetCropfertilizer", 1);
+            // TableData.GetCropfertilizer(int id, bool needException=false) is 2-param; resolve
+            // that first and pass the bool, falling back to a legacy 1-param build. Param count is
+            // an EXACT filter in mono_class_get_method_from_name, so a 1-only resolve would miss
+            // the real method entirely.
+            IntPtr getCropFertilizerMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetCropfertilizer", 2);
+            if (getCropFertilizerMethod == IntPtr.Zero)
+            {
+                getCropFertilizerMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetCropfertilizer", 1);
+            }
             if (getCropFertilizerMethod == IntPtr.Zero)
             {
                 return false;
             }
 
+            // 2-slot args array is safe for the 1-param fallback too: mono_runtime_invoke reads
+            // only signature->param_count pointers, so the extra needException slot is ignored.
             IntPtr exc = IntPtr.Zero;
-            IntPtr* args = stackalloc IntPtr[1];
+            byte needException = 0;
+            IntPtr* args = stackalloc IntPtr[2];
             args[0] = (IntPtr)(&fertilizerStaticId);
+            args[1] = (IntPtr)(&needException);
             rowObj = auraMonoRuntimeInvoke(getCropFertilizerMethod, IntPtr.Zero, (IntPtr)args, ref exc);
             return exc == IntPtr.Zero && rowObj != IntPtr.Zero;
         }
@@ -13498,15 +13510,23 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr getFlowerplantMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetFlowerplant", 1);
+            // TableData.GetFlowerplant(int id, bool needException=false) is 2-param; resolve that
+            // first (param count is an EXACT filter), fall back to a legacy 1-param build.
+            IntPtr getFlowerplantMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetFlowerplant", 2);
+            if (getFlowerplantMethod == IntPtr.Zero)
+            {
+                getFlowerplantMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetFlowerplant", 1);
+            }
             if (getFlowerplantMethod == IntPtr.Zero)
             {
                 return false;
             }
 
             IntPtr exc = IntPtr.Zero;
-            IntPtr* args = stackalloc IntPtr[1];
+            byte needException = 0;
+            IntPtr* args = stackalloc IntPtr[2];
             args[0] = (IntPtr)(&flowerStaticId);
+            args[1] = (IntPtr)(&needException);
             IntPtr rowObj = auraMonoRuntimeInvoke(getFlowerplantMethod, IntPtr.Zero, (IntPtr)args, ref exc);
             if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
             {
