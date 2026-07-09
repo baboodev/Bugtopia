@@ -61,6 +61,11 @@ namespace HeartopiaMod
                 return this.DrawSandSculptureTab(startY);
             }
 
+            if (this.newFeaturesSubTab == 7)
+            {
+                return this.DrawSeaCleanQteTab(startY);
+            }
+
             return startY + 40f;
         }
 
@@ -419,6 +424,11 @@ namespace HeartopiaMod
             if (this.newFeaturesSubTab == 6)
             {
                 return 600f;
+            }
+
+            if (this.newFeaturesSubTab == 7)
+            {
+                return this.CalculateSeaCleanQteTabHeight();
             }
 
             return 400f;

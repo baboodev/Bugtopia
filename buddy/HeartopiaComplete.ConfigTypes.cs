@@ -91,6 +91,7 @@ namespace HeartopiaMod
             public int keyBirdVacuum;
             public int keyAutoSnow;
             public int keyAutoSand;
+            public int keySeaCleanQte;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

@@ -141,6 +141,8 @@ namespace HeartopiaMod
             { "Max per ingredient: {0}", "Max per ingredient: {0}" },
             { "Home", "Home" },
             { "Animal Care", "Animal Care" },
+            { "Sea Clean", "Sea Clean" },
+            { "Auto Sea Clean QTE", "Auto Sea Clean QTE" },
             { "NPCs", "NPCs" },
             { "Locations", "Locations" },
             { "Events", "Events" },

@@ -994,6 +994,12 @@ namespace HeartopiaMod
                     this.AddMenuNotification(this.L("Auto Sand Sculpture") + ": " + (this.autoSandEnabled ? this.L("On") : this.L("Off")),
                         this.autoSandEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
+                if (this.TryGetModHotkeyDown(this.seaCleanQteHotkey))
+                {
+                    this.seaCleanQteEnabled = !this.seaCleanQteEnabled;
+                    this.SaveKeybinds(false);
+                    this.AddMenuNotification($"Auto Sea Clean QTE {(this.seaCleanQteEnabled ? "Enabled" : "Disabled")}", this.seaCleanQteEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                }
                 if (this.TryGetModHotkeyDown(this.keyAutoJoinFriend))
                 {
                     this.StartLobbyAutoJoinFriend("Hotkey triggered");
@@ -1212,6 +1218,7 @@ namespace HeartopiaMod
             }
             this.ProcessSnowSculptureOnUpdate();
             this.ProcessSandSculptureOnUpdate();
+            this.ProcessSeaCleanQteOnUpdate();
             if (this.autoBuyEnabled && Time.unscaledTime >= this.nextAutoBuyLogicTime)
             {
                 this.nextAutoBuyLogicTime = Time.unscaledTime + 0.05f;
@@ -2324,6 +2331,7 @@ namespace HeartopiaMod
                 tabs.Add(("Ice Skating", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
                 tabs.Add((this.L("extra.title"), () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
                 tabs.Add((this.L("Sand Sculpture"), () => this.newFeaturesSubTab == 6, () => this.SetNewFeaturesSubTab(6)));
+                tabs.Add(("Sea Clean", () => this.newFeaturesSubTab == 7, () => this.SetNewFeaturesSubTab(7)));
                 // "Quest Assistant" sub-tab removed 2026-07-04 (§54) — its content moved into "Daily Quests".
             }
             else if (this.selectedTab == 4)
