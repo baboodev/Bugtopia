@@ -133,6 +133,7 @@ namespace HeartopiaMod
             data.keyBypassOverlap = (int)this.keyBypassOverlap;
             data.keyBirdVacuum = (int)this.keyBirdVacuum;
             data.keyAutoSnow = (int)this.autoSnowHotkey;
+            data.keyAutoSand = (int)this.autoSandHotkey;
             data.keyGameSpeed1x = (int)this.keyGameSpeed1x;
             data.keyGameSpeed2x = (int)this.keyGameSpeed2x;
             data.keyGameSpeed5x = (int)this.keyGameSpeed5x;
@@ -302,6 +303,7 @@ namespace HeartopiaMod
             this.keyBypassOverlap = (KeyCode)data.keyBypassOverlap;
             this.keyBirdVacuum = (KeyCode)data.keyBirdVacuum;
             this.autoSnowHotkey = (KeyCode)data.keyAutoSnow;
+            this.autoSandHotkey = (KeyCode)data.keyAutoSand;
             this.keyGameSpeed1x = (KeyCode)data.keyGameSpeed1x;
             this.keyGameSpeed2x = (KeyCode)data.keyGameSpeed2x;
             this.keyGameSpeed5x = (KeyCode)data.keyGameSpeed5x;
@@ -585,6 +587,7 @@ namespace HeartopiaMod
                         else if (line.Contains("keyAutoRepair")) this.keyAutoRepair = (KeyCode)GetJsonInt(line, "\"keyAutoRepair\":");
                         else if (line.Contains("keyAutoJoinFriend")) this.keyAutoJoinFriend = (KeyCode)GetJsonInt(line, "\"keyAutoJoinFriend\":");
                         else if (line.Contains("keyAutoSnow")) this.autoSnowHotkey = (KeyCode)GetJsonInt(line, "\"keyAutoSnow\":");
+                        else if (line.Contains("keyAutoSand")) this.autoSandHotkey = (KeyCode)GetJsonInt(line, "\"keyAutoSand\":");
                         else if (line.Contains("keyJoinPublic")) this.keyJoinPublic = (KeyCode)GetJsonInt(line, "\"keyJoinPublic\":");
                         else if (line.Contains("keyJoinMyTown")) this.keyJoinMyTown = (KeyCode)GetJsonInt(line, "\"keyJoinMyTown\":");
                         else if (line.Contains("keyAutoInsectFarm")) this.keyAutoInsectFarm = (KeyCode)GetJsonInt(line, "\"keyAutoInsectFarm\":");
@@ -912,7 +915,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Inspect Move", ref this.keyInspectMove);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 19, subHeaderStyle, accent, panelFill, panelLine);
+            this.BeginKeybindSection(ref num, left, contentWidth, "AUTOMATION", 20, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Aura Farm", ref this.keyAuraFarm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Water + Weed Radius", ref this.keyWaterWeedRadius);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Insect Farm", ref this.keyAutoInsectFarm);
@@ -926,6 +929,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Feed All Cats", ref this.keyFeedAllCats);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Feed All Dogs", ref this.keyFeedAllDogs);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Snow Sculpture", ref this.autoSnowHotkey);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Sand Sculpture", ref this.autoSandHotkey);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Bird Vacuum", ref this.keyBirdVacuum);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Spawn Bubble", ref this.keySpawnBubble);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Auto Repair", ref this.keyAutoRepair);
@@ -986,6 +990,7 @@ namespace HeartopiaMod
                 this.keyUseAttractor = KeyCode.None;
                 this.keyAntiAfk = KeyCode.None;
                 this.autoSnowHotkey = KeyCode.None;
+                this.autoSandHotkey = KeyCode.None;
                 this.keyBypassOverlap = KeyCode.None;
                 this.keyBirdVacuum = KeyCode.None;
                 this.keyGameSpeed1x = KeyCode.None;
@@ -1432,6 +1437,7 @@ namespace HeartopiaMod
                 case "Auto Repair": this.keyAutoRepair = newKey; break;
                 case "Auto Join Friend": this.keyAutoJoinFriend = newKey; break;
                 case "Auto Snow Sculpture": this.autoSnowHotkey = newKey; break;
+                case "Auto Sand Sculpture": this.autoSandHotkey = newKey; break;
                 case "Noclip": this.keyNoclip = newKey; break;
                 case "Camera Toggle": this.keyCameraToggle = newKey; break;
                 case "Auto Ice Skating": this.keyAutoIceSkating = newKey; break;

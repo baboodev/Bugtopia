@@ -90,6 +90,7 @@ namespace HeartopiaMod
             public int keyBypassOverlap;
             public int keyBirdVacuum;
             public int keyAutoSnow;
+            public int keyAutoSand;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

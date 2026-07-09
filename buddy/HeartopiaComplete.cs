@@ -988,6 +988,12 @@ namespace HeartopiaMod
                         this.AddMenuNotification($"Auto Snow Sculpture {(this.autoSnowEnabled ? "Enabled" : "Disabled")}", this.autoSnowEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                     }
                 }
+                if (this.TryGetModHotkeyDown(this.autoSandHotkey))
+                {
+                    this.autoSandEnabled = !this.autoSandEnabled;
+                    this.AddMenuNotification(this.L("Auto Sand Sculpture") + ": " + (this.autoSandEnabled ? this.L("On") : this.L("Off")),
+                        this.autoSandEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                }
                 if (this.TryGetModHotkeyDown(this.keyAutoJoinFriend))
                 {
                     this.StartLobbyAutoJoinFriend("Hotkey triggered");

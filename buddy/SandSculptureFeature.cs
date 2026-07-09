@@ -58,6 +58,7 @@ namespace HeartopiaMod
 
         private bool autoSandEnabled;
         private bool autoSandWasEnabled;
+        private KeyCode autoSandHotkey = KeyCode.None;
         // When FindBase turns up nothing, place a fresh base from the backpack (direct
         // BuildBatchOperationProCommand; no build-mode UI) in front of the player, then rescan.
         // OFF by default: only run this (and the backpack/module scans it drives) while the user
