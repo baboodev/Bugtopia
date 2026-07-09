@@ -56,6 +56,11 @@ namespace HeartopiaMod
                 return this.DrawExtraFeaturesTab(startY);
             }
 
+            if (this.newFeaturesSubTab == 6)
+            {
+                return this.DrawSandSculptureTab(startY);
+            }
+
             return startY + 40f;
         }
 
@@ -409,6 +414,11 @@ namespace HeartopiaMod
             if (this.newFeaturesSubTab == 5)
             {
                 return 140f;
+            }
+
+            if (this.newFeaturesSubTab == 6)
+            {
+                return 520f;
             }
 
             return 400f;

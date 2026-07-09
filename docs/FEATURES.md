@@ -63,6 +63,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |
 | Extras | Ice skating: network "Perfect Ice Skating" sequences (`IceSkatingSequenceFeature`) + real-time **Auto Ice Skating** bot (`AutoIceSkatingFeature`) |
 | Extra | Open Craft panel; **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`) |
+| Sand Sculpture | Fully-automatic beach sand-sculpting: auto-place base + auto-sculpt correct model + auto-collect (`SandSculptureFeature`) |
 
 Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pets): **[BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md)**.
 
@@ -347,6 +348,27 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 #### Debug
 
 - `MasterLogSnowSculpture` in `SnowSculptureFeature.cs` (default **false**) — `[SnowSculpture]` lines in `bugtopia.log`.
+
+### Sand Sculpting
+
+**Tab:** New Features → **Sand Sculpture** (`newFeaturesSubTab == 6`). Source: `buddy/SandSculptureFeature.cs` (partial `HeartopiaComplete`).
+
+#### Auto Sand Sculpture
+
+- **Pure protocol, AuraMono-only** (the vanilla swing QTE is fully client-simulated in `SandSwingTrackCellModel` and only reports totals). FSM per cycle:
+  1. **FindBase** — scan streamed `SandSculpturesComponent` views (`TryAuraMonoGetComponentObjects`), nearest base within **60 m**; reads `_componentData { baseStaticId, roughStaticId }` from the boxed struct via field offsets. If none is found and **Auto-place base** is on, goes to **PlaceBase** (below) instead of just re-scanning.
+  2. **StartSculpt** — rounds = `TableData.GetSandrough(roughStaticId).interval.Length`; quality gate `FeatureOpenSystem.IsFeatureOpen(SandSculptingQuality=300041)`; sends `StartMakingSandSculpture` only. **`CanStartSandSculpture` (PreStart) is never sent** — its `PreStartSandSculptureEvent(Ok)` reply makes the vanilla client *join* the sculpt mode (`GameSandMode` → `TrackModule` opens the swing-QTE track) and the player FSM sends a duplicate Start → in-game "Error" tip + a stuck QTE track. The server accepts Start+Finish without the handshake, so the whole PreStart path (and its `TrackModule.EndSand` cleanup) was removed.
+  3. **SendFinish** — after the configurable **Finish delay** slider (default 3 s) sends `FinishMakingSandSculpture(base, successCount, perfectCount)`: all-perfect `(0, rounds)` when quality is open, else the vanilla-max `(1, 0)`.
+  4. **WaitRough** — polls (0.5 s, 12 s timeout) for the own `SandSculptureRoughComponent` (`ownerNetId == self`), reads `options[]` from its component data, then `ChooseSandSculptureProduct(roughNetId, productId)` (**rough** netId, not the base). **Always picks the correct model:** the option list is `[one real model + 2 decoys]` — the 14 real sculptures are `SandfinishedItem` ids **1–14**, decoys are **>14** (incl. name-trap duplicates like 17/25/26), and picking a decoy yields `sandfinished 600299` = a **spoiled** sculpture. The mod always chooses the smallest id ≤ 14 (the only real model in the set), so it never spoils; a `model-pick anomaly` line is logged if the set ever has ≠1 valid id. Clears `PlayerDataComponent.SetSandRoughData(0)` afterwards like the vanilla select state.
+  5. **CloseDialog** — the rough spawns next to the player, so the vanilla FSM opens the `DialogueSimplePanel` "choose model" dialog; our protocol Choose bypassed its callback, so nothing closes it. Polls (0.25 s, 3 s timeout) `UIManager.GetView(DialogueSimplePanel)` (Type from the class pointer — never `Type.GetType`) and invokes its protected `CloseSelf()`.
+- **Auto-place base from backpack** (toggle, **off by default**): when FindBase finds nothing, place a fresh base ~0.8 m in front of the player via the game's generic build-placement command directly (no build-mode UI / camera), then rescan. **Out of sand bases in the bag stops the whole feature** (`autoSandEnabled = false`, not just auto-place) — no base can appear by retrying and the loop has nothing to sculpt. Other (non-terminal) failures disable just auto-place after 3 attempts. Path (`.research-record/sand-base-placement-helper.md`): scan bag for a `TableSandbase` item (`TableData.GetSandbase(staticId) != null`) → build a boxed `BuildPlaceData { BuildType=0, TransformData { LevelObjectNetId = putZoneId, LocalPos = root-local target, Angle, VirtualLinkLevelObjectNetId=[putZoneId] } }` where `buildRootNetId = LocalPlayerComponent.inFieldNetId` and `putZoneId = (ulong)root | (1<<32)` → `HomelandProtocolManager.SendBuildBatchOperation(bagItemNetId, buildRootNetId, IBuildData)` (the 3-param one-shot). No dedicated sand-place command exists; base placement goes through the generic build system. **No server position check** (build-overlap is bypassable).
+- **Auto-collect finished sculptures** (toggle, **off by default**): independently of the sculpt FSM, scan `SandFinishComponent` views, and for each own freshly-made one (`SandFinishComponentData.onNewMake == true`) take it into the backpack via `CharacterProtocolManager.PoseDeleteBuild(entityNetId)` (→ `TakeItemNetworkCommand`, exactly what vanilla `GardenSandCommand`/interact 85 does). One at a time (`PoseDeleteBuild` gates on a single in-flight build option cleared by the server's `BuildOptionRespondEvent`), throttled ~1.5 s between takes. **Off by default** because a continuous every-tick scan caught a mono teardown window and AV'd (2026-07-09); the pre-flight `BackPackSystem.GetBlankCount()` check that faulted was removed — a full bag now just gets a harmless server-side reject.
+- A base failing 3 times (start/finish rejected → rough timeout) is **blacklisted** for the session; "Reset base blacklist" button clears it. "Close stuck dialog" button force-closes a stray model dialog.
+- UI (all localized — en/es/zh-CN/pt-BR/th): the auto-sculpt toggle, auto-place + auto-collect toggles, finish-delay slider, a compact status box (state / done / collected / last status / place / collect), and the two buttons. **Quality note:** the mod maxes the controllable QTE input (all-perfect), but the actual star cap is gated by the player's **Lepka/sand hobby level (theme 140, L1–5): 5★ only at L5** — see memory `sand-sculpting-qte-model`.
+
+#### Debug
+
+- `MasterLogSandSculpture` in `SandSculptureFeature.cs` (default **true** while the feature is fresh) — verbose `[SandSculpture]` lines; deduped status logging stays on regardless.
 
 ### Auto Buy
 

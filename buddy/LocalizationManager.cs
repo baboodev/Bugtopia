@@ -448,6 +448,28 @@ namespace HeartopiaMod
             { "homeland_farm.log_water_failed", "Water log failed." },
             { "homeland_farm.log_water_done", "Water log done." },
             { "homeland_farm.status_warming", "Warming up..." },
+
+            // Sand Sculpture
+            { "Sand Sculpture", "Sand Sculpture" },
+            { "Auto Sand Sculpture", "Auto Sand Sculpture" },
+            { "On", "On" },
+            { "Off", "Off" },
+            { "Places a base, sculpts the correct model, and repeats — fully automatic.", "Places a base, sculpts the correct model, and repeats — fully automatic." },
+            { "Auto-place base from backpack", "Auto-place base from backpack" },
+            { "Auto-collect finished sculptures", "Auto-collect finished sculptures" },
+            { "Finish delay", "Finish delay" },
+            { "State", "State" },
+            { "Done", "Done" },
+            { "Collected", "Collected" },
+            { "Status", "Status" },
+            { "Place", "Place" },
+            { "Collect", "Collect" },
+            { "Reset base blacklist", "Reset base blacklist" },
+            { "Close stuck dialog", "Close stuck dialog" },
+            { "Sand sculpture complete", "Sand sculpture complete" },
+            { "Sculpture collected", "Sculpture collected" },
+            { "Sand base placed", "Sand base placed" },
+            { "no sand bases left", "no sand bases left in backpack" },
         };
 
         // Built-in Spanish fallback strings.
@@ -865,6 +887,28 @@ namespace HeartopiaMod
             { "homeland_farm.log_water_failed", "Registro de riego fallido." },
             { "homeland_farm.log_water_done", "Registro de riego completado." },
             { "homeland_farm.status_warming", "Iniciando..." },
+
+            // Sand Sculpture
+            { "Sand Sculpture", "Escultura de arena" },
+            { "Auto Sand Sculpture", "Escultura de arena automática" },
+            { "On", "Activado" },
+            { "Off", "Desactivado" },
+            { "Places a base, sculpts the correct model, and repeats — fully automatic.", "Coloca una base, esculpe el modelo correcto y repite: totalmente automático." },
+            { "Auto-place base from backpack", "Colocar base desde la mochila" },
+            { "Auto-collect finished sculptures", "Recoger esculturas terminadas" },
+            { "Finish delay", "Retraso de finalización" },
+            { "State", "Estado" },
+            { "Done", "Hechas" },
+            { "Collected", "Recogidas" },
+            { "Status", "Estado" },
+            { "Place", "Colocar" },
+            { "Collect", "Recoger" },
+            { "Reset base blacklist", "Restablecer lista negra de bases" },
+            { "Close stuck dialog", "Cerrar diálogo atascado" },
+            { "Sand sculpture complete", "Escultura de arena completada" },
+            { "Sculpture collected", "Escultura recogida" },
+            { "Sand base placed", "Base de arena colocada" },
+            { "no sand bases left", "no quedan bases de arena en la mochila" },
         };
 
         // Built-in Simplified Chinese fallback strings.
@@ -1280,6 +1324,28 @@ namespace HeartopiaMod
             { "homeland_farm.log_water_failed", "浇水日志失败。" },
             { "homeland_farm.log_water_done", "浇水日志完成。" },
             { "homeland_farm.status_warming", "正在预热..." },
+
+            // Sand Sculpture
+            { "Sand Sculpture", "沙雕" },
+            { "Auto Sand Sculpture", "自动沙雕" },
+            { "On", "开" },
+            { "Off", "关" },
+            { "Places a base, sculpts the correct model, and repeats — fully automatic.", "放置底座、雕刻正确的模型并循环——全自动。" },
+            { "Auto-place base from backpack", "自动从背包放置底座" },
+            { "Auto-collect finished sculptures", "自动收取完成的沙雕" },
+            { "Finish delay", "完成延迟" },
+            { "State", "状态" },
+            { "Done", "完成" },
+            { "Collected", "已收取" },
+            { "Status", "状态" },
+            { "Place", "放置" },
+            { "Collect", "收取" },
+            { "Reset base blacklist", "重置底座黑名单" },
+            { "Close stuck dialog", "关闭卡住的对话框" },
+            { "Sand sculpture complete", "沙雕完成" },
+            { "Sculpture collected", "已收取沙雕" },
+            { "Sand base placed", "已放置沙雕底座" },
+            { "no sand bases left", "背包中没有沙雕底座了" },
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -1681,6 +1747,28 @@ namespace HeartopiaMod
             { "homeland_farm.log_water_failed", "Registro de rega falhou." },
             { "homeland_farm.log_water_done", "Registro de rega concluído." },
             { "homeland_farm.status_warming", "Iniciando..." },
+
+            // Sand Sculpture
+            { "Sand Sculpture", "Escultura de areia" },
+            { "Auto Sand Sculpture", "Escultura de areia automática" },
+            { "On", "Ligado" },
+            { "Off", "Desligado" },
+            { "Places a base, sculpts the correct model, and repeats — fully automatic.", "Coloca uma base, esculpe o modelo correto e repete — totalmente automático." },
+            { "Auto-place base from backpack", "Colocar base da mochila" },
+            { "Auto-collect finished sculptures", "Coletar esculturas prontas" },
+            { "Finish delay", "Atraso de conclusão" },
+            { "State", "Estado" },
+            { "Done", "Feitas" },
+            { "Collected", "Coletadas" },
+            { "Status", "Status" },
+            { "Place", "Colocar" },
+            { "Collect", "Coletar" },
+            { "Reset base blacklist", "Redefinir lista negra de bases" },
+            { "Close stuck dialog", "Fechar diálogo travado" },
+            { "Sand sculpture complete", "Escultura de areia concluída" },
+            { "Sculpture collected", "Escultura coletada" },
+            { "Sand base placed", "Base de areia colocada" },
+            { "no sand bases left", "sem bases de areia na mochila" },
         };
 
         // Built-in Thai fallback strings.
@@ -2088,6 +2176,28 @@ namespace HeartopiaMod
             { "homeland_farm.log_water_failed", "บันทึกการรดน้ำล้มเหลว" },
             { "homeland_farm.log_water_done", "บันทึกการรดน้ำเสร็จแล้ว" },
             { "homeland_farm.status_warming", "กำลังเริ่มต้น..." },
+
+            // Sand Sculpture
+            { "Sand Sculpture", "ประติมากรรมทราย" },
+            { "Auto Sand Sculpture", "ปั้นทรายอัตโนมัติ" },
+            { "On", "เปิด" },
+            { "Off", "ปิด" },
+            { "Places a base, sculpts the correct model, and repeats — fully automatic.", "วางฐาน ปั้นแบบที่ถูกต้อง แล้วทำซ้ำ — อัตโนมัติทั้งหมด" },
+            { "Auto-place base from backpack", "วางฐานจากกระเป๋าอัตโนมัติ" },
+            { "Auto-collect finished sculptures", "เก็บประติมากรรมที่เสร็จอัตโนมัติ" },
+            { "Finish delay", "หน่วงเวลาก่อนจบ" },
+            { "State", "สถานะ" },
+            { "Done", "เสร็จ" },
+            { "Collected", "เก็บแล้ว" },
+            { "Status", "สถานะ" },
+            { "Place", "วาง" },
+            { "Collect", "เก็บ" },
+            { "Reset base blacklist", "รีเซ็ตบัญชีดำของฐาน" },
+            { "Close stuck dialog", "ปิดกล่องโต้ตอบที่ค้าง" },
+            { "Sand sculpture complete", "ปั้นทรายเสร็จแล้ว" },
+            { "Sculpture collected", "เก็บประติมากรรมแล้ว" },
+            { "Sand base placed", "วางฐานทรายแล้ว" },
+            { "no sand bases left", "ไม่มีฐานทรายในกระเป๋าแล้ว" },
         };
 
         // Runtime localization state.

@@ -951,6 +951,44 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 - **Filter:** `BackpackItem.staticId == 5100` only
 - **File:** `SnowSculptureFeature.cs` (send helpers in `HeartopiaComplete.cs`)
 
+### 3.18b Sand sculpting
+
+#### `SandSculptureProtocolManager`
+- **Dump:** `XDTDataAndProtocol/XDTDataAndProtocol.ProtocolService.SandSculpture/SandSculptureProtocolManager.cs`
+- **Features:** Auto Sand Sculpture — `CanStartSandSculpture(uint)`, `StartMakingSandSculpture(uint)`, `FinishMakingSandSculpture(uint, successCount, perfectCount)` (client-authoritative QTE totals), `ChooseSandSculptureProduct(roughNetId, productId)`
+- **Access:** **A** — static invokes (Mono-only image; managed lookup dead on this build)
+- **File:** `SandSculptureFeature.cs`
+
+#### `SandSculpturesComponent` / `SandSculptureRoughComponent`
+- **Dump:** `XDTLevelAndEntity/XDTLevelAndEntity.Gameplay.Component/`
+- **Features:** base discovery / own-rough discovery; `_componentData` boxed-struct reads (`SandSculpturesComponentData { baseStaticId, roughStaticId }`, `SandSculptureRoughComponentData { staticId, ownerNetId, options[] }`) via `mono_field_get_offset` − 2·IntPtr header; `options` array copied under pins
+- **Access:** **A** — `TryAuraMonoGetComponentObjects` scan + field offsets
+- **Interact command:** **74** `SandSculpturesCommand` (vanilla entry; the mod does not use interacts)
+
+#### `TableSandrough` / `FeatureOpenSystem`
+- **Detail:** QTE round count = `TableData.GetSandrough(roughStaticId).interval.Length`; `FeatureOpenSystem.IsFeatureOpen(FeatureOpenEnum.SandSculptingQuality=300041)` gates the all-perfect plan vs the 1-round no-perfect plan
+- **Access:** **A** — `GetSandrough(int,bool)` static invoke; `TryResolveAuraMonoModule` + `IsFeatureOpen(enum→int)`
+
+#### Base placement (Auto-place base) — generic build system, NOT a sand command
+- **Detail:** placing a sand base has **no dedicated command** — it goes through the generic homeland build-place path. The mod sends it directly (no build-mode UI). Full report + ready helper: `.research-record/sand-base-placement-helper.md`.
+- **`HomelandProtocolManager.SendBuildBatchOperation(uint netId, uint buildRootNetId, IBuildData data)`** — `XDTDataAndProtocol/…ProtocolService.Homeland/HomelandProtocolManager.cs:52` — the **3-param one-shot** overload (only one at arity 3): it runs `BuildPlaceData.Encode()`, builds `SendBuildOperationBytesPro` + `BuildBatchOperationProCommand` (Version=0, IsLastOperation=true, GamePlayType.Building, FakeId=0), calls `WebRequestUtility.SendCommand`, disposes — all internally. The mod builds only one boxed `BuildPlaceData`.
+- **`BuildPlaceData` / `BuildTransformData`** — `EcsClient/XDT.Scene.Shared.Modules.Build/` — `BuildPlaceData { byte BuildType; BuildTransformData TransformData; BuildAttributeData AttributeData; }` (`BuildType=0` = consume bag item, `NetId=bagItemNetId`; `BuildType=1` = free-by-staticId). `BuildTransformData { ulong LevelObjectNetId; Vector3 LocalPos; int Angle; ulong Ext; byte Curve; bool VirtualLinkHasChange; ulong[] VirtualLinkLevelObjectNetId; }`.
+- **Runtime values:** `buildRootNetId = LocalPlayerComponent.get_inFieldNetId` (== homeNetId == world.id; must be ≠0); `putZoneId = LevelObjectId(root,1) = (ulong)root | (1<<32)` used for both `LevelObjectNetId` and `VirtualLinkLevelObjectNetId[0]`; `LocalPos` = field-root-local (world target via field-root entity `localToWorldMatrix.inverse`; identity fallback since there is **no server position check**); `Angle = ToBuildingRotValue(facing)` or 0.
+- **Item:** `EntityType.sandbase = 601`; `TableSandbase.id` == bag item staticId == `SandSculpturesComponentData.baseStaticId`; filter a bag item with `TableData.GetSandbase(staticId) != null`.
+- **Access:** **A** — boxed-struct build via `mono_object_new` + `mono_field_set_value` (value fields `&x`; reference field / interface arg = object pointer directly; nested value-type field = unboxed pointer), SGen-pinned, `mono_runtime_invoke`.
+- **File:** `SandSculptureFeature.cs` (`TryPlaceSandBaseFromBackpack`)
+
+#### Finished-sculpture collect — `SandFinishComponent` + `CharacterProtocolManager.PoseDeleteBuild`
+- **Detail:** a finished sculpture is a build entity with `SandFinishComponentData { bool onCreate; bool onNewMake; }` (`XDTDataAndProtocol.ComponentsData`) and a `SandFinishComponent` view (`XDTLevelAndEntity/…Gameplay.Component/`, image XDTLevelAndEntity; `EntityType.sandfinished = 603`). Vanilla take = `GardenSandCommand` (`[InteractSetting(85)]`): when `onNewMake==true` and `LevelEntityComponentData.ownerId == self`, `CharacterProtocolManager.PoseDeleteBuild(ownerNetId)`.
+- **`CharacterProtocolManager.PoseDeleteBuild(uint itemNetId) -> bool`** — `XDTDataAndProtocol/…ProtocolService.GamePlay.Character/CharacterProtocolManager.cs:1016` — gates on `PrepareBuildOption(3)` (`_optionType == 0`, i.e. no other build op in flight; **no build-mode required**), then `WebRequestUtility.SendCommand(new TakeItemNetworkCommand { itemNetId, buildTakeType = NormalMode })`. Returns `false` if a prior option is still pending; `_optionType` is cleared by the server's `BuildOptionRespondEvent`.
+- **Access:** **A** — scan `SandFinishComponent` (`TryAuraMonoGetComponentObjects`), read `onNewMake` byte from boxed `_componentData` (`mono_field_get_offset` − 2·IntPtr), `entity` netId via `TryGetAuraMonoEntityNetId`, then `PoseDeleteBuild(netId)` static invoke (unbox bool to detect the busy gate). Bag-full guard via `BackPackSystem.GetBlankCount()`.
+- **File:** `SandSculptureFeature.cs` (`RunSandAutoCollect` / `TryCollectOneFinishedSculpture` / `TryInvokeSandPoseDeleteBuild`)
+
+#### `TrackModule` / `DialogueSimplePanel` (stuck-UI cleanup — only when Send PreStart is on)
+- **Detail:** the mod's protocol Choose bypasses the vanilla UI, so a QTE track (from the PreStart join) or the model-select dialog (rough spawned next to the player) can be left open. `TrackModule.EndSand(uint baseNetId)` (`XDTGameUI/XDTGUI.Module.Track/TrackModule.cs`, namespace `XDTGUI.Module.Track`, image **XDTGameUI**) = `RemoveSand` + `TrackSandModeCloseEvent`; `DialogueSimplePanel.CloseSelf()` (`XDTGameUI/XDTGame.UI.Panel/`) = `UIManager.CloseView(this)`.
+- **Access:** **A** — TrackModule is a ViewModule (no static Instance): class via `FindAuraMonoClassInImages` (XDTGameUI first) → `System.Type` FROM THE CLASS POINTER → `Managers.GetModule(Type)`. Dialog via `UIManager.GetView(Type)` → `CloseSelf`. **NEVER `TryResolveAuraMonoModule`** on these — its `Type.GetType(string)` fallback hard-crashed the runtime (2026-07-09 WER dump); now hardened at the source but the explicit-image route is still used here.
+- **File:** `SandSculptureFeature.cs` (`TryCloseSandQteTrack` / `TryCloseSandModelDialog`)
+
 ### 3.19 Homeland building (Pad)
 
 #### `BuildModule`
@@ -987,6 +1025,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Radar / ESP | Entities, resource components, BubbleComponent | HC, HeartopiaResourceVisualEsp.cs | R + G |
 | Bag / transfer | BackPackSystem, BackpackProtocolManager, EStorageType | HC, DailyQuestSubmitFeature, SnowSculptureFeature | A + R |
 | Snow sculpting | SnowSculpturePanel, SnowSculptureProtocolManager, PlayerInteraction, InteractSystem, snow interact commands 14–16 | SnowSculptureFeature.cs | A (+ R) |
+| Sand sculpting | SandSculptureProtocolManager, SandSculpturesComponent, SandSculptureRoughComponent, TableSandrough, FeatureOpenSystem | SandSculptureFeature.cs | A |
 | Pad build hotkeys | BuildModule, Managers (GetModule), BuildStatusPanel (UI fallback) | PadBuildHotkeyFeature.cs | A (+ R dormant, G fallback) |
 | Daily quest submit | BackPackSystem, TaskProtocolManager, ItemNetPair, TableData | DailyQuestSubmitFeature.cs | A (+ N) |
 | Daily claims | EcsService, IOperationActivityCenterService, ITownGuidesService, IMailClientService, BattlePassSystem, *ProtocolManager | DailyClaimsFeature.cs | A + S |

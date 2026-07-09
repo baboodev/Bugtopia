@@ -271,6 +271,7 @@
     <Compile Include="ForceLocomotionFeature.cs" />
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
+    <Compile Include="SandSculptureFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
     <Compile Include="BubbleSpawnRewriteFeature.cs" />
     <Compile Include="AutoBubbleCollectFeature.cs" />

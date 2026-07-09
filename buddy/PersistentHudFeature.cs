@@ -96,6 +96,14 @@ namespace HeartopiaMod
             // SightseeingStatusPanel: no duplicated widgets.
         };
 
+        // StatusPanel's own tool-skill block (bottom-right). Its main button is a RightJoyStick
+        // sitting at the exact screen spot of every mode panel's primary control (FishingPanel's
+        // strike button, VehicleStatusPanel's exit/boat controls). Reopened StatusPanel is the later
+        // sibling -> renders on top -> that joystick eats the PointerDown and the strike never fires
+        // (field report: manual fishing impossible with the toggle on). Hidden while any mode panel
+        // is active; the block only contains skill_bar@w@go, menu/emoji/camera rows stay.
+        private const string PersistentHudStatusSkillBlockPath = "AniRoot@ani@queueanimation/right_layout@ani/middle_right_layout@go";
+
         private bool persistentHudEnabled;
         private bool persistentHudHookRegistered;
         private float persistentHudNextPollAt;
@@ -227,6 +235,7 @@ namespace HeartopiaMod
                 }
             }
 
+            GameObject activeModePanelRoot = null;
             foreach (KeyValuePair<string, string[]> entry in PersistentHudDuplicateNodesByPanel)
             {
                 GameObject panelRoot = PersistentHudFindPanelRoot(entry.Key);
@@ -235,29 +244,57 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                if (activeModePanelRoot == null)
+                {
+                    activeModePanelRoot = panelRoot;
+                }
+
                 foreach (string childPath in entry.Value)
                 {
-                    Transform child = panelRoot.transform.Find(childPath);
-                    if (child == null)
-                    {
-                        continue;
-                    }
-
-                    GameObject node = child.gameObject;
-                    if (node.activeSelf)
-                    {
-                        node.SetActive(false);
-                        if (!this.PersistentHudIsNodeTracked(node))
-                        {
-                            this.persistentHudHiddenNodes.Add(new KeyValuePair<GameObject, GameObject>(panelRoot, node));
-                        }
-
-                        if (MasterLogPersistentHud)
-                        {
-                            ModLogger.Msg("[PersistentHud] hid duplicate " + entry.Key + "/" + childPath);
-                        }
-                    }
+                    this.PersistentHudHideNode(panelRoot, panelRoot, childPath, entry.Key);
                 }
+            }
+
+            // SightseeingStatusPanel has no duplicate widgets but still owns the bottom-right spot.
+            if (activeModePanelRoot == null)
+            {
+                activeModePanelRoot = PersistentHudFindPanelRoot("SightseeingStatusPanel");
+            }
+
+            // A mode panel is up: get StatusPanel's tool-skill joystick out of the way of the mode's
+            // primary control (fishing strike / vehicle exit). Owner = the mode panel root, so the
+            // standard restore path re-enables the skill bar the moment the mode exits.
+            if (activeModePanelRoot != null)
+            {
+                this.PersistentHudHideNode(activeModePanelRoot, statusRoot, PersistentHudStatusSkillBlockPath, "StatusPanel");
+            }
+        }
+
+        // Disables ownerRoot-lifetimed searchRoot/childPath and tracks it for restore. The owner is
+        // the panel whose visibility justifies the hide — once it deactivates, the node comes back.
+        private void PersistentHudHideNode(GameObject ownerRoot, GameObject searchRoot, string childPath, string label)
+        {
+            Transform child = searchRoot.transform.Find(childPath);
+            if (child == null)
+            {
+                return;
+            }
+
+            GameObject node = child.gameObject;
+            if (!node.activeSelf)
+            {
+                return;
+            }
+
+            node.SetActive(false);
+            if (!this.PersistentHudIsNodeTracked(node))
+            {
+                this.persistentHudHiddenNodes.Add(new KeyValuePair<GameObject, GameObject>(ownerRoot, node));
+            }
+
+            if (MasterLogPersistentHud)
+            {
+                ModLogger.Msg("[PersistentHud] hid " + label + "/" + childPath);
             }
         }
 

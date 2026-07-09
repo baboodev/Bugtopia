@@ -1757,6 +1757,41 @@ namespace HeartopiaMod
             }
         }
 
+        // Every embedded-Mono game image, for the exhaustive class sweep below. Some game types live
+        // in an image whose name != their namespace (XDTGUI.Module.Build.BuildModule and
+        // XDTGUI.Module.Track.TrackModule compile into XDTLevelAndEntity/XDTGameUI; XDTGame.Core.UIManager
+        // into XDTGameUI), so a single namespace-picked image is not enough — probe them all natively.
+        private static readonly string[] AuraMonoAllGameImageNames =
+        {
+            "XDTGameUI", "XDTGameUI.dll",
+            "XDTGameSystem", "XDTGameSystem.dll",
+            "XDTLevelAndEntity", "XDTLevelAndEntity.dll",
+            "XDTBaseService", "XDTBaseService.dll",
+            "XDTDataAndProtocol", "XDTDataAndProtocol.dll",
+            "EcsClient", "EcsClient.dll",
+            "EcsSystem", "EcsSystem.dll",
+            "Client", "Client.dll",
+            "Assembly-CSharp", "Assembly-CSharp.dll"
+        };
+
+        // Whether a name is safe to feed to System.Type.GetType(string) via mono_runtime_invoke.
+        // That icall (mono icall.c internal_from_name) only resolves BCL/corlib names without an
+        // image-specific lookup; a GAME image name crashes it (see TryCreateAuraMonoSystemTypeObject).
+        // corlib namespaces are System.* / Mono.* / Microsoft.* — matches AuraFarm's framework prefixes.
+        private static bool IsBclSafeMonoTypeName(string fullTypeName)
+        {
+            if (string.IsNullOrWhiteSpace(fullTypeName))
+            {
+                return false;
+            }
+
+            string trimmed = fullTypeName.TrimStart();
+            return trimmed.StartsWith("System.", StringComparison.Ordinal)
+                || trimmed.Equals("System", StringComparison.Ordinal)
+                || trimmed.StartsWith("Mono.", StringComparison.Ordinal)
+                || trimmed.StartsWith("Microsoft.", StringComparison.Ordinal);
+        }
+
         private unsafe bool TryCreateAuraMonoSystemTypeObject(string fullTypeName, out IntPtr typeObj)
         {
             typeObj = IntPtr.Zero;
@@ -1765,41 +1800,53 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Primary route for GAME types: resolve the mono class (now sweeping every game image,
+            // incl. namespace != assembly cases) and convert class -> System.Type. This stays on the
+            // safe mono_class_get_type -> mono_type_get_object path and never touches Type.GetType.
             if (this.TryCreateAuraMonoSystemTypeObjectFromClass(fullTypeName, out typeObj) && typeObj != IntPtr.Zero)
             {
                 return true;
             }
 
-            if (auraMonoRuntimeInvoke == null || auraMonoStringNew == null || this.auraMonoTypeGetTypeMethodPtr == IntPtr.Zero)
+            // Name-based fallback: System.Type.GetType(string) via mono_runtime_invoke. This icall
+            // (mono icall.c internal_from_name) HARD-CRASHES the process for any name the root domain
+            // cannot resolve without an image-specific lookup — i.e. every game type. Two confirmed
+            // process kills went through here: XDTGUI.Module.Build.BuildModule (Jun 2026, PadBuild) and
+            // XDTGUI.Module.Track.TrackModule (2026-07-09, coreclr WER dump, main-thread
+            // ExecutionEngineException). It only resolves BCL/corlib names safely (proven by the
+            // List`1[System.UInt64] / Dictionary`2 construction paths). So gate it: BCL-rooted names
+            // only. Every game type must have resolved via the class route above, or fail closed here —
+            // never crash. See memory auramono-viewmodule-resolve-typecrash + PadBuildHotkeyFeature.cs.
+            if (!IsBclSafeMonoTypeName(fullTypeName)
+                || auraMonoRuntimeInvoke == null
+                || auraMonoStringNew == null
+                || this.auraMonoTypeGetTypeMethodPtr == IntPtr.Zero)
             {
                 return false;
             }
 
-            foreach (string candidate in this.GetAuraMonoTypeNameCandidates(fullTypeName))
+            IntPtr typeNameObj = IntPtr.Zero;
+            try
             {
-                IntPtr typeNameObj = IntPtr.Zero;
-                try
+                typeNameObj = auraMonoStringNew(this.auraMonoRootDomain, fullTypeName);
+                if (typeNameObj == IntPtr.Zero)
                 {
-                    typeNameObj = auraMonoStringNew(this.auraMonoRootDomain, candidate);
-                    if (typeNameObj == IntPtr.Zero)
-                    {
-                        continue;
-                    }
+                    return false;
+                }
 
-                    IntPtr* args = stackalloc IntPtr[1];
-                    args[0] = typeNameObj;
-                    IntPtr exc = IntPtr.Zero;
-                    IntPtr candidateTypeObj = auraMonoRuntimeInvoke(this.auraMonoTypeGetTypeMethodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-                    if (exc == IntPtr.Zero && candidateTypeObj != IntPtr.Zero)
-                    {
-                        typeObj = candidateTypeObj;
-                        this.DirectBackpackVerboseLog("[DirectBackpackMono] Type object resolved: " + candidate);
-                        return true;
-                    }
-                }
-                catch
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = typeNameObj;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr candidateTypeObj = auraMonoRuntimeInvoke(this.auraMonoTypeGetTypeMethodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc == IntPtr.Zero && candidateTypeObj != IntPtr.Zero)
                 {
+                    typeObj = candidateTypeObj;
+                    this.DirectBackpackVerboseLog("[DirectBackpackMono] Type object resolved (BCL name): " + fullTypeName);
+                    return true;
                 }
+            }
+            catch
+            {
             }
 
             return false;
@@ -1816,6 +1863,15 @@ namespace HeartopiaMod
                 }
 
                 IntPtr classPtr = this.FindAuraMonoClassByFullName(fullTypeName);
+                if (classPtr == IntPtr.Zero)
+                {
+                    // FindAuraMonoClassByFullName probes only the first *loaded* likely image plus the
+                    // unreliable Il2CppMonoGame.MonoHost reflection sweep, so it misses types whose
+                    // namespace != assembly image (BuildModule/TrackModule/UIManager). Sweep every game
+                    // image natively before giving up — keeps the safe class->Type route so the caller
+                    // does not fall through to the crashing Type.GetType icall.
+                    classPtr = this.FindAuraMonoClassByFullNameExhaustive(fullTypeName);
+                }
                 if (classPtr == IntPtr.Zero)
                 {
                     return false;
@@ -1844,44 +1900,21 @@ namespace HeartopiaMod
             }
         }
 
-        private IEnumerable<string> GetAuraMonoTypeNameCandidates(string fullTypeName)
+        // Exhaustive, reliable class lookup: split the full name and probe every game image natively
+        // (auraMonoClassFromName per image). Used when FindAuraMonoClassByFullName misses a type whose
+        // namespace differs from its assembly image. This replaces the old Type.GetType(string) name
+        // fallback, which crashed the runtime for game types (see TryCreateAuraMonoSystemTypeObject).
+        private IntPtr FindAuraMonoClassByFullNameExhaustive(string fullTypeName)
         {
-            yield return fullTypeName;
-
-            string[] assemblies;
-            if (fullTypeName.StartsWith("XDTGameSystem.", StringComparison.Ordinal))
+            if (string.IsNullOrWhiteSpace(fullTypeName))
             {
-                assemblies = new[] { "XDTGameSystem", "XDTGameSystem.dll", "Client", "Client.dll" };
-            }
-            else if (fullTypeName.StartsWith("XDTGame.UI.", StringComparison.Ordinal))
-            {
-                assemblies = new[] { "XDTGameUI", "XDTGameUI.dll", "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" };
-            }
-            else if (fullTypeName.StartsWith("XDTLevelAndEntity.", StringComparison.Ordinal))
-            {
-                assemblies = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" };
-            }
-            else if (fullTypeName.StartsWith("XDTGame.Framework.", StringComparison.Ordinal) || fullTypeName.StartsWith("XDTGame.Core.", StringComparison.Ordinal))
-            {
-                assemblies = new[] { "XDTBaseService", "XDTBaseService.dll", "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" };
-            }
-            else if (fullTypeName.StartsWith("EcsClient.", StringComparison.Ordinal))
-            {
-                assemblies = new[] { "EcsClient", "EcsClient.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll" };
-            }
-            else if (fullTypeName.StartsWith("XDT.Scene.", StringComparison.Ordinal))
-            {
-                assemblies = new[] { "EcsClient", "EcsClient.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
-            }
-            else
-            {
-                assemblies = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTGameSystem", "XDTGameSystem.dll", "XDTBaseService", "XDTBaseService.dll", "EcsClient", "EcsClient.dll", "Client", "Client.dll" };
+                return IntPtr.Zero;
             }
 
-            foreach (string assembly in assemblies)
-            {
-                yield return fullTypeName + ", " + assembly;
-            }
+            int lastDot = fullTypeName.LastIndexOf('.');
+            string ns = lastDot > 0 ? fullTypeName.Substring(0, lastDot) : string.Empty;
+            string name = lastDot > 0 ? fullTypeName.Substring(lastDot + 1) : fullTypeName;
+            return this.FindAuraMonoClassInImages(ns, name, AuraMonoAllGameImageNames);
         }
 
         private IntPtr FindAuraMonoClassByFullName(string fullTypeName)

@@ -1205,6 +1205,7 @@ namespace HeartopiaMod
                 this.ProcessNetCookLoop();
             }
             this.ProcessSnowSculptureOnUpdate();
+            this.ProcessSandSculptureOnUpdate();
             if (this.autoBuyEnabled && Time.unscaledTime >= this.nextAutoBuyLogicTime)
             {
                 this.nextAutoBuyLogicTime = Time.unscaledTime + 0.05f;
@@ -2316,6 +2317,7 @@ namespace HeartopiaMod
                 tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
                 tabs.Add(("Ice Skating", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
                 tabs.Add((this.L("extra.title"), () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
+                tabs.Add((this.L("Sand Sculpture"), () => this.newFeaturesSubTab == 6, () => this.SetNewFeaturesSubTab(6)));
                 // "Quest Assistant" sub-tab removed 2026-07-04 (§54) — its content moved into "Daily Quests".
             }
             else if (this.selectedTab == 4)
