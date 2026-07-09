@@ -214,6 +214,7 @@ namespace HeartopiaMod
             data.autoFishAutoBaitNoFishSeconds = AutoFishingFarm.GetAutoBaitNoFishSeconds();
             data.autoFishSkipCatchAnim = AutoFishingFarm.GetSkipCatchAnimEnabled();
             data.autoFishSkipCastAnim = AutoFishingFarm.GetSkipCastAnimEnabled();
+            data.autoFishSkipBaitAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
             data.autoFishReelMaxDuration = -1f;
             data.autoFishReelHoldDuration = -1f;
             data.autoFishReelPauseDuration = -1f;
@@ -411,6 +412,7 @@ namespace HeartopiaMod
             }
             AutoFishingFarm.SetSkipCatchAnimEnabled(data.autoFishSkipCatchAnim);
             AutoFishingFarm.SetSkipCastAnimEnabled(data.autoFishSkipCastAnim);
+            AutoFishingFarm.SetSkipBaitAnimEnabled(data.autoFishSkipBaitAnim);
             if (data.insectBatchSize > 0)
             {
                 InsectNetFarm.SetBatchSize(data.insectBatchSize);
@@ -648,6 +650,7 @@ namespace HeartopiaMod
                         else if (line.Contains("autoFishAutoBaitMax")) AutoFishingFarm.SetAutoBaitMaxCount(GetJsonInt(line, "\"autoFishAutoBaitMax\":"));
                         else if (line.Contains("autoFishSkipCatchAnim")) AutoFishingFarm.SetSkipCatchAnimEnabled(GetJsonInt(line, "\"autoFishSkipCatchAnim\":") != 0);
                         else if (line.Contains("autoFishSkipCastAnim")) AutoFishingFarm.SetSkipCastAnimEnabled(GetJsonInt(line, "\"autoFishSkipCastAnim\":") != 0);
+                        else if (line.Contains("autoFishSkipBaitAnim")) AutoFishingFarm.SetSkipBaitAnimEnabled(GetJsonInt(line, "\"autoFishSkipBaitAnim\":") != 0);
                         else if (line.Contains("autoFishReelMaxDuration")) this.saved_autoFishReelMaxDuration = GetJsonFloat(line, "\"autoFishReelMaxDuration\":");
                         else if (line.Contains("autoFishReelHoldDuration")) this.saved_autoFishReelHoldDuration = GetJsonFloat(line, "\"autoFishReelHoldDuration\":");
                         else if (line.Contains("autoFishReelPauseDuration")) this.saved_autoFishReelPauseDuration = GetJsonFloat(line, "\"autoFishReelPauseDuration\":");

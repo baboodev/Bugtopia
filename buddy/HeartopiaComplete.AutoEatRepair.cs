@@ -2611,6 +2611,127 @@ namespace HeartopiaMod
             return useBait ? this.TryUseBaitFromBag() : this.TryUseAttractorFromBag();
         }
 
+        // Direct bait/attractor throw without the ~1.5-2s spread animation, same pattern as the direct
+        // repair-kit throw: AuraMono-invoke the game's own network sender at the end of its throw chain.
+        // Bait  = FishingProtocolManager.CmdScatterBait(uint baitNetId, Vector3 position) -> SpawnFishByBaitCommand.
+        // Lure  = FishingProtocolManager.CmdUseFishTrapDevice(uint deviceNetId, Vector3 pos, Quaternion rot) -> SpawnFishRefreshDeviceCommand.
+        // Both are pure WebRequestUtility.SendCommand (no local anim). Position computed ahead of the
+        // player (the game's own CanThrowAutoBait has an out-Vector3 that's unsafe via mono invoke).
+        private const float BaitThrowDistance = 2.5f;
+
+        private bool TryComputeBaitThrowTarget(out Vector3 targetPos)
+        {
+            targetPos = Vector3.zero;
+            if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos) || playerPos == Vector3.zero)
+            {
+                return false;
+            }
+
+            Vector3 forward = Vector3.forward;
+            GameObject pr = this.FindPlayerRoot();
+            if (pr != null)
+            {
+                forward = pr.transform.forward;
+                forward.y = 0f;
+                forward = forward.sqrMagnitude < 0.0004f ? Vector3.forward : forward.normalized;
+            }
+
+            targetPos = playerPos + forward * BaitThrowDistance;
+            return true;
+        }
+
+        private unsafe bool TryScatterBaitDirectMono(uint itemNetId, out string status)
+        {
+            status = "direct bait unavailable";
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    status = "direct bait Mono runtime unavailable";
+                    return false;
+                }
+
+                IntPtr cls = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Fishing.FishingProtocolManager");
+                if (cls == IntPtr.Zero) { status = "FishingProtocolManager class unavailable"; return false; }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "CmdScatterBait", 2);
+                if (method == IntPtr.Zero) { status = "CmdScatterBait(2) unavailable"; return false; }
+
+                if (!this.TryComputeBaitThrowTarget(out Vector3 targetPos)) { status = "bait target unavailable"; return false; }
+
+                uint netIdArg = itemNetId;
+                Vector3 posArg = targetPos;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&netIdArg);
+                args[1] = (IntPtr)(&posArg);
+                auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "CmdScatterBait exception";
+                    this.AutoEatRepairLog("[UseBait] Direct scatter Mono exception ptr=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                status = "SpawnFishByBaitCommand sent (direct) target=" + targetPos;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "direct bait failed: " + ex.Message;
+                return false;
+            }
+        }
+
+        private unsafe bool TryUseAttractorDirectMono(uint itemNetId, out string status)
+        {
+            status = "direct attractor unavailable";
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    status = "direct attractor Mono runtime unavailable";
+                    return false;
+                }
+
+                IntPtr cls = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Fishing.FishingProtocolManager");
+                if (cls == IntPtr.Zero) { status = "FishingProtocolManager class unavailable"; return false; }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "CmdUseFishTrapDevice", 3);
+                if (method == IntPtr.Zero) { status = "CmdUseFishTrapDevice(3) unavailable"; return false; }
+
+                if (!this.TryComputeBaitThrowTarget(out Vector3 targetPos)) { status = "attractor target unavailable"; return false; }
+
+                Quaternion rotation = Quaternion.identity;
+                GameObject pr = this.FindPlayerRoot();
+                if (pr != null) { rotation = pr.transform.rotation; }
+
+                uint netIdArg = itemNetId;
+                Vector3 posArg = targetPos;
+                Quaternion rotArg = rotation;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[3];
+                args[0] = (IntPtr)(&netIdArg);
+                args[1] = (IntPtr)(&posArg);
+                args[2] = (IntPtr)(&rotArg);
+                auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "CmdUseFishTrapDevice exception";
+                    this.AutoEatRepairLog("[UseAttractor] Direct trap Mono exception ptr=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                status = "SpawnFishRefreshDeviceCommand sent (direct) target=" + targetPos;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "direct attractor failed: " + ex.Message;
+                return false;
+            }
+        }
+
         private bool TryUseBaitFromBag()
         {
             try
@@ -2626,11 +2747,30 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                this.AutoEatRepairLog("[UseBait] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending ChumBait function.");
-                if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncChumBait, netId))
+                // Skip Bait Animation ON: send SpawnFishByBaitCommand directly; func path is the fallback.
+                bool skipAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
+                bool sent = false;
+                if (skipAnim)
                 {
-                    this.AutoEatRepairLog("[UseBait] ExecuteBackpackItemFunc failed for netId=" + netId);
-                    return false;
+                    if (this.TryScatterBaitDirectMono(netId, out string directStatus))
+                    {
+                        this.AutoEatRepairLog("[UseBait] Direct scatter netId=" + netId + ": " + directStatus);
+                        sent = true;
+                    }
+                    else
+                    {
+                        this.AutoEatRepairLog("[UseBait] Direct scatter failed (" + directStatus + "); falling back to ChumBait function.");
+                    }
+                }
+
+                if (!sent)
+                {
+                    this.AutoEatRepairLog("[UseBait] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending ChumBait function.");
+                    if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncChumBait, netId))
+                    {
+                        this.AutoEatRepairLog("[UseBait] ExecuteBackpackItemFunc failed for netId=" + netId);
+                        return false;
+                    }
                 }
 
                 this.nextUseBaitAllowedAt = Time.unscaledTime + UseBaitCooldownSeconds;
@@ -2658,11 +2798,30 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                this.AutoEatRepairLog("[UseAttractor] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending FishingLureBall function.");
-                if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncFishingLureBall, netId))
+                // Skip Bait Animation ON: send SpawnFishRefreshDeviceCommand directly; func path is the fallback.
+                bool skipAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
+                bool sent = false;
+                if (skipAnim)
                 {
-                    this.AutoEatRepairLog("[UseAttractor] ExecuteBackpackItemFunc failed for netId=" + netId);
-                    return false;
+                    if (this.TryUseAttractorDirectMono(netId, out string directStatus))
+                    {
+                        this.AutoEatRepairLog("[UseAttractor] Direct trap netId=" + netId + ": " + directStatus);
+                        sent = true;
+                    }
+                    else
+                    {
+                        this.AutoEatRepairLog("[UseAttractor] Direct trap failed (" + directStatus + "); falling back to FishingLureBall function.");
+                    }
+                }
+
+                if (!sent)
+                {
+                    this.AutoEatRepairLog("[UseAttractor] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending FishingLureBall function.");
+                    if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncFishingLureBall, netId))
+                    {
+                        this.AutoEatRepairLog("[UseAttractor] ExecuteBackpackItemFunc failed for netId=" + netId);
+                        return false;
+                    }
                 }
 
                 this.nextUseAttractorAllowedAt = Time.unscaledTime + UseAttractorCooldownSeconds;

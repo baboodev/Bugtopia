@@ -162,6 +162,9 @@ namespace HeartopiaMod
         private const float SkipCastPollInterval = 0.07f;
         private const float SkipCastWindowSeconds = 1.5f;
         private static bool skipCastAnimEnabled = false;
+        // Skip Bait Animation: send bait/attractor (Use Bait / Use Attractor / Auto Bait) via the direct
+        // network command instead of the ~1.5-2s throw animation. Read by HeartopiaComplete's bait use.
+        private static bool skipBaitAnimEnabled = false;
         private static float skipCastWindowUntil = -999f;
         private static float nextSkipCastPollAt = -999f;
         private static int skipCastSpinSeenCount = 0;
@@ -272,6 +275,8 @@ namespace HeartopiaMod
                 skipCastWindowUntil = -999f;
             }
         }
+        public static bool GetSkipBaitAnimEnabled() => skipBaitAnimEnabled;
+        public static void SetSkipBaitAnimEnabled(bool value) => skipBaitAnimEnabled = value;
         public static int GetAutoBaitRemaining() => autoBaitRemaining;
         public static void ResetAutoBaitCounter()
         {
@@ -693,6 +698,17 @@ namespace HeartopiaMod
                 host.UI_AddMenuNotification(
                     "Skip Cast Animation " + (nextSkipCast ? "Enabled" : "Disabled"),
                     nextSkipCast ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                try { host.UI_SaveKeybinds(false); } catch { }
+            }
+            num += 30;
+
+            bool nextSkipBait = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), skipBaitAnimEnabled, "Skip Bait Animation");
+            if (nextSkipBait != skipBaitAnimEnabled)
+            {
+                SetSkipBaitAnimEnabled(nextSkipBait);
+                host.UI_AddMenuNotification(
+                    "Skip Bait Animation " + (nextSkipBait ? "Enabled" : "Disabled"),
+                    nextSkipBait ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 try { host.UI_SaveKeybinds(false); } catch { }
             }
             num += 30;
