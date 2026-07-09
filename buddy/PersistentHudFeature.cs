@@ -104,10 +104,14 @@ namespace HeartopiaMod
         // is active; the block only contains skill_bar@w@go, menu/emoji/camera rows stay.
         private const string PersistentHudStatusSkillBlockPath = "AniRoot@ani@queueanimation/right_layout@ani/middle_right_layout@go";
 
+        // SkillWidget.MainJoyState.Null (Fishing=0, SweepNet=1, Handhold=2, Empty=3, SeaClean=4, Null=5).
+        private const int PersistentHudMainJoyStateNull = 5;
+
         private bool persistentHudEnabled;
         private bool persistentHudHookRegistered;
         private float persistentHudNextPollAt;
         private float persistentHudNextDedupeAt;
+        private bool persistentHudSkillJoySuppressed;
         private string persistentHudLastStatus = "Idle.";
 
         // Nodes we disabled on the mode panels, with the panel root they belong to. Restored the
@@ -153,6 +157,14 @@ namespace HeartopiaMod
                 if (this.persistentHudHiddenNodes.Count > 0)
                 {
                     try { this.PersistentHudRestoreHiddenNodes(); } catch { }
+                }
+
+                // Toggle falling edge: hand the skill joystick back to the game's own recompute so
+                // it leaves in a consistent vanilla state (whatever mode the current tool implies).
+                if (this.persistentHudSkillJoySuppressed)
+                {
+                    this.persistentHudSkillJoySuppressed = false;
+                    try { this.TryPersistentHudSetSkillJoy(suppress: false); } catch { }
                 }
 
                 return;
@@ -267,6 +279,156 @@ namespace HeartopiaMod
             if (activeModePanelRoot != null)
             {
                 this.PersistentHudHideNode(activeModePanelRoot, statusRoot, PersistentHudStatusSkillBlockPath, "StatusPanel");
+
+                // Hiding the node is NOT enough: SkillWidget's OnStart already ran RefreshSkillJoy
+                // -> rod in hand -> MainJoyFishing.Enter -> SetFKeyHoldHandholdActive(true) ->
+                // PushInputListener(MainInteraction) ABOVE LocalPlayerComponent's handler. That
+                // listener outlives SetActive(false) and eats the fishing-strike input (both the
+                // panel button's SendValueToControl and the F key). SetMainJoyState(Null) runs the
+                // widget's own Leave() path — exactly what a vanilla panel close does — popping the
+                // listener. Re-asserted every tick (no-op inside the widget once already Null)
+                // because game events (handhold changes) can re-enter the fishing joy mode.
+                if (this.TryPersistentHudSetSkillJoy(suppress: true) && !this.persistentHudSkillJoySuppressed)
+                {
+                    this.persistentHudSkillJoySuppressed = true;
+                    if (MasterLogPersistentHud)
+                    {
+                        ModLogger.Msg("[PersistentHud] StatusPanel skill joy suppressed (MainJoyState.Null)");
+                    }
+                }
+            }
+            else if (this.persistentHudSkillJoySuppressed)
+            {
+                // Back to Free with StatusPanel still open: recompute the joy mode from the current
+                // tool via the widget's own RefreshSkillJoy (the OnStart path) so casting works again.
+                if (this.TryPersistentHudSetSkillJoy(suppress: false))
+                {
+                    this.persistentHudSkillJoySuppressed = false;
+                    if (MasterLogPersistentHud)
+                    {
+                        ModLogger.Msg("[PersistentHud] StatusPanel skill joy restored (RefreshSkillJoy)");
+                    }
+                }
+            }
+        }
+
+        // Drives StatusPanel's SkillWidget through its own private API via AuraMono:
+        //   suppress=true  -> SetMainJoyState(MainJoyState.Null)  (Leave(): pops the MainInteraction
+        //                     listener, clears joystick handlers — the vanilla panel-close path)
+        //   suppress=false -> RefreshSkillJoy()                   (recompute from the current tool —
+        //                     the vanilla OnStart path; safe to call even if nothing was suppressed)
+        // Chain: UIManager.GetView(StatusPanel) -> .ui (StatusPanel_Auto) -> .skill_bar_widget.
+        // All intermediate objects are managed heap objects — pinned across the nested invokes.
+        private unsafe bool TryPersistentHudSetSkillJoy(bool suppress)
+        {
+            try
+            {
+                if (!this.TryPersistentHudResolveUiManager(out IntPtr uiManagerObj))
+                {
+                    return false;
+                }
+
+                uint uiManagerPin = AuraMonoPinNew(uiManagerObj);
+                try
+                {
+                    if (!this.TryCreateAuraMonoSystemTypeObject(PersistentHudStatusPanelTypeName, out IntPtr typeObj) || typeObj == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    IntPtr exc = IntPtr.Zero;
+                    IntPtr view;
+                    {
+                        IntPtr* args = stackalloc IntPtr[1];
+                        args[0] = typeObj;
+                        view = auraMonoRuntimeInvoke(this.persistentHudGetViewMethod, uiManagerObj, (IntPtr)args, ref exc);
+                    }
+
+                    if (exc != IntPtr.Zero || view == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    uint viewPin = AuraMonoPinNew(view);
+                    try
+                    {
+                        if (!this.TryGetMonoObjectMember(view, "ui", out IntPtr autoObj) || autoObj == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+
+                        uint autoPin = AuraMonoPinNew(autoObj);
+                        try
+                        {
+                            if (!this.TryGetMonoObjectMember(autoObj, "skill_bar_widget", out IntPtr widget) || widget == IntPtr.Zero)
+                            {
+                                return false;
+                            }
+
+                            uint widgetPin = AuraMonoPinNew(widget);
+                            try
+                            {
+                                IntPtr widgetClass = auraMonoObjectGetClass(widget);
+                                if (widgetClass == IntPtr.Zero)
+                                {
+                                    return false;
+                                }
+
+                                exc = IntPtr.Zero;
+                                if (suppress)
+                                {
+                                    IntPtr setState = this.FindAuraMonoMethodOnHierarchy(widgetClass, "SetMainJoyState", 1);
+                                    if (setState == IntPtr.Zero)
+                                    {
+                                        return false;
+                                    }
+
+                                    int state = PersistentHudMainJoyStateNull;
+                                    IntPtr* args = stackalloc IntPtr[1];
+                                    args[0] = (IntPtr)(&state);
+                                    auraMonoRuntimeInvoke(setState, widget, (IntPtr)args, ref exc);
+                                }
+                                else
+                                {
+                                    IntPtr refresh = this.FindAuraMonoMethodOnHierarchy(widgetClass, "RefreshSkillJoy", 0);
+                                    if (refresh == IntPtr.Zero)
+                                    {
+                                        return false;
+                                    }
+
+                                    auraMonoRuntimeInvoke(refresh, widget, IntPtr.Zero, ref exc);
+                                }
+
+                                return exc == IntPtr.Zero;
+                            }
+                            finally
+                            {
+                                AuraMonoPinFree(widgetPin);
+                            }
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(autoPin);
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(viewPin);
+                    }
+                }
+                finally
+                {
+                    AuraMonoPinFree(uiManagerPin);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (MasterLogPersistentHud)
+                {
+                    ModLogger.Msg("[PersistentHud] skill joy " + (suppress ? "suppress" : "restore") + " failed: " + ex.Message);
+                }
+
+                return false;
             }
         }
 
