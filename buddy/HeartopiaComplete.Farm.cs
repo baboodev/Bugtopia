@@ -221,7 +221,7 @@ namespace HeartopiaMod
             num += (int)statusPanel.height + 14;
 
             float settingsHeight = 184f
-                + (this.auraFarmEnabled ? (this.auraFarmLootCollectEnabled ? 136f : 102f) : 0f)
+                + (this.auraFarmEnabled ? 69f : 0f)
                 + (this.autoFarmAutoStopEnabled ? 44f : 0f);
             Rect settingsPanel = new Rect(left, (float)num, panelWidth, settingsHeight);
             this.DrawExentriSectionPanel(settingsPanel, accent, panelFill, panelLine);
@@ -262,36 +262,10 @@ namespace HeartopiaMod
 
             if (this.auraFarmEnabled)
             {
-                float lootToggleWidth = 250f;
-                float lootToggleHeight = this.GetSwitchToggleHeight(lootToggleWidth, "Auto Pickup Drops", 25f);
-                bool newLootCollectEnabled = this.DrawWrappedSwitchToggle(
-                    new Rect(settingsPanel.x + 14f, rowY, lootToggleWidth, lootToggleHeight),
-                    this.auraFarmLootCollectEnabled,
-                    "Auto Pickup Drops",
-                    25f);
-                if (newLootCollectEnabled != this.auraFarmLootCollectEnabled)
-                {
-                    this.auraFarmLootCollectEnabled = newLootCollectEnabled;
-                    try { this.SaveKeybinds(false); } catch { }
-                }
-
-                rowY += Mathf.Ceil(lootToggleHeight + 8f);
-                if (this.auraFarmLootCollectEnabled)
-                {
-                    GUI.Label(new Rect(settingsPanel.x + 14f, rowY, 170f, 20f), this.LF("Pickup Distance: {0}m", (int)this.auraFarmLootCollectDistance), bodyStyle);
-                    float prevLootDistance = this.auraFarmLootCollectDistance;
-                    this.auraFarmLootCollectDistance = Mathf.Round(this.DrawAccentSlider(
-                        new Rect(settingsPanel.x + 192f, rowY + 1f, settingsPanel.width - 220f, 20f),
-                        this.auraFarmLootCollectDistance,
-                        1f,
-                        500f));
-                    if (this.auraFarmLootCollectDistance != prevLootDistance)
-                    {
-                        try { this.SaveKeybinds(false); } catch { }
-                    }
-
-                    rowY += 34f;
-                }
+                // "Auto Pickup Drops" (loot auto-collect) UI HIDDEN + feature DISABLED 2026-07-09: it triggers
+                // server ErrorCode 3 "Error in uploaded data" after the map-resource rework (stale/wrong loot
+                // netId). Runtime call is commented out in AuraFarm.cs (UpdateAuraFarmLootCollect). Restore this
+                // block + that call once the netId regression is fixed (see scratchpad LOOT_ERROR3_DIAGNOSIS).
 
                 GUI.Label(new Rect(settingsPanel.x + 14f, rowY, 170f, 20f), this.LF("Collect Wait Max: {0}s", (int)this.auraCollectWaitTimeout), bodyStyle);
                 float prevAuraCollectWait = this.auraCollectWaitTimeout;

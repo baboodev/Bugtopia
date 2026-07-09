@@ -524,7 +524,10 @@ namespace HeartopiaMod
 
             this.RunAuraFarmTick();
             this.CleanupAuraCooldownMap(now);
-            this.UpdateAuraFarmLootCollect();
+            // "Auto Pickup Drops" (loot auto-collect) DISABLED 2026-07-09: SendPickLootCommand is rejected by
+            // the server with ErrorCode 3 "Error in uploaded data" after the map-resource rework (stale/wrong
+            // loot netId). UI hidden in HeartopiaComplete.Farm.cs. Re-enable once the netId fix lands.
+            // this.UpdateAuraFarmLootCollect();
         }
 
         private void RunAuraFarmTick()
