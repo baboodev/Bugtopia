@@ -2012,15 +2012,11 @@ namespace HeartopiaMod
         // (dialogs, panels), so force-friending it globally broke those. Instead we bracket MapTrackWidget.SetData
         // with this flag and let FriendGateNative force-friend ONLY while it is set, so the override is confined
         // to the pointer's own render call and never leaks to a dialog's friend check.
-        // Two methods read TryGetFriendByNetId to build the pointer's avatar, at different times:
-        //  [0] MapTrackCellModel.SetData(TrackingItem)      -> iconId.SpriteName = GetUserProfile.AvatarImageUrl
-        //  [1] MapTrackWidget.SetData(MapPositionTrackBarModel) -> shows the head-icon texture branch
-        // Both must run with the force-friend flag set, so we bracket BOTH (save/restore for nesting safety).
+        // The pointer's avatar is force-friended only while its icon is being computed (mapTrackWidgetRendering),
+        // scoping the FriendGateNative override to that window. The old MapTrackCellModel/MapTrackWidget.SetData
+        // brackets were removed in the 2026-07-09 update (MapTrackCellModel deleted, which silently disabled the
+        // whole patch); TrackingItem.GetAtlasSpriteId is their superset and is the sole anchor now.
         private static volatile bool mapTrackWidgetRendering;
-        private delegate void MapTrackSetDataDelegate(IntPtr self, IntPtr arg);
-        private static readonly MapTrackSetDataDelegate[] mapTrackSetDataHooks = new MapTrackSetDataDelegate[2];       // anti-GC
-        private static readonly MapTrackSetDataDelegate[] mapTrackSetDataTrampolines = new MapTrackSetDataDelegate[2]; // originals
-        private static readonly MonoMod.RuntimeDetour.NativeDetour[] mapTrackSetDataDetours = new MonoMod.RuntimeDetour.NativeDetour[2];
         private bool mapTrackSetDataPatchTried;
         private bool mapTrackClassMissLogged;
         // The track icon (incl. the player avatar URL) is computed by TrackingItem.GetAtlasSpriteId, which is
@@ -2628,23 +2624,17 @@ namespace HeartopiaMod
             }
         }
 
-        // Detour MapTrackCellModel.SetData + MapTrackWidget.SetData: mark mapTrackWidgetRendering for the
-        // duration so the friend-gate override is scoped to exactly the pointer's icon-build + render calls
-        // (see FriendGateNative). Bodies are allocation-free — a save/restore flag + pass-through.
+        // Bracket TrackingItem.GetAtlasSpriteId (the pointer icon source): set mapTrackWidgetRendering while the
+        // icon is computed so FriendGateNative force-friends exactly for that window (sret struct return:
+        // RCX=this, RDX=sret, R8=useReason). Allocation-free. The old MapTrackCellModel/MapTrackWidget.SetData
+        // brackets were dropped with MapTrackCellModel in the 2026-07-09 update; GetAtlasSpriteId is their superset.
         private void EnsureTrackWidgetPatch()
         {
             try
             {
-                if (mapTrackSetDataDetours[0] != null || mapTrackSetDataDetours[1] != null)
+                if (getAtlasSpriteIdDetour != null)
                 {
-                    for (int i = 0; i < mapTrackSetDataDetours.Length; i++)
-                    {
-                        if (mapTrackSetDataDetours[i] != null && !mapTrackSetDataDetours[i].IsApplied)
-                        {
-                            mapTrackSetDataDetours[i].Apply();
-                        }
-                    }
-                    if (getAtlasSpriteIdDetour != null && !getAtlasSpriteIdDetour.IsApplied)
+                    if (!getAtlasSpriteIdDetour.IsApplied)
                     {
                         getAtlasSpriteIdDetour.Apply();
                     }
@@ -2658,86 +2648,47 @@ namespace HeartopiaMod
                 {
                     return;
                 }
-                IntPtr cellCls = this.FindAuraMonoClassByFullName("XDTGUI.Module.Track.Cells.MapTrackCellModel");
-                if (cellCls == IntPtr.Zero)
-                {
-                    cellCls = this.FindAuraMonoClassInAllLoadedImages("MapTrackCellModel", "XDTGUI.Module.Track.Cells");
-                }
-                IntPtr widgetCls = this.FindAuraMonoClassByFullName("XDTGame.UI.Widget.MapTrackWidget");
-                if (widgetCls == IntPtr.Zero)
-                {
-                    widgetCls = this.FindAuraMonoClassInAllLoadedImages("MapTrackWidget", "XDTGame.UI.Widget");
-                }
-                if (cellCls == IntPtr.Zero || widgetCls == IntPtr.Zero)
-                {
-                    if (!this.mapTrackClassMissLogged)
-                    {
-                        this.mapTrackClassMissLogged = true;
-                        ModLogger.Msg("[MapSpots] avatar patch: SetData class NOT resolved yet (cell="
-                            + (cellCls != IntPtr.Zero) + " widget=" + (widgetCls != IntPtr.Zero) + ") — retrying");
-                    }
-                    return; // images not loaded yet — retry later
-                }
-                IntPtr cellNative = this.ResolveBuildingMonoNative(cellCls, "SetData", 1);
-                IntPtr widgetNative = this.ResolveBuildingMonoNative(widgetCls, "SetData", 1);
-                if (cellNative == IntPtr.Zero || widgetNative == IntPtr.Zero)
-                {
-                    this.mapTrackSetDataPatchTried = true;
-                    ModLogger.Msg("[MapSpots] avatar patch: SetData not resolved (cell=" + (cellNative != IntPtr.Zero)
-                        + " widget=" + (widgetNative != IntPtr.Zero) + ")");
-                    return;
-                }
-                mapTrackSetDataHooks[0] = MapTrackCellSetDataNative;
-                mapTrackSetDataHooks[1] = MapTrackWidgetSetDataNative;
-                IntPtr[] natives = { cellNative, widgetNative };
-                for (int i = 0; i < 2; i++)
-                {
-                    MonoMod.RuntimeDetour.NativeDetour d = new MonoMod.RuntimeDetour.NativeDetour(natives[i], mapTrackSetDataHooks[i]);
-                    try
-                    {
-                        mapTrackSetDataTrampolines[i] = d.GenerateTrampoline<MapTrackSetDataDelegate>();
-                    }
-                    catch
-                    {
-                        try { d.Undo(); } catch { }
-                        mapTrackSetDataTrampolines[i] = null;
-                        throw;
-                    }
-                    mapTrackSetDataDetours[i] = d;
-                }
-                // Bracket TrackingItem.GetAtlasSpriteId (the icon source) so refresh/streaming recomputes at
-                // close range also run under force-friend. sret struct return -> IntPtr-returning delegate.
                 IntPtr trackingItemCls = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.Navigation.TrackingItem");
                 if (trackingItemCls == IntPtr.Zero)
                 {
                     trackingItemCls = this.FindAuraMonoClassInAllLoadedImages("TrackingItem", "XDTGameSystem.GameplaySystem.Navigation");
                 }
-                IntPtr atlasNative = trackingItemCls != IntPtr.Zero
-                    ? this.ResolveBuildingMonoNative(trackingItemCls, "GetAtlasSpriteId", 1) : IntPtr.Zero;
-                if (atlasNative != IntPtr.Zero)
+                if (trackingItemCls == IntPtr.Zero)
                 {
-                    getAtlasSpriteIdHook = GetAtlasSpriteIdNative;
-                    MonoMod.RuntimeDetour.NativeDetour ad = new MonoMod.RuntimeDetour.NativeDetour(atlasNative, getAtlasSpriteIdHook);
-                    try
+                    if (!this.mapTrackClassMissLogged)
                     {
-                        getAtlasSpriteIdTrampoline = ad.GenerateTrampoline<GetAtlasSpriteIdDelegate>();
+                        this.mapTrackClassMissLogged = true;
+                        ModLogger.Msg("[MapSpots] avatar patch: TrackingItem class NOT resolved yet — retrying");
                     }
-                    catch
-                    {
-                        try { ad.Undo(); } catch { }
-                        getAtlasSpriteIdTrampoline = null;
-                        throw;
-                    }
-                    getAtlasSpriteIdDetour = ad;
+                    return; // image not loaded yet — retry later
                 }
+                IntPtr atlasNative = this.ResolveBuildingMonoNative(trackingItemCls, "GetAtlasSpriteId", 1);
+                if (atlasNative == IntPtr.Zero)
+                {
+                    this.mapTrackSetDataPatchTried = true;
+                    ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId not resolved");
+                    return;
+                }
+                getAtlasSpriteIdHook = GetAtlasSpriteIdNative;
+                MonoMod.RuntimeDetour.NativeDetour ad = new MonoMod.RuntimeDetour.NativeDetour(atlasNative, getAtlasSpriteIdHook);
+                try
+                {
+                    getAtlasSpriteIdTrampoline = ad.GenerateTrampoline<GetAtlasSpriteIdDelegate>();
+                }
+                catch
+                {
+                    try { ad.Undo(); } catch { }
+                    getAtlasSpriteIdTrampoline = null;
+                    throw;
+                }
+                getAtlasSpriteIdDetour = ad;
                 this.mapTrackSetDataPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: SetData + GetAtlasSpriteId detours installed (atlas="
-                    + (atlasNative != IntPtr.Zero) + ", scoped world-pointer avatars)");
+                ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId detour installed (scoped world-pointer avatars)");
             }
             catch (Exception ex)
             {
                 this.mapTrackSetDataPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: SetData detour failed: " + ex.Message);
+                ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId detour failed: " + ex.Message);
             }
         }
 
@@ -2763,13 +2714,6 @@ namespace HeartopiaMod
         {
             try
             {
-                for (int i = 0; i < mapTrackSetDataDetours.Length; i++)
-                {
-                    if (mapTrackSetDataDetours[i] != null && mapTrackSetDataDetours[i].IsApplied)
-                    {
-                        mapTrackSetDataDetours[i].Undo();
-                    }
-                }
                 if (getAtlasSpriteIdDetour != null && getAtlasSpriteIdDetour.IsApplied)
                 {
                     getAtlasSpriteIdDetour.Undo();
@@ -2777,43 +2721,9 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] avatar patch: SetData undo failed: " + ex.Message);
+                ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId undo failed: " + ex.Message);
             }
             mapTrackWidgetRendering = false;
-        }
-
-        private static void MapTrackCellSetDataNative(IntPtr self, IntPtr message)
-        {
-            bool prev = mapTrackWidgetRendering;
-            mapTrackWidgetRendering = true;
-            try
-            {
-                if (mapTrackSetDataTrampolines[0] != null)
-                {
-                    mapTrackSetDataTrampolines[0](self, message);
-                }
-            }
-            finally
-            {
-                mapTrackWidgetRendering = prev;
-            }
-        }
-
-        private static void MapTrackWidgetSetDataNative(IntPtr self, IntPtr barData)
-        {
-            bool prev = mapTrackWidgetRendering;
-            mapTrackWidgetRendering = true;
-            try
-            {
-                if (mapTrackSetDataTrampolines[1] != null)
-                {
-                    mapTrackSetDataTrampolines[1](self, barData);
-                }
-            }
-            finally
-            {
-                mapTrackWidgetRendering = prev;
-            }
         }
 
         // MapSpot.get_IsTracked replacement: keep the real value, but suppress the tracked square
