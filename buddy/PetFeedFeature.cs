@@ -5890,10 +5890,12 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // 2026-07-09 game update renamed PetSpatialDataCenter -> PetGameDataCenter (same [ClientService],
+            // same TryGetDataOpt(EcsEntity/uint, out PetEntityOptData) overloads + order). Field names kept.
             this.petFeedPetSpatialDataCenterType = this.FindLoadedType(
-                "XDT.Scene.Shared.DataCenter.Pet.PetSpatialDataCenter",
-                "Il2CppXDT.Scene.Shared.DataCenter.Pet.PetSpatialDataCenter",
-                "PetSpatialDataCenter");
+                "XDT.Scene.Shared.DataCenter.Pet.PetGameDataCenter",
+                "Il2CppXDT.Scene.Shared.DataCenter.Pet.PetGameDataCenter",
+                "PetGameDataCenter");
             this.petFeedPetEntityOptDataType = this.FindLoadedType(
                 "XDT.Scene.Shared.Entity.EntityOptData.PetEntityOptData",
                 "Il2CppXDT.Scene.Shared.Entity.EntityOptData.PetEntityOptData",
@@ -6089,12 +6091,12 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.petFeedAuraSpatialCenterClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.DataCenter.Pet.PetSpatialDataCenter");
+            this.petFeedAuraSpatialCenterClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.DataCenter.Pet.PetGameDataCenter");
             if (this.petFeedAuraSpatialCenterClass == IntPtr.Zero)
             {
                 this.petFeedAuraSpatialCenterClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
                     "XDT.Scene.Shared.DataCenter.Pet",
-                    "PetSpatialDataCenter");
+                    "PetGameDataCenter");
             }
 
             this.petFeedAuraPetEntityOptDataClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Entity.EntityOptData.PetEntityOptData");
@@ -6583,7 +6585,7 @@ namespace HeartopiaMod
                 }
             }
 
-            // PetSpatialDataCenter declares TryGetDataOpt(EcsEntity, ...) before TryGetDataOpt(uint, ...).
+            // PetGameDataCenter declares TryGetDataOpt(EcsEntity, ...) before TryGetDataOpt(uint, ...).
             // mono_class_get_method_from_name returns the first overload and causes NRE when passed a uint*.
             IntPtr fallback = candidates.Count >= 2 ? candidates[1] : candidates[0];
             this.petFeedAuraTryGetDataOptMethod = fallback;
@@ -6622,7 +6624,7 @@ namespace HeartopiaMod
             if (!this.TryDailyClaimsAuraMonoEcsTryGet(this.petFeedAuraSpatialCenterClass, false, out IntPtr serviceObj, out string tryGetStatus)
                 || serviceObj == IntPtr.Zero)
             {
-                this.LogPetFeedAuraSecretDiagnosticOnce("AuraMono PetSpatialDataCenter unavailable: " + tryGetStatus);
+                this.LogPetFeedAuraSecretDiagnosticOnce("AuraMono PetGameDataCenter unavailable: " + tryGetStatus);
                 return false;
             }
 
