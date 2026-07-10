@@ -348,39 +348,62 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Every member read below allocates mono-side (boxed returns), so unpinned row
+            // pointers race the moving sgen GC -> stale IntPtr -> native AV without a crashlog
+            // (the 2026-07-10 Auto Sell death). Pin the rows for the whole walk, and each value
+            // pulled OUT of its pinned pair box for its reads (pinning is not transitive).
             List<IntPtr> rows = new List<IntPtr>(512);
-            if (!this.TryEnumerateAuraMonoCollectionItems(flatTable, rows))
+            List<uint> rowPins = new List<uint>(512);
+            if (!this.TryEnumerateAuraMonoCollectionItems(flatTable, rows, rowPins))
             {
+                FreeAuraMonoPins(rowPins);
                 return false;
             }
 
-            for (int i = 0; i < rows.Count; i++)
+            try
             {
-                IntPtr rowObj = rows[i];
-                if (rowObj == IntPtr.Zero)
+                for (int i = 0; i < rows.Count; i++)
                 {
-                    continue;
+                    IntPtr rowObj = rows[i];
+                    if (rowObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    IntPtr valueObj = rowObj;
+                    uint valuePin = 0U;
+                    if (this.TryGetAuraMonoDictionaryEntryIntKey(rowObj, out int pairKey, out IntPtr pairValue) && pairValue != IntPtr.Zero)
+                    {
+                        valueObj = pairValue;
+                        valuePin = AuraMonoPinNew(valueObj);
+                    }
+                    else if (this.TryGetMonoObjectMember(rowObj, "Value", out IntPtr boxedValue) && boxedValue != IntPtr.Zero)
+                    {
+                        valueObj = boxedValue;
+                        valuePin = AuraMonoPinNew(valueObj);
+                    }
+
+                    try
+                    {
+                        if (this.TryReadPeriodCurrencySaleRowAura(valueObj, out int rowCurrency, out int rowEntityId)
+                            && rowCurrency == currencyTypeId
+                            && rowEntityId == entityId)
+                        {
+                            return true;
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(valuePin);
+                    }
                 }
 
-                IntPtr valueObj = rowObj;
-                if (this.TryGetAuraMonoDictionaryEntryIntKey(rowObj, out int pairKey, out IntPtr pairValue) && pairValue != IntPtr.Zero)
-                {
-                    valueObj = pairValue;
-                }
-                else if (this.TryGetMonoObjectMember(rowObj, "Value", out IntPtr boxedValue) && boxedValue != IntPtr.Zero)
-                {
-                    valueObj = boxedValue;
-                }
-
-                if (this.TryReadPeriodCurrencySaleRowAura(valueObj, out int rowCurrency, out int rowEntityId)
-                    && rowCurrency == currencyTypeId
-                    && rowEntityId == entityId)
-                {
-                    return true;
-                }
+                return false;
             }
-
-            return false;
+            finally
+            {
+                FreeAuraMonoPins(rowPins);
+            }
         }
 
         private bool TryLookupPeriodCurrencySaleManaged(int currencyTypeId, int entityId)
@@ -464,12 +487,20 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryFindAuraMonoPeriodCurrencyEntityMap(currencyTypeId, out IntPtr entityMapObj) || entityMapObj == IntPtr.Zero)
+            if (!this.TryFindAuraMonoPeriodCurrencyEntityMap(currencyTypeId, out IntPtr entityMapObj, out uint entityMapPin) || entityMapObj == IntPtr.Zero)
             {
                 return false;
             }
 
-            return this.TryAuraMonoDictionaryContainsIntKey(entityMapObj, staticId);
+            try
+            {
+                // ContainsKey boxes its key mono-side before the invoke — keep the map pinned.
+                return this.TryAuraMonoDictionaryContainsIntKey(entityMapObj, staticId);
+            }
+            finally
+            {
+                AuraMonoPinFree(entityMapPin);
+            }
         }
 
         private bool TryGetAuraMonoTableDataPeriodCurrencySales(out IntPtr salesMapObj)
@@ -504,12 +535,24 @@ namespace HeartopiaMod
             return exc == IntPtr.Zero && salesMapObj != IntPtr.Zero;
         }
 
+        // Session cache: the allowlist is static design-table data, but it was re-walked from
+        // the live mono tables on EVERY sell tick — each walk a fresh window for the moving-GC
+        // stale-pointer crash and a few ms of wasted invokes. Resolve once per currency.
+        // Callers only read the returned set (Contains/foreach), so sharing the instance is safe.
+        private readonly Dictionary<int, HashSet<int>> periodCurrencyAllowlistCache = new Dictionary<int, HashSet<int>>();
+
         private bool TryGetAllowedPeriodCurrencyStaticIds(int currencyTypeId, out HashSet<int> allowedStaticIds)
         {
             allowedStaticIds = new HashSet<int>();
             if (currencyTypeId <= 0)
             {
                 return false;
+            }
+            if (this.periodCurrencyAllowlistCache.TryGetValue(currencyTypeId, out HashSet<int> cachedAllowlist)
+                && cachedAllowlist != null && cachedAllowlist.Count > 0)
+            {
+                allowedStaticIds = cachedAllowlist;
+                return true;
             }
             string source = string.Empty;
             if (this.TryGetAllowedPeriodCurrencyStaticIdsAura(currencyTypeId, out allowedStaticIds) && allowedStaticIds.Count > 0)
@@ -526,7 +569,8 @@ namespace HeartopiaMod
             }
             if (allowedStaticIds.Count > 0)
             {
-                this.AutoSellLogSellResult("Period allowlist via " + source + " count=" + allowedStaticIds.Count + " sample=" + this.FormatAutoSellIdSample(allowedStaticIds, 8) + " currency=" + currencyTypeId);
+                this.periodCurrencyAllowlistCache[currencyTypeId] = allowedStaticIds;
+                this.AutoSellLogSellResult("Period allowlist via " + source + " count=" + allowedStaticIds.Count + " sample=" + this.FormatAutoSellIdSample(allowedStaticIds, 8) + " currency=" + currencyTypeId + " (cached for session)");
                 return true;
             }
             allowedStaticIds = new HashSet<int>();
@@ -623,44 +667,72 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // The crash path of the 2026-07-10 no-crashlog Auto Sell death: this walk kept
+            // unpinned row pointers while every read below allocated mono-side, so a mid-loop
+            // sgen GC pass relocated the rows out from under the loop. Pin the rows for the
+            // walk, and each row value pulled out of its pinned pair box (not transitive).
             List<IntPtr> rows = new List<IntPtr>(512);
-            if (!this.TryEnumerateAuraMonoCollectionItems(flatTable, rows) || rows.Count == 0)
+            List<uint> rowPins = new List<uint>(512);
+            if (!this.TryEnumerateAuraMonoCollectionItems(flatTable, rows, rowPins) || rows.Count == 0)
             {
+                FreeAuraMonoPins(rowPins);
                 return false;
             }
 
-            bool foundAny = false;
-            for (int i = 0; i < rows.Count; i++)
+            try
             {
-                IntPtr rowObj = rows[i];
-                if (rowObj == IntPtr.Zero)
+                bool foundAny = false;
+                for (int i = 0; i < rows.Count; i++)
                 {
-                    continue;
+                    IntPtr rowObj = rows[i];
+                    if (rowObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    IntPtr valueObj = rowObj;
+                    uint valuePin = 0U;
+                    if (this.TryGetAuraMonoDictionaryEntryIntKey(rowObj, out int pairKey, out IntPtr pairValue) && pairValue != IntPtr.Zero)
+                    {
+                        valueObj = pairValue;
+                        valuePin = AuraMonoPinNew(valueObj);
+                    }
+                    else if (this.TryGetMonoObjectMember(rowObj, "Value", out IntPtr boxedValue) && boxedValue != IntPtr.Zero)
+                    {
+                        valueObj = boxedValue;
+                        valuePin = AuraMonoPinNew(valueObj);
+                    }
+
+                    bool rowOk;
+                    int rowCurrency;
+                    int entityId;
+                    try
+                    {
+                        rowOk = this.TryReadPeriodCurrencySaleRowAura(valueObj, out rowCurrency, out entityId);
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(valuePin);
+                    }
+
+                    if (!rowOk || entityId <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (rowCurrency == currencyTypeId)
+                    {
+                        allowedStaticIds.Add(entityId);
+                        foundAny = true;
+                    }
                 }
 
-                IntPtr valueObj = rowObj;
-                if (this.TryGetAuraMonoDictionaryEntryIntKey(rowObj, out int pairKey, out IntPtr pairValue) && pairValue != IntPtr.Zero)
-                {
-                    valueObj = pairValue;
-                }
-                else if (this.TryGetMonoObjectMember(rowObj, "Value", out IntPtr boxedValue) && boxedValue != IntPtr.Zero)
-                {
-                    valueObj = boxedValue;
-                }
-
-                if (!this.TryReadPeriodCurrencySaleRowAura(valueObj, out int rowCurrency, out int entityId) || entityId <= 0)
-                {
-                    continue;
-                }
-
-                if (rowCurrency == currencyTypeId)
-                {
-                    allowedStaticIds.Add(entityId);
-                    foundAny = true;
-                }
+                return foundAny;
             }
-
-            return foundAny;
+            finally
+            {
+                FreeAuraMonoPins(rowPins);
+            }
         }
 
         private bool TryReadPeriodCurrencySaleRowAura(IntPtr rowObj, out int currency, out int entityId)
@@ -834,12 +906,19 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryFindAuraMonoPeriodCurrencyEntityMap(currencyTypeId, out IntPtr entityMapObj) || entityMapObj == IntPtr.Zero)
+            if (!this.TryFindAuraMonoPeriodCurrencyEntityMap(currencyTypeId, out IntPtr entityMapObj, out uint entityMapPin) || entityMapObj == IntPtr.Zero)
             {
                 return false;
             }
 
-            return this.TryCollectPeriodSaleEntityIdsFromAuraEntityMap(entityMapObj, allowedStaticIds) && allowedStaticIds.Count > 0;
+            try
+            {
+                return this.TryCollectPeriodSaleEntityIdsFromAuraEntityMap(entityMapObj, allowedStaticIds) && allowedStaticIds.Count > 0;
+            }
+            finally
+            {
+                AuraMonoPinFree(entityMapPin);
+            }
         }
 
         private unsafe bool TryGetAllowedPeriodCurrencyStaticIdsIl2Cpp(int currencyTypeId, out HashSet<int> allowedStaticIds)
@@ -1051,31 +1130,50 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> buckets = new List<IntPtr>(64);
-            if (!this.TryEnumerateAuraMonoCollectionItems(mapObj, buckets) || buckets.Count == 0)
+            List<uint> bucketPins = new List<uint>(64);
+            if (!this.TryEnumerateAuraMonoCollectionItems(mapObj, buckets, bucketPins) || buckets.Count == 0)
             {
+                FreeAuraMonoPins(bucketPins);
                 return false;
             }
 
             bool foundAny = false;
-            for (int i = 0; i < buckets.Count; i++)
+            try
             {
-                IntPtr bucketObj = buckets[i];
-                if (bucketObj == IntPtr.Zero)
+                for (int i = 0; i < buckets.Count; i++)
                 {
-                    continue;
-                }
+                    IntPtr bucketObj = buckets[i];
+                    if (bucketObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                if (!this.TryGetAuraMonoDictionaryEntryIntKey(bucketObj, out int bucketCurrency, out IntPtr entityMapObj))
-                {
-                    continue;
-                }
+                    if (!this.TryGetAuraMonoDictionaryEntryIntKey(bucketObj, out int bucketCurrency, out IntPtr entityMapObj))
+                    {
+                        continue;
+                    }
 
-                if (bucketCurrency != currencyTypeId || entityMapObj == IntPtr.Zero)
-                {
-                    continue;
-                }
+                    if (bucketCurrency != currencyTypeId || entityMapObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
 
-                foundAny = this.TryCollectPeriodSaleEntityIdsFromAuraEntityMap(entityMapObj, allowedStaticIds) || foundAny;
+                    // The nested map came out of the pinned pair box — pin it across the
+                    // allocating walk below (pinning is not transitive).
+                    uint entityMapPin = AuraMonoPinNew(entityMapObj);
+                    try
+                    {
+                        foundAny = this.TryCollectPeriodSaleEntityIdsFromAuraEntityMap(entityMapObj, allowedStaticIds) || foundAny;
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityMapPin);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(bucketPins);
             }
 
             return foundAny;
@@ -1089,37 +1187,62 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> entries = new List<IntPtr>(128);
-            if (!this.TryEnumerateAuraMonoCollectionItems(entityMapObj, entries) || entries.Count == 0)
+            List<uint> entryPins = new List<uint>(128);
+            if (!this.TryEnumerateAuraMonoCollectionItems(entityMapObj, entries, entryPins) || entries.Count == 0)
             {
+                FreeAuraMonoPins(entryPins);
                 return false;
             }
 
             bool foundAny = false;
-            for (int i = 0; i < entries.Count; i++)
+            try
             {
-                IntPtr entryObj = entries[i];
-                if (entryObj == IntPtr.Zero)
+                for (int i = 0; i < entries.Count; i++)
                 {
-                    continue;
-                }
-
-                if (this.TryGetAuraMonoDictionaryEntryIntKey(entryObj, out int keyInt, out IntPtr valueObj)
-                    && this.TryExtractPeriodSaleEntityIdFromAuraValue(keyInt, valueObj, out int entityId))
-                {
-                    allowedStaticIds.Add(entityId);
-                    foundAny = true;
-                    continue;
-                }
-
-                int fallbackKey = 0;
-                if (this.TryGetMonoInt32Member(entryObj, "Key", out fallbackKey) || this.TryGetMonoIntMember(entryObj, "Key", out fallbackKey))
-                {
-                    if (this.TryExtractPeriodSaleEntityIdFromAuraValue(fallbackKey, IntPtr.Zero, out int fallbackEntityId))
+                    IntPtr entryObj = entries[i];
+                    if (entryObj == IntPtr.Zero)
                     {
-                        allowedStaticIds.Add(fallbackEntityId);
-                        foundAny = true;
+                        continue;
+                    }
+
+                    if (this.TryGetAuraMonoDictionaryEntryIntKey(entryObj, out int keyInt, out IntPtr valueObj))
+                    {
+                        // The row value came out of the pinned entry box — pin it across the
+                        // multi-field reads below (pinning is not transitive).
+                        uint valuePin = AuraMonoPinNew(valueObj);
+                        bool extracted;
+                        int entityId;
+                        try
+                        {
+                            extracted = this.TryExtractPeriodSaleEntityIdFromAuraValue(keyInt, valueObj, out entityId);
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(valuePin);
+                        }
+
+                        if (extracted)
+                        {
+                            allowedStaticIds.Add(entityId);
+                            foundAny = true;
+                            continue;
+                        }
+                    }
+
+                    int fallbackKey = 0;
+                    if (this.TryGetMonoInt32Member(entryObj, "Key", out fallbackKey) || this.TryGetMonoIntMember(entryObj, "Key", out fallbackKey))
+                    {
+                        if (this.TryExtractPeriodSaleEntityIdFromAuraValue(fallbackKey, IntPtr.Zero, out int fallbackEntityId))
+                        {
+                            allowedStaticIds.Add(fallbackEntityId);
+                            foundAny = true;
+                        }
                     }
                 }
+            }
+            finally
+            {
+                FreeAuraMonoPins(entryPins);
             }
 
             return foundAny;
@@ -1159,9 +1282,13 @@ namespace HeartopiaMod
             return entityId > 0;
         }
 
-        private bool TryFindAuraMonoPeriodCurrencyEntityMap(int currencyTypeId, out IntPtr entityMapObj)
+        // On success entityMapPin is a pinned gchandle rooting entityMapObj (the nested
+        // per-entity dictionary): the caller keeps using the raw pointer across allocating
+        // invokes, so it must stay pinned until the caller AuraMonoPinFree()s it.
+        private bool TryFindAuraMonoPeriodCurrencyEntityMap(int currencyTypeId, out IntPtr entityMapObj, out uint entityMapPin)
         {
             entityMapObj = IntPtr.Zero;
+            entityMapPin = 0U;
             if (currencyTypeId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
             {
                 return false;
@@ -1197,32 +1324,42 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> buckets = new List<IntPtr>(64);
-            if (!this.TryEnumerateAuraMonoCollectionItems(salesMapObj, buckets) || buckets.Count == 0)
+            List<uint> bucketPins = new List<uint>(64);
+            if (!this.TryEnumerateAuraMonoCollectionItems(salesMapObj, buckets, bucketPins) || buckets.Count == 0)
             {
+                FreeAuraMonoPins(bucketPins);
                 return false;
             }
 
-            for (int i = 0; i < buckets.Count; i++)
+            try
             {
-                IntPtr bucketObj = buckets[i];
-                if (bucketObj == IntPtr.Zero)
+                for (int i = 0; i < buckets.Count; i++)
                 {
-                    continue;
+                    IntPtr bucketObj = buckets[i];
+                    if (bucketObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetAuraMonoDictionaryEntryIntKey(bucketObj, out int bucketCurrency, out IntPtr mapObj))
+                    {
+                        continue;
+                    }
+
+                    if (bucketCurrency == currencyTypeId && mapObj != IntPtr.Zero)
+                    {
+                        entityMapObj = mapObj;
+                        entityMapPin = AuraMonoPinNew(mapObj);
+                        return true;
+                    }
                 }
 
-                if (!this.TryGetAuraMonoDictionaryEntryIntKey(bucketObj, out int bucketCurrency, out IntPtr mapObj))
-                {
-                    continue;
-                }
-
-                if (bucketCurrency == currencyTypeId && mapObj != IntPtr.Zero)
-                {
-                    entityMapObj = mapObj;
-                    return true;
-                }
+                return false;
             }
-
-            return false;
+            finally
+            {
+                FreeAuraMonoPins(bucketPins);
+            }
         }
 
     }

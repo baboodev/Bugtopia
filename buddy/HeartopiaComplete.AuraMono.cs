@@ -1212,29 +1212,39 @@ namespace HeartopiaMod
 
             if (keyObj != IntPtr.Zero)
             {
-                if (!this.TryGetMonoInt32Member(keyObj, "m_value", out keyInt))
+                // The key box is fresh unpinned garbage and the probes below allocate between
+                // reads — pin it so a mid-sequence moving-GC pass can't relocate it.
+                uint keyPin = AuraMonoPinNew(keyObj);
+                try
                 {
-                    this.TryGetMonoIntMember(keyObj, "m_value", out keyInt);
-                }
-
-                if (keyInt <= 0)
-                {
-                    this.TryGetMonoInt32Member(keyObj, "value__", out keyInt);
-                }
-
-                if (keyInt <= 0 && auraMonoObjectUnbox != null)
-                {
-                    try
+                    if (!this.TryGetMonoInt32Member(keyObj, "m_value", out keyInt))
                     {
-                        IntPtr unboxed = auraMonoObjectUnbox(keyObj);
-                        if (unboxed != IntPtr.Zero)
+                        this.TryGetMonoIntMember(keyObj, "m_value", out keyInt);
+                    }
+
+                    if (keyInt <= 0)
+                    {
+                        this.TryGetMonoInt32Member(keyObj, "value__", out keyInt);
+                    }
+
+                    if (keyInt <= 0 && auraMonoObjectUnbox != null)
+                    {
+                        try
                         {
-                            keyInt = Marshal.ReadInt32(unboxed);
+                            IntPtr unboxed = auraMonoObjectUnbox(keyObj);
+                            if (unboxed != IntPtr.Zero)
+                            {
+                                keyInt = Marshal.ReadInt32(unboxed);
+                            }
+                        }
+                        catch
+                        {
                         }
                     }
-                    catch
-                    {
-                    }
+                }
+                finally
+                {
+                    AuraMonoPinFree(keyPin);
                 }
             }
 
