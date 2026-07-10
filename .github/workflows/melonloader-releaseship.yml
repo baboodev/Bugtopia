@@ -1,7 +1,8 @@
-# Builds the single unified bugtopia.dll (ReleaseShip) and, on v* tags, publishes it to the GitHub
-# release. One DLL works under both MelonLoader (Mods\) and BepInEx (BepInEx\plugins\), so there is
-# one build and one artifact. Build deps come from the unified-ci-deps.zip on the 'deps' release
-# (regenerate with ci/prepare-ci-deps.ps1 from an install that has both loaders).
+# Builds all three flavors (ReleaseShip): Loader=MelonLoader / BepInEx / Universal. On v* tags it
+# publishes the renamed DLLs (bugtopia-melonloader.dll / bugtopia-bepinex.dll / bugtopia-universal.dll)
+# to the GitHub release. Universal works under either loader; the single-loader builds need only that
+# loader. Build deps come from unified-ci-deps.zip on the 'deps' release (regenerate with
+# ci/prepare-ci-deps.ps1 from an install that has both loaders).
 name: ReleaseShip
 
 on:
@@ -84,6 +85,8 @@ jobs:
 
           $required = @(
             "MelonLoader\net6\MelonLoader.dll",
+            "MelonLoader\net6\Il2CppInterop.Runtime.dll",
+            "MelonLoader\Il2CppAssemblies\Il2Cppmscorlib.dll",
             "BepInEx\core\BepInEx.Core.dll",
             "BepInEx\core\BepInEx.Unity.IL2CPP.dll",
             "BepInEx\core\MonoMod.RuntimeDetour.dll",
@@ -97,22 +100,38 @@ jobs:
             }
           }
 
-      - name: Build ReleaseShip (unified)
+      - name: Build all flavors (MelonLoader, BepInEx, Universal)
         shell: pwsh
         run: |
-          dotnet build buddy/buddy.csproj `
-            -c ReleaseShip `
-            -p:HeartopiaDir="${{ github.workspace }}\ci\heartopia" `
-            -p:ContinuousIntegrationBuild=true `
-            --nologo
+          $deps = "${{ github.workspace }}\ci\heartopia"
+          foreach ($loader in 'MelonLoader', 'BepInEx', 'Universal') {
+            Write-Host "::group::Build $loader"
+            dotnet build buddy/buddy.csproj `
+              -c ReleaseShip `
+              -p:Loader=$loader `
+              -p:HeartopiaDir="$deps" `
+              -p:ContinuousIntegrationBuild=true `
+              --nologo
+            if ($LASTEXITCODE -ne 0) { throw "Build failed for Loader=$loader" }
+            Write-Host "::endgroup::"
+          }
 
-      - name: Upload bugtopia.dll artifact
+      - name: Stage renamed release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item buddy/bin/MelonLoader/ReleaseShip/bugtopia.dll dist/bugtopia-melonloader.dll
+          Copy-Item buddy/bin/BepInEx/ReleaseShip/bugtopia.dll     dist/bugtopia-bepinex.dll
+          Copy-Item buddy/bin/Universal/ReleaseShip/bugtopia.dll   dist/bugtopia-universal.dll
+          Copy-Item buddy/bin/MelonLoader/ReleaseShip/bugtopia.pdb dist/bugtopia-melonloader.pdb
+          Copy-Item buddy/bin/BepInEx/ReleaseShip/bugtopia.pdb     dist/bugtopia-bepinex.pdb
+          Copy-Item buddy/bin/Universal/ReleaseShip/bugtopia.pdb   dist/bugtopia-universal.pdb
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: bugtopia-releaseship
-          path: |
-            buddy/bin/Universal/ReleaseShip/bugtopia.dll
-            buddy/bin/Universal/ReleaseShip/bugtopia.pdb
+          path: dist/*
           if-no-files-found: error
 
       - name: Publish release
@@ -123,9 +142,10 @@ jobs:
         run: |
           $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" `
             -f "tag_name=${{ github.ref_name }}" --jq .body
-          $notes = "Unified build — one bugtopia.dll for MelonLoader (Mods\) and BepInEx (BepInEx\plugins\).`n`n$generated"
+          $notes = "Three builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n`n$generated"
           gh release create "${{ github.ref_name }}" `
             --title "${{ github.ref_name }}" `
             --notes $notes `
-            "buddy/bin/Universal/ReleaseShip/bugtopia.dll" `
-            "buddy/bin/Universal/ReleaseShip/bugtopia.pdb"
+            "dist/bugtopia-bepinex.dll" `
+            "dist/bugtopia-melonloader.dll" `
+            "dist/bugtopia-universal.dll"

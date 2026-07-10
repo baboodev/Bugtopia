@@ -1,8 +1,11 @@
-# Packages the Universal build's reference assemblies from a local Heartopia install into
-# ci/unified-ci-deps.zip for GitHub Actions. The single unified bugtopia.dll references BOTH
-# loaders, so the zip needs MelonLoader.dll + the BepInEx core deps + the IL2CPP interop assemblies.
-# This mirrors the reference set in buddy/buddy.csproj exactly. Requires an install that has BOTH
-# MelonLoader and BepInEx.
+# Packages the build reference assemblies from a local Heartopia install into ci/unified-ci-deps.zip
+# for GitHub Actions. CI builds all three flavors (Loader=MelonLoader / BepInEx / Universal), so the
+# zip carries the FULL reference set for both loaders — mirroring buddy/buddy.csproj:
+#   * BepInEx flavor  -> BepInEx\core + BepInEx\interop
+#   * MelonLoader flavor -> MelonLoader\net6 + MelonLoader\Il2CppAssemblies
+#   * Universal flavor -> BepInEx\core + BepInEx\interop + MelonLoader\net6\MelonLoader.dll
+# No game assemblies (Assembly-CSharp / Client / EcsClient): the mod references zero typed game symbols.
+# Requires an install that has BOTH MelonLoader and BepInEx.
 param(
     [string]$HeartopiaDir = $env:HEARTOPIA_DIR,
     [string]$OutputZip = (Join-Path $PSScriptRoot "unified-ci-deps.zip")
@@ -18,10 +21,13 @@ if (-not (Test-Path $HeartopiaDir)) {
     throw "HeartopiaDir not found: $HeartopiaDir. Pass -HeartopiaDir or set HEARTOPIA_DIR."
 }
 
-# MelonLoader.dll is the only MelonLoader-specific reference; shared deps (MonoMod / Il2CppInterop)
-# and the BepInEx entry assemblies come from BepInEx\core, and the IL2CPP interop from BepInEx\interop.
-# No game assemblies (Assembly-CSharp / Client / EcsClient) — the mod references zero typed game symbols.
-$net6Dlls = @(
+# Shared loader deps (identical identities in both installs) + each loader's entry assembly.
+$melonNet6Dlls = @(
+    "0Harmony.dll",
+    "MonoMod.RuntimeDetour.dll",
+    "MonoMod.Utils.dll",
+    "Il2CppInterop.Common.dll",
+    "Il2CppInterop.Runtime.dll",
     "MelonLoader.dll"
 )
 $bepinexCoreDlls = @(
@@ -33,7 +39,8 @@ $bepinexCoreDlls = @(
     "BepInEx.Core.dll",
     "BepInEx.Unity.IL2CPP.dll"
 )
-$bepinexInteropDlls = @(
+# IL2CPP interop — same file list under BepInEx\interop and MelonLoader\Il2CppAssemblies.
+$interopDlls = @(
     "Il2Cppmscorlib.dll",
     "UnityEngine.dll",
     "UnityEngine.AnimationModule.dll",
@@ -51,10 +58,11 @@ $bepinexInteropDlls = @(
 )
 
 $staging = Join-Path $env:TEMP ("heartopia-ci-deps-" + [guid]::NewGuid().ToString("N"))
-$net6Out = Join-Path $staging "MelonLoader\net6"
-$coreOut = Join-Path $staging "BepInEx\core"
-$interopOut = Join-Path $staging "BepInEx\interop"
-New-Item -ItemType Directory -Force -Path $net6Out, $coreOut, $interopOut | Out-Null
+$melonNet6Out = Join-Path $staging "MelonLoader\net6"
+$melonInteropOut = Join-Path $staging "MelonLoader\Il2CppAssemblies"
+$bepinexCoreOut = Join-Path $staging "BepInEx\core"
+$bepinexInteropOut = Join-Path $staging "BepInEx\interop"
+New-Item -ItemType Directory -Force -Path $melonNet6Out, $melonInteropOut, $bepinexCoreOut, $bepinexInteropOut | Out-Null
 
 function Copy-Deps([string]$SrcDir, [string[]]$Names, [string]$DestDir) {
     if (-not (Test-Path $SrcDir)) {
@@ -69,9 +77,10 @@ function Copy-Deps([string]$SrcDir, [string[]]$Names, [string]$DestDir) {
     }
 }
 
-Copy-Deps (Join-Path $HeartopiaDir "MelonLoader\net6") $net6Dlls $net6Out
-Copy-Deps (Join-Path $HeartopiaDir "BepInEx\core") $bepinexCoreDlls $coreOut
-Copy-Deps (Join-Path $HeartopiaDir "BepInEx\interop") $bepinexInteropDlls $interopOut
+Copy-Deps (Join-Path $HeartopiaDir "MelonLoader\net6") $melonNet6Dlls $melonNet6Out
+Copy-Deps (Join-Path $HeartopiaDir "MelonLoader\Il2CppAssemblies") $interopDlls $melonInteropOut
+Copy-Deps (Join-Path $HeartopiaDir "BepInEx\core") $bepinexCoreDlls $bepinexCoreOut
+Copy-Deps (Join-Path $HeartopiaDir "BepInEx\interop") $interopDlls $bepinexInteropOut
 
 if (Test-Path $OutputZip) {
     Remove-Item $OutputZip -Force
