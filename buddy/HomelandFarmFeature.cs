@@ -213,7 +213,6 @@ namespace HeartopiaMod
         private bool homelandFarmWarmupComplete = false;
         private bool homelandFarmSowManagedReflectionAttempted = false;
         private bool homelandFarmComponentRadiusWarned = false;
-        private bool homelandFarmInteropZeroLoadLogged = false;
 
         private sealed class HomelandFarmRegisteredFarmTarget
         {
@@ -340,15 +339,12 @@ namespace HeartopiaMod
         // GenSimpleConfirmOption wire y on homeland crop grid (ReducePrecision).
         private const float HomelandFarmCropSowFieldLocalY = 0.06f;
 
-        private bool homelandFarmReflectionResolved = false;
         private bool homelandFarmManagedReflectionReady = false;
         private bool homelandFarmAuraReflectionReady = false;
         private bool homelandFarmReflectionUnavailable = false;
         private string homelandFarmReflectionUnavailableStatus = string.Empty;
         private bool homelandFarmInteropAssembliesLoaded = false;
-        private float homelandFarmNextInteropLoadAttemptAt = 0f;
         private const float HomelandFarmInteropLoadRetryIntervalSeconds = 5f;
-        private bool homelandFarmInteropMissingDirLogged = false;
         private float homelandFarmNextReflectionRetryAt = 0f;
         private bool homelandFarmManagedReflectionUnavailable = false;
         private string homelandFarmManagedReflectionUnavailableStatus = string.Empty;
@@ -435,7 +431,6 @@ namespace HeartopiaMod
         // Set once the manure visual refresh is found structurally unavailable on this build
         // (Entities.PlayVfxAt missing / crops have no CropComponent). Each failed attempt does heavy
         // AuraMono work, so without this fertilize-all lags ~2-3s per batch refreshing cosmetics.
-        private bool homelandFarmManureVisualUnavailable = false;
         private IntPtr homelandFarmAuraEntitiesGetComponentsMethod = IntPtr.Zero;
         private readonly Dictionary<IntPtr, IntPtr> homelandFarmAuraComponentListClassByComponentClass = new Dictionary<IntPtr, IntPtr>();
         private readonly Dictionary<IntPtr, IntPtr> homelandFarmAuraInflatedGetComponentsMethodByComponentClass = new Dictionary<IntPtr, IntPtr>();
@@ -525,7 +520,6 @@ namespace HeartopiaMod
         private MethodInfo homelandFarmCropSeedingInteropMethod = null;
 
         private bool homelandFarmScannerTypesResolved = false;
-        private bool homelandFarmScannerTypesUnavailable = false;
         private string homelandFarmScannerTypesUnavailableStatus = string.Empty;
         private readonly Dictionary<uint, Vector3> homelandFarmAuraLevelObjectPositionCache = new Dictionary<uint, Vector3>();
         private readonly Dictionary<uint, uint> homelandFarmAuraLevelObjectOwnerByNetId = new Dictionary<uint, uint>();
@@ -606,7 +600,6 @@ namespace HeartopiaMod
                 && this.TryEnsureHomelandFarmManagedReflection(out string managedStatus))
             {
                 this.homelandFarmManagedReflectionReady = true;
-                this.homelandFarmReflectionResolved = true;
                 this.homelandFarmReflectionUnavailable = false;
                 this.homelandFarmReflectionUnavailableStatus = string.Empty;
                 this.HomelandFarmLog("Managed reflection ready.");
@@ -616,7 +609,6 @@ namespace HeartopiaMod
             if (this.TryEnsureHomelandFarmAuraReflection(out string auraStatus))
             {
                 this.homelandFarmAuraReflectionReady = true;
-                this.homelandFarmReflectionResolved = true;
                 this.homelandFarmReflectionUnavailable = false;
                 this.homelandFarmReflectionUnavailableStatus = string.Empty;
                 this.HomelandFarmLog("Aura reflection ready (MelonLoader/native path).");
@@ -9560,7 +9552,6 @@ namespace HeartopiaMod
             if (hasManagedScanPath || hasAuraScanPath)
             {
                 this.homelandFarmScannerTypesResolved = true;
-                this.homelandFarmScannerTypesUnavailable = false;
                 this.homelandFarmScannerUnavailableLogged = false;
                 return true;
             }

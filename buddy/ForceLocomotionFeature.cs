@@ -59,7 +59,6 @@ namespace HeartopiaMod
         // that exit never fires. Field ptr cached per class (image lifetime).
         private IntPtr forceSkateGroundFieldClass;
         private IntPtr forceSkateLeaveGroundField;
-        private float forceSkateGroundLogAt = -999f;
 
         private void ProcessForceLocomotionOnUpdate()
         {

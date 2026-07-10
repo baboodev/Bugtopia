@@ -27,7 +27,6 @@ namespace HeartopiaMod
         private static string lastToolStatus = "Unknown";
         private static float lastKnownScannerToolStatusAt = -999f;
         private const float ScannerEquipRetryInterval = 3.25f;
-        private static bool scannerEquipRequestActive = false;
         private static float nextScannerEquipAttemptAt = -999f;
         private static int previousToolId = 0;
         private static bool previousToolRestorePending = false;
@@ -103,7 +102,6 @@ namespace HeartopiaMod
             lastToolStatus = "Unknown";
             lastKnownScannerToolStatusAt = -999f;
             lastScannerEquipped = false;
-            scannerEquipRequestActive = false;
             nextScannerEquipAttemptAt = -999f;
             consecutiveServerRejectTicks = 0;
             Breadcrumbs.Drop("bf.clearstate.begin");
@@ -132,7 +130,6 @@ namespace HeartopiaMod
                 sessionStartedAt = -999f;
                 lastScannerEquipped = false;
                 lastKnownScannerToolStatusAt = -999f;
-                scannerEquipRequestActive = false;
                 nextScannerEquipAttemptAt = -999f;
                 previousToolId = 0;
                 previousToolRestorePending = false;
@@ -677,7 +674,6 @@ namespace HeartopiaMod
                     if (scannerEquipped)
                     {
                         lastKnownScannerToolStatusAt = Time.unscaledTime;
-                        scannerEquipRequestActive = false;
                         nextScannerEquipAttemptAt = -999f;
                     }
                 }
@@ -946,7 +942,6 @@ namespace HeartopiaMod
                 return;
             }
 
-            scannerEquipRequestActive = true;
             float now = Time.unscaledTime;
             if (now >= nextScannerEquipAttemptAt)
             {
@@ -1013,7 +1008,6 @@ namespace HeartopiaMod
             lastStatus = "Disabled";
             lastToolStatus = "Unknown";
             lastKnownScannerToolStatusAt = -999f;
-            scannerEquipRequestActive = false;
             nextScannerEquipAttemptAt = -999f;
             previousToolId = 0;
             previousToolRestorePending = false;

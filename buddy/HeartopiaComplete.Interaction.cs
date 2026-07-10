@@ -1520,7 +1520,6 @@ namespace HeartopiaMod
                 if (toastsRoot == null || !toastsRoot.activeInHierarchy)
                 {
                     this.cachedToastRootObj = null;
-                    this.cachedToastTextObj = null;
                     if (now < this.nextToastRootPathScanAt)
                     {
                         return;

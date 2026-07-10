@@ -242,7 +242,6 @@ namespace HeartopiaMod
         private IntPtr mapResDropDictGetItem = IntPtr.Zero;  // Dictionary.get_Item(string)
         private IntPtr mapResGetQualityMethod = IntPtr.Zero; // RewardUtility.GetQuality(RewardType,int,int)
         private IntPtr mapResGetEntityMethod = IntPtr.Zero;  // TableData.GetEntity(int,bool) -> TableEntity (.name)
-        private int mapResDropGroupDiagCount;
         private int mapResGroupVerboseCount;
         private int mapTrackMatchDiagCount;
 

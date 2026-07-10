@@ -298,7 +298,6 @@ namespace HeartopiaMod
                 // GamePhotoMode state before the safer Aura entity scan even starts.
                 // For Bird Farm stability, route directly to entity scanning instead.
                 bool canUseGameplayTarget = false;
-                bool justEnteredPhotoMode = false;
                 string photoModeStatus = "Gameplay target path bypassed";
 
                 bool shouldFallbackToEntityTargets = true;

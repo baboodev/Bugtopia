@@ -86,7 +86,6 @@ namespace HeartopiaMod
         private string petFeedSelectedFoodName = "Any Food";
         private bool petFeedSkipFiveStarFood = true;
         private readonly List<PetFeedTarget> petFeedDetectedPets = new List<PetFeedTarget>();
-        private int petFeedPetListScrollIndex = 0;
         private string petFeedPetListStatus = "Scan pets to list cats and dogs.";
         private readonly List<PetFeedFavoriteUiRow> petFeedFavoriteUiRows = new List<PetFeedFavoriteUiRow>();
         private Vector2 petFeedFavoriteUiScroll = Vector2.zero;
@@ -1876,7 +1875,6 @@ namespace HeartopiaMod
         private void RefreshPetFeedPetList()
         {
             this.petFeedDetectedPets.Clear();
-            this.petFeedPetListScrollIndex = 0;
 
             int catCount = 0;
             int dogCount = 0;

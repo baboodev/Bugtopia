@@ -23,6 +23,13 @@ namespace HeartopiaMod
     // unreadable ⇒ logged no-op (never sends a malformed op). Verify in-game with MasterLogPadBuild.
     public partial class HeartopiaComplete
     {
+        // NOTE: this "Plan B" free-transform (arbitrary Y angle / arbitrary XYZ position via BuildMoveData)
+        // is DRAFTED BUT NOT WIRED: TryBuildingApplyFreeRotate/FreePosition + DrawBuildingPosAxis exist but
+        // nothing calls them, so these input fields are never set (angle/pos → CS0649) and the step/status
+        // fields are never read (CS0414). Kept as scaffolding; warnings suppressed here until a build-panel
+        // wires it (read focus → DrawBuildingPosAxis writes these → call the apply methods).
+#pragma warning disable CS0649 // input field never assigned — panel not wired yet
+#pragma warning disable CS0414 // step/status field assigned but never read — panel not wired yet
         private int buildingFreeRotateAngleY;       // desired absolute Y angle (degrees, 0..359)
         private int buildingFreeRotateStep = 15;    // +/- button step
         private string buildingFreeRotateStatus = "Focus an existing object in build mode, set Y, Apply.";
@@ -34,6 +41,8 @@ namespace HeartopiaMod
         private float buildingFreePosZ;
         private float buildingFreePosStep = 0.25f;
         private string buildingFreePosStatus = "Focus an object, Read, nudge X/Y/Z, Apply.";
+#pragma warning restore CS0414
+#pragma warning restore CS0649
 
         // Floor height (god-mode build plane). SetPlaneHeight(offset) raises _standardHeight so placement
         // floats at the chosen height above the field floor. Applied on change; god-mode only.

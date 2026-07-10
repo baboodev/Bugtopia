@@ -175,7 +175,6 @@ namespace HeartopiaMod
         private static string lastToolStatus = "Unknown";
         private static string lastTargetStatus = "None";
         private const float RodEquipRetryInterval = 3.25f;
-        private static bool rodEquipRequestActive = false;
         private static float nextRodEquipAttemptAt = -999f;
         private static int previousToolId = 0;
         private static bool previousToolRestorePending = false;
@@ -190,7 +189,6 @@ namespace HeartopiaMod
         private static uint lastBattleBaitNetId = 0U;
         private static float lastCastSentAt = -999f;
         private static float nextWorldReadyLogAt = -999f;
-        private static float nextRuntimeReadyLogAt = -999f;
         private static float nextFishingStateLogAt = -999f;
         private static float nextActiveStateLogAt = -999f;
         private static string lastActiveStateLogKey = string.Empty;
@@ -584,7 +582,6 @@ namespace HeartopiaMod
             }
 
             enabled = value;
-            rodEquipRequestActive = false;
             nextRodEquipAttemptAt = -999f;
             nextActionAt = -999f;
             instantCatchActiveCached = false;
@@ -609,7 +606,6 @@ namespace HeartopiaMod
             lastLoggedFishResultAt = -999f;
             lastCastSentAt = -999f;
             nextWorldReadyLogAt = -999f;
-            nextRuntimeReadyLogAt = -999f;
             nextFishingStateLogAt = -999f;
             nextActiveStateLogAt = -999f;
             lastActiveStateLogKey = string.Empty;
@@ -1487,7 +1483,6 @@ namespace HeartopiaMod
                     return;
                 }
 
-                rodEquipRequestActive = false;
                 nextRodEquipAttemptAt = -999f;
 
                 bool foundTarget = host.TryFindNearestFishShadowTarget(fishShadowDetectRange, out uint targetNetId, out Vector3 targetPos, out float targetDistance, out int detectedCount, out int inRangeCount, out string targetStatus);
@@ -1580,7 +1575,6 @@ namespace HeartopiaMod
         public static void ForceStop(HeartopiaComplete host = null)
         {
             enabled = false;
-            rodEquipRequestActive = false;
             nextRodEquipAttemptAt = -999f;
             previousToolId = 0;
             previousToolRestorePending = false;
@@ -1602,7 +1596,6 @@ namespace HeartopiaMod
             lastLoggedFishResultAt = -999f;
             lastCastSentAt = -999f;
             nextWorldReadyLogAt = -999f;
-            nextRuntimeReadyLogAt = -999f;
             nextFishingStateLogAt = -999f;
             lastActiveStateLogKey = string.Empty;
             nextTargetMissLogAt = -999f;
@@ -1631,7 +1624,6 @@ namespace HeartopiaMod
                 return;
             }
 
-            rodEquipRequestActive = true;
             float now = Time.unscaledTime;
             if (now >= nextRodEquipAttemptAt)
             {

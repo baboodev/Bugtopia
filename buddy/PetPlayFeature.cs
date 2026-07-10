@@ -34,7 +34,6 @@ namespace HeartopiaMod
         private int petPlayLastDogRound = -1;
         private float petPlayLastDogAnswerAt = -999f;
         private float petPlayNextDogRoundScanAt = 0f;
-        private float petPlayNextPanelInvokeFailureLogAt = 0f;
         private float petPlayNextActiveQuestionFailureLogAt = 0f;
         private float petPlayNextCatQuestionScanAt = 0f;
         private float petPlayNextWashTickAt = 0f;

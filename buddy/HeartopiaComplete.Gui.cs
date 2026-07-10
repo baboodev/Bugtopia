@@ -1043,7 +1043,6 @@ namespace HeartopiaMod
             if (this.automationSubTab == 3)
             {
                 float left = 20f;
-                float width = 360f;
                 float panelWidth = 580f;
                 Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
                 Color panelFill = new Color(this.uiContentR, this.uiContentG, this.uiContentB, Mathf.Clamp(this.uiPanelAlpha * 0.82f, 0.14f, 0.92f));

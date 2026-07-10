@@ -4904,17 +4904,12 @@ namespace HeartopiaMod
         private object netCookReliableChannelValue = null;
         private bool netCookTypeDiagnosticsLogged = false;
         // Auto-cook diagnostics
-        private int autoCookLoopTicks = 0;
-        private float lastAutoCookHeartbeatAt = -999f;
         private string lastAutoCookException = null;
         // Legacy Auto Cook auto-stop timer fields kept for old routine reuse.
         private bool autoCookAutoStopEnabled = false;
         private int autoCookAutoStopHours = 0;
         private int autoCookAutoStopMinutes = 0;
         private int autoCookAutoStopSeconds = 0;
-        private string autoCookAutoStopHoursInput = "0";
-        private string autoCookAutoStopMinutesInput = "0";
-        private string autoCookAutoStopSecondsInput = "0";
         private float autoCookAutoStopAt = -1f;
         private int autoFarmSubTab = 0; // 0 = Main, 1 = Tree Farm, 2 = Fish Farm, 3 = Insect Farm, 4 = Bird Farm
         private int automationSubTab = 0; // 0 = Main, 1 = Food & Repair, 2 = Snow Sculpting, 3 = Auto Buy, 4 = Auto Sell, 5 = Mass Cook, 6 = Puzzle, 7 = Pet Care
@@ -4984,8 +4979,6 @@ namespace HeartopiaMod
         };
 
         // Auto Buy Store Selection (0=None, 1=Cooking, 2=Birdwatching, 3=Garden, 4=Fishing)
-        private int autoBuySelectedStore = 0;
-        private bool autoBuyStoreDropdownOpen = false;
         private readonly string[] autoBuyStoreOptions = new string[] { "None", "Cooking Store", "Birdwatching Store", "Garden Store", "Fishing Store" };
 
         // Auto Sell fields - direct quick-sell protocol, no sell-panel clicks.
@@ -5334,7 +5327,6 @@ namespace HeartopiaMod
         private float saved_autoFishReelMaxDuration = -1f;
         private float saved_autoFishReelHoldDuration = -1f;
         private float saved_autoFishReelPauseDuration = -1f;
-        private GameObject cachedToastTextObj = null;
         private GameObject cachedToastRootObj = null;
         private float nextToastRootPathScanAt = 0f;
         private GameObject cachedEnergyTextObj = null;
@@ -5467,7 +5459,6 @@ namespace HeartopiaMod
         private const int BirdPoseStretch = 3;
         // AuraMono radar: positions of bird entities found by the entity scan, refreshed with the entity cache.
         private readonly List<Vector3> _auraMonoBirdRadarPositions = new List<Vector3>();
-        private float _auraMonoBirdRadarRefreshedAt = -999f;
         private float lastBirdFarmSendAt = -999f;
         private uint lastBirdFarmAttemptedNetId = 0U;
         private uint lastBirdFarmRecentPhotoNetId = 0U;
@@ -5567,7 +5558,6 @@ namespace HeartopiaMod
         public bool showFishShadowRadar = false;
         private bool showMeteorRadar = false;
         // Draw radar objects as a GUI overlay (like meteors) regardless of world distance
-        private bool showRadarGuiOverlay = false;
         
         // Token: 0x04000030 RID: 48
         private bool showTreeRadar = false;
