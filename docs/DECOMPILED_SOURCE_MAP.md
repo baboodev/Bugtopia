@@ -1045,6 +1045,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Auto repair / eat | ToolSystem, BackPackSystem, EcsService | HC | R + A |
 | Warehouse bypass | BagPanel UI hierarchy | WarehouseBypassFeature.cs | W + A |
 | Game UI timings | ConfigManager (Managers._serviceDic), TipConfig, TipShowTimeConfig, LightToastPanel (reader) | GameUiTimingsFeature.cs | A |
+| Carpet Stamp (stampede carpets) | UGCWorld._uActors, UActor (StaticId/UgcType), UgcOperateCommand, UgcOperateMethod, WebRequestUtility.SendCommand, PhysEventSkill/UGCTriggerCase (reference) | CarpetStampFeature.cs | A + S (inflated SendCommand<UgcOperateCommand>) |
 
 ---
 

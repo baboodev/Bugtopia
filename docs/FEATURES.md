@@ -62,7 +62,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Homeland Farm | Crop-box farming: auto farm, water/weed/harvest/sow/fertilize in radius, seed/fertilizer selection |
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |
 | Extras | Ice skating: network "Perfect Ice Skating" sequences (`IceSkatingSequenceFeature`) + real-time **Auto Ice Skating** bot (`AutoIceSkatingFeature`) |
-| Extra | Open Craft panel; **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`) |
+| Extra | Open Craft panel; **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
 | Sand Sculpture | Fully-automatic beach sand-sculpting: auto-place base + auto-sculpt correct model + auto-collect (`SandSculptureFeature`) |
 
 Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pets): **[BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md)**.
@@ -814,6 +814,21 @@ returns 0 under "Input System (New)". This bridge fixes that.
 
 Pipeline details: **[TECHNICAL.md § Analog movement bridge](./TECHNICAL.md)**; resolver facts in
 `memory/analog-move-injection.md`.
+
+---
+
+## New Features — Extra (Carpet Stamp)
+
+**Tab:** New Features → Extra. **Source:** `CarpetStampFeature.cs`.
+
+Research tool for the party **stampede carpets** — Slippery Rug `260242` (`p_mechanism_party_acceleratecarpet_1`, +20% move speed) and Slime Rug `260243` (−20%), plus the start/end point rugs `260240`/`260241` (listed scan-only).
+
+- **Scan Carpets** — walks the static `UGCWorld._uActors` dictionary (one `UActor` per UGC mechanism on the map) via AuraMono with GC pins, reads each actor's `StaticId` / `UgcType` / entity position, and lists everything with `UgcType.StampedeInteraction` (1002) or a known carpet staticId, sorted by distance. Every actor found is logged (`[CarpetStamp]`), carpet or not.
+- **Step On** (row button / **Step On Nearest**) — sends a single self-reported step-on: `UgcOperateCommand { Type = actor UgcType, NetId = carpet, OperateMethod = (UgcOperateMethod)enterSkillId }` through the AuraMono-inflated `WebRequestUtility.SendCommand<UgcOperateCommand>` (Reliable). The server runs the skill's `UgcServerAction` itself — Slippery Rug: **AddBuff 1003** (+20% speed, no expiry until removed).
+- **Step Off** — completes the cycle like a real exit: both `PlayerExit` skills in `ugcSkills` order (AddBuff 1005, +20% for 3 s linger, then RemoveBuff 1003).
+- **Logging** — always on, no toggle: resolution pointers, dictionary walk per-actor lines (netId/staticId/ugcType/pos/dist), full command payloads, invoke results/exceptions.
+
+Skill ids are per-staticId constants recovered from the decrypted `cn.bytes` tables (`Mechanism.ugcSkills` → `Ugcskill` → `UgcServerAction`/`BuffConfig`); the game-side pipeline this replays is `UGCTriggerCase → LocalPlayerComponent.TriggerEnter → PhysInteractionSystem → PhysEventSkill → Action_Command_UgcOperate`. Research: `memory/ugc-mechanism-carpet-interaction.md`.
 
 ---
 

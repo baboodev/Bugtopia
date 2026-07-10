@@ -86,6 +86,8 @@ namespace HeartopiaMod
             }
             y += 42f;
 
+            y = this.DrawCarpetStampSection(y);
+
             return y + 20f;
         }
 
@@ -418,7 +420,9 @@ namespace HeartopiaMod
 
             if (this.newFeaturesSubTab == 5)
             {
-                return 140f;
+                // Craft button + Carpet Stamp section (first-frame estimate; real height comes
+                // from the returned content bottom once the carpet list is populated).
+                return 640f;
             }
 
             if (this.newFeaturesSubTab == 6)

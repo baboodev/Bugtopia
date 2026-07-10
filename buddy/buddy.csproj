@@ -237,6 +237,7 @@
 
   <ItemGroup>
     <Compile Include="AnimalCareFeature.cs" />
+    <Compile Include="CarpetStampFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
     <Compile Include="DailyClaimsFeature.cs" />
     <Compile Include="BirdPhotoSubmitFeature.cs" />
