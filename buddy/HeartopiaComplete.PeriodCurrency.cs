@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -225,13 +225,11 @@ namespace HeartopiaMod
                 return false;
             }
 
-#if BEPINEX
-            if (this.TryLookupPeriodCurrencySaleIl2CppContains(currencyTypeId, entityId))
+            if (!ModLoaderInfo.IsMelonLoader && this.TryLookupPeriodCurrencySaleIl2CppContains(currencyTypeId, entityId))
             {
                 lookupPath = "il2cpp[ContainsKey]";
                 return true;
             }
-#endif
 
             if (this.TryLookupPeriodCurrencySaleAura(currencyTypeId, entityId))
             {

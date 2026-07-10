@@ -328,9 +328,9 @@ ilspy-dumps/
 | Item | Value |
 |------|-------|
 | Project | `buddy/buddy.csproj` |
-| Output | `buddy/bin/<Loader>/<Configuration>/bugtopia.dll` |
+| Output | `buddy/bin/<Configuration>/bugtopia.dll` (one unified DLL for both loaders) |
 | TFM | `net6.0`, x64, `AllowUnsafeBlocks` |
-| Loaders | `MelonLoader` or `BepInEx` via `-p:Loader=` and `#if MELONLOADER` / `BEPINEX` |
+| Loaders | One unified DLL serves both MelonLoader and BepInEx; runtime dispatch via `ModLoaderInfo.IsMelonLoader` (both `[MelonInfo]` and `[BepInPlugin]` entry points, no `-p:Loader=`, no loader `#if`) |
 | Script | `buddy/build-all.bat` |
 | Game path | `buddy/Directory.Build.props` → `HeartopiaDir` |
 

@@ -1,16 +1,61 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-
-#if MELONLOADER
-using MelonLoader;
-#elif BEPINEX
 using BepInEx.Unity.IL2CPP.Utils.Collections;
-#endif
 
+// Loader-neutral coroutine front. The active entry point installs its backend; loader
+// assemblies are only referenced inside the adapter classes, so they are resolved lazily
+// and only under the loader that actually hosts us.
 public static class ModCoroutines
 {
-#if BEPINEX
+    private static Func<IEnumerator, object> _start;
+    private static Action<object> _stop;
+
+    public static void InitMelonLoader()
+    {
+        _start = MelonCoroutineAdapter.Start;
+        _stop = MelonCoroutineAdapter.Stop;
+    }
+
+    public static void InitBepInEx()
+    {
+        _start = BepInExCoroutineHost.Start;
+        _stop = BepInExCoroutineHost.Stop;
+    }
+
+    public static void SetHost(MonoBehaviour host) => BepInExCoroutineHost.SetHost(host);
+
+    public static object Start(IEnumerator routine)
+    {
+        if (routine == null || _start == null)
+        {
+            return null;
+        }
+
+        return _start(routine);
+    }
+
+    public static void Stop(object coroutine)
+    {
+        if (coroutine == null)
+        {
+            return;
+        }
+
+        _stop?.Invoke(coroutine);
+    }
+}
+
+internal static class MelonCoroutineAdapter
+{
+    public static object Start(IEnumerator routine) => MelonLoader.MelonCoroutines.Start(routine);
+
+    public static void Stop(object token) => MelonLoader.MelonCoroutines.Stop(token);
+}
+
+internal static class BepInExCoroutineHost
+{
     private static MonoBehaviour _host;
 
     // GC roots for in-flight coroutines. WrapToIl2Cpp() bridges our managed IEnumerator into an
@@ -25,13 +70,9 @@ public static class ModCoroutines
     private static readonly Dictionary<object, object> _wrapperByHandle = new Dictionary<object, object>();
 
     public static void SetHost(MonoBehaviour host) => _host = host;
-#endif
 
     public static object Start(IEnumerator routine)
     {
-#if MELONLOADER
-        return MelonCoroutines.Start(routine);
-#elif BEPINEX
         if (_host == null || routine == null)
         {
             return null;
@@ -54,12 +95,8 @@ public static class ModCoroutines
             _wrapperByHandle[handle] = wrapped;
         }
         return handle;
-#else
-        return null;
-#endif
     }
 
-#if BEPINEX
     private static IEnumerator TrackRoutine(IEnumerator inner, object[] tokenHolder)
     {
         try
@@ -102,18 +139,9 @@ public static class ModCoroutines
             }
         }
     }
-#endif
 
     public static void Stop(object coroutine)
     {
-        if (coroutine == null)
-        {
-            return;
-        }
-
-#if MELONLOADER
-        MelonCoroutines.Stop(coroutine);
-#elif BEPINEX
         if (coroutine is Coroutine unityCoroutine)
         {
             _host?.StopCoroutine(unityCoroutine);
@@ -124,6 +152,5 @@ public static class ModCoroutines
             _liveRoots.Remove(wrapper);
             _wrapperByHandle.Remove(coroutine);
         }
-#endif
     }
 }

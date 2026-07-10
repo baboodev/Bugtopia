@@ -1245,6 +1245,31 @@ namespace HeartopiaMod
                     }
                 }
             }
+            bool anyShortNameQuery = false;
+            foreach (string shortNameProbe in names)
+            {
+                if (!string.IsNullOrEmpty(shortNameProbe) && shortNameProbe.IndexOf('.') < 0)
+                {
+                    anyShortNameQuery = true;
+                    break;
+                }
+            }
+
+            // The full GetTypes() sweep below only adds value for SHORT (namespace-less) query names;
+            // for fully-qualified names the assembly.GetType(fullName) loop above is already
+            // authoritative. Skipping it for all-dotted queries avoids enumerating every loaded
+            // assembly — on MelonLoader's Cpp2IL proxies GetTypes() throws ReflectionTypeLoadException
+            // and costs seconds per miss (dead farm-type lookups made "Capture planters" hang ~7s).
+            if (!anyShortNameQuery)
+            {
+                if (!string.IsNullOrEmpty(cacheKey))
+                {
+                    this.loadedTypeMissCacheUntil[cacheKey] = Time.unscaledTime + LoadedTypeMissCacheSeconds;
+                }
+
+                return null;
+            }
+
             foreach (Assembly assembly2 in assemblies)
             {
                 Type[] types;

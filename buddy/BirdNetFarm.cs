@@ -327,13 +327,9 @@ namespace HeartopiaMod
                 return crashTracePath;
             }
 
-#if MELONLOADER
-            string logsDir = Path.Combine(Directory.GetCurrentDirectory(), "MelonLoader", "Logs");
-#elif BEPINEX
-            string logsDir = Path.Combine(Directory.GetCurrentDirectory(), "BepInEx");
-#else
-            string logsDir = Path.Combine(Directory.GetCurrentDirectory(), "UserData");
-#endif
+            string logsDir = ModLoaderInfo.IsMelonLoader
+                ? Path.Combine(Directory.GetCurrentDirectory(), "MelonLoader", "Logs")
+                : Path.Combine(Directory.GetCurrentDirectory(), "BepInEx");
             Directory.CreateDirectory(logsDir);
             crashTracePath = Path.Combine(logsDir, "birdfarm-crashtrace.log");
             return crashTracePath;

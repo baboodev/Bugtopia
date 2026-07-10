@@ -637,132 +637,15 @@ namespace HeartopiaMod
 
         private void TryEnsureHomelandFarmInteropAssembliesLoaded()
         {
-            if (this.homelandFarmInteropAssembliesLoaded)
-            {
-                return;
-            }
-
-            float now = Time.realtimeSinceStartup;
-            if (now < this.homelandFarmNextInteropLoadAttemptAt)
-            {
-                return;
-            }
-
-            this.homelandFarmNextInteropLoadAttemptAt = now + HomelandFarmInteropLoadRetryIntervalSeconds;
-
-            try
-            {
-                string dataPath = Application.dataPath;
-                if (string.IsNullOrEmpty(dataPath))
-                {
-                    return;
-                }
-
-                string gameDir = Path.GetDirectoryName(dataPath);
-                if (string.IsNullOrEmpty(gameDir))
-                {
-                    return;
-                }
-
-#if BEPINEX
-                string interopDir = Path.Combine(gameDir, "BepInEx", "interop");
-#else
-                string interopDir = Path.Combine(gameDir, "MelonLoader", "Il2CppAssemblies");
-#endif
-                int loaded = 0;
-                if (Directory.Exists(interopDir))
-                {
-                    loaded += this.TryHomelandFarmLoadInteropAssembliesFromDirectory(interopDir);
-                }
-
-                string dotnetAssembliesDir = Path.Combine(dataPath, "StreamingAssets", "DotnetAssemblies");
-                if (Directory.Exists(dotnetAssembliesDir))
-                {
-                    loaded += this.TryHomelandFarmLoadInteropAssembliesFromDirectory(dotnetAssembliesDir, "*.bytes");
-                }
-
-                if (loaded == 0)
-                {
-                    if (!Directory.Exists(interopDir))
-                    {
-                        if (!this.homelandFarmInteropMissingDirLogged)
-                        {
-                            this.homelandFarmInteropMissingDirLogged = true;
-                            this.HomelandFarmLog("Interop directory missing: " + interopDir + " (will retry).");
-                        }
-
-                        return;
-                    }
-
-                    if (!this.homelandFarmInteropZeroLoadLogged)
-                    {
-                        this.homelandFarmInteropZeroLoadLogged = true;
-                        this.HomelandFarmLog("Interop directory present but 0 game assemblies loaded from " + interopDir + " (will retry).");
-                    }
-
-                    return;
-                }
-
-                this.homelandFarmInteropAssembliesLoaded = true;
-                this.homelandFarmManagedReflectionUnavailable = false;
-                this.homelandFarmSowManagedReflectionAttempted = false;
-                this.ClearHomelandFarmReflectionMissCaches();
-                this.HomelandFarmLog("Loaded " + loaded + " interop assembly(ies) from interop/DotnetAssemblies.");
-            }
-            catch (Exception ex)
-            {
-                this.HomelandFarmLog("Interop load exception: " + ex.Message);
-            }
-        }
-
-        private int TryHomelandFarmLoadInteropAssembliesFromDirectory(string directory, string searchPattern = "*.dll")
-        {
-            int loaded = 0;
-            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
-            {
-                return loaded;
-            }
-
-            foreach (string dllPath in Directory.GetFiles(directory, searchPattern))
-            {
-                string fileName = Path.GetFileNameWithoutExtension(dllPath) ?? string.Empty;
-#if BEPINEX
-                bool isInteropDirectory = directory.IndexOf("interop", StringComparison.OrdinalIgnoreCase) >= 0;
-                if (isInteropDirectory && string.Equals(searchPattern, "*.dll", StringComparison.Ordinal))
-                {
-                    if (fileName.StartsWith("System", StringComparison.OrdinalIgnoreCase)
-                        || fileName.StartsWith("Unity", StringComparison.OrdinalIgnoreCase)
-                        || fileName.StartsWith("Mono", StringComparison.OrdinalIgnoreCase)
-                        || fileName.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase)
-                        || fileName.StartsWith("Newtonsoft", StringComparison.OrdinalIgnoreCase)
-                        || fileName.IndexOf("Harmony", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        continue;
-                    }
-                }
-                else
-#endif
-                if (fileName.IndexOf("Assembly-CSharp", StringComparison.OrdinalIgnoreCase) < 0
-                    && fileName.IndexOf("Client", StringComparison.OrdinalIgnoreCase) < 0
-                    && fileName.IndexOf("EcsClient", StringComparison.OrdinalIgnoreCase) < 0
-                    && fileName.IndexOf("GameApp", StringComparison.OrdinalIgnoreCase) < 0
-                    && fileName.IndexOf("XDT", StringComparison.OrdinalIgnoreCase) < 0
-                    && fileName.IndexOf("Il2Cpp", StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    Assembly.LoadFrom(dllPath);
-                    loaded++;
-                }
-                catch
-                {
-                }
-            }
-
-            return loaded;
+            // Interop-assembly loading removed. The game's gameplay types live in embedded Mono,
+            // never in the IL2CPP interop/proxy assemblies, so managed reflection over them always
+            // resolved nothing (warmup consistently reported managed=False, aura=True) — AuraMono
+            // does all farm access. Force-loading ~99 proxy assemblies via Assembly.LoadFrom was
+            // dead weight, and on MelonLoader the Cpp2IL-generated proxies make Assembly.GetTypes()
+            // throw ReflectionTypeLoadException, so every FindLoadedType miss paid a multi-second
+            // full-domain enumeration ("Capture planters" hung ~7s; instant on BepInEx). Marking
+            // the flag done keeps callers from retrying; nothing downstream depends on the load.
+            this.homelandFarmInteropAssembliesLoaded = true;
         }
 
         private void ClearHomelandFarmReflectionMissCaches()

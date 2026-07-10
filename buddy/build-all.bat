@@ -2,17 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
-@rem To compile MelonLoader target, uncomment the lines below:
-@rem echo Building MelonLoader...
-@rem dotnet build buddy.csproj -c Release -p:Loader=MelonLoader
-@rem if errorlevel 1 exit /b 1
-@rem echo.
-
-echo Building BepInEx...
-dotnet build buddy.csproj -c Release -p:Loader=BepInEx
+echo Building unified bugtopia.dll (works under MelonLoader and BepInEx)...
+dotnet build buddy.csproj -c Release
 if errorlevel 1 exit /b 1
 
 echo.
 echo Done.
-@rem echo   MelonLoader: bin\MelonLoader\Release\bugtopia.dll  -^> copy to Mods\
-echo   BepInEx:     bin\BepInEx\Release\bugtopia.dll      -^> copy to BepInEx\plugins\
+echo   bin\Release\bugtopia.dll  -^> auto-deployed to Mods\ and BepInEx\plugins\ (whichever exist)

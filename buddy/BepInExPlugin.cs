@@ -1,4 +1,3 @@
-#if BEPINEX
 using System;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
@@ -15,7 +14,9 @@ namespace HeartopiaMod
 
         public override void Load()
         {
-            ModLogger.Init(Log);
+            ModLoaderInfo.IsMelonLoader = false;
+            BepInExLogAdapter.Install(Log);
+            ModCoroutines.InitBepInEx();
             AddComponent<HeartopiaBehaviour>();
         }
     }
@@ -69,4 +70,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

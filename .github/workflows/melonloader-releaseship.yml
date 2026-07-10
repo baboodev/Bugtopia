@@ -1,8 +1,7 @@
-# MelonLoader ReleaseShip is built and (on v* tags) published to the GitHub release.
-# BepInEx ReleaseShip is built as a WORKFLOW ARTIFACT ONLY — deliberately never
-# attached to the release. It self-skips (with a warning) until the deps zip on the
-# `deps` release is regenerated with ci/prepare-melonloader-deps.ps1 from an install
-# that has BepInEx, so refreshing the zip is what activates it.
+# Builds the single unified bugtopia.dll (ReleaseShip) and, on v* tags, publishes it to the GitHub
+# release. One DLL works under both MelonLoader (Mods\) and BepInEx (BepInEx\plugins\), so there is
+# one build and one artifact. Build deps come from the unified-ci-deps.zip on the 'deps' release
+# (regenerate with ci/prepare-ci-deps.ps1 from an install that has both loaders).
 name: ReleaseShip
 
 on:
@@ -23,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       deps_url:
-        description: Optional override URL for melonloader-ci-deps.zip
+        description: Optional override URL for unified-ci-deps.zip
         required: false
         type: string
 
@@ -49,7 +48,7 @@ jobs:
         with:
           dotnet-version: "6.0.x"
 
-      - name: Restore MelonLoader build dependencies
+      - name: Restore build dependencies
         shell: pwsh
         env:
           DEPS_URL_SECRET: ${{ secrets.MELONLOADER_CI_DEPS_URL }}
@@ -57,14 +56,14 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $depsRoot = Join-Path $env:GITHUB_WORKSPACE "ci\heartopia"
-          $zipPath = Join-Path $env:RUNNER_TEMP "melonloader-ci-deps.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP "unified-ci-deps.zip"
           $depsUrl = if ($env:DEPS_URL_INPUT) { $env:DEPS_URL_INPUT } else { $env:DEPS_URL_SECRET }
 
           if (-not $depsUrl) {
             $release = Invoke-RestMethod `
               -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/deps" `
               -Headers @{ "User-Agent" = "Bugtopia-CI" }
-            $asset = $release.assets | Where-Object { $_.name -eq "melonloader-ci-deps.zip" } | Select-Object -First 1
+            $asset = $release.assets | Where-Object { $_.name -eq "unified-ci-deps.zip" } | Select-Object -First 1
             if ($asset) {
               $depsUrl = $asset.browser_download_url
             }
@@ -72,9 +71,9 @@ jobs:
 
           if (-not $depsUrl) {
             throw @"
-          MelonLoader CI dependencies are not configured.
-          1. Run: pwsh ci/prepare-melonloader-deps.ps1 -HeartopiaDir '<Game>'
-          2. Upload ci/melonloader-ci-deps.zip to the GitHub release tagged deps, or
+          Unified CI dependencies are not configured.
+          1. Run: pwsh ci/prepare-ci-deps.ps1 -HeartopiaDir '<Game>'   (needs an install with BOTH loaders)
+          2. Upload ci/unified-ci-deps.zip to the GitHub release tagged deps, or
           3. Set repository secret MELONLOADER_CI_DEPS_URL to a direct download URL.
           "@
           }
@@ -85,24 +84,23 @@ jobs:
 
           $required = @(
             "MelonLoader\net6\MelonLoader.dll",
-            "MelonLoader\net6\MonoMod.RuntimeDetour.dll",
-            "MelonLoader\net6\MonoMod.Utils.dll",
-            "MelonLoader\Il2CppAssemblies\Assembly-CSharp.dll",
-            "MelonLoader\Il2CppAssemblies\Il2CppClient.dll"
+            "BepInEx\core\BepInEx.Core.dll",
+            "BepInEx\core\BepInEx.Unity.IL2CPP.dll",
+            "BepInEx\core\MonoMod.RuntimeDetour.dll",
+            "BepInEx\interop\Il2Cppmscorlib.dll"
           )
           foreach ($rel in $required) {
             $path = Join-Path $depsRoot $rel
             if (-not (Test-Path $path)) {
-              throw "Dependency archive is missing required file: $rel"
+              throw "Dependency archive is missing required file: $rel (regenerate unified-ci-deps.zip with ci/prepare-ci-deps.ps1 from an install that has both loaders)."
             }
           }
 
-      - name: Build ReleaseShip (MelonLoader)
+      - name: Build ReleaseShip (unified)
         shell: pwsh
         run: |
           dotnet build buddy/buddy.csproj `
             -c ReleaseShip `
-            -p:Loader=MelonLoader `
             -p:HeartopiaDir="${{ github.workspace }}\ci\heartopia" `
             -p:ContinuousIntegrationBuild=true `
             --nologo
@@ -110,45 +108,10 @@ jobs:
       - name: Upload bugtopia.dll artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bugtopia-melonloader-releaseship
+          name: bugtopia-releaseship
           path: |
-            buddy/bin/MelonLoader/ReleaseShip/bugtopia.dll
-            buddy/bin/MelonLoader/ReleaseShip/bugtopia.pdb
-          if-no-files-found: error
-
-      - name: Check BepInEx CI deps
-        id: bepinex_deps
-        shell: pwsh
-        run: |
-          $core = Join-Path $env:GITHUB_WORKSPACE "ci\heartopia\BepInEx\core\BepInEx.Core.dll"
-          $interop = Join-Path $env:GITHUB_WORKSPACE "ci\heartopia\BepInEx\interop\Client.dll"
-          $present = (Test-Path $core) -and (Test-Path $interop)
-          "present=$($present.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          if (-not $present) {
-            Write-Host "::warning::BepInEx deps missing from melonloader-ci-deps.zip - skipping the BepInEx ReleaseShip build. Regenerate the zip with ci/prepare-melonloader-deps.ps1 (from an install that has BepInEx) and re-upload it to the 'deps' release."
-          }
-
-      - name: Build ReleaseShip (BepInEx)
-        if: steps.bepinex_deps.outputs.present == 'true'
-        shell: pwsh
-        run: |
-          dotnet build buddy/buddy.csproj `
-            -c ReleaseShip `
-            -p:Loader=BepInEx `
-            -p:HeartopiaDir="${{ github.workspace }}\ci\heartopia" `
-            -p:ContinuousIntegrationBuild=true `
-            --nologo
-
-      # Artifacts only by design: the BepInEx flavor is NOT attached to the GitHub
-      # release below (the release stays MelonLoader-only).
-      - name: Upload bugtopia.dll artifact (BepInEx)
-        if: steps.bepinex_deps.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bugtopia-bepinex-releaseship
-          path: |
-            buddy/bin/BepInEx/ReleaseShip/bugtopia.dll
-            buddy/bin/BepInEx/ReleaseShip/bugtopia.pdb
+            buddy/bin/ReleaseShip/bugtopia.dll
+            buddy/bin/ReleaseShip/bugtopia.pdb
           if-no-files-found: error
 
       - name: Publish release
@@ -159,9 +122,9 @@ jobs:
         run: |
           $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" `
             -f "tag_name=${{ github.ref_name }}" --jq .body
-          $notes = "Release for MelonLoader`n`n$generated"
+          $notes = "Unified build — one bugtopia.dll for MelonLoader (Mods\) and BepInEx (BepInEx\plugins\).`n`n$generated"
           gh release create "${{ github.ref_name }}" `
             --title "${{ github.ref_name }}" `
             --notes $notes `
-            "buddy/bin/MelonLoader/ReleaseShip/bugtopia.dll" `
-            "buddy/bin/MelonLoader/ReleaseShip/bugtopia.pdb"
+            "buddy/bin/ReleaseShip/bugtopia.dll" `
+            "buddy/bin/ReleaseShip/bugtopia.pdb"

@@ -85,29 +85,29 @@ cd buddy
 build-all.bat
 ```
 
-Produces:
+Produces one unified DLL that works under both loaders:
 
 ```
-buddy/bin/MelonLoader/Release/bugtopia.dll
-buddy/bin/BepInEx/Release/bugtopia.dll
+buddy/bin/Release/bugtopia.dll
 ```
 
-Single loader:
+Or directly:
 
 ```powershell
-dotnet build buddy.csproj -c Release -p:Loader=MelonLoader
-dotnet build buddy.csproj -c Release -p:Loader=BepInEx
+dotnet build buddy.csproj -c Release
 ```
 
 One-off path override:
 
 ```powershell
-dotnet build buddy.csproj -c Release -p:Loader=BepInEx -p:HeartopiaDir="C:\Games\Heartopia"
+dotnet build buddy.csproj -c Release -p:HeartopiaDir="C:\Games\Heartopia"
 ```
 
 Shipping build (hides loader console): `-c ReleaseShip`
 
 ### Deploy
+
+The same `bugtopia.dll` serves either loader (the build auto-deploys to whichever folders exist):
 
 | Loader | Copy `bugtopia.dll` to |
 |--------|-------------------------|

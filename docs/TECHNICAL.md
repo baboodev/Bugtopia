@@ -41,7 +41,7 @@ flowchart TB
 
 ### Design pattern
 
-- **Dual-loader build:** Same sources, `-p:Loader=MelonLoader|BepInEx`, conditional compilation (`MELONLOADER` / `BEPINEX`).
+- **Unified build:** One `bugtopia.dll` for both loaders — both `[MelonInfo]` and `[BepInPlugin]` entry points in one assembly, runtime dispatch via `ModLoaderInfo.IsMelonLoader` (no per-loader `#if`).
 - **Loader-agnostic core:** `HeartopiaComplete` is a plain class; plugins forward lifecycle hooks.
 - **Shared abstractions:** `ModLogger` / `ModCoroutines` hide loader-specific APIs.
 - **Monolithic core:** ~59,000 lines in `HeartopiaComplete.cs`.
@@ -635,7 +635,7 @@ Recommended workflow:
 
 1. Launch game with your loader; check the log for hook / type-resolution failures (Mono `NativeDetour` installs, AuraMono resolves, EventCenter hooks) — the mod uses no Harmony patches.
 2. Regenerate interop (MelonLoader Il2CppAssemblies or BepInEx interop) after game updates.
-3. Rebuild both targets: `build-all.bat` or `-p:Loader=...` for the loader you use.
+3. Rebuild: `build-all.bat` (or `dotnet build buddy.csproj -c Release`) — one unified DLL for both loaders.
 4. For aura/fish/insect/bird: enable `MasterLog*` flags; fix type names per [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md).
 5. For bag/UI automation: verify UI hierarchy paths still exist.
 6. Test in a private town, one feature at a time.

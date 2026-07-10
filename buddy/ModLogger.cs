@@ -2,19 +2,44 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-#if MELONLOADER
-using MelonLoader;
-#elif BEPINEX
-using BepInEx.Logging;
-#endif
-
+// Loader-neutral log front. The entry point that actually runs installs its sink;
+// loader assemblies are only touched inside the adapter classes below, so the CLR
+// never tries to resolve MelonLoader.dll under BepInEx or BepInEx.*.dll under
+// MelonLoader (types/methods referencing them are never loaded/JITted).
 public static class ModLogger
 {
-#if BEPINEX
-    private static ManualLogSource _log;
+    private static Action<string> _msg;
+    private static Action<string> _warn;
+
+    public static void SetSinks(Action<string> msg, Action<string> warn)
+    {
+        _msg = msg;
+        _warn = warn;
+    }
+
+    public static void Msg(string message) => _msg?.Invoke(message);
+
+    public static void Warning(string message) => _warn?.Invoke(message);
+}
+
+// MelonLoader-backed sink. MelonLoader.dll is resolved the first time Msg/Warning JITs,
+// which only happens after Install() — i.e. only when MelonLoader actually hosts us.
+internal static class MelonLogAdapter
+{
+    public static void Install() => ModLogger.SetSinks(Msg, Warning);
+
+    private static void Msg(string message) => MelonLoader.MelonLogger.Msg(message);
+
+    private static void Warning(string message) => MelonLoader.MelonLogger.Warning(message);
+}
+
+// BepInEx-backed sink; also mirrors to UserData/bugtopia.log like the original build.
+internal static class BepInExLogAdapter
+{
+    private static BepInEx.Logging.ManualLogSource _log;
     private static StreamWriter _fileLog;
 
-    public static void Init(ManualLogSource log)
+    public static void Install(BepInEx.Logging.ManualLogSource log)
     {
         _log = log;
         try
@@ -29,6 +54,8 @@ public static class ModLogger
         {
             _log?.LogWarning("Could not open UserData/bugtopia.log: " + ex.Message);
         }
+
+        ModLogger.SetSinks(Msg, Warning);
     }
 
     private static void WriteFile(string level, string message)
@@ -41,26 +68,17 @@ public static class ModLogger
         {
         }
     }
-#endif
 
-    public static void Msg(string message)
+    private static void Msg(string message)
     {
-#if MELONLOADER
-        MelonLogger.Msg(message);
-#elif BEPINEX
         _log?.LogInfo(message);
         WriteFile("INFO", message);
-#endif
     }
 
-    public static void Warning(string message)
+    private static void Warning(string message)
     {
-#if MELONLOADER
-        MelonLogger.Warning(message);
-#elif BEPINEX
         _log?.LogWarning(message);
         WriteFile("WARN", message);
-#endif
     }
 }
 

@@ -85,39 +85,33 @@ This file is git-ignored. Do not commit machine-specific paths.
 
 ## Building
 
-### Both loaders (recommended)
+### Unified build (one DLL for both loaders)
 
 ```bat
 cd buddy
 build-all.bat
 ```
 
-Output:
+Output — a single DLL that works under both MelonLoader and BepInEx:
 
 ```
-buddy/bin/MelonLoader/Release/bugtopia.dll
-buddy/bin/BepInEx/Release/bugtopia.dll
+buddy/bin/Release/bugtopia.dll
 ```
 
-### Single loader
+Or directly:
 
 ```powershell
 cd buddy
-
-# MelonLoader
-dotnet build buddy.csproj -c Release -p:Loader=MelonLoader
-
-# BepInEx
-dotnet build buddy.csproj -c Release -p:Loader=BepInEx
+dotnet build buddy.csproj -c Release
 ```
 
 One-off custom game path:
 
 ```powershell
-dotnet build buddy.csproj -c Release -p:Loader=BepInEx -p:HeartopiaDir="C:\Games\Heartopia"
+dotnet build buddy.csproj -c Release -p:HeartopiaDir="C:\Games\Heartopia"
 ```
 
-Debug builds go to `bin\<Loader>\Debug\`.
+Debug builds go to `bin\Debug\`.
 
 ---
 

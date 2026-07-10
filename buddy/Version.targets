@@ -1,11 +1,11 @@
 <Project>
   <PropertyGroup>
-    <ModVersionFile>$(MSBuildProjectDirectory)\obj\$(Loader)\$(Configuration)\ModVersion.g.cs</ModVersionFile>
+    <ModVersionFile>$(MSBuildProjectDirectory)\obj\$(Configuration)\ModVersion.g.cs</ModVersionFile>
     <ResolveBuildVersionScript>$(MSBuildThisFileDirectory)..\ci\resolve-build-version.ps1</ResolveBuildVersionScript>
   </PropertyGroup>
 
   <Target Name="GenerateModVersion" BeforeTargets="BeforeCompile">
-    <MakeDir Directories="$(MSBuildProjectDirectory)\obj\$(Loader)\$(Configuration)" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)\obj\$(Configuration)" />
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)\.."
           Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ResolveBuildVersionScript)&quot; -OutputPath &quot;$(ModVersionFile)&quot; -DisplayVersionOverride &quot;$(ModDisplayVersion)&quot; -AssemblyVersionOverride &quot;$(ModAssemblyVersion)&quot;" />
     <ItemGroup>

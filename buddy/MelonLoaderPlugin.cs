@@ -1,8 +1,11 @@
-#if MELONLOADER
 using MelonLoader;
 
 [assembly: MelonInfo(typeof(HeartopiaMod.HeartopiaMelonPlugin), "Bugtopia", HeartopiaMod.ModBuildVersion.Numeric, "HeartopiaMod")]
 [assembly: MelonGame(null, null)]
+// The single unified DLL references BOTH loaders' assemblies; under MelonLoader the BepInEx ones
+// are absent. Mark them optional so ML doesn't warn now — and won't hard-fail to load us once a
+// future ML version turns the missing-dependency warning into an error.
+[assembly: MelonOptionalDependencies("BepInEx.Core", "BepInEx.Unity.IL2CPP")]
 
 namespace HeartopiaMod
 {
@@ -12,6 +15,9 @@ namespace HeartopiaMod
 
         public override void OnInitializeMelon()
         {
+            ModLoaderInfo.IsMelonLoader = true;
+            MelonLogAdapter.Install();
+            ModCoroutines.InitMelonLoader();
             _mod = new HeartopiaComplete();
             _mod.OnInitializeMelon();
         }
@@ -37,4 +43,3 @@ namespace HeartopiaMod
         public override void OnDeinitializeMelon() => _mod?.OnDeinitializeMelon();
     }
 }
-#endif

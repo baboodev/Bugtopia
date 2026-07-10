@@ -499,7 +499,7 @@ Interop is produced from the **game install**, not from `DotnetAssemblies`.
 
 1. Install [MelonLoader](https://melonloader.co/download.html).
 2. Run once; check `<Game>/MelonLoader/Il2CppAssemblies/` for `Il2CppEcsClient.dll` / `EcsClient.dll`.
-3. Rebuild with `-p:Loader=MelonLoader`.
+3. Rebuild: `build-all.bat` (one unified DLL for both loaders).
 
 ### Optional compile-time reference
 
@@ -616,7 +616,7 @@ Details: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md), [FEATURES.md](./FEATU
 
 1. Launch with loader; note Harmony / mod errors in log.
 2. Regenerate interop (`BepInEx/interop` or `MelonLoader/Il2CppAssemblies`).
-3. Rebuild: `buddy/build-all.bat` or `dotnet build -p:Loader=...`.
+3. Rebuild: `buddy/build-all.bat` (or `dotnet build buddy.csproj -c Release`) — one unified DLL for both loaders.
 4. Re-check critical types in ILSpy (`ItemNetPair`, `TaskProtocolManager`, feature-specific commands).
 5. Update `FindLoadedType` name lists if namespaces changed — see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md).
 
