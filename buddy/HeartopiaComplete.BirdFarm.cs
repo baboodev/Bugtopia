@@ -933,6 +933,7 @@ namespace HeartopiaMod
             this.cachedBirdFarmAuraEntityCount = 0;
             this.nextBirdFarmPhotoModeMissingBackoffAt = -999f;
             this.nextBirdFarmPhotoModeComponentRefreshAt = -999f;
+            this.birdFarmPhotoModeListSuspectStale = true;
             this.nextBirdFarmManagedFallbackScanAt = -999f;
             this.nextBirdFarmCleanupAt = -999f;
             this.birdFarmDenseVerifyOffset = 0;
@@ -1370,7 +1371,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.nextBirdFarmPhotoModeComponentRefreshAt = now + BirdFarmManagedFallbackScanInterval;
+            this.nextBirdFarmPhotoModeComponentRefreshAt = now + BirdFarmPhotoModeComponentRefreshInterval;
             try
             {
                 IntPtr photoModeClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(photoModeObj) : IntPtr.Zero;
@@ -1435,6 +1436,17 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // The game only maintains _birdScannables while the scanner mode is actively
+                // ticking; with the scanner lowered the list keeps its last snapshot, and after a
+                // capture wave that snapshot is all despawned/never-capturable entries. A non-empty
+                // stale list never hit the empty-branch refresh below, so the farm wedged until the
+                // user pressed F (which re-activates the mode and re-runs UpdateAllComponent).
+                // When the previous pass yielded nothing usable, run that same refresh ourselves.
+                if (this.birdFarmPhotoModeListSuspectStale && this.TryRefreshAuraMonoBirdPhotoModeComponents(photoModeObj))
+                {
+                    this.birdFarmPhotoModeListSuspectStale = false;
+                }
+
                 if (!this.TryGetMonoObjectMember(photoModeObj, "_birdScannables", out IntPtr birdListObj) || birdListObj == IntPtr.Zero)
                 {
                     status = "Aura PhotoMode _birdScannables unavailable";
@@ -1452,8 +1464,10 @@ namespace HeartopiaMod
                 int noNetIdCount = 0;
                 int filteredCount = 0;
                 int noStaticIdCount = 0;
+                int notBirdCount = 0;
                 int outOfRangeCount = 0;
                 int unresolvedActionCount = 0;
+                int uncapturableCount = 0;
                 try
                 {
                 if (!this.TryEnumerateAuraMonoCollectionItems(birdListObj, scannables, scannablePins) || scannables.Count == 0)
@@ -1463,6 +1477,7 @@ namespace HeartopiaMod
                         || scannables.Count == 0)
                     {
                         status = "Aura PhotoMode bird list empty";
+                        this.birdFarmPhotoModeListSuspectStale = true;
                         return false;
                     }
                 }
@@ -1531,6 +1546,15 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    // Same gate the take-side applies (StaticId >= 10000 / bird id families).
+                    // Without it, non-bird scannables (pendant decorations, camouflage) enter the
+                    // cache only to be discarded by every take → "cached target unavailable" loop.
+                    if (!this.IsBirdFarmStaticIdLikelyBird(candidateStaticId))
+                    {
+                        notBirdCount++;
+                        continue;
+                    }
+
                     if (!this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 candidatePosition))
                     {
                         candidatePosition = playerPos;
@@ -1578,6 +1602,15 @@ namespace HeartopiaMod
                         this.CacheBirdFarmAuraResolvedDetail(candidateNetId, candidateStaticId, candidateActionType, candidateBirdState, candidateStandNetId, candidateIsPerchBird, now + BirdEntityVerifyCacheTtl);
                     }
 
+                    // Take-side state gate applied at accept time: fly/alert/interval birds would
+                    // be removed by every TryTakeBirdFarmAuraCandidateFromCache anyway, and a cache
+                    // made only of them reads as "cached target unavailable" forever.
+                    if (!this.IsBirdFarmStateCapturable(candidateBirdState, out _))
+                    {
+                        uncapturableCount++;
+                        continue;
+                    }
+
                     detectedCount++;
                     this.cachedBirdFarmAuraCandidates.Add(new BirdFarmAuraCandidate
                     {
@@ -1600,28 +1633,34 @@ namespace HeartopiaMod
 
                 if (this.cachedBirdFarmAuraCandidates.Count == 0)
                 {
+                    // Nothing usable came out of a non-empty list — treat the snapshot as stale
+                    // and force the game-side UpdateAllComponent refresh on the next pass (also
+                    // covers the pure "recently attempted" case, where the refresh is harmless).
+                    this.birdFarmPhotoModeListSuspectStale = true;
+
                     if (scannables.Count > 0
                         && detectedCount == 0
                         && filteredCount > 0
-                        && filteredCount + noEntityCount + noNetIdCount + noStaticIdCount + outOfRangeCount + unresolvedActionCount >= scannables.Count)
+                        && filteredCount + noEntityCount + noNetIdCount + noStaticIdCount + notBirdCount + outOfRangeCount + unresolvedActionCount + uncapturableCount >= scannables.Count)
                     {
                         status = $"No fresh birds available ({filteredCount}/{scannables.Count} recently attempted or confirmed)";
                         return false;
                     }
 
-                    if (unresolvedActionCount > 0 && detectedCount == 0)
+                    if (unresolvedActionCount + uncapturableCount > 0 && detectedCount == 0)
                     {
-                        status = $"Waiting for capturable bird pose ({unresolvedActionCount}/{scannables.Count} action/perch birds unresolved)";
+                        status = $"Waiting for capturable bird pose ({unresolvedActionCount + uncapturableCount}/{scannables.Count} birds unresolved or not capturable)";
                         return false;
                     }
 
-                    status = $"Aura PhotoMode no target list={scannables.Count} noEntity={noEntityCount} noNet={noNetIdCount} filtered={filteredCount} unresolved={unresolvedActionCount} noStatic={noStaticIdCount} outRange={outOfRangeCount} accepted={detectedCount}";
+                    status = $"Aura PhotoMode no target list={scannables.Count} noEntity={noEntityCount} noNet={noNetIdCount} filtered={filteredCount} unresolved={unresolvedActionCount} uncap={uncapturableCount} notBird={notBirdCount} noStatic={noStaticIdCount} outRange={outOfRangeCount} accepted={detectedCount}";
                     return false;
                 }
 
                 this.cachedBirdFarmAuraCandidates.Sort((a, b) => a.Distance.CompareTo(b.Distance));
                 if (!this.TryTakeBirdFarmAuraCandidateFromCache(playerPos, scanRange, out netId, out staticId, out distance, out birdActionType, out birdStandNetId, out int cachedDetectedCount))
                 {
+                    this.birdFarmPhotoModeListSuspectStale = true;
                     status = "Aura PhotoMode cached target unavailable";
                     return false;
                 }
@@ -1629,6 +1668,7 @@ namespace HeartopiaMod
                 detectedCount = Mathf.Max(detectedCount, cachedDetectedCount);
                 source = "AuraMono.GamePhotoMode._birdScannables/" + photoModeSource;
                 status = "Aura PhotoMode bird target ready";
+                this.birdFarmPhotoModeListSuspectStale = false;
                 return true;
             }
             catch (Exception ex)

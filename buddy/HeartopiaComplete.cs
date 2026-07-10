@@ -5420,6 +5420,14 @@ namespace HeartopiaMod
         private int cachedBirdFarmAuraEntityCount = 0;
         private float nextBirdFarmPhotoModeMissingBackoffAt = -999f;
         private float nextBirdFarmPhotoModeComponentRefreshAt = -999f;
+        // The game maintains GamePhotoMode._birdScannables only while the scanner mode is
+        // actively ticking; with the scanner lowered the list keeps its last snapshot. After a
+        // capture wave those entries go stale (despawned / never-capturable birds) and the scan
+        // yields zero sendable targets forever — the log signature is 30+ min of
+        // "Aura PhotoMode cached target unavailable" / "no target ... noNet=ALL" heartbeats that
+        // only pressing F (re-activating the scanner, which re-runs UpdateAllComponent) fixed.
+        // When true, the next scan forces the game's UpdateAllComponent refresh before enumerating.
+        private bool birdFarmPhotoModeListSuspectStale = true;
         private float nextBirdFarmManagedFallbackScanAt = -999f;
         private float nextBirdFarmCleanupAt = -999f;
         private int birdFarmDenseVerifyOffset = 0;
@@ -5450,6 +5458,10 @@ namespace HeartopiaMod
         private static readonly bool birdFarmDisableAuraEntityScan = true;
         private string lastBirdPhotoModeResolveStatus = "not attempted";
         private const float BirdFarmManagedFallbackScanInterval = 12f;
+        // Throttle for invoking the game's GamePhotoMode.UpdateAllComponent (2 cheap ECS queries;
+        // the game itself runs it every ~0.5s while the scanner is up). Separate from the 12s
+        // managed-reflection fallback interval so stale-list recovery doesn't wait 12s per retry.
+        private const float BirdFarmPhotoModeComponentRefreshInterval = 4f;
         private const float BirdFarmCleanupInterval = 1f;
         private const float BirdEntityVerifyCacheTtl = 15f;
         private const int BirdPoseStretch = 3;

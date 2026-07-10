@@ -243,6 +243,12 @@ namespace HeartopiaMod
                 return "Scanner error";
             }
 
+            if (status.StartsWith("Aura PhotoMode", StringComparison.Ordinal)
+                || status.StartsWith("Waiting for Aura PhotoMode bird list", StringComparison.Ordinal))
+            {
+                return "Scanning for birds...";
+            }
+
             return status;
         }
 
