@@ -1,3 +1,4 @@
+#if LOADER_MELON
 using MelonLoader;
 
 [assembly: MelonInfo(typeof(HeartopiaMod.HeartopiaMelonPlugin), "Bugtopia", HeartopiaMod.ModBuildVersion.Numeric, "HeartopiaMod")]
@@ -43,3 +44,4 @@ namespace HeartopiaMod
         public override void OnDeinitializeMelon() => _mod?.OnDeinitializeMelon();
     }
 }
+#endif

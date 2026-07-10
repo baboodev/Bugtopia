@@ -1,3 +1,4 @@
+#if LOADER_BEPINEX
 using System;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
@@ -70,3 +71,4 @@ namespace HeartopiaMod
         }
     }
 }
+#endif

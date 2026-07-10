@@ -25,6 +25,7 @@ $net6Dlls = @(
     "MelonLoader.dll"
 )
 $bepinexCoreDlls = @(
+    "0Harmony.dll",
     "MonoMod.RuntimeDetour.dll",
     "MonoMod.Utils.dll",
     "Il2CppInterop.Common.dll",

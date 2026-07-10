@@ -41,7 +41,7 @@ flowchart TB
 
 ### Design pattern
 
-- **Unified build:** One `bugtopia.dll` for both loaders — both `[MelonInfo]` and `[BepInPlugin]` entry points in one assembly, runtime dispatch via `ModLoaderInfo.IsMelonLoader` (no per-loader `#if`).
+- **Unified build (default):** One `bugtopia.dll` for both loaders — both `[MelonInfo]` and `[BepInPlugin]` entry points, runtime dispatch via `ModLoaderInfo.IsMelonLoader`. `-p:Loader=BepInEx`/`MelonLoader` builds a single-loader DLL (`#if LOADER_BEPINEX`/`LOADER_MELON` gate the glue) that needs only that loader installed.
 - **Loader-agnostic core:** `HeartopiaComplete` is a plain class; plugins forward lifecycle hooks.
 - **Shared abstractions:** `ModLogger` / `ModCoroutines` hide loader-specific APIs.
 - **Monolithic core:** ~59,000 lines in `HeartopiaComplete.cs`.

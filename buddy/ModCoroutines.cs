@@ -2,22 +2,28 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+#if LOADER_BEPINEX
 using BepInEx.Unity.IL2CPP.Utils.Collections;
+#endif
 
-// Loader-neutral coroutine front. The active entry point installs its backend; loader
-// assemblies are only referenced inside the adapter classes, so they are resolved lazily
-// and only under the loader that actually hosts us.
+// Loader-neutral coroutine front. The active entry point installs its backend; loader assemblies
+// are only referenced inside the adapter classes, which are compiled per-loader via LOADER_MELON /
+// LOADER_BEPINEX (Universal defines both). A single-loader build therefore never references the
+// absent loader's assembly at build or run time.
 public static class ModCoroutines
 {
     private static Func<IEnumerator, object> _start;
     private static Action<object> _stop;
 
+#if LOADER_MELON
     public static void InitMelonLoader()
     {
         _start = MelonCoroutineAdapter.Start;
         _stop = MelonCoroutineAdapter.Stop;
     }
+#endif
 
+#if LOADER_BEPINEX
     public static void InitBepInEx()
     {
         _start = BepInExCoroutineHost.Start;
@@ -25,6 +31,7 @@ public static class ModCoroutines
     }
 
     public static void SetHost(MonoBehaviour host) => BepInExCoroutineHost.SetHost(host);
+#endif
 
     public static object Start(IEnumerator routine)
     {
@@ -47,13 +54,16 @@ public static class ModCoroutines
     }
 }
 
+#if LOADER_MELON
 internal static class MelonCoroutineAdapter
 {
     public static object Start(IEnumerator routine) => MelonLoader.MelonCoroutines.Start(routine);
 
     public static void Stop(object token) => MelonLoader.MelonCoroutines.Stop(token);
 }
+#endif
 
+#if LOADER_BEPINEX
 internal static class BepInExCoroutineHost
 {
     private static MonoBehaviour _host;
@@ -154,3 +164,4 @@ internal static class BepInExCoroutineHost
         }
     }
 }
+#endif

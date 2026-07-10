@@ -22,8 +22,9 @@ public static class ModLogger
     public static void Warning(string message) => _warn?.Invoke(message);
 }
 
-// MelonLoader-backed sink. MelonLoader.dll is resolved the first time Msg/Warning JITs,
-// which only happens after Install() — i.e. only when MelonLoader actually hosts us.
+// MelonLoader-backed sink. Only compiled under LOADER_MELON (MelonLoader / Universal), so a
+// BepInEx-only build never references MelonLoader.dll.
+#if LOADER_MELON
 internal static class MelonLogAdapter
 {
     public static void Install() => ModLogger.SetSinks(Msg, Warning);
@@ -32,8 +33,10 @@ internal static class MelonLogAdapter
 
     private static void Warning(string message) => MelonLoader.MelonLogger.Warning(message);
 }
+#endif
 
-// BepInEx-backed sink; also mirrors to UserData/bugtopia.log like the original build.
+// BepInEx-backed sink; also mirrors to UserData/bugtopia.log. Only compiled under LOADER_BEPINEX.
+#if LOADER_BEPINEX
 internal static class BepInExLogAdapter
 {
     private static BepInEx.Logging.ManualLogSource _log;
@@ -81,6 +84,7 @@ internal static class BepInExLogAdapter
         WriteFile("WARN", message);
     }
 }
+#endif
 
 // Circuit breaker for per-frame feature ticks. A tick that throws repeatedly goes into a
 // cooldown instead of hammering (and log-spamming) every frame; after several cooldown cycles
