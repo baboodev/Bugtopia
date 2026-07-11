@@ -227,7 +227,7 @@ namespace HeartopiaMod
             num += (int)statusPanel.height + 14;
 
             float settingsHeight = 184f
-                + (this.auraFarmEnabled ? 69f : 0f)
+                + (this.auraFarmEnabled ? 103f : 0f)
                 + (this.autoFarmAutoStopEnabled ? 44f : 0f);
             Rect settingsPanel = new Rect(left, (float)num, panelWidth, settingsHeight);
             this.DrawExentriSectionPanel(settingsPanel, accent, panelFill, panelLine);
@@ -281,6 +281,20 @@ namespace HeartopiaMod
                     4f,
                     30f));
                 if (this.auraCollectWaitTimeout != prevAuraCollectWait)
+                {
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+
+                rowY += 34f;
+
+                GUI.Label(new Rect(settingsPanel.x + 14f, rowY, 180f, 20f), this.LF("Teleport Delay: {0}s", (int)this.foragingTeleportDelaySeconds), bodyStyle);
+                float prevTpDelay = this.foragingTeleportDelaySeconds;
+                this.foragingTeleportDelaySeconds = Mathf.Round(this.DrawAccentSlider(
+                    new Rect(settingsPanel.x + 192f, rowY + 1f, settingsPanel.width - 220f, 20f),
+                    this.foragingTeleportDelaySeconds,
+                    0f,
+                    10f));
+                if (this.foragingTeleportDelaySeconds != prevTpDelay)
                 {
                     try { this.SaveKeybinds(false); } catch { }
                 }
@@ -739,6 +753,23 @@ namespace HeartopiaMod
                             break;
                         }
 
+                        // Corrupted debuff (buff 610) + Contamination radar: park at the nearest
+                        // cleansing coral until it clears. Repair still wins (gate above); an
+                        // in-flight Collecting dwell is never interrupted (this state only).
+                        if (this.TryBeginCorruptionCleanse())
+                        {
+                            break;
+                        }
+
+                        // Teleport-rate throttle (Foraging Settings slider): hold the next hop until
+                        // the configured delay has elapsed since the last teleport. Placed after the
+                        // repair/corruption gates so those keep priority.
+                        if (this.IsFarmTeleportThrottled(out float tpCooldownScan))
+                        {
+                            this.autoFarmStatus = $"Teleport cooldown... ({tpCooldownScan:F1}s)";
+                            break;
+                        }
+
                         // Periodic recheck of priority locations
                         if (this.priorityRecheckTimer >= 60f) // 1 minute
                         {
@@ -749,7 +780,7 @@ namespace HeartopiaMod
                                 float distance = Vector3.Distance(Camera.main.transform.position, recheckLocation.Value);
                                 this.autoFarmStatus = $"Rechecking priority location ({distance:F0}m)...";
                                 this.AutoFarmLog("Periodic priority recheck -> location " + recheckLocation.Value + " distance=" + distance.ToString("F1"));
-                                this.TeleportToLocation(recheckLocation.Value);
+                                this.FarmTeleportTo(recheckLocation.Value);
                                 this.currentPriorityLocation = recheckLocation;
                                 this.lastTeleportWasPriorityLocation = true;
                                 this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
@@ -772,7 +803,7 @@ namespace HeartopiaMod
                                     this.autoFarmStatus = $"Sweeping active priority node ({distance:F0}m)...";
                                     this.AutoFarmLog("Active priority sweep -> node " + activeAreaPriorityNode.Value
                                         + " area=" + this.currentPriorityLocation.Value + " distance=" + distance.ToString("F1"));
-                                    this.TeleportToLocation(activeAreaPriorityNode.Value);
+                                    this.FarmTeleportTo(activeAreaPriorityNode.Value);
                                     this.lastNodePosition = activeAreaPriorityNode.Value;
                                     this.lastTeleportWasPriorityLocation = true;
                                     this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
@@ -795,7 +826,7 @@ namespace HeartopiaMod
                             this.AutoFarmLog("Visible priority node -> " + priorityNode.Value
                                 + " mappedArea=" + (this.lastFoundPriorityNodeLocation.HasValue ? this.lastFoundPriorityNodeLocation.Value.ToString() : "none")
                                 + " distance=" + distance.ToString("F1"));
-                            this.TeleportToLocation(priorityNode.Value);
+                            this.FarmTeleportTo(priorityNode.Value);
                             this.lastNodePosition = priorityNode.Value;
                             if (this.lastFoundPriorityNodeLocation.HasValue)
                             {
@@ -818,7 +849,7 @@ namespace HeartopiaMod
                             float distance = Vector3.Distance(Camera.main.transform.position, priorityLocation.Value);
                             this.autoFarmStatus = $"Going to priority location ({distance:F0}m)...";
                             this.AutoFarmLog("Priority location fallback -> " + priorityLocation.Value + " distance=" + distance.ToString("F1"));
-                            this.TeleportToLocation(priorityLocation.Value);
+                            this.FarmTeleportTo(priorityLocation.Value);
                             this.currentPriorityLocation = priorityLocation;
                             this.lastTeleportWasPriorityLocation = true;
                             this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
@@ -834,7 +865,7 @@ namespace HeartopiaMod
                             float value = Vector3.Distance(Camera.main.transform.position, vector.Value);
                             this.autoFarmStatus = $"Teleporting to node ({value:F0}m)...";
                             this.AutoFarmLog("Normal node target -> " + vector.Value + " label=" + scanNodeLabel + " distance=" + value.ToString("F1"));
-                            this.TeleportToLocation(vector.Value);
+                            this.FarmTeleportTo(vector.Value);
                             this.lastNodePosition = vector.Value;
                             this.lastTeleportWasPriorityLocation = false;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
@@ -940,6 +971,18 @@ namespace HeartopiaMod
                         {
                             this.autoFarmStatus = "Paused for Auto Repair...";
                             this.autoFarmTimer = 0f;
+                            break;
+                        }
+
+                        // Corrupted debuff: cleanse before hopping to the next farm location.
+                        if (this.TryBeginCorruptionCleanse())
+                        {
+                            break;
+                        }
+
+                        if (this.IsFarmTeleportThrottled(out float tpCooldownMove))
+                        {
+                            this.autoFarmStatus = $"Teleport cooldown... ({tpCooldownMove:F1}s)";
                             break;
                         }
 
@@ -1082,7 +1125,7 @@ namespace HeartopiaMod
                             else
                             {
                                 this.autoFarmStatus = "Moving to " + farmLocation.Name + "...";
-                                this.TeleportToLocation(farmLocation.Position);
+                                this.FarmTeleportTo(farmLocation.Position);
                                 this.farmState = HeartopiaComplete.AutoFarmState.LoadingArea;
                                 this.autoFarmTimer = 0f;
                             }
@@ -1113,13 +1156,25 @@ namespace HeartopiaMod
                             break;
                         }
 
+                        // Corrupted debuff: cleanse before hopping to the next node.
+                        if (this.TryBeginCorruptionCleanse())
+                        {
+                            break;
+                        }
+
+                        if (this.IsFarmTeleportThrottled(out float tpCooldownWait))
+                        {
+                            this.autoFarmStatus = $"Teleport cooldown... ({tpCooldownWait:F1}s)";
+                            break;
+                        }
+
                         Vector3? vector2 = this.FindClosestAvailableNode(out string waitingNodeLabel);
                         bool flag21 = vector2 != null;
                         if (flag21)
                         {
                             float value2 = Vector3.Distance(Camera.main.transform.position, vector2.Value);
                             this.autoFarmStatus = $"Node found! Teleporting ({value2:F0}m)...";
-                            this.TeleportToLocation(vector2.Value);
+                            this.FarmTeleportTo(vector2.Value);
                             this.lastNodePosition = vector2.Value;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                             this.autoFarmTimer = 0f;
@@ -1164,6 +1219,13 @@ namespace HeartopiaMod
                         }
                         break;
                     }
+                case HeartopiaComplete.AutoFarmState.CleansingCorruption:
+                    {
+                        // Corrupted debuff: hold inside a cleansing-coral area until buff 610
+                        // clears (CorruptionCleanseFeature.cs), then resume scanning.
+                        this.RunCorruptionCleanseWait();
+                        break;
+                    }
             }
         }
 
@@ -1181,6 +1243,33 @@ namespace HeartopiaMod
         private bool contaminationToolReady = false;
         private bool contaminationToolDepleted = false;
         private string contaminationToolStatus = string.Empty;
+
+        // Global minimum interval between Aura Farm teleports (node / area / priority hops), user-set
+        // 0-10s in Foraging Settings (0 = off). Real-time (unscaled) so 5x game speed doesn't shrink
+        // it. Prevents the farm from teleporting too frequently.
+        private float foragingTeleportDelaySeconds = 0f;
+        private float lastFarmTeleportAt = -999f;
+
+        // Every Aura Farm hop goes through this wrapper so the throttle clock is stamped uniformly;
+        // IsFarmTeleportThrottled() below paces the teleport-initiating states off it.
+        private void FarmTeleportTo(Vector3 position)
+        {
+            this.lastFarmTeleportAt = Time.unscaledTime;
+            this.TeleportToLocation(position);
+        }
+
+        // True while the configured teleport delay hasn't elapsed since the last farm teleport.
+        private bool IsFarmTeleportThrottled(out float remaining)
+        {
+            remaining = 0f;
+            float delay = this.foragingTeleportDelaySeconds;
+            if (delay <= 0f)
+            {
+                return false;
+            }
+            remaining = delay - (Time.unscaledTime - this.lastFarmTeleportAt);
+            return remaining > 0f;
+        }
 
         // Clears all contamination-dwell bookkeeping (farm toggle on/off + every node hop).
         private void ResetContaminationDwellState()
@@ -2679,6 +2768,7 @@ namespace HeartopiaMod
                 this.recentlyVisitedNodes.Clear();
                 this.cameraRotationAttempts = 0;
                 this.ResetContaminationDwellState();
+                this.ResetCorruptionCleanseState();
                 this.priorityLocationCooldowns.Clear();
                 this.RefreshActivePriorityLocations();
                 this.currentPriorityLocation = this.GetActivePriorityLocation();
@@ -2690,7 +2780,7 @@ namespace HeartopiaMod
                 if (this.currentPriorityLocation.HasValue)
                 {
                     this.AutoFarmLog("Startup routing to priority location " + this.currentPriorityLocation.Value);
-                    this.TeleportToLocation(this.currentPriorityLocation.Value);
+                    this.FarmTeleportTo(this.currentPriorityLocation.Value);
                     this.lastTeleportWasPriorityLocation = true;
                     this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
                     this.autoFarmStatus = "Going to priority location...";
@@ -2724,6 +2814,7 @@ namespace HeartopiaMod
                 this.lastTeleportWasPriorityLocation = false;
                 this.autoFarmAutoStopAt = -1f;
                 this.ResetContaminationDwellState();
+                this.ResetCorruptionCleanseState();
                 this.AutoFarmLog("Stopped. reason=manual-toggle");
                 ModLogger.Msg("[AUTO FARM] Disabled");
             }
@@ -2944,7 +3035,9 @@ namespace HeartopiaMod
             // Token: 0x0400005C RID: 92
             WaitingForNodes,
             // Token: 0x0400005D RID: 93
-            WaitingForPriorityArea
+            WaitingForPriorityArea,
+            // Corrupted-debuff cleanse hold (CorruptionCleanseFeature.cs)
+            CleansingCorruption
         }
 
     }

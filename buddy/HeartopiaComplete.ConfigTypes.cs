@@ -98,6 +98,9 @@ namespace HeartopiaMod
             // "Clean Without Delays" toggle (replaced the old 0-1s delay slider). Default true (no
             // delay = instant in-range sweep); old configs lacking the element keep this initializer.
             public bool seaCleanCleanNoDelay = true;
+            // Aura Farm: auto-teleport to a cleansing coral area while the Corrupted debuff (610)
+            // is active and hold until it clears. Default true; old configs keep the initializer.
+            public bool autoCleanseCorruptedEnabled = true;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;
@@ -127,6 +130,8 @@ namespace HeartopiaMod
             public float noclipBoostMultiplier;
             public float areaLoadDelay;
             public float auraCollectWaitTimeout;
+            // Foraging: min real-time seconds between Aura Farm teleports (0-10, 0 = off).
+            public float foragingTeleportDelaySeconds;
             public float resourceAutoRepairPauseSeconds;
             public float gameSpeed;
             public bool fpsBypassEnabled;

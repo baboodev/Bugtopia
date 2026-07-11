@@ -941,6 +941,31 @@ namespace HeartopiaMod
             }
             y += 36f;
 
+            // Aura Farm companion: park at a cleansing coral while the Corrupted debuff (610) is
+            // active (CorruptionCleanseFeature.cs). Only acts while Auto Farm runs with the
+            // Contamination radar category on.
+            bool prevAutoCleanse = this.autoCleanseCorruptedEnabled;
+            this.autoCleanseCorruptedEnabled = this.DrawSwitchToggle(new Rect(left, y, 360f, 30f), this.autoCleanseCorruptedEnabled, "Auto-Cleanse Corrupted");
+            if (this.autoCleanseCorruptedEnabled != prevAutoCleanse)
+            {
+                this.AddMenuNotification(
+                    $"Auto-Cleanse Corrupted {(this.autoCleanseCorruptedEnabled ? "Enabled" : "Disabled")}",
+                    this.autoCleanseCorruptedEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            y += 36f;
+
+            GUI.Label(new Rect(left, y, 500f, 34f),
+                this.L("Aura Farm: when the Corrupted debuff lands (Contamination radar on), teleport to the nearest cleansing coral and hold until it clears."),
+                bodyStyle);
+            y += 38f;
+
+            if (this.farmState == HeartopiaComplete.AutoFarmState.CleansingCorruption)
+            {
+                GUI.Label(new Rect(left, y, 500f, 22f), this.L("Cleansing now: ") + this.autoFarmStatus, bodyStyle);
+                y += 26f;
+            }
+
             KeyCode hotkey = this.seaCleanQteHotkey;
             GUI.Label(new Rect(left, y, 500f, 22f),
                 this.LF("Hotkey: {0} (rebind in Settings > Keybinds)", FormatKeybindLabel(hotkey)),
@@ -966,7 +991,7 @@ namespace HeartopiaMod
 
         private float CalculateSeaCleanQteTabHeight()
         {
-            return 390f;
+            return 500f;
         }
 
         // ---- Radar: "Contaminated places" (sea-clean pollutants) -------------------------------

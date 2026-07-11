@@ -856,6 +856,7 @@ namespace HeartopiaMod
                     this.autoFarmActive = false;
                     this.farmState = HeartopiaComplete.AutoFarmState.Idle;
                     this.autoFarmAutoStopAt = -1f;
+                    this.ResetCorruptionCleanseState();
                     this.SetAuraFarmEnabled(false);
                     this.bypassEnabled = false;
                     this.antiAfkEnabled = false;
@@ -1227,6 +1228,7 @@ namespace HeartopiaMod
             this.ProcessSnowSculptureOnUpdate();
             this.ProcessSandSculptureOnUpdate();
             this.ProcessSeaCleanQteOnUpdate();
+            this.ProcessCorruptionCleanseOnUpdate();
             if (this.autoBuyEnabled && Time.unscaledTime >= this.nextAutoBuyLogicTime)
             {
                 this.nextAutoBuyLogicTime = Time.unscaledTime + 0.05f;

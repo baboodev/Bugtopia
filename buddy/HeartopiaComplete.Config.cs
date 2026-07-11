@@ -138,6 +138,7 @@ namespace HeartopiaMod
             data.keyEquipSeaCleaner = (int)this.keyEquipSeaCleaner;
             data.seaCleanAutoRadius = this.seaCleanAutoRadius;
             data.seaCleanCleanNoDelay = this.seaCleanCleanNoDelay;
+            data.autoCleanseCorruptedEnabled = this.autoCleanseCorruptedEnabled;
             data.keyGameSpeed1x = (int)this.keyGameSpeed1x;
             data.keyGameSpeed2x = (int)this.keyGameSpeed2x;
             data.keyGameSpeed5x = (int)this.keyGameSpeed5x;
@@ -167,6 +168,7 @@ namespace HeartopiaMod
             data.noclipBoostMultiplier = this.noclipBoostMultiplier;
             data.areaLoadDelay = this.areaLoadDelay;
             data.auraCollectWaitTimeout = this.auraCollectWaitTimeout;
+            data.foragingTeleportDelaySeconds = this.foragingTeleportDelaySeconds;
             data.resourceAutoRepairPauseSeconds = this.resourceAutoRepairPauseSeconds;
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
@@ -314,6 +316,7 @@ namespace HeartopiaMod
                 ? SeaCleanAutoRadiusDefault
                 : Mathf.Clamp(data.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
             this.seaCleanCleanNoDelay = data.seaCleanCleanNoDelay;
+            this.autoCleanseCorruptedEnabled = data.autoCleanseCorruptedEnabled;
             this.keyGameSpeed1x = (KeyCode)data.keyGameSpeed1x;
             this.keyGameSpeed2x = (KeyCode)data.keyGameSpeed2x;
             this.keyGameSpeed5x = (KeyCode)data.keyGameSpeed5x;
@@ -346,6 +349,7 @@ namespace HeartopiaMod
                 data.auraCollectWaitTimeout > 0f ? data.auraCollectWaitTimeout : 12f,
                 4f,
                 30f);
+            this.foragingTeleportDelaySeconds = Mathf.Clamp(data.foragingTeleportDelaySeconds, 0f, 10f);
             this.resourceAutoRepairPauseSeconds = data.resourceAutoRepairPauseSeconds;
             this.gameSpeed = data.gameSpeed;
             this.fpsBypassEnabled = data.fpsBypassEnabled;
@@ -618,6 +622,7 @@ namespace HeartopiaMod
                         else if (line.Contains("noclipBoostMultiplier")) this.noclipBoostMultiplier = GetJsonFloat(line, "\"noclipBoostMultiplier\":");
                         else if (line.Contains("areaLoadDelay")) this.areaLoadDelay = GetJsonInt(line, "\"areaLoadDelay\":");
                         else if (line.Contains("auraCollectWaitTimeout")) this.auraCollectWaitTimeout = Mathf.Clamp(GetJsonFloat(line, "\"auraCollectWaitTimeout\":"), 4f, 30f);
+                        else if (line.Contains("foragingTeleportDelaySeconds")) this.foragingTeleportDelaySeconds = Mathf.Clamp(GetJsonFloat(line, "\"foragingTeleportDelaySeconds\":"), 0f, 10f);
                         else if (line.Contains("resourceAutoRepairPauseSeconds")) this.resourceAutoRepairPauseSeconds = GetJsonFloat(line, "\"resourceAutoRepairPauseSeconds\":");
                         else if (line.Contains("gameSpeed")) this.gameSpeed = GetJsonFloat(line, "\"gameSpeed\":");
                         else if (line.Contains("fpsBypassEnabled")) this.fpsBypassEnabled = GetJsonInt(line, "\"fpsBypassEnabled\":") != 0;
