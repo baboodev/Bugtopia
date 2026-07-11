@@ -861,5 +861,90 @@ namespace HeartopiaMod
         {
             return 380f;
         }
+
+        // ---- Radar: "Contaminated places" (sea-clean pollutants) -------------------------------
+        // Marks live SeaCleanMonsterComponent instances on the radar so pollutants are easy to find.
+        // Reuses the Auto Sea Clean component resolution (class + IsCleaned/IsHidden getters) and works
+        // independently of the auto-clean toggle. Called each RunRadar; fail-closed if AuraMono / the
+        // type isn't ready (no-op → no markers, never crash). Same pin discipline as the underwater scan.
+        private void ScanContaminatedRadar(Vector3 origin, Material line, Material fill, float maxRange)
+        {
+            if (!this.showContaminatedRadar || line == null || fill == null)
+            {
+                return;
+            }
+
+            // Resolve the monster class + getters on demand (side-effect of EnsureSeaCleanQteAuraResolved).
+            this.EnsureSeaCleanQteAuraResolved(out _);
+            if (this.seaCleanQteMonsterClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            float maxSqr = maxRange * maxRange;
+            List<uint> compPins = new List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(this.seaCleanQteMonsterClass, out List<IntPtr> components, compPins)
+                    || components == null || components.Count == 0)
+                {
+                    return;
+                }
+
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr comp = components[i];
+                    if (comp == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    // Skip already-cleaned / hidden pollutants — they aren't actionable contamination.
+                    if (this.SeaCleanQteInvokeBoolGetter(comp, this.seaCleanQteGetIsCleanedMethod, out bool isCleaned) && isCleaned)
+                    {
+                        continue;
+                    }
+                    if (this.SeaCleanQteInvokeBoolGetter(comp, this.seaCleanQteGetIsHiddenMethod, out bool isHidden) && isHidden)
+                    {
+                        continue;
+                    }
+                    // Skip player-hosted "body pollution" — the contamination status a player picks up
+                    // mid-clean rides on a player entity, so a radar marker would sit ON the player instead
+                    // of a real world pollutant. The auto-clean scan excludes these too (!IsPlayerHosted).
+                    if (this.SeaCleanQteInvokeBoolGetter(comp, this.seaCleanQteGetIsPlayerHostedMethod, out bool isPlayerHosted) && isPlayerHosted)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetMonoObjectMember(comp, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        if (!this.TryGetMonoVector3Member(entityObj, "position", out Vector3 pos))
+                        {
+                            continue;
+                        }
+                        if ((pos - origin).sqrMagnitude > maxSqr)
+                        {
+                            continue;
+                        }
+
+                        this.CreateMarker(pos, "contaminated", line, fill, null);
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(compPins);
+            }
+        }
     }
 }

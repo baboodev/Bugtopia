@@ -45,6 +45,12 @@ namespace HeartopiaMod
         private const float MapResScanInterval = 2f;
         // Synthetic StaticId with no TableMapElement -> TrackingItem falls back to "gametask_icon_002".
         private const int MapTrackSyntheticStaticId = 900000000;
+        // "Contaminated" (sea-clean pollutant) map icon: pin it to the decadopecten seashell entity (Shell
+        // table 22000, normalStep0PrefabId = p_gather_decadopecten_step00). As a Furniture track this
+        // resolves through RewardUtility.GetIconName(22000) -> AtlasEnum.NormalItem/
+        // ui_item_normal_p_gather_decadopecten_step00 — the SAME seashell the ESP overlay draws — instead
+        // of position-matching to a neighboring collectable (which stole a nearby wakame's icon).
+        private const int ContaminatedMapIconStaticId = 22000;
         // High tag in the token so our synthetic tokens never collide with real server tokens (netIds).
         private const ulong MapTrackTokenTag = 0x5000000000000000UL;
         private const float MapTrackSyncInterval = 0.4f;
@@ -612,7 +618,16 @@ namespace HeartopiaMod
                 // "Bubble" is NavigationPoint but NOT a collectable: a bubble drifting within the 3 m XZ match
                 // radius of a random bush/tree would steal its item icon and poison mapTrackLabelIcon["Bubble"]
                 // for every other bubble (random icon on the Bubbles radar) — keep bubbles on the plain flag.
-                if (type == MapTrackTypeNavigationPoint
+                // "Contaminated" (sea-clean pollutant) is likewise NavigationPoint but NOT a collectable —
+                // position-matching it stole a neighboring wakame's icon. Pin it to the decadopecten seashell
+                // item (Furniture track -> NormalItem, same seashell as the ESP overlay) BEFORE the match
+                // block so it never falls into the collectable position-match.
+                if (string.Equals(cand.Label, "Contaminated", StringComparison.Ordinal))
+                {
+                    type = MapTrackTypeFurniture;
+                    staticId = ContaminatedMapIconStaticId;
+                }
+                else if (type == MapTrackTypeNavigationPoint
                     && !string.Equals(cand.Label, "Bubble", StringComparison.Ordinal))
                 {
                     bool didMatch = this.TryMatchCollectable(cand.Position, out int resStaticId, out int resProduceId, out bool resOnCooldown);

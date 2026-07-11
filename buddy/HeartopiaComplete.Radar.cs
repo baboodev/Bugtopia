@@ -542,6 +542,13 @@ namespace HeartopiaMod
                     return "p_gather_seagrape_00";
                 case "Wakame":
                     return "p_dynamicbush_wakame_00";
+                case "Contaminated":
+                    // No item icon exists for sea-clean pollutants (world objects p_contaminant_seastone_*).
+                    // The furniture/decoration garbage icon's bundle isn't loaded in the sea scene, so borrow
+                    // a seashell from theme/gather/shell/ — SAME icon-bundle family as the berries/underwater
+                    // gatherables that already load here (scallop = a recognizable seashell). Falls back to the
+                    // hazard diamond while it loads.
+                    return "p_gather_decadopecten_step00";
                 case "Fiddlehead":
                     return "p_gather_bracken_00";
                 case "Tall Mustard":
@@ -591,6 +598,9 @@ namespace HeartopiaMod
                     return this.CreateRadarIconFallbackTexture(key, new Color(0.26f, 0.72f, 1f), new Color(0.08f, 0.3f, 0.55f), false, false, false);
                 case "Meteor":
                     return this.CreateRadarIconFallbackTexture(key, new Color(1f, 0.55f, 0.15f), new Color(0.98f, 0.83f, 0.36f), false, true, false);
+                // NOTE: no "Contaminated" fallback on purpose — a fallback texture gets cached permanently
+                // in metadata.ResourceVisualEspIconTexture on the first frame and short-circuits the async
+                // game-icon (seashell) load. Returning null → the badge shows during load, then the real icon.
                 default:
                     return null;
             }
@@ -1187,6 +1197,7 @@ namespace HeartopiaMod
                 this.showGlasswortRadar = true;
                 this.showSeaGrapeRadar = true;
                 this.showWakameRadar = true;
+                this.showContaminatedRadar = true;
                 this.showBlueberryRadar = true;
                 this.showRaspberryRadar = true;
                 this.showStoneRadar = true;
@@ -1219,6 +1230,7 @@ namespace HeartopiaMod
                 this.showGlasswortRadar = false;
                 this.showSeaGrapeRadar = false;
                 this.showWakameRadar = false;
+                this.showContaminatedRadar = false;
                 this.showBlueberryRadar = false;
                 this.showRaspberryRadar = false;
                 this.showStoneRadar = false;
@@ -1519,6 +1531,7 @@ namespace HeartopiaMod
             if (this.showGlasswortRadar) selected.Add("Glasswort");
             if (this.showSeaGrapeRadar) selected.Add("Sea Grape");
             if (this.showWakameRadar) selected.Add("Wakame");
+            if (this.showContaminatedRadar) selected.Add("Contaminated");
             string summary = this.GetRadarSelectionSummary(selected);
             y = this.DrawRadarDropdownHeader(y, "Underwater", summary, ref this.radarUnderwaterDropdownOpen);
             if (!this.radarUnderwaterDropdownOpen)
@@ -1535,6 +1548,9 @@ namespace HeartopiaMod
             y += 30;
             v = this.DrawRadarDropdownOption(y, "Wakame", this.showWakameRadar);
             if (v != this.showWakameRadar) { this.showWakameRadar = v; changed = true; }
+            y += 30;
+            v = this.DrawRadarDropdownOption(y, "Contaminated", this.showContaminatedRadar);
+            if (v != this.showContaminatedRadar) { this.showContaminatedRadar = v; changed = true; }
             y += 30;
 
             if (changed)
@@ -2564,7 +2580,7 @@ namespace HeartopiaMod
         private bool AnyRadarLootToggleEnabled()
         {
             return this.IsAnyMushroomRadarEnabled() || this.showFiddleheadRadar || this.showTallMustardRadar || this.showBurdockRadar || this.showMustardGreensRadar
-                || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar
+                || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar || this.showContaminatedRadar
                 || this.showBlueberryRadar || this.showRaspberryRadar || this.showStoneRadar || this.showOreRadar
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
                 || this.showBubbleRadar || this.showBirdRadar || this.showInsectRadar || this.showFishShadowRadar || this.showMeteorRadar
@@ -3196,6 +3212,9 @@ namespace HeartopiaMod
 
             // Underwater gatherables (Glasswort/Sea Grape/Wakame) — see ScanUnderwaterGatherables.
             this.ScanUnderwaterGatherables(position, material, material2, radarDistanceLimit);
+
+            // Contaminated places (sea-clean pollutants) — live SeaCleanMonsterComponent scan.
+            this.ScanContaminatedRadar(position, material, material2, radarDistanceLimit);
         }
 
         // Radar markers for the underwater gatherables. They are "fruit"-family collectable produce
@@ -3546,6 +3565,13 @@ namespace HeartopiaMod
                                                             icon = "[Wk]";
                                                             endColor = new Color(0.45f, 0.9f, 0.55f); // kelp green
                                                             bgColor = new Color(0.1f, 0.38f, 0.2f, 0.85f);
+                                                        }
+                                                        else if (text.Contains("contaminated"))
+                                                        {
+                                                            text2 = "Contaminated";
+                                                            icon = "[!]";
+                                                            endColor = new Color(0.7f, 1f, 0.2f); // toxic yellow-green
+                                                            bgColor = new Color(0.32f, 0.4f, 0.05f, 0.88f);
                                                         }
                                                     }
                                                 }

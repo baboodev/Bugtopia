@@ -91,6 +91,7 @@ namespace HeartopiaMod
             { "Glasswort", "Glasswort" },
             { "Sea Grape", "Sea Grape" },
             { "Wakame", "Wakame" },
+            { "Contaminated", "Contaminated" },
             { "Stones", "Stones" },
             { "Ores", "Ores" },
             { "Rare Trees", "Rare Trees" },

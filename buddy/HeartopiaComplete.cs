@@ -5557,6 +5557,9 @@ namespace HeartopiaMod
         private bool showGlasswortRadar = false;
         private bool showSeaGrapeRadar = false;
         private bool showWakameRadar = false;
+        // Sea-clean pollutants ("contaminated places") — live SeaCleanMonsterComponent scan, same
+        // infrastructure as the Auto Sea Clean feature.
+        private bool showContaminatedRadar = false;
 
         // Token: 0x0400002B RID: 43
         private bool showBlueberryRadar = false;

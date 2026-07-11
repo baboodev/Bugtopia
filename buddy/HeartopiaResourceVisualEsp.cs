@@ -450,6 +450,7 @@ namespace HeartopiaMod
                 case "Glasswort":
                 case "Sea Grape":
                 case "Wakame":
+                case "Contaminated":
                 case "Stone":
                 case "Ore":
                 case "Tree":
@@ -503,6 +504,7 @@ namespace HeartopiaMod
                 case "Glasswort": return "GW";
                 case "Sea Grape": return "SG";
                 case "Wakame": return "WK";
+                case "Contaminated": return "CT";
                 case "Stone": return "ST";
                 case "Ore": return "OR";
                 case "Rare Tree": return "RT";
@@ -538,6 +540,7 @@ namespace HeartopiaMod
                 case "Glasswort": return new Color(0.5f, 1f, 0.75f);
                 case "Sea Grape": return new Color(0.65f, 0.85f, 1f);
                 case "Wakame": return new Color(0.45f, 0.9f, 0.55f);
+                case "Contaminated": return new Color(0.75f, 1f, 0.28f);
                 case "Stone": return new Color(0.72f, 0.76f, 0.82f);
                 case "Ore": return new Color(0.95f, 0.72f, 0.44f);
                 case "Tree": return new Color(0.58f, 0.92f, 0.78f);
