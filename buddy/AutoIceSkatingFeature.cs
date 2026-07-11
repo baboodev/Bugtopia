@@ -10,7 +10,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool AutoIceSkatingLogsEnabled = MasterLogAutoIceSkating;
+        private static bool AutoIceSkatingLogsEnabled => MasterLogAutoIceSkating;
         private const float AutoIceSkatingMinStartTriggerInterval = 0.03f;
         private const float AutoIceSkatingMinPerfectRatio = 0.02f;
         private const float AutoIceSkatingLogThrottleSeconds = 1.5f;

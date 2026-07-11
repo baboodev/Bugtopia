@@ -13,7 +13,7 @@ namespace HeartopiaMod
         private const int FlauntActionEventPayloadBytes = 64;
         private const int PlayerStateShowOff = 27;
 
-        internal const bool MasterLogShowOffBypass = true;
+        internal static bool MasterLogShowOffBypass = true;
 
         private bool skipShowOffAnimations;
         private bool showOffBypassHooksRegistered;

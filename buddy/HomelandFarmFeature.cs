@@ -11,7 +11,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool HomelandFarmLogsEnabled = MasterLogHomelandFarm;
+        private static bool HomelandFarmLogsEnabled => MasterLogHomelandFarm;
         private const float HomelandFarmDefaultWaterRadius = 30f;
         private const float HomelandFarmMinWaterRadius = 1f;
         private const float HomelandFarmMaxWaterRadius = 80f;

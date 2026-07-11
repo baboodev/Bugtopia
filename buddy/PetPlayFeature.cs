@@ -10,7 +10,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool PetPlayLogsEnabled = MasterLogPetPlay;
+        private static bool PetPlayLogsEnabled => MasterLogPetPlay;
 
         private bool petPlayAutoCatEnabled = false;
         private bool petPlayAutoDogEnabled = false;

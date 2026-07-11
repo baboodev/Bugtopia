@@ -37,7 +37,7 @@ namespace HeartopiaMod
     {
         // Verbose diagnosis. Off by default — the user turns this on to verify offsets/enum/target
         // resolution live (we cannot test in-game). Every key step logs under [SeaCleanQte].
-        private bool MasterLogSeaCleanQte = false;
+        internal static bool MasterLogSeaCleanQte = false;
 
         private bool seaCleanQteEnabled = false;
         private KeyCode seaCleanQteHotkey = KeyCode.None;
@@ -152,7 +152,7 @@ namespace HeartopiaMod
 
         private void SeaCleanQteLog(string message)
         {
-            if (!this.MasterLogSeaCleanQte)
+            if (!MasterLogSeaCleanQte)
             {
                 return;
             }

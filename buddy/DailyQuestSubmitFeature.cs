@@ -8,7 +8,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool DailyQuestSubmitLogsEnabled = MasterLogDailyQuestSubmit;
+        private static bool DailyQuestSubmitLogsEnabled => MasterLogDailyQuestSubmit;
         private const float DailyQuestSubmitDelaySeconds = 0.65f;
         private const int DailyQuestSubmitStateCanAccept = 2;
         private const int DailyQuestSubmitStateCanSubmit = 4;

@@ -12,7 +12,7 @@ namespace HeartopiaMod
     {
         private bool auraFarmEnabled = false;
         private bool auraFarmMethodsReady = false;
-        private const bool AuraFarmDebugLogs = HeartopiaComplete.MasterLogAuraFarm;
+        private static bool AuraFarmDebugLogs => HeartopiaComplete.MasterLogAuraFarm;
         private const bool AuraUseManagedSpatialFallbackScans = false;
         private const bool AuraUseMonoTargetFallbacks = false;
         private static readonly float AuraScanInterval = 0.08f;

@@ -8,7 +8,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool PadBuildHotkeyLogsEnabled = MasterLogPadBuild;
+        private static bool PadBuildHotkeyLogsEnabled => MasterLogPadBuild;
         private const float PadBuildRotateInitialRepeatDelay = 0.6f;  // hold delay before auto-repeat
         private const float PadBuildRotateRepeatInterval = 0.1f;      // auto-repeat cadence while held
         private const float PadBuildManagedResolveRetrySeconds = 5f;

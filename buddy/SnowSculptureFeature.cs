@@ -8,7 +8,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool MasterLogSnowSculpture = false;
+        internal static bool MasterLogSnowSculpture = false;
         private const float SnowSculptureTypeResolveRetrySeconds = 2f;
         private const int SnowSculptureRatingSuccessId = 2;
         private const int SnowSculptureMaxRound = 20;

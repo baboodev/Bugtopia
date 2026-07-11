@@ -5,7 +5,7 @@ namespace HeartopiaMod
 {
     public static class AutoFishingFarm
     {
-        private const bool debugLoggingEnabled = HeartopiaComplete.MasterLogAutoFish;
+        private static bool debugLoggingEnabled => HeartopiaComplete.MasterLogAutoFish;
 
         private static bool enabled = false;
         private static bool instantCatchEnabled = false;

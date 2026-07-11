@@ -10,7 +10,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool PetFeedLogsEnabled = MasterLogPetFeed;
+        private static bool PetFeedLogsEnabled => MasterLogPetFeed;
         private const float PetFeedWorldScanRadius = 55f;
         private const float PetFeedProbeCooldownSeconds = 4f;
         private const float PetFeedActionCooldownSeconds = 1.25f;

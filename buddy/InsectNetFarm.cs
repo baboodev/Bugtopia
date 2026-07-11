@@ -6,7 +6,7 @@ namespace HeartopiaMod
 {
     public static class InsectNetFarm
     {
-        private const bool debugLoggingEnabled = HeartopiaComplete.MasterLogInsectFarm;
+        private static bool debugLoggingEnabled => HeartopiaComplete.MasterLogInsectFarm;
 
         private static bool enabled = false;
         private static float catchCooldown = 1.5f;

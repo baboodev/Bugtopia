@@ -32,7 +32,7 @@ namespace HeartopiaMod
     {
         // Debug: log every registered event dispatch (scalar dump). Off by default — turn on to
         // discover/verify event payloads. Individual features register their own handlers regardless.
-        internal const bool MasterLogGameEvents = false;
+        internal static bool MasterLogGameEvents = false;
 
         // EventCenter.DispatchEvent<T>(in T): static, one pointer arg, void return.
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -751,7 +751,7 @@ namespace HeartopiaMod
         // channel). High-frequency, so we don't log each one — we count them and emit a throttled
         // summary + a sample netId/archetype so the EntityData netId@8 offset can be confirmed live
         // and the frequency measured before wiring a feature (e.g. NetCook stove detection) to it. ----
-        internal const bool MasterLogEntityEvents = false; // debug toggle for the summary log (measured; off)
+        internal static bool MasterLogEntityEvents = false; // debug toggle for the summary log (measured; off)
 
         private const string EntityCreateEventName = "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityCreateEvent";
         private const string EntityRemoveEventName = "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityRemoveEvent";

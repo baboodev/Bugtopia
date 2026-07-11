@@ -745,6 +745,11 @@ namespace HeartopiaMod
                 return 520f;
             }
 
+            if (this.settingsSubTab == 4)
+            {
+                return this.CalculateLoggingTabHeight();
+            }
+
             return this.CalculateSettingsMainTabHeight();
         }
 
@@ -887,6 +892,11 @@ namespace HeartopiaMod
             if (this.settingsSubTab == 3)
             {
                 return this.DrawAboutTab(startY);
+            }
+
+            if (this.settingsSubTab == 4)
+            {
+                return this.DrawLoggingTab(startY);
             }
 
             int num = startY;

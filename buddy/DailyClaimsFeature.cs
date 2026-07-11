@@ -10,7 +10,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool DailyClaimsLogsEnabled = MasterLogDailyClaims;
+        private static bool DailyClaimsLogsEnabled => MasterLogDailyClaims;
         private const float DailyClaimsActionDelaySeconds = 0.65f;
 
         private object dailyClaimsCoroutine = null;

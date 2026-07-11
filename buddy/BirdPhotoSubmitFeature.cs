@@ -8,7 +8,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool BirdPhotoSubmitLogsEnabled = MasterLogBirdPhotoSubmit;
+        private static bool BirdPhotoSubmitLogsEnabled => MasterLogBirdPhotoSubmit;
         private const float BirdPhotoSubmitDelaySeconds = 0.65f;
         private const int BirdPhotoEntityTypeValue = 504;
         private const int BirdPhotoExchangeListMaxItems = 50;

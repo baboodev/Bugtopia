@@ -22,7 +22,7 @@ namespace HeartopiaMod
             public short TargetY;
         }
 
-        private const bool PuzzleLogsEnabled = MasterLogPuzzle;
+        private static bool PuzzleLogsEnabled => MasterLogPuzzle;
         private const float PuzzleNetworkSettleSeconds = 0.12f;
         private const float PuzzleAutoRetrySeconds = 8.00f;
         private const int PuzzleMaxSolvePasses = 5;

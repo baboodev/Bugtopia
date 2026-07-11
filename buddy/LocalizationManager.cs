@@ -560,6 +560,7 @@ namespace HeartopiaMod
             { "Warehouse Anywhere Enabled", "Warehouse Anywhere Enabled" },
             { "{0} Items ({1})", "{0} Items ({1})" },
             { "{0} stacks ({1})", "{0} stacks ({1})" },
+            { "Logging", "Logging" },
         };
 
         // Built-in Spanish fallback strings.
@@ -1102,6 +1103,7 @@ namespace HeartopiaMod
             { "Warehouse Anywhere Enabled", "Almacén en cualquier lugar activado" },
             { "{0} Items ({1})", "{0} objetos ({1})" },
             { "{0} stacks ({1})", "{0} pilas ({1})" },
+            { "Logging", "Registros" },
         };
 
         // Built-in Simplified Chinese fallback strings.
@@ -1644,6 +1646,7 @@ namespace HeartopiaMod
             { "Warehouse Anywhere Enabled", "随处仓库已启用" },
             { "{0} Items ({1})", "{0} 个物品（{1}）" },
             { "{0} stacks ({1})", "{0} 组（{1}）" },
+            { "Logging", "日志" },
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -2176,6 +2179,7 @@ namespace HeartopiaMod
             { "Warehouse Anywhere Enabled", "Armazém em qualquer lugar ativado" },
             { "{0} Items ({1})", "{0} itens ({1})" },
             { "{0} stacks ({1})", "{0} pilhas ({1})" },
+            { "Logging", "Registros" },
         };
 
         // Built-in Thai fallback strings.
@@ -2708,6 +2712,7 @@ namespace HeartopiaMod
             { "Warehouse Anywhere Enabled", "เปิดคลังทุกที่แล้ว" },
             { "{0} Items ({1})", "{0} ไอเทม ({1})" },
             { "{0} stacks ({1})", "{0} กอง ({1})" },
+            { "Logging", "บันทึก" },
         };
 
         // Runtime localization state.

@@ -38,7 +38,7 @@ namespace HeartopiaMod
         // trigger ids/centers and the self-netId match live (also forces hook registration + the
         // buff poll + area resolve even while the farm gate is off, so it can be verified by just
         // swimming into pollution).
-        private bool MasterLogCorruptionCleanse = false;
+        internal static bool MasterLogCorruptionCleanse = false;
 
         // Persisted feature gate (saved with the unified config like seaCleanCleanNoDelay).
         private bool autoCleanseCorruptedEnabled = true;
@@ -137,7 +137,7 @@ namespace HeartopiaMod
 
         private void CorruptionCleanseLog(string message)
         {
-            if (!this.MasterLogCorruptionCleanse)
+            if (!MasterLogCorruptionCleanse)
             {
                 return;
             }
@@ -153,7 +153,7 @@ namespace HeartopiaMod
             bool gate = this.autoFarmActive && this.showContaminatedRadar && this.autoCleanseCorruptedEnabled;
             bool wantsTracking = gate
                 || this.farmState == HeartopiaComplete.AutoFarmState.CleansingCorruption
-                || this.MasterLogCorruptionCleanse;
+                || MasterLogCorruptionCleanse;
             if (!wantsTracking)
             {
                 return;
@@ -184,7 +184,7 @@ namespace HeartopiaMod
 
             // With the diag flag on, resolve the areas eagerly too so the parent can verify the
             // trigger ids + centers without running the whole farm (throttled internally).
-            if (this.MasterLogCorruptionCleanse)
+            if (MasterLogCorruptionCleanse)
             {
                 this.TryResolveCorruptionCleanseAreas();
             }
@@ -213,7 +213,7 @@ namespace HeartopiaMod
         // playerNetId, so it fires for peers too: only a self-attributed event drives state.
         private void OnCorruptionBodyPollutionSyncEvent(GameEventSnapshot e)
         {
-            if (!this.autoCleanseCorruptedEnabled && !this.MasterLogCorruptionCleanse)
+            if (!this.autoCleanseCorruptedEnabled && !MasterLogCorruptionCleanse)
             {
                 return;
             }
@@ -255,7 +255,7 @@ namespace HeartopiaMod
         // Terminal — but it also fires on world teardown, so it only requests a HasBuff confirm.
         private void OnCorruptionBodyPollutionClearedEvent(GameEventSnapshot e)
         {
-            if (!this.autoCleanseCorruptedEnabled && !this.MasterLogCorruptionCleanse)
+            if (!this.autoCleanseCorruptedEnabled && !MasterLogCorruptionCleanse)
             {
                 return;
             }
@@ -274,7 +274,7 @@ namespace HeartopiaMod
         // "We're inside the area and cleansing" confirmation + live progress.
         private void OnCorruptionCleanseFlowStateChangedEvent(GameEventSnapshot e)
         {
-            if (!this.autoCleanseCorruptedEnabled && !this.MasterLogCorruptionCleanse)
+            if (!this.autoCleanseCorruptedEnabled && !MasterLogCorruptionCleanse)
             {
                 return;
             }
@@ -301,7 +301,7 @@ namespace HeartopiaMod
         // Self-player buff add/update/remove (id only, no direction) — re-query on 610.
         private void OnCorruptionUpdateBuffUiEvent(GameEventSnapshot e)
         {
-            if (!this.autoCleanseCorruptedEnabled && !this.MasterLogCorruptionCleanse)
+            if (!this.autoCleanseCorruptedEnabled && !MasterLogCorruptionCleanse)
             {
                 return;
             }
@@ -1060,7 +1060,7 @@ namespace HeartopiaMod
         // for the computed event offsets, the self-netId match and the resolved areas.
         private void LogCorruptionCleanseMasterDiag(float now)
         {
-            if (!this.MasterLogCorruptionCleanse || now < this.corruptionNextMasterLogAt)
+            if (!MasterLogCorruptionCleanse || now < this.corruptionNextMasterLogAt)
             {
                 return;
             }

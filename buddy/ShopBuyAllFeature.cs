@@ -10,7 +10,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool ShopBuyAllLogsEnabled = MasterLogAutoBuy;
+        private static bool ShopBuyAllLogsEnabled => MasterLogAutoBuy;
         private const int ShopBuyAllCurrencyCoin = 1;
         private const int ShopBuyAllStoreMoneyCurrency = 1;
         private const int ShopBuyAllCurrencyEnumLeft = 0;

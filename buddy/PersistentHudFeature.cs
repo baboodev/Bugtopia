@@ -34,7 +34,7 @@ namespace HeartopiaMod
         private const string PersistentHudStatusPanelTypeName = "XDTGame.UI.Panel.StatusPanel";
         private const float PersistentHudPollInterval = 2f;
 
-        internal const bool MasterLogPersistentHud = true;
+        internal static bool MasterLogPersistentHud = true;
 
         // The panels the wanted modes open (UIEventBridge.OnGameModeFocused); any of them open while
         // StatusPanel is closed => a HUD-replacing special mode is active. Probed by the poll fallback.

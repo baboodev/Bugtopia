@@ -23,7 +23,7 @@ namespace HeartopiaMod
         // All game access is AuraMono-only: the protocol manager / components live in
         // Mono-only images (managed FindLoadedType is dead for them on this build).
 
-        private const bool MasterLogSandSculpture = true; // verbose logging for live debugging
+        internal static bool MasterLogSandSculpture = true; // verbose logging for live debugging
         private const float SandSculptureResolveRetrySeconds = 2f;
         private const float SandApiTickIntervalSeconds = 0.1f;
         private const float SandApiRetryBackoffSeconds = 1.5f;

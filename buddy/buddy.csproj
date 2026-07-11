@@ -295,6 +295,7 @@
     <Compile Include="HeartopiaComplete.Win32.cs" />
     <Compile Include="HeartopiaComplete.AuraMonoEngine.cs" />
     <Compile Include="HeartopiaComplete.Localization.cs" />
+    <Compile Include="HeartopiaComplete.Logging.cs" />
     <Compile Include="HeartopiaComplete.Patches.cs" />
     <Compile Include="HeartopiaComplete.BagAutomation.cs" />
     <Compile Include="HeartopiaDebugEsp.cs" />

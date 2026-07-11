@@ -7,8 +7,8 @@ namespace HeartopiaMod
 {
     public static class BirdNetFarm
     {
-        private const bool debugLoggingEnabled = HeartopiaComplete.MasterLogBirdFarm;
-        private const bool verboseCrashTraceEnabled = HeartopiaComplete.MasterLogBirdFarmCrashTrace;
+        private static bool debugLoggingEnabled => HeartopiaComplete.MasterLogBirdFarm;
+        private static bool verboseCrashTraceEnabled => HeartopiaComplete.MasterLogBirdFarmCrashTrace;
 
         private static bool enabled = false;
         private static bool perfectPhotoEnabled = false;

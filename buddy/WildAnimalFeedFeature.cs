@@ -9,7 +9,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool WildAnimalFeedLogsEnabled = MasterLogWildAnimalFeed;
+        private static bool WildAnimalFeedLogsEnabled => MasterLogWildAnimalFeed;
         private const int WildAnimalFeedMaxDetailLogsPerPlan = 12;
         private const int WildAnimalFeedFullnessCacheMiss = -1;
         private const float WildAnimalFeedActionCooldownSeconds = 1.5f;

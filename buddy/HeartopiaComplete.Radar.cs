@@ -3232,7 +3232,7 @@ namespace HeartopiaMod
         // Diagnostic: logs each in-range collectable's produceId/staticId/resolved item id under
         // [UnderwaterRadar]. Identity CONFIRMED live 2026-07-11 (produceId 701/702/703 → item
         // 40601/40602/40603, "marked 11"), so it's off now.
-        internal bool MasterLogUnderwaterRadar = false;
+        internal static bool MasterLogUnderwaterRadar = false;
 
         private void ScanUnderwaterGatherables(Vector3 origin, Material line, Material fill, float maxRange)
         {
@@ -3297,7 +3297,7 @@ namespace HeartopiaMod
                 // Diagnostic, narrowed to the fruit/bush family (40100-40999: apples, berries AND the
                 // underwater plants 40601-603) so the log reveals the underwater ids without flooding
                 // one line per stone/ore/tree every scan.
-                if (this.MasterLogUnderwaterRadar && (meshName != null || (itemId >= 40100 && itemId <= 40999)))
+                if (MasterLogUnderwaterRadar && (meshName != null || (itemId >= 40100 && itemId <= 40999)))
                 {
                     ModLogger.Msg("[UnderwaterRadar] collectable produceId=" + entry.ProduceId
                         + " staticId=" + entry.StaticId + " itemId=" + itemId
@@ -3313,7 +3313,7 @@ namespace HeartopiaMod
                 found++;
             }
 
-            if (this.MasterLogUnderwaterRadar)
+            if (MasterLogUnderwaterRadar)
             {
                 ModLogger.Msg("[UnderwaterRadar] snapshot " + this.mapResEntities.Count + " collectables, "
                     + diagInRange + " in range, marked " + found + ".");

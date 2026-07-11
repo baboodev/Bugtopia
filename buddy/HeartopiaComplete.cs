@@ -104,41 +104,42 @@ namespace HeartopiaMod
 #else
         private const bool MasterHideLoaderConsole = false;
 #endif
-        internal const bool MasterLogAuraFarm = false;
-        internal const bool MasterLogBirdFarm = false;
-        internal const bool MasterLogBirdFarmCrashTrace = true;
-        internal const bool MasterLogInsectFarm = false;
-        internal const bool MasterLogAutoFish = true;
-        internal const bool MasterLogInstantCatch = true;
-        internal const bool MasterLogAutoFarm = false;
+        // Runtime-toggleable from Settings → Logging (session-only; never persisted).
+        internal static bool MasterLogAuraFarm = false;
+        internal static bool MasterLogBirdFarm = false;
+        internal static bool MasterLogBirdFarmCrashTrace = true;
+        internal static bool MasterLogInsectFarm = false;
+        internal static bool MasterLogAutoFish = false;
+        internal static bool MasterLogInstantCatch = true;
+        internal static bool MasterLogAutoFarm = false;
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
         // recipe-id probes per active quest) — flip to false once classification is confirmed.
-        internal const bool MasterLogQuestAssistant = true;
-        private const bool MasterLogAutoEatRepair = false;
-        private const bool MasterLogNpcTeleport = false;
-        private const bool MasterLogNetCook = false;
-        private const bool MasterLogNetCookScan = false;
-        private const bool MasterLogPuzzle = false;
-        private const bool MasterLogAutoSell = false;
-        private const bool MasterLogRadarIconEsp = false;
-        private const bool MasterLogBubbleRadar = false;
-        private const bool MasterLogAutoBuy = false;
+        internal static bool MasterLogQuestAssistant = true;
+        private static bool MasterLogAutoEatRepair = false;
+        private static bool MasterLogNpcTeleport = false;
+        private static bool MasterLogNetCook = false;
+        private static bool MasterLogNetCookScan = false;
+        private static bool MasterLogPuzzle = false;
+        private static bool MasterLogAutoSell = false;
+        private static bool MasterLogRadarIconEsp = false;
+        private static bool MasterLogBubbleRadar = false;
+        private static bool MasterLogAutoBuy = false;
 #if HIDE_LOADER_CONSOLE
-        private const bool MasterLogForceOpenShop = false;
+        private static bool MasterLogForceOpenShop = false;
 #else
-        private const bool MasterLogForceOpenShop = true;
+        private static bool MasterLogForceOpenShop = true;
 #endif
-        private const bool MasterLogPetPlay = false;
-        private const bool MasterLogPetFeed = false;
-        private const bool MasterLogWildAnimalFeed = false;
-        private const bool MasterLogHomelandFarm = true;
-        private const bool MasterLogPadBuild = true;
-        private const bool MasterLogWildAnimalGift = true;
-        private const bool MasterLogAutoIceSkating = false;
-        private const bool MasterLogDailyQuestSubmit = true;
-        internal const bool MasterLogDailyClaims = true;
-        private const bool MasterLogBirdPhotoSubmit = false;
-        private const bool MasterLogStrangerChat = false;
+        private static bool MasterLogPetPlay = false;
+        private static bool MasterLogPetFeed = false;
+        private static bool MasterLogWildAnimalFeed = false;
+        private static bool MasterLogHomelandFarm = true;
+        private static bool MasterLogPadBuild = true;
+        private static bool MasterLogWildAnimalGift = true;
+        private static bool MasterLogAutoIceSkating = false;
+        private static bool MasterLogDailyQuestSubmit = true;
+        internal static bool MasterLogDailyClaims = true;
+        private static bool MasterLogBirdPhotoSubmit = false;
+        private static bool MasterLogStrangerChat = false;
 
 
         
@@ -218,7 +219,7 @@ namespace HeartopiaMod
         private bool repairTeleportBackEnabled = false;
         private bool autoRepairOnToastEnabled = false; // Toggle for auto repair via live durability detection
         private bool autoEatOnToastEnabled = false; // Toggle for auto eat via toast notification
-        private const bool AutoEatRepairLogsEnabled = MasterLogAutoEatRepair;
+        private static bool AutoEatRepairLogsEnabled => MasterLogAutoEatRepair;
         private bool autoEatAutoTriggerEnabled = true;
         // Auto Eat sends CharacterProtocolManager.EatFood directly (server consume, no client
         // animation clip) instead of the BagModule Eat function; falls back automatically.
@@ -2370,6 +2371,7 @@ namespace HeartopiaMod
                 tabs.Add(("Keybinds", () => this.settingsSubTab == 1, () => this.SetSettingsSubTab(1)));
                 tabs.Add(("UI Theme", () => this.settingsSubTab == 2, () => this.SetSettingsSubTab(2)));
                 tabs.Add(("About", () => this.settingsSubTab == 3, () => this.SetSettingsSubTab(3)));
+                tabs.Add(("Logging", () => this.settingsSubTab == 4, () => this.SetSettingsSubTab(4)));
             }
             return tabs;
         }
@@ -4631,7 +4633,7 @@ namespace HeartopiaMod
 
         private List<KeyValuePair<string, Vector3>> cachedNpcTeleportEntries = new List<KeyValuePair<string, Vector3>>();
         private static readonly bool NpcTeleportLiveLocationEnabled = true;
-        private static readonly bool NpcTeleportDebugLogsEnabled = MasterLogNpcTeleport;
+        private static bool NpcTeleportDebugLogsEnabled => MasterLogNpcTeleport;
 
         private Dictionary<string, int> cachedNpcTeleportIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -4805,9 +4807,9 @@ namespace HeartopiaMod
         private const float NetCookStatusCacheStaleSeconds = 2.5f;
         private const float NetCookRemoteActiveCookGuardSeconds = 45f;
         private const float NetCookBroadRefreshCooldownSeconds = 15f;
-        private const bool AutoFarmLogsEnabled = MasterLogAutoFarm;
-        private const bool NetCookLogsEnabled = MasterLogNetCook;
-        private const bool NetCookScanDebugLogsEnabled = MasterLogNetCookScan;
+        private static bool AutoFarmLogsEnabled => MasterLogAutoFarm;
+        private static bool NetCookLogsEnabled => MasterLogNetCook;
+        private static bool NetCookScanDebugLogsEnabled => MasterLogNetCookScan;
         private const int NetCookScanDebugSampleLimit = 48;
         private const int NetCookOwnerNetIdProbeWindow = 2048;
         private const int NetCookFastOwnerNetIdProbeWindow = 768;
@@ -4955,8 +4957,8 @@ namespace HeartopiaMod
 
         // Auto Buy fields
         private bool autoBuyEnabled = false;
-        private bool autoBuyLogsEnabled = MasterLogAutoBuy;
-        private bool forceOpenShopLogsEnabled = MasterLogForceOpenShop;
+        private bool autoBuyLogsEnabled => MasterLogAutoBuy;
+        private bool forceOpenShopLogsEnabled => MasterLogForceOpenShop;
         private int autoBuySubState = 0; // 0=idle,1=teleporting,2=waiting_dialogue,3=selecting_store,4=buying,5=returning
         private Vector3 autoBuySavedPosition = Vector3.zero;
         private int autoBuyCurrentIngredientIndex = 0;
@@ -5045,8 +5047,8 @@ namespace HeartopiaMod
         private IntPtr autoSellMonoInt32ClassPtr = IntPtr.Zero;
         private IntPtr autoSellMonoUIntIntDictionaryClass = IntPtr.Zero;
         private IntPtr autoSellMonoUIntIntDictionarySetItemMethod = IntPtr.Zero;
-        private static readonly bool AutoSellLogsEnabled = MasterLogAutoSell;
-        private const bool BubbleRadarDebugLoggingEnabled = MasterLogBubbleRadar;
+        private static bool AutoSellLogsEnabled => MasterLogAutoSell;
+        private static bool BubbleRadarDebugLoggingEnabled => MasterLogBubbleRadar;
 
         // Auto Buy Birdwatching Store fields
         private bool autoBuyBirdEnabled = false;
@@ -5474,7 +5476,7 @@ namespace HeartopiaMod
         private readonly Dictionary<uint, float> _rejectedBirdEntityNetIds = new Dictionary<uint, float>();
         private readonly Dictionary<uint, BirdFarmAuraResolvedDetail> _birdFarmResolvedDetailsByNetId = new Dictionary<uint, BirdFarmAuraResolvedDetail>();
         private readonly List<uint> birdFarmExpiredNetIdBuffer = new List<uint>(64);
-        private const bool RadarIconEspDebugLoggingEnabled = MasterLogRadarIconEsp;
+        private static bool RadarIconEspDebugLoggingEnabled => MasterLogRadarIconEsp;
         private static readonly bool birdFarmDisableAuraEntityScan = true;
         private string lastBirdPhotoModeResolveStatus = "not attempted";
         private const float BirdFarmManagedFallbackScanInterval = 12f;
