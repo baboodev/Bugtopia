@@ -2129,6 +2129,9 @@ namespace HeartopiaMod
             this.showPennyBunRadar = false;
             this.showTruffleRadar = false;
             this.showMushroomRadar = false;
+            this.showGlasswortRadar = false;
+            this.showSeaGrapeRadar = false;
+            this.showWakameRadar = false;
         }
 
         // Ids/fields verified against docs/RADAR_GAME_MAP.md's known collectable atlas and the actual
@@ -2188,6 +2191,15 @@ namespace HeartopiaMod
                     this.showTruffleRadar = true;
                     this.showMushroomRadar = this.AreAllMushroomRadarsEnabled();
                     return true;
+                case 40601:
+                    this.showGlasswortRadar = true;
+                    return true;
+                case 40602:
+                    this.showSeaGrapeRadar = true;
+                    return true;
+                case 40603:
+                    this.showWakameRadar = true;
+                    return true;
                 default:
                     return false;
             }
@@ -2231,6 +2243,9 @@ namespace HeartopiaMod
                 case 48003: return "Button Mushroom";
                 case 48004: return "Penny Bun";
                 case 48005: return "Black Truffle";
+                case 40601: return "Glasswort";
+                case 40602: return "Sea Grape";
+                case 40603: return "Wakame";
                 default: return "item #" + itemStaticId;
             }
         }

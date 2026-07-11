@@ -4,27 +4,33 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Auto Sea Clean QTE — auto-pass the ocean-cleanup pollutant QTE (2026-07-09 update).
+    // Auto Sea Clean — full auto ocean-cleanup (2026-07-09 update).
     //
-    // The Sea-Clean QTE is CLIENT-SIMULATED and self-reported to the server as a single
-    // `bool QtePassed` (same trust model as fishing instant-catch / dragon-boat fake-checkpoint;
-    // see .research-record/SEA_CLEAN_QTE_REPORT.md + memory seaclean-qte-client-authoritative).
-    // There are two safe AuraMono levers — no IL2CPP .text patch:
-    //   * EXCLUSIVE (private/solo) pollutant, fully client-side:
-    //       SeaCleanMonsterComponent.ExecuteKill()  → MarkCleaned(qtePassed:true) → dying-Tick
-    //       auto-sends ReqExclusiveSyncState(...,true,true). Instant kill, no hold / no roll.
-    //   * PUBLIC "boss" pollutant (server owns HP, but trusts the pass bool):
-    //       SeaCleanProtocolManager.ReqStartCleanPublicPollutant(netId, qtePassed:true)
-    //       → "never-miss" (server still applies per-pass damage; not a one-shot).
+    // The legit flow (see .research-record/SEA_CLEAN_QTE_REPORT.md + memory
+    // seaclean-qte-client-authoritative) is: equip HandHoldSeaCleaner (ToolSystem toolId 7) → aim
+    // at a pollutant → hold main button → PlayerStateSeaClean damages the EXCLUSIVE pollutant
+    // locally → at an HP threshold a client-rolled hold-and-release QTE runs → on pass
+    // SeaCleanMonsterComponent.ExecuteKill() → MarkCleaned(qtePassed:true) → the dying Tick sends
+    // ReqExclusiveSyncState(netId, typeId, 0f, true, true). The server never re-decides anything —
+    // the whole exclusive branch is client-authoritative and self-reported.
     //
-    // Both are driven off the GLOBAL EventCenter event SeaCleanExecutionStateEvent (dispatched on
-    // every QTE state change). When a QTE becomes active (state == Ready) and it is NOT a shield
-    // QTE, we resolve the pollutant currently in QTE by scanning SeaCleanMonsterComponent via the
-    // reusable Entities.GetComponents<T> path (TryAuraMonoGetComponentObjects), pick the one whose
-    // IsInQTE == true, and fire the matching lever. CleanupEventPublicPollutantSpawnedEvent captures
-    // the boss netId as a fallback.
+    // ExecuteKill() itself has NO precondition beyond !isShared (no QTE, no cleaning state), so
+    // this feature short-circuits the entire loop:
+    //   * AUTO-CLEAN LOOP (scan-driven): every 0.5s scan SeaCleanMonsterComponent, pick the
+    //     nearest exclusive pollutant (!IsShared && !IsPublicPollutant && !IsPlayerHosted &&
+    //     !IsCleaned && !IsHidden) within range and AuraMono-invoke ExecuteKill() on it — paced,
+    //     one kill per interval. The sea cleaner must be in hand (server plausibility: the legit
+    //     client can never clean without it); if hands are empty the tool is AUTO-EQUIPPED via
+    //     the shared ToolSystem.SetHandhold path (TryEquipHandTool(7)). If another tool is held
+    //     we do NOT yank it — status tells the user.
+    //   * QTE AUTO-PASS (event-driven, kept from v1): SeaCleanExecutionStateEvent(state==Ready,
+    //     !shield) → exclusive target ExecuteKill() / public boss
+    //     ReqStartCleanPublicPollutant(netId, qtePassed:true) ("never-miss"; server owns boss HP).
+    //     This still covers manual cleaning of the public boss and any QTE the loop can't own.
     //
-    // Structurally identical to AutoFishingFarm / PetPlayFeature (QTE event → AuraMono invoke).
+    // Shared/env-hosted and player-hosted (body pollution) targets have no client kill lever —
+    // they are skipped (the QTE auto-pass still helps when cleaning them manually).
+    //
     // Fail-closed everywhere: if AuraMono / pinning / type resolution is not ready, no-op — never
     // crash. Gated entirely behind seaCleanQteEnabled; no runtime work (and no hook) when OFF.
     public partial class HeartopiaComplete
@@ -52,6 +58,43 @@ namespace HeartopiaMod
         private float seaCleanQteLastActedAt = -999f;
         private float seaCleanQteNextResolveAt = 0f;
 
+        // ---- Auto-clean loop (scan-driven ExecuteKill) ----
+        // ToolSystem tool type of the sea cleaner (EcsClient ToolType enum: Null=0, Axe=1,
+        // Sprinkler=2, Rod=3, BirdScanner=4, Net=5, Pad=6, SeaCleaner=7).
+        internal const int SeaCleanerToolTypeId = 7;
+        private const float SeaCleanAutoScanInterval = 0.5f;
+        private const float SeaCleanAutoEquipRetryInterval = 3f;
+
+        // User-tunable via tab sliders (persisted in the unified config). Radius stays under the
+        // game's own aim-select DetectMaxDistance (~20m) so every kill is plausibly reachable.
+        private const float SeaCleanAutoRadiusMin = 1f;
+        private const float SeaCleanAutoRadiusMax = 20f;
+        private const float SeaCleanAutoRadiusDefault = 7f;
+        private const float SeaCleanAutoKillDelayMin = 0f;
+        private const float SeaCleanAutoKillDelayMax = 1f;
+        private const float SeaCleanAutoKillDelayDefault = 0.05f;
+
+        private float seaCleanAutoRadius = SeaCleanAutoRadiusDefault;
+        private float seaCleanAutoKillDelaySeconds = SeaCleanAutoKillDelayDefault;
+
+        private float seaCleanAutoNextScanAt = 0f;
+        private float seaCleanAutoNextKillAt = 0f;
+        private float seaCleanAutoNextEquipAttemptAt = 0f;
+        private int seaCleanAutoKillCount = 0;
+        private string seaCleanAutoLastStatus = string.Empty;
+
+        private struct SeaCleanAutoCandidate
+        {
+            public int Index;
+            public uint NetId;
+            public float DistSqr;
+        }
+
+        // Reused across scan passes to avoid per-pass allocations.
+        private readonly List<SeaCleanAutoCandidate> seaCleanAutoCandidates = new List<SeaCleanAutoCandidate>();
+        private static readonly Comparison<SeaCleanAutoCandidate> SeaCleanAutoCandidateByDistance =
+            (a, b) => a.DistSqr.CompareTo(b.DistSqr);
+
         // Cached AuraMono class/method pointers (class/method IntPtrs may stay raw — image lifetime).
         private IntPtr seaCleanQteMonsterClass = IntPtr.Zero;
         private IntPtr seaCleanQteExecuteKillMethod = IntPtr.Zero;
@@ -60,6 +103,8 @@ namespace HeartopiaMod
         private IntPtr seaCleanQteGetIsPublicMethod = IntPtr.Zero;
         private IntPtr seaCleanQteGetIsCleanedMethod = IntPtr.Zero;
         private IntPtr seaCleanQteGetIsQteShieldMethod = IntPtr.Zero;
+        private IntPtr seaCleanQteGetIsHiddenMethod = IntPtr.Zero;
+        private IntPtr seaCleanQteGetIsPlayerHostedMethod = IntPtr.Zero;
         private IntPtr seaCleanQteProtocolClass = IntPtr.Zero;
         private IntPtr seaCleanQteReqStartPublicMethod = IntPtr.Zero;
 
@@ -102,8 +147,8 @@ namespace HeartopiaMod
         }
 
         // Called every frame from OnUpdate. Registers the event hooks the first time the feature is
-        // enabled (and never when it stays OFF), then relies on the shared event engine for install +
-        // drain. All action happens inside the event handlers, gated on seaCleanQteEnabled.
+        // enabled (and never when it stays OFF), then runs the throttled auto-clean scan loop. The
+        // QTE auto-pass stays event-driven; the loop is what actually finds + kills pollutants.
         private void ProcessSeaCleanQteOnUpdate()
         {
             if (!this.seaCleanQteEnabled)
@@ -112,6 +157,232 @@ namespace HeartopiaMod
             }
 
             this.EnsureSeaCleanQteEventHooks();
+            this.TickSeaCleanAutoClean();
+        }
+
+        // The auto-clean loop: find the nearest exclusive pollutant in range and ExecuteKill it.
+        // Everything is synchronous within one call (no yields, no cross-frame IntPtr holds); the
+        // component list is pinned by TryAuraMonoGetComponentObjects and each derived entity object
+        // is pinned across its reads (moving-SGen rule).
+        private void TickSeaCleanAutoClean()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.seaCleanAutoNextScanAt)
+            {
+                return;
+            }
+
+            this.seaCleanAutoNextScanAt = now + SeaCleanAutoScanInterval;
+
+            if (!this.EnsureSeaCleanQteAuraResolved(out string resolveStatus)
+                || this.seaCleanQteMonsterClass == IntPtr.Zero
+                || this.seaCleanQteExecuteKillMethod == IntPtr.Zero)
+            {
+                this.seaCleanAutoLastStatus = "Waiting for game types (AuraMono): " + resolveStatus;
+                return;
+            }
+
+            if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+            {
+                this.seaCleanAutoLastStatus = "Player position unavailable.";
+                return;
+            }
+
+            List<uint> compPins = new List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(this.seaCleanQteMonsterClass, out List<IntPtr> components, compPins)
+                    || components == null || components.Count == 0)
+                {
+                    this.seaCleanAutoLastStatus = "No pollutants around — swim into a sea-clean area.";
+                    return;
+                }
+
+                float radius = Mathf.Clamp(this.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
+                float radiusSqr = radius * radius;
+                this.seaCleanAutoCandidates.Clear();
+                int noLeverCount = 0;
+
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr compObj = components[i];
+                    if (compObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    if (this.SeaCleanQteInvokeBoolGetter(compObj, this.seaCleanQteGetIsCleanedMethod, out bool isCleaned) && isCleaned)
+                    {
+                        continue;
+                    }
+
+                    if (this.SeaCleanQteInvokeBoolGetter(compObj, this.seaCleanQteGetIsHiddenMethod, out bool isHidden) && isHidden)
+                    {
+                        continue;
+                    }
+
+                    // ExecuteKill during an active non-shield QTE IS the game's own success path
+                    // (OnQTESucceeded → ExecuteKill), so in-QTE targets stay candidates — this keeps
+                    // the loop working even if the event-hook layout guess is off. Shield QTEs are
+                    // left alone (BreakShield is their legit path, not a kill).
+                    if (this.SeaCleanQteInvokeBoolGetter(compObj, this.seaCleanQteGetIsInQteMethod, out bool isInQte) && isInQte
+                        && this.SeaCleanQteInvokeBoolGetter(compObj, this.seaCleanQteGetIsQteShieldMethod, out bool isShieldQte) && isShieldQte)
+                    {
+                        continue;
+                    }
+
+                    // ExecuteKill only works on exclusive pollutants: shared/env-hosted, the public
+                    // boss and player body pollution have server-owned state — no client lever.
+                    bool isShared = this.SeaCleanQteInvokeBoolGetter(compObj, this.seaCleanQteGetIsSharedMethod, out bool shared) && shared;
+                    bool isPublic = this.SeaCleanQteInvokeBoolGetter(compObj, this.seaCleanQteGetIsPublicMethod, out bool pub) && pub;
+                    bool isPlayerHosted = this.SeaCleanQteInvokeBoolGetter(compObj, this.seaCleanQteGetIsPlayerHostedMethod, out bool hosted) && hosted;
+                    if (isShared || isPublic || isPlayerHosted)
+                    {
+                        noLeverCount++;
+                        continue;
+                    }
+
+                    if (!this.TryGetMonoObjectMember(compObj, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        // Real network id only — netId==0 would be a local view entity and the
+                        // dying-Tick self-report would be meaningless.
+                        if (!this.TryGetMonoUInt32Member(entityObj, "netId", out uint netId) || netId == 0U)
+                        {
+                            continue;
+                        }
+
+                        if (!this.TryGetMonoVector3Member(entityObj, "position", out Vector3 pollutantPos))
+                        {
+                            continue;
+                        }
+
+                        float distSqr = (pollutantPos - playerPos).sqrMagnitude;
+                        if (distSqr > radiusSqr)
+                        {
+                            continue;
+                        }
+
+                        this.seaCleanAutoCandidates.Add(new SeaCleanAutoCandidate
+                        {
+                            Index = i,
+                            NetId = netId,
+                            DistSqr = distSqr
+                        });
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
+                }
+
+                if (this.seaCleanAutoCandidates.Count == 0)
+                {
+                    this.seaCleanAutoLastStatus = noLeverCount > 0
+                        ? "Only shared/public pollutants nearby — clean them manually, the QTE auto-passes."
+                        : "No cleanable pollutant within " + radius.ToString("F0") + "m.";
+                    return;
+                }
+
+                // Server plausibility: the legit client can never clean without the sea cleaner in
+                // hand, so hold the kill until it is equipped (auto-equips from empty hands).
+                if (!this.TrySeaCleanEnsureCleanerEquipped(now, out string toolStatus))
+                {
+                    this.seaCleanAutoLastStatus = toolStatus;
+                    return;
+                }
+
+                // Kill nearest-first, as many as the delay budget allows this pass: delay 0 sweeps
+                // everything in range at once; delay > 0 paces one kill per interval across passes.
+                this.seaCleanAutoCandidates.Sort(SeaCleanAutoCandidateByDistance);
+                float delay = Mathf.Clamp(this.seaCleanAutoKillDelaySeconds, SeaCleanAutoKillDelayMin, SeaCleanAutoKillDelayMax);
+                int killedThisPass = 0;
+                uint lastKilledNetId = 0U;
+
+                for (int c = 0; c < this.seaCleanAutoCandidates.Count; c++)
+                {
+                    if (now < this.seaCleanAutoNextKillAt)
+                    {
+                        break;
+                    }
+
+                    SeaCleanAutoCandidate candidate = this.seaCleanAutoCandidates[c];
+                    if (!this.TrySeaCleanExecuteKill(components[candidate.Index], candidate.NetId, "auto"))
+                    {
+                        continue;
+                    }
+
+                    this.seaCleanAutoNextKillAt = now + delay;
+                    killedThisPass++;
+                    lastKilledNetId = candidate.NetId;
+                    this.seaCleanAutoKillCount++;
+                }
+
+                if (killedThisPass > 1)
+                {
+                    this.seaCleanAutoLastStatus = "Cleaned " + killedThisPass + " pollutants (session total: " + this.seaCleanAutoKillCount + ").";
+                }
+                else if (killedThisPass == 1)
+                {
+                    this.seaCleanAutoLastStatus = "Cleaned pollutant #" + lastKilledNetId + " (session total: " + this.seaCleanAutoKillCount + ").";
+                }
+                // killedThisPass == 0 while paced: keep the previous status (usually the last kill).
+            }
+            finally
+            {
+                FreeAuraMonoPins(compPins);
+            }
+        }
+
+        // True only when the sea cleaner (toolId 7) is the current ToolSystem tool with durability
+        // left. Empty hands (GetCurrentTool()==null → the read helper fails) auto-equips it via the
+        // shared TryEquipHandTool path, throttled. A DIFFERENT equipped tool is never yanked.
+        private bool TrySeaCleanEnsureCleanerEquipped(float now, out string status)
+        {
+            if (this.TryGetCurrentToolDurability(out int toolId, out int durability, out _, out string toolStatus))
+            {
+                if (toolId == SeaCleanerToolTypeId)
+                {
+                    if (durability <= 0)
+                    {
+                        status = "Sea cleaner durability exhausted — repair it (Tool Restorer / workbench).";
+                        return false;
+                    }
+
+                    status = "ok";
+                    return true;
+                }
+
+                status = "Another tool is equipped — unequip it (or press the Equip Sea Cleaner hotkey).";
+                return false;
+            }
+
+            // No current ToolSystem tool (empty hands or a non-tool handhold). GetCurrentTool()
+            // returning null lands here — attempt the auto-equip, throttled.
+            if (now < this.seaCleanAutoNextEquipAttemptAt)
+            {
+                status = "Equipping sea cleaner…";
+                return false;
+            }
+
+            this.seaCleanAutoNextEquipAttemptAt = now + SeaCleanAutoEquipRetryInterval;
+            if (this.TryEquipHandTool(SeaCleanerToolTypeId, out string equipStatus))
+            {
+                status = "Equipping sea cleaner…";
+                this.SeaCleanQteLog("auto-equip sea cleaner sent: " + equipStatus + " (tool read: " + toolStatus + ")");
+            }
+            else
+            {
+                status = "Sea cleaner equip failed: " + equipStatus;
+                this.SeaCleanQteLog(status);
+            }
+
+            return false;
         }
 
         private void EnsureSeaCleanQteEventHooks()
@@ -458,6 +729,14 @@ namespace HeartopiaMod
                     {
                         this.seaCleanQteGetIsQteShieldMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_IsQTEShield", 0);
                     }
+                    if (this.seaCleanQteGetIsHiddenMethod == IntPtr.Zero)
+                    {
+                        this.seaCleanQteGetIsHiddenMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_IsHidden", 0);
+                    }
+                    if (this.seaCleanQteGetIsPlayerHostedMethod == IntPtr.Zero)
+                    {
+                        this.seaCleanQteGetIsPlayerHostedMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_IsPlayerHosted", 0);
+                    }
                 }
 
                 if (this.seaCleanQteProtocolClass == IntPtr.Zero)
@@ -517,36 +796,70 @@ namespace HeartopiaMod
             };
             bodyStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
 
-            GUI.Label(new Rect(left, y, 460f, 24f), this.L("Auto Sea Clean QTE"), headerStyle);
+            GUI.Label(new Rect(left, y, 460f, 24f), this.L("Auto Sea Clean"), headerStyle);
             y += 34f;
 
             bool prev = this.seaCleanQteEnabled;
-            this.seaCleanQteEnabled = this.DrawSwitchToggle(new Rect(left, y, 360f, 30f), this.seaCleanQteEnabled, "Auto Sea Clean QTE");
+            this.seaCleanQteEnabled = this.DrawSwitchToggle(new Rect(left, y, 360f, 30f), this.seaCleanQteEnabled, "Auto Sea Clean");
             if (this.seaCleanQteEnabled != prev)
             {
                 this.AddMenuNotification(
-                    $"Auto Sea Clean QTE {(this.seaCleanQteEnabled ? "Enabled" : "Disabled")}",
+                    $"Auto Sea Clean {(this.seaCleanQteEnabled ? "Enabled" : "Disabled")}",
                     this.seaCleanQteEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
             }
             y += 40f;
 
-            GUI.Label(new Rect(left, y, 500f, 60f),
-                this.L("Auto-passes the ocean cleanup pollutant QTE. Equip the sea cleaner and aim at a pollutant; the QTE is passed automatically (exclusive pollutants are cleaned instantly, the public boss never misses). Shield QTEs are left alone."),
+            GUI.Label(new Rect(left, y, 500f, 76f),
+                this.L("Fully automatic ocean cleanup: swim near pollutants — the sea cleaner is equipped automatically (only from empty hands) and solo pollutants in range are cleaned instantly, nearest first. QTEs are auto-passed too (the public boss never misses when you clean it manually). Shared/body pollution has no client lever and is skipped."),
                 bodyStyle);
-            y += 66f;
+            y += 82f;
+
+            GUI.Label(new Rect(left, y, 230f, 22f), this.LF("Clean radius: {0:F1}m", this.seaCleanAutoRadius), bodyStyle);
+            float prevRadius = this.seaCleanAutoRadius;
+            this.seaCleanAutoRadius = Mathf.Round(
+                this.DrawAccentSlider(new Rect(left + 240f, y + 2f, 200f, 20f), this.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax) * 2f) / 2f;
+            if (Mathf.Abs(this.seaCleanAutoRadius - prevRadius) > 0.0001f)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            y += 28f;
+
+            GUI.Label(new Rect(left, y, 230f, 22f), this.LF("Delay between cleans: {0:F2}s", this.seaCleanAutoKillDelaySeconds), bodyStyle);
+            float prevDelay = this.seaCleanAutoKillDelaySeconds;
+            this.seaCleanAutoKillDelaySeconds = Mathf.Round(
+                this.DrawAccentSlider(new Rect(left + 240f, y + 2f, 200f, 20f), this.seaCleanAutoKillDelaySeconds, SeaCleanAutoKillDelayMin, SeaCleanAutoKillDelayMax) * 20f) / 20f;
+            if (Mathf.Abs(this.seaCleanAutoKillDelaySeconds - prevDelay) > 0.0001f)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            y += 28f;
 
             KeyCode hotkey = this.seaCleanQteHotkey;
             GUI.Label(new Rect(left, y, 500f, 22f),
                 this.LF("Hotkey: {0} (rebind in Settings > Keybinds)", FormatKeybindLabel(hotkey)),
                 bodyStyle);
-            y += 30f;
+            y += 26f;
+
+            if (this.seaCleanQteEnabled)
+            {
+                GUI.Label(new Rect(left, y, 500f, 22f),
+                    this.LF("Cleaned this session: {0}", this.seaCleanAutoKillCount),
+                    bodyStyle);
+                y += 24f;
+
+                if (!string.IsNullOrEmpty(this.seaCleanAutoLastStatus))
+                {
+                    GUI.Label(new Rect(left, y, 500f, 40f), this.L("Status: ") + this.seaCleanAutoLastStatus, bodyStyle);
+                    y += 44f;
+                }
+            }
 
             return y + 20f;
         }
 
         private float CalculateSeaCleanQteTabHeight()
         {
-            return 220f;
+            return 380f;
         }
     }
 }

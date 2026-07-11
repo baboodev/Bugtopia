@@ -447,6 +447,9 @@ namespace HeartopiaMod
                 case "Mustard Greens":
                 case "Blueberry":
                 case "Raspberry":
+                case "Glasswort":
+                case "Sea Grape":
+                case "Wakame":
                 case "Stone":
                 case "Ore":
                 case "Tree":
@@ -497,6 +500,9 @@ namespace HeartopiaMod
             {
                 case "Blueberry": return "BB";
                 case "Raspberry": return "RB";
+                case "Glasswort": return "GW";
+                case "Sea Grape": return "SG";
+                case "Wakame": return "WK";
                 case "Stone": return "ST";
                 case "Ore": return "OR";
                 case "Rare Tree": return "RT";
@@ -529,6 +535,9 @@ namespace HeartopiaMod
             {
                 case "Blueberry": return new Color(0.42f, 0.72f, 1f);
                 case "Raspberry": return new Color(1f, 0.45f, 0.58f);
+                case "Glasswort": return new Color(0.5f, 1f, 0.75f);
+                case "Sea Grape": return new Color(0.65f, 0.85f, 1f);
+                case "Wakame": return new Color(0.45f, 0.9f, 0.55f);
                 case "Stone": return new Color(0.72f, 0.76f, 0.82f);
                 case "Ore": return new Color(0.95f, 0.72f, 0.44f);
                 case "Tree": return new Color(0.58f, 0.92f, 0.78f);
@@ -714,6 +723,149 @@ namespace HeartopiaMod
             GUI.Label(new Rect(rect.x + 50f * this.resourceVisualEspScale, rect.y + 22f * this.resourceVisualEspScale, rect.width - 56f * this.resourceVisualEspScale, 16f * this.resourceVisualEspScale), subLine, subStyle);
         }
 
+        // ---- ESP player-avatar texture (beacon) ------------------------------------------------
+        // The photo texture services live in the EMBEDDED-MONO domain (Il2CppInterop reflection can't see
+        // them — confirmed) AND UnityEngine.ImageConversion is IL2CPP-only (AuraMono EncodeToPNG resolved
+        // 0x0), so the Mono-texture→interop bridge is blocked both ways. Instead we go straight to the
+        // encrypted DISK cache (the same source the game's head-icon load reads) and decrypt it with the
+        // mod's existing Pictures-page decryptor:
+        //   LocalTextureCacheService caches the head-icon at {ScreenCaptureUtil.CACHE_PATH}/{Photo|Head}/
+        //   {objectId}_{w}_{h}.{jpg|png}, encrypted (EncryptUtil), where objectId = url with '/'→'+'.
+        // Read that file → TryInvokeGameDecryptBytes (game EncryptUtil.DecryptBytes, interop-reflection —
+        // resolves fine, it's the same one Pictures uses) → PNG/JPG bytes → interop Texture2D.LoadImage.
+        // No Mono texture object crosses the runtime boundary — only decrypted image bytes. Fail-soft → badge.
+        private readonly Dictionary<uint, Texture2D> espAvatarTextureByNetId = new Dictionary<uint, Texture2D>();
+        private readonly Dictionary<uint, float> espAvatarRetryAtByNetId = new Dictionary<uint, float>();
+        // Player avatars live in Limit/ (ImageEnum.limit) as {objectId}_300_300.jpg — confirmed live.
+        // Keep the others as fallbacks in case a build routes head-icons differently.
+        private static readonly string[] EspAvatarCacheSubdirs = { "Limit", "Head", "Photo", "NoBgPhoto" };
+
+        // Locate the encrypted head-icon file on disk, read + decrypt it to raw image bytes.
+        private bool TryReadPlayerAvatarPngBytes(string url, out byte[] png)
+        {
+            png = null;
+            if (string.IsNullOrEmpty(url))
+            {
+                return false;
+            }
+
+            string root = this.TryGetScreenCaptureRootPath();
+            if (string.IsNullOrEmpty(root))
+            {
+                return false;
+            }
+
+            string objectId = url.Replace('/', '+');    // LocalTextureCacheUtility does this before caching
+            string prefix = objectId + "_";             // file = {objectId}_{w}_{h}.{ext}
+
+            for (int s = 0; s < EspAvatarCacheSubdirs.Length; s++)
+            {
+                string dir = System.IO.Path.Combine(root, EspAvatarCacheSubdirs[s]);
+                if (!System.IO.Directory.Exists(dir))
+                {
+                    continue;
+                }
+
+                string[] files;
+                try
+                {
+                    files = System.IO.Directory.GetFiles(dir);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                for (int f = 0; f < files.Length; f++)
+                {
+                    string name = System.IO.Path.GetFileName(files[f]);
+                    if (name == null || !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        byte[] raw = System.IO.File.ReadAllBytes(files[f]);
+                        if (raw == null || raw.Length == 0)
+                        {
+                            continue;
+                        }
+                        if (this.LooksLikeImageBytes(raw))
+                        {
+                            png = raw; // already plaintext
+                            return true;
+                        }
+                        // Try the game's own EncryptUtil.DecryptBytes first, then the mod's AES-256-CBC
+                        // fallback (same two-step the Pictures decrypt page uses).
+                        if (this.TryInvokeGameDecryptBytes(raw, out byte[] dec) && dec != null && this.LooksLikeImageBytes(dec))
+                        {
+                            png = dec;
+                            return true;
+                        }
+                        if (this.TryDecryptGamePhotoBytes(raw, out byte[] aesDec) && aesDec != null && this.LooksLikeImageBytes(aesDec))
+                        {
+                            png = aesDec;
+                            return true;
+                        }
+                    }
+                    catch
+                    {
+                        // unreadable/locked — try the next candidate
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryGetPlayerAvatarTexture(uint netId, out Texture2D texture)
+        {
+            texture = null;
+            if (netId == 0u)
+            {
+                return false;
+            }
+            if (this.espAvatarTextureByNetId.TryGetValue(netId, out texture) && texture != null)
+            {
+                return true;
+            }
+            if (this.espAvatarRetryAtByNetId.TryGetValue(netId, out float retryAt) && Time.unscaledTime < retryAt)
+            {
+                return false;
+            }
+            if (this.mapAvatarUrlByNetId == null
+                || !this.mapAvatarUrlByNetId.TryGetValue(netId, out string url)
+                || string.IsNullOrEmpty(url))
+            {
+                this.espAvatarRetryAtByNetId[netId] = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            byte[] png = null;
+            try
+            {
+                if (this.TryReadPlayerAvatarPngBytes(url, out png) && png != null && png.Length > 0)
+                {
+                    Texture2D tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    if (tex.LoadImage(png))
+                    {
+                        this.espAvatarTextureByNetId[netId] = tex;
+                        this.espAvatarRetryAtByNetId.Remove(netId);
+                        texture = tex;
+                        return true;
+                    }
+                    UnityEngine.Object.Destroy(tex);
+                }
+            }
+            catch
+            {
+                // decrypt / LoadImage failure — fall through to the retry throttle, beacon keeps the badge
+            }
+
+            this.espAvatarRetryAtByNetId[netId] = Time.unscaledTime + 5f;
+            return false;
+        }
+
         private Texture2D GetResourceVisualEspBeaconIconTexture(ResourceVisualEspItem item)
         {
             if (item == null || item.Metadata == null)
@@ -725,6 +877,16 @@ namespace HeartopiaMod
             if (metadata.ResourceVisualEspIconTexture != null)
             {
                 return metadata.ResourceVisualEspIconTexture;
+            }
+
+            // Players: show the real avatar photo instead of the "PL" badge. Resolve the player behind
+            // this marker (position → netId) and load the head-icon texture the game already cached.
+            if (string.Equals(item.Label, "Player", StringComparison.Ordinal)
+                && this.TryMatchRemotePlayer(item.WorldPosition, out uint playerNetId)
+                && this.TryGetPlayerAvatarTexture(playerNetId, out Texture2D avatarTexture)
+                && avatarTexture != null)
+            {
+                return avatarTexture; // NOT cached in metadata: markers churn per-player, keep it netId-keyed
             }
 
             if (Time.unscaledTime < metadata.ResourceVisualEspNextIconResolveAt)

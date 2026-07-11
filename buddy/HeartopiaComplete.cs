@@ -69,6 +69,7 @@ namespace HeartopiaMod
         private KeyCode keyEquipSprinkler = KeyCode.None;
         private KeyCode keyEquipBirdScanner = KeyCode.None;
         private KeyCode keyEquipPad = KeyCode.None;
+        private KeyCode keyEquipSeaCleaner = KeyCode.None;
         private KeyCode keyPadConfirm = KeyCode.None;
         private KeyCode keyPadCancel = KeyCode.None;
         private KeyCode keyPadRotate = KeyCode.None;
@@ -998,7 +999,7 @@ namespace HeartopiaMod
                 {
                     this.seaCleanQteEnabled = !this.seaCleanQteEnabled;
                     this.SaveKeybinds(false);
-                    this.AddMenuNotification($"Auto Sea Clean QTE {(this.seaCleanQteEnabled ? "Enabled" : "Disabled")}", this.seaCleanQteEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                    this.AddMenuNotification($"Auto Sea Clean {(this.seaCleanQteEnabled ? "Enabled" : "Disabled")}", this.seaCleanQteEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
                 if (this.TryGetModHotkeyDown(this.keyAutoJoinFriend))
                 {
@@ -1089,6 +1090,13 @@ namespace HeartopiaMod
                     if (this.TryToggleEquipHandToolHotkey(6, out bool unequipped, out _))
                     {
                         this.AddMenuNotification(unequipped ? "Unequipping Pad" : "Equipping Pad", new Color(0.45f, 1f, 0.55f));
+                    }
+                }
+                if (this.TryGetModHotkeyDown(this.keyEquipSeaCleaner))
+                {
+                    if (this.TryToggleEquipHandToolHotkey(SeaCleanerToolTypeId, out bool unequipped, out _))
+                    {
+                        this.AddMenuNotification(unequipped ? "Unequipping Sea Cleaner" : "Equipping Sea Cleaner", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 this.ProcessPadBuildHotkeysOnUpdate();
@@ -5533,6 +5541,7 @@ namespace HeartopiaMod
         private bool radarMushroomsDropdownOpen = false;
         private bool radarBerriesDropdownOpen = false;
         private bool radarEventsDropdownOpen = false;
+        private bool radarUnderwaterDropdownOpen = false;
         private bool radarResourcesDropdownOpen = false;
         private bool radarTreesDropdownOpen = false;
         private bool radarMiscDropdownOpen = false;
@@ -5540,6 +5549,14 @@ namespace HeartopiaMod
         private bool showTallMustardRadar = false;
         private bool showBurdockRadar = false;
         private bool showMustardGreensRadar = false;
+
+        // Underwater gatherables (2026-07-09 SeaWorld update, Fruit table 40601-40603):
+        // Glasswort = p_gather_seaasparagus_00, Sea Grape = p_gather_seagrape_00,
+        // Wakame = p_dynamicbush_wakame_00. All render through the same BrgManager cycle-entities
+        // pipeline as mushrooms/herbs, so the forage scan covers them by mesh-name substrings.
+        private bool showGlasswortRadar = false;
+        private bool showSeaGrapeRadar = false;
+        private bool showWakameRadar = false;
 
         // Token: 0x0400002B RID: 43
         private bool showBlueberryRadar = false;

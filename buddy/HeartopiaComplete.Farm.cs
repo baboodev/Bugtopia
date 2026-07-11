@@ -2366,6 +2366,15 @@ namespace HeartopiaMod
                 return this.showMushroomRadar || this.showTruffleRadar;
             }
 
+            // Underwater gatherables are owned by the live ECS scan (ScanUnderwaterGatherablesAura),
+            // never by this BRG mesh path — explicitly ignore them here so a wakame mesh that happens
+            // to flow through the dynamicbush batch isn't mislabeled as a mushroom.
+            if (forageText.Contains("seaasparagus") || forageText.Contains("glasswort")
+                || forageText.Contains("seagrape") || forageText.Contains("wakame"))
+            {
+                return false;
+            }
+
             if (forageText.Contains("fiddlehead") || forageText.Contains("fiddle") || forageText.Contains("fern") || forageText.Contains("pterid") || forageText.Contains("bracken"))
             {
                 return this.showFiddleheadRadar;

@@ -92,6 +92,12 @@ namespace HeartopiaMod
             public int keyAutoSnow;
             public int keyAutoSand;
             public int keySeaCleanQte;
+            public int keyEquipSeaCleaner;
+            // 0/absent = "use default" (radius can never legitimately be 0).
+            public float seaCleanAutoRadius;
+            // -1 initializer = "absent in old config"; 0 is a VALID user choice (no delay), so the
+            // sentinel must be negative (XmlSerializer keeps field initializers for missing elements).
+            public float seaCleanAutoKillDelaySeconds = -1f;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

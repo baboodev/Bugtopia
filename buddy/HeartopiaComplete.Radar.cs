@@ -536,6 +536,12 @@ namespace HeartopiaMod
                     return "p_fruit_blueberry";
                 case "Raspberry":
                     return "p_fruit_raspberry";
+                case "Glasswort":
+                    return "p_gather_seaasparagus_00";
+                case "Sea Grape":
+                    return "p_gather_seagrape_00";
+                case "Wakame":
+                    return "p_dynamicbush_wakame_00";
                 case "Fiddlehead":
                     return "p_gather_bracken_00";
                 case "Tall Mustard":
@@ -1178,6 +1184,9 @@ namespace HeartopiaMod
                 this.showTallMustardRadar = true;
                 this.showBurdockRadar = true;
                 this.showMustardGreensRadar = true;
+                this.showGlasswortRadar = true;
+                this.showSeaGrapeRadar = true;
+                this.showWakameRadar = true;
                 this.showBlueberryRadar = true;
                 this.showRaspberryRadar = true;
                 this.showStoneRadar = true;
@@ -1207,6 +1216,9 @@ namespace HeartopiaMod
                 this.showTallMustardRadar = false;
                 this.showBurdockRadar = false;
                 this.showMustardGreensRadar = false;
+                this.showGlasswortRadar = false;
+                this.showSeaGrapeRadar = false;
+                this.showWakameRadar = false;
                 this.showBlueberryRadar = false;
                 this.showRaspberryRadar = false;
                 this.showStoneRadar = false;
@@ -1229,6 +1241,7 @@ namespace HeartopiaMod
             num = this.DrawRadarMushroomDropdown(num);
             num = this.DrawRadarBerriesDropdown(num);
             num = this.DrawRadarEventsDropdown(num);
+            num = this.DrawRadarUnderwaterDropdown(num);
             num = this.DrawRadarResourcesDropdown(num);
             num = this.DrawRadarTreesDropdown(num);
             num = this.DrawRadarMiscDropdown(num);
@@ -1486,6 +1499,42 @@ namespace HeartopiaMod
             y += 30;
             v = this.DrawRadarDropdownOption(y, "Mustard Greens", this.showMustardGreensRadar);
             if (v != this.showMustardGreensRadar) { this.showMustardGreensRadar = v; changed = true; }
+            y += 30;
+
+            if (changed)
+            {
+                this.CheckRadarAutoToggle();
+                if (this.isRadarActive)
+                {
+                    this.RunRadar();
+                }
+            }
+
+            return y + 8;
+        }
+
+        private int DrawRadarUnderwaterDropdown(int y)
+        {
+            List<string> selected = new List<string>();
+            if (this.showGlasswortRadar) selected.Add("Glasswort");
+            if (this.showSeaGrapeRadar) selected.Add("Sea Grape");
+            if (this.showWakameRadar) selected.Add("Wakame");
+            string summary = this.GetRadarSelectionSummary(selected);
+            y = this.DrawRadarDropdownHeader(y, "Underwater", summary, ref this.radarUnderwaterDropdownOpen);
+            if (!this.radarUnderwaterDropdownOpen)
+            {
+                return y + 8;
+            }
+
+            bool changed = false;
+            bool v = this.DrawRadarDropdownOption(y, "Glasswort", this.showGlasswortRadar);
+            if (v != this.showGlasswortRadar) { this.showGlasswortRadar = v; changed = true; }
+            y += 30;
+            v = this.DrawRadarDropdownOption(y, "Sea Grape", this.showSeaGrapeRadar);
+            if (v != this.showSeaGrapeRadar) { this.showSeaGrapeRadar = v; changed = true; }
+            y += 30;
+            v = this.DrawRadarDropdownOption(y, "Wakame", this.showWakameRadar);
+            if (v != this.showWakameRadar) { this.showWakameRadar = v; changed = true; }
             y += 30;
 
             if (changed)
@@ -2515,6 +2564,7 @@ namespace HeartopiaMod
         private bool AnyRadarLootToggleEnabled()
         {
             return this.IsAnyMushroomRadarEnabled() || this.showFiddleheadRadar || this.showTallMustardRadar || this.showBurdockRadar || this.showMustardGreensRadar
+                || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar
                 || this.showBlueberryRadar || this.showRaspberryRadar || this.showStoneRadar || this.showOreRadar
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
                 || this.showBubbleRadar || this.showBirdRadar || this.showInsectRadar || this.showFishShadowRadar || this.showMeteorRadar
@@ -3050,7 +3100,8 @@ namespace HeartopiaMod
             }
 
             bool flag34 = object2 != null;
-            if (this.IsAnyMushroomRadarEnabled() || this.showFiddleheadRadar || this.showTallMustardRadar || this.showBurdockRadar || this.showMustardGreensRadar)
+            if (this.IsAnyMushroomRadarEnabled() || this.showFiddleheadRadar || this.showTallMustardRadar || this.showBurdockRadar || this.showMustardGreensRadar
+                || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar)
             {
                 if (flag34)
                 {
@@ -3097,6 +3148,10 @@ namespace HeartopiaMod
                                     }));
                                     string meshName = this.GetMeshName(object7, bindingFlags);
                                     string forageText = meshName.ToLower();
+                                    // NOTE: the underwater gatherables (Glasswort/Sea Grape/Wakame) are NOT
+                                    // found here — GetMeshName returns the Unity MESH asset name, not the
+                                    // prefab name, so a prefab-name substring never matches. They are handled
+                                    // by ScanUnderwaterGatherablesAura (live ECS scan, called below) instead.
                                     bool flag31 = forageText.Contains("dynamicbush");
                                     if (flag31)
                                     {
@@ -3137,6 +3192,112 @@ namespace HeartopiaMod
                         }
                     }
                 }
+            }
+
+            // Underwater gatherables (Glasswort/Sea Grape/Wakame) — see ScanUnderwaterGatherables.
+            this.ScanUnderwaterGatherables(position, material, material2, radarDistanceLimit);
+        }
+
+        // Radar markers for the underwater gatherables. They are "fruit"-family collectable produce
+        // points (like berries): the ENTITY staticId is a map-resource point id (e.g. 388), NOT the
+        // fruit item id — the item id is what the point PRODUCES. So we DON'T decode the entity staticId
+        // (v2's mistake). Instead we reuse the proven, shared MapSpots collectable snapshot
+        // (RefreshCollectableScan → mapResEntities, one CollectableObjectComponent scan, shared-throttled
+        // so no extra cost / no second component sweep) and resolve each entry's produceId → item id via
+        // the same TableData.GetMapResourceProduce path the map-spot icons use, matching 40601/40602/40603.
+        // No own component scan here (v2 swept 4 classes incl. DynamicBush whose entities NRE on
+        // get_position ~28×/s — that storm is gone).
+        private const int UnderwaterGlasswortItemId = 40601;   // p_gather_seaasparagus_00
+        private const int UnderwaterSeaGrapeItemId = 40602;    // p_gather_seagrape_00
+        private const int UnderwaterWakameItemId = 40603;      // p_dynamicbush_wakame_00
+        // Diagnostic: logs each in-range collectable's produceId/staticId/resolved item id under
+        // [UnderwaterRadar]. Identity CONFIRMED live 2026-07-11 (produceId 701/702/703 → item
+        // 40601/40602/40603, "marked 11"), so it's off now.
+        internal bool MasterLogUnderwaterRadar = false;
+
+        private void ScanUnderwaterGatherables(Vector3 origin, Material line, Material fill, float maxRange)
+        {
+            if (!this.showGlasswortRadar && !this.showSeaGrapeRadar && !this.showWakameRadar)
+            {
+                return;
+            }
+
+            if (line == null || fill == null)
+            {
+                return;
+            }
+
+            // Populate/refresh the shared collectable snapshot (shared throttle with map-spots + the
+            // cooldown sync — whoever asks first runs the single CollectableObjectComponent scan).
+            this.RefreshCollectableScan();
+            if (this.mapResEntities == null || this.mapResEntities.Count == 0)
+            {
+                return;
+            }
+
+            float maxSqr = maxRange * maxRange;
+            int found = 0;
+            int diagInRange = 0;
+
+            for (int i = 0; i < this.mapResEntities.Count; i++)
+            {
+                MapResEntity entry = this.mapResEntities[i];
+                if ((entry.Position - origin).sqrMagnitude > maxSqr)
+                {
+                    continue;
+                }
+
+                diagInRange++;
+
+                // Resolve the produced item id: produceId → drop item (berries: 103→40502). Fall back to
+                // the entity staticId in case a plant is modeled with the item id directly.
+                int itemId = 0;
+                if (entry.ProduceId > 0)
+                {
+                    this.TryGetProduceItemId(entry.ProduceId, out itemId);
+                }
+                if (itemId <= 0)
+                {
+                    itemId = entry.StaticId;
+                }
+
+                string meshName = null;
+                if (itemId == UnderwaterGlasswortItemId && this.showGlasswortRadar)
+                {
+                    meshName = "glasswort";
+                }
+                else if (itemId == UnderwaterSeaGrapeItemId && this.showSeaGrapeRadar)
+                {
+                    meshName = "seagrape";
+                }
+                else if (itemId == UnderwaterWakameItemId && this.showWakameRadar)
+                {
+                    meshName = "wakame";
+                }
+
+                // Diagnostic, narrowed to the fruit/bush family (40100-40999: apples, berries AND the
+                // underwater plants 40601-603) so the log reveals the underwater ids without flooding
+                // one line per stone/ore/tree every scan.
+                if (this.MasterLogUnderwaterRadar && (meshName != null || (itemId >= 40100 && itemId <= 40999)))
+                {
+                    ModLogger.Msg("[UnderwaterRadar] collectable produceId=" + entry.ProduceId
+                        + " staticId=" + entry.StaticId + " itemId=" + itemId
+                        + (meshName != null ? " -> " + meshName : string.Empty));
+                }
+
+                if (meshName == null)
+                {
+                    continue;
+                }
+
+                this.CreateMarker(entry.Position, meshName, line, fill, null);
+                found++;
+            }
+
+            if (this.MasterLogUnderwaterRadar)
+            {
+                ModLogger.Msg("[UnderwaterRadar] snapshot " + this.mapResEntities.Count + " collectables, "
+                    + diagInRange + " in range, marked " + found + ".");
             }
         }
 
@@ -3364,6 +3525,27 @@ namespace HeartopiaMod
                                                             icon = "[TM]";
                                                             endColor = new Color(0.7f, 1f, 0.5f);
                                                             bgColor = new Color(0.2f, 0.45f, 0.12f, 0.85f);
+                                                        }
+                                                        else if (text.Contains("seaasparagus") || text.Contains("glasswort"))
+                                                        {
+                                                            text2 = "Glasswort";
+                                                            icon = "[Gw]";
+                                                            endColor = new Color(0.5f, 1f, 0.75f); // seafoam green
+                                                            bgColor = new Color(0.1f, 0.4f, 0.28f, 0.85f);
+                                                        }
+                                                        else if (text.Contains("seagrape"))
+                                                        {
+                                                            text2 = "Sea Grape";
+                                                            icon = "[Sg]";
+                                                            endColor = new Color(0.65f, 0.85f, 1f); // light aqua
+                                                            bgColor = new Color(0.12f, 0.3f, 0.5f, 0.85f);
+                                                        }
+                                                        else if (text.Contains("wakame"))
+                                                        {
+                                                            text2 = "Wakame";
+                                                            icon = "[Wk]";
+                                                            endColor = new Color(0.45f, 0.9f, 0.55f); // kelp green
+                                                            bgColor = new Color(0.1f, 0.38f, 0.2f, 0.85f);
                                                         }
                                                     }
                                                 }

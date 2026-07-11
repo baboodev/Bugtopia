@@ -138,6 +138,7 @@ namespace HeartopiaMod
         private readonly List<IntPtr> mapNameGetProfileMethods = new List<IntPtr>(2); // both 1-arg overloads
         private int mapNameProfileNameOffset = -1;   // PlayerProfile.Name raw offset (value-type buffer)
         private int mapNameProfileIdOffset = -1;     // PlayerProfile.Id (encoded shortId string) raw offset
+        private int mapNameProfileAvatarUrlOffset = -1; // PlayerProfile.AvatarImageUrl raw offset (ESP avatar)
         private IntPtr mapNameDecodeShortIdMethod = IntPtr.Zero; // ShortIdUtil.DecodeShortId(string)->long
         private IntPtr mapNameGetPlayerNameMethod = IntPtr.Zero; // PlayerServiceSystem.GetPlayerName(long,long)
         private bool mapNameMethodsTried;
@@ -148,6 +149,10 @@ namespace HeartopiaMod
         private readonly Dictionary<long, IntPtr> mapNameByShortIdNext = new Dictionary<long, IntPtr>();
         private readonly List<uint> mapNamePins = new List<uint>();      // pins backing the live map
         private readonly List<uint> mapNamePinsNext = new List<uint>();
+        // netId -> avatar image url (managed string copies, no pinning). Built in the same player scan
+        // that reads names; consumed by the ESP-beacon player-avatar resolver.
+        private Dictionary<uint, string> mapAvatarUrlByNetId = new Dictionary<uint, string>();
+        private readonly Dictionary<uint, string> mapAvatarUrlByNetIdNext = new Dictionary<uint, string>();
         private delegate IntPtr GetPlayerNameDelegate(IntPtr self, long shortId, long title);
         private static GetPlayerNameDelegate getPlayerNameHook;          // anti-GC
         private static GetPlayerNameDelegate getPlayerNameTrampoline;    // original
@@ -789,13 +794,28 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.mapTrackDiagSyncs < 5 || addOk > 0 || removed > 0 || removeFail > 0 || addFail > 0)
+            // Count Player-type candidates for the avatar-path diagnostic (how many player pointers the
+            // radar saw, vs how many got force-friended for the non-friend avatar).
+            int playerCandidates = 0;
+            for (int pc = 0; pc < this.mapTrackCandidates.Count; pc++)
+            {
+                if (this.mapTrackCandidates[pc].TrackType == MapTrackTypePlayer)
+                {
+                    playerCandidates++;
+                }
+            }
+
+            if (this.mapTrackDiagSyncs < 5 || addOk > 0 || removed > 0 || removeFail > 0 || addFail > 0 || playerCandidates > 0)
             {
                 this.mapTrackDiagSyncs++;
                 ModLogger.Msg("[MapSpots] track sync: candidates=" + this.mapTrackCandidates.Count
                     + " desired=" + this.mapTrackDesired.Count + " injected=" + this.mapTrackInjected.Count
                     + " collectables=" + this.mapResEntities.Count + " matched=" + matched
-                    + " addOk=" + addOk + " addFail=" + addFail + " removed=" + removed + " removeFail=" + removeFail);
+                    + " addOk=" + addOk + " addFail=" + addFail + " removed=" + removed + " removeFail=" + removeFail
+                    // Avatar-path diagnostic: avatarsAll=toggle, playerCand=Player spots seen,
+                    // forceFriend=players matched to a real netId (the non-friend avatar set).
+                    + " | avatarsAll=" + this.radarPlayerAvatarsAll + " playerCand=" + playerCandidates
+                    + " forceFriend=" + this.mapAvatarWorldNetIdsNext.Count);
             }
 
             // Publish the world-pointer force-friend set for the FriendClientService detour (swap in one
@@ -1029,7 +1049,7 @@ namespace HeartopiaMod
                         // decoded shortId. Pin the string so the GetPlayerName detour can return it safely
                         // until the next scan rebuilds the map.
                         if (friendInstance != IntPtr.Zero
-                            && this.TryReadPlayerName(friendInstance, netId, out long shortId, out IntPtr nameStr, out uint namePin)
+                            && this.TryReadPlayerName(friendInstance, netId, out long shortId, out IntPtr nameStr, out uint namePin, out string avatarUrl)
                             && nameStr != IntPtr.Zero)
                         {
                             if (this.mapNameByShortIdNext.ContainsKey(shortId))
@@ -1040,6 +1060,11 @@ namespace HeartopiaMod
                             {
                                 this.mapNamePinsNext.Add(namePin);
                                 this.mapNameByShortIdNext[shortId] = nameStr;
+                            }
+
+                            if (!string.IsNullOrEmpty(avatarUrl))
+                            {
+                                this.mapAvatarUrlByNetIdNext[netId] = avatarUrl;
                             }
                         }
                     }
@@ -1061,12 +1086,17 @@ namespace HeartopiaMod
             this.mapNamePins.AddRange(this.mapNamePinsNext);
             this.mapNamePinsNext.Clear();
 
+            // Publish the avatar-url map (plain managed strings — no pins).
+            this.mapAvatarUrlByNetId = new Dictionary<uint, string>(this.mapAvatarUrlByNetIdNext);
+            this.mapAvatarUrlByNetIdNext.Clear();
+
             if (!this.mapPlayerDiagLogged && this.mapPlayerEntities.Count > 0)
             {
                 this.mapPlayerDiagLogged = true;
                 ModLogger.Msg("[MapSpots] player scan: remotePlayers=" + this.mapPlayerEntities.Count
                     + " named=" + mapNameByShortId.Count + " sample netId=" + this.mapPlayerEntities[0].NetId);
             }
+
         }
 
         // Resolve FriendSystem class + GetUserProfile(1-arg) overloads + PlayerProfile.Name offset (once),
@@ -1110,6 +1140,7 @@ namespace HeartopiaMod
                     {
                         this.TryGetTrackFieldRawOffset(profCls, "Name", out this.mapNameProfileNameOffset);
                         this.TryGetTrackFieldRawOffset(profCls, "Id", out this.mapNameProfileIdOffset);
+                        this.TryGetTrackFieldRawOffset(profCls, "AvatarImageUrl", out this.mapNameProfileAvatarUrlOffset);
                         // Title._titleString within the PlayerProfile buffer = Title field offset (embedded
                         // value type) + _titleString offset within PlayerTitle.
                         IntPtr titleCls = this.FindAuraMonoClassByFullName("XDTGameSystem.PlayerService.PlayerTitle");
@@ -1156,11 +1187,12 @@ namespace HeartopiaMod
         // Invoke FriendSystem.GetUserProfile(netId) -> boxed PlayerProfile -> read Name MonoString + Id
         // (encoded shortId), decode Id to the raw shortId. Tries both 1-arg overloads (uint netId vs long
         // shortId); the netId overload returns a populated profile -> keep whichever yields a name.
-        private unsafe bool TryReadPlayerName(IntPtr friendInstance, uint netId, out long shortId, out IntPtr nameStr, out uint namePin)
+        private unsafe bool TryReadPlayerName(IntPtr friendInstance, uint netId, out long shortId, out IntPtr nameStr, out uint namePin, out string avatarUrl)
         {
             shortId = 0L;
             nameStr = IntPtr.Zero;
             namePin = 0u;
+            avatarUrl = null;
             uint arg = netId;
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&arg);
@@ -1200,6 +1232,21 @@ namespace HeartopiaMod
                 {
                     nameStr = candidate;
                     namePin = pin;
+                    // Also copy the avatar image url out of the SAME profile buffer (managed string copy →
+                    // no pin needed past this scope). Powers the ESP-beacon player-avatar icon.
+                    if (this.mapNameProfileAvatarUrlOffset >= 0)
+                    {
+                        IntPtr avatarStr = Marshal.ReadIntPtr(raw, this.mapNameProfileAvatarUrlOffset);
+                        if (avatarStr != IntPtr.Zero)
+                        {
+                            uint apin = AuraMonoPinNew(avatarStr);
+                            if (this.TryReadMonoString(avatarStr, out string au) && !string.IsNullOrEmpty(au))
+                            {
+                                avatarUrl = au;
+                            }
+                            AuraMonoPinFree(apin);
+                        }
+                    }
                     if (i != 0) // move the working overload to the front so we stop probing the wrong one
                     {
                         IntPtr good = this.mapNameGetProfileMethods[i];
@@ -1995,6 +2042,7 @@ namespace HeartopiaMod
         private static uint mapAvatarSelfNetId; // exclude self (vanilla getters do too)
         private const int SpotEnumPlayer = 3;
 
+
         // "Player Avatars (all)" for the IN-WORLD pointer: the native MapTrackWidget shows the avatar only
         // when TryGetFriendByNetId(cell.NetID) is true (twice, inline, unhookable). A trampoline detour on
         // FriendClientService.TryGetFriendByNetId forces true for the specific player netIds we inject a
@@ -2027,6 +2075,17 @@ namespace HeartopiaMod
         private static GetAtlasSpriteIdDelegate getAtlasSpriteIdHook;        // anti-GC
         private static GetAtlasSpriteIdDelegate getAtlasSpriteIdTrampoline;  // original
         private static MonoMod.RuntimeDetour.NativeDetour getAtlasSpriteIdDetour;
+        // SECOND friend-gate anchor (2026-07-11): MapTrackWidget.SetData(MapTrackHudItem) re-checks
+        // FriendProtocolManager.TryGetFriendByNetId(item.targetNetId) ITSELF to pick the avatar branch
+        // (headIcon_widget.SetIcon(iconId.SpriteName)) vs the placeholder icon. GetAtlasSpriteId already
+        // put the avatar URL into iconId, but this widget's own friend check runs OUTSIDE that bracket ->
+        // real "not a friend" -> placeholder (the white-circle bug). Commit 06dd9c0 dropped this bracket
+        // assuming GetAtlasSpriteId was a superset; the live "flag OFF" diagnostic proved it wasn't.
+        // Re-bracket SetData so force-friend covers its check too. void instance, 1 ref-type arg.
+        private delegate void MapTrackSetDataDelegate(IntPtr self, IntPtr arg);
+        private static MapTrackSetDataDelegate mapTrackSetDataHook;        // anti-GC
+        private static MapTrackSetDataDelegate mapTrackSetDataTrampoline;  // original
+        private static MonoMod.RuntimeDetour.NativeDetour mapTrackSetDataDetour;
         // netIds we currently inject a world Player track for. Read by the static hook -> a plain field the
         // sync writes wholesale each pass (single-threaded UI thread; the detour also fires on it).
         private static HashSet<uint> mapAvatarWorldNetIds = new HashSet<uint>();
@@ -2637,6 +2696,10 @@ namespace HeartopiaMod
                     {
                         getAtlasSpriteIdDetour.Apply();
                     }
+                    if (mapTrackSetDataDetour != null && !mapTrackSetDataDetour.IsApplied)
+                    {
+                        mapTrackSetDataDetour.Apply();
+                    }
                     return;
                 }
                 if (this.mapTrackSetDataPatchTried)
@@ -2681,6 +2744,42 @@ namespace HeartopiaMod
                     throw;
                 }
                 getAtlasSpriteIdDetour = ad;
+
+                // Second anchor: bracket MapTrackWidget.SetData(MapTrackHudItem) so its OWN in-line
+                // FriendProtocolManager.TryGetFriendByNetId check (which chooses avatar vs placeholder) is
+                // force-friended for our netIds too. Non-fatal if it can't resolve — GetAtlasSpriteId still
+                // sets the URL, and the diagnostic will show it stayed on the placeholder path.
+                IntPtr widgetCls = this.FindAuraMonoClassByFullName("XDTGame.UI.Widget.MapTrackWidget");
+                if (widgetCls == IntPtr.Zero)
+                {
+                    widgetCls = this.FindAuraMonoClassInAllLoadedImages("MapTrackWidget", "XDTGame.UI.Widget");
+                }
+                IntPtr widgetSetData = widgetCls != IntPtr.Zero
+                    ? this.ResolveBuildingMonoNative(widgetCls, "SetData", 1) : IntPtr.Zero;
+                if (widgetSetData != IntPtr.Zero)
+                {
+                    mapTrackSetDataHook = MapTrackSetDataNative;
+                    MonoMod.RuntimeDetour.NativeDetour wd = new MonoMod.RuntimeDetour.NativeDetour(widgetSetData, mapTrackSetDataHook);
+                    try
+                    {
+                        mapTrackSetDataTrampoline = wd.GenerateTrampoline<MapTrackSetDataDelegate>();
+                        mapTrackSetDataDetour = wd;
+                        ModLogger.Msg("[MapSpots] avatar patch: MapTrackWidget.SetData bracket installed (second friend-gate anchor)");
+                    }
+                    catch (Exception exWidget)
+                    {
+                        try { wd.Undo(); } catch { }
+                        mapTrackSetDataTrampoline = null;
+                        mapTrackSetDataDetour = null;
+                        ModLogger.Msg("[MapSpots] avatar patch: MapTrackWidget.SetData bracket failed: " + exWidget.Message);
+                    }
+                }
+                else
+                {
+                    ModLogger.Msg("[MapSpots] avatar patch: MapTrackWidget.SetData NOT resolved (widgetCls="
+                        + (widgetCls != IntPtr.Zero) + ") — GetAtlasSpriteId-only");
+                }
+
                 this.mapTrackSetDataPatchTried = true;
                 ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId detour installed (scoped world-pointer avatars)");
             }
@@ -2688,6 +2787,26 @@ namespace HeartopiaMod
             {
                 this.mapTrackSetDataPatchTried = true;
                 ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId detour failed: " + ex.Message);
+            }
+        }
+
+        // Bracket body for MapTrackWidget.SetData: force-friend for the duration so the widget's own
+        // Player friend check takes the avatar branch for our netIds. void instance, 1 ref-type arg.
+        // Allocation-free; save/restore the flag for nesting safety (GetAtlasSpriteId may nest under it).
+        private static void MapTrackSetDataNative(IntPtr self, IntPtr arg)
+        {
+            bool prev = mapTrackWidgetRendering;
+            mapTrackWidgetRendering = true;
+            try
+            {
+                if (mapTrackSetDataTrampoline != null)
+                {
+                    mapTrackSetDataTrampoline(self, arg);
+                }
+            }
+            finally
+            {
+                mapTrackWidgetRendering = prev;
             }
         }
 
@@ -2716,6 +2835,10 @@ namespace HeartopiaMod
                 if (getAtlasSpriteIdDetour != null && getAtlasSpriteIdDetour.IsApplied)
                 {
                     getAtlasSpriteIdDetour.Undo();
+                }
+                if (mapTrackSetDataDetour != null && mapTrackSetDataDetour.IsApplied)
+                {
+                    mapTrackSetDataDetour.Undo();
                 }
             }
             catch (Exception ex)
@@ -2830,10 +2953,15 @@ namespace HeartopiaMod
             // Only force TRUE while a bracketed pointer render path is on the stack (mapTrackWidgetRendering) —
             // that confines the override to the in-world pointer's avatar rendering. Every other caller
             // (dialogs, panels, party, gifts) runs with the flag clear and gets the real (correct) result.
-            if (mapTrackWidgetRendering && avatarForceFriendActive && netId != 0u && netId != mapAvatarSelfNetId
+            if (avatarForceFriendActive && netId != 0u && netId != mapAvatarSelfNetId
                 && mapAvatarWorldNetIds.Contains(netId))
             {
-                return 1;
+                // Force TRUE only while a bracketed pointer render path (GetAtlasSpriteId or
+                // MapTrackWidget.SetData) is on the stack — confines the override to the world pointer.
+                if (mapTrackWidgetRendering)
+                {
+                    return 1;
+                }
             }
             return 0;
         }

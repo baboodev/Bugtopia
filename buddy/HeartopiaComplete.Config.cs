@@ -135,6 +135,9 @@ namespace HeartopiaMod
             data.keyAutoSnow = (int)this.autoSnowHotkey;
             data.keyAutoSand = (int)this.autoSandHotkey;
             data.keySeaCleanQte = (int)this.seaCleanQteHotkey;
+            data.keyEquipSeaCleaner = (int)this.keyEquipSeaCleaner;
+            data.seaCleanAutoRadius = this.seaCleanAutoRadius;
+            data.seaCleanAutoKillDelaySeconds = this.seaCleanAutoKillDelaySeconds;
             data.keyGameSpeed1x = (int)this.keyGameSpeed1x;
             data.keyGameSpeed2x = (int)this.keyGameSpeed2x;
             data.keyGameSpeed5x = (int)this.keyGameSpeed5x;
@@ -306,6 +309,13 @@ namespace HeartopiaMod
             this.autoSnowHotkey = (KeyCode)data.keyAutoSnow;
             this.autoSandHotkey = (KeyCode)data.keyAutoSand;
             this.seaCleanQteHotkey = (KeyCode)data.keySeaCleanQte;
+            this.keyEquipSeaCleaner = (KeyCode)data.keyEquipSeaCleaner;
+            this.seaCleanAutoRadius = data.seaCleanAutoRadius <= 0f
+                ? SeaCleanAutoRadiusDefault
+                : Mathf.Clamp(data.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
+            this.seaCleanAutoKillDelaySeconds = data.seaCleanAutoKillDelaySeconds < 0f
+                ? SeaCleanAutoKillDelayDefault
+                : Mathf.Clamp(data.seaCleanAutoKillDelaySeconds, SeaCleanAutoKillDelayMin, SeaCleanAutoKillDelayMax);
             this.keyGameSpeed1x = (KeyCode)data.keyGameSpeed1x;
             this.keyGameSpeed2x = (KeyCode)data.keyGameSpeed2x;
             this.keyGameSpeed5x = (KeyCode)data.keyGameSpeed5x;
@@ -951,7 +961,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Bypass Overlap", ref this.keyBypassOverlap);
             num += 14;
 
-            this.BeginKeybindSection(ref num, left, contentWidth, "SPEED & TOOLS", 15, subHeaderStyle, accent, panelFill, panelLine);
+            this.BeginKeybindSection(ref num, left, contentWidth, "SPEED & TOOLS", 16, subHeaderStyle, accent, panelFill, panelLine);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Game Speed 1x", ref this.keyGameSpeed1x);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Game Speed 2x", ref this.keyGameSpeed2x);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Game Speed 5x", ref this.keyGameSpeed5x);
@@ -962,6 +972,7 @@ namespace HeartopiaMod
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Equip Sprinkler", ref this.keyEquipSprinkler);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Equip Bird Scanner", ref this.keyEquipBirdScanner);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Equip Pad", ref this.keyEquipPad);
+            this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Equip Sea Cleaner", ref this.keyEquipSeaCleaner);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Confirm", ref this.keyPadConfirm);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Cancel", ref this.keyPadCancel);
             this.DrawKeybindRowInPanel(ref num, left, contentWidth, "Pad Rotate", ref this.keyPadRotate);
@@ -996,6 +1007,7 @@ namespace HeartopiaMod
                 this.autoSnowHotkey = KeyCode.None;
                 this.autoSandHotkey = KeyCode.None;
                 this.seaCleanQteHotkey = KeyCode.None;
+                this.keyEquipSeaCleaner = KeyCode.None;
                 this.keyBypassOverlap = KeyCode.None;
                 this.keyBirdVacuum = KeyCode.None;
                 this.keyGameSpeed1x = KeyCode.None;
@@ -1444,6 +1456,7 @@ namespace HeartopiaMod
                 case "Auto Snow Sculpture": this.autoSnowHotkey = newKey; break;
                 case "Auto Sand Sculpture": this.autoSandHotkey = newKey; break;
                 case "Auto Sea Clean QTE": this.seaCleanQteHotkey = newKey; break;
+                case "Equip Sea Cleaner": this.keyEquipSeaCleaner = newKey; break;
                 case "Noclip": this.keyNoclip = newKey; break;
                 case "Camera Toggle": this.keyCameraToggle = newKey; break;
                 case "Auto Ice Skating": this.keyAutoIceSkating = newKey; break;
