@@ -101,6 +101,11 @@ namespace HeartopiaMod
             // Aura Farm: auto-teleport to a cleansing coral area while the Corrupted debuff (610)
             // is active and hold until it clears. Default true; old configs keep the initializer.
             public bool autoCleanseCorruptedEnabled = true;
+            // Custom Swim Sprint (underwater dash SwimSprintConfig override). Duration 0/absent =
+            // "use default 0.5s"; slider max (30) = Infinite. Cooldown 0 = instant re-dash.
+            public bool swimSprintTweakEnabled;
+            public float swimSprintDurationSeconds;
+            public float swimSprintCooldownSeconds;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

@@ -139,6 +139,9 @@ namespace HeartopiaMod
             data.seaCleanAutoRadius = this.seaCleanAutoRadius;
             data.seaCleanCleanNoDelay = this.seaCleanCleanNoDelay;
             data.autoCleanseCorruptedEnabled = this.autoCleanseCorruptedEnabled;
+            data.swimSprintTweakEnabled = this.swimSprintTweakEnabled;
+            data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
+            data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
             data.keyGameSpeed1x = (int)this.keyGameSpeed1x;
             data.keyGameSpeed2x = (int)this.keyGameSpeed2x;
             data.keyGameSpeed5x = (int)this.keyGameSpeed5x;
@@ -317,6 +320,11 @@ namespace HeartopiaMod
                 : Mathf.Clamp(data.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
             this.seaCleanCleanNoDelay = data.seaCleanCleanNoDelay;
             this.autoCleanseCorruptedEnabled = data.autoCleanseCorruptedEnabled;
+            this.swimSprintTweakEnabled = data.swimSprintTweakEnabled;
+            this.swimSprintDurationSeconds = data.swimSprintDurationSeconds <= 0f
+                ? SwimSprintDurationDefault
+                : Mathf.Clamp(data.swimSprintDurationSeconds, SwimSprintDurationMin, SwimSprintDurationMax);
+            this.swimSprintCooldownSeconds = Mathf.Clamp(data.swimSprintCooldownSeconds, SwimSprintCooldownMin, SwimSprintCooldownMax);
             this.keyGameSpeed1x = (KeyCode)data.keyGameSpeed1x;
             this.keyGameSpeed2x = (KeyCode)data.keyGameSpeed2x;
             this.keyGameSpeed5x = (KeyCode)data.keyGameSpeed5x;

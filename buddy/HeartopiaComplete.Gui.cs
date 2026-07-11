@@ -1888,6 +1888,55 @@ namespace HeartopiaMod
             num += Mathf.CeilToInt(forceSwimToggleHeight + 8f);
 
             GUI.Label(new Rect(20f, (float)num, 260f, 36f), "Swim/Skate on land (others see it). Status: " + this.forceLocomotionLastStatus);
+            num += 44;
+
+            // --- Custom Swim Sprint (underwater dash duration/cooldown override) ------------------
+            const string swimSprintLabel = "Custom Swim Sprint";
+            bool prevSwimSprint = this.swimSprintTweakEnabled;
+            float swimSprintToggleHeight = this.GetSwitchToggleHeight(toggleWidth, swimSprintLabel, 25f);
+            this.swimSprintTweakEnabled = this.DrawWrappedSwitchToggle(
+                new Rect(20f, (float)num, toggleWidth, swimSprintToggleHeight),
+                this.swimSprintTweakEnabled,
+                swimSprintLabel,
+                25f);
+            if (this.swimSprintTweakEnabled != prevSwimSprint)
+            {
+                this.AddMenuNotification(
+                    this.swimSprintTweakEnabled ? "Custom Swim Sprint on" : "Custom Swim Sprint off",
+                    new Color(0.45f, 0.85f, 1f));
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            num += Mathf.CeilToInt(swimSprintToggleHeight + 8f);
+
+            bool swimSprintInfinite = this.swimSprintDurationSeconds >= SwimSprintDurationMax - 0.001f;
+            GUI.Label(new Rect(20f, (float)num, 260f, 20f),
+                swimSprintInfinite
+                    ? this.L("Sprint Duration: ") + "∞"
+                    : this.LF("Sprint Duration: {0:F1}s", this.swimSprintDurationSeconds));
+            num += 22;
+            float prevSwimSprintDuration = this.swimSprintDurationSeconds;
+            this.swimSprintDurationSeconds = Mathf.Round(
+                this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.swimSprintDurationSeconds, SwimSprintDurationMin, SwimSprintDurationMax) * 2f) / 2f;
+            if (Mathf.Abs(this.swimSprintDurationSeconds - prevSwimSprintDuration) > 0.0001f)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            num += 24;
+
+            GUI.Label(new Rect(20f, (float)num, 260f, 20f), this.LF("Sprint Cooldown: {0:F1}s", this.swimSprintCooldownSeconds));
+            num += 22;
+            float prevSwimSprintCooldown = this.swimSprintCooldownSeconds;
+            this.swimSprintCooldownSeconds = Mathf.Round(
+                this.DrawAccentSlider(new Rect(20f, (float)num, 260f, 20f), this.swimSprintCooldownSeconds, SwimSprintCooldownMin, SwimSprintCooldownMax) * 10f) / 10f;
+            if (Mathf.Abs(this.swimSprintCooldownSeconds - prevSwimSprintCooldown) > 0.0001f)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            num += 24;
+
+            GUI.Label(new Rect(20f, (float)num, 260f, 36f),
+                "Underwater dash (Shift). Max duration = never ends (a sharp turn still cancels)."
+                + (this.swimSprintTweakEnabled ? " Status: " + this.swimSprintTweakStatus : string.Empty));
             return (float)num + 50f;
         }
 
