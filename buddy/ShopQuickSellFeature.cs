@@ -15,6 +15,70 @@ namespace HeartopiaMod
 
         private string shopQuickSellStatus = "Idle.";
 
+        // Fashionwave / battle-pass TOKEN sell UI (XDTGame.UI.Panel.BattlePassSellPanel) — the panel
+        // that shows "Available in Fashionwave" items and sells them for the current period token via
+        // RecycleProtocolManager.CmdBattlePassSell (same currency as Auto Sell "Festival For Tokens").
+        // Opened via its OWN static Open() which builds the intent (current period currency +
+        // per-period override prefab) and UIManager.OpenView<BattlePassSellPanel>. Separate from
+        // ItemSellPanel above, which is the COIN sell (CmdQuickSell).
+        private const string TokenSellPanelTypeName = "XDTGame.UI.Panel.BattlePassSellPanel";
+        private string tokenSellPanelStatus = "Idle.";
+
+        // XDT* UI type -> AuraMono only (no managed fallback, per project convention). Invoke the
+        // 0-arg static BattlePassSellPanel.Open(); it self-populates from the active battle-pass period.
+        private void StartTokenSellOpenPanel()
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    this.tokenSellPanelStatus = "Aura mono runtime not ready.";
+                    this.AddMenuNotification(this.tokenSellPanelStatus, new Color(1f, 0.55f, 0.45f));
+                    return;
+                }
+
+                IntPtr panelClass = this.FindAuraMonoClassByFullName(TokenSellPanelTypeName);
+                if (panelClass == IntPtr.Zero)
+                {
+                    panelClass = this.FindAuraMonoClassInImages(
+                        "XDTGame.UI.Panel",
+                        "BattlePassSellPanel",
+                        new string[] { "XDTGameUI", "XDTGameUI.dll", "Client", "Client.dll" });
+                }
+                if (panelClass == IntPtr.Zero)
+                {
+                    this.tokenSellPanelStatus = "BattlePassSellPanel class not found.";
+                    this.AddMenuNotification(this.tokenSellPanelStatus, new Color(1f, 0.55f, 0.45f));
+                    return;
+                }
+
+                IntPtr openMethod = this.FindAuraMonoMethodOnHierarchy(panelClass, "Open", 0);
+                if (openMethod == IntPtr.Zero)
+                {
+                    this.tokenSellPanelStatus = "BattlePassSellPanel.Open() not found.";
+                    this.AddMenuNotification(this.tokenSellPanelStatus, new Color(1f, 0.55f, 0.45f));
+                    return;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(openMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    this.tokenSellPanelStatus = "BattlePassSellPanel.Open() raised an exception (no active period?).";
+                    this.AddMenuNotification(this.tokenSellPanelStatus, new Color(1f, 0.55f, 0.45f));
+                    return;
+                }
+
+                this.tokenSellPanelStatus = "Opened token sell panel.";
+                this.AddMenuNotification(this.tokenSellPanelStatus, new Color(0.45f, 0.88f, 1f));
+            }
+            catch (Exception ex)
+            {
+                this.tokenSellPanelStatus = "Token sell open exception: " + ex.GetType().Name;
+                this.AddMenuNotification(this.tokenSellPanelStatus, new Color(1f, 0.55f, 0.45f));
+            }
+        }
+
         private void StartShopQuickSellOpenPanel()
         {
             const string successStatus = "Opened ItemSellPanel.";

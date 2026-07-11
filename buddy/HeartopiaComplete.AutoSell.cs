@@ -357,13 +357,22 @@ namespace HeartopiaMod
             }
             num += 44;
 
-            // Opens the game's player-inventory sell UI (ItemSellPanel) for manual multi-select selling.
-            if (this.DrawPrimaryActionButton(new Rect(left, (float)num, 200f, 32f), "OPEN SELL PANEL"))
+            // OPEN SELL PANEL = coin sell (ItemSellPanel / CmdQuickSell); OPEN TOKEN SELL = Fashionwave /
+            // battle-pass token sell (BattlePassSellPanel / CmdBattlePassSell) — the "Available in
+            // Fashionwave" panel for the current period token.
+            if (this.DrawPrimaryActionButton(new Rect(left, (float)num, 195f, 32f), "OPEN SELL PANEL"))
             {
                 this.StartShopQuickSellOpenPanel();
             }
-            GUI.Label(new Rect(left + 210f, (float)num + 7f, panelWidth - 210f, 22f), this.shopQuickSellStatus ?? "Idle.", tinyStyle);
-            num += 40;
+            if (this.DrawPrimaryActionButton(new Rect(left + 205f, (float)num, 195f, 32f), "OPEN TOKEN SELL"))
+            {
+                this.StartTokenSellOpenPanel();
+            }
+            num += 36;
+            GUI.Label(new Rect(left, (float)num, panelWidth - 20f, 22f),
+                "Coins: " + (this.shopQuickSellStatus ?? "Idle.") + "     Tokens: " + (this.tokenSellPanelStatus ?? "Idle."),
+                tinyStyle);
+            num += 30;
 
             if (this.autoSellScanSourceDropdownOpen)
             {
