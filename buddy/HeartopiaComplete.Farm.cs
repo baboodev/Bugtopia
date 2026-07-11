@@ -81,6 +81,12 @@ namespace HeartopiaMod
 
             if (status.StartsWith("Collecting", StringComparison.OrdinalIgnoreCase))
                 return "Collecting";
+            if (status.StartsWith("Cleaning", StringComparison.OrdinalIgnoreCase))
+                return "Cleaning";
+            if (status.StartsWith("Paused", StringComparison.OrdinalIgnoreCase))
+                return "Paused";
+            if (status.StartsWith("Sea cleaner depleted", StringComparison.OrdinalIgnoreCase))
+                return "Repair Needed";
             if (status.StartsWith("Scanning", StringComparison.OrdinalIgnoreCase))
                 return "Scanning";
             if (status.StartsWith("Loading", StringComparison.OrdinalIgnoreCase))
@@ -721,6 +727,18 @@ namespace HeartopiaMod
             {
                 case HeartopiaComplete.AutoFarmState.ScanningForNodes:
                     {
+                        // Auto Repair coordination (mirrors the FishingRoute hop gate): never
+                        // start a teleport while a repair kit is in use or the restore aura is
+                        // still ticking — the hop would yank the player out of the repair circle.
+                        // Only the teleport-initiating states are gated; an in-flight
+                        // collect/clean dwell (Collecting) always finishes.
+                        if (this.IsAutoRepairBusy())
+                        {
+                            this.autoFarmStatus = "Paused for Auto Repair...";
+                            this.autoFarmTimer = 0f;
+                            break;
+                        }
+
                         // Periodic recheck of priority locations
                         if (this.priorityRecheckTimer >= 60f) // 1 minute
                         {
@@ -761,6 +779,7 @@ namespace HeartopiaMod
                                     this.autoFarmTimer = 0f;
                                     this.autoCollectClickedSinceArrival = false;
                                     this.cameraRotationAttempts = 0;
+                                    this.ResetContaminationDwellState(); // priority nodes are plants
                                     this.ArmAuraCollectWait(true);
                                     break;
                                 }
@@ -787,6 +806,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
+                            this.ResetContaminationDwellState(); // priority nodes are plants
                             this.ArmAuraCollectWait(true);
                             break;
                         }
@@ -807,13 +827,13 @@ namespace HeartopiaMod
                         }
 
                         // THIRD: Normal scanning logic
-                        Vector3? vector = this.FindClosestAvailableNode();
+                        Vector3? vector = this.FindClosestAvailableNode(out string scanNodeLabel);
                         bool flag2 = vector != null;
                         if (flag2)
                         {
                             float value = Vector3.Distance(Camera.main.transform.position, vector.Value);
                             this.autoFarmStatus = $"Teleporting to node ({value:F0}m)...";
-                            this.AutoFarmLog("Normal node target -> " + vector.Value + " distance=" + value.ToString("F1"));
+                            this.AutoFarmLog("Normal node target -> " + vector.Value + " label=" + scanNodeLabel + " distance=" + value.ToString("F1"));
                             this.TeleportToLocation(vector.Value);
                             this.lastNodePosition = vector.Value;
                             this.lastTeleportWasPriorityLocation = false;
@@ -821,7 +841,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
-                            this.ArmAuraCollectWait(true);
+                            this.BeginFarmNodeDwell(scanNodeLabel);
                         }
                         else
                         {
@@ -832,6 +852,14 @@ namespace HeartopiaMod
                     }
                 case HeartopiaComplete.AutoFarmState.Collecting:
                     {
+                        // Contamination nodes get the sea-clean sweep dwell instead of the aura
+                        // pick wait. Deliberately NOT gated on IsAutoRepairBusy — an in-flight
+                        // dwell finishes (and can even hold for a cleaner repair).
+                        if (this.autoFarmTargetIsContamination)
+                        {
+                            this.RunContaminationCleanWait();
+                            break;
+                        }
                         if (this.auraFarmEnabled && this.auraCollectWaitArmed)
                         {
                             this.RunAuraCollectWait();
@@ -907,6 +935,14 @@ namespace HeartopiaMod
                     }
                 case HeartopiaComplete.AutoFarmState.MovingToLocation:
                     {
+                        // Auto Repair coordination: hold the location hop while a repair runs.
+                        if (this.IsAutoRepairBusy())
+                        {
+                            this.autoFarmStatus = "Paused for Auto Repair...";
+                            this.autoFarmTimer = 0f;
+                            break;
+                        }
+
                         bool flag10 = this.farmLocations.Count == 0;
                         if (flag10)
                         {
@@ -927,6 +963,10 @@ namespace HeartopiaMod
                             bool flagEventTallMustard = this.showTallMustardRadar;
                             bool flagEventBurdock = this.showBurdockRadar;
                             bool flagEventMustardGreens = this.showMustardGreensRadar;
+                            // Any underwater radar category shares the sea-area waypoints so the farm
+                            // can hop to a fresh sea region once the current one is cleared.
+                            bool flagUnderwater = this.showContaminatedRadar || this.showGlasswortRadar
+                                || this.showSeaGrapeRadar || this.showWakameRadar;
                             int num = this.currentLocationIndex;
                             HeartopiaComplete.FarmLocation farmLocation = null;
                             int num2 = 0;
@@ -1008,6 +1048,10 @@ namespace HeartopiaMod
                                             {
                                                 flag13 = true;
                                             }
+                                            else if (farmLocation2.Type == "underwater" && flagUnderwater)
+                                            {
+                                                flag13 = true;
+                                            }
                                         }
                                     }
                                 }
@@ -1027,7 +1071,13 @@ namespace HeartopiaMod
                             bool flag19 = farmLocation == null;
                             if (flag19)
                             {
+                                // Wedge fix: toggles with no farmLocations entry (underwater
+                                // plants / contamination have none) used to dead-end this state
+                                // forever. Fall back to waiting on radar markers where we stand —
+                                // markers keep rebuilding every RunRadar pass.
                                 this.autoFarmStatus = "No matching locations for enabled toggles!";
+                                this.farmState = HeartopiaComplete.AutoFarmState.WaitingForNodes;
+                                this.autoFarmTimer = 0f;
                             }
                             else
                             {
@@ -1055,7 +1105,15 @@ namespace HeartopiaMod
                     }
                 case HeartopiaComplete.AutoFarmState.WaitingForNodes:
                     {
-                        Vector3? vector2 = this.FindClosestAvailableNode();
+                        // Auto Repair coordination: hold the node hop while a repair runs.
+                        if (this.IsAutoRepairBusy())
+                        {
+                            this.autoFarmStatus = "Paused for Auto Repair...";
+                            this.autoFarmTimer = 0f;
+                            break;
+                        }
+
+                        Vector3? vector2 = this.FindClosestAvailableNode(out string waitingNodeLabel);
                         bool flag21 = vector2 != null;
                         if (flag21)
                         {
@@ -1067,7 +1125,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
-                            this.ArmAuraCollectWait(true);
+                            this.BeginFarmNodeDwell(waitingNodeLabel);
                         }
                         else
                         {
@@ -1096,6 +1154,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
+                            this.ResetContaminationDwellState(); // priority areas are plant dwells
                             this.ArmAuraCollectWait(false);
                             this.autoFarmStatus = "Farming at priority location...";
                         }
@@ -1106,6 +1165,178 @@ namespace HeartopiaMod
                         break;
                     }
             }
+        }
+
+        // ---- Contamination (sea-clean) farm dwell ------------------------------------------
+        // The Aura Farm travels to "Contaminated" radar markers like any other node; the
+        // Collecting dwell then runs the shared sea-clean sweep (SeaCleanQteFeature pass)
+        // instead of the aura pick wait. All cross-frame state below is scalars — no
+        // coroutines, no raw mono pointers held across frames.
+        private bool autoFarmTargetIsContamination = false;
+        private int contaminationZeroPassCount = 0;
+        private int contaminationKillsThisNode = 0;
+        private float contaminationLastConsumedPassAt = 0f;
+        private float contaminationRepairHoldSince = -1f;
+        private float contaminationNextToolCheckAt = 0f;
+        private bool contaminationToolReady = false;
+        private bool contaminationToolDepleted = false;
+        private string contaminationToolStatus = string.Empty;
+
+        // Clears all contamination-dwell bookkeeping (farm toggle on/off + every node hop).
+        private void ResetContaminationDwellState()
+        {
+            this.autoFarmTargetIsContamination = false;
+            this.contaminationZeroPassCount = 0;
+            this.contaminationKillsThisNode = 0;
+            this.contaminationLastConsumedPassAt = Time.unscaledTime;
+            this.contaminationRepairHoldSince = -1f;
+            this.contaminationNextToolCheckAt = 0f;
+            this.contaminationToolReady = false;
+            this.contaminationToolDepleted = false;
+            this.contaminationToolStatus = string.Empty;
+        }
+
+        // Starts the Collecting dwell for a freshly targeted radar node: "Contaminated" markers
+        // get the sea-clean sweep dwell (RunContaminationCleanWait), everything else the normal
+        // aura collect wait.
+        private void BeginFarmNodeDwell(string nodeLabel)
+        {
+            this.ResetContaminationDwellState();
+            bool contamination = string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal);
+            this.autoFarmTargetIsContamination = contamination;
+            if (contamination)
+            {
+                // Ignore sweep passes completed before (or immediately after) arrival — the
+                // reported player position may not have settled yet right after the teleport,
+                // so an early zero-actionable pass could belong to the OLD position.
+                this.contaminationLastConsumedPassAt = Time.unscaledTime + 0.5f;
+            }
+            this.ArmAuraCollectWait(!contamination);
+        }
+
+        // Contamination-node Collecting dwell (Aura Farm x Auto Sea Clean): drive the shared
+        // sweep pass at this node until nothing killable is left in range, then hop. The sweep
+        // and its throttles (0.5s scan interval + kill pacing) are shared with the standalone
+        // Auto Sea Clean tick — whichever caller runs a pass, the results land in
+        // seaCleanLastPass* and are consumed here exactly once.
+        private void RunContaminationCleanWait()
+        {
+            float now = Time.unscaledTime;
+            float maxWait = Mathf.Max(6f, this.auraCollectWaitTimeout);
+
+            // Types not ready — bounded wait (EnsureSeaCleanQteAuraResolved retries every 2s).
+            if (!this.EnsureSeaCleanQteAuraResolved(out _)
+                || this.seaCleanQteMonsterClass == IntPtr.Zero
+                || this.seaCleanQteExecuteKillMethod == IntPtr.Zero)
+            {
+                if (this.autoFarmTimer >= maxWait)
+                {
+                    this.FinishContaminationCleanDwell(now, "types unavailable");
+                    return;
+                }
+
+                this.autoFarmStatus = $"Cleaning... waiting for game types ({maxWait - this.autoFarmTimer:F0}s)";
+                return;
+            }
+
+            // Farm-owned tool gate (allowSwap variant — the standalone no-yank rule is
+            // untouched). The AuraMono tool read runs at 4Hz, cached in scalars between checks.
+            if (now >= this.contaminationNextToolCheckAt)
+            {
+                this.contaminationNextToolCheckAt = now + 0.25f;
+                this.contaminationToolReady = this.TrySeaCleanFarmEnsureCleanerEquipped(now, out bool cleanerDepleted, out string toolStatus);
+                this.contaminationToolDepleted = cleanerDepleted;
+                this.contaminationToolStatus = toolStatus;
+            }
+
+            if (!this.contaminationToolReady && this.contaminationToolDepleted)
+            {
+                if (this.IsAutoRepairBusy())
+                {
+                    // A repair for the depleted cleaner is running/queued: hold this dwell (and
+                    // suspend its timeout) so the restorer can land, bounded so a wedged repair
+                    // can never pin the farm here.
+                    if (this.contaminationRepairHoldSince < 0f)
+                    {
+                        this.contaminationRepairHoldSince = now;
+                    }
+
+                    if (now - this.contaminationRepairHoldSince <= 45f)
+                    {
+                        this.autoFarmTimer = 0f;
+                        this.autoFarmStatus = "Cleaning... waiting for sea cleaner repair";
+                        return;
+                    }
+                }
+
+                this.autoFarmStatus = "Sea cleaner depleted - repair needed";
+                this.FinishContaminationCleanDwell(now, "cleaner depleted");
+                return;
+            }
+            this.contaminationRepairHoldSince = -1f;
+
+            // Run the shared sweep (self-throttled). It runs even while the equip is still
+            // pending: kills stay blocked by the pass's own tool gate, but actionable counts
+            // keep flowing so a node with nothing killable (shared/public only) hops early.
+            this.TrySeaCleanAutoCleanPass(out _, out _, out _, out _);
+
+            // Consume every completed pass exactly once, no matter which caller ran it.
+            if (this.seaCleanLastPassCompletedAt > this.contaminationLastConsumedPassAt)
+            {
+                this.contaminationLastConsumedPassAt = this.seaCleanLastPassCompletedAt;
+                this.contaminationKillsThisNode += this.seaCleanLastPassKilled;
+                if (this.seaCleanLastPassKilled == 0 && this.seaCleanLastPassActionable == 0)
+                {
+                    this.contaminationZeroPassCount++;
+                }
+                else
+                {
+                    this.contaminationZeroPassCount = 0;
+                }
+            }
+
+            // Done: two consecutive passes with nothing killable and nothing killed.
+            if (this.contaminationZeroPassCount >= 2 && this.autoFarmTimer >= 1f)
+            {
+                this.FinishContaminationCleanDwell(now, "area clear");
+                return;
+            }
+
+            // One unreachable/wedged node must not stall the loop forever.
+            if (this.autoFarmTimer >= maxWait)
+            {
+                this.FinishContaminationCleanDwell(now, "timeout");
+                return;
+            }
+
+            float remaining = maxWait - this.autoFarmTimer;
+            if (!this.contaminationToolReady)
+            {
+                this.autoFarmStatus = $"Cleaning... {this.contaminationToolStatus} ({remaining:F0}s)";
+            }
+            else if (this.contaminationKillsThisNode > 0)
+            {
+                this.autoFarmStatus = $"Cleaning... {this.contaminationKillsThisNode} cleaned ({remaining:F0}s)";
+            }
+            else if (this.contaminationZeroPassCount > 0 && this.seaCleanLastPassNoLever > 0)
+            {
+                this.autoFarmStatus = $"Cleaning... only shared pollutants here ({remaining:F0}s)";
+            }
+            else
+            {
+                this.autoFarmStatus = $"Cleaning... sweeping pollutants ({remaining:F0}s)";
+            }
+        }
+
+        // Finish the contamination dwell: stamp the node (15s when something was actually
+        // cleaned here, 60s when nothing was killable — shared/public markers stay on the
+        // radar and must not ping-pong the farm) and hop via the normal cycle finish.
+        private void FinishContaminationCleanDwell(float now, string reason)
+        {
+            float stampSeconds = this.contaminationKillsThisNode > 0 ? 15f : 60f;
+            this.recentlyVisitedNodes[this.lastNodePosition] = now + stampSeconds;
+            this.AutoFarmLog($"Contamination dwell done at {this.lastNodePosition} (kills={this.contaminationKillsThisNode}, reason={reason}, stamp={stampSeconds:F0}s)");
+            this.FinishCollectingCycle();
         }
 
         // Aura-mode Collecting: hold the hop to the next radar target until this node is
@@ -1730,8 +1961,11 @@ namespace HeartopiaMod
         }
 
         // Token: 0x06000016 RID: 22 RVA: 0x0000459C File Offset: 0x0000279C
-        private Vector3? FindClosestAvailableNode()
+        // selectedLabel = canonical marker label of the returned node (empty when none) — the
+        // caller uses it to route "Contaminated" nodes into the sea-clean dwell.
+        private Vector3? FindClosestAvailableNode(out string selectedLabel)
         {
+            selectedLabel = string.Empty;
             bool flag = !this.isRadarActive || this.radarContainer == null;
             Vector3? result;
             if (flag)
@@ -1795,7 +2029,14 @@ namespace HeartopiaMod
                                 if (!flag8)
                                 {
                                     bool flag9 = false;
-                                    bool flag10 = this.ShouldShowMushroomByLabel(markerLabel)
+                                    // Underwater update (2026-07-09): sea plants + contamination.
+                                    // Exact-toggle branches checked before the generic substring
+                                    // chain below so these labels can never be shadowed by it.
+                                    bool flag10 = (this.showGlasswortRadar && markerLabel.Contains("Glasswort"))
+                                        || (this.showSeaGrapeRadar && markerLabel.Contains("Sea Grape"))
+                                        || (this.showWakameRadar && markerLabel.Contains("Wakame"))
+                                        || (this.showContaminatedRadar && markerLabel.Contains("Contaminated"))
+                                        || this.ShouldShowMushroomByLabel(markerLabel)
                                         || (this.showFiddleheadRadar && markerLabel.Contains("Fiddlehead"))
                                         || (this.showTallMustardRadar && markerLabel.Contains("Tall Mustard"))
                                         || (this.showBurdockRadar && markerLabel.Contains("Burdock"))
@@ -1894,6 +2135,7 @@ namespace HeartopiaMod
                                         {
                                             num = num2;
                                             vector = new Vector3?(child.position);
+                                            selectedLabel = markerLabel;
                                         }
                                     }
                                 }
@@ -2436,6 +2678,7 @@ namespace HeartopiaMod
                 this.currentLocationIndex = 0;
                 this.recentlyVisitedNodes.Clear();
                 this.cameraRotationAttempts = 0;
+                this.ResetContaminationDwellState();
                 this.priorityLocationCooldowns.Clear();
                 this.RefreshActivePriorityLocations();
                 this.currentPriorityLocation = this.GetActivePriorityLocation();
@@ -2480,6 +2723,7 @@ namespace HeartopiaMod
                 this.currentPriorityLocation = null;
                 this.lastTeleportWasPriorityLocation = false;
                 this.autoFarmAutoStopAt = -1f;
+                this.ResetContaminationDwellState();
                 this.AutoFarmLog("Stopped. reason=manual-toggle");
                 ModLogger.Msg("[AUTO FARM] Disabled");
             }

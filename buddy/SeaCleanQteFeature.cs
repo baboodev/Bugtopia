@@ -70,18 +70,32 @@ namespace HeartopiaMod
         private const float SeaCleanAutoRadiusMin = 1f;
         private const float SeaCleanAutoRadiusMax = 20f;
         private const float SeaCleanAutoRadiusDefault = 7f;
-        private const float SeaCleanAutoKillDelayMin = 0f;
-        private const float SeaCleanAutoKillDelayMax = 1f;
-        private const float SeaCleanAutoKillDelayDefault = 0.05f;
+        // Out-of-world guard: a game bug spawns pollutants far below the playable sea floor (valid
+        // sea points sit at Y ~ -23..-65). The radar ignores any pollutant below this Y so the ESP /
+        // game map / Aura Farm never target an unreachable one (user-reported boundary 2026-07-11).
+        private const float ContaminatedRadarMinWorldY = -78f;
+        // Paced-kill interval used when "Clean Without Delays" is OFF: one kill per scan pass (0.5s)
+        // for server plausibility. When the toggle is ON, every in-range pollutant is swept at once.
+        private const float SeaCleanPacedKillDelaySeconds = 0.05f;
 
         private float seaCleanAutoRadius = SeaCleanAutoRadiusDefault;
-        private float seaCleanAutoKillDelaySeconds = SeaCleanAutoKillDelayDefault;
+        // "Clean Without Delays" toggle (replaced the old 0-1s delay slider). Default ON = instant sweep.
+        private bool seaCleanCleanNoDelay = true;
 
         private float seaCleanAutoNextScanAt = 0f;
         private float seaCleanAutoNextKillAt = 0f;
         private float seaCleanAutoNextEquipAttemptAt = 0f;
         private int seaCleanAutoKillCount = 0;
         private string seaCleanAutoLastStatus = string.Empty;
+
+        // Results of the most recent completed sweep pass (TrySeaCleanAutoCleanPass), no matter
+        // which caller ran it — the standalone tick and the Aura Farm contamination dwell share
+        // one 0.5s scan throttle, so a pass may execute in either caller's frame slot. The farm
+        // dwell consumes these exactly once per pass for its done-detection.
+        private float seaCleanLastPassCompletedAt = -1f;
+        private int seaCleanLastPassActionable = 0;
+        private int seaCleanLastPassKilled = 0;
+        private int seaCleanLastPassNoLever = 0;
 
         private struct SeaCleanAutoCandidate
         {
@@ -160,16 +174,44 @@ namespace HeartopiaMod
             this.TickSeaCleanAutoClean();
         }
 
-        // The auto-clean loop: find the nearest exclusive pollutant in range and ExecuteKill it.
-        // Everything is synchronous within one call (no yields, no cross-frame IntPtr holds); the
-        // component list is pinned by TryAuraMonoGetComponentObjects and each derived entity object
-        // is pinned across its reads (moving-SGen rule).
+        // Thin wrapper for the standalone Auto Sea Clean toggle: run the shared sweep pass and
+        // apply its status line (empty = keep the previous one, e.g. while throttled or while
+        // kills are paced) — semantics identical to the pre-refactor tick.
         private void TickSeaCleanAutoClean()
         {
+            this.TrySeaCleanAutoCleanPass(out _, out _, out _, out string status);
+            if (!string.IsNullOrEmpty(status))
+            {
+                this.seaCleanAutoLastStatus = status;
+            }
+        }
+
+        // The auto-clean sweep pass, shared by the standalone tick (above) and the Aura Farm
+        // contamination dwell (RunContaminationCleanWait): find the nearest exclusive pollutants
+        // in range and ExecuteKill them, scan-throttled and kill-paced. Body/pins/pacing are the
+        // original tick's: everything is synchronous within one call (no yields, no cross-frame
+        // IntPtr holds); the component list is pinned by TryAuraMonoGetComponentObjects and each
+        // derived entity object is pinned across its reads (moving-SGen rule).
+        //
+        // Returns true when the scan actually ran this call (throttle allowed + types resolved +
+        // player position available) — the out counts are only meaningful then, and the pass
+        // results are additionally mirrored into seaCleanLastPass* for the cross-caller consumer.
+        // actionableInRange counts killable (exclusive) candidates within radius and is computed
+        // BEFORE the equip gate, so a blocked tool still reports what is actionable.
+        // standaloneStatus is the standalone tab's status line (empty = keep previous); the
+        // equip gate inside is the standalone NO-YANK one — the farm dwell does its own
+        // allowSwap equip before calling this.
+        private bool TrySeaCleanAutoCleanPass(out int actionableInRange, out int killedThisPass, out int noLeverCount, out string standaloneStatus)
+        {
+            actionableInRange = 0;
+            killedThisPass = 0;
+            noLeverCount = 0;
+            standaloneStatus = string.Empty;
+
             float now = Time.unscaledTime;
             if (now < this.seaCleanAutoNextScanAt)
             {
-                return;
+                return false;
             }
 
             this.seaCleanAutoNextScanAt = now + SeaCleanAutoScanInterval;
@@ -178,14 +220,14 @@ namespace HeartopiaMod
                 || this.seaCleanQteMonsterClass == IntPtr.Zero
                 || this.seaCleanQteExecuteKillMethod == IntPtr.Zero)
             {
-                this.seaCleanAutoLastStatus = "Waiting for game types (AuraMono): " + resolveStatus;
-                return;
+                standaloneStatus = "Waiting for game types (AuraMono): " + resolveStatus;
+                return false;
             }
 
             if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
             {
-                this.seaCleanAutoLastStatus = "Player position unavailable.";
-                return;
+                standaloneStatus = "Player position unavailable.";
+                return false;
             }
 
             List<uint> compPins = new List<uint>();
@@ -194,14 +236,14 @@ namespace HeartopiaMod
                 if (!this.TryAuraMonoGetComponentObjects(this.seaCleanQteMonsterClass, out List<IntPtr> components, compPins)
                     || components == null || components.Count == 0)
                 {
-                    this.seaCleanAutoLastStatus = "No pollutants around — swim into a sea-clean area.";
-                    return;
+                    standaloneStatus = "No pollutants around — swim into a sea-clean area.";
+                    this.SeaCleanRecordPassResult(now, 0, 0, 0);
+                    return true;
                 }
 
                 float radius = Mathf.Clamp(this.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
                 float radiusSqr = radius * radius;
                 this.seaCleanAutoCandidates.Clear();
-                int noLeverCount = 0;
 
                 for (int i = 0; i < components.Count; i++)
                 {
@@ -281,27 +323,30 @@ namespace HeartopiaMod
                     }
                 }
 
+                actionableInRange = this.seaCleanAutoCandidates.Count;
+
                 if (this.seaCleanAutoCandidates.Count == 0)
                 {
-                    this.seaCleanAutoLastStatus = noLeverCount > 0
+                    standaloneStatus = noLeverCount > 0
                         ? "Only shared/public pollutants nearby — clean them manually, the QTE auto-passes."
                         : "No cleanable pollutant within " + radius.ToString("F0") + "m.";
-                    return;
+                    this.SeaCleanRecordPassResult(now, 0, 0, noLeverCount);
+                    return true;
                 }
 
                 // Server plausibility: the legit client can never clean without the sea cleaner in
                 // hand, so hold the kill until it is equipped (auto-equips from empty hands).
                 if (!this.TrySeaCleanEnsureCleanerEquipped(now, out string toolStatus))
                 {
-                    this.seaCleanAutoLastStatus = toolStatus;
-                    return;
+                    standaloneStatus = toolStatus;
+                    this.SeaCleanRecordPassResult(now, actionableInRange, 0, noLeverCount);
+                    return true;
                 }
 
                 // Kill nearest-first, as many as the delay budget allows this pass: delay 0 sweeps
                 // everything in range at once; delay > 0 paces one kill per interval across passes.
                 this.seaCleanAutoCandidates.Sort(SeaCleanAutoCandidateByDistance);
-                float delay = Mathf.Clamp(this.seaCleanAutoKillDelaySeconds, SeaCleanAutoKillDelayMin, SeaCleanAutoKillDelayMax);
-                int killedThisPass = 0;
+                float delay = this.seaCleanCleanNoDelay ? 0f : SeaCleanPacedKillDelaySeconds;
                 uint lastKilledNetId = 0U;
 
                 for (int c = 0; c < this.seaCleanAutoCandidates.Count; c++)
@@ -323,20 +368,31 @@ namespace HeartopiaMod
                     this.seaCleanAutoKillCount++;
                 }
 
+                this.SeaCleanRecordPassResult(now, actionableInRange, killedThisPass, noLeverCount);
+
                 if (killedThisPass > 1)
                 {
-                    this.seaCleanAutoLastStatus = "Cleaned " + killedThisPass + " pollutants (session total: " + this.seaCleanAutoKillCount + ").";
+                    standaloneStatus = "Cleaned " + killedThisPass + " pollutants (session total: " + this.seaCleanAutoKillCount + ").";
                 }
                 else if (killedThisPass == 1)
                 {
-                    this.seaCleanAutoLastStatus = "Cleaned pollutant #" + lastKilledNetId + " (session total: " + this.seaCleanAutoKillCount + ").";
+                    standaloneStatus = "Cleaned pollutant #" + lastKilledNetId + " (session total: " + this.seaCleanAutoKillCount + ").";
                 }
                 // killedThisPass == 0 while paced: keep the previous status (usually the last kill).
+                return true;
             }
             finally
             {
                 FreeAuraMonoPins(compPins);
             }
+        }
+
+        private void SeaCleanRecordPassResult(float now, int actionable, int killed, int noLever)
+        {
+            this.seaCleanLastPassCompletedAt = now;
+            this.seaCleanLastPassActionable = actionable;
+            this.seaCleanLastPassKilled = killed;
+            this.seaCleanLastPassNoLever = noLever;
         }
 
         // True only when the sea cleaner (toolId 7) is the current ToolSystem tool with durability
@@ -379,6 +435,59 @@ namespace HeartopiaMod
             else
             {
                 status = "Sea cleaner equip failed: " + equipStatus;
+                this.SeaCleanQteLog(status);
+            }
+
+            return false;
+        }
+
+        // Farm-dwell tool gate (Aura Farm contamination nodes ONLY): unlike the standalone
+        // no-yank rule above, the farm MAY swap FROM another equipped tool — it teleported to a
+        // contamination marker on purpose — but never during the Auto Repair kit-use phase (the
+        // game must see an idle player or the ToolRestorer use is silently dropped). Shares the
+        // standalone 3s equip throttle so the two paths never double-send SetHandhold.
+        // cleanerDepleted distinguishes "cleaner in hand but durability 0" (caller decides
+        // hold-for-repair vs hop) from a pending/blocked equip.
+        private bool TrySeaCleanFarmEnsureCleanerEquipped(float now, out bool cleanerDepleted, out string status)
+        {
+            cleanerDepleted = false;
+            if (this.TryGetCurrentToolDurability(out int toolId, out int durability, out _, out _)
+                && toolId == SeaCleanerToolTypeId)
+            {
+                if (durability <= 0)
+                {
+                    cleanerDepleted = true;
+                    status = "sea cleaner depleted";
+                    return false;
+                }
+
+                status = "ok";
+                return true;
+            }
+
+            // Empty hands OR another tool equipped: the swap is allowed for the farm dwell,
+            // except while the repair kit-use phase needs the player untouched.
+            if (this.IsAutoRepairUsePhase())
+            {
+                status = "waiting for Auto Repair";
+                return false;
+            }
+
+            if (now < this.seaCleanAutoNextEquipAttemptAt)
+            {
+                status = "equipping sea cleaner";
+                return false;
+            }
+
+            this.seaCleanAutoNextEquipAttemptAt = now + SeaCleanAutoEquipRetryInterval;
+            if (this.TryEquipHandTool(SeaCleanerToolTypeId, out string farmEquipStatus))
+            {
+                status = "equipping sea cleaner";
+                this.SeaCleanQteLog("farm auto-equip sea cleaner sent: " + farmEquipStatus);
+            }
+            else
+            {
+                status = "sea cleaner equip failed: " + farmEquipStatus;
                 this.SeaCleanQteLog(status);
             }
 
@@ -824,15 +933,13 @@ namespace HeartopiaMod
             }
             y += 28f;
 
-            GUI.Label(new Rect(left, y, 230f, 22f), this.LF("Delay between cleans: {0:F2}s", this.seaCleanAutoKillDelaySeconds), bodyStyle);
-            float prevDelay = this.seaCleanAutoKillDelaySeconds;
-            this.seaCleanAutoKillDelaySeconds = Mathf.Round(
-                this.DrawAccentSlider(new Rect(left + 240f, y + 2f, 200f, 20f), this.seaCleanAutoKillDelaySeconds, SeaCleanAutoKillDelayMin, SeaCleanAutoKillDelayMax) * 20f) / 20f;
-            if (Mathf.Abs(this.seaCleanAutoKillDelaySeconds - prevDelay) > 0.0001f)
+            bool prevNoDelay = this.seaCleanCleanNoDelay;
+            this.seaCleanCleanNoDelay = this.DrawSwitchToggle(new Rect(left, y, 360f, 30f), this.seaCleanCleanNoDelay, "Clean Without Delays");
+            if (this.seaCleanCleanNoDelay != prevNoDelay)
             {
                 try { this.SaveKeybinds(false); } catch { }
             }
-            y += 28f;
+            y += 36f;
 
             KeyCode hotkey = this.seaCleanQteHotkey;
             GUI.Label(new Rect(left, y, 500f, 22f),
@@ -859,7 +966,7 @@ namespace HeartopiaMod
 
         private float CalculateSeaCleanQteTabHeight()
         {
-            return 380f;
+            return 390f;
         }
 
         // ---- Radar: "Contaminated places" (sea-clean pollutants) -------------------------------
@@ -925,6 +1032,12 @@ namespace HeartopiaMod
                     try
                     {
                         if (!this.TryGetMonoVector3Member(entityObj, "position", out Vector3 pos))
+                        {
+                            continue;
+                        }
+                        // Out-of-world bug guard: pollutants spawned below the playable sea floor are
+                        // unreachable — keep them off the radar (and thus off the Aura Farm's targets).
+                        if (pos.y < ContaminatedRadarMinWorldY)
                         {
                             continue;
                         }

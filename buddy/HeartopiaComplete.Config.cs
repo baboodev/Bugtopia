@@ -137,7 +137,7 @@ namespace HeartopiaMod
             data.keySeaCleanQte = (int)this.seaCleanQteHotkey;
             data.keyEquipSeaCleaner = (int)this.keyEquipSeaCleaner;
             data.seaCleanAutoRadius = this.seaCleanAutoRadius;
-            data.seaCleanAutoKillDelaySeconds = this.seaCleanAutoKillDelaySeconds;
+            data.seaCleanCleanNoDelay = this.seaCleanCleanNoDelay;
             data.keyGameSpeed1x = (int)this.keyGameSpeed1x;
             data.keyGameSpeed2x = (int)this.keyGameSpeed2x;
             data.keyGameSpeed5x = (int)this.keyGameSpeed5x;
@@ -313,9 +313,7 @@ namespace HeartopiaMod
             this.seaCleanAutoRadius = data.seaCleanAutoRadius <= 0f
                 ? SeaCleanAutoRadiusDefault
                 : Mathf.Clamp(data.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
-            this.seaCleanAutoKillDelaySeconds = data.seaCleanAutoKillDelaySeconds < 0f
-                ? SeaCleanAutoKillDelayDefault
-                : Mathf.Clamp(data.seaCleanAutoKillDelaySeconds, SeaCleanAutoKillDelayMin, SeaCleanAutoKillDelayMax);
+            this.seaCleanCleanNoDelay = data.seaCleanCleanNoDelay;
             this.keyGameSpeed1x = (KeyCode)data.keyGameSpeed1x;
             this.keyGameSpeed2x = (KeyCode)data.keyGameSpeed2x;
             this.keyGameSpeed5x = (KeyCode)data.keyGameSpeed5x;

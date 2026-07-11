@@ -391,6 +391,8 @@ namespace HeartopiaMod
                     return "BirdScanner";
                 case 5:
                     return "Net";
+                case 7:
+                    return "SeaCleaner"; // ToolType.SeaCleaner — Aura Farm contamination dwell holds it
                 default:
                     return string.Empty;
             }

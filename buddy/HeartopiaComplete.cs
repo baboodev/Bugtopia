@@ -4528,7 +4528,17 @@ namespace HeartopiaMod
             new HeartopiaComplete.FarmLocation("Rare Tree Spawn", new Vector3(93.626f, 18.635f, -112.966f), "raretree"),
             new HeartopiaComplete.FarmLocation("Rare Tree Spawn 2", new Vector3(-50.454f, 22.314f, -63.417f), "raretree"),
             new HeartopiaComplete.FarmLocation("Rare Tree Spawn 3", new Vector3(-108.954f, 25.088f,49.249f), "raretree"),
-            new HeartopiaComplete.FarmLocation("Rare Tree Spawn 4", new Vector3(41.253f, 25.317f, 76.247f), "raretree")
+            new HeartopiaComplete.FarmLocation("Rare Tree Spawn 4", new Vector3(41.253f, 25.317f, 76.247f), "raretree"),
+            // Underwater / Sea-Clean area waypoints (user-provided 2026-07-11). Toured when any
+            // underwater radar toggle (Contaminated / Glasswort / Sea Grape / Wakame) is on, so the
+            // farm loads new sea areas after clearing the pollutants/plants in range at each point.
+            new HeartopiaComplete.FarmLocation("Sea Area 1", new Vector3(85.670f, -23.746f, -87.544f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 2", new Vector3(-43.220f, -60.554f, -53.835f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 3", new Vector3(-78.554f, -61.607f, -39.751f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 4", new Vector3(-14.896f, -65.087f, 31.243f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 5", new Vector3(13.840f, -57.014f, 54.296f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 6", new Vector3(83.279f, -38.932f, 52.555f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 7", new Vector3(77.268f, -32.197f, -29.265f), "underwater")
         };
 
         // House Slot Teleports

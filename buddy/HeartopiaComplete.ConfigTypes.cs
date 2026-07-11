@@ -95,9 +95,9 @@ namespace HeartopiaMod
             public int keyEquipSeaCleaner;
             // 0/absent = "use default" (radius can never legitimately be 0).
             public float seaCleanAutoRadius;
-            // -1 initializer = "absent in old config"; 0 is a VALID user choice (no delay), so the
-            // sentinel must be negative (XmlSerializer keeps field initializers for missing elements).
-            public float seaCleanAutoKillDelaySeconds = -1f;
+            // "Clean Without Delays" toggle (replaced the old 0-1s delay slider). Default true (no
+            // delay = instant in-range sweep); old configs lacking the element keep this initializer.
+            public bool seaCleanCleanNoDelay = true;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

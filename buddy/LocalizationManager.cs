@@ -152,7 +152,7 @@ namespace HeartopiaMod
             { "Cleaned this session: {0}", "Cleaned this session: {0}" },
             { "Status: ", "Status: " },
             { "Clean radius: {0:F1}m", "Clean radius: {0:F1}m" },
-            { "Delay between cleans: {0:F2}s", "Delay between cleans: {0:F2}s" },
+            { "Clean Without Delays", "Clean Without Delays" },
             { "NPCs", "NPCs" },
             { "Locations", "Locations" },
             { "Events", "Events" },
