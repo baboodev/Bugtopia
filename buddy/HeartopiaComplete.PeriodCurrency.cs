@@ -73,9 +73,13 @@ namespace HeartopiaMod
             return true;
         }
 
-        private void ClassifyPeriodCurrencyStack(int currencyTypeId, uint netId, string descriptor, HashSet<int> allowedStaticIds, bool useAllowlist, out bool isFestival)
+        // matchedEntityId = the TablePeriodCurrencySale entityId that classified this stack as
+        // festival-sellable (0 when not festival) — the split uses it to look up the row's
+        // per-period sell cap (maxSellCount) and the player's sold-so-far count.
+        private void ClassifyPeriodCurrencyStack(int currencyTypeId, uint netId, string descriptor, HashSet<int> allowedStaticIds, bool useAllowlist, out bool isFestival, out int matchedEntityId)
         {
             isFestival = false;
+            matchedEntityId = 0;
             this.CollectPeriodCurrencyCandidateEntityIds(netId, descriptor, allowedStaticIds, out List<int> candidateIds, out _);
             for (int c = 0; c < candidateIds.Count; c++)
             {
@@ -87,6 +91,7 @@ namespace HeartopiaMod
                 if (useAllowlist ? allowedStaticIds.Contains(candidateId) : this.TryLookupPeriodCurrencySale(currencyTypeId, candidateId, out _))
                 {
                     isFestival = true;
+                    matchedEntityId = candidateId;
                     return;
                 }
             }
@@ -303,7 +308,7 @@ namespace HeartopiaMod
                 {
                     foreach (DictionaryEntry entry in dictionary)
                     {
-                        if (this.TryReadPeriodCurrencySaleRowManaged(entry.Value, out int rowCurrency, out int rowEntityId)
+                        if (this.TryReadPeriodCurrencySaleRowManaged(entry.Value, out int rowCurrency, out int rowEntityId, out _)
                             && rowCurrency == currencyTypeId
                             && rowEntityId == entityId)
                         {
@@ -383,7 +388,7 @@ namespace HeartopiaMod
 
                     try
                     {
-                        if (this.TryReadPeriodCurrencySaleRowAura(valueObj, out int rowCurrency, out int rowEntityId)
+                        if (this.TryReadPeriodCurrencySaleRowAura(valueObj, out int rowCurrency, out int rowEntityId, out _)
                             && rowCurrency == currencyTypeId
                             && rowEntityId == entityId)
                         {
@@ -539,6 +544,20 @@ namespace HeartopiaMod
         // Callers only read the returned set (Contains/foreach), so sharing the instance is safe.
         private readonly Dictionary<int, HashSet<int>> periodCurrencyAllowlistCache = new Dictionary<int, HashSet<int>>();
 
+        // entityId -> TablePeriodCurrencySale.maxSellCount (0 = unlimited) per currency, captured
+        // by the SAME table walk that builds the allowlist above (static design-table data — the
+        // two caches are always written together). Entries the walk could not read stay absent
+        // and are treated as unlimited by the split (today's pre-clamp behavior).
+        private readonly Dictionary<int, Dictionary<int, int>> periodCurrencyMaxSellCountCache = new Dictionary<int, Dictionary<int, int>>();
+
+        private bool TryGetPeriodCurrencyMaxSellCounts(int currencyTypeId, out Dictionary<int, int> maxSellByEntityId)
+        {
+            maxSellByEntityId = null;
+            return currencyTypeId > 0
+                && this.periodCurrencyMaxSellCountCache.TryGetValue(currencyTypeId, out maxSellByEntityId)
+                && maxSellByEntityId != null;
+        }
+
         private bool TryGetAllowedPeriodCurrencyStaticIds(int currencyTypeId, out HashSet<int> allowedStaticIds)
         {
             allowedStaticIds = new HashSet<int>();
@@ -553,29 +572,39 @@ namespace HeartopiaMod
                 return true;
             }
             string source = string.Empty;
-            if (this.TryGetAllowedPeriodCurrencyStaticIdsAura(currencyTypeId, out allowedStaticIds) && allowedStaticIds.Count > 0)
+            Dictionary<int, int> maxSellByEntityId = new Dictionary<int, int>();
+            if (this.TryGetAllowedPeriodCurrencyStaticIdsAura(currencyTypeId, out allowedStaticIds, maxSellByEntityId) && allowedStaticIds.Count > 0)
             {
                 source = "nestedAura";
             }
-            else if (this.TryGetAllowedPeriodCurrencyStaticIdsManaged(currencyTypeId, out allowedStaticIds) && allowedStaticIds.Count > 0)
+            else if (this.TryGetAllowedPeriodCurrencyStaticIdsManaged(currencyTypeId, out allowedStaticIds, maxSellByEntityId) && allowedStaticIds.Count > 0)
             {
                 source = "nestedManaged";
             }
-            else if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTable(currencyTypeId, out allowedStaticIds, out string flatSource) && allowedStaticIds.Count > 0)
+            else if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTable(currencyTypeId, out allowedStaticIds, out string flatSource, maxSellByEntityId) && allowedStaticIds.Count > 0)
             {
                 source = flatSource;
             }
             if (allowedStaticIds.Count > 0)
             {
                 this.periodCurrencyAllowlistCache[currencyTypeId] = allowedStaticIds;
-                this.AutoSellLogSellResult("Period allowlist via " + source + " count=" + allowedStaticIds.Count + " sample=" + this.FormatAutoSellIdSample(allowedStaticIds, 8) + " currency=" + currencyTypeId + " (cached for session)");
+                this.periodCurrencyMaxSellCountCache[currencyTypeId] = maxSellByEntityId;
+                int cappedCount = 0;
+                foreach (int max in maxSellByEntityId.Values)
+                {
+                    if (max > 0)
+                    {
+                        cappedCount++;
+                    }
+                }
+                this.AutoSellLogSellResult("Period allowlist via " + source + " count=" + allowedStaticIds.Count + " capped=" + cappedCount + "/" + maxSellByEntityId.Count + " sample=" + this.FormatAutoSellIdSample(allowedStaticIds, 8) + " currency=" + currencyTypeId + " (cached for session)");
                 return true;
             }
             allowedStaticIds = new HashSet<int>();
             return false;
         }
 
-        private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTable(int currencyTypeId, out HashSet<int> allowedStaticIds, out string source)
+        private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTable(int currencyTypeId, out HashSet<int> allowedStaticIds, out string source, Dictionary<int, int> maxSellByEntityId)
         {
             allowedStaticIds = new HashSet<int>();
             source = string.Empty;
@@ -584,13 +613,13 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableManaged(currencyTypeId, allowedStaticIds))
+            if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableManaged(currencyTypeId, allowedStaticIds, maxSellByEntityId))
             {
                 source = "flatManaged";
                 return allowedStaticIds.Count > 0;
             }
 
-            if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableAura(currencyTypeId, allowedStaticIds))
+            if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableAura(currencyTypeId, allowedStaticIds, maxSellByEntityId))
             {
                 source = "flatAura";
                 return allowedStaticIds.Count > 0;
@@ -599,7 +628,7 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableManaged(int currencyTypeId, HashSet<int> allowedStaticIds)
+        private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableManaged(int currencyTypeId, HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
         {
             if (allowedStaticIds == null || currencyTypeId <= 0)
             {
@@ -629,7 +658,7 @@ namespace HeartopiaMod
                     }
                 }
 
-                return this.TryAddPeriodCurrencyEntityIdsFromFlatTableObject(flatTable, currencyTypeId, allowedStaticIds);
+                return this.TryAddPeriodCurrencyEntityIdsFromFlatTableObject(flatTable, currencyTypeId, allowedStaticIds, maxSellByEntityId);
             }
             catch (Exception ex)
             {
@@ -638,7 +667,7 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableAura(int currencyTypeId, HashSet<int> allowedStaticIds)
+        private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableAura(int currencyTypeId, HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
         {
             if (allowedStaticIds == null || currencyTypeId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
             {
@@ -704,9 +733,10 @@ namespace HeartopiaMod
                     bool rowOk;
                     int rowCurrency;
                     int entityId;
+                    int rowMaxSell;
                     try
                     {
-                        rowOk = this.TryReadPeriodCurrencySaleRowAura(valueObj, out rowCurrency, out entityId);
+                        rowOk = this.TryReadPeriodCurrencySaleRowAura(valueObj, out rowCurrency, out entityId, out rowMaxSell);
                     }
                     finally
                     {
@@ -721,6 +751,10 @@ namespace HeartopiaMod
                     if (rowCurrency == currencyTypeId)
                     {
                         allowedStaticIds.Add(entityId);
+                        if (maxSellByEntityId != null && rowMaxSell >= 0)
+                        {
+                            maxSellByEntityId[entityId] = rowMaxSell;
+                        }
                         foundAny = true;
                     }
                 }
@@ -733,10 +767,14 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryReadPeriodCurrencySaleRowAura(IntPtr rowObj, out int currency, out int entityId)
+        // maxSellCount: TablePeriodCurrencySale per-period sell cap (0 = unlimited); -1 when the
+        // row exposed neither the maxSellCount property nor the _maxSellCount backing byte
+        // (callers treat unknown as unlimited — today's pre-clamp behavior).
+        private bool TryReadPeriodCurrencySaleRowAura(IntPtr rowObj, out int currency, out int entityId, out int maxSellCount)
         {
             currency = 0;
             entityId = 0;
+            maxSellCount = -1;
             if (rowObj == IntPtr.Zero)
             {
                 return false;
@@ -757,10 +795,19 @@ namespace HeartopiaMod
                 currency = rawCurrency;
             }
 
+            // maxSellCount is a property (get_maxSellCount, int) backed by the byte _maxSellCount —
+            // same property-then-backing-field pattern as the _currency read above.
+            if (!this.TryGetMonoInt32Member(rowObj, "maxSellCount", out maxSellCount)
+                && !this.TryGetMonoIntMember(rowObj, "maxSellCount", out maxSellCount)
+                && !this.TryGetMonoInt32Member(rowObj, "_maxSellCount", out maxSellCount))
+            {
+                maxSellCount = -1;
+            }
+
             return entityId > 0;
         }
 
-        private bool TryAddPeriodCurrencyEntityIdsFromFlatTableObject(object flatTable, int currencyTypeId, HashSet<int> allowedStaticIds)
+        private bool TryAddPeriodCurrencyEntityIdsFromFlatTableObject(object flatTable, int currencyTypeId, HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
         {
             if (flatTable == null || allowedStaticIds == null || currencyTypeId <= 0)
             {
@@ -772,7 +819,7 @@ namespace HeartopiaMod
             {
                 foreach (DictionaryEntry entry in dictionary)
                 {
-                    if (!this.TryReadPeriodCurrencySaleRowManaged(entry.Value, out int rowCurrency, out int entityId))
+                    if (!this.TryReadPeriodCurrencySaleRowManaged(entry.Value, out int rowCurrency, out int entityId, out int rowMaxSell))
                     {
                         continue;
                     }
@@ -780,6 +827,10 @@ namespace HeartopiaMod
                     if (rowCurrency == currencyTypeId && entityId > 0)
                     {
                         allowedStaticIds.Add(entityId);
+                        if (maxSellByEntityId != null && rowMaxSell >= 0)
+                        {
+                            maxSellByEntityId[entityId] = rowMaxSell;
+                        }
                         foundAny = true;
                     }
                 }
@@ -791,7 +842,7 @@ namespace HeartopiaMod
             {
                 foreach (object row in enumerable)
                 {
-                    if (!this.TryReadPeriodCurrencySaleRowManaged(row, out int rowCurrency, out int entityId))
+                    if (!this.TryReadPeriodCurrencySaleRowManaged(row, out int rowCurrency, out int entityId, out int rowMaxSell))
                     {
                         continue;
                     }
@@ -799,6 +850,10 @@ namespace HeartopiaMod
                     if (rowCurrency == currencyTypeId && entityId > 0)
                     {
                         allowedStaticIds.Add(entityId);
+                        if (maxSellByEntityId != null && rowMaxSell >= 0)
+                        {
+                            maxSellByEntityId[entityId] = rowMaxSell;
+                        }
                         foundAny = true;
                     }
                 }
@@ -807,10 +862,12 @@ namespace HeartopiaMod
             return foundAny;
         }
 
-        private bool TryReadPeriodCurrencySaleRowManaged(object row, out int currency, out int entityId)
+        // maxSellCount: per-period sell cap (0 = unlimited); -1 when unreadable (treated unlimited).
+        private bool TryReadPeriodCurrencySaleRowManaged(object row, out int currency, out int entityId, out int maxSellCount)
         {
             currency = 0;
             entityId = 0;
+            maxSellCount = -1;
             if (row == null)
             {
                 return false;
@@ -826,10 +883,16 @@ namespace HeartopiaMod
                 this.TryReadObjectInt(row, "Currency", out currency);
             }
 
+            if (!this.TryReadObjectInt(row, "maxSellCount", out maxSellCount)
+                && !this.TryReadObjectInt(row, "_maxSellCount", out maxSellCount))
+            {
+                maxSellCount = -1;
+            }
+
             return entityId > 0;
         }
 
-        private bool TryGetAllowedPeriodCurrencyStaticIdsManaged(int currencyTypeId, out HashSet<int> allowedStaticIds)
+        private bool TryGetAllowedPeriodCurrencyStaticIdsManaged(int currencyTypeId, out HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
         {
             allowedStaticIds = new HashSet<int>();
             if (currencyTypeId <= 0)
@@ -881,6 +944,12 @@ namespace HeartopiaMod
                         if (entityId > 0)
                         {
                             allowedStaticIds.Add(entityId);
+                            if (maxSellByEntityId != null
+                                && this.TryReadPeriodCurrencySaleRowManaged(e.Value, out _, out _, out int rowMaxSell)
+                                && rowMaxSell >= 0)
+                            {
+                                maxSellByEntityId[entityId] = rowMaxSell;
+                            }
                         }
                     }
                     catch
@@ -896,7 +965,7 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetAllowedPeriodCurrencyStaticIdsAura(int currencyTypeId, out HashSet<int> allowedStaticIds)
+        private bool TryGetAllowedPeriodCurrencyStaticIdsAura(int currencyTypeId, out HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
         {
             allowedStaticIds = new HashSet<int>();
             if (currencyTypeId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
@@ -911,7 +980,7 @@ namespace HeartopiaMod
 
             try
             {
-                return this.TryCollectPeriodSaleEntityIdsFromAuraEntityMap(entityMapObj, allowedStaticIds) && allowedStaticIds.Count > 0;
+                return this.TryCollectPeriodSaleEntityIdsFromAuraEntityMap(entityMapObj, allowedStaticIds, maxSellByEntityId) && allowedStaticIds.Count > 0;
             }
             finally
             {
@@ -1177,7 +1246,9 @@ namespace HeartopiaMod
             return foundAny;
         }
 
-        private bool TryCollectPeriodSaleEntityIdsFromAuraEntityMap(IntPtr entityMapObj, HashSet<int> allowedStaticIds)
+        // maxSellByEntityId (optional): filled with entityId -> maxSellCount for every row whose
+        // cap could be read off the pinned row value (see TryExtractPeriodSaleEntityIdFromAuraValue).
+        private bool TryCollectPeriodSaleEntityIdsFromAuraEntityMap(IntPtr entityMapObj, HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId = null)
         {
             if (entityMapObj == IntPtr.Zero || allowedStaticIds == null)
             {
@@ -1210,9 +1281,10 @@ namespace HeartopiaMod
                         uint valuePin = AuraMonoPinNew(valueObj);
                         bool extracted;
                         int entityId;
+                        int rowMaxSell;
                         try
                         {
-                            extracted = this.TryExtractPeriodSaleEntityIdFromAuraValue(keyInt, valueObj, out entityId);
+                            extracted = this.TryExtractPeriodSaleEntityIdFromAuraValue(keyInt, valueObj, out entityId, out rowMaxSell);
                         }
                         finally
                         {
@@ -1222,6 +1294,10 @@ namespace HeartopiaMod
                         if (extracted)
                         {
                             allowedStaticIds.Add(entityId);
+                            if (maxSellByEntityId != null && rowMaxSell >= 0)
+                            {
+                                maxSellByEntityId[entityId] = rowMaxSell;
+                            }
                             foundAny = true;
                             continue;
                         }
@@ -1230,7 +1306,9 @@ namespace HeartopiaMod
                     int fallbackKey = 0;
                     if (this.TryGetMonoInt32Member(entryObj, "Key", out fallbackKey) || this.TryGetMonoIntMember(entryObj, "Key", out fallbackKey))
                     {
-                        if (this.TryExtractPeriodSaleEntityIdFromAuraValue(fallbackKey, IntPtr.Zero, out int fallbackEntityId))
+                        // Key-only fallback: no row object, so the cap stays unknown (absent from
+                        // the map = treated as unlimited by the split).
+                        if (this.TryExtractPeriodSaleEntityIdFromAuraValue(fallbackKey, IntPtr.Zero, out int fallbackEntityId, out _))
                         {
                             allowedStaticIds.Add(fallbackEntityId);
                             foundAny = true;
@@ -1246,14 +1324,25 @@ namespace HeartopiaMod
             return foundAny;
         }
 
-        private bool TryExtractPeriodSaleEntityIdFromAuraValue(int keyInt, IntPtr valueObj, out int entityId)
+        // maxSellCount: the row's per-period sell cap (0 = unlimited), -1 when unreadable or when
+        // there is no row object (key-only fallback). Caller must keep valueObj pinned across
+        // this call — every member read below allocates mono-side.
+        private bool TryExtractPeriodSaleEntityIdFromAuraValue(int keyInt, IntPtr valueObj, out int entityId, out int maxSellCount)
         {
             entityId = 0;
+            maxSellCount = -1;
             if (valueObj != IntPtr.Zero)
             {
                 if (!this.TryGetMonoInt32Member(valueObj, "entityId", out entityId))
                 {
                     this.TryGetMonoIntMember(valueObj, "entityId", out entityId);
+                }
+
+                if (!this.TryGetMonoInt32Member(valueObj, "maxSellCount", out maxSellCount)
+                    && !this.TryGetMonoIntMember(valueObj, "maxSellCount", out maxSellCount)
+                    && !this.TryGetMonoInt32Member(valueObj, "_maxSellCount", out maxSellCount))
+                {
+                    maxSellCount = -1;
                 }
 
                 if (entityId <= 0 && !this.TryGetMonoInt32Member(valueObj, "EntityId", out entityId))
@@ -1357,6 +1446,216 @@ namespace HeartopiaMod
             finally
             {
                 FreeAuraMonoPins(bucketPins);
+            }
+        }
+
+        // ---- Per-period sold counts (PeriodStallRecordComponent.SellRecord) ----
+        // Class/method pointers live for the image lifetime (same convention as the DailyClaims
+        // EcsService fields); the SERVICE INSTANCE pointer is re-fetched on every read and never
+        // cached across frames.
+        private IntPtr periodStallDataCenterClassPtr = IntPtr.Zero;
+        private IntPtr periodStallTryGetRecordMethodPtr = IntPtr.Zero;
+
+        // Live read of how many of each token-sellable entityId the player already sold this
+        // period, for one currency — the exact read the game's own BattlePassSellPanel.GetSlotData
+        // performs (ilspy-dumps/XDTGameUI/XDTGame.UI.Panel/BattlePassSellPanel.cs:226-260):
+        //   EcsService.TryGet<SellPeriodSellGameDataCenter> →
+        //   TryGetPeriodStallRecordComponent((NetworkEntityRef.RefId)self, currency, out hasValue)
+        //   → PeriodStallRecordComponent.SellRecord (Dictionary<int,int> entityId → sold).
+        // NetworkEntityRef.RefId is a readonly struct wrapping the raw uint netId (it has an
+        // implicit conversion FROM uint), so the self player netId passed byref IS the RefId —
+        // no EcsEntity/GetSelfEntity dance needed. The method returns
+        // `ref readonly PeriodStallRecordComponent`; this build's mono (mono-2.0-sgen.dll,
+        // dotnet/runtime 8.0 fork) dereferences byref returns inside the runtime-invoke wrapper
+        // and hands back a BOXED PeriodStallRecordComponent, so SellRecord is a plain field read
+        // off the pinned box. Fail-closed: any miss returns false and the split clamps assuming
+        // sold=0 (a valid first-sell clamp — strictly better than the old unclamped send).
+        private unsafe bool TryGetPeriodStallSoldCounts(int currencyTypeId, Dictionary<int, int> soldByEntityId, out string status)
+        {
+            status = "unavailable";
+            if (currencyTypeId <= 0 || soldByEntityId == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null || auraMonoObjectUnbox == null)
+                {
+                    status = "AuraMono API unavailable";
+                    return false;
+                }
+
+                if (this.periodStallDataCenterClassPtr == IntPtr.Zero)
+                {
+                    this.periodStallDataCenterClassPtr = this.FindAuraMonoClassByFullName(
+                        "Sazabi.Scene.XDT.Scene.Server.SceneGameLogic.Sell.PeriodSell.SellPeriodSellGameDataCenter");
+                    if (this.periodStallDataCenterClassPtr == IntPtr.Zero)
+                    {
+                        this.periodStallDataCenterClassPtr = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                            "Sazabi.Scene.XDT.Scene.Server.SceneGameLogic.Sell.PeriodSell",
+                            "SellPeriodSellGameDataCenter");
+                    }
+                }
+
+                if (this.periodStallDataCenterClassPtr == IntPtr.Zero)
+                {
+                    status = "SellPeriodSellGameDataCenter class unresolved";
+                    return false;
+                }
+
+                // Proven generic inflate: EcsService.TryGet<SellPeriodSellGameDataCenter>.
+                if (!this.TryDailyClaimsAuraMonoEcsTryGet(this.periodStallDataCenterClassPtr, false, out IntPtr serviceObj, out string tryGetStatus)
+                    || serviceObj == IntPtr.Zero)
+                {
+                    status = "EcsService.TryGet miss: " + tryGetStatus;
+                    return false;
+                }
+
+                if (!this.TryResolveSelfPlayerNetId(out uint selfPlayerNetId) || selfPlayerNetId == 0U)
+                {
+                    status = "self player netId unresolved";
+                    return false;
+                }
+
+                uint servicePin = AuraMonoPinNew(serviceObj);
+                try
+                {
+                    if (this.periodStallTryGetRecordMethodPtr == IntPtr.Zero)
+                    {
+                        IntPtr runtimeClass = auraMonoObjectGetClass(serviceObj);
+                        this.periodStallTryGetRecordMethodPtr = runtimeClass != IntPtr.Zero
+                            ? this.FindAuraMonoMethodOnHierarchy(runtimeClass, "TryGetPeriodStallRecordComponent", 3)
+                            : IntPtr.Zero;
+                    }
+
+                    if (this.periodStallTryGetRecordMethodPtr == IntPtr.Zero)
+                    {
+                        status = "TryGetPeriodStallRecordComponent method unresolved";
+                        return false;
+                    }
+
+                    // Signature: (in NetworkEntityRef.RefId player, int currencyId, out bool hasValue).
+                    // Byref args take a pointer to the value data: RefId = { uint _id } so &netId IS
+                    // the byref RefId; the out bool gets an 8-byte zeroed slot (mono writes 1 byte
+                    // through the pointer — narrower than a pointer, so no slot-corruption risk).
+                    uint refIdValue = selfPlayerNetId;
+                    int currencyArg = currencyTypeId;
+                    long hasValueSlot = 0L;
+                    IntPtr* invokeArgs = stackalloc IntPtr[3];
+                    invokeArgs[0] = (IntPtr)(&refIdValue);
+                    invokeArgs[1] = (IntPtr)(&currencyArg);
+                    invokeArgs[2] = (IntPtr)(&hasValueSlot);
+                    IntPtr exc = IntPtr.Zero;
+                    IntPtr boxedRecord = auraMonoRuntimeInvoke(this.periodStallTryGetRecordMethodPtr, serviceObj, (IntPtr)invokeArgs, ref exc);
+                    if (exc != IntPtr.Zero)
+                    {
+                        status = "TryGetPeriodStallRecordComponent raised an exception";
+                        return false;
+                    }
+
+                    if (*(byte*)&hasValueSlot == 0)
+                    {
+                        // No stall record component for this currency = nothing sold this period —
+                        // an authoritative EMPTY result, not a failure.
+                        status = "no record yet (sold=0)";
+                        return true;
+                    }
+
+                    if (boxedRecord == IntPtr.Zero)
+                    {
+                        status = "record invoke returned null";
+                        return false;
+                    }
+
+                    uint recordPin = AuraMonoPinNew(boxedRecord);
+                    try
+                    {
+                        if (!this.TryGetMonoObjectMember(boxedRecord, "SellRecord", out IntPtr sellRecordObj) || sellRecordObj == IntPtr.Zero)
+                        {
+                            // Component present but the dictionary is null — the game reads it with
+                            // `SellRecord?.TryGetValue(...)`, i.e. nothing sold yet.
+                            status = "SellRecord null (sold=0)";
+                            return true;
+                        }
+
+                        uint dictPin = AuraMonoPinNew(sellRecordObj);
+                        try
+                        {
+                            List<IntPtr> entries = new List<IntPtr>(32);
+                            List<uint> entryPins = new List<uint>(32);
+                            if (!this.TryEnumerateAuraMonoCollectionItems(sellRecordObj, entries, entryPins))
+                            {
+                                FreeAuraMonoPins(entryPins);
+                                status = "SellRecord enumeration failed";
+                                return false;
+                            }
+
+                            try
+                            {
+                                for (int i = 0; i < entries.Count; i++)
+                                {
+                                    IntPtr entryObj = entries[i];
+                                    if (entryObj == IntPtr.Zero)
+                                    {
+                                        continue;
+                                    }
+
+                                    if (!this.TryGetAuraMonoDictionaryEntryIntKey(entryObj, out int entityId, out IntPtr valueObj)
+                                        || entityId <= 0 || valueObj == IntPtr.Zero)
+                                    {
+                                        continue;
+                                    }
+
+                                    // The boxed int came out of the pinned entry box — pin it across
+                                    // the unbox read (pinning is not transitive).
+                                    uint valuePin = AuraMonoPinNew(valueObj);
+                                    try
+                                    {
+                                        IntPtr raw = auraMonoObjectUnbox(valueObj);
+                                        if (raw != IntPtr.Zero)
+                                        {
+                                            int soldCount = Marshal.ReadInt32(raw);
+                                            if (soldCount > 0)
+                                            {
+                                                soldByEntityId[entityId] = soldCount;
+                                            }
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        AuraMonoPinFree(valuePin);
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                FreeAuraMonoPins(entryPins);
+                            }
+
+                            status = "ok entries=" + soldByEntityId.Count;
+                            return true;
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(dictPin);
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(recordPin);
+                    }
+                }
+                finally
+                {
+                    AuraMonoPinFree(servicePin);
+                }
+            }
+            catch (Exception ex)
+            {
+                status = ex.GetType().Name + ": " + ex.Message;
+                return false;
             }
         }
 

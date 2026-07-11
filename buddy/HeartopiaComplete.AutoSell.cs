@@ -864,17 +864,23 @@ namespace HeartopiaMod
             }
 
             bool sent;
+            Dictionary<uint, int> optimisticSoldMap = sellItems;
             if (this.autoSellFestivalTokensEnabled && this.TryGetFestivalSellCurrencyId(out int festivalCurrencyId))
             {
                 Dictionary<uint, int> festivalItems = new Dictionary<uint, int>();
                 Dictionary<uint, int> coinItems = new Dictionary<uint, int>();
+                int festivalKeptByCap = 0;
                 string festivalCurrencyStatus = string.Empty;
                 try
                 {
-                    this.SplitSellItemsByPeriodCurrency(festivalCurrencyId, sellItems, out festivalItems, out coinItems, out festivalCurrencyStatus);
+                    this.SplitSellItemsByPeriodCurrency(festivalCurrencyId, sellItems, out festivalItems, out coinItems, out festivalKeptByCap, out festivalCurrencyStatus);
                 }
                 catch (Exception ex)
                 {
+                    // The split writes its out params progressively — discard any partial token
+                    // batch so a mid-split throw can't double-sell stacks (token + coin).
+                    festivalItems = new Dictionary<uint, int>();
+                    festivalKeptByCap = 0;
                     coinItems = new Dictionary<uint, int>(sellItems);
                     festivalCurrencyStatus = "split exception: " + ex.GetType().Name + ": " + ex.Message + " -> all coin";
                     this.AutoSellLogSellResult(festivalCurrencyStatus);
@@ -882,9 +888,33 @@ namespace HeartopiaMod
 
                 int festivalCount = this.SumAutoSellItemCounts(festivalItems);
                 int coinCount = this.SumAutoSellItemCounts(coinItems);
-                this.autoSellLastMatchSummary += "\nSell split: " + festivalItems.Count + " token stack(s), " + coinItems.Count + " coin stack(s)";
+                this.autoSellLastMatchSummary += "\nSell split: " + festivalItems.Count + " token stack(s), " + coinItems.Count + " coin stack(s)"
+                    + (festivalKeptByCap > 0 ? ", " + festivalKeptByCap + " kept (token cap)" : "");
                 ModLogger.Msg("[AutoSell] " + festivalCurrencyStatus);
-                this.AutoSellLogSellResult("Festival sell batch count=" + festivalItems.Count + " coin batch count=" + coinItems.Count);
+                this.AutoSellLogSellResult("Festival sell batch count=" + festivalItems.Count + " coin batch count=" + coinItems.Count
+                    + (festivalKeptByCap > 0 ? " keptByCap=" + festivalKeptByCap : ""));
+                if (festivalItems.Count == 0 && coinItems.Count == 0 && festivalKeptByCap > 0)
+                {
+                    // Everything matched is token-eligible but the per-period sell cap is already
+                    // used up — keeping the items in the bag is the intended outcome, not a send
+                    // failure (must not trip the auto-disable below).
+                    this.autoSellStatus = "Token cap reached - kept " + festivalKeptByCap + " item(s)";
+                    this.AutoSellLogSellResult("Festival sell skipped: token cap reached, kept=" + festivalKeptByCap + " item(s) in bag");
+                    if (!fromAuto)
+                    {
+                        this.AddMenuNotification("Auto Sell: token cap reached - kept " + festivalKeptByCap, new Color(1f, 0.85f, 0.35f));
+                    }
+                    return true;
+                }
+                // The optimistic UI removal must reflect the CLAMPED quantities, not the raw
+                // matched stacks — cap-kept items stay in the bag and in the list.
+                Dictionary<uint, int> clampedSoldMap = new Dictionary<uint, int>(coinItems);
+                foreach (KeyValuePair<uint, int> festivalEntry in festivalItems)
+                {
+                    clampedSoldMap[festivalEntry.Key] = festivalEntry.Value;
+                }
+                optimisticSoldMap = clampedSoldMap;
+                totalCount = festivalCount + coinCount;
                 bool sentFestival = festivalItems.Count == 0 || this.TryQuickSellItemsBatched(festivalItems, festivalCurrencyId);
                 bool sentCoins = coinItems.Count == 0 || this.TryQuickSellItemsBatched(coinItems, 0);
                 this.AutoSellLogSellResult("Festival sell result tokenOk=" + sentFestival + " coinOk=" + sentCoins);
@@ -898,6 +928,10 @@ namespace HeartopiaMod
                         : festivalCount > 0
                         ? ("Sell sent: " + festivalCount + " festival token item(s)")
                         : ("Sell sent: " + coinCount + " for coins");
+                    if (festivalKeptByCap > 0)
+                    {
+                        this.autoSellStatus += " - " + festivalKeptByCap + " kept (token cap)";
+                    }
                 }
                 else if (sentCoins && festivalItems.Count > 0)
                 {
@@ -932,7 +966,7 @@ namespace HeartopiaMod
             if (sent && !fromAuto)
             {
                 this.AddMenuNotification("Auto Sell: " + totalCount + " item(s)", new Color(0.45f, 1f, 0.55f));
-                this.FinalizeManualAutoSellSend(sellItems);
+                this.FinalizeManualAutoSellSend(optimisticSoldMap);
             }
             else if (!sent && !fromAuto)
             {
@@ -1810,10 +1844,18 @@ namespace HeartopiaMod
             return false;
         }
 
-        private void SplitSellItemsByPeriodCurrency(int currencyTypeId, Dictionary<uint, int> sellItems, out Dictionary<uint, int> festivalItems, out Dictionary<uint, int> coinItems, out string diagnostics)
+        // Logged once when the live sold-record read fails and the cap clamp falls back to sold=0.
+        private bool autoSellPeriodSoldFallbackLogged;
+
+        // keptByCapCount = items intentionally left in the bag because their per-period token sell
+        // cap (TablePeriodCurrencySale.maxSellCount) is (or would be) exhausted. They are NOT
+        // coin-sold: the server would otherwise cap/reject the over-limit part of
+        // PeriodSellNetworkCommand and the excess would silently stay unsold (birdphoto118 bug).
+        private void SplitSellItemsByPeriodCurrency(int currencyTypeId, Dictionary<uint, int> sellItems, out Dictionary<uint, int> festivalItems, out Dictionary<uint, int> coinItems, out int keptByCapCount, out string diagnostics)
         {
             festivalItems = new Dictionary<uint, int>();
             coinItems = new Dictionary<uint, int>();
+            keptByCapCount = 0;
             diagnostics = "festival split unavailable";
             if (sellItems == null || sellItems.Count == 0)
             {
@@ -1846,6 +1888,17 @@ namespace HeartopiaMod
                 allowedStaticIds = null;
             }
             bool useAllowlist = allowedStaticIds != null;
+
+            // Per-period sell caps captured by the same walk that built the allowlist. Sold-so-far
+            // is read live (once per sell, lazily on the first capped stack) off the game's own
+            // PeriodStallRecordComponent; on read failure clamp from sold=0 (valid for the first
+            // sell of a period, still strictly tighter than the old unclamped send).
+            this.TryGetPeriodCurrencyMaxSellCounts(currencyTypeId, out Dictionary<int, int> maxSellByEntityId);
+            Dictionary<int, int> soldByEntityId = null;
+            bool soldResolved = false;
+            bool soldReadOk = false;
+            Dictionary<int, int> remainingByEntityId = null;
+
             foreach (KeyValuePair<uint, int> kv in sellItems)
             {
                 if (kv.Key == 0U || kv.Value <= 0)
@@ -1854,18 +1907,73 @@ namespace HeartopiaMod
                 }
                 string descriptor = string.Empty;
                 this.autoSellLastSellDetailsByNetId?.TryGetValue(kv.Key, out descriptor);
-                this.ClassifyPeriodCurrencyStack(currencyTypeId, kv.Key, descriptor, allowedStaticIds, useAllowlist, out bool isFestival);
-                if (isFestival)
-                {
-                    festivalItems[kv.Key] = kv.Value;
-                }
-                else
+                this.ClassifyPeriodCurrencyStack(currencyTypeId, kv.Key, descriptor, allowedStaticIds, useAllowlist, out bool isFestival, out int matchedEntityId);
+                if (!isFestival)
                 {
                     coinItems[kv.Key] = kv.Value;
+                    continue;
                 }
+
+                int maxSellCount = 0;
+                if (matchedEntityId > 0 && maxSellByEntityId != null)
+                {
+                    maxSellByEntityId.TryGetValue(matchedEntityId, out maxSellCount);
+                }
+
+                if (maxSellCount <= 0)
+                {
+                    // maxSellCount == 0 (or unknown) = unlimited — sell the whole stack for tokens.
+                    festivalItems[kv.Key] = kv.Value;
+                    continue;
+                }
+
+                if (!soldResolved)
+                {
+                    soldResolved = true;
+                    soldByEntityId = new Dictionary<int, int>();
+                    soldReadOk = this.TryGetPeriodStallSoldCounts(currencyTypeId, soldByEntityId, out string soldStatus);
+                    if (!soldReadOk && !this.autoSellPeriodSoldFallbackLogged)
+                    {
+                        this.autoSellPeriodSoldFallbackLogged = true;
+                        this.AutoSellLogSellResult("token cap: sold-record read unavailable (" + soldStatus + ") - clamping caps from sold=0");
+                    }
+                }
+
+                int sold = 0;
+                if (soldReadOk && soldByEntityId != null)
+                {
+                    soldByEntityId.TryGetValue(matchedEntityId, out sold);
+                }
+
+                // Running remaining per entityId so several stacks that resolve to the SAME
+                // table entityId within this one sell can't jointly exceed the cap.
+                if (remainingByEntityId == null)
+                {
+                    remainingByEntityId = new Dictionary<int, int>();
+                }
+                if (!remainingByEntityId.TryGetValue(matchedEntityId, out int remaining))
+                {
+                    remaining = Math.Max(0, maxSellCount - Math.Max(0, sold));
+                }
+
+                int tokenQty = Math.Min(kv.Value, remaining);
+                remainingByEntityId[matchedEntityId] = remaining - tokenQty;
+                int kept = kv.Value - tokenQty;
+                keptByCapCount += kept;
+                if (tokenQty > 0)
+                {
+                    // PeriodSellNetworkCommand counts are per-stack quantities — a partial count
+                    // is exactly how the game itself clamps capped sells.
+                    festivalItems[kv.Key] = tokenQty;
+                }
+                // else: cap exhausted — keep the whole stack in the bag (no token, no coin).
+
+                this.AutoSellLogSellResult("token cap: entityId=" + matchedEntityId + " max=" + maxSellCount + " sold=" + sold
+                    + " remaining=" + remaining + " stack=" + kv.Value + " -> tokenQty=" + tokenQty + " kept=" + kept);
             }
             diagnostics = "currency=" + currencyTypeId + " " + tablePath
-                + " tokenStacks=" + festivalItems.Count + " coinStacks=" + coinItems.Count;
+                + " tokenStacks=" + festivalItems.Count + " coinStacks=" + coinItems.Count
+                + (keptByCapCount > 0 ? " keptByCap=" + keptByCapCount : "");
         }
 
         private int SumAutoSellItemCounts(Dictionary<uint, int> items)
