@@ -2962,6 +2962,15 @@ namespace HeartopiaMod
                 this.ClearBubbleTrackedMarkers();
             }
 
+            // Little Whale figurine finder (daily photo hide-and-seek, LittleWhaleFinderFeature.cs):
+            // one marker at the figurine position. Recreated each RunRadar pass like the resource
+            // markers, so the ESP beacon overlay and the game-map track sync pick it up for free.
+            if (this.littleWhaleFinderEnabled && this.littleWhalePresent)
+            {
+                this.CreateMarker(this.littleWhaleLastPos, "littlewhale", material, material2, null);
+            }
+
+
             // Match the older dedicated insect radar scan path from backup logic, but reuse the
             // shared throttled scene scan so low-spec machines do not pay for a second full walk.
             if (this.showInsectRadar && freshGOs != null)
@@ -3379,7 +3388,14 @@ namespace HeartopiaMod
                             }
                             else
                             {
-                                if (meshName == "otherplayermorph")
+                                if (meshName == "littlewhale")
+                                {
+                                    text2 = "Little Whale";
+                                    icon = "[w]";
+                                    endColor = new Color(1f, 0.65f, 0.85f);
+                                    bgColor = new Color(0.42f, 0.12f, 0.3f, 0.9f);
+                                }
+                                else if (meshName == "otherplayermorph")
                                 {
                                     text2 = "Morph";
                                     icon = "[M]";

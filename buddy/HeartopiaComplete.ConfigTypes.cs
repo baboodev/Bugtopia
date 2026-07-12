@@ -104,6 +104,8 @@ namespace HeartopiaMod
             // "Hide Crystal Clear Banner" — suppress the sea-clean cleanliness-stage banner
             // (SeaCleanCleanBannerPanel). Default false = banner shows as vanilla.
             public bool hideSeaCleanBannerEnabled;
+            // Little Whale figurine finder (daily photo hide-and-seek, MapDynamicResource 300023-33).
+            public bool littleWhaleFinderEnabled;
             // Custom Swim Sprint (underwater dash SwimSprintConfig override). Duration 0/absent =
             // "use default 0.5s"; slider max (30) = Infinite. Cooldown 0 = instant re-dash.
             public bool swimSprintTweakEnabled;

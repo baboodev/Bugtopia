@@ -140,6 +140,7 @@ namespace HeartopiaMod
             data.seaCleanCleanNoDelay = this.seaCleanCleanNoDelay;
             data.autoCleanseCorruptedEnabled = this.autoCleanseCorruptedEnabled;
             data.hideSeaCleanBannerEnabled = this.hideSeaCleanBannerEnabled;
+            data.littleWhaleFinderEnabled = this.littleWhaleFinderEnabled;
             data.swimSprintTweakEnabled = this.swimSprintTweakEnabled;
             data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
             data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
@@ -322,6 +323,7 @@ namespace HeartopiaMod
             this.seaCleanCleanNoDelay = data.seaCleanCleanNoDelay;
             this.autoCleanseCorruptedEnabled = data.autoCleanseCorruptedEnabled;
             this.hideSeaCleanBannerEnabled = data.hideSeaCleanBannerEnabled;
+            this.littleWhaleFinderEnabled = data.littleWhaleFinderEnabled;
             this.swimSprintTweakEnabled = data.swimSprintTweakEnabled;
             this.swimSprintDurationSeconds = data.swimSprintDurationSeconds <= 0f
                 ? SwimSprintDurationDefault

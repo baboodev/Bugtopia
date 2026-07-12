@@ -951,6 +951,50 @@ namespace HeartopiaMod
             }
             y += 36f;
 
+            // Little Whale figurine finder (daily photo hide-and-seek; LittleWhaleFinderFeature.cs).
+            bool prevLittleWhale = this.littleWhaleFinderEnabled;
+            this.littleWhaleFinderEnabled = this.DrawSwitchToggle(new Rect(left, y, 360f, 30f), this.littleWhaleFinderEnabled, "Little Whale Finder");
+            if (this.littleWhaleFinderEnabled != prevLittleWhale)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            y += 36f;
+
+            if (this.littleWhaleFinderEnabled)
+            {
+                string figurineStatus;
+                if (this.littleWhalePresent)
+                {
+                    Camera figCam = Camera.main;
+                    float figDist = figCam != null ? Vector3.Distance(figCam.transform.position, this.littleWhaleLastPos) : -1f;
+                    int styleNo = this.littleWhaleActiveConfigId - LittleWhaleConfigIdFirst + 1;
+                    figurineStatus = figDist >= 0f
+                        ? this.LF("Figurine located (style {0}) — {1}m away", styleNo, (int)figDist)
+                        : this.LF("Figurine located (style {0})", styleNo);
+                }
+                else
+                {
+                    figurineStatus = this.L("Figurine not found — take the daily task and enter the canyon");
+                }
+                GUI.Label(new Rect(left, y, 500f, 22f), figurineStatus, bodyStyle);
+                y += 26f;
+
+                if (this.littleWhalePresent)
+                {
+                    if (this.DrawPrimaryActionButton(new Rect(left, y, 240f, 30f), this.L("TELEPORT TO FIGURINE")))
+                    {
+                        this.StartLittleWhaleTeleport();
+                    }
+
+                    if (this.DrawPrimaryActionButton(new Rect(left + 250f, y, 200f, 30f),
+                        this.littleWhaleMapPinActive ? this.L("UNPIN FROM MAP") : this.L("SHOW ON MAP")))
+                    {
+                        this.ToggleLittleWhaleMapPin();
+                    }
+                }
+                y += this.littleWhalePresent ? 36f : 4f;
+            }
+
             // Aura Farm companion: park at a cleansing coral while the Corrupted debuff (610) is
             // active (CorruptionCleanseFeature.cs). Only acts while Auto Farm runs with the
             // Contamination radar category on.
@@ -1001,7 +1045,7 @@ namespace HeartopiaMod
 
         private float CalculateSeaCleanQteTabHeight()
         {
-            return 536f;
+            return 640f;
         }
 
         // ---- Radar: "Contaminated places" (sea-clean pollutants) -------------------------------
