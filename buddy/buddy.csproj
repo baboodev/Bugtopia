@@ -321,6 +321,7 @@
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="SandSculptureFeature.cs" />
     <Compile Include="SeaCleanQteFeature.cs" />
+    <Compile Include="SeaCleanBannerHideFeature.cs" />
     <Compile Include="CorruptionCleanseFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
     <Compile Include="BubbleSpawnRewriteFeature.cs" />

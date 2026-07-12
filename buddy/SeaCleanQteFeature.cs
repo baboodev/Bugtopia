@@ -941,6 +941,16 @@ namespace HeartopiaMod
             }
             y += 36f;
 
+            // Suppress the game's "Crystal Clear" / cleanliness-stage banner (SeaCleanCleanBannerPanel)
+            // so it stops covering the screen during auto-cleaning (SeaCleanBannerHideFeature.cs).
+            bool prevHideBanner = this.hideSeaCleanBannerEnabled;
+            this.hideSeaCleanBannerEnabled = this.DrawSwitchToggle(new Rect(left, y, 360f, 30f), this.hideSeaCleanBannerEnabled, "Hide Crystal Clear Banner");
+            if (this.hideSeaCleanBannerEnabled != prevHideBanner)
+            {
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            y += 36f;
+
             // Aura Farm companion: park at a cleansing coral while the Corrupted debuff (610) is
             // active (CorruptionCleanseFeature.cs). Only acts while Auto Farm runs with the
             // Contamination radar category on.
@@ -991,7 +1001,7 @@ namespace HeartopiaMod
 
         private float CalculateSeaCleanQteTabHeight()
         {
-            return 500f;
+            return 536f;
         }
 
         // ---- Radar: "Contaminated places" (sea-clean pollutants) -------------------------------

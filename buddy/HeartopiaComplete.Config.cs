@@ -139,6 +139,7 @@ namespace HeartopiaMod
             data.seaCleanAutoRadius = this.seaCleanAutoRadius;
             data.seaCleanCleanNoDelay = this.seaCleanCleanNoDelay;
             data.autoCleanseCorruptedEnabled = this.autoCleanseCorruptedEnabled;
+            data.hideSeaCleanBannerEnabled = this.hideSeaCleanBannerEnabled;
             data.swimSprintTweakEnabled = this.swimSprintTweakEnabled;
             data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
             data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
@@ -320,6 +321,7 @@ namespace HeartopiaMod
                 : Mathf.Clamp(data.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
             this.seaCleanCleanNoDelay = data.seaCleanCleanNoDelay;
             this.autoCleanseCorruptedEnabled = data.autoCleanseCorruptedEnabled;
+            this.hideSeaCleanBannerEnabled = data.hideSeaCleanBannerEnabled;
             this.swimSprintTweakEnabled = data.swimSprintTweakEnabled;
             this.swimSprintDurationSeconds = data.swimSprintDurationSeconds <= 0f
                 ? SwimSprintDurationDefault
