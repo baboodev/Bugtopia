@@ -42,7 +42,34 @@ namespace HeartopiaMod
         private const byte MapTrackReasonLocal = 1;
         // Match a tracked marker to a live collectable entity within this XZ distance (m).
         private const float MapResMatchRadiusSqr = 9f;
+        // Tight identification radius (1.5m XZ, squared) for COOLDOWN decisions — see TryMatchCollectable.
+        private const float MapResCooldownMatchSqr = 2.25f;
         private const float MapResScanInterval = 2f;
+
+        // Deterministic icon pins for radar labels whose produce is FIXED by design tables. The
+        // position-match (TryMatchCollectable, 3m XZ) can hit a NEIGHBORING entity of another type
+        // (berry bushes cluster with stick bushes, fruit trees with plain trees) — the wrong produce
+        // then resolved (sticks 40001 for "Blueberry", timber 40002 for "Apple Tree") AND poisoned
+        // mapTrackLabelIcon[label] for every far marker of that type until relog. These labels don't
+        // need a live match to know their icon (RandomDrop, cn_tables): Timber 40002 / Rare 40004,
+        // Apple 40101, Mandarin 40201, Blueberry 40501, Raspberry 40502, Stone 40021, Ore 40022.
+        // Labels with VARIED produce (Meteor tiers 40034-36, mushrooms, greens, underwater) keep the
+        // live resolve chain. 0 = not pinned.
+        private static int GetPinnedMapIconItemId(string label)
+        {
+            switch (label)
+            {
+                case "Tree": return 40002;          // Timber
+                case "Rare Tree": return 40004;     // Rare Timber (the headline tier)
+                case "Apple Tree": return 40101;    // Apple
+                case "Mandarin Tree": return 40201; // Mandarin
+                case "Blueberry": return 40501;
+                case "Raspberry": return 40502;
+                case "Stone": return 40021;
+                case "Ore": return 40022;
+                default: return 0;
+            }
+        }
         // Synthetic StaticId with no TableMapElement -> TrackingItem falls back to "gametask_icon_002".
         private const int MapTrackSyntheticStaticId = 900000000;
         // "Contaminated" (sea-clean pollutant) map icon: pin it to the decadopecten seashell entity (Shell
@@ -630,14 +657,36 @@ namespace HeartopiaMod
                 else if (type == MapTrackTypeNavigationPoint
                     && !string.Equals(cand.Label, "Bubble", StringComparison.Ordinal))
                 {
-                    bool didMatch = this.TryMatchCollectable(cand.Position, out int resStaticId, out int resProduceId, out bool resOnCooldown);
-                    if (didMatch && resOnCooldown)
+                    bool didMatch = this.TryMatchCollectable(cand.Position, out int resStaticId, out int resProduceId, out bool resOnCooldown, out float resMatchSqr);
+                    if (didMatch && resOnCooldown && resMatchSqr <= MapResCooldownMatchSqr)
                     {
-                        // Authoritative: this resource is depleted (on cooldown) -> no marker, even if the
-                        // radar's own (local) cooldown tracking thinks it's still active.
+                        // Authoritative: this marker's OWN entity is depleted (on cooldown) -> no marker,
+                        // even if the radar's local cooldown tracking thinks it's still active. The tight
+                        // radius is IDENTIFICATION (1.5m XZ, like TryGetLiveNodeColdState) — with the
+                        // loose 3m icon radius a cold NEIGHBOR bush hid ready berry markers indefinitely
+                        // in dense fields. A loose-only match still resolves the ICON below, it just
+                        // can't hide the marker.
                         continue;
                     }
-                    if (didMatch)
+                    int pinnedIconId = GetPinnedMapIconItemId(cand.Label);
+                    if (pinnedIconId > 0)
+                    {
+                        // Fixed-produce label: the icon is known from the tables — never derive it from
+                        // the position-matched entity (a 3m neighbor of another type would poison it and
+                        // the label cache; see GetPinnedMapIconItemId). The cooldown drop above still
+                        // uses the live match. Same optimistic atlas gate as produceInAtlas below.
+                        type = (this.mapAtlasIdSet.Count == 0 || this.mapAtlasIdSet.Contains(pinnedIconId))
+                            ? MapTrackTypeMapResource
+                            : MapTrackTypeFurniture;
+                        staticId = pinnedIconId;
+                        matched++;
+                        if (!string.IsNullOrEmpty(cand.Label) && this.mapTrackResolveDiag.Add(cand.Label + "|pinned"))
+                        {
+                            ModLogger.Msg("[MapSpots] resolve '" + cand.Label + "' via=pinned itemId=" + pinnedIconId
+                                + " type=" + (type == MapTrackTypeMapResource ? "MapResource" : "Furniture"));
+                        }
+                    }
+                    else if (didMatch)
                     {
                         // Resolve the collectable-atlas icon id. Priority:
                         //  1) produce drop-item id WITH a collectable sprite (materials: timber/stone/fruit).
@@ -1395,11 +1444,16 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryMatchCollectable(Vector3 pos, out int staticId, out int produceId, out bool onCooldown)
+        // matchSqr = XZ distance^2 of the winning entity. Callers deciding COOLDOWN (hide the
+        // marker) must require identification-tight proximity (<= MapResCooldownMatchSqr): with the
+        // loose 3m icon radius a COLD NEIGHBOR in a dense berry field would win the match and hide
+        // a ready bush's marker indefinitely.
+        private bool TryMatchCollectable(Vector3 pos, out int staticId, out int produceId, out bool onCooldown, out float matchSqr)
         {
             staticId = 0;
             produceId = 0;
             onCooldown = false;
+            matchSqr = float.MaxValue;
             float bestSqr = MapResMatchRadiusSqr;
             bool found = false;
             for (int i = 0; i < this.mapResEntities.Count; i++)
@@ -1410,6 +1464,7 @@ namespace HeartopiaMod
                 if (sqr < bestSqr)
                 {
                     bestSqr = sqr;
+                    matchSqr = sqr;
                     staticId = this.mapResEntities[i].StaticId;
                     produceId = this.mapResEntities[i].ProduceId;
                     onCooldown = this.mapResEntities[i].OnCooldown;

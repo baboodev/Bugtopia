@@ -649,7 +649,12 @@ namespace HeartopiaMod
             }
         }
 
-        private void ApplyLiveResourceCooldownByPosition(Vector3 entityPosition, long coldEndTimeMs, int availableNum, string resTypeName, long nowUnixMs, float nowUnscaled)
+        // endAuthoritative: coldEndTimeMs is a REAL server end (entity read / CollectColdEvent) and
+        // may correct an existing stamp in BOTH directions. False = synthetic placeholder (the
+        // rolling 30s SyncLiveResourceColdStates emits when the entity's end is unreadable) — it
+        // may only bump a stamp UP, never shorten one (it used to stomp the 125-300s visit stamps
+        // down to 30s, re-exposing depleted nodes to the farm rotation within seconds).
+        private void ApplyLiveResourceCooldownByPosition(Vector3 entityPosition, long coldEndTimeMs, int availableNum, string resTypeName, long nowUnixMs, float nowUnscaled, bool endAuthoritative = true)
         {
             bool isOnCooldown = coldEndTimeMs > nowUnixMs;
             bool isTreeType = resTypeName.IndexOf("Tree", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -704,7 +709,17 @@ namespace HeartopiaMod
             if (isOnCooldown)
             {
                 float secondsRemaining = Math.Max(0f, (float)(coldEndTimeMs - nowUnixMs) / 1000f);
-                targetCooldowns[targetIndex] = nowUnscaled + secondsRemaining;
+                float newUntil = nowUnscaled + secondsRemaining;
+                // A real server end overwrites unconditionally (corrects wrong long stamps DOWN so
+                // a ripe-again node re-enters the rotation on time); a synthetic placeholder end
+                // only bumps UP (never shortens the 125-300s visit stamps to its rolling 30s).
+                float existingUntil;
+                if (endAuthoritative
+                    || !targetCooldowns.TryGetValue(targetIndex, out existingUntil)
+                    || existingUntil < newUntil)
+                {
+                    targetCooldowns[targetIndex] = newUntil;
+                }
                 if (targetHideUntil != null)
                 {
                     targetHideUntil[targetIndex] = nowUnscaled + 10f;
@@ -712,8 +727,18 @@ namespace HeartopiaMod
             }
             else if (availableNum != 0)
             {
+                // Mid-drain flip-flop protection ONLY: a multi-charge bush reads WARM between its
+                // ~2.5s charge ticks while the aura drains it, so the send-time stamp of the node
+                // being worked must survive those reads. The old unscoped guard kept ANY active
+                // bush stamp against ANY warm read — a respawned (ready) bush whose slot kept
+                // getting refreshed by nearby collect activity then stayed hidden on the radar
+                // long after it was collectable. Everywhere else live-warm wins: clear the stamp.
                 float localUntil;
-                if (isBushType && targetCooldowns.TryGetValue(targetIndex, out localUntil) && localUntil > nowUnscaled)
+                if (isBushType
+                    && this.autoFarmActive
+                    && this.farmState == HeartopiaComplete.AutoFarmState.Collecting
+                    && Vector3.Distance(entityPosition, this.lastNodePosition) < 3f
+                    && targetCooldowns.TryGetValue(targetIndex, out localUntil) && localUntil > nowUnscaled)
                 {
                     return;
                 }
@@ -899,7 +924,7 @@ namespace HeartopiaMod
                         bool flag3 = this.autoFarmTimer >= 5f;
                         if (flag3)
                         {
-                            this.recentlyVisitedNodes[this.lastNodePosition] = Time.unscaledTime + 15f;
+                            this.recentlyVisitedNodes[this.lastNodePosition] = Time.unscaledTime + FarmVisitedRetryStampSeconds;
                             this.FinishCollectingCycle();
                         }
                         else
@@ -907,7 +932,7 @@ namespace HeartopiaMod
                             bool flag4 = this.autoFarmTimer >= 3f;
                             if (flag4)
                             {
-                                this.recentlyVisitedNodes[this.lastNodePosition] = Time.unscaledTime + 15f;
+                                this.recentlyVisitedNodes[this.lastNodePosition] = Time.unscaledTime + FarmVisitedRetryStampSeconds;
                                 this.FinishCollectingCycle();
                             }
                             else
@@ -1250,6 +1275,42 @@ namespace HeartopiaMod
         private float foragingTeleportDelaySeconds = 0f;
         private float lastFarmTeleportAt = -999f;
 
+        // Visited-node stamp durations. A node PROVEN cold is blocked for its REAL remaining
+        // cooldown when a server end time is known (CollectColdEvent.endUnixTimeMs for the node we
+        // just drained, or the live scan's coldEndTime) — cooldowns differ per resource
+        // (MapResourceProduce totalData: trees/bushes 120s, stones/ore 300s, rare tree & daily
+        // rocks/meteors 86400s), so no single constant fits. When the node is proven cold but no
+        // end time is readable, fall back to the common 120s; ambiguous outcomes (timeout with no
+        // cooldown evidence — usually world streaming) keep the short retry stamp so a slow-loading
+        // node isn't lost for minutes. The old flat 15s expired faster than a 2-3-dead-node loop
+        // takes, so the farm circled the same depleted trees/bushes indefinitely.
+        private const float FarmVisitedRetryStampSeconds = 15f;
+        private const float FarmVisitedColdStampFallbackSeconds = 120f;
+        // Upper bound for the visited stamp: recentlyVisitedNodes is a BACKSTOP (the label cooldown
+        // dicts carry the authoritative long ends for daily resources), and unlike them it is only
+        // ever corrected by TIME — cap it so a bad end-time read can't silently park a node for
+        // hours. The live warm-purge in SyncLiveResourceColdStates clears it earlier anyway.
+        private const float FarmVisitedColdStampMaxSeconds = 600f;
+
+        // Real cooldown end (unix ms) of the node being collected, captured from the drain-end
+        // CollectColdEvent (endMs > now). 0 = unknown (event-forage families drain with endMs=0).
+        private long auraCollectNodeColdEndMs;
+
+        // Remaining-cooldown stamp: real end + 2s grace when known, else the 120s fallback. Clamped
+        // to [retry, 10min]: long (daily) cooldowns are carried by the label cooldown dicts (which
+        // live corrections CAN shorten); this per-position backstop stays bounded so a bad end-time
+        // read can't park a node for hours (see FarmVisitedColdStampMaxSeconds).
+        private float GetVisitedColdStampSeconds(long coldEndUnixMs)
+        {
+            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (coldEndUnixMs > nowUnixMs)
+            {
+                return Mathf.Clamp((float)((coldEndUnixMs - nowUnixMs) / 1000.0) + 2f,
+                    FarmVisitedRetryStampSeconds, FarmVisitedColdStampMaxSeconds);
+            }
+            return FarmVisitedColdStampFallbackSeconds;
+        }
+
         // Every Aura Farm hop goes through this wrapper so the throttle clock is stamped uniformly;
         // IsFarmTeleportThrottled() below paces the teleport-initiating states off it.
         private void FarmTeleportTo(Vector3 position)
@@ -1442,6 +1503,7 @@ namespace HeartopiaMod
             this.auraCollectWaitArmed = armed;
             this.auraCollectNodeOwnerNetId = 0U;
             this.auraCollectNodeResourceNetId = 0U;
+            this.auraCollectNodeColdEndMs = 0L;
             this.auraCollectNodeEntitySeen = false;
             this.auraCollectNodeConfirmedAt = -1f;
             this.auraNextCollectNodeProbeAt = 0f;
@@ -1574,6 +1636,11 @@ namespace HeartopiaMod
             }
 
             this.auraCollectNodeConfirmedAt = Time.unscaledTime;
+            if (endMs > nowUnixMs)
+            {
+                // Real server cooldown end for OUR node — the visited stamp uses it verbatim.
+                this.auraCollectNodeColdEndMs = endMs;
+            }
             this.AutoFarmLog($"Aura collect confirmed by CollectColdEvent (netId={resourceNetId}, endMs={endMs})");
 
             // Stamp the REAL cooldown onto the node position so the radar/ESP marker flips on
@@ -1796,7 +1863,15 @@ namespace HeartopiaMod
 
             // Authoritative live state of THIS node (tight XZ identification, scan must postdate
             // arrival). The scan arbitrates the event heuristics both ways below.
-            bool liveNodeFound = this.TryGetLiveNodeColdState(this.lastNodePosition, now - this.autoFarmTimer, out bool liveNodeCold);
+            bool liveNodeFound = this.TryGetLiveNodeColdState(this.lastNodePosition, now - this.autoFarmTimer, out bool liveNodeCold, out long liveNodeColdEndMs);
+
+            // Best-known real cooldown end for the visited stamp: our own drain event's endMs wins
+            // (freshest, always ours), else the live entity's coldEndTime; 0 => 120s fallback.
+            long knownColdEndMs = this.auraCollectNodeColdEndMs;
+            if (knownColdEndMs <= 0L && liveNodeFound && liveNodeCold)
+            {
+                knownColdEndMs = liveNodeColdEndMs;
+            }
 
             // Scan-driven confirm: we made progress here and the node's entity flipped cold —
             // collected, even if the event binding missed it (partial event streams).
@@ -1830,7 +1905,8 @@ namespace HeartopiaMod
                     if (now - hopAnchor >= 1f || now - this.auraCollectNodeConfirmedAt >= 3f)
                     {
                         this.AutoFarmLog($"Aura collect done after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (bagRefresh={(this.auraCollectLastBackpackAt >= 0f ? "yes" : "none")})");
-                        this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                        // We just drained it — block for its real remaining cooldown.
+                        this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
                         this.FinishCollectingCycle();
                         return;
                     }
@@ -1861,7 +1937,8 @@ namespace HeartopiaMod
                 && liveNodeCold)
             {
                 this.AutoFarmLog($"Aura node is live-cold (mono scan) after {this.autoFarmTimer:F1}s at {this.lastNodePosition} -> skipping");
-                this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                // Proven server cooldown — block for its real remaining window.
+                this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
                 this.FinishCollectingCycle();
                 return;
             }
@@ -1877,7 +1954,8 @@ namespace HeartopiaMod
                 if (markerFound && markerOnCooldown)
                 {
                     this.AutoFarmLog($"Aura collect confirmed (marker cooldown) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
-                    this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                    // Marker shows [CD] — proven cooldown, block for its known/fallback window.
+                    this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
                     this.FinishCollectingCycle();
                     return;
                 }
@@ -1889,7 +1967,8 @@ namespace HeartopiaMod
                 if (!markerFound && this.autoCollectClickedSinceArrival && this.auraCollectNodeOwnerNetId != 0U)
                 {
                     this.AutoFarmLog($"Aura collect confirmed (marker gone) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
-                    this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                    // Collected (stamped nodes hide their marker) — real/fallback cooldown, not 15s.
+                    this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
                     this.FinishCollectingCycle();
                     return;
                 }
@@ -1900,7 +1979,10 @@ namespace HeartopiaMod
             {
                 string markerState = markerFound ? (markerOnCooldown ? "cooldown" : "available") : "none";
                 this.AutoFarmLog($"Aura collect wait timed out after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker={markerState}, label={(string.IsNullOrEmpty(nodeMarkerLabel) ? "<none>" : nodeMarkerLabel)}, clicked={this.autoCollectClickedSinceArrival})");
-                this.recentlyVisitedNodes[this.lastNodePosition] = now + 15f;
+                // Cooldown evidence at timeout => real/fallback block; otherwise short retry (streaming lag).
+                bool timedOutCold = (markerFound && markerOnCooldown) || (liveNodeFound && liveNodeCold);
+                this.recentlyVisitedNodes[this.lastNodePosition] = now
+                    + (timedOutCold ? this.GetVisitedColdStampSeconds(knownColdEndMs) : FarmVisitedRetryStampSeconds);
                 this.FinishCollectingCycle();
                 return;
             }
@@ -1992,14 +2074,16 @@ namespace HeartopiaMod
             }
 
             long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            List<Vector3> warmVisitedPurge = null;
             for (int i = 0; i < this.liveCollectableColds.Count; i++)
             {
                 LiveCollectableCold entry = this.liveCollectableColds[i];
+                bool endReadable = entry.ColdEndMs > nowUnixMs;
                 long endMs;
                 if (entry.OnCooldown)
                 {
                     // Real end time when readable; otherwise a rolling 30s re-confirmed each scan.
-                    endMs = entry.ColdEndMs > nowUnixMs ? entry.ColdEndMs : nowUnixMs + 30000L;
+                    endMs = endReadable ? entry.ColdEndMs : nowUnixMs + 30000L;
                 }
                 else
                 {
@@ -2008,10 +2092,37 @@ namespace HeartopiaMod
 
                 try
                 {
-                    this.ApplyLiveResourceCooldownByPosition(entry.Position, endMs, entry.OnCooldown ? 0 : 1, string.Empty, nowUnixMs, now);
+                    this.ApplyLiveResourceCooldownByPosition(entry.Position, endMs, entry.OnCooldown ? 0 : 1, string.Empty, nowUnixMs, now, endReadable);
                 }
                 catch
                 {
+                }
+
+                // Live truth beats any stamp: a node the scan sees WARM (collectable right now) must
+                // not stay parked in recentlyVisitedNodes — a wrong/stale visited stamp there is
+                // corrected by nothing else (it only expires by time), and while nearby nodes sit
+                // wrongly blocked FindClosestAvailableNode returns null and the farm wanders the
+                // area-waypoint rotation ("jumps between empty loading spots"). The node currently
+                // being worked (3m of lastNodePosition) is exempt: right after our drain the server
+                // flip lags a beat and a warm read would purge the fresh stamp -> bounce-back.
+                if (!entry.OnCooldown && this.recentlyVisitedNodes.Count > 0
+                    && Vector3.Distance(entry.Position, this.lastNodePosition) > 3f)
+                {
+                    foreach (Vector3 visited in this.recentlyVisitedNodes.Keys)
+                    {
+                        if (Vector3.Distance(entry.Position, visited) < 2f)
+                        {
+                            (warmVisitedPurge ??= new List<Vector3>()).Add(visited);
+                        }
+                    }
+                }
+            }
+
+            if (warmVisitedPurge != null)
+            {
+                for (int i = 0; i < warmVisitedPurge.Count; i++)
+                {
+                    this.recentlyVisitedNodes.Remove(warmVisitedPurge[i]);
                 }
             }
         }
@@ -2024,7 +2135,15 @@ namespace HeartopiaMod
         // warm node — false skips).
         private bool TryGetLiveNodeColdState(Vector3 nodePosition, float minScanCompletedAt, out bool onCooldown)
         {
+            return this.TryGetLiveNodeColdState(nodePosition, minScanCompletedAt, out onCooldown, out _);
+        }
+
+        // coldEndUnixMs = the entity's real coldEndTime (unix ms) when on cooldown; 0 when warm or
+        // unreadable (some families never set it — callers fall back to the 120s stamp).
+        private bool TryGetLiveNodeColdState(Vector3 nodePosition, float minScanCompletedAt, out bool onCooldown, out long coldEndUnixMs)
+        {
             onCooldown = false;
+            coldEndUnixMs = 0L;
             if (this.liveCollectableScanCompletedAt < minScanCompletedAt)
             {
                 return false;
@@ -2044,6 +2163,7 @@ namespace HeartopiaMod
                 bestSqr = sqr;
                 found = true;
                 onCooldown = this.liveCollectableColds[i].OnCooldown;
+                coldEndUnixMs = this.liveCollectableColds[i].ColdEndMs;
             }
 
             return found;
