@@ -290,6 +290,223 @@ namespace HeartopiaMod
             public float DistanceSqr;
             public byte TrackType;
             public string Label;
+            // >0: species ITEM id (insect item / birdphoto card) — the game-map track switches to
+            // Furniture with this staticId so the big map shows the actual species picture.
+            public int SpeciesItemId;
+        }
+
+        // Bird staticId (Bird table / entity id) -> birdphoto ITEM id (the photo card whose
+        // NormalItem icon is the species picture). Joined offline from cn tables on the shared
+        // prefab suffix (p_bird_birdNNN <-> p_birdphoto_birdphotoNNN): 135/136 birds mapped
+        // (only special id 2001 has no photo card). Insects need no map — the insect entity
+        // staticId IS its bag-item id (Insect table id == Bagitem id, icons ui_item_normal_
+        // p_insect_insectNNN).
+        private static readonly Dictionary<int, int> BirdIdToPhotoItemId = new Dictionary<int, int>
+        {
+            { 61101, 69201 }, { 61102, 69202 }, { 61103, 69203 }, { 61104, 69209 }, { 61105, 69210 }, { 61106, 69219 },
+            { 61107, 69220 }, { 61108, 69221 }, { 61109, 69211 }, { 61110, 69222 }, { 61111, 69223 }, { 61112, 69224 },
+            { 61113, 69212 }, { 61114, 69225 }, { 61115, 69226 }, { 61116, 69213 }, { 61117, 69227 }, { 61118, 69228 },
+            { 61119, 69241 }, { 61120, 69242 }, { 61121, 69243 }, { 61122, 69244 }, { 61124, 69259 }, { 61125, 69260 },
+            { 61126, 69257 }, { 61127, 69267 }, { 61128, 69268 }, { 61129, 69269 }, { 61130, 69270 }, { 61131, 69271 },
+            { 61132, 69272 }, { 61133, 69273 }, { 61134, 69274 }, { 61135, 69281 }, { 61136, 69291 }, { 61137, 69292 },
+            { 61138, 69310 }, { 61139, 69311 }, { 61140, 69312 }, { 61141, 69313 }, { 61142, 69332 }, { 61143, 69333 },
+            { 61144, 69334 }, { 61145, 69335 }, { 61146, 69336 }, { 61201, 69207 }, { 61202, 69218 }, { 61203, 69245 },
+            { 61204, 69231 }, { 61205, 69232 }, { 61206, 69233 }, { 61207, 69246 }, { 61208, 69247 }, { 61209, 69248 },
+            { 61210, 69261 }, { 61211, 69256 }, { 61212, 69288 }, { 61213, 69289 }, { 61214, 69290 }, { 61215, 69293 },
+            { 61216, 69300 }, { 61217, 69301 }, { 61218, 69302 }, { 61219, 69303 }, { 61220, 69304 }, { 61221, 69305 },
+            { 61222, 69306 }, { 61223, 69307 }, { 61224, 69308 }, { 61225, 69309 }, { 61226, 69314 }, { 61227, 69327 },
+            { 61228, 69328 }, { 61229, 69329 }, { 61230, 69330 }, { 61231, 69331 }, { 61301, 69206 }, { 61302, 69217 },
+            { 61303, 69240 }, { 61304, 69258 }, { 61305, 69280 }, { 61306, 69294 }, { 61307, 69318 }, { 61308, 69319 },
+            { 61309, 69320 }, { 61310, 69321 }, { 61311, 69322 }, { 61401, 69204 }, { 61402, 69214 }, { 61403, 69249 },
+            { 61404, 69250 }, { 61405, 69251 }, { 61406, 69252 }, { 61407, 69262 }, { 61408, 69255 }, { 61409, 69275 },
+            { 61410, 69276 }, { 61411, 69277 }, { 61412, 69278 }, { 61501, 69205 }, { 61502, 69215 }, { 61503, 69229 },
+            { 61504, 69216 }, { 61505, 69263 }, { 61506, 69264 }, { 61507, 69337 }, { 61508, 69338 }, { 61509, 69339 },
+            { 61510, 69340 }, { 61511, 69341 }, { 61512, 69342 }, { 61701, 69234 }, { 61702, 69235 }, { 61703, 69236 },
+            { 61704, 69265 }, { 61705, 69282 }, { 61706, 69285 }, { 61707, 69286 }, { 61708, 69287 }, { 61709, 69315 },
+            { 61710, 69316 }, { 61711, 69323 }, { 61712, 69324 }, { 61713, 69325 }, { 61714, 69326 }, { 61801, 69238 },
+            { 61802, 69239 }, { 61803, 69253 }, { 61804, 69279 }, { 61901, 69208 }, { 61902, 69254 }, { 61903, 69266 },
+            { 61904, 69317 }, { 63002, 69283 }, { 63003, 69284 },
+        };
+
+        // Bird PREFAB-suffix (the trailing number of p_bird_birdNNN / p_birdphoto_birdphotoNNN —
+        // both share the same NNN) -> birdphoto ITEM id. Joined offline from the Birdphoto table
+        // (137 rows, collision-free). This is the PRIMARY bird resolve: it needs only the tracked
+        // GameObject's name (or the ESP's already-resolved sprite key) — zero Mono calls — while
+        // the staticId path above depends on BirdFarm aura helpers that idle when the farm is off.
+        // NOTE: suffixes are SHUFFLED vs bird staticIds (61119 -> bird120), never derive numerically.
+        private static readonly Dictionary<int, int> BirdSuffixToPhotoItemId = new Dictionary<int, int>
+        {
+            { 1, 69298 }, { 2, 69299 }, { 101, 69201 }, { 102, 69202 }, { 103, 69203 }, { 104, 69209 }, { 105, 69210 }, { 106, 69219 },
+            { 107, 69220 }, { 108, 69221 }, { 109, 69211 }, { 110, 69222 }, { 111, 69223 }, { 112, 69224 }, { 113, 69212 }, { 114, 69225 },
+            { 115, 69226 }, { 116, 69213 }, { 117, 69227 }, { 118, 69228 }, { 119, 69283 }, { 120, 69241 }, { 121, 69242 }, { 122, 69243 },
+            { 123, 69244 }, { 124, 69260 }, { 125, 69259 }, { 126, 69257 }, { 127, 69292 }, { 128, 69291 }, { 129, 69267 }, { 130, 69268 },
+            { 131, 69269 }, { 132, 69270 }, { 133, 69271 }, { 134, 69272 }, { 135, 69273 }, { 136, 69274 }, { 141, 69332 }, { 142, 69333 },
+            { 143, 69334 }, { 144, 69335 }, { 145, 69336 }, { 201, 69207 }, { 202, 69218 }, { 204, 69231 }, { 205, 69232 }, { 206, 69233 },
+            { 207, 69248 }, { 208, 69246 }, { 209, 69245 }, { 210, 69247 }, { 211, 69261 }, { 212, 69256 }, { 218, 69314 }, { 219, 69293 },
+            { 222, 69310 }, { 223, 69311 }, { 224, 69312 }, { 225, 69313 }, { 226, 69288 }, { 227, 69289 }, { 228, 69290 }, { 229, 69305 },
+            { 230, 69306 }, { 231, 69307 }, { 232, 69308 }, { 233, 69309 }, { 234, 69327 }, { 235, 69328 }, { 236, 69329 }, { 237, 69330 },
+            { 238, 69331 }, { 301, 69206 }, { 302, 69217 }, { 303, 69240 }, { 304, 69258 }, { 309, 69280 }, { 310, 69294 }, { 311, 69322 },
+            { 401, 69204 }, { 402, 69214 }, { 403, 69249 }, { 404, 69250 }, { 406, 69251 }, { 407, 69252 }, { 408, 69262 }, { 409, 69255 },
+            { 410, 69275 }, { 411, 69276 }, { 412, 69277 }, { 413, 69278 }, { 414, 69323 }, { 415, 69324 }, { 416, 69325 }, { 417, 69326 },
+            { 501, 69205 }, { 502, 69215 }, { 503, 69229 }, { 504, 69216 }, { 505, 69263 }, { 506, 69264 }, { 507, 69282 }, { 510, 69337 },
+            { 511, 69338 }, { 701, 69234 }, { 702, 69235 }, { 703, 69236 }, { 704, 69265 }, { 705, 69341 }, { 706, 69342 }, { 801, 69238 },
+            { 802, 69239 }, { 803, 69253 }, { 804, 69279 }, { 901, 69208 }, { 902, 69266 }, { 903, 69254 }, { 904, 69317 }, { 1102, 69281 },
+            { 1501, 69318 }, { 1502, 69319 }, { 1503, 69320 }, { 1504, 69321 }, { 1601, 69284 }, { 1701, 69315 }, { 1702, 69316 }, { 1703, 69285 },
+            { 1704, 69286 }, { 1705, 69287 }, { 1801, 69300 }, { 1802, 69301 }, { 1803, 69302 }, { 1804, 69303 }, { 1805, 69304 }, { 1901, 69339 },
+            { 1902, 69340 },
+        };
+
+        // Insect PREFAB-suffix (trailing number of p_insect_insectNNN) -> insect ITEM id (== entity
+        // staticId). Joined offline from the Insect table (145 wild-catchable prefabs, collision-
+        // free; the remaining table rows are variants without insectNNN prefabs). Suffixes are
+        // SHUFFLED vs ids here too (insect113 -> 51117, insect119 -> 51113) — never derive
+        // numerically. PRIMARY insect resolve (no Mono calls); the live-entity path is the fallback.
+        private static readonly Dictionary<int, int> InsectSuffixToItemId = new Dictionary<int, int>
+        {
+            { 101, 51101 }, { 102, 51102 }, { 103, 51103 }, { 104, 51104 }, { 105, 51105 }, { 106, 51106 }, { 107, 51107 }, { 108, 51108 },
+            { 109, 51109 }, { 111, 51111 }, { 112, 51112 }, { 113, 51117 }, { 114, 51114 }, { 115, 51115 }, { 116, 51116 }, { 117, 51119 },
+            { 118, 51118 }, { 119, 51113 }, { 120, 51120 }, { 121, 51121 }, { 122, 51122 }, { 123, 51123 }, { 124, 51124 }, { 125, 51125 },
+            { 126, 51126 }, { 132, 51922 }, { 133, 51925 }, { 134, 51127 }, { 135, 51128 }, { 136, 51129 }, { 142, 51130 }, { 143, 51131 },
+            { 146, 51930 }, { 147, 51929 }, { 148, 51928 }, { 149, 51132 }, { 150, 51133 }, { 151, 51134 }, { 152, 51135 }, { 153, 51136 },
+            { 154, 51137 }, { 155, 51138 }, { 156, 51139 }, { 201, 51201 }, { 202, 51202 }, { 203, 51203 }, { 204, 51204 }, { 205, 51205 },
+            { 206, 51206 }, { 207, 51207 }, { 208, 51208 }, { 209, 51209 }, { 210, 51210 }, { 211, 51216 }, { 213, 51213 }, { 214, 51214 },
+            { 215, 51211 }, { 216, 51220 }, { 217, 51217 }, { 218, 51218 }, { 219, 51219 }, { 220, 51212 }, { 221, 51215 }, { 222, 51221 },
+            { 223, 51911 }, { 224, 51923 }, { 225, 51927 }, { 226, 51232 }, { 227, 51233 }, { 301, 51301 }, { 302, 51302 }, { 303, 51303 },
+            { 304, 51304 }, { 305, 51305 }, { 306, 51306 }, { 307, 51912 }, { 308, 51307 }, { 401, 51401 }, { 402, 51402 }, { 403, 51403 },
+            { 404, 51404 }, { 405, 51405 }, { 406, 51406 }, { 407, 51407 }, { 408, 51408 }, { 409, 51924 }, { 501, 51501 }, { 502, 51502 },
+            { 503, 51504 }, { 504, 51505 }, { 505, 51506 }, { 506, 51507 }, { 508, 51503 }, { 511, 51921 }, { 517, 51508 }, { 519, 51308 },
+            { 520, 51309 }, { 521, 51310 }, { 522, 51311 }, { 523, 51312 }, { 601, 51601 }, { 602, 51602 }, { 603, 51603 }, { 606, 51604 },
+            { 701, 51701 }, { 702, 51702 }, { 703, 51703 }, { 704, 51704 }, { 705, 51913 }, { 801, 51801 }, { 802, 51914 }, { 901, 51901 },
+            { 902, 51902 }, { 903, 51903 }, { 904, 51904 }, { 905, 51905 }, { 906, 51906 }, { 1001, 51926 }, { 1005, 51936 }, { 1101, 51705 },
+            { 1301, 51409 }, { 1302, 51410 }, { 1303, 51411 }, { 1304, 51412 }, { 1401, 51413 }, { 1501, 51222 }, { 1502, 51223 }, { 1503, 51224 },
+            { 1504, 51225 }, { 1505, 51226 }, { 1601, 51231 }, { 1602, 51227 }, { 1603, 51228 }, { 1604, 51229 }, { 1605, 51230 }, { 1701, 51935 },
+            { 1702, 51934 }, { 1703, 51931 }, { 1704, 51933 }, { 1705, 51932 }, { 1801, 51706 }, { 1802, 51707 }, { 1803, 51710 }, { 1804, 51708 },
+            { 1805, 51709 },
+        };
+
+        // Trailing number of a bird prefab/sprite name ("p_bird_bird101(clone)" -> 101). 0 = none.
+        private static int GetTrailingNumber(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return 0;
+            }
+
+            int end = name.Length;
+            while (end > 0 && !char.IsDigit(name[end - 1]))
+            {
+                end--;
+            }
+            int start = end;
+            while (start > 0 && char.IsDigit(name[start - 1]))
+            {
+                start--;
+            }
+            if (end <= start)
+            {
+                return 0;
+            }
+            int value;
+            return int.TryParse(name.Substring(start, end - start), out value) ? value : 0;
+        }
+
+        // Species ITEM id for a Bird/Insect radar marker (game-map icon). Resolved once per marker
+        // (metadata persists — tracked markers), retried every 5s while the target's entity is
+        // still streaming in. Insects: the entity staticId IS the item id. Birds: entity staticId
+        // -> BirdIdToPhotoItemId (the photo card). All resolves are the SAME helpers the ESP
+        // species icons already use; failures leave 0 => the native category icon stays.
+        private int GetMapSpeciesItemIdForMarker(GameObject markerGo, RadarMarkerMetadata metadata, string label)
+        {
+            if (metadata == null)
+            {
+                return 0;
+            }
+            if (metadata.MapSpeciesItemId > 0)
+            {
+                return metadata.MapSpeciesItemId;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < metadata.MapSpeciesNextResolveAt)
+            {
+                return 0;
+            }
+            metadata.MapSpeciesNextResolveAt = now + 5f;
+
+            try
+            {
+                GameObject target = null;
+                this.TryGetRadarMarkerTrackedTarget(markerGo, out target);
+
+                int itemId = 0;
+                if (string.Equals(label, "Bird", StringComparison.Ordinal))
+                {
+                    // PRIMARY: prefab-suffix from the tracked GO name / the ESP's resolved sprite
+                    // key — no Mono calls, works with Auto Bird Farm off. FALLBACK: staticId via
+                    // the BirdFarm aura helpers.
+                    int suffix = target != null ? GetTrailingNumber(target.name) : 0;
+                    if (suffix <= 0)
+                    {
+                        suffix = GetTrailingNumber(metadata.SpecificIconKey);
+                    }
+                    if (suffix > 0)
+                    {
+                        BirdSuffixToPhotoItemId.TryGetValue(suffix, out itemId);
+                    }
+
+                    if (itemId <= 0 && target != null)
+                    {
+                        int birdId = 0;
+                        if (!this.TryResolveBirdStaticIdFromGameObject(target, out birdId, out _) || birdId <= 0)
+                        {
+                            if (this.TryResolveBirdNetId(target, out uint birdNetId, out _) && birdNetId != 0U)
+                            {
+                                birdId = this.TryGetEntityStaticId(birdNetId);
+                            }
+                        }
+
+                        if (birdId > 0 && BirdIdToPhotoItemId.TryGetValue(birdId, out int photoItemId))
+                        {
+                            itemId = photoItemId;
+                        }
+                    }
+                }
+                else if (string.Equals(label, "Insect", StringComparison.Ordinal))
+                {
+                    // PRIMARY: prefab-suffix from the tracked GO name / the ESP sprite key via the
+                    // baked (shuffle-aware) InsectSuffixToItemId. FALLBACK: live entity resolve
+                    // (entity staticId == bag-item id).
+                    int suffix = target != null ? GetTrailingNumber(target.name) : 0;
+                    if (suffix <= 0)
+                    {
+                        suffix = GetTrailingNumber(metadata.SpecificIconKey);
+                    }
+                    if (suffix > 0)
+                    {
+                        InsectSuffixToItemId.TryGetValue(suffix, out itemId);
+                    }
+
+                    if (itemId <= 0 && target != null
+                        && this.TryResolveInsectNetId(target, out uint insectNetId, out _) && insectNetId != 0U)
+                    {
+                        int staticId = this.TryGetEntityStaticId(insectNetId);
+                        if (staticId > 0)
+                        {
+                            itemId = staticId;
+                        }
+                    }
+                }
+
+                if (itemId > 0)
+                {
+                    metadata.MapSpeciesItemId = itemId;
+                }
+                return itemId;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static byte GetMapTrackTypeForLabel(string label)
@@ -584,6 +801,13 @@ namespace HeartopiaMod
 
                 ulong token = MapTrackTokenTag | (uint)this.GetGameMapSpotUsageId(child.gameObject, label, pos);
                 byte trackType = GetMapTrackTypeForLabel(label);
+                // Bird/Insect: resolve the species ITEM id (cached per marker) so the map sync can
+                // swap the generic category pin for the species picture.
+                int speciesItemId = 0;
+                if (string.Equals(label, "Bird", StringComparison.Ordinal) || string.Equals(label, "Insect", StringComparison.Ordinal))
+                {
+                    speciesItemId = this.GetMapSpeciesItemIdForMarker(child.gameObject, metadata, label);
+                }
                 bool replaced = false;
                 for (int c = 0; c < this.mapTrackCandidates.Count; c++)
                 {
@@ -591,7 +815,7 @@ namespace HeartopiaMod
                     {
                         if (distSqr < this.mapTrackCandidates[c].DistanceSqr)
                         {
-                            this.mapTrackCandidates[c] = new MapTrackCandidate { Token = token, Position = pos, DistanceSqr = distSqr, TrackType = trackType, Label = label };
+                            this.mapTrackCandidates[c] = new MapTrackCandidate { Token = token, Position = pos, DistanceSqr = distSqr, TrackType = trackType, Label = label, SpeciesItemId = speciesItemId };
                         }
                         replaced = true;
                         break;
@@ -599,7 +823,7 @@ namespace HeartopiaMod
                 }
                 if (!replaced)
                 {
-                    this.mapTrackCandidates.Add(new MapTrackCandidate { Token = token, Position = pos, DistanceSqr = distSqr, TrackType = trackType, Label = label });
+                    this.mapTrackCandidates.Add(new MapTrackCandidate { Token = token, Position = pos, DistanceSqr = distSqr, TrackType = trackType, Label = label, SpeciesItemId = speciesItemId });
                 }
             }
 
@@ -649,7 +873,17 @@ namespace HeartopiaMod
                 // position-matching it stole a neighboring wakame's icon. Pin it to the decadopecten seashell
                 // item (Furniture track -> NormalItem, same seashell as the ESP overlay) BEFORE the match
                 // block so it never falls into the collectable position-match.
-                if (string.Equals(cand.Label, "Contaminated", StringComparison.Ordinal))
+                if ((string.Equals(cand.Label, "Bird", StringComparison.Ordinal)
+                        || string.Equals(cand.Label, "Insect", StringComparison.Ordinal))
+                    && cand.SpeciesItemId > 0)
+                {
+                    // Species picture on the big map: Furniture track with the species ITEM id
+                    // (insect item / birdphoto card) instead of the game's generic category pin.
+                    // Unresolved species (entity still streaming) keep the native icon.
+                    type = MapTrackTypeFurniture;
+                    staticId = cand.SpeciesItemId;
+                }
+                else if (string.Equals(cand.Label, "Contaminated", StringComparison.Ordinal))
                 {
                     type = MapTrackTypeFurniture;
                     staticId = ContaminatedMapIconStaticId;

@@ -2995,8 +2995,10 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    string insectNameLower = insectObject.name.ToLowerInvariant();
-                    if (!this.ShouldTrackInsectObject(insectNameLower))
+                    // GameObject overload = name match + the display/aquarium exclusion
+                    // (IsDisplayInsectObject: vivarium components + aquarium/terrarium/decor
+                    // hierarchy). The old string overload tracked showcase insects too.
+                    if (!this.ShouldTrackInsectObject(insectObject))
                     {
                         continue;
                     }
@@ -4229,6 +4231,11 @@ namespace HeartopiaMod
             public bool IsCooldown;
             public Texture2D ResourceVisualEspIconTexture;
             public float ResourceVisualEspNextIconResolveAt;
+            // Species ITEM id for the game-map track (bird -> birdphoto item, insect -> its own
+            // item id). 0 = unresolved (retried on MapSpeciesNextResolveAt); >0 = resolved once
+            // per marker (bird/insect markers are tracked, so the metadata persists).
+            public int MapSpeciesItemId;
+            public float MapSpeciesNextResolveAt;
         }
 
     }

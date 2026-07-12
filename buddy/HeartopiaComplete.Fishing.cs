@@ -4096,6 +4096,13 @@ namespace HeartopiaMod
                 "fish tank",
                 "fishtank",
                 "aquarium",
+                "fishbowl",
+                "vivarium",
+                // Sea Micro Home eco-aquarium (2026-07-09 update): its fish carry the same runtime
+                // fish components as wild shadows, so only the hierarchy names exclude them.
+                "seamicro",
+                "microhome",
+                "micro_home",
                 "homeitem",
                 "home_item",
                 "houseitem",
@@ -4128,7 +4135,10 @@ namespace HeartopiaMod
                 if (currentName.Contains("tank")
                     || currentName.Contains("fishtank")
                     || currentName.Contains("aquarium")
-                    || currentName.Contains("fishbowl"))
+                    || currentName.Contains("fishbowl")
+                    || currentName.Contains("vivarium")
+                    || currentName.Contains("seamicro")
+                    || currentName.Contains("microhome"))
                 {
                     return false;
                 }
