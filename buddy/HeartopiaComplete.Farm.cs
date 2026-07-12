@@ -1260,6 +1260,9 @@ namespace HeartopiaMod
         // instead of the aura pick wait. All cross-frame state below is scalars — no
         // coroutines, no raw mono pointers held across frames.
         private bool autoFarmTargetIsContamination = false;
+        // Bubble targets get their own dwell completion: the aura cannot collect bubbles (touch /
+        // AutoBubbleCollect territory), so no aura confirmation ever fires for them.
+        private bool autoFarmTargetIsBubble = false;
         private int contaminationZeroPassCount = 0;
         private int contaminationKillsThisNode = 0;
         private float contaminationLastConsumedPassAt = 0f;
@@ -1336,6 +1339,7 @@ namespace HeartopiaMod
         private void ResetContaminationDwellState()
         {
             this.autoFarmTargetIsContamination = false;
+            this.autoFarmTargetIsBubble = false;
             this.contaminationZeroPassCount = 0;
             this.contaminationKillsThisNode = 0;
             this.contaminationLastConsumedPassAt = Time.unscaledTime;
@@ -1354,6 +1358,7 @@ namespace HeartopiaMod
             this.ResetContaminationDwellState();
             bool contamination = string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal);
             this.autoFarmTargetIsContamination = contamination;
+            this.autoFarmTargetIsBubble = string.Equals(nodeLabel, "Bubble", StringComparison.Ordinal);
             if (contamination)
             {
                 // Ignore sweep passes completed before (or immediately after) arrival — the
@@ -1843,6 +1848,33 @@ namespace HeartopiaMod
             string nodeMarkerLabel;
             bool markerOnCooldown = this.TryGetNodeMarkerState(this.lastNodePosition, out markerFound, out nodeMarkerLabel);
 
+            // Bubble targets: the aura cannot collect bubbles (they pop by touch / AutoBubbleCollect),
+            // so none of the aura confirmations below ever fire and the dwell burned the whole
+            // Collect Wait Max per bubble (30s each, user report 2026-07-12). A bubble is done when
+            // its tracked marker despawns (popped/collected — or drifted >2.5m, in which case it can
+            // be re-targeted at its new spot); and if the marker still stands after a few seconds,
+            // standing longer will not pop it — hop with the short retry stamp.
+            if (this.autoFarmTargetIsBubble)
+            {
+                if (this.autoFarmTimer >= 1f && !markerFound)
+                {
+                    this.AutoFarmLog($"Bubble collected/despawned after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
+                    this.recentlyVisitedNodes[this.lastNodePosition] = now + FarmVisitedRetryStampSeconds;
+                    this.FinishCollectingCycle();
+                    return;
+                }
+
+                if (this.autoFarmTimer >= 6f)
+                {
+                    this.AutoFarmLog($"Bubble dwell capped after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker still present)");
+                    this.recentlyVisitedNodes[this.lastNodePosition] = now + FarmVisitedRetryStampSeconds;
+                    this.FinishCollectingCycle();
+                    return;
+                }
+
+                this.autoFarmStatus = "Collecting bubble...";
+                return;
+            }
 
             // Fast path: the node reported collected (CollectColdEvent / despawn / entity state).
             // No aura-quiet gate here: the aura keeps re-spamming every in-radius bush (the server
