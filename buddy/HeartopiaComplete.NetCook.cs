@@ -406,6 +406,9 @@ namespace HeartopiaMod
 
         private void StartNetCookInternal()
         {
+            // Trail marker: the occasional START-click native crash left only a bare
+            // AuraMono.enumerate tick — this pins the death inside the start pipeline.
+            Breadcrumbs.Tick("netcook.start");
             if (this.netCookStartCoroutine != null)
             {
                 this.netCookStatus = "Preparing mass cook after ingredient move...";
@@ -9543,9 +9546,15 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // Pinned walk: the per-entry member reads below (Value/netId/isActive/position)
+                // dereference live dictionary entries — unpinned they race the moving sgen GC
+                // (occasional native AV on START MASS COOK with breadcrumbs ending at
+                // AuraMono.enumerate).
                 List<IntPtr> entries = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries) || entries.Count <= 0)
+                List<uint> entryPins = new List<uint>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries, entryPins) || entries.Count <= 0)
                 {
+                    FreeAuraMonoPins(entryPins);
                     status = "AuraMono world scan found no dictionary entries.";
                     this.NetCookLog(status);
                     return false;
@@ -9555,6 +9564,8 @@ namespace HeartopiaMod
                 List<KeyValuePair<ulong, float>> nearbyCandidates = new List<KeyValuePair<ulong, float>>();
                 float maxScanDistance = Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
 
+                try
+                {
                 for (int i = 0; i < entries.Count; i++)
                 {
                     IntPtr entryObj = entries[i];
@@ -9610,6 +9621,11 @@ namespace HeartopiaMod
 
                     this.netCookAuraMonoLevelObjectPtrs[levelObjectNetId] = levelObjectObj.ToInt64();
                     nearbyCandidates.Add(new KeyValuePair<ulong, float>(levelObjectNetId, distance));
+                }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(entryPins);
                 }
 
                 if (nearbyCandidates.Count <= 0)
@@ -9911,37 +9927,50 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Pin the walked components: GetAllComponents returns a live ECS slot list and the
+            // per-candidate class-name reads below dereference each pointer — unpinned, a moving
+            // sgen pass mid-walk relocates them -> native AV with no crashlog (the occasional
+            // "crash on START MASS COOK"; breadcrumbs end at AuraMono.enumerate).
             List<IntPtr> components = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components) || components.Count <= 0)
+            List<uint> componentPins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components, componentPins) || components.Count <= 0)
             {
+                FreeAuraMonoPins(componentPins);
                 status = "AuraMono burner has no components.";
                 return false;
             }
 
-            for (int i = 0; i < components.Count && i < 128; i++)
+            try
             {
-                IntPtr candidate = components[i];
-                if (candidate == IntPtr.Zero)
+                for (int i = 0; i < components.Count && i < 128; i++)
                 {
-                    continue;
+                    IntPtr candidate = components[i];
+                    if (candidate == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(candidate));
+                    if (string.IsNullOrEmpty(className))
+                    {
+                        continue;
+                    }
+
+                    if (className.IndexOf("CookingComponent", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        componentObj = candidate;
+                        status = "AuraMono cooking component ready.";
+                        return true;
+                    }
                 }
 
-                string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(candidate));
-                if (string.IsNullOrEmpty(className))
-                {
-                    continue;
-                }
-
-                if (className.IndexOf("CookingComponent", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    componentObj = candidate;
-                    status = "AuraMono cooking component ready.";
-                    return true;
-                }
+                status = "AuraMono current target is not a cooking component.";
+                return false;
             }
-
-            status = "AuraMono current target is not a cooking component.";
-            return false;
+            finally
+            {
+                FreeAuraMonoPins(componentPins);
+            }
         }
 
         private bool TryResolveNetCookBuildComponentAuraMono(IntPtr entityObj, out IntPtr componentObj, out string status)
@@ -9959,37 +9988,47 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Pinned walk — see TryResolveNetCookCookingComponentAuraMono for the sgen rationale.
             List<IntPtr> components = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components) || components.Count <= 0)
+            List<uint> componentPins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components, componentPins) || components.Count <= 0)
             {
+                FreeAuraMonoPins(componentPins);
                 status = "AuraMono cook build has no components.";
                 return false;
             }
 
-            for (int i = 0; i < components.Count && i < 128; i++)
+            try
             {
-                IntPtr candidate = components[i];
-                if (candidate == IntPtr.Zero)
+                for (int i = 0; i < components.Count && i < 128; i++)
                 {
-                    continue;
+                    IntPtr candidate = components[i];
+                    if (candidate == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(candidate));
+                    if (string.IsNullOrEmpty(className))
+                    {
+                        continue;
+                    }
+
+                    if (className.IndexOf("CookBuildComponent", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        componentObj = candidate;
+                        status = "AuraMono cook build component ready.";
+                        return true;
+                    }
                 }
 
-                string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(candidate));
-                if (string.IsNullOrEmpty(className))
-                {
-                    continue;
-                }
-
-                if (className.IndexOf("CookBuildComponent", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    componentObj = candidate;
-                    status = "AuraMono cook build component ready.";
-                    return true;
-                }
+                status = "AuraMono owner is not a cook build.";
+                return false;
             }
-
-            status = "AuraMono owner is not a cook build.";
-            return false;
+            finally
+            {
+                FreeAuraMonoPins(componentPins);
+            }
         }
 
         private bool TryResolveNetCookWorldCookerDataManaged(uint cookerNetId, out int cookerStaticId, out string status)
@@ -10178,37 +10217,47 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Pinned walk — see TryResolveNetCookCookingComponentAuraMono for the sgen rationale.
             List<IntPtr> components = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components) || components.Count <= 0)
+            List<uint> componentPins = new List<uint>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(componentsObj, components, componentPins) || components.Count <= 0)
             {
+                FreeAuraMonoPins(componentPins);
                 status = "AuraMono owner entity has no components.";
                 return false;
             }
 
-            for (int i = 0; i < components.Count && i < 128; i++)
+            try
             {
-                IntPtr candidate = components[i];
-                if (candidate == IntPtr.Zero)
+                for (int i = 0; i < components.Count && i < 128; i++)
                 {
-                    continue;
+                    IntPtr candidate = components[i];
+                    if (candidate == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(candidate));
+                    if (string.IsNullOrEmpty(className))
+                    {
+                        continue;
+                    }
+
+                    if (className.IndexOf("WorldCookerComponent", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        componentObj = candidate;
+                        status = "AuraMono world cooker component ready.";
+                        return true;
+                    }
                 }
 
-                string className = this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(candidate));
-                if (string.IsNullOrEmpty(className))
-                {
-                    continue;
-                }
-
-                if (className.IndexOf("WorldCookerComponent", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    componentObj = candidate;
-                    status = "AuraMono world cooker component ready.";
-                    return true;
-                }
+                status = "AuraMono current target is not a world cooker.";
+                return false;
             }
-
-            status = "AuraMono current target is not a world cooker.";
-            return false;
+            finally
+            {
+                FreeAuraMonoPins(componentPins);
+            }
         }
 
         private bool TryGetNetCookScanOrigin(out Vector3 origin, out string status)
@@ -11675,12 +11724,18 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // Pinned walk: per-item netId/staticId/count reads dereference live backpack items —
+                // unpinned they race the moving sgen GC (see the component-walk fixes above).
                 List<IntPtr> warehouseItems = new List<IntPtr>(128);
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, warehouseItems))
+                List<uint> warehousePins = new List<uint>(128);
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, warehouseItems, warehousePins))
                 {
+                    FreeAuraMonoPins(warehousePins);
                     return true;
                 }
 
+                try
+                {
                 for (int i = 0; i < warehouseItems.Count; i++)
                 {
                     IntPtr itemObj = warehouseItems[i];
@@ -11723,6 +11778,15 @@ namespace HeartopiaMod
                     }
 
                     stacks.Add(new KeyValuePair<uint, int>(netId, count));
+                    if (starByNetId != null && this.TryGetDirectBackpackItemStarRate(itemObj, out int starRate))
+                    {
+                        starByNetId[netId] = starRate;
+                    }
+                }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(warehousePins);
                 }
 
                 return true;
@@ -11947,13 +12011,20 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // Pinned walk: this runs synchronously on the START MASS COOK click; the per-slot
+                // filled/netId reads dereference live MaterialSlot objects — unpinned they race the
+                // moving sgen GC (prime suspect for the occasional start-click native crash).
                 List<IntPtr> slotItems = new List<IntPtr>(16);
-                if (!this.TryEnumerateAuraMonoCollectionItems(slotsObj, slotItems) || slotItems.Count == 0)
+                List<uint> slotPins = new List<uint>(16);
+                if (!this.TryEnumerateAuraMonoCollectionItems(slotsObj, slotItems, slotPins) || slotItems.Count == 0)
                 {
+                    FreeAuraMonoPins(slotPins);
                     status = "AuraMono recipe slots unavailable.";
                     return false;
                 }
 
+                try
+                {
                 for (int i = 0; i < slotItems.Count; i++)
                 {
                     IntPtr slotObj = slotItems[i];
@@ -11976,6 +12047,11 @@ namespace HeartopiaMod
                     }
 
                     materials.Add(materialNetId);
+                }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(slotPins);
                 }
 
                 if (materials.Count == 0)
