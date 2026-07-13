@@ -567,6 +567,7 @@ namespace HeartopiaMod
                 try
                 {
                     uint confirmedNetId;
+                    bool confirmedAnyThisFrame = false;
                     while (host.TryConsumeRecentBirdFarmCapture(out confirmedNetId) && confirmedNetId != 0U)
                     {
                         if (_pendingConfirmNetIds.Contains(confirmedNetId))
@@ -577,12 +578,22 @@ namespace HeartopiaMod
                             {
                                 host.ConfirmRecentBirdFarmCapture(confirmedNetId);
                                 sessionCatchCount++;
+                                confirmedAnyThisFrame = true;
                                 TraceCrashBreadcrumb($"Confirmed capture netId={confirmedNetId} total={sessionCatchCount}");
                                 Log($"Confirmed bird capture netId={confirmedNetId} (+1 → total={sessionCatchCount})");
                             }
                             _pendingTimeoutStrikes.Remove(confirmedNetId);
                             _pendingConfirmNetIds.Remove(confirmedNetId);
                         }
+                    }
+
+                    // The bird scanner (toolId 4) wears per capture. Fast multi-catch outpaces the
+                    // game's HandHold durability event + the safety poll, so the tool can drain to 0
+                    // between checks and quietly stop working. Request a durability check on each catch
+                    // tick so auto-repair fires before the break (same fix as fast fishing).
+                    if (confirmedAnyThisFrame)
+                    {
+                        host.RequestDurabilityCheck();
                     }
 
                     // Expire the batch window after PendingConfirmTimeout seconds.

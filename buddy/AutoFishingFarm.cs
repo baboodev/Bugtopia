@@ -221,6 +221,7 @@ namespace HeartopiaMod
         public static int LastInRangeCount { get; private set; }
         // True while the engine is inside an active fishing session (cast/waiting/battle/hook).
         public static bool IsInFishingSession { get; private set; }
+        private static bool wasInFishingSession = false; // for the cast-cycle-end durability check edge
         // When Auto Bait last threw a bait/attractor (route restarts its no-fish window on this).
         public static float LastAutoBaitAt { get; private set; } = -999f;
         public static string GetLastStatus() => GetDisplayStatus(lastStatus);
@@ -616,6 +617,7 @@ namespace HeartopiaMod
             currentTargetPos = Vector3.zero;
             lastRequestedPressed = null;
             IsInFishingSession = false;
+            wasInFishingSession = false;
             LastScanAt = -999f;
             LastInRangeCount = 0;
             lastStatus = enabled ? "Enabled" : "Disabled";
@@ -941,7 +943,18 @@ namespace HeartopiaMod
                     lastTargetStatus = $"Stale bait netId={baitingFishNetId}; scanning for next shadow";
                 }
 
-                IsInFishingSession = hasFishingState && inFishingState;
+                bool inSessionNow = hasFishingState && inFishingState;
+                // Falling edge = a cast cycle just ended (catch OR срыв). The rod was just used, so
+                // check its durability NOW: with animations off + fast catches the game's HandHold
+                // durability event and the timed poll lag behind the wear, and the rod snaps between
+                // checks (cast then instantly fails). Direct kit throw (no idle slot) repairs mid-fishing.
+                if (wasInFishingSession && !inSessionNow)
+                {
+                    host.RequestDurabilityCheck();
+                }
+                wasInFishingSession = inSessionNow;
+
+                IsInFishingSession = inSessionNow;
                 if (hasFishingState && inFishingState)
                 {
                     if (sessionStartedAt <= 0f)
@@ -1605,6 +1618,7 @@ namespace HeartopiaMod
             currentTargetPos = Vector3.zero;
             lastRequestedPressed = null;
             IsInFishingSession = false;
+            wasInFishingSession = false;
             LastScanAt = -999f;
             LastInRangeCount = 0;
             lastStatus = "Disabled";

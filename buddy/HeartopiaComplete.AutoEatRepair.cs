@@ -2236,6 +2236,31 @@ namespace HeartopiaMod
             return this.AreHeavyFarmAutomationsActive() ? FarmActiveToolDurabilityPollInterval : ToolDurabilityPollInterval;
         }
 
+        // External request for an immediate tool-durability check (e.g. AutoFishingFarm on each
+        // cast-cycle end, BirdNetFarm on each catch tick). Same channel the HandHoldUpdatedEvent uses:
+        // the OnUpdate poll picks up the flag next frame and runs TryHandleLiveDurabilityAutoRepair once,
+        // bypassing the timed poll — so fast animation-skipped farming repairs the tool before it snaps.
+        // Throttled to ≤1/s: bird multi-catch can confirm captures every frame, and each honoured request
+        // forces a fresh AuraMono durability read — 1/s is ample for gradual wear. No-op unless
+        // auto-repair-on-toast is enabled.
+        private float nextRequestedDurabilityCheckAt = -999f;
+        public void RequestDurabilityCheck()
+        {
+            if (!this.autoRepairOnToastEnabled)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.nextRequestedDurabilityCheckAt)
+            {
+                return;
+            }
+
+            this.nextRequestedDurabilityCheckAt = now + 1f;
+            this.durabilityCheckRequestedByEvent = true;
+        }
+
         private bool TryHandleDurabilityAutoRepairTrigger(string source)
         {
             float now = Time.time;
