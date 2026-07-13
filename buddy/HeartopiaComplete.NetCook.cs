@@ -423,6 +423,17 @@ namespace HeartopiaMod
                 return;
             }
 
+            // With Permanent Stove Memory, every start rebuilds the target set from the registry.
+            // The Ensure* helpers only resolve when the list is EMPTY, so a leftover partial list
+            // (e.g. the last stove of a drained run, or a mid-run stop) silently shrank restarts
+            // to "cooking on 1 of 3 stoves". Clearing here forces the full remembered restore.
+            if (this.netCookRememberStoves && !this.netCookEnabled && this.netCookTargets.Count > 0)
+            {
+                this.NetCookDiagLog("start: clearing " + this.netCookTargets.Count
+                    + " leftover target(s) — rebuilding from remembered registry.");
+                this.netCookTargets.Clear();
+            }
+
             if (!this.HasNetCookContext() && !this.TryCaptureNetCookFromCurrentTarget())
             {
                 if (string.IsNullOrWhiteSpace(this.netCookStatus))
@@ -3461,7 +3472,7 @@ namespace HeartopiaMod
                 this.LogNetCookStatusCacheClear("capture-start", this.netCookStatusCache.Count);
                 this.netCookStatusCache.Clear();
                 this.netCookStatusByLevelObject.Clear();
-                bool resolvedTargets = this.TryResolveNetCookContextsFromCurrentTarget(this.netCookTargets, out string multiCaptureStatus, true);
+                bool resolvedTargets = this.TryResolveNetCookContextsFromCurrentTarget(this.netCookTargets, out string multiCaptureStatus, true, explicitCapture: true);
                 uint cookerNetId = 0U;
                 int cookerStaticId = 0;
                 int cookerType = 0;
@@ -6827,7 +6838,13 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryResolveNetCookContextsFromCurrentTarget(List<NetCookTargetContext> targets, out string status, bool deferOwnerWindowExpansion = false)
+        // explicitCapture: true only for the Capture Stoves button. The "Capture Radius" toggle and
+        // the final distance cull are CAPTURE-time semantics — a mass-cook (re)start resolving its
+        // targets must still restore the remembered set at any distance, otherwise a remote restart
+        // with Capture Radius on skipped the registry, range-culled everything and cooked on the one
+        // stale single-fallback stove (field log: "TARGET REMOVED out-of-range dist=12m max=3m" ×3
+        // right after "registered-cache skipped (Capture Radius only)").
+        private bool TryResolveNetCookContextsFromCurrentTarget(List<NetCookTargetContext> targets, out string status, bool deferOwnerWindowExpansion = false, bool explicitCapture = false)
         {
             status = "No cooker target found.";
             if (targets == null)
@@ -6843,7 +6860,8 @@ namespace HeartopiaMod
                 + " lastStatic=" + this.netCookLastCapturedCookerStaticId
                 + " radius=" + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m"
                 + " remember=" + this.netCookRememberStoves);
-            if (this.netCookCaptureRadiusOnly)
+            bool radiusOnly = this.netCookCaptureRadiusOnly && explicitCapture;
+            if (radiusOnly)
             {
                 this.NetCookDiagLog("capture: registered-cache skipped (Capture Radius only).");
             }
@@ -7067,14 +7085,14 @@ namespace HeartopiaMod
                 this.NetCookCaptureLog("Deferred owner-window expansion; using " + targets.Count + " seed cooker target(s) for initial capture.");
             }
 
-            int registeredWorldAdded = this.netCookCaptureRadiusOnly
+            int registeredWorldAdded = radiusOnly
                 ? 0
                 : this.TryAddRegisteredWorldCookerTargets(targets, seenTargets, seenCookerNetIds, desiredCookerStaticId, desiredCookerType);
             if (registeredWorldAdded > 0)
             {
                 this.NetCookCaptureLog("Added " + registeredWorldAdded + " registered world cooker target(s).");
             }
-            else if (!this.netCookCaptureRadiusOnly && this.netCookRegisteredWorldCookers.Count > 0)
+            else if (!radiusOnly && this.netCookRegisteredWorldCookers.Count > 0)
             {
                 // The event hook registered cookers but the synth expansion added none — the decisive
                 // clue for "player is next to a registered stove yet capture finds nothing".
@@ -7082,7 +7100,7 @@ namespace HeartopiaMod
                     + " registered (desiredStatic=" + desiredCookerStaticId + " desiredType=" + desiredCookerType + ")");
             }
 
-            int registeredAdded = this.netCookCaptureRadiusOnly
+            int registeredAdded = radiusOnly
                 ? 0
                 : this.TryAddRegisteredNetCookTargets(targets, seenTargets, seenCookerNetIds, desiredCookerStaticId, desiredCookerType);
             if (registeredAdded > 0)
@@ -7124,7 +7142,11 @@ namespace HeartopiaMod
                 this.NetCookCaptureLog("Filtered " + removedDifferentCooker + " incompatible cooker target(s); using cookerStaticId=" + desiredCookerStaticId + " cookerType=" + desiredCookerType + ".");
             }
 
-            int removedOutOfRange = this.RemoveOutOfRangeNetCookTargets(targets, seenTargets, seenCookerNetIds);
+            // Remember-restart resolves (start button, not the Capture button) keep the remembered
+            // set at any distance — range culling there is what shrank remote restarts to one stove.
+            int removedOutOfRange = this.netCookRememberStoves && !explicitCapture
+                ? 0
+                : this.RemoveOutOfRangeNetCookTargets(targets, seenTargets, seenCookerNetIds);
             if (removedOutOfRange > 0)
             {
                 this.NetCookCaptureLog("Filtered " + removedOutOfRange + " cooker target(s) outside scan radius=" + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m.");
