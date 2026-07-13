@@ -1062,7 +1062,11 @@ namespace HeartopiaMod
 
                     if (this.TryInvokeNetCookPrepare(this.netCookRecipeId, this.netCookMaterialNetIds))
                     {
-                        this.RecordNetCookPrepareCommitted();
+                        // Always name the stove: "prepare committed N/M" alone cannot prove sends
+                        // went to distinct burners (asked in the field, and rightly so).
+                        this.NetCookDiagLog("prepare SENT stove=" + target.CookerNetId
+                            + " lo=" + target.LevelObjectNetId
+                            + " materials=" + this.netCookMaterialNetIds.Count);
                         target.Phase = 1;
                         target.ContinuePulses = 0;
                         target.IdleRetries = 0;
@@ -1070,6 +1074,7 @@ namespace HeartopiaMod
                         target.LastStatusActionAt = -999f;
                         target.LastCookCommandAt = now;
                         target.TrustedCollected = false; // new dish in progress — clear the stale collect flag
+                        target.PrepareConfirmed = false; // committed counts on server confirmation, not send
                         target.NextActionAt = now + NetCookPhaseAdvanceDelaySeconds;
                         readyTargets++;
                     }
@@ -1147,6 +1152,15 @@ namespace HeartopiaMod
                         }
                         else if (cookingStatus == 1 || cookingStatus == 2)
                         {
+                            // Server acknowledged the dish — THIS is when it counts against the
+                            // quantity limit. The 20s window ties the confirmation to our own
+                            // recent prepare (shared town stoves: a neighbor's dish must not count).
+                            if (!target.PrepareConfirmed && target.Phase >= 1 && now - target.LastCookCommandAt < 20f)
+                            {
+                                target.PrepareConfirmed = true;
+                                this.RecordNetCookPrepareCommitted();
+                            }
+
                             target.IdleRetries = 0;
                             target.LastCookCommandAt = now;
                             target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
@@ -1562,6 +1576,18 @@ namespace HeartopiaMod
                 if (this.IsNetCookTargetOccupiedWithDish(this.netCookTargets[i]))
                 {
                     this.netCookCommittedDishCount++;
+                    // Already occupied at start = already server-confirmed; mark it so the
+                    // Preparing/Cooking confirmation path doesn't count the same dish twice.
+                    this.netCookTargets[i].PrepareConfirmed = true;
+                    if (this.netCookStatusDiagEnabled)
+                    {
+                        NetCookTargetContext seeded = this.netCookTargets[i];
+                        this.NetCookDiagLog("seed committed: stove=" + seeded.CookerNetId
+                            + " lo=" + seeded.LevelObjectNetId
+                            + " phase=" + seeded.Phase
+                            + " lastStatus=" + seeded.LastStatus
+                            + " -> committed=" + this.netCookCommittedDishCount + "/" + this.netCookCookQuantity);
+                    }
                 }
             }
 
@@ -1579,6 +1605,7 @@ namespace HeartopiaMod
             }
 
             this.netCookCommittedDishCount++;
+            this.NetCookDiagLog("prepare committed " + this.netCookCommittedDishCount + "/" + this.netCookCookQuantity);
             if (this.IsNetCookCookQuantityCommitFull())
             {
                 this.BeginNetCookDrain(this.FormatNetCookQuantityDrainReason());
@@ -1868,6 +1895,42 @@ namespace HeartopiaMod
             if (!this.RegisterGameEventHook(NetCookDiagCookResultEventName, NetCookDiagCookLifecycleEventBytes, this.OnNetCookFunctionalCookResultEvent))
             {
                 this.RegisterGameEventHook("XDTDataAndProtocol.Events.CookResultEvent", NetCookDiagCookLifecycleEventBytes, this.OnNetCookFunctionalCookResultEvent);
+            }
+
+            // StartCookEvent is dispatched by CookingProtocolManager.OnPrepareSucceed — the client's
+            // own prepare acknowledgment (fires only for OUR accepted PrepareCooking, carries the lo).
+            // This is the event-driven confirmation: no polling, works at any distance.
+            if (!this.RegisterGameEventHook(NetCookDiagStartCookEventName, NetCookDiagCookLifecycleEventBytes, this.OnNetCookFunctionalStartCookEvent))
+            {
+                this.RegisterGameEventHook("XDTDataAndProtocol.Events.StartCookEvent", NetCookDiagCookLifecycleEventBytes, this.OnNetCookFunctionalStartCookEvent);
+            }
+        }
+
+        // Prepare accepted by the server: confirm the matching target (quantity limit counts
+        // CONFIRMED dishes) the moment the ack arrives instead of waiting on the status poll.
+        private void OnNetCookFunctionalStartCookEvent(GameEventSnapshot e)
+        {
+            ulong levelObjectNetId = e.ReadUInt64(8);
+            if (levelObjectNetId == 0UL)
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target == null || target.LevelObjectNetId != levelObjectNetId)
+                {
+                    continue;
+                }
+
+                if (!target.PrepareConfirmed && target.Phase >= 1)
+                {
+                    target.PrepareConfirmed = true;
+                    this.NetCookDiagLog("prepare CONFIRMED (StartCookEvent) stove=" + target.CookerNetId
+                        + " lo=" + levelObjectNetId);
+                    this.RecordNetCookPrepareCommitted();
+                }
             }
         }
 
@@ -2289,13 +2352,168 @@ namespace HeartopiaMod
             }
         }
 
+        // --- CookingProtocolManager.OnPrepareFail native detour ---
+        //
+        // The server answers every PrepareCooking with PrepareCookingNetworkEvent{Result}; on
+        // Result=false the sync bridge calls the static, parameterless OnPrepareFail (UI toast
+        // "stove occupied"). Detouring it gives the missing REJECTION signal, so failed prepares
+        // retry immediately instead of hanging a stove at phase=2/Idle until the drain kills it.
+        // Which stove failed isn't in the signal — we fast-retry every recent unconfirmed send.
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void OnPrepareFailHookDelegate();
+
+        private bool netCookOnPrepareFailDetourAttempted;
+        private MonoMod.RuntimeDetour.NativeDetour netCookOnPrepareFailDetour;
+        private OnPrepareFailHookDelegate netCookOnPrepareFailBodyKeepAlive;
+        private static OnPrepareFailHookDelegate netCookOnPrepareFailTrampoline;
+        private static int netCookPrepareFailCount; // written by the detour body (main thread)
+        private int netCookPrepareFailSeen;
+
+        private static void NetCookOnPrepareFailDetourBody()
+        {
+            netCookPrepareFailCount++;
+            OnPrepareFailHookDelegate tramp = netCookOnPrepareFailTrampoline;
+            if (tramp != null)
+            {
+                tramp();
+            }
+        }
+
+        private void EnsureNetCookOnPrepareFailDetour()
+        {
+            if (this.netCookOnPrepareFailDetourAttempted)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return; // retry next frame
+                }
+
+                IntPtr protocolClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Cooking.CookingProtocolManager");
+                if (protocolClass == IntPtr.Zero)
+                {
+                    protocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ProtocolService.Cooking", "CookingProtocolManager");
+                }
+                if (protocolClass == IntPtr.Zero)
+                {
+                    return; // image not loaded yet — retry next frame
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(protocolClass, "OnPrepareFail", 0);
+                if (method == IntPtr.Zero)
+                {
+                    this.netCookOnPrepareFailDetourAttempted = true;
+                    this.NetCookDiagLog("OnPrepareFail detour: method not found.", force: true);
+                    return;
+                }
+
+                IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                NetCookCompileMethodDelegate compile = monoModule != IntPtr.Zero
+                    ? this.GetAuraMonoExport<NetCookCompileMethodDelegate>(monoModule, "mono_compile_method")
+                    : null;
+                if (compile == null)
+                {
+                    this.netCookOnPrepareFailDetourAttempted = true;
+                    return;
+                }
+
+                IntPtr nativePtr = compile(method);
+                if (nativePtr == IntPtr.Zero)
+                {
+                    this.netCookOnPrepareFailDetourAttempted = true;
+                    return;
+                }
+
+                this.netCookOnPrepareFailDetourAttempted = true;
+                OnPrepareFailHookDelegate body = NetCookOnPrepareFailDetourBody;
+                this.netCookOnPrepareFailBodyKeepAlive = body;
+                this.netCookOnPrepareFailDetour = new MonoMod.RuntimeDetour.NativeDetour(nativePtr, body);
+                OnPrepareFailHookDelegate tramp = this.netCookOnPrepareFailDetour.GenerateTrampoline<OnPrepareFailHookDelegate>();
+                if (tramp == null)
+                {
+                    try { this.netCookOnPrepareFailDetour.Undo(); } catch { }
+                    this.netCookOnPrepareFailDetour = null;
+                    this.netCookOnPrepareFailBodyKeepAlive = null;
+                    return;
+                }
+
+                netCookOnPrepareFailTrampoline = tramp;
+                this.NetCookDiagLog("OnPrepareFail detour INSTALLED @0x" + nativePtr.ToInt64().ToString("X"), force: true);
+            }
+            catch (Exception ex)
+            {
+                this.netCookOnPrepareFailDetourAttempted = true;
+                this.NetCookDiagLog("OnPrepareFail detour install failed: " + ex.Message, force: true);
+            }
+        }
+
+        // A prepare rejection arrived: re-queue every recent unconfirmed send for an immediate
+        // retry (the signal carries no lo, but unconfirmed-recent is exactly the candidate set).
+        private void ProcessNetCookPrepareFailSignals()
+        {
+            if (this.netCookPrepareFailSeen == netCookPrepareFailCount)
+            {
+                return;
+            }
+
+            this.netCookPrepareFailSeen = netCookPrepareFailCount;
+            float now = Time.unscaledTime;
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target == null
+                    || target.PrepareConfirmed
+                    || target.Phase < 1
+                    || target.Phase > 2
+                    || now - target.LastCookCommandAt > 6f)
+                {
+                    continue;
+                }
+
+                target.Phase = 0;
+                target.LastStatus = -1;
+                target.NextActionAt = now + 1.2f;
+                this.NetCookDiagLog("prepare REJECTED (OnPrepareFail) — fast retry stove=" + target.CookerNetId
+                    + " lo=" + target.LevelObjectNetId, force: true);
+            }
+        }
+
+        // Urgent statuses must not wait out the ~0.75s poll pause: Danger needs the relief
+        // interact NOW, and Succeed/Failed can collect immediately. The pump runs at the top of
+        // ProcessNetCookLoop, so zeroing NextActionAt here makes the SAME frame's target pass
+        // send the command — event-to-command latency becomes one frame instead of a poll tick.
+        private void WakeNetCookTargetsForUrgentStatus(ulong levelObjectNetId, int status, float now)
+        {
+            if (levelObjectNetId == 0UL || (status != 3 && status != 5 && status != 6))
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target != null && target.LevelObjectNetId == levelObjectNetId && target.NextActionAt > now)
+                {
+                    target.NextActionAt = now;
+                    this.NetCookDiagLog("urgent status " + this.GetNetCookCookingStatusName(status)
+                        + " — waking stove=" + target.CookerNetId + " lo=" + levelObjectNetId);
+                }
+            }
+        }
+
         // Installs the detour (once) and drains its ring — call this from the active cook loop AND the
         // diagnostics tick so the lo-keyed status cache is populated whenever cooking is running, not
         // only while Status Diagnostics is on. Cheap when idle (the monotonic ring drains nothing).
         private void PumpNetCookCookStatusDetour()
         {
             this.EnsureNetCookOnUpdateCookerStatusDetour();
+            this.EnsureNetCookOnPrepareFailDetour();
             this.DrainNetCookCookStatusRing();
+            this.ProcessNetCookPrepareFailSignals();
         }
 
         // Main-thread drain of the detour ring. ALWAYS populates the lo-keyed status cache (the remote-
@@ -12721,6 +12939,11 @@ namespace HeartopiaMod
             public float NextActionAt;
             public bool HasWorldPosition;
             public Vector3 WorldPosition;
+            // True once the server acknowledged OUR prepare (status reached Preparing/Cooking).
+            // The quantity limit counts CONFIRMED dishes, not sends — a burst of prepares can be
+            // silently rejected server-side (shared bag materials race), and counting sends burned
+            // the limit and started the drain before the Idle-resync retry could fire.
+            public bool PrepareConfirmed;
             // Set when a global CookResultEvent(TakeFood) confirms this stove's dish was collected —
             // the authoritative "finished" signal that reaches the client even at distance (the post-
             // collect Idle goes through ComponentRemoved<CookingStatusComponent>, NOT OnUpdateCookerStatus,
