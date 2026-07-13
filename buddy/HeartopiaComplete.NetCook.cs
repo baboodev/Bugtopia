@@ -2043,6 +2043,7 @@ namespace HeartopiaMod
                     entry.FoodItemId = foodItemIdRaw;
                     entry.UpdatedAt = Time.unscaledTime;
                     this.netCookStatusCache[cookNetId] = entry;
+                    this.WakeNetCookTargetsForUrgentStatus(levelObjectNetId, statusValue, Time.unscaledTime);
                     if (this.netCookStatusDiagEnabled
                         && tracked
                         && (!hadPrevious || previous.Status != statusValue))
@@ -2559,6 +2560,7 @@ namespace HeartopiaMod
                     entry.FoodItemId = foodId;
                     entry.UpdatedAt = now;
                     this.netCookStatusByLevelObject[lo] = entry;
+                    this.WakeNetCookTargetsForUrgentStatus(lo, status, now);
                 }
 
                 if (this.netCookStatusDiagEnabled && logged < 24)
