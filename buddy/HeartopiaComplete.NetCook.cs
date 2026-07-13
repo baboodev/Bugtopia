@@ -1502,6 +1502,14 @@ namespace HeartopiaMod
             this.netCookDrainAfterIngredientsRunOut = true;
             this.netCookDrainReason = string.IsNullOrWhiteSpace(reason) ? "Ingredients ran out." : reason;
             this.NetCookLog(this.netCookDrainReason + " Draining active stoves before stop.");
+            // force: fires at most once per run and is the single most important state flip for
+            // diagnosing "stoves stopped cooking" — keep it visible even with diagnostics off.
+            this.NetCookDiagLog("DRAIN BEGIN reason=" + this.netCookDrainReason
+                + " committed=" + this.netCookCommittedDishCount
+                + " completed=" + this.netCookCompletedDishCount
+                + " quantity=" + this.netCookCookQuantity
+                + " limit=" + this.HasNetCookCookQuantityLimit()
+                + " targets=" + this.netCookTargets.Count, force: true);
         }
 
         private bool HasNetCookCookQuantityLimit()
@@ -1873,10 +1881,14 @@ namespace HeartopiaMod
 
             // Mark matching active stoves collected so drain can remove them without waiting on an Idle
             // status that never arrives remotely (and without the view-alive trust gate).
+            // Phase==4 gate: CookResultEvent is GLOBAL and public town stoves are SHARED, so a
+            // NEIGHBOR collecting their dish on a stove we captured must not mark OUR target
+            // collected (it would drop the stove before we even prepared). Phase 4 is set only
+            // after WE sent the drain collect interact — that TakeFood confirmation is ours.
             for (int i = 0; i < this.netCookTargets.Count; i++)
             {
                 NetCookTargetContext target = this.netCookTargets[i];
-                if (target != null && target.LevelObjectNetId == levelObjectNetId)
+                if (target != null && target.LevelObjectNetId == levelObjectNetId && target.Phase == 4)
                 {
                     target.TrustedCollected = true;
                 }
@@ -7679,11 +7691,16 @@ namespace HeartopiaMod
             {
                 this.TryGetCookerTypeForStaticId(preferredCookerStaticId, out preferredCookerType);
             }
-            if (preferredCookerStaticId <= 0 || preferredCookerType <= 0)
+            if (preferredCookerStaticId <= 0)
             {
-                status = "Registered cooker cache: no usable cooker type (static=" + preferredCookerStaticId + " type=" + preferredCookerType + ").";
+                status = "Registered cooker cache: no usable cooker static id.";
                 return false;
             }
+            // cookerType may legitimately stay 0 for public/world cookers (managed TableData.GetCooker
+            // is dead on IL2CPP and the burner view carries no type) — IsCompatibleNetCookCooker then
+            // falls back to the staticId comparison, so a 0 type must NOT abort the restore. Bailing
+            // here broke Remember-restore for town stoves: remote restarts couldn't rebuild the set
+            // and mass cook shrank run over run (3 -> 2 -> 1 -> 0) as drained targets never came back.
 
             HashSet<string> seenTargets = new HashSet<string>();
             HashSet<uint> seenCookerNetIds = new HashSet<uint>();
