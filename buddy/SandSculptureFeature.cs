@@ -1776,7 +1776,7 @@ namespace HeartopiaMod
         // the base is placed ~2 m in front of the player.
 
         private const int SandPlaceMaxBackpackScan = 4096;
-        private const float SandPlaceDistance = 0.8f; // metres in front of the player (close, within interact range)
+        private const float SandPlaceDistance = 1.5f; // metres in front of the player (close, within interact range)
 
         // Cached descriptors (image-lifetime; safe to cache raw).
         private IntPtr sandPlaceHomelandProtocolClass;   // XDTDataAndProtocol.ProtocolService.Homeland.HomelandProtocolManager
