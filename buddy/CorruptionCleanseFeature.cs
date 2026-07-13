@@ -922,7 +922,7 @@ namespace HeartopiaMod
             this.corruptionCleanseStartedAt = now;
             this.corruptionCleanseArrivedAt = now;
             this.corruptionCleanseNextReteleportAt = now + CorruptionCleanseReteleportMinIntervalSeconds;
-            this.TeleportToLocation(first.Center);
+            this.CorruptionCleanseTeleportTo(first.Center);
             this.farmState = HeartopiaComplete.AutoFarmState.CleansingCorruption;
             this.autoFarmTimer = 0f;
             this.autoFarmStatus = "Cleansing Corrupted...";
@@ -930,6 +930,15 @@ namespace HeartopiaMod
                 + first.TriggerId + " @ " + first.Center.ToString("F1")
                 + " (" + this.corruptionCleanseOrderedCandidates.Count + " candidate(s), source=" + this.corruptionCleanseAreaSource + ")");
             return true;
+        }
+
+        // Cleansing corals sit on the sea floor — arrive SeaCleanTeleportYOffset (5m) above the
+        // polygon centroid instead of inside the coral geometry; underwater = swimming, and the
+        // candidate ordering / re-teleport checks are XZ-based so the lift changes nothing else.
+        private void CorruptionCleanseTeleportTo(Vector3 center)
+        {
+            center.y += SeaCleanTeleportYOffset;
+            this.TeleportToLocation(center);
         }
 
         // CleansingCorruption state body: confirm the cleanse flow started, hold inside the polygon
@@ -975,7 +984,7 @@ namespace HeartopiaMod
                         this.corruptionCleanseTargetCenter = next.Center;
                         this.corruptionCleanseArrivedAt = now;
                         this.corruptionCleanseNextReteleportAt = now + CorruptionCleanseReteleportMinIntervalSeconds;
-                        this.TeleportToLocation(next.Center);
+                        this.CorruptionCleanseTeleportTo(next.Center);
                         this.autoFarmStatus = "Cleansing Corrupted... trying next coral area";
                         this.AutoFarmLog("Corruption cleanse: no cleanse flow -> next candidate trigger "
                             + next.TriggerId + " @ " + next.Center.ToString("F1")
@@ -1007,7 +1016,7 @@ namespace HeartopiaMod
                     > CorruptionCleanseHoldRadiusMeters * CorruptionCleanseHoldRadiusMeters)
             {
                 this.corruptionCleanseNextReteleportAt = now + CorruptionCleanseReteleportMinIntervalSeconds;
-                this.TeleportToLocation(this.corruptionCleanseTargetCenter);
+                this.CorruptionCleanseTeleportTo(this.corruptionCleanseTargetCenter);
                 this.AutoFarmLog("Corruption cleanse: drifted out of hold radius -> re-teleport to trigger " + this.corruptionCleanseTargetTriggerId);
             }
         }

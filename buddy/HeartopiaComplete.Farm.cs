@@ -890,7 +890,7 @@ namespace HeartopiaMod
                             float value = Vector3.Distance(Camera.main.transform.position, vector.Value);
                             this.autoFarmStatus = $"Teleporting to node ({value:F0}m)...";
                             this.AutoFarmLog("Normal node target -> " + vector.Value + " label=" + scanNodeLabel + " distance=" + value.ToString("F1"));
-                            this.FarmTeleportTo(vector.Value);
+                            this.FarmTeleportTo(this.ApplyContaminationTeleportOffset(vector.Value, scanNodeLabel));
                             this.lastNodePosition = vector.Value;
                             this.lastTeleportWasPriorityLocation = false;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
@@ -1199,7 +1199,7 @@ namespace HeartopiaMod
                         {
                             float value2 = Vector3.Distance(Camera.main.transform.position, vector2.Value);
                             this.autoFarmStatus = $"Node found! Teleporting ({value2:F0}m)...";
-                            this.FarmTeleportTo(vector2.Value);
+                            this.FarmTeleportTo(this.ApplyContaminationTeleportOffset(vector2.Value, waitingNodeLabel));
                             this.lastNodePosition = vector2.Value;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                             this.autoFarmTimer = 0f;
@@ -1312,6 +1312,21 @@ namespace HeartopiaMod
                     FarmVisitedRetryStampSeconds, FarmVisitedColdStampMaxSeconds);
             }
             return FarmVisitedColdStampFallbackSeconds;
+        }
+
+        // Sea-clean teleport lift: contamination nodes and cleansing corals sit on the sea floor —
+        // teleporting straight onto the point lands inside the geometry. Arrive 5m above instead
+        // (underwater = swimming, so the height is free). Applied ONLY to the teleport argument —
+        // lastNodePosition keeps the true node position for marker matching and dwell checks.
+        private const float SeaCleanTeleportYOffset = 5f;
+
+        private Vector3 ApplyContaminationTeleportOffset(Vector3 position, string nodeLabel)
+        {
+            if (string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal))
+            {
+                position.y += SeaCleanTeleportYOffset;
+            }
+            return position;
         }
 
         // Every Aura Farm hop goes through this wrapper so the throttle clock is stamped uniformly;
