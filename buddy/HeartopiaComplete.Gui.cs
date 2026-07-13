@@ -1937,6 +1937,27 @@ namespace HeartopiaMod
             GUI.Label(new Rect(20f, (float)num, 260f, 36f),
                 "Underwater dash (Shift). Max duration = never ends (a sharp turn still cancels)."
                 + (this.swimSprintTweakEnabled ? " Status: " + this.swimSprintTweakStatus : string.Empty));
+            num += 44;
+
+            // Space/Ctrl (ascend/descend) cancel the dash in vanilla — the guard hook keeps it
+            // running (SwimSprintVerticalGuardFeature.cs). Independent of Custom Swim Sprint.
+            const string swimVerticalGuardLabel = "Sprint Ignores Space/Ctrl";
+            bool prevVerticalGuard = this.swimSprintVerticalGuardEnabled;
+            float verticalGuardToggleHeight = this.GetSwitchToggleHeight(toggleWidth, swimVerticalGuardLabel, 25f);
+            this.swimSprintVerticalGuardEnabled = this.DrawWrappedSwitchToggle(
+                new Rect(20f, (float)num, toggleWidth, verticalGuardToggleHeight),
+                this.swimSprintVerticalGuardEnabled,
+                swimVerticalGuardLabel,
+                25f);
+            if (this.swimSprintVerticalGuardEnabled != prevVerticalGuard)
+            {
+                this.AddMenuNotification(
+                    this.swimSprintVerticalGuardEnabled ? "Sprint ignores Space/Ctrl: on" : "Sprint ignores Space/Ctrl: off",
+                    new Color(0.45f, 0.85f, 1f));
+                try { this.SaveKeybinds(false); } catch { }
+            }
+            num += Mathf.CeilToInt(verticalGuardToggleHeight + 8f);
+
             return (float)num + 50f;
         }
 

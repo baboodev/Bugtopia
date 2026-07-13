@@ -111,6 +111,8 @@ namespace HeartopiaMod
             public bool swimSprintTweakEnabled;
             public float swimSprintDurationSeconds;
             public float swimSprintCooldownSeconds;
+            // Space/Ctrl (ascend/descend) no longer cancel the underwater dash (detour guard).
+            public bool swimSprintVerticalGuardEnabled;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;
