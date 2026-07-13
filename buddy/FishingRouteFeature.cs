@@ -103,17 +103,49 @@ namespace HeartopiaMod
         public static bool SnapshotAutoEatPanel => snapshotAutoEatPanel;
         public static bool SnapshotAutoRepair => snapshotAutoRepair;
 
-        private static int TotalSpotCount => FixedSpots.Length + customSpots.Count;
+        // "Custom Spots Only": rotate over user-saved spots and skip the fixed list. With zero
+        // custom spots the toggle is inert (full list) so the route can never start empty.
+        private static bool customSpotsOnly;
+        public static bool GetCustomSpotsOnly() => customSpotsOnly;
+        public static void SetCustomSpotsOnly(bool value)
+        {
+            if (customSpotsOnly == value)
+            {
+                return;
+            }
+
+            customSpotsOnly = value;
+            // The index space changed (fixed+custom vs custom-only) — restart the rotation; the
+            // actual teleport happens on the next due hop, the current spot keeps fishing.
+            if (active)
+            {
+                currentIndex = 0;
+            }
+            Log("Custom Spots Only " + (value ? "enabled" : "disabled") + $" (custom={customSpots.Count})");
+        }
+
+        private static bool UseCustomOnly => customSpotsOnly && customSpots.Count > 0;
+
+        private static int TotalSpotCount => UseCustomOnly ? customSpots.Count : FixedSpots.Length + customSpots.Count;
 
         private static string GetSpotName(int index)
         {
-            if (index < FixedSpots.Length)
+            int customIndex;
+            if (UseCustomOnly)
             {
-                return FixedSpots[index].name;
+                customIndex = index;
+            }
+            else
+            {
+                if (index < FixedSpots.Length)
+                {
+                    return FixedSpots[index].name;
+                }
+
+                customIndex = index - FixedSpots.Length;
             }
 
-            int customIndex = index - FixedSpots.Length;
-            if (customIndex < customSpots.Count)
+            if (customIndex >= 0 && customIndex < customSpots.Count)
             {
                 return customSpots[customIndex]?.name ?? ("Custom " + (customIndex + 1));
             }
@@ -123,13 +155,22 @@ namespace HeartopiaMod
 
         private static Vector3 GetSpotPos(int index)
         {
-            if (index < FixedSpots.Length)
+            int customIndex;
+            if (UseCustomOnly)
             {
-                return FixedSpots[index].pos;
+                customIndex = index;
+            }
+            else
+            {
+                if (index < FixedSpots.Length)
+                {
+                    return FixedSpots[index].pos;
+                }
+
+                customIndex = index - FixedSpots.Length;
             }
 
-            int customIndex = index - FixedSpots.Length;
-            return customIndex < customSpots.Count ? customSpots[customIndex].position : Vector3.zero;
+            return customIndex >= 0 && customIndex < customSpots.Count ? customSpots[customIndex].position : Vector3.zero;
         }
 
         // --- Config persistence (list lives in UnifiedConfigData.FishingRouteSpots) ---
@@ -408,6 +449,25 @@ namespace HeartopiaMod
             }
             num += 42f;
 
+            bool nextCustomOnly = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), customSpotsOnly, "Custom Spots Only");
+            if (nextCustomOnly != customSpotsOnly)
+            {
+                SetCustomSpotsOnly(nextCustomOnly);
+                host.UI_AddMenuNotification(
+                    host.UI_Localize(nextCustomOnly ? "Route: custom spots only" : "Route: all spots"),
+                    nextCustomOnly ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.75f, 0.5f));
+                try { host.UI_SaveKeybinds(false); } catch { }
+            }
+            num += 30f;
+
+            if (customSpotsOnly && customSpots.Count == 0)
+            {
+                GUIStyle hint = new GUIStyle(small);
+                hint.normal.textColor = new Color(1f, 0.7f, 0.45f);
+                GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_Localize("No custom spots saved - using all spots"), hint);
+                num += 24f;
+            }
+
             if (active)
             {
                 GUI.Label(new Rect(20f, num, 360f, 20f),
@@ -450,10 +510,17 @@ namespace HeartopiaMod
 
                 if (removeIndex >= 0)
                 {
-                    // Keep the route pointer stable when the list shrinks under it.
-                    int removedGlobalIndex = FixedSpots.Length + removeIndex;
+                    // Keep the route pointer stable when the list shrinks under it. Capture the
+                    // index mapping BEFORE removal — dropping the last custom spot flips
+                    // UseCustomOnly back to the full list, which changes the index space.
+                    bool wasCustomOnly = UseCustomOnly;
+                    int removedRouteIndex = wasCustomOnly ? removeIndex : FixedSpots.Length + removeIndex;
                     customSpots.RemoveAt(removeIndex);
-                    if (active && currentIndex >= removedGlobalIndex && currentIndex > 0)
+                    if (active && wasCustomOnly != UseCustomOnly)
+                    {
+                        currentIndex = 0;
+                    }
+                    else if (active && currentIndex >= removedRouteIndex && currentIndex > 0)
                     {
                         currentIndex--;
                     }

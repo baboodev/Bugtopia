@@ -227,6 +227,7 @@ namespace HeartopiaMod
             data.autoFishSkipCatchAnim = AutoFishingFarm.GetSkipCatchAnimEnabled();
             data.autoFishSkipCastAnim = AutoFishingFarm.GetSkipCastAnimEnabled();
             data.autoFishSkipBaitAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
+            data.fishingRouteCustomOnly = FishingRouteFeature.GetCustomSpotsOnly();
             data.autoFishReelMaxDuration = -1f;
             data.autoFishReelHoldDuration = -1f;
             data.autoFishReelPauseDuration = -1f;
@@ -441,6 +442,7 @@ namespace HeartopiaMod
             AutoFishingFarm.SetSkipCatchAnimEnabled(data.autoFishSkipCatchAnim);
             AutoFishingFarm.SetSkipCastAnimEnabled(data.autoFishSkipCastAnim);
             AutoFishingFarm.SetSkipBaitAnimEnabled(data.autoFishSkipBaitAnim);
+            FishingRouteFeature.SetCustomSpotsOnly(data.fishingRouteCustomOnly);
             if (data.insectBatchSize > 0)
             {
                 InsectNetFarm.SetBatchSize(data.insectBatchSize);
