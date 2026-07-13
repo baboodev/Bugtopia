@@ -11483,7 +11483,8 @@ namespace HeartopiaMod
             List<int> categoryTypes = new List<int>(categoryPerDish.Keys);
 
             Dictionary<int, List<KeyValuePair<uint, int>>> stacksByStaticId = new Dictionary<int, List<KeyValuePair<uint, int>>>();
-            if (!this.TryCollectNetCookWarehouseStacks(stacksByStaticId, specificItemIds, categoryTypes, out status))
+            Dictionary<uint, int> starByNetId = new Dictionary<uint, int>();
+            if (!this.TryCollectNetCookWarehouseStacks(stacksByStaticId, starByNetId, specificItemIds, categoryTypes, out status))
             {
                 return false;
             }
@@ -11519,7 +11520,7 @@ namespace HeartopiaMod
                 anyMoveDeficit = true;
                 if (stacksByStaticId.TryGetValue(demand.Key, out List<KeyValuePair<uint, int>> stacks))
                 {
-                    AllocateNetCookMoveFromStacks(stacks, remainingByNetId, moveMap, ref remaining);
+                    AllocateNetCookMoveFromStacks(stacks, remainingByNetId, moveMap, starByNetId, ref remaining);
                 }
             }
 
@@ -11537,20 +11538,21 @@ namespace HeartopiaMod
                 }
 
                 anyMoveDeficit = true;
+                // Pool ALL matching stacks and allocate once, so the low-star-first ordering holds
+                // ACROSS the category's different item ids (per-staticId allocation would only sort
+                // stars within each item and pull whole item groups in dictionary order).
+                List<KeyValuePair<uint, int>> categoryPool = new List<KeyValuePair<uint, int>>();
                 foreach (KeyValuePair<int, List<KeyValuePair<uint, int>>> kvp in stacksByStaticId)
                 {
-                    if (remaining <= 0)
-                    {
-                        break;
-                    }
-
                     if (specificItemIds.Contains(kvp.Key) || !this.NetCookItemMatchesCategory(kvp.Key, demand.Key))
                     {
                         continue;
                     }
 
-                    AllocateNetCookMoveFromStacks(kvp.Value, remainingByNetId, moveMap, ref remaining);
+                    categoryPool.AddRange(kvp.Value);
                 }
+
+                AllocateNetCookMoveFromStacks(categoryPool, remainingByNetId, moveMap, starByNetId, ref remaining);
             }
 
             if (moveMap.Count == 0)
@@ -11563,16 +11565,36 @@ namespace HeartopiaMod
             return true;
         }
 
-        // Pull up to `remaining` units from the given warehouse stacks (smallest first), tracking per-stack
+        // Pull up to `remaining` units from the given warehouse stacks, tracking per-stack
         // remaining so the same netId is never over-allocated and accumulating into moveMap additively.
-        private static void AllocateNetCookMoveFromStacks(List<KeyValuePair<uint, int>> stacks, Dictionary<uint, int> remainingByNetId, Dictionary<uint, int> moveMap, ref int remaining)
+        // Order: LOWEST STAR first (spend cheap ingredients, keep 4-5★ in the warehouse — mirrors the
+        // game's own AutoFill which picks the cheapest by price=f(starRate)), then smallest stack first
+        // (clean up tails). Stacks without a resolvable star sort as star 0.
+        private static void AllocateNetCookMoveFromStacks(List<KeyValuePair<uint, int>> stacks, Dictionary<uint, int> remainingByNetId, Dictionary<uint, int> moveMap, Dictionary<uint, int> starByNetId, ref int remaining)
         {
             if (stacks == null || stacks.Count == 0 || remaining <= 0)
             {
                 return;
             }
 
-            stacks.Sort((a, b) => a.Value.CompareTo(b.Value));
+            stacks.Sort((a, b) =>
+            {
+                int starA = 0;
+                int starB = 0;
+                if (starByNetId != null)
+                {
+                    starByNetId.TryGetValue(a.Key, out starA);
+                    starByNetId.TryGetValue(b.Key, out starB);
+                }
+
+                int starCompare = starA.CompareTo(starB);
+                if (starCompare != 0)
+                {
+                    return starCompare;
+                }
+
+                return a.Value.CompareTo(b.Value);
+            });
             for (int i = 0; i < stacks.Count && remaining > 0; i++)
             {
                 uint netId = stacks[i].Key;
@@ -11594,7 +11616,9 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryCollectNetCookWarehouseStacks(Dictionary<int, List<KeyValuePair<uint, int>>> stacksByStaticId, HashSet<int> requiredStaticIds, List<int> requiredCategories, out string status)
+        // starByNetId: star rating (starRate, 1..5) per collected warehouse stack — feeds the
+        // low-star-first move ordering so high-star ingredients stay in the warehouse.
+        private unsafe bool TryCollectNetCookWarehouseStacks(Dictionary<int, List<KeyValuePair<uint, int>>> stacksByStaticId, Dictionary<uint, int> starByNetId, HashSet<int> requiredStaticIds, List<int> requiredCategories, out string status)
         {
             status = string.Empty;
             bool hasSpecific = requiredStaticIds != null && requiredStaticIds.Count > 0;
