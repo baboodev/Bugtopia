@@ -156,6 +156,17 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 - Applies additional Harmony patch on demand (`EnsureBypassPatched`).
 - Credits third-party contributor in UI.
 
+### Game UI — Custom UI Timings (Self → Game UI sub-tab)
+
+- Editable display durations for the game's tip/toast popups: item-obtained bubbles
+  (`LightToastPanel`, game default 2.5 s), text toasts, buff icon toasts, and the four
+  `HarvestTipPanel` banners (pictorial / achievement / cat-buff / task).
+- Overrides float fields of the live `TipShowTimeConfig` (`ConfigManager.TipConfig.TipShowTimeConfig`)
+  via AuraMono `mono_field_set_value`; re-applied on a 0.5 s throttle so config reloads can't revert it.
+- Originals captured before the first write; disabling the toggle restores them.
+- Sliders 0.5–15 s + "Reset to game defaults" button; persisted in config
+  (`gameUiTimingsEnabled` / `gameUiTimingSeconds`). Implementation: `GameUiTimingsFeature.cs`.
+
 ---
 
 ## Resource Gathering

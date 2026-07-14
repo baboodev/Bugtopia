@@ -317,6 +317,7 @@
     <Compile Include="BunnyHopFeature.cs" />
     <Compile Include="ForceLocomotionFeature.cs" />
     <Compile Include="SwimSprintTweakFeature.cs" />
+    <Compile Include="GameUiTimingsFeature.cs" />
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="SandSculptureFeature.cs" />

@@ -245,6 +245,11 @@ namespace HeartopiaMod
                 return 380f;
             }
 
+            if (this.selfSubTab == 4)
+            {
+                return this.CalculateSelfGameUiTabHeight();
+            }
+
             return (float)num + 50f;
         }
 
@@ -1680,6 +1685,11 @@ namespace HeartopiaMod
             if (this.selfSubTab == 3)
             {
                 return this.DrawPrivacyBlockExtraTab(startY + 8f, 20f);
+            }
+
+            if (this.selfSubTab == 4)
+            {
+                return this.DrawSelfGameUiTab(startY);
             }
 
             return (float)num + 50f;

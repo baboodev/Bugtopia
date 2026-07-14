@@ -113,6 +113,10 @@ namespace HeartopiaMod
             public float swimSprintCooldownSeconds;
             // Space/Ctrl (ascend/descend) no longer cancel the underwater dash (detour guard).
             public bool swimSprintVerticalGuardEnabled;
+            // Game UI tip/toast display-time overrides (TipShowTimeConfig), seconds, ordered as
+            // GameUiTimingFieldNames (GameUiTimingsFeature.cs). Null/short/0 entries = game defaults.
+            public bool gameUiTimingsEnabled;
+            public float[] gameUiTimingSeconds;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

@@ -23,6 +23,7 @@ namespace HeartopiaMod
         {
             // Main navigation / tabs
             { "Self", "Self" },
+            { "Game UI", "Game UI" },
             { "Resource Gathering", "Resource Gathering" },
             { "Features", "Features" },
             { "New Features", "New Features" },
@@ -583,6 +584,7 @@ namespace HeartopiaMod
         {
             // Main navigation / tabs
             { "Self", "Personal" },
+            { "Game UI", "Interfaz del juego" },
             { "Resource Gathering", "Recolección" },
             { "Features", "Funciones" },
             { "New Features", "Nuevas funciones" },
@@ -1235,6 +1237,7 @@ namespace HeartopiaMod
             { "Credits: • evermoreee12 for Bypass Overlap", "鸣谢：• evermoreee12 提供绕过重叠" },
             // Main navigation / tabs
             { "Self", "个人" },
+            { "Game UI", "游戏界面" },
             { "Resource Gathering", "资源采集" },
             { "Features", "功能" },
             { "New Features", "新功能" },
@@ -1696,6 +1699,7 @@ namespace HeartopiaMod
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             { "Self", "Eu" },
+            { "Game UI", "Interface do jogo" },
             { "Resource Gathering", "Coleta de Recursos" },
             { "Features", "Recursos" },
             { "New Features", "Novos recursos" },
@@ -2246,6 +2250,7 @@ namespace HeartopiaMod
         private static readonly Dictionary<string, string> ThaiDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             { "Self", "ตัวเอง" },
+            { "Game UI", "UI เกม" },
             { "Resource Gathering", "เก็บทรัพยากร" },
             { "Features", "ฟีเจอร์" },
             { "New Features", "ฟีเจอร์ใหม่" },

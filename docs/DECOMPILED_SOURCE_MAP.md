@@ -1044,6 +1044,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Analog move (gamepad) | MonoInputManager.SendMoveValueToControl, LocalPlayerComponent.OnLeftJoystickPerformed, PlayerMoveComponent.SetMoveJoystick, CameraComponent.ToCameraSpaceJoystick | MovementInputFeature.cs | A + W (XInput) |
 | Auto repair / eat | ToolSystem, BackPackSystem, EcsService | HC | R + A |
 | Warehouse bypass | BagPanel UI hierarchy | WarehouseBypassFeature.cs | W + A |
+| Game UI timings | ConfigManager (Managers._serviceDic), TipConfig, TipShowTimeConfig, LightToastPanel (reader) | GameUiTimingsFeature.cs | A |
 
 ---
 

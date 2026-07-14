@@ -145,6 +145,7 @@ namespace HeartopiaMod
             data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
             data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
             data.swimSprintVerticalGuardEnabled = this.swimSprintVerticalGuardEnabled;
+            this.SaveGameUiTimingsToConfig(data);
             data.keyGameSpeed1x = (int)this.keyGameSpeed1x;
             data.keyGameSpeed2x = (int)this.keyGameSpeed2x;
             data.keyGameSpeed5x = (int)this.keyGameSpeed5x;
@@ -332,6 +333,7 @@ namespace HeartopiaMod
                 : Mathf.Clamp(data.swimSprintDurationSeconds, SwimSprintDurationMin, SwimSprintDurationMax);
             this.swimSprintCooldownSeconds = Mathf.Clamp(data.swimSprintCooldownSeconds, SwimSprintCooldownMin, SwimSprintCooldownMax);
             this.swimSprintVerticalGuardEnabled = data.swimSprintVerticalGuardEnabled;
+            this.LoadGameUiTimingsFromConfig(data);
             this.keyGameSpeed1x = (KeyCode)data.keyGameSpeed1x;
             this.keyGameSpeed2x = (KeyCode)data.keyGameSpeed2x;
             this.keyGameSpeed5x = (KeyCode)data.keyGameSpeed5x;

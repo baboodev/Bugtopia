@@ -686,6 +686,7 @@ namespace HeartopiaMod
             this.ProcessForceLocomotionOnUpdate();
             this.ProcessForceSwimInputOnUpdate();
             this.ProcessSwimSprintTweakOnUpdate();
+            this.ProcessGameUiTimingsOnUpdate();
             this.UpdateMovementInputBridge();
             this.ProcessAutoIceSkatingOnUpdate();
             this.ProcessBubbleFeatureOnUpdate();
@@ -2317,6 +2318,7 @@ namespace HeartopiaMod
                 tabs.Add(("Building", () => this.selfSubTab == 1, () => this.SetSelfSubTab(1)));
                 tabs.Add(("Fun", () => this.selfSubTab == 2, () => this.SetSelfSubTab(2)));
                 tabs.Add(("Privacy", () => this.selfSubTab == 3, () => this.SetSelfSubTab(3)));
+                tabs.Add(("Game UI", () => this.selfSubTab == 4, () => this.SetSelfSubTab(4)));
             }
             else if (this.selectedTab == 2)
             {
@@ -4947,7 +4949,7 @@ namespace HeartopiaMod
         private float autoCookAutoStopAt = -1f;
         private int autoFarmSubTab = 0; // 0 = Main, 1 = Tree Farm, 2 = Fish Farm, 3 = Insect Farm, 4 = Bird Farm
         private int automationSubTab = 0; // 0 = Main, 1 = Food & Repair, 2 = Snow Sculpting, 3 = Auto Buy, 4 = Auto Sell, 5 = Mass Cook, 6 = Puzzle, 7 = Pet Care
-        private int selfSubTab = 0; // 0 = Main, 1 = Building, 2 = Fun, 3 = Privacy
+        private int selfSubTab = 0; // 0 = Main, 1 = Building, 2 = Fun, 3 = Privacy, 4 = Game UI
         private Type cachedFishingGameplayApiType = null;
         private Type cachedFishingSubStateType = null;
         private MethodInfo cachedFishingEnterFishingMethod = null;
