@@ -1,7 +1,7 @@
 #if LOADER_MELON
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(HeartopiaMod.HeartopiaMelonPlugin), "Bugtopia", HeartopiaMod.ModBuildVersion.Numeric, "HeartopiaMod")]
+[assembly: MelonInfo(typeof(HeartopiaMod.HeartopiaMelonPlugin), "Bugtopia", HeartopiaMod.ModBuildVersion.Numeric, "baboodev")]
 [assembly: MelonGame(null, null)]
 // The single unified DLL references BOTH loaders' assemblies; under MelonLoader the BepInEx ones
 // are absent. Mark them optional so ML doesn't warn now — and won't hard-fail to load us once a
