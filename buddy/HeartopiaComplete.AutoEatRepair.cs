@@ -2362,9 +2362,9 @@ namespace HeartopiaMod
                     rotation = playerRoot.transform.rotation;
                 }
 
-                // Mimic the game's own aim: just ahead of the player. The device's repair trigger is a
-                // sphere around the landing point, so near-feet placement is ideal.
-                Vector3 targetPos = playerPos + forward * 1.5f;
+                // Match the game's own aim distance (LevelScriptableConfig.toolRestorerLength = 3m; the
+                // game also adds +2m height then sphere-snaps to ground — we place flat, which works).
+                Vector3 targetPos = playerPos + forward * ToolRestorerThrowDistance;
 
                 uint netIdArg = itemNetId;
                 Vector3 posArg = targetPos;
@@ -2644,7 +2644,9 @@ namespace HeartopiaMod
         // Lure  = FishingProtocolManager.CmdUseFishTrapDevice(uint deviceNetId, Vector3 pos, Quaternion rot) -> SpawnFishRefreshDeviceCommand.
         // Both are pure WebRequestUtility.SendCommand (no local anim). Position computed ahead of the
         // player (the game's own CanThrowAutoBait has an out-Vector3 that's unsafe via mono invoke).
-        private const float BaitThrowDistance = 2.5f;
+        // 3m matches the game's standard: FishGear searches 3–5m (FishGearMinLength=3), toolRestorerLength=3.
+        private const float BaitThrowDistance = 4f;         // bait / attractor forward throw distance
+        private const float ToolRestorerThrowDistance = 3f; // repair-kit forward throw distance
 
         private bool TryComputeBaitThrowTarget(out Vector3 targetPos)
         {
