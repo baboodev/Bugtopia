@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -18,11 +19,8 @@ namespace HeartopiaMod
         private bool petPlayRuntimeReadyLogged = false;
         private float petPlayNextResolverProbeAt = 0f;
         private float petPlayNextAutoTickAt = 0f;
-        private float petPlayNextHeartbeatAt = 0f;
         private int petPlayCatAnswerCount = 0;
         private int petPlayDogAnswerCount = 0;
-        private MethodInfo petPlayMeowTeaseQteMethod = null;
-        private MethodInfo petPlayDogTeaseQteMethod = null;
         private IntPtr petPlayAuraMeowTeaseQteMethod = IntPtr.Zero;
         private IntPtr petPlayAuraDogTeaseQteMethod = IntPtr.Zero;
         private uint petPlayLastCatNetId = 0U;
@@ -42,8 +40,142 @@ namespace HeartopiaMod
         private int petPlayWashClickCount = 0;
         private bool petPlayWashClickLocked = false;
         private bool petPlayWashSawButtonHidden = false;
-        private MethodInfo petPlayPetBathingRoundStartMethod = null;
         private IntPtr petPlayAuraPetBathingRoundStartMethod = IntPtr.Zero;
+
+        // ---- Headless cat play (background session, no game-mode/UI entry) ----
+        private enum PetPlayHeadlessCatState
+        {
+            Idle,
+            Starting,
+            Active
+        }
+
+        private PetPlayHeadlessCatState petPlayHeadlessCatState = PetPlayHeadlessCatState.Idle;
+        private uint petPlayHeadlessCatNetId = 0U;
+        private float petPlayHeadlessCatStartSentAt = 0f;
+        private float petPlayHeadlessCatLastActivityAt = 0f;
+        private int petPlayHeadlessCatAnswerCount = 0;
+        private int petPlayHeadlessCatLastExitReason = -1;
+        private bool petPlayHeadlessCatHooksRegistered = false;
+        private IntPtr petPlayAuraMeowBeginTeaseMethod = IntPtr.Zero;
+        private IntPtr petPlayAuraMeowCancelTeaseMethod = IntPtr.Zero;
+
+        // ---- Pet care list (My Pets rows with per-pet Play / Wash) ----
+        private sealed class PetCareEntry
+        {
+            public uint NetId;
+            public string Name = string.Empty;
+            public bool IsDog;
+            public int Fullness = -1;
+            public int Vitality = -1;
+            public int Chemistry = -1;
+            public string Message = string.Empty;
+        }
+
+        private readonly List<PetCareEntry> petCareEntries = new List<PetCareEntry>();
+        private bool petCareListVisible = false;
+        private string petCareListStatus = string.Empty;
+        private float petCareNextScanAllowedAt = 0f;
+        private int petCareDogTeaseVitalityCost = -1;
+        // Auto stats refresh: there are NO value-change EventCenter events for vitality/fullness
+        // (UpdateVitality/UpdateFullness just write component data), so while the list is visible a
+        // round-robin poll reloads one pet per interval; feed/favor events trigger immediate reloads.
+        private int petCareStatsCursor = 0;
+        private float petCareNextAutoStatsAt = 0f;
+        private int petCareStatsBurstRemaining = 0;
+        private bool petCareAutoHooksRegistered = false;
+        private const string PetFeedEndResultEventName = "XDTDataAndProtocol.Events.PetFeedEndResultEvent";
+        private const string PetFavorChangedEventName = "XDTDataAndProtocol.Events.PetFavorChangedEvent";
+
+        // ---- Headless dog training (protocol-only, no game mode / panels) ----
+        private enum PetPlayHeadlessDogState
+        {
+            Idle,
+            Preparing,
+            Beginning,
+            Active
+        }
+
+        private PetPlayHeadlessDogState petPlayHeadlessDogState = PetPlayHeadlessDogState.Idle;
+        private uint petPlayHeadlessDogNetId = 0U;
+        private string petPlayHeadlessDogName = string.Empty;
+        private int petPlayHeadlessDogLearningId = 0;
+        private string petPlayHeadlessDogLearningName = string.Empty;
+        private float petPlayHeadlessDogPhaseSentAt = 0f;
+        private float petPlayHeadlessDogLastActivityAt = 0f;
+        private float petPlayHeadlessDogAwaitingSince = 0f;
+        private float petPlayHeadlessDogNextCachePollAt = 0f;
+        private bool petPlayHeadlessDogAwaitingAnswer = false;
+        private bool petPlayHeadlessDogPerformanceSeen = false;
+        private int petPlayHeadlessDogPreActionMotionId = 0;
+        private float petPlayHeadlessDogAnswerNotBefore = -1f;
+        private int petPlayHeadlessDogNotReadyRetries = 0;
+
+        // ---- Dog session trace (Auto vs Headless comparison): logs every server event, dog motion
+        // change, panel state change and answer send with timestamps while a dog context is active.
+        private int petPlayDogTraceLastMotionId = -1;
+        private uint petPlayDogTraceLastPanelNetId = 0U;
+        private int petPlayDogTraceLastPanelRound = -1;
+        private int petPlayDogTraceLastPanelState = -1;
+
+        // Detailed dog-session trace — gated by the Logging tab's "Pet Play" switch like all other
+        // PetPlay logs, and only while a dog context (auto or headless) is active.
+        private void DogTraceLog(string message)
+        {
+            if (!PetPlayLogsEnabled
+                || (!this.petPlayAutoDogEnabled && this.petPlayHeadlessDogState == PetPlayHeadlessDogState.Idle))
+            {
+                return;
+            }
+
+            try
+            {
+                ModLogger.Msg("[PetPlay][dog] t=" + Time.unscaledTime.ToString("F2") + " " + message);
+            }
+            catch
+            {
+            }
+        }
+
+        private static string FormatPetTeaseQteResult(int result)
+        {
+            switch (result)
+            {
+                case 0: return "Invalid";
+                case 1: return "Success";
+                case 2: return "Failure";
+                case 3: return "NotReady";
+                case 4: return "Timeout";
+                default: return "result" + result;
+            }
+        }
+        private int petPlayHeadlessDogAnswerCount = 0;
+        private int petPlayHeadlessDogSuccessCount = 0;
+        private int petPlayHeadlessDogFailCount = 0;
+        private bool petPlayHeadlessDogHooksRegistered = false;
+        private IntPtr petPlayAuraPetPrepareTeaseMethod = IntPtr.Zero;
+        private IntPtr petPlayAuraPetEndTeaseMethod = IntPtr.Zero;
+        private IntPtr petPlayAuraPetBeginTeaseMethod = IntPtr.Zero;
+        private IntPtr petPlayAuraPetBathingBeginMethod = IntPtr.Zero;
+        private IntPtr petPlayAuraPetBathingCancelMethod = IntPtr.Zero;
+
+        // ---- Headless pet wash (protocol-only round loop) ----
+        private enum PetPlayHeadlessWashState
+        {
+            Idle,
+            Beginning,
+            Rounds
+        }
+
+        private PetPlayHeadlessWashState petPlayHeadlessWashState = PetPlayHeadlessWashState.Idle;
+        private uint petPlayHeadlessWashNetId = 0U;
+        private string petPlayHeadlessWashName = string.Empty;
+        private int petPlayHeadlessWashRoundTotal = 0;
+        private int petPlayHeadlessWashRoundIndex = 0;
+        private float petPlayHeadlessWashPhaseSentAt = 0f;
+        private float petPlayHeadlessWashLastActivityAt = 0f;
+        private float petPlayHeadlessWashNextRoundAt = -1f;
+        private bool petPlayHeadlessWashHooksRegistered = false;
 
         private float DrawPetPlayTab(int startY)
         {
@@ -91,6 +223,97 @@ namespace HeartopiaMod
             }
 
             num += 174;
+
+            GUIStyle petCareStatusStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip
+            };
+            petCareStatusStyle.normal.textColor = textColor;
+
+            int petCareRowCount = this.petCareListVisible ? this.petCareEntries.Count : 0;
+            float petsCardHeight = 82f + petCareRowCount * 72f + (this.petCareListVisible && petCareRowCount == 0 ? 22f : 0f);
+            Rect petsRect = new Rect(left, num, width, petsCardHeight);
+            GUI.Box(petsRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
+            this.DrawCardOutline(petsRect, 1f);
+            GUI.Label(new Rect(petsRect.x + 16f, petsRect.y + 12f, 200f, 20f), "MY PETS", labelStyle);
+
+            if (GUI.Button(new Rect(petsRect.x + 16f, petsRect.y + 38f, 160f, 30f), this.petCareListVisible ? "Refresh" : "Show My Pets", this.themePrimaryButtonStyle ?? GUI.skin.button))
+            {
+                this.petCareListVisible = true;
+                this.RefreshPetCareList();
+            }
+            GUI.Label(new Rect(petsRect.x + 188f, petsRect.y + 44f, width - 204f, 18f), this.petCareListStatus ?? string.Empty, petCareStatusStyle);
+
+            if (this.petCareListVisible)
+            {
+                this.TickPetCareAutoStatsRefresh();
+
+                GUIStyle petNameStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 12,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft,
+                    clipping = TextClipping.Clip
+                };
+                petNameStyle.normal.textColor = Color.white;
+
+                if (petCareRowCount == 0)
+                {
+                    GUI.Label(new Rect(petsRect.x + 16f, petsRect.y + 76f, width - 32f, 18f), "No owned pets found nearby.", petCareStatusStyle);
+                }
+
+                bool petCareBusy = this.TryGetPetCareBusyLabel(out string petCareBusyLabel);
+                for (int i = 0; i < petCareRowCount; i++)
+                {
+                    PetCareEntry entry = this.petCareEntries[i];
+                    if (entry == null)
+                    {
+                        continue;
+                    }
+
+                    float rowTop = petsRect.y + 76f + i * 72f;
+                    if (i > 0)
+                    {
+                        this.DrawCardOutline(new Rect(petsRect.x + 12f, rowTop - 5f, width - 24f, 1f), 1f);
+                    }
+
+                    GUI.Label(new Rect(petsRect.x + 16f, rowTop, width - 200f, 18f),
+                        (string.IsNullOrEmpty(entry.Name) ? entry.NetId.ToString() : entry.Name) + (entry.IsDog ? "  (dog)" : "  (cat)"),
+                        petNameStyle);
+                    GUI.Label(new Rect(petsRect.x + 16f, rowTop + 18f, width - 200f, 18f),
+                        "energy " + (entry.Vitality >= 0 ? entry.Vitality.ToString() : "?")
+                        + " · food " + (entry.Fullness >= 0 ? entry.Fullness.ToString() : "?")
+                        + " · growth " + (entry.Chemistry >= 0 ? entry.Chemistry.ToString() : "?"),
+                        petCareStatusStyle);
+                    GUI.Label(new Rect(petsRect.x + 16f, rowTop + 36f, width - 32f, 18f), entry.Message ?? string.Empty, petCareStatusStyle);
+
+                    bool rowIsActiveSession = petCareBusy && this.IsPetCareEntryActiveSession(entry.NetId);
+                    if (rowIsActiveSession)
+                    {
+                        if (GUI.Button(new Rect(petsRect.xMax - 96f, rowTop, 80f, 26f), "Stop", this.themePrimaryButtonStyle ?? GUI.skin.button))
+                        {
+                            this.StopPetCareActiveSession();
+                        }
+                    }
+                    else
+                    {
+                        GUI.enabled = !petCareBusy;
+                        if (GUI.Button(new Rect(petsRect.xMax - 180f, rowTop, 80f, 26f), "Play", this.themePrimaryButtonStyle ?? GUI.skin.button))
+                        {
+                            this.OnPetCarePlayClicked(entry);
+                        }
+                        if (GUI.Button(new Rect(petsRect.xMax - 96f, rowTop, 80f, 26f), "Wash", this.themePrimaryButtonStyle ?? GUI.skin.button))
+                        {
+                            this.OnPetCareWashClicked(entry);
+                        }
+                        GUI.enabled = true;
+                    }
+                }
+            }
+
+            num += Mathf.CeilToInt(petsCardHeight + 14f);
             int petFoodOptionCount = this.GetPetFeedFoodDropdownOptionCount();
             this.ClampPetFeedFoodDropdownScrollIndex();
             int visibleFoodRows = this.petFeedFoodDropdownOpen ? Math.Min(PetFeedFoodVisibleRows, petFoodOptionCount) : 0;
@@ -391,7 +614,11 @@ namespace HeartopiaMod
 
         private void UpdatePetPlayAutomation()
         {
-            if (!this.petPlayAutoCatEnabled && !this.petPlayAutoDogEnabled && !this.petPlayAutoWashEnabled)
+            bool headlessCatActive = this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle;
+            bool headlessDogActive = this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle;
+            bool headlessWashActive = this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle;
+            if (!this.petPlayAutoCatEnabled && !this.petPlayAutoDogEnabled && !this.petPlayAutoWashEnabled
+                && !headlessCatActive && !headlessDogActive && !headlessWashActive)
             {
                 return;
             }
@@ -407,15 +634,7 @@ namespace HeartopiaMod
 
             this.petPlayNextAutoTickAt = Time.unscaledTime + 0.12f;
 
-            if (Time.unscaledTime >= this.petPlayNextHeartbeatAt)
-            {
-                this.petPlayNextHeartbeatAt = Time.unscaledTime + 3f;
-                this.PetPlayLog("Auto tick. cat=" + this.petPlayAutoCatEnabled
-                    + " dogTrain=" + this.petPlayAutoDogEnabled
-                    + " wash=" + this.petPlayAutoWashEnabled);
-            }
-
-            if (this.petPlayAutoCatEnabled)
+            if (this.petPlayAutoCatEnabled || headlessCatActive)
             {
                 // When the CatPlayQuestionForUiEvent hook is live, answers come from the event
                 // handler (no scan). Fall back to the UI scan only until the detour installs.
@@ -425,8 +644,27 @@ namespace HeartopiaMod
                 }
             }
 
+            if (headlessCatActive)
+            {
+                this.UpdateHeadlessCatPlay();
+            }
+
+            if (headlessDogActive)
+            {
+                this.UpdateHeadlessDogPlay();
+            }
+
+            if (headlessWashActive)
+            {
+                this.UpdateHeadlessWash();
+            }
+
             if (this.petPlayAutoDogEnabled)
             {
+                // Register the full dog event pack in auto mode too — the handlers no-op for the
+                // headless FSM but their [dog] trace lines make Auto vs Headless runs comparable.
+                this.EnsureHeadlessDogEventHooks();
+
                 // Dog choice needs the live learning/motion state, so the resolver still runs here —
                 // the per-netId TeaseDogRoundBeginEvent just clears the throttle so it answers
                 // promptly. Scans on its own timer when the hook isn't installed.
@@ -439,34 +677,15 @@ namespace HeartopiaMod
             }
         }
 
+        // AuraMono ONLY (XDT* protocol statics — managed reflection is dead on this game).
         private bool TryInvokeCatTeaseQte(uint catNetId, int qteValue)
         {
-            if (!this.EnsureCatTeaseQteMethod())
-            {
-                return this.TryInvokeAuraMonoCatTeaseQte(catNetId, qteValue);
-            }
-
-            ParameterInfo[] parameters = this.petPlayMeowTeaseQteMethod.GetParameters();
-            object qteArg = Enum.ToObject(parameters[1].ParameterType, qteValue);
-            this.petPlayMeowTeaseQteMethod.Invoke(null, new object[] { catNetId, qteArg });
-            return true;
+            return this.TryInvokeAuraMonoCatTeaseQte(catNetId, qteValue);
         }
 
         private bool TryInvokeDogTeaseQte(uint dogNetId, bool encourage)
         {
-            if (this.TryInvokeAuraMonoDogTeaseQte(dogNetId, encourage))
-            {
-                return true;
-            }
-
-            if (!this.EnsureDogTeaseQteMethod())
-            {
-                this.PetPlayLog("PetProtocolManager.TeaseQte unavailable.");
-                return false;
-            }
-
-            this.petPlayDogTeaseQteMethod.Invoke(null, new object[] { dogNetId, encourage });
-            return true;
+            return this.TryInvokeAuraMonoDogTeaseQte(dogNetId, encourage);
         }
 
         // ---- Event-driven QTE (see docs/GAME_EVENTS.md): the cat question is a GLOBAL event we
@@ -476,6 +695,55 @@ namespace HeartopiaMod
         // CatPlayQuestionForUiEvent: catHandle(uint)@0, questionId(MeowQteType=byte)@4, duration(float)@8 → 12 bytes.
         private const int CatPlayQuestionForUiEventBytes = 12;
         private const string TeaseDogRoundBeginEventName = "XDTDataAndProtocol.Events.TeaseDogRoundBeginEvent";
+
+        // ---- Headless cat play events (all GLOBAL dispatch from MeowProtocolManager) ----
+        // TeaseCatStartResultEvent: catHandle(uint)@0, success(bool)@4 → 8 bytes padded.
+        private const string TeaseCatStartResultEventName = "XDTDataAndProtocol.Events.TeaseCatStartResultEvent";
+        private const int TeaseCatStartResultEventBytes = 8;
+        // TeaseCatEndEvent: catHandle@0, motionId@4, motionExpResult@8, motionExpAddition@12,
+        // chemistryAddition@16, extraChemistryAddition@20 → 24 bytes. Dispatched only when the
+        // session finish reason != Cancel (CancelTease ends silently).
+        private const string TeaseCatEndEventName = "XDTDataAndProtocol.Events.TeaseCatEndEvent";
+        private const int TeaseCatEndEventBytes = 24;
+        // CatPlayExitForUiEvent: catHandle@0, 6×int, reason(MeowTeaseFinishReason int)@28 → 32 bytes.
+        // TrackingCatPlay opens CatPlayResultPanel on it — suppressed while headless is active.
+        private const string CatPlayExitForUiEventName = "XDTDataAndProtocol.Events.CatPlayExitForUiEvent";
+        private const int CatPlayExitForUiEventBytes = 32;
+        // CatPlayPromoteForUiEvent: skillId@0, learned(bool)@4, currentScore@8, deltaScore@12 → 16 bytes.
+        // TrackingCatPlay opens CatPlayTipPanel on it — suppressed while headless is active.
+        private const string CatPlayPromoteForUiEventName = "XDTDataAndProtocol.Events.CatPlayPromoteForUiEvent";
+        private const int CatPlayPromoteForUiEventBytes = 16;
+
+        // ---- Headless dog training events ----
+        // PetTeasePrepareResultEvent / PetTeaseBeginResultEvent (GLOBAL): netId(uint)@0, isSucceed(bool)@4 → 8 bytes.
+        // PetTeaseBeginResultEvent is also what always-on TrackingDogPlay latches the dog netId from
+        // (to open the result panel at session end) — suppressed while headless dog play is active.
+        private const string PetTeasePrepareResultEventName = "XDTDataAndProtocol.Events.PetTeasePrepareResultEvent";
+        private const string PetTeaseBeginResultEventName = "XDTDataAndProtocol.Events.PetTeaseBeginResultEvent";
+        private const int PetTeaseResultEventBytes = 8;
+        // PetTeaseQteResultEvent (per-netId): result(PetTeaseQteResult int)@0, isSelfPet(bool)@4 → 8 bytes.
+        private const string PetTeaseQteResultEventName = "XDTDataAndProtocol.Events.PetTeaseQteResultEvent";
+        private const int PetTeaseQteResultEventBytes = 8;
+        // TeaseDogPlayEvent (per-netId, empty payload): the dog PERFORMED its round motion — this is
+        // the same signal DogPlayStatusPanel opens the answer window on. Judge the motion NOW.
+        private const string TeaseDogPlayEventName = "XDTDataAndProtocol.Events.TeaseDogPlayEvent";
+        // PetTeaseEndResultEvent (per-netId): petHandle@0 + inline serverData PetTeaseEndNetworkEvent
+        // {Result@4, Reason@8, Pet@12, LearningId@16, LearningExp@20, LearningGrowth@24, LearnedGrowth@28} → 32 bytes.
+        private const string PetTeaseEndResultEventName = "XDTDataAndProtocol.Events.PetTeaseEndResultEvent";
+        private const int PetTeaseEndResultEventBytes = 32;
+
+        // ---- Headless wash events ----
+        // PetBathBeginResultClientEvent (GLOBAL): Result(PetBathingBeginResult int)@0, petHandle@4, roundTotal@8 → 12 bytes.
+        private const string PetBathBeginResultClientEventName = "XDTDataAndProtocol.Events.PetBathBeginResultClientEvent";
+        private const int PetBathBeginResultClientEventBytes = 12;
+        // PetBathClickResultClientEvent (GLOBAL): isSucceed(bool)@0, petHandle@4, roundIndex@8, roundDuration(float)@12 → 16 bytes.
+        private const string PetBathClickResultClientEventName = "XDTDataAndProtocol.Events.PetBathClickResultClientEvent";
+        private const int PetBathClickResultClientEventBytes = 16;
+        // PetBathRoundEndClientEvent (per-netId): IsLastRound(bool)@0 → 1 byte.
+        private const string PetBathRoundEndClientEventName = "XDTDataAndProtocol.Events.PetBathRoundEndClientEvent";
+        private const int PetBathRoundEndClientEventBytes = 1;
+        // PetBathEndResultClientEvent (per-netId): empty payload, dispatched on bathing Success.
+        private const string PetBathEndResultClientEventName = "XDTDataAndProtocol.Events.PetBathEndResultClientEvent";
 
         private bool petPlayEventHooksRegistered;
 
@@ -495,7 +763,8 @@ namespace HeartopiaMod
         // the answer enum MeowTeaseQteType, so qteValue == (int)questionId (no sprite scan needed).
         private void OnCatPlayQuestionEvent(GameEventSnapshot e)
         {
-            if (!this.petPlayAutoCatEnabled)
+            bool headlessActive = this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle;
+            if (!this.petPlayAutoCatEnabled && !headlessActive)
             {
                 return;
             }
@@ -505,6 +774,12 @@ namespace HeartopiaMod
             if (catNetId == 0U)
             {
                 return;
+            }
+
+            bool headlessCat = headlessActive && catNetId == this.petPlayHeadlessCatNetId;
+            if (headlessCat)
+            {
+                this.petPlayHeadlessCatLastActivityAt = Time.unscaledTime;
             }
 
             // One answer per (cat, qte) within a short window — the event normally fires once per
@@ -523,7 +798,12 @@ namespace HeartopiaMod
             if (this.TryInvokeCatTeaseQte(catNetId, qteValue))
             {
                 this.petPlayCatAnswerCount++;
-                this.PetPlayLog("Cat QTE answered via event netId=" + catNetId + " type=" + qteValue + ".");
+                if (headlessCat)
+                {
+                    this.petPlayHeadlessCatAnswerCount++;
+                    this.SetPetCareMessage(catNetId, "Playing: " + this.petPlayHeadlessCatAnswerCount + " QTE answered...");
+                }
+                this.PetPlayLog("Cat QTE answered via event netId=" + catNetId + " type=" + qteValue + (headlessCat ? " (headless)" : string.Empty) + ".");
             }
         }
 
@@ -532,6 +812,29 @@ namespace HeartopiaMod
         // resolved by TryAutoAnswerDogPlayFromUi from the dog's live state.
         private void OnTeaseDogRoundBeginEvent(GameEventSnapshot e)
         {
+            this.DogTraceLog("EVENT RoundBegin netId=" + e.NetId
+                + " playHook=" + this.IsGameEventHookInstalled(TeaseDogPlayEventName));
+
+            // Headless dog training: a round began for our dog — arm the answer poll (no UI panel
+            // exists to read the round from). Snapshot the dog's current motion as the baseline so
+            // the motion-watch fallback can detect the NEW performance of this round.
+            if (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle
+                && e.NetId == this.petPlayHeadlessDogNetId)
+            {
+                if (this.petPlayHeadlessDogState == PetPlayHeadlessDogState.Beginning)
+                {
+                    this.petPlayHeadlessDogState = PetPlayHeadlessDogState.Active;
+                }
+
+                this.petPlayHeadlessDogAwaitingAnswer = true;
+                this.petPlayHeadlessDogPerformanceSeen = false;
+                this.petPlayHeadlessDogAnswerNotBefore = -1f;
+                this.petPlayHeadlessDogNotReadyRetries = 0;
+                this.petPlayHeadlessDogAwaitingSince = Time.unscaledTime;
+                this.petPlayHeadlessDogNextCachePollAt = Time.unscaledTime + 0.1f;
+                this.petPlayHeadlessDogLastActivityAt = Time.unscaledTime;
+            }
+
             if (!this.petPlayAutoDogEnabled)
             {
                 return;
@@ -542,61 +845,1594 @@ namespace HeartopiaMod
             this.PetPlayLog("Dog round-begin event netId=" + e.NetId + " -> kicking resolver.");
         }
 
-        private bool EnsureCatTeaseQteMethod()
+        // ---- Headless cat play: protocol-only session (BeginTease → server QTE pushes → TeaseQte
+        // answers → natural end). No client game mode is entered, so the status panels never open
+        // (they are mode-gated via UIEventBridge). The two reactive popups that WOULD open from the
+        // always-on TrackingPanel — CatPlayResultPanel (exit) and CatPlayTipPanel (promote) — are
+        // suppressed at the dispatch detour while the session runs. Question bubbles stay visible
+        // as live feedback. See .research-record/PET_QTE_HEADLESS_REPORT.md. ----
+
+        private void StartHeadlessCatPlayForTarget(uint catNetId, string catName)
         {
-            if (this.petPlayMeowTeaseQteMethod != null)
+            if (this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle || catNetId == 0U)
             {
+                return;
+            }
+
+            this.EnsurePetPlayEventHooks();
+            this.EnsureHeadlessCatEventHooks();
+
+            this.petPlayHeadlessCatNetId = catNetId;
+            this.petPlayHeadlessCatAnswerCount = 0;
+            this.petPlayHeadlessCatLastExitReason = -1;
+            this.SetHeadlessCatUiSuppression(true);
+
+            if (!this.TryInvokeCatBeginTease(catNetId))
+            {
+                this.SetHeadlessCatUiSuppression(false);
+                this.petPlayHeadlessCatNetId = 0U;
+                this.SetPetCareMessage(catNetId, "Play start failed (protocol unavailable).");
+                return;
+            }
+
+            this.petPlayHeadlessCatState = PetPlayHeadlessCatState.Starting;
+            this.petPlayHeadlessCatStartSentAt = Time.unscaledTime;
+            this.petPlayHeadlessCatLastActivityAt = Time.unscaledTime;
+            this.SetPetCareMessage(catNetId, "Play: asking server...");
+            this.PetPlayLog("Headless cat play: BeginTease sent netId=" + catNetId + " name=" + catName + ".");
+        }
+
+        private void StopHeadlessCatPlay(string reason)
+        {
+            if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Idle)
+            {
+                return;
+            }
+
+            // CancelTease ends silently: EndTeaseResult skips the exit/end UI events for
+            // reason == Cancel, so no result panel and no TeaseCatEndEvent will follow.
+            this.TryInvokeCatCancelTease(this.petPlayHeadlessCatNetId);
+            this.FinishHeadlessCatPlay("Stopped (" + reason + ") after " + this.petPlayHeadlessCatAnswerCount + " answers.");
+        }
+
+        private void FinishHeadlessCatPlay(string status)
+        {
+            uint endedNetId = this.petPlayHeadlessCatNetId;
+            this.petPlayHeadlessCatState = PetPlayHeadlessCatState.Idle;
+            this.petPlayHeadlessCatNetId = 0U;
+            this.SetHeadlessCatUiSuppression(false);
+            if (endedNetId != 0U)
+            {
+                this.SetPetCareMessage(endedNetId, status);
+                this.RefreshPetCareEntryStats(endedNetId);
+            }
+            this.PetPlayLog("Headless cat play: " + status);
+        }
+
+        private void EnsureHeadlessCatEventHooks()
+        {
+            if (this.petPlayHeadlessCatHooksRegistered)
+            {
+                return;
+            }
+
+            this.petPlayHeadlessCatHooksRegistered = true;
+            this.RegisterGameEventHook(TeaseCatStartResultEventName, TeaseCatStartResultEventBytes, this.OnTeaseCatStartResultEvent);
+            this.RegisterGameEventHook(TeaseCatEndEventName, TeaseCatEndEventBytes, this.OnTeaseCatEndEvent);
+            this.RegisterGameEventHook(CatPlayExitForUiEventName, CatPlayExitForUiEventBytes, this.OnCatPlayExitForUiEvent);
+            this.RegisterGameEventHook(CatPlayPromoteForUiEventName, CatPlayPromoteForUiEventBytes, this.OnCatPlayPromoteForUiEvent);
+        }
+
+        // Suppress-forward is toggled ONLY for the headless session window so normal UI-mode play
+        // keeps its result/tip panels. Our own handlers still see suppressed dispatches (the detour
+        // reads the payload before deciding whether to forward).
+        private void SetHeadlessCatUiSuppression(bool on)
+        {
+            this.SetGameEventHookSuppressForward(CatPlayExitForUiEventName, on);
+            this.SetGameEventHookSuppressForward(CatPlayPromoteForUiEventName, on);
+        }
+
+        private void OnTeaseCatStartResultEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Starting
+                || e.ReadUInt32(0) != this.petPlayHeadlessCatNetId)
+            {
+                return;
+            }
+
+            if (e.ReadBool(4))
+            {
+                this.petPlayHeadlessCatState = PetPlayHeadlessCatState.Active;
+                this.petPlayHeadlessCatLastActivityAt = Time.unscaledTime;
+                this.SetPetCareMessage(this.petPlayHeadlessCatNetId, "Playing: session accepted - cat is coming, waiting for first QTE...");
+                this.PetPlayLog("Headless cat play: server accepted BeginTease netId=" + this.petPlayHeadlessCatNetId + ".");
+            }
+            else
+            {
+                // Server rejected (hungry/tired/stamina/occupied/…) — the game shows its own toast.
+                this.FinishHeadlessCatPlay("Start rejected by server (see game toast).");
+            }
+        }
+
+        private void OnTeaseCatEndEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Idle
+                || e.ReadUInt32(0) != this.petPlayHeadlessCatNetId)
+            {
+                return;
+            }
+
+            int motionId = e.ReadInt32(4);
+            int motionExpAddition = e.ReadInt32(12);
+            int chemistryAddition = e.ReadInt32(16) + e.ReadInt32(20);
+            string reasonText = this.petPlayHeadlessCatLastExitReason >= 0
+                ? FormatMeowTeaseFinishReason(this.petPlayHeadlessCatLastExitReason)
+                : "?";
+            this.FinishHeadlessCatPlay("Ended (" + reasonText + "): answers=" + this.petPlayHeadlessCatAnswerCount
+                + " motion=" + motionId + " exp+=" + motionExpAddition + " chem+=" + chemistryAddition + ".");
+        }
+
+        // Suppressed from the UI while headless — we still read the finish reason for the summary.
+        private void OnCatPlayExitForUiEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Idle
+                || e.ReadUInt32(0) != this.petPlayHeadlessCatNetId)
+            {
+                return;
+            }
+
+            this.petPlayHeadlessCatLastExitReason = e.ReadInt32(28);
+            this.petPlayHeadlessCatLastActivityAt = Time.unscaledTime;
+        }
+
+        private void OnCatPlayPromoteForUiEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Idle)
+            {
+                return;
+            }
+
+            // Skill/exp promote tick (tip panel suppressed) — counts as session activity and gives
+            // the row a progress line: skillId@0, learned(bool)@4, currentScore@8, deltaScore@12.
+            this.petPlayHeadlessCatLastActivityAt = Time.unscaledTime;
+            int skillId = e.ReadInt32(0);
+            bool learned = e.ReadBool(4);
+            int currentScore = e.ReadInt32(8);
+            int deltaScore = e.ReadInt32(12);
+            this.SetPetCareMessage(this.petPlayHeadlessCatNetId,
+                "Playing: " + this.petPlayHeadlessCatAnswerCount + " answered · skill " + skillId
+                + " exp +" + deltaScore + " (" + currentScore + ")" + (learned ? " · LEARNED!" : string.Empty));
+        }
+
+        private void UpdateHeadlessCatPlay()
+        {
+            float now = Time.unscaledTime;
+            if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Starting
+                && now - this.petPlayHeadlessCatStartSentAt > 6f)
+            {
+                this.FinishHeadlessCatPlay("Start timeout: no TeaseCatStartResultEvent within 6s.");
+            }
+            else if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Active
+                && now - this.petPlayHeadlessCatLastActivityAt > 45f)
+            {
+                this.TryInvokeCatCancelTease(this.petPlayHeadlessCatNetId);
+                this.FinishHeadlessCatPlay("Watchdog: no QTE activity for 45s — cancelled.");
+            }
+        }
+
+        private static string FormatMeowTeaseFinishReason(int reason)
+        {
+            switch (reason)
+            {
+                case 0: return "Quit";
+                case 1: return "Offline";
+                case 2: return "MaxTargetMotionCount";
+                case 3: return "MaxFailedCount";
+                case 4: return "MaxMotionLearnedCount";
+                case 5: return "Cancel";
+                default: return "reason" + reason;
+            }
+        }
+
+        // AuraMono ONLY (XDT* protocol statics — managed reflection is dead on this game).
+        private bool TryInvokeCatBeginTease(uint catNetId)
+        {
+            return this.TryInvokeAuraMonoMeowUIntMethod("BeginTease", ref this.petPlayAuraMeowBeginTeaseMethod, catNetId);
+        }
+
+        private bool TryInvokeCatCancelTease(uint catNetId)
+        {
+            return this.TryInvokeAuraMonoMeowUIntMethod("CancelTease", ref this.petPlayAuraMeowCancelTeaseMethod, catNetId);
+        }
+
+        private unsafe bool TryInvokeAuraMonoMeowUIntMethod(string methodName, ref IntPtr methodCache, uint netId)
+        {
+            try
+            {
+                if (methodCache == IntPtr.Zero)
+                {
+                    if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                    {
+                        this.PetPlayLog("Aura Meow." + methodName + " unavailable: AuraMono API not ready.");
+                        return false;
+                    }
+
+                    IntPtr protocolClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Meow.MeowProtocolManager");
+                    if (protocolClass == IntPtr.Zero)
+                    {
+                        this.PetPlayLog("Aura Meow." + methodName + " unavailable: MeowProtocolManager class not found.");
+                        return false;
+                    }
+
+                    methodCache = this.FindAuraMonoMethodOnHierarchy(protocolClass, methodName, 1);
+                }
+
+                if (methodCache == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+                {
+                    this.PetPlayLog("Aura Meow." + methodName + " unavailable: method not resolved.");
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&netId);
+                auraMonoRuntimeInvoke(methodCache, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    this.PetPlayLog("Aura Meow." + methodName + " netId=" + netId + " exc=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
                 return true;
             }
-
-            Type protocolType = this.FindLoadedType(
-                "XDTDataAndProtocol.ProtocolService.Meow.MeowProtocolManager",
-                "MeowProtocolManager");
-            if (protocolType == null)
+            catch (Exception ex)
             {
+                this.PetPlayLog("Aura Meow." + methodName + " exception: " + ex.Message);
                 return false;
             }
+        }
 
-            foreach (MethodInfo method in protocolType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+        // ================= My Pets list (per-pet Play / Wash rows) =================
+
+        private void RefreshPetCareList()
+        {
+            if (Time.realtimeSinceStartup < this.petCareNextScanAllowedAt)
             {
-                if (method == null || method.Name != "TeaseQte")
+                return;
+            }
+
+            this.petCareNextScanAllowedAt = Time.realtimeSinceStartup + 1.5f;
+            this.EnsurePetCareAutoRefreshHooks();
+
+            Dictionary<uint, string> oldMessages = new Dictionary<uint, string>();
+            foreach (PetCareEntry old in this.petCareEntries)
+            {
+                if (old != null && old.NetId != 0U && !string.IsNullOrEmpty(old.Message))
+                {
+                    oldMessages[old.NetId] = old.Message;
+                }
+            }
+
+            this.petCareEntries.Clear();
+
+            List<PetFeedTarget> pets = new List<PetFeedTarget>();
+            this.TryCollectPetFeedPetList(false, pets, out int catCount, out string catStatus);
+            this.TryCollectPetFeedPetList(true, pets, out int dogCount, out string dogStatus);
+
+            foreach (PetFeedTarget pet in pets)
+            {
+                if (pet == null || pet.NetId == 0U || pet.IsMine != true)
                 {
                     continue;
                 }
 
-                ParameterInfo[] parameters = method.GetParameters();
-                if (parameters.Length == 2 && parameters[0].ParameterType == typeof(uint) && parameters[1].ParameterType.IsEnum)
+                PetCareEntry entry = new PetCareEntry
                 {
-                    this.petPlayMeowTeaseQteMethod = method;
-                    return true;
+                    NetId = pet.NetId,
+                    Name = pet.Name ?? string.Empty,
+                    IsDog = pet.IsDog,
+                    Fullness = pet.CurrentFullness
+                };
+                this.TryLoadPetCareStats(entry);
+                if (oldMessages.TryGetValue(entry.NetId, out string oldMessage))
+                {
+                    entry.Message = oldMessage;
                 }
+
+                this.petCareEntries.Add(entry);
             }
 
-            return false;
+            this.petCareListStatus = "mine=" + this.petCareEntries.Count + " scanned=" + (catCount + dogCount);
+            this.PetPlayLog("Pet care list: " + this.petCareListStatus + " catStatus=" + catStatus + " dogStatus=" + dogStatus);
         }
 
-        private bool EnsureDogTeaseQteMethod()
+        // Fills vitality / fullness / chemistry (growth) / name from PetSystem.GetPetComponentData
+        // via the Mono bridge. AuraMono ONLY: managed reflection over EcsClient/XDT* types is dead
+        // code on this game (user rule — see prefer-auramono memory / TYPE_RESOLUTION.md).
+        private bool TryLoadPetCareStats(PetCareEntry entry)
         {
-            if (this.petPlayDogTeaseQteMethod != null)
-            {
-                return true;
-            }
-
-            Type protocolType = this.FindLoadedType(
-                "XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager",
-                "PetProtocolManager");
-            if (protocolType == null)
+            if (entry == null || entry.NetId == 0U)
             {
                 return false;
             }
 
-            this.petPlayDogTeaseQteMethod = protocolType.GetMethod(
-                "TeaseQte",
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new Type[] { typeof(uint), typeof(bool) },
-                null);
-            return this.petPlayDogTeaseQteMethod != null;
+            return this.TryLoadPetCareStatsAuraMono(entry);
+        }
+
+        private unsafe bool TryLoadPetCareStatsAuraMono(PetCareEntry entry)
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+                {
+                    return false;
+                }
+
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Pet.PetSystem", out IntPtr petSystemObj)
+                    || petSystemObj == IntPtr.Zero)
+                {
+                    this.PetPlayLog("Pet care stats: AuraMono PetSystem module unavailable.");
+                    return false;
+                }
+
+                IntPtr petSystemClass = auraMonoObjectGetClass(petSystemObj);
+                IntPtr getDataMethod = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "GetPetComponentData", 2);
+                if (getDataMethod == IntPtr.Zero)
+                {
+                    this.PetPlayLog("Pet care stats: AuraMono GetPetComponentData(2) unavailable.");
+                    return false;
+                }
+
+                if (!this.TryGetPetFeedAuraEntityTypeValue(entry.IsDog, out int entityTypeValue, out string enumStatus))
+                {
+                    this.PetPlayLog("Pet care stats: entity type value unavailable: " + enumStatus);
+                    return false;
+                }
+
+                uint netId = entry.NetId;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&entityTypeValue);
+                args[1] = (IntPtr)(&netId);
+                IntPtr dataObj = auraMonoRuntimeInvoke(getDataMethod, petSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || dataObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                // Boxed PetComponentData return — pin while member reads allocate (sgen moves).
+                uint dataPin = AuraMonoPinNew(dataObj);
+                try
+                {
+                    bool any = false;
+                    if (this.TryGetNestedMonoIntMember(dataObj, out int vitality, "animalComponentData", "vitality"))
+                    {
+                        entry.Vitality = vitality;
+                        any = true;
+                    }
+
+                    if (this.TryGetNestedMonoIntMember(dataObj, out int fullness, "animalComponentData", "fullness"))
+                    {
+                        entry.Fullness = fullness;
+                        any = true;
+                    }
+
+                    if (this.TryGetMonoIntMember(dataObj, "chemistry", out int chemistry))
+                    {
+                        entry.Chemistry = chemistry;
+                        any = true;
+                    }
+
+                    if (string.IsNullOrEmpty(entry.Name)
+                        && this.TryGetMonoObjectMember(dataObj, "animalComponentData", out IntPtr animalObj) && animalObj != IntPtr.Zero
+                        && this.TryGetMonoStringMember(animalObj, "name", out string petName) && !string.IsNullOrEmpty(petName))
+                    {
+                        entry.Name = petName;
+                    }
+
+                    return any;
+                }
+                finally
+                {
+                    AuraMonoPinFree(dataPin);
+                }
+            }
+            catch (Exception ex)
+            {
+                this.PetPlayLog("Pet care stats (aura) netId=" + entry.NetId + " exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // One pet per interval keeps the OnGUI-path cost negligible; a "burst" (after favor-changed
+        // or a finished session) walks the whole list quickly.
+        private void TickPetCareAutoStatsRefresh()
+        {
+            if (this.petCareEntries.Count == 0 || Time.unscaledTime < this.petCareNextAutoStatsAt)
+            {
+                return;
+            }
+
+            float interval = this.petCareStatsBurstRemaining > 0 ? 0.15f : 0.7f;
+            this.petCareNextAutoStatsAt = Time.unscaledTime + interval;
+            if (this.petCareStatsBurstRemaining > 0)
+            {
+                this.petCareStatsBurstRemaining--;
+            }
+
+            if (this.petCareStatsCursor >= this.petCareEntries.Count)
+            {
+                this.petCareStatsCursor = 0;
+            }
+
+            PetCareEntry entry = this.petCareEntries[this.petCareStatsCursor];
+            this.petCareStatsCursor++;
+            if (entry != null)
+            {
+                this.TryLoadPetCareStats(entry);
+            }
+        }
+
+        private void EnsurePetCareAutoRefreshHooks()
+        {
+            if (this.petCareAutoHooksRegistered)
+            {
+                return;
+            }
+
+            this.petCareAutoHooksRegistered = true;
+            // Feeding finished for a specific pet (per-netId) — its fullness/vitality just changed.
+            this.RegisterGameEventHookByNetId(PetFeedEndResultEventName, 4, this.OnPetCareFeedEndEvent);
+            // Own-pet chemistry grew (global, payload = delta only, no netId) — burst-refresh all rows.
+            this.RegisterGameEventHook(PetFavorChangedEventName, 4, this.OnPetCareFavorChangedEvent);
+        }
+
+        private void OnPetCareFeedEndEvent(GameEventSnapshot e)
+        {
+            this.RefreshPetCareEntryStats(e.NetId);
+        }
+
+        private void OnPetCareFavorChangedEvent(GameEventSnapshot e)
+        {
+            this.petCareStatsBurstRemaining = this.petCareEntries.Count;
+            this.petCareNextAutoStatsAt = 0f;
+        }
+
+        private void RefreshPetCareEntryStats(uint netId)
+        {
+            if (netId == 0U)
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.petCareEntries.Count; i++)
+            {
+                PetCareEntry entry = this.petCareEntries[i];
+                if (entry != null && entry.NetId == netId)
+                {
+                    this.TryLoadPetCareStats(entry);
+                    break;
+                }
+            }
+        }
+
+        private void SetPetCareMessage(uint netId, string message)
+        {
+            if (netId == 0U)
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.petCareEntries.Count; i++)
+            {
+                PetCareEntry entry = this.petCareEntries[i];
+                if (entry != null && entry.NetId == netId)
+                {
+                    entry.Message = message ?? string.Empty;
+                    break;
+                }
+            }
+        }
+
+        private bool TryGetPetCareBusyLabel(out string busy)
+        {
+            if (this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle)
+            {
+                busy = "cat play";
+                return true;
+            }
+
+            if (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle)
+            {
+                busy = "dog training";
+                return true;
+            }
+
+            if (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle)
+            {
+                busy = "washing";
+                return true;
+            }
+
+            busy = string.Empty;
+            return false;
+        }
+
+        private bool IsPetCareEntryActiveSession(uint netId)
+        {
+            return netId != 0U
+                && ((this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle && this.petPlayHeadlessCatNetId == netId)
+                    || (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle && this.petPlayHeadlessDogNetId == netId)
+                    || (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle && this.petPlayHeadlessWashNetId == netId));
+        }
+
+        private void StopPetCareActiveSession()
+        {
+            if (this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle)
+            {
+                this.StopHeadlessCatPlay("user");
+            }
+
+            if (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle)
+            {
+                this.TryInvokePetEndTease(this.petPlayHeadlessDogNetId);
+                this.FinishHeadlessDogPlay("Training stopped by user after " + this.petPlayHeadlessDogAnswerCount + " rounds.");
+            }
+
+            if (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle)
+            {
+                this.TryInvokePetBathingCancel(this.petPlayHeadlessWashNetId);
+                this.FinishHeadlessWash("Wash cancelled by user.");
+            }
+        }
+
+        private void OnPetCarePlayClicked(PetCareEntry entry)
+        {
+            if (entry == null || entry.NetId == 0U)
+            {
+                return;
+            }
+
+            if (this.TryGetPetCareBusyLabel(out string busy))
+            {
+                this.SetPetCareMessage(entry.NetId, "Busy: " + busy + " already in progress.");
+                return;
+            }
+
+            this.TryLoadPetCareStats(entry);
+
+            // Same client-side pre-checks the game's interact command does (TeasePetCommand):
+            // hungry = fullness <= 0 for owned pets; dog energy = vitality < teaseVitalityPointDecrease.
+            if (entry.Fullness == 0)
+            {
+                this.SetPetCareMessage(entry.NetId, "Pet is hungry - feed it before playing.");
+                return;
+            }
+
+            if (entry.IsDog)
+            {
+                int teaseCost = this.GetDogTeaseVitalityCost();
+                if (teaseCost > 0 && entry.Vitality >= 0 && entry.Vitality < teaseCost)
+                {
+                    this.SetPetCareMessage(entry.NetId, "Not enough energy for play (" + entry.Vitality + "/" + teaseCost + " needed).");
+                    return;
+                }
+
+                this.StartHeadlessDogPlay(entry.NetId, entry.Name);
+            }
+            else
+            {
+                if (entry.Vitality == 0)
+                {
+                    this.SetPetCareMessage(entry.NetId, "Not enough energy for play.");
+                    return;
+                }
+
+                this.StartHeadlessCatPlayForTarget(entry.NetId, entry.Name);
+            }
+        }
+
+        private void OnPetCareWashClicked(PetCareEntry entry)
+        {
+            if (entry == null || entry.NetId == 0U)
+            {
+                return;
+            }
+
+            if (this.TryGetPetCareBusyLabel(out string busy))
+            {
+                this.SetPetCareMessage(entry.NetId, "Busy: " + busy + " already in progress.");
+                return;
+            }
+
+            this.StartHeadlessWash(entry.NetId, entry.Name);
+        }
+
+        // ================= Headless dog training (protocol-only) =================
+        // PrepareTease -> BeginTease(learningId) -> per-round TeaseDogRoundBeginEvent arms a
+        // DogTeaseCache poll -> TeaseQte(encourage = ActionConfig == ActionFormal) -> server ends
+        // with PetTeaseEndResultEvent (CompleteActions / TooManyMistakes) or we EndTease.
+        // PetTeaseBeginResultEvent is suppressed while active so the always-on TrackingDogPlay never
+        // latches our session (its end handler would open CatPlayResultPanel).
+
+        private void StartHeadlessDogPlay(uint dogNetId, string dogName)
+        {
+            if (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle || dogNetId == 0U)
+            {
+                return;
+            }
+
+            this.EnsurePetPlayEventHooks();
+            this.EnsureHeadlessDogEventHooks();
+
+            if (!this.TryPickDogLearningMotion(dogNetId, out int learningId, out string learningName, out string pickStatus))
+            {
+                this.SetPetCareMessage(dogNetId, pickStatus);
+                this.PetPlayLog("Headless dog play aborted: " + pickStatus);
+                return;
+            }
+
+            this.petPlayHeadlessDogNetId = dogNetId;
+            this.petPlayHeadlessDogName = dogName ?? string.Empty;
+            this.petPlayHeadlessDogLearningId = learningId;
+            this.petPlayHeadlessDogLearningName = learningName ?? string.Empty;
+            this.petPlayHeadlessDogAnswerCount = 0;
+            this.petPlayHeadlessDogSuccessCount = 0;
+            this.petPlayHeadlessDogFailCount = 0;
+            this.petPlayHeadlessDogAwaitingAnswer = false;
+            this.petPlayHeadlessDogPerformanceSeen = false;
+            this.petPlayHeadlessDogAnswerNotBefore = -1f;
+            this.petPlayHeadlessDogNotReadyRetries = 0;
+
+            // The dog performs its table preAction (e.g. sniffing) BEFORE the judged motion each
+            // round — knowing it lets the motion-watch skip the prepare phase without the play event.
+            this.petPlayHeadlessDogPreActionMotionId = 0;
+            if (this.TryGetDogLearningMotionData(learningId, out _, out int preActionMotionId, out _))
+            {
+                this.petPlayHeadlessDogPreActionMotionId = preActionMotionId;
+            }
+
+            this.PetPlayLog("Headless dog hooks installed: play=" + this.IsGameEventHookInstalled(TeaseDogPlayEventName)
+                + " roundBegin=" + this.IsGameEventHookInstalled(TeaseDogRoundBeginEventName)
+                + " qteResult=" + this.IsGameEventHookInstalled(PetTeaseQteResultEventName)
+                + " end=" + this.IsGameEventHookInstalled(PetTeaseEndResultEventName)
+                + " preAction=" + this.petPlayHeadlessDogPreActionMotionId + ".");
+            this.SetGameEventHookSuppressForward(PetTeaseBeginResultEventName, true);
+
+            if (!this.TryInvokePetPrepareTease(dogNetId))
+            {
+                this.SetGameEventHookSuppressForward(PetTeaseBeginResultEventName, false);
+                this.petPlayHeadlessDogNetId = 0U;
+                this.SetPetCareMessage(dogNetId, "Training start failed (protocol unavailable).");
+                return;
+            }
+
+            this.petPlayHeadlessDogState = PetPlayHeadlessDogState.Preparing;
+            this.petPlayHeadlessDogPhaseSentAt = Time.unscaledTime;
+            this.petPlayHeadlessDogLastActivityAt = Time.unscaledTime;
+            this.SetPetCareMessage(dogNetId, "Training: preparing '" + this.petPlayHeadlessDogLearningName + "' (" + pickStatus + ")...");
+            this.PetPlayLog("Headless dog play: PrepareTease sent netId=" + dogNetId + " learningId=" + learningId + " (" + pickStatus + ").");
+        }
+
+        private void FinishHeadlessDogPlay(string status)
+        {
+            uint endedNetId = this.petPlayHeadlessDogNetId;
+            this.petPlayHeadlessDogState = PetPlayHeadlessDogState.Idle;
+            this.petPlayHeadlessDogNetId = 0U;
+            this.petPlayHeadlessDogAwaitingAnswer = false;
+            this.SetGameEventHookSuppressForward(PetTeaseBeginResultEventName, false);
+            if (endedNetId != 0U)
+            {
+                this.SetPetCareMessage(endedNetId, status);
+                this.RefreshPetCareEntryStats(endedNetId);
+            }
+            this.PetPlayLog("Headless dog play: " + status);
+        }
+
+        private void EnsureHeadlessDogEventHooks()
+        {
+            if (this.petPlayHeadlessDogHooksRegistered)
+            {
+                return;
+            }
+
+            this.petPlayHeadlessDogHooksRegistered = true;
+            this.RegisterGameEventHook(PetTeasePrepareResultEventName, PetTeaseResultEventBytes, this.OnPetTeasePrepareResultEvent);
+            this.RegisterGameEventHook(PetTeaseBeginResultEventName, PetTeaseResultEventBytes, this.OnPetTeaseBeginResultEvent);
+            this.RegisterGameEventHookByNetId(TeaseDogPlayEventName, 0, this.OnTeaseDogPlayEventHeadless);
+            this.RegisterGameEventHookByNetId(PetTeaseQteResultEventName, PetTeaseQteResultEventBytes, this.OnPetTeaseQteResultEvent);
+            this.RegisterGameEventHookByNetId(PetTeaseEndResultEventName, PetTeaseEndResultEventBytes, this.OnPetTeaseEndResultEvent);
+        }
+
+        private void OnPetTeasePrepareResultEvent(GameEventSnapshot e)
+        {
+            this.DogTraceLog("EVENT PrepareResult netId=" + e.ReadUInt32(0) + " ok=" + e.ReadBool(4));
+
+            if (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Preparing
+                || e.ReadUInt32(0) != this.petPlayHeadlessDogNetId)
+            {
+                return;
+            }
+
+            if (!e.ReadBool(4))
+            {
+                this.FinishHeadlessDogPlay("Training rejected by server (hungry/energy/occupied - see toast).");
+                return;
+            }
+
+            if (!this.TryInvokePetBeginTease(this.petPlayHeadlessDogNetId, this.petPlayHeadlessDogLearningId))
+            {
+                this.TryInvokePetEndTease(this.petPlayHeadlessDogNetId);
+                this.FinishHeadlessDogPlay("BeginTease invoke failed (see log).");
+                return;
+            }
+
+            this.petPlayHeadlessDogState = PetPlayHeadlessDogState.Beginning;
+            this.petPlayHeadlessDogPhaseSentAt = Time.unscaledTime;
+            this.petPlayHeadlessDogLastActivityAt = Time.unscaledTime;
+        }
+
+        private void OnPetTeaseBeginResultEvent(GameEventSnapshot e)
+        {
+            this.DogTraceLog("EVENT BeginResult netId=" + e.ReadUInt32(0) + " ok=" + e.ReadBool(4));
+
+            if (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Beginning
+                || e.ReadUInt32(0) != this.petPlayHeadlessDogNetId)
+            {
+                return;
+            }
+
+            if (!e.ReadBool(4))
+            {
+                this.FinishHeadlessDogPlay("Training begin rejected (motion locked/unavailable - see toast).");
+                return;
+            }
+
+            this.petPlayHeadlessDogState = PetPlayHeadlessDogState.Active;
+            this.petPlayHeadlessDogLastActivityAt = Time.unscaledTime;
+            this.SetPetCareMessage(this.petPlayHeadlessDogNetId, "Training '" + this.petPlayHeadlessDogLearningName + "' running...");
+            this.PetPlayLog("Headless dog play: session active netId=" + this.petPlayHeadlessDogNetId + ".");
+        }
+
+        private void OnPetTeaseQteResultEvent(GameEventSnapshot e)
+        {
+            this.DogTraceLog("EVENT QteResult netId=" + e.NetId + " result=" + FormatPetTeaseQteResult(e.ReadInt32(0)));
+
+            if (this.petPlayHeadlessDogState == PetPlayHeadlessDogState.Idle
+                || e.NetId != this.petPlayHeadlessDogNetId)
+            {
+                return;
+            }
+
+            // PetTeaseQteResult: 0 Invalid, 1 Success, 2 Failure, 3 NotReady, 4 Timeout.
+            int result = e.ReadInt32(0);
+            if (result == 1)
+            {
+                this.petPlayHeadlessDogSuccessCount++;
+            }
+            else if (result == 2 || result == 4)
+            {
+                this.petPlayHeadlessDogFailCount++;
+            }
+            else if (result == 3)
+            {
+                // NotReady: the server did NOT count the answer — we fired before the answer window
+                // opened. Re-arm and retry after a beat (bounded, in case the window truly is shut).
+                if (this.petPlayHeadlessDogNotReadyRetries < 4)
+                {
+                    this.petPlayHeadlessDogNotReadyRetries++;
+                    this.petPlayHeadlessDogAwaitingAnswer = true;
+                    this.petPlayHeadlessDogAwaitingSince = Time.unscaledTime;
+                    this.petPlayHeadlessDogAnswerNotBefore = Time.unscaledTime + 0.7f;
+                    this.PetPlayLog("Headless dog answer was NotReady - retry " + this.petPlayHeadlessDogNotReadyRetries + " in 0.7s.");
+                }
+                else
+                {
+                    this.PetPlayLog("Headless dog answer NotReady retry limit reached - waiting for next round.");
+                }
+            }
+
+            if (result == 1 || result == 2 || result == 4)
+            {
+                // Success = the answer was ACCEPTED by the server (comes for encourage and ignore
+                // alike); Failure/Timeout = the round was missed.
+                this.SetPetCareMessage(this.petPlayHeadlessDogNetId,
+                    "Training '" + this.petPlayHeadlessDogLearningName + "': " + (result == 1 ? "answered" : "missed")
+                    + " (answered=" + this.petPlayHeadlessDogSuccessCount + " missed=" + this.petPlayHeadlessDogFailCount + ")");
+            }
+
+            this.petPlayHeadlessDogLastActivityAt = Time.unscaledTime;
+        }
+
+        private void OnPetTeaseEndResultEvent(GameEventSnapshot e)
+        {
+            this.DogTraceLog("EVENT End netId=" + e.NetId + " result=" + e.ReadInt32(4)
+                + " reason=" + FormatPetTeaseEndReason(e.ReadInt32(8))
+                + " learningId=" + e.ReadInt32(16) + " exp=" + e.ReadInt32(20)
+                + " growth=" + e.ReadInt32(24) + "/" + e.ReadInt32(28));
+
+            if (this.petPlayHeadlessDogState == PetPlayHeadlessDogState.Idle
+                || e.NetId != this.petPlayHeadlessDogNetId)
+            {
+                return;
+            }
+
+            int result = e.ReadInt32(4);
+            int reason = e.ReadInt32(8);
+            int learningExp = e.ReadInt32(20);
+            this.FinishHeadlessDogPlay("Training ended (" + FormatPetTeaseEndReason(reason) + ", result=" + result + "): '" + this.petPlayHeadlessDogLearningName
+                + "' rounds=" + this.petPlayHeadlessDogAnswerCount
+                + " answered=" + this.petPlayHeadlessDogSuccessCount
+                + " missed=" + this.petPlayHeadlessDogFailCount
+                + " exp=" + learningExp + ".");
+        }
+
+        private void UpdateHeadlessDogPlay()
+        {
+            float now = Time.unscaledTime;
+            switch (this.petPlayHeadlessDogState)
+            {
+                case PetPlayHeadlessDogState.Preparing:
+                case PetPlayHeadlessDogState.Beginning:
+                    if (now - this.petPlayHeadlessDogPhaseSentAt > 6f)
+                    {
+                        this.TryInvokePetEndTease(this.petPlayHeadlessDogNetId);
+                        this.FinishHeadlessDogPlay("Training start timeout (no server response).");
+                    }
+                    break;
+
+                case PetPlayHeadlessDogState.Active:
+                    if (this.petPlayHeadlessDogAwaitingAnswer && now >= this.petPlayHeadlessDogNextCachePollAt)
+                    {
+                        this.petPlayHeadlessDogNextCachePollAt = now + 0.15f;
+                        this.TryAnswerHeadlessDogRound(now);
+                        if (this.petPlayHeadlessDogAwaitingAnswer && now - this.petPlayHeadlessDogAwaitingSince > 15f)
+                        {
+                            // Final safety: something kept the round pending — drop it, next round re-arms.
+                            this.petPlayHeadlessDogAwaitingAnswer = false;
+                            this.PetPlayLog("Headless dog round dropped (pending >15s).");
+                        }
+                    }
+
+                    if (now - this.petPlayHeadlessDogLastActivityAt > 45f)
+                    {
+                        this.TryInvokePetEndTease(this.petPlayHeadlessDogNetId);
+                        this.FinishHeadlessDogPlay("Watchdog: no training activity for 45s - ended.");
+                    }
+                    break;
+            }
+        }
+
+        private struct PetCareMotionInfo
+        {
+            public int Id;
+            public int Exp;
+            public int Exp2Learn;
+            public string Name;
+        }
+
+        // The dog performed its round motion — judge NOW, exactly when the game's own answer window
+        // opens (this is what makes the working Auto Dog Train correct: the panel it reads updates
+        // on this event, so the motion data is the round's performance, not idle/stale state).
+        private void OnTeaseDogPlayEventHeadless(GameEventSnapshot e)
+        {
+            this.DogTraceLog("EVENT Play netId=" + e.NetId + " (answer window opens)");
+
+            if (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Active
+                || e.NetId != this.petPlayHeadlessDogNetId)
+            {
+                return;
+            }
+
+            this.petPlayHeadlessDogPerformanceSeen = true;
+            this.petPlayHeadlessDogLastActivityAt = Time.unscaledTime;
+            // Human-ish beat before answering: the server opens the answer window with this same
+            // message — replying in the exact frame races the round-state commit (NotReady).
+            this.petPlayHeadlessDogAnswerNotBefore = Time.unscaledTime + 0.5f;
+        }
+
+        // Answers the armed round with the SAME choice resolver the working Auto Dog Train uses
+        // (learning-table + live dog motion; all AuraMono) — just with our known learningId instead
+        // of reading it from the DogPlayStatusPanel (which never opens headless). Judged only after
+        // the performance signal (TeaseDogPlayEvent) or, as a backstop, 4s after round begin.
+        private void TryAnswerHeadlessDogRound(float now)
+        {
+            if (!this.petPlayHeadlessDogAwaitingAnswer)
+            {
+                return;
+            }
+
+            uint dogNetId = this.petPlayHeadlessDogNetId;
+            float sinceArm = now - this.petPlayHeadlessDogAwaitingSince;
+
+            // Trace the dog's motion while the round runs — DIAGNOSTIC ONLY. The performance motion
+            // syncs ~5s BEFORE the server opens the answer window (proven by the Auto-vs-Headless
+            // trace), so judging by motion fires into a closed window and the server discards the
+            // answer. The ONLY valid answer gate is TeaseDogPlayEvent (what DogPlayStatusPanel uses).
+            if (this.TryGetDogComponentMotionId(dogNetId, out int liveMotionId, out _)
+                && liveMotionId != this.petPlayDogTraceLastMotionId)
+            {
+                this.DogTraceLog("dog motion " + this.petPlayDogTraceLastMotionId + " -> " + liveMotionId
+                    + " (preAction=" + this.petPlayHeadlessDogPreActionMotionId + ")");
+                this.petPlayDogTraceLastMotionId = liveMotionId;
+            }
+
+            if (!this.petPlayHeadlessDogPerformanceSeen)
+            {
+                if (sinceArm > 12f)
+                {
+                    // No Play event — the answer window never opened; nothing valid to send.
+                    this.petPlayHeadlessDogAwaitingAnswer = false;
+                    this.DogTraceLog("no Play event within 12s - skipping round");
+                }
+
+                return;
+            }
+
+            if (now < this.petPlayHeadlessDogAnswerNotBefore)
+            {
+                return;
+            }
+
+            bool encourage;
+            string choiceStatus;
+            bool resolved = this.TryResolveDogQteChoiceForLearning(dogNetId, this.petPlayHeadlessDogLearningId, out encourage, out choiceStatus)
+                || this.TryResolveDogQteChoiceFromMotion(dogNetId, out encourage, out choiceStatus);
+
+            if (!resolved)
+            {
+                if (now - this.petPlayHeadlessDogAnswerNotBefore < 2f)
+                {
+                    return; // retry on the next poll tick — motion may not be readable yet
+                }
+
+                // Window is open but the choice is unresolvable — a deliberate "ignore" beats a timeout.
+                encourage = false;
+                choiceStatus = "unresolved -> ignore (" + choiceStatus + ")";
+            }
+
+            this.DogTraceLog("SEND TeaseQte(" + (encourage ? "encourage" : "ignore") + ") headless, sinceRound=" + sinceArm.ToString("F1")
+                + "s perfSeen=" + this.petPlayHeadlessDogPerformanceSeen + " retries=" + this.petPlayHeadlessDogNotReadyRetries);
+            if (this.TryInvokeDogTeaseQte(dogNetId, encourage))
+            {
+                this.petPlayHeadlessDogAwaitingAnswer = false;
+                this.petPlayHeadlessDogAnswerCount++;
+                this.petPlayHeadlessDogLastActivityAt = now;
+                this.SetPetCareMessage(dogNetId,
+                    "Training '" + this.petPlayHeadlessDogLearningName + "': round " + this.petPlayHeadlessDogAnswerCount
+                    + " -> " + (encourage ? "encourage" : "ignore") + "...");
+                this.PetPlayLog("Headless dog QTE answered action=" + (encourage ? "encourage" : "ignore")
+                    + " perfSeen=" + this.petPlayHeadlessDogPerformanceSeen + " t=" + sinceArm.ToString("F1") + "s " + choiceStatus + ".");
+            }
+        }
+
+        // Picks the user's requested learning motion: first an unfinished (started but not learned)
+        // one; otherwise the first available (unlocked) one.
+        private bool TryPickDogLearningMotion(uint dogNetId, out int learningId, out string learningName, out string status)
+        {
+            learningId = 0;
+            learningName = string.Empty;
+
+            List<PetCareMotionInfo> motions = new List<PetCareMotionInfo>(24);
+            if (!this.TryCollectDogMotions(dogNetId, motions, out int growth, out status))
+            {
+                return false;
+            }
+
+            if (motions.Count == 0)
+            {
+                status = "No trainable motions found.";
+                return false;
+            }
+
+            int unfinishedIndex = -1;
+            int notBegunIndex = -1;
+            int firstUnlockedIndex = -1;
+            int lockedCount = 0;
+
+            for (int i = 0; i < motions.Count; i++)
+            {
+                PetCareMotionInfo motion = motions[i];
+                if (this.TryGetDogLearningMotionUnlockGrowth(motion.Id, out int unlockGrowth) && growth < unlockGrowth)
+                {
+                    lockedCount++;
+                    continue;
+                }
+
+                if (firstUnlockedIndex < 0)
+                {
+                    firstUnlockedIndex = i;
+                }
+
+                if (motion.Exp > 0 && motion.Exp < motion.Exp2Learn && unfinishedIndex < 0)
+                {
+                    unfinishedIndex = i;
+                }
+                else if (motion.Exp == 0 && notBegunIndex < 0)
+                {
+                    notBegunIndex = i;
+                }
+            }
+
+            int pickedIndex;
+            if (unfinishedIndex >= 0)
+            {
+                pickedIndex = unfinishedIndex;
+                status = "continuing unfinished";
+            }
+            else if (notBegunIndex >= 0)
+            {
+                pickedIndex = notBegunIndex;
+                status = "starting new";
+            }
+            else if (firstUnlockedIndex >= 0)
+            {
+                pickedIndex = firstUnlockedIndex;
+                status = "all learned - repeating";
+            }
+            else
+            {
+                status = "No unlocked motions (locked=" + lockedCount + ", growth=" + growth + ").";
+                return false;
+            }
+
+            learningId = motions[pickedIndex].Id;
+            learningName = string.IsNullOrEmpty(motions[pickedIndex].Name) ? ("#" + learningId) : motions[pickedIndex].Name;
+            return true;
+        }
+
+        // AuraMono ONLY (managed reflection over XDT* types is dead on this game).
+        private bool TryCollectDogMotions(uint dogNetId, List<PetCareMotionInfo> motions, out int growth, out string status)
+        {
+            return this.TryCollectDogMotionsAuraMono(dogNetId, motions, out growth, out status);
+        }
+
+        private unsafe bool TryCollectDogMotionsAuraMono(uint dogNetId, List<PetCareMotionInfo> motions, out int growth, out string status)
+        {
+            growth = 0;
+            status = "AuraMono motion list unavailable.";
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+                {
+                    status = "AuraMono API unavailable.";
+                    return false;
+                }
+
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Pet.PetSystem", out IntPtr petSystemObj)
+                    || petSystemObj == IntPtr.Zero)
+                {
+                    status = "AuraMono PetSystem module unavailable.";
+                    return false;
+                }
+
+                IntPtr petSystemClass = auraMonoObjectGetClass(petSystemObj);
+                IntPtr getMotionsMethod = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "GetMotionDatas", 2);
+                if (getMotionsMethod == IntPtr.Zero)
+                {
+                    status = "AuraMono GetMotionDatas unavailable.";
+                    return false;
+                }
+
+                if (!this.TryGetPetFeedAuraEntityTypeValue(true, out int entityTypeValue, out string enumStatus))
+                {
+                    status = "AuraMono entity type unavailable: " + enumStatus;
+                    return false;
+                }
+
+                uint netId = dogNetId;
+                IntPtr exc = IntPtr.Zero;
+
+                // growth (chemistry) for the unlock check.
+                IntPtr getDataMethod = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "GetPetComponentData", 2);
+                if (getDataMethod != IntPtr.Zero)
+                {
+                    IntPtr* dataArgs = stackalloc IntPtr[2];
+                    dataArgs[0] = (IntPtr)(&entityTypeValue);
+                    dataArgs[1] = (IntPtr)(&netId);
+                    IntPtr dataObj = auraMonoRuntimeInvoke(getDataMethod, petSystemObj, (IntPtr)dataArgs, ref exc);
+                    if (exc == IntPtr.Zero && dataObj != IntPtr.Zero)
+                    {
+                        uint dataPin = AuraMonoPinNew(dataObj);
+                        try
+                        {
+                            this.TryGetMonoIntMember(dataObj, "chemistry", out growth);
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(dataPin);
+                        }
+                    }
+
+                    exc = IntPtr.Zero;
+                }
+
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&entityTypeValue);
+                args[1] = (IntPtr)(&netId);
+                IntPtr motionsObj = auraMonoRuntimeInvoke(getMotionsMethod, petSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || motionsObj == IntPtr.Zero)
+                {
+                    status = "AuraMono GetMotionDatas failed exc=0x" + exc.ToInt64().ToString("X");
+                    return false;
+                }
+
+                uint motionsPin = AuraMonoPinNew(motionsObj);
+                List<IntPtr> items = new List<IntPtr>(24);
+                List<uint> itemPins = new List<uint>(24);
+                try
+                {
+                    if (!this.TryEnumerateAuraMonoCollectionItems(motionsObj, items, itemPins) || items.Count == 0)
+                    {
+                        status = "AuraMono motion list empty.";
+                        return false;
+                    }
+
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        IntPtr motionObj = items[i];
+                        if (motionObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        if (!this.TryGetMonoIntMember(motionObj, "id", out int id) || id == 0)
+                        {
+                            continue;
+                        }
+
+                        this.TryGetMonoIntMember(motionObj, "exp", out int exp);
+                        this.TryGetMonoIntMember(motionObj, "exp2Learn", out int exp2Learn);
+                        this.TryGetMonoStringMember(motionObj, "name", out string name);
+                        motions.Add(new PetCareMotionInfo
+                        {
+                            Id = id,
+                            Exp = exp,
+                            Exp2Learn = exp2Learn,
+                            Name = name
+                        });
+                    }
+
+                    status = "AuraMono motions=" + motions.Count + " growth=" + growth;
+                    return motions.Count > 0;
+                }
+                finally
+                {
+                    AuraMonoPinFree(motionsPin);
+                    FreeAuraMonoPins(itemPins);
+                }
+            }
+            catch (Exception ex)
+            {
+                status = "AuraMono motion collect exception: " + ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+        }
+
+        // AuraMono ONLY: table row via the Mono bridge ("unlockGrowth" resolves to the int property
+        // getter — the backing field is a ushort).
+        private bool TryGetDogLearningMotionUnlockGrowth(int learningId, out int unlockGrowth)
+        {
+            unlockGrowth = 0;
+            try
+            {
+                if (this.TryGetAuraMonoDogLearningMotion(learningId, out IntPtr tableObj, out _)
+                    && tableObj != IntPtr.Zero
+                    && this.TryGetMonoIntMember(tableObj, "unlockGrowth", out unlockGrowth))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            unlockGrowth = 0;
+            return false;
+        }
+
+        // The exact client-side energy gate the game's TeasePetCommand uses:
+        // vitality < TableDogThemes.First().teaseVitalityPointDecrease. AuraMono ONLY.
+        private int GetDogTeaseVitalityCost()
+        {
+            if (this.petCareDogTeaseVitalityCost >= 0)
+            {
+                return this.petCareDogTeaseVitalityCost;
+            }
+
+            int auraCost = this.GetDogTeaseVitalityCostAuraMono();
+            if (auraCost >= 0)
+            {
+                this.petCareDogTeaseVitalityCost = auraCost;
+            }
+
+            return auraCost;
+        }
+
+        private int GetDogTeaseVitalityCostAuraMono()
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null)
+                {
+                    return -1;
+                }
+
+                // TableData lives in the EcsClient image at global namespace (same resolution
+                // chain as TryGetAuraMonoDogLearningMotion).
+                IntPtr ecsImage = this.FindAuraMonoImage(new string[] { "EcsClient", "EcsClient.dll" });
+                IntPtr tableDataClass = ecsImage != IntPtr.Zero ? auraMonoClassFromName(ecsImage, string.Empty, "TableData") : IntPtr.Zero;
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    tableDataClass = this.FindAuraMonoClassAcrossLoadedAssemblies(string.Empty, "TableData");
+                }
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    return -1;
+                }
+
+                if (!this.TryGetAuraMonoStaticObjectField(tableDataClass, "TableDogThemes", out IntPtr dictObj) || dictObj == IntPtr.Zero)
+                {
+                    return -1;
+                }
+
+                List<IntPtr> entries = new List<IntPtr>(4);
+                List<uint> entryPins = new List<uint>(4);
+                try
+                {
+                    if (!this.TryEnumerateAuraMonoCollectionItems(dictObj, entries, entryPins) || entries.Count == 0)
+                    {
+                        return -1;
+                    }
+
+                    for (int i = 0; i < entries.Count; i++)
+                    {
+                        IntPtr kvObj = entries[i];
+                        if (kvObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        if ((this.TryGetMonoObjectMember(kvObj, "Value", out IntPtr rowObj)
+                                || this.TryGetMonoObjectMember(kvObj, "value", out rowObj))
+                            && rowObj != IntPtr.Zero
+                            && this.TryGetMonoIntMember(rowObj, "teaseVitalityPointDecrease", out int cost))
+                        {
+                            return cost;
+                        }
+
+                        break;
+                    }
+
+                    return -1;
+                }
+                finally
+                {
+                    FreeAuraMonoPins(entryPins);
+                }
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static string FormatPetTeaseEndReason(int reason)
+        {
+            switch (reason)
+            {
+                case 0: return "Quit";
+                case 1: return "CompleteActions";
+                case 2: return "TooManyMistakes";
+                default: return "reason" + reason;
+            }
+        }
+
+        // ================= Headless pet wash (protocol-only) =================
+        // PetBathinghBegin [sic] -> begin result (Success carries roundTotal; Failed = already
+        // clean / on cooldown) -> per round: PetBathingRoundStart -> click result (roundIndex,
+        // duration) -> per-netId round end (IsLastRound) -> next round -> per-netId end event.
+        // The PetBathPanel never opens (it is GamePetBathMode-gated), so no wash UI appears.
+
+        private void StartHeadlessWash(uint petNetId, string petName)
+        {
+            if (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle || petNetId == 0U)
+            {
+                return;
+            }
+
+            this.EnsureHeadlessWashEventHooks();
+
+            this.petPlayHeadlessWashNetId = petNetId;
+            this.petPlayHeadlessWashName = petName ?? string.Empty;
+            this.petPlayHeadlessWashRoundTotal = 0;
+            this.petPlayHeadlessWashRoundIndex = -1;
+            this.petPlayHeadlessWashNextRoundAt = -1f;
+
+            if (!this.TryInvokePetBathingBegin(petNetId))
+            {
+                this.petPlayHeadlessWashNetId = 0U;
+                this.SetPetCareMessage(petNetId, "Wash start failed (protocol unavailable).");
+                return;
+            }
+
+            this.petPlayHeadlessWashState = PetPlayHeadlessWashState.Beginning;
+            this.petPlayHeadlessWashPhaseSentAt = Time.unscaledTime;
+            this.petPlayHeadlessWashLastActivityAt = Time.unscaledTime;
+            this.SetPetCareMessage(petNetId, "Wash: asking server...");
+            this.PetPlayLog("Headless wash: PetBathinghBegin sent netId=" + petNetId + ".");
+        }
+
+        private void FinishHeadlessWash(string status)
+        {
+            uint endedNetId = this.petPlayHeadlessWashNetId;
+            this.petPlayHeadlessWashState = PetPlayHeadlessWashState.Idle;
+            this.petPlayHeadlessWashNetId = 0U;
+            this.petPlayHeadlessWashNextRoundAt = -1f;
+            if (endedNetId != 0U)
+            {
+                this.SetPetCareMessage(endedNetId, status);
+                this.RefreshPetCareEntryStats(endedNetId);
+            }
+            this.PetPlayLog("Headless wash: " + status);
+        }
+
+        private void EnsureHeadlessWashEventHooks()
+        {
+            if (this.petPlayHeadlessWashHooksRegistered)
+            {
+                return;
+            }
+
+            this.petPlayHeadlessWashHooksRegistered = true;
+            this.RegisterGameEventHook(PetBathBeginResultClientEventName, PetBathBeginResultClientEventBytes, this.OnPetBathBeginResultEvent);
+            this.RegisterGameEventHook(PetBathClickResultClientEventName, PetBathClickResultClientEventBytes, this.OnPetBathClickResultEvent);
+            this.RegisterGameEventHookByNetId(PetBathRoundEndClientEventName, PetBathRoundEndClientEventBytes, this.OnPetBathRoundEndEvent);
+            this.RegisterGameEventHookByNetId(PetBathEndResultClientEventName, 0, this.OnPetBathEndResultEvent);
+        }
+
+        private void OnPetBathBeginResultEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Beginning
+                || e.ReadUInt32(4) != this.petPlayHeadlessWashNetId)
+            {
+                return;
+            }
+
+            // PetBathingBeginResult: 0 Failed, 1 Success, 2 FeatureNotOpen, 3 PetOccupying,
+            // 4 PlayerOccupying, 5 NoStamina, 6 Hungry, 7 NotAtHome.
+            int result = e.ReadInt32(0);
+            switch (result)
+            {
+                case 1:
+                    this.petPlayHeadlessWashRoundTotal = e.ReadInt32(8);
+                    this.petPlayHeadlessWashState = PetPlayHeadlessWashState.Rounds;
+                    this.petPlayHeadlessWashLastActivityAt = Time.unscaledTime;
+                    this.petPlayHeadlessWashNextRoundAt = Time.unscaledTime + 0.35f;
+                    this.SetPetCareMessage(this.petPlayHeadlessWashNetId, "Washing: 0/" + this.petPlayHeadlessWashRoundTotal + " rounds...");
+                    break;
+                case 0:
+                    this.FinishHeadlessWash("Pet is already clean - wash unavailable.");
+                    break;
+                case 3:
+                case 4:
+                    this.FinishHeadlessWash("Pet or player is busy - wash unavailable.");
+                    break;
+                case 5:
+                    this.FinishHeadlessWash("No player stamina for washing.");
+                    break;
+                case 6:
+                    this.FinishHeadlessWash("Pet is hungry - feed it before washing.");
+                    break;
+                case 7:
+                    this.FinishHeadlessWash("Washing works only at home.");
+                    break;
+                default:
+                    this.FinishHeadlessWash("Wash unavailable (result " + result + ").");
+                    break;
+            }
+        }
+
+        private void OnPetBathClickResultEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Rounds
+                || e.ReadUInt32(4) != this.petPlayHeadlessWashNetId
+                || !e.ReadBool(0))
+            {
+                return;
+            }
+
+            this.petPlayHeadlessWashRoundIndex = e.ReadInt32(8);
+            this.petPlayHeadlessWashLastActivityAt = Time.unscaledTime;
+            this.petPlayHeadlessWashNextRoundAt = -1f;
+            this.SetPetCareMessage(this.petPlayHeadlessWashNetId,
+                "Washing: round " + (this.petPlayHeadlessWashRoundIndex + 1) + "/" + this.petPlayHeadlessWashRoundTotal + "...");
+        }
+
+        private void OnPetBathRoundEndEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Rounds
+                || e.NetId != this.petPlayHeadlessWashNetId)
+            {
+                return;
+            }
+
+            this.petPlayHeadlessWashLastActivityAt = Time.unscaledTime;
+            if (!e.ReadBool(0))
+            {
+                // Next scrub — the game waits for the player's click here; keep a human-ish beat.
+                this.petPlayHeadlessWashNextRoundAt = Time.unscaledTime + 0.4f;
+            }
+        }
+
+        private void OnPetBathEndResultEvent(GameEventSnapshot e)
+        {
+            if (this.petPlayHeadlessWashState == PetPlayHeadlessWashState.Idle
+                || e.NetId != this.petPlayHeadlessWashNetId)
+            {
+                return;
+            }
+
+            this.FinishHeadlessWash("Washed! (" + this.petPlayHeadlessWashRoundTotal + " rounds done)");
+        }
+
+        private void UpdateHeadlessWash()
+        {
+            float now = Time.unscaledTime;
+            if (this.petPlayHeadlessWashState == PetPlayHeadlessWashState.Beginning)
+            {
+                if (now - this.petPlayHeadlessWashPhaseSentAt > 6f)
+                {
+                    this.FinishHeadlessWash("Wash start timeout (no server response).");
+                }
+            }
+            else if (this.petPlayHeadlessWashState == PetPlayHeadlessWashState.Rounds)
+            {
+                if (this.petPlayHeadlessWashNextRoundAt >= 0f && now >= this.petPlayHeadlessWashNextRoundAt)
+                {
+                    this.petPlayHeadlessWashNextRoundAt = -1f;
+                    if (!this.TryInvokePetBathingRoundStart(this.petPlayHeadlessWashNetId))
+                    {
+                        this.TryInvokePetBathingCancel(this.petPlayHeadlessWashNetId);
+                        this.FinishHeadlessWash("Wash round invoke failed (see log).");
+                        return;
+                    }
+
+                    this.petPlayHeadlessWashLastActivityAt = now;
+                }
+
+                if (now - this.petPlayHeadlessWashLastActivityAt > 30f)
+                {
+                    this.TryInvokePetBathingCancel(this.petPlayHeadlessWashNetId);
+                    this.FinishHeadlessWash("Wash watchdog: no progress for 30s - cancelled.");
+                }
+            }
+        }
+
+        // ================= PetProtocolManager invokers (managed -> AuraMono fallback) =================
+
+        // AuraMono ONLY (XDT* protocol statics — managed reflection is dead on this game).
+        private bool TryInvokePetPrepareTease(uint netId)
+        {
+            return this.TryInvokeAuraMonoPetUIntMethod("PrepareTease", ref this.petPlayAuraPetPrepareTeaseMethod, netId);
+        }
+
+        private bool TryInvokePetEndTease(uint netId)
+        {
+            return this.TryInvokeAuraMonoPetUIntMethod("EndTease", ref this.petPlayAuraPetEndTeaseMethod, netId);
+        }
+
+        // NB: the game method name really is "PetBathinghBegin" (typo in game code).
+        private bool TryInvokePetBathingBegin(uint netId)
+        {
+            return this.TryInvokeAuraMonoPetUIntMethod("PetBathinghBegin", ref this.petPlayAuraPetBathingBeginMethod, netId);
+        }
+
+        private bool TryInvokePetBathingCancel(uint netId)
+        {
+            return this.TryInvokeAuraMonoPetUIntMethod("PetBathingCancel", ref this.petPlayAuraPetBathingCancelMethod, netId);
+        }
+
+        private unsafe bool TryInvokeAuraMonoPetUIntMethod(string methodName, ref IntPtr methodCache, uint netId)
+        {
+            try
+            {
+                if (methodCache == IntPtr.Zero)
+                {
+                    if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                    {
+                        this.PetPlayLog("Aura Pet." + methodName + " unavailable: AuraMono API not ready.");
+                        return false;
+                    }
+
+                    IntPtr protocolClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager");
+                    if (protocolClass == IntPtr.Zero)
+                    {
+                        this.PetPlayLog("Aura Pet." + methodName + " unavailable: PetProtocolManager class not found.");
+                        return false;
+                    }
+
+                    methodCache = this.FindAuraMonoMethodOnHierarchy(protocolClass, methodName, 1);
+                }
+
+                if (methodCache == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+                {
+                    this.PetPlayLog("Aura Pet." + methodName + " unavailable: method not resolved.");
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&netId);
+                auraMonoRuntimeInvoke(methodCache, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    this.PetPlayLog("Aura Pet." + methodName + " netId=" + netId + " exc=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.PetPlayLog("Aura Pet." + methodName + " exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // AuraMono ONLY.
+        private bool TryInvokePetBeginTease(uint netId, int learningId)
+        {
+            return this.TryInvokeAuraMonoPetBeginTease(netId, learningId);
+        }
+
+        private unsafe bool TryInvokeAuraMonoPetBeginTease(uint netId, int learningId)
+        {
+            try
+            {
+                if (this.petPlayAuraPetBeginTeaseMethod == IntPtr.Zero)
+                {
+                    if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                    {
+                        return false;
+                    }
+
+                    IntPtr protocolClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager");
+                    if (protocolClass == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    this.petPlayAuraPetBeginTeaseMethod = this.FindAuraMonoMethodOnHierarchy(protocolClass, "BeginTease", 2);
+                }
+
+                if (this.petPlayAuraPetBeginTeaseMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+                {
+                    this.PetPlayLog("Aura Pet.BeginTease unavailable: method not resolved.");
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&netId);
+                args[1] = (IntPtr)(&learningId);
+                auraMonoRuntimeInvoke(this.petPlayAuraPetBeginTeaseMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    this.PetPlayLog("Aura Pet.BeginTease netId=" + netId + " learningId=" + learningId + " exc=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.PetPlayLog("Aura Pet.BeginTease exception: " + ex.Message);
+                return false;
+            }
         }
 
         private void TryAutoAnswerCatPlayFromQuestionState()
@@ -647,98 +2483,6 @@ namespace HeartopiaMod
                     + " sprite=" + spriteName
                     + " net=True.");
             }
-        }
-
-        private bool TryGetActiveCatPlayPanel(out object panelTarget, out uint catNetId, out bool inputDisabled, out string status)
-        {
-            panelTarget = null;
-            catNetId = 0U;
-            inputDisabled = false;
-            status = "CatPlayStatusPanel not found.";
-
-            try
-            {
-                Component[] components = Resources.FindObjectsOfTypeAll<Component>();
-                for (int i = 0; i < components.Length; i++)
-                {
-                    Component component = components[i];
-                    if (component == null || component.gameObject == null || !component.gameObject.activeInHierarchy)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryGetPetPlayPanelTarget(component, "CatPlayStatusPanel", out object target) || target == null)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryReadManagedBoolMember(target, "_inputDisabled", out inputDisabled)
-                        && !this.TryReadManagedBoolMember(target, "inputDisabled", out inputDisabled))
-                    {
-                        inputDisabled = false;
-                    }
-
-                    if (!this.TryReadManagedUInt32Member(target, "_catNetId", out catNetId)
-                        && !this.TryReadManagedUInt32Member(target, "catNetId", out catNetId))
-                    {
-                        status = "CatPlayStatusPanel missing cat net id.";
-                        continue;
-                    }
-
-                    panelTarget = target;
-                    status = "CatPlayStatusPanel active: netId=" + catNetId + " inputDisabled=" + inputDisabled + ".";
-                    return true;
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                status = "CatPlayStatusPanel scan exception: " + ex.Message;
-                return false;
-            }
-        }
-
-        private bool TryGetPetPlayPanelTarget(Component component, string panelTypeName, out object target)
-        {
-            target = null;
-            if (component == null || string.IsNullOrEmpty(panelTypeName))
-            {
-                return false;
-            }
-
-            try
-            {
-                string managedName = component.GetType().FullName ?? component.GetType().Name ?? string.Empty;
-                if (managedName.IndexOf(panelTypeName, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    target = component;
-                    return true;
-                }
-
-                Il2CppObject il2CppObject = component.TryCast<Il2CppObject>();
-                string il2CppName = il2CppObject?.GetIl2CppType()?.FullName?.ToString() ?? string.Empty;
-                if (il2CppName.IndexOf(panelTypeName, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    target = component;
-                    return true;
-                }
-
-                Type wrapperType = component.GetType();
-                PropertyInfo implProperty = wrapperType.GetProperty("Impl", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                object impl = implProperty != null ? implProperty.GetValue(component, null) : null;
-                string implName = impl?.GetType().FullName ?? impl?.GetType().Name ?? string.Empty;
-                if (impl != null && implName.IndexOf(panelTypeName, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    target = impl;
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
         }
 
         private bool TryGetActiveCatPlayQuestion(out uint catNetId, out int qteValue, out string spriteName, out IntPtr questionCellObj, out string status)
@@ -1199,6 +2943,7 @@ namespace HeartopiaMod
                 return;
             }
 
+            this.DogTraceLog("SEND TeaseQte(" + (encourage ? "encourage" : "ignore") + ") auto, panelRound=" + round);
             bool protocolOk = this.TryInvokeDogTeaseQte(dogNetId, encourage);
             if (protocolOk)
             {
@@ -1226,49 +2971,52 @@ namespace HeartopiaMod
             }
         }
 
+        // DogTeaseCacheComponent is not read anymore: its only access path was managed
+        // EntityDataOpt reflection, which is dead on this game (AuraMono-only rule). The choice is
+        // resolved from the learning table + the dog's live motion instead (both AuraMono).
         private bool TryResolveDogQteChoice(uint dogNetId, int round, out bool encourage, out string status)
         {
             encourage = true;
-            status = "not checked";
 
-            if (!this.TryGetDogTeaseCache(dogNetId, out int actionRound, out int actionConfig, out int actionFormal, out status))
+            if (this.TryResolveDogQteChoiceFromLearningTable(dogNetId, out encourage, out string learningTableStatus))
             {
-                string cacheStatus = status;
-                if (this.TryResolveDogQteChoiceFromLearningTable(dogNetId, out encourage, out string learningTableStatus))
-                {
-                    status = learningTableStatus + " cacheFallback=" + cacheStatus;
-                    return true;
-                }
-
-                if (this.TryResolveDogQteChoiceFromMotion(dogNetId, out encourage, out string motionStatus))
-                {
-                    status = motionStatus + " cacheFallback=" + cacheStatus;
-                    return true;
-                }
-
-                status = cacheStatus + " " + learningTableStatus + " " + motionStatus;
-                return false;
+                status = learningTableStatus;
+                return true;
             }
 
-            if (actionRound > 0 && round > 0 && actionRound != round)
+            if (this.TryResolveDogQteChoiceFromMotion(dogNetId, out encourage, out string motionStatus))
             {
-                status = "stale dog cache round=" + actionRound + " uiRound=" + round + " config=" + actionConfig + " formal=" + actionFormal;
-                return false;
+                status = motionStatus;
+                return true;
             }
 
-            encourage = actionConfig == actionFormal;
-            status = "choiceSource=DogTeaseCache actionRound=" + actionRound + " config=" + actionConfig + " formal=" + actionFormal;
-            return true;
+            status = learningTableStatus + " " + motionStatus;
+            return false;
         }
 
         private bool TryResolveDogQteChoiceFromLearningTable(uint dogNetId, out bool encourage, out string status)
         {
             encourage = true;
-            status = "DogLearningMotion PreAction unavailable.";
 
             if (!this.TryGetDogPlayPanelLearningId(out int learningId, out string learningStatus) || learningId <= 0)
             {
                 status = learningStatus;
+                return false;
+            }
+
+            return this.TryResolveDogQteChoiceForLearning(dogNetId, learningId, out encourage, out status);
+        }
+
+        // Shared choice core (Auto Dog Train + headless): encourage when the dog's live motion IS
+        // the trained motion (table motionID match, or the motion's requireLearningId matches).
+        private bool TryResolveDogQteChoiceForLearning(uint dogNetId, int learningId, out bool encourage, out string status)
+        {
+            encourage = true;
+            status = "DogLearningMotion PreAction unavailable.";
+
+            if (learningId <= 0)
+            {
+                status = "learningId unavailable.";
                 return false;
             }
 
@@ -1290,71 +3038,10 @@ namespace HeartopiaMod
             return true;
         }
 
+        // AuraMono ONLY (EcsClient TableData — managed reflection is dead on this game).
         private bool TryGetDogLearningMotionData(int learningId, out int motionId, out int preAction, out string status)
         {
-            motionId = 0;
-            preAction = 0;
-            status = "DogLearningMotion unavailable.";
-
-            if (this.TryGetDogLearningMotionDataManaged(learningId, out motionId, out preAction, out status))
-            {
-                return true;
-            }
-
-            string managedStatus = status;
-            if (this.TryGetDogLearningMotionDataAuraMono(learningId, out motionId, out preAction, out status))
-            {
-                return true;
-            }
-
-            status = managedStatus + " " + status;
-            return false;
-        }
-
-        private bool TryGetDogLearningMotionDataManaged(int learningId, out int motionId, out int preAction, out string status)
-        {
-            motionId = 0;
-            preAction = 0;
-            status = "managed TableDogLearningMotion unavailable.";
-
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                MethodInfo getMethod = tableDataType.GetMethod("GetDogLearningMotion", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                if (getMethod == null)
-                {
-                    status = "managed TableData.GetDogLearningMotion unavailable.";
-                    return false;
-                }
-
-                object tableObj = getMethod.Invoke(null, new object[] { learningId, false });
-                if (tableObj == null)
-                {
-                    status = "managed TableDogLearningMotion missing learningId=" + learningId + ".";
-                    return false;
-                }
-
-                bool hasMotion = this.TryGetNestedIntMember(tableObj, out motionId, "motionID");
-                bool hasPreAction = this.TryGetNestedIntMember(tableObj, out preAction, "PreAction");
-                if (!hasMotion || !hasPreAction)
-                {
-                    status = "managed TableDogLearningMotion fields unreadable motion=" + hasMotion + " preAction=" + hasPreAction + ".";
-                    return false;
-                }
-
-                status = "managed TableDogLearningMotion motionID=" + motionId + " PreAction=" + preAction;
-                return motionId > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "managed TableDogLearningMotion exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
+            return this.TryGetDogLearningMotionDataAuraMono(learningId, out motionId, out preAction, out status);
         }
 
         private unsafe bool TryGetDogLearningMotionDataAuraMono(int learningId, out int motionId, out int preAction, out string status)
@@ -1389,67 +3076,10 @@ namespace HeartopiaMod
             }
         }
 
+        // AuraMono ONLY (EcsClient TableData — managed reflection is dead on this game).
         private bool TryGetDogLearningPreAction(int learningId, out int preAction, out string status)
         {
-            preAction = 0;
-            status = "DogLearningMotion unavailable.";
-
-            if (this.TryGetDogLearningPreActionManaged(learningId, out preAction, out status))
-            {
-                return true;
-            }
-
-            string managedStatus = status;
-            if (this.TryGetDogLearningPreActionAuraMono(learningId, out preAction, out status))
-            {
-                return true;
-            }
-
-            status = managedStatus + " " + status;
-            return false;
-        }
-
-        private bool TryGetDogLearningPreActionManaged(int learningId, out int preAction, out string status)
-        {
-            preAction = 0;
-            status = "managed TableDogLearningMotion unavailable.";
-
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                MethodInfo getMethod = tableDataType.GetMethod("GetDogLearningMotion", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                if (getMethod == null)
-                {
-                    status = "managed TableData.GetDogLearningMotion unavailable.";
-                    return false;
-                }
-
-                object tableObj = getMethod.Invoke(null, new object[] { learningId, false });
-                if (tableObj == null)
-                {
-                    status = "managed TableDogLearningMotion missing learningId=" + learningId + ".";
-                    return false;
-                }
-
-                if (!this.TryGetNestedIntMember(tableObj, out preAction, "PreAction"))
-                {
-                    status = "managed TableDogLearningMotion.PreAction unreadable.";
-                    return false;
-                }
-
-                status = "managed TableDogLearningMotion PreAction=" + preAction;
-                return preAction > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "managed TableDogLearningMotion exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
+            return this.TryGetDogLearningPreActionAuraMono(learningId, out preAction, out status);
         }
 
         private unsafe bool TryGetDogLearningPreActionAuraMono(int learningId, out int preAction, out string status)
@@ -1534,74 +3164,10 @@ namespace HeartopiaMod
             return true;
         }
 
+        // AuraMono ONLY (EcsClient TableData — managed reflection is dead on this game).
         private bool TryGetDogMotionLearningInfo(int dogMotionId, out int requireLearningId, out bool teaseNotLearningMotion, out string status)
         {
-            requireLearningId = 0;
-            teaseNotLearningMotion = false;
-            status = "Dogmotion unavailable.";
-
-            if (this.TryGetDogMotionLearningInfoManaged(dogMotionId, out requireLearningId, out teaseNotLearningMotion, out status))
-            {
-                return true;
-            }
-
-            string managedStatus = status;
-            if (this.TryGetDogMotionLearningInfoAuraMono(dogMotionId, out requireLearningId, out teaseNotLearningMotion, out status))
-            {
-                return true;
-            }
-
-            status = managedStatus + " " + status;
-            return false;
-        }
-
-        private bool TryGetDogMotionLearningInfoManaged(int dogMotionId, out int requireLearningId, out bool teaseNotLearningMotion, out string status)
-        {
-            requireLearningId = 0;
-            teaseNotLearningMotion = false;
-            status = "managed TableDogmotion unavailable.";
-
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                MethodInfo getMethod = tableDataType.GetMethod("GetDogmotion", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                if (getMethod == null)
-                {
-                    status = "managed TableData.GetDogmotion unavailable.";
-                    return false;
-                }
-
-                object tableObj = getMethod.Invoke(null, new object[] { dogMotionId, false });
-                if (tableObj == null)
-                {
-                    status = "managed TableDogmotion missing id=" + dogMotionId + ".";
-                    return false;
-                }
-
-                if (!this.TryGetNestedIntMember(tableObj, out requireLearningId, "requireLearningId"))
-                {
-                    status = "managed TableDogmotion.requireLearningId unreadable.";
-                    return false;
-                }
-
-                if (this.TryGetObjectMember(tableObj, "teaseNotLearningMotion", out object raw) && raw is bool flag)
-                {
-                    teaseNotLearningMotion = flag;
-                }
-
-                status = "managed TableDogmotion requireLearningId=" + requireLearningId + " teaseNotLearning=" + teaseNotLearningMotion;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "managed TableDogmotion exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
+            return this.TryGetDogMotionLearningInfoAuraMono(dogMotionId, out requireLearningId, out teaseNotLearningMotion, out status);
         }
 
         private unsafe bool TryGetDogMotionLearningInfoAuraMono(int dogMotionId, out int requireLearningId, out bool teaseNotLearningMotion, out string status)
@@ -1724,94 +3290,10 @@ namespace HeartopiaMod
             }
         }
 
+        // AuraMono ONLY (DataCenter/DogComponentData — managed reflection is dead on this game).
         private bool TryGetDogComponentMotionId(uint dogNetId, out int motionId, out string status)
         {
-            motionId = 0;
-            status = "DogComponentData unavailable.";
-
-            if (this.TryGetDogComponentMotionIdAuraMono(dogNetId, out motionId, out status))
-            {
-                return true;
-            }
-
-            string auraStatus = status;
-            try
-            {
-                Type dataCenterType = this.FindLoadedType(
-                    "XDTDataAndProtocol.ComponentsData.DataCenter",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData.DataCenter",
-                    "DataCenter");
-                Type dogComponentDataType = this.FindLoadedType(
-                    "XDTDataAndProtocol.ComponentsData.DogComponentData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData.DogComponentData",
-                    "DogComponentData");
-                Type netIdType = this.FindLoadedType(
-                    "EcsClient.XDT.Scene.Shared.Data.SharedData.NetId",
-                    "XDT.Scene.Shared.Data.SharedData.NetId",
-                    "NetId");
-
-                if (dataCenterType == null || dogComponentDataType == null || netIdType == null)
-                {
-                    status = auraStatus + ". DogComponentData types unavailable. DataCenter=" + (dataCenterType != null) + " DogComponentData=" + (dogComponentDataType != null) + " NetId=" + (netIdType != null);
-                    return false;
-                }
-
-                MethodInfo tryGetComponentMethod = null;
-                foreach (MethodInfo method in dataCenterType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (method == null || method.Name != "TryGetComponentData" || !method.IsGenericMethodDefinition)
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters = method.GetParameters();
-                    if (parameters.Length == 2
-                        && parameters[0].ParameterType == netIdType
-                        && parameters[1].ParameterType.IsByRef)
-                    {
-                        tryGetComponentMethod = method.MakeGenericMethod(dogComponentDataType);
-                        break;
-                    }
-                }
-
-                if (tryGetComponentMethod == null)
-                {
-                    status = "DataCenter.TryGetComponentData<DogComponentData> unavailable.";
-                    return false;
-                }
-
-                object netIdArg = this.CreateNetCookNetIdArgument(netIdType, dogNetId);
-                if (netIdArg == null)
-                {
-                    status = "DogComponentData NetId argument creation failed.";
-                    return false;
-                }
-
-                object componentDataBox = Activator.CreateInstance(dogComponentDataType);
-                object[] args = new object[] { netIdArg, componentDataBox };
-                object invokeResult = tryGetComponentMethod.Invoke(null, args);
-                bool found = invokeResult is bool foundFlag && foundFlag;
-                if (!found)
-                {
-                    status = "DogComponentData missing for netId " + dogNetId + ".";
-                    return false;
-                }
-
-                object componentData = args[1] ?? componentDataBox;
-                if (!this.TryGetNestedIntMember(componentData, out motionId, "petComponentData", "animalComponentData", "motionId"))
-                {
-                    status = "DogComponentData motionId unavailable.";
-                    return false;
-                }
-
-                status = "DogComponentData motionId=" + motionId;
-                return motionId > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "DogComponentData exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
+            return this.TryGetDogComponentMotionIdAuraMono(dogNetId, out motionId, out status);
         }
 
         private bool TryGetDogComponentMotionIdAuraMono(uint dogNetId, out int motionId, out string status)
@@ -2064,188 +3546,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetDogTeaseCache(uint dogNetId, out int actionRound, out int actionConfig, out int actionFormal, out string status)
-        {
-            actionRound = 0;
-            actionConfig = 0;
-            actionFormal = 0;
-            status = "DogTeaseCache unavailable.";
-
-            try
-            {
-                object worldManager = this.TryResolvePetPlayWorldManager();
-                if (worldManager == null)
-                {
-                    status = "world manager unavailable.";
-                    return false;
-                }
-
-                MethodInfo getNetworkEntityMethod = worldManager.GetType().GetMethod("GetNetworkEntity", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (getNetworkEntityMethod == null)
-                {
-                    status = "GetNetworkEntity unavailable.";
-                    return false;
-                }
-
-                object ecsEntity = getNetworkEntityMethod.Invoke(worldManager, new object[] { dogNetId });
-                if (ecsEntity == null)
-                {
-                    status = "dog EcsEntity unavailable.";
-                    return false;
-                }
-
-                Type componentType = this.FindLoadedType(
-                    "XDT.Scene.Shared.Modules.Dog.DogTeaseCacheComponent",
-                    "DogTeaseCacheComponent");
-                Type entityDataOptOpenType = this.FindLoadedType(
-                    "XDT.Scene.Shared.Entity.EntityOptData.EntityDataOpt`1",
-                    "EntityDataOpt`1");
-                Type entityDataOptExtensionsType = this.FindLoadedType(
-                    "XDT.Scene.Shared.Entity.EntityOptData.EntityDataOpt",
-                    "EntityDataOpt");
-                if (componentType == null || entityDataOptOpenType == null || entityDataOptExtensionsType == null)
-                {
-                    status = "DogTeaseCache types unavailable. component=" + (componentType != null) + " opt=" + (entityDataOptOpenType != null) + " ext=" + (entityDataOptExtensionsType != null);
-                    return false;
-                }
-
-                Type optType = entityDataOptOpenType.MakeGenericType(componentType);
-                object opt = Activator.CreateInstance(optType);
-                FieldInfo entityField = optType.GetField("_entity", BindingFlags.Instance | BindingFlags.NonPublic);
-                if (entityField == null)
-                {
-                    status = "EntityDataOpt._entity unavailable.";
-                    return false;
-                }
-                entityField.SetValue(opt, ecsEntity);
-
-                MethodInfo tryGetValueMethod = null;
-                foreach (MethodInfo method in entityDataOptExtensionsType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (method == null || method.Name != "TryGetValue" || !method.IsGenericMethodDefinition)
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters = method.GetParameters();
-                    if (parameters.Length == 2 && parameters[1].ParameterType.IsByRef)
-                    {
-                        tryGetValueMethod = method.MakeGenericMethod(componentType);
-                        break;
-                    }
-                }
-
-                if (tryGetValueMethod == null)
-                {
-                    status = "EntityDataOpt.TryGetValue<DogTeaseCacheComponent> unavailable.";
-                    return false;
-                }
-
-                object componentBox = Activator.CreateInstance(componentType);
-                object[] args = new object[] { opt, componentBox };
-                object result = tryGetValueMethod.Invoke(null, args);
-                bool found = result is bool foundFlag && foundFlag;
-                if (!found)
-                {
-                    status = "DogTeaseCacheComponent missing for netId " + dogNetId + ".";
-                    return false;
-                }
-
-                object component = args[1] ?? componentBox;
-                FieldInfo actionRoundField = componentType.GetField("ActionRound", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                FieldInfo actionConfigField = componentType.GetField("ActionConfig", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                FieldInfo actionFormalField = componentType.GetField("ActionFormal", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (actionRoundField == null || actionConfigField == null || actionFormalField == null)
-                {
-                    status = "DogTeaseCache fields unavailable.";
-                    return false;
-                }
-
-                actionRound = Convert.ToInt32(actionRoundField.GetValue(component));
-                actionConfig = Convert.ToInt32(actionConfigField.GetValue(component));
-                actionFormal = Convert.ToInt32(actionFormalField.GetValue(component));
-                status = "DogTeaseCache ready.";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "DogTeaseCache exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
-        }
-
-        private object TryResolvePetPlayWorldManager()
-        {
-            Type[] managerTypes = new Type[]
-            {
-                this.FindLoadedType("EcsSystem.XD.GameGerm.Ecs.Boost.Client.ClientNetworkManager", "ClientNetworkManager"),
-                this.FindLoadedType("EcsSystem.World.XDTownClientNetworkManager", "XDTownClientNetworkManager")
-            };
-
-            foreach (Type managerType in managerTypes)
-            {
-                if (managerType == null)
-                {
-                    continue;
-                }
-
-                object manager = this.TryGetStaticObjectAcrossHierarchy(managerType, "Instance", "_instance", "instance", "Current", "Singleton");
-                if (manager == null && typeof(UnityEngine.Object).IsAssignableFrom(managerType))
-                {
-                    try
-                    {
-                        UnityEngine.Object[] sceneObjects = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.Object>();
-                        if (sceneObjects != null)
-                        {
-                            for (int _si = 0; _si < sceneObjects.Length; _si++)
-                            {
-                                try
-                                {
-                                    UnityEngine.Object sceneObject = sceneObjects[_si];
-                                    // IL2CPP-wrapped objects may be partially freed — null-check before GetType()
-                                    if (sceneObject == null)
-                                    {
-                                        continue;
-                                    }
-                                    Type sceneObjectType = sceneObject.GetType();
-                                    if (sceneObjectType != null && managerType.IsAssignableFrom(sceneObjectType))
-                                    {
-                                        manager = sceneObject;
-                                        break;
-                                    }
-                                }
-                                catch
-                                {
-                                    // Skip destroyed/invalid IL2CPP object
-                                }
-                            }
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                if (manager == null)
-                {
-                    continue;
-                }
-
-                if (this.TryGetObjectMember(manager, "WorldManager", out object worldManager) && worldManager != null)
-                {
-                    return worldManager;
-                }
-
-                if (this.TryGetObjectMember(manager, "EcsClientNetwork", out object ecsClientNetwork) && ecsClientNetwork != null
-                    && this.TryGetObjectMember(ecsClientNetwork, "WorldManager", out worldManager) && worldManager != null)
-                {
-                    return worldManager;
-                }
-            }
-
-            return null;
-        }
-
         private bool TryGetActiveDogPlayRound(out uint dogNetId, out int round, out string status)
         {
             dogNetId = 0U;
@@ -2275,6 +3575,17 @@ namespace HeartopiaMod
                 if (!this.TryGetMonoIntMember(panelObj, "_round", out round))
                 {
                     round = 0;
+                }
+
+                if (dogNetId != this.petPlayDogTraceLastPanelNetId
+                    || round != this.petPlayDogTraceLastPanelRound
+                    || roundState != this.petPlayDogTraceLastPanelState)
+                {
+                    this.DogTraceLog("panel netId=" + dogNetId + " round=" + round + " state=" + roundState
+                        + " (0=None 1=Ready 2=Play 3=End)");
+                    this.petPlayDogTraceLastPanelNetId = dogNetId;
+                    this.petPlayDogTraceLastPanelRound = round;
+                    this.petPlayDogTraceLastPanelState = roundState;
                 }
 
                 if (roundState != 2)
@@ -2437,45 +3748,10 @@ namespace HeartopiaMod
             return true;
         }
 
+        // AuraMono ONLY (XDT* protocol static — managed reflection is dead on this game).
         private bool TryInvokePetBathingRoundStart(uint petNetId)
         {
-            if (this.TryInvokeAuraMonoPetBathingRoundStart(petNetId))
-            {
-                return true;
-            }
-
-            if (!this.EnsurePetBathingRoundStartMethod())
-            {
-                this.PetPlayLog("PetProtocolManager.PetBathingRoundStart unavailable.");
-                return false;
-            }
-
-            this.petPlayPetBathingRoundStartMethod.Invoke(null, new object[] { petNetId });
-            return true;
-        }
-
-        private bool EnsurePetBathingRoundStartMethod()
-        {
-            if (this.petPlayPetBathingRoundStartMethod != null)
-            {
-                return true;
-            }
-
-            Type protocolType = this.FindLoadedType(
-                "XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager",
-                "PetProtocolManager");
-            if (protocolType == null)
-            {
-                return false;
-            }
-
-            this.petPlayPetBathingRoundStartMethod = protocolType.GetMethod(
-                "PetBathingRoundStart",
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new Type[] { typeof(uint) },
-                null);
-            return this.petPlayPetBathingRoundStartMethod != null;
+            return this.TryInvokeAuraMonoPetBathingRoundStart(petNetId);
         }
 
         private bool EnsureAuraMonoPetBathingRoundStartMethod(out string status)
@@ -2899,18 +4175,10 @@ namespace HeartopiaMod
         {
             try
             {
-                Type trackingCat = this.FindLoadedType("XDTGame.UI.Panel.TrackingCatPlay", "TrackingCatPlay");
-                Type catPanel = this.FindLoadedType("XDTGame.UI.Panel.CatPlayStatusPanel", "CatPlayStatusPanel");
-                Type dogPanel = this.FindLoadedType("XDTGame.UI.Panel.DogPlayStatusPanel", "DogPlayStatusPanel");
-                Type bathPanel = this.FindLoadedType("XDTGame.UI.Panel.PetBathPanel", "PetBathPanel");
-                Type meowProtocol = this.FindLoadedType("XDTDataAndProtocol.ProtocolService.Meow.MeowProtocolManager", "MeowProtocolManager");
-                Type petProtocol = this.FindLoadedType("XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager", "PetProtocolManager");
                 IntPtr auraMeow = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Meow.MeowProtocolManager");
                 IntPtr auraPet = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager");
                 this.EnsureAuraMonoPetBathingRoundStartMethod(out string washStatus);
-                this.PetPlayLog("Resolver probe: managed trackingCat/catPanel/dogPanel/bathPanel/meow/pet="
-                    + (trackingCat != null) + "/" + (catPanel != null) + "/" + (dogPanel != null) + "/" + (bathPanel != null) + "/" + (meowProtocol != null) + "/" + (petProtocol != null)
-                    + " aura meow/pet=0x" + auraMeow.ToInt64().ToString("X") + "/0x" + auraPet.ToInt64().ToString("X")
+                this.PetPlayLog("Resolver probe: aura meow/pet=0x" + auraMeow.ToInt64().ToString("X") + "/0x" + auraPet.ToInt64().ToString("X")
                     + " cat=" + catStatus + " dog=" + dogStatus + " wash=" + washStatus);
             }
             catch (Exception ex)

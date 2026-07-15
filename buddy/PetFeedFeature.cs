@@ -22,27 +22,6 @@ namespace HeartopiaMod
         private object petFeedAllCoroutine = null;
         private float petFeedAllBusyUntil = 0f;
         private string petFeedAllActiveLabel = string.Empty;
-        private MethodInfo petFeedPrepareMethod = null;
-        private MethodInfo petFeedBeginMethod = null;
-        private Type petFeedEntityTypeType = null;
-        private Type petFeedPetTypeType = null;
-        private Type petFeedStorageTypeType = null;
-        private Type petFeedPetSystemType = null;
-        private PropertyInfo petFeedPetSystemInstanceProperty = null;
-        private MethodInfo petFeedGetPetComponentDatasMethod = null;
-        private MethodInfo petFeedInitFoodsMethod = null;
-        private MethodInfo petFeedInitFoodsForPickerMethod = null;
-        private MethodInfo petFeedGetFoodsMethod = null;
-        private MethodInfo petFeedGetFoodBackpackItemsMethod = null;
-        private MethodInfo petFeedGetEatenFavoriteFoodsMethod = null;
-        private Type petFeedPetSpatialDataCenterType = null;
-        private MethodInfo petFeedPetSpatialTryGetDataOptMethod = null;
-        private Type petFeedPetEntityOptDataType = null;
-        private Type petFeedPetBasePropertyType = null;
-        private PropertyInfo petFeedPetEntityOptDataBasePropertyProperty = null;
-        private MethodInfo petFeedEntityDataOptTryGetValueMethod = null;
-        private MethodInfo petFeedEcsTryGetSpatialServiceMethod = null;
-        private bool petFeedEcsFavoriteMetadataLoggedUnavailable = false;
         private IntPtr petFeedAuraSpatialCenterClass = IntPtr.Zero;
         private IntPtr petFeedAuraPetEntityOptDataClass = IntPtr.Zero;
         private IntPtr petFeedAuraPetBasePropertyClass = IntPtr.Zero;
@@ -60,8 +39,6 @@ namespace HeartopiaMod
         private IntPtr petFeedAuraEntityDataOptHasPetFeedStateMethod = IntPtr.Zero;
         private bool petFeedAuraFavoriteMetadataLoggedUnavailable = false;
         private bool petFeedAuraSecretDiagnosticLogged = false;
-        private bool petFeedManagedReflectionUnavailable = false;
-        private string petFeedManagedReflectionUnavailableStatus = string.Empty;
         private IntPtr petFeedAuraPrepareMethod = IntPtr.Zero;
         private IntPtr petFeedAuraBeginMethod = IntPtr.Zero;
         private IntPtr petFeedAuraUIntListClass = IntPtr.Zero;
@@ -275,101 +252,16 @@ namespace HeartopiaMod
             }
         }
 
+        // AuraMono ONLY (PetSystem/EntityType are embedded-Mono types absent from interop).
         private bool TryBuildPetFeedPlan(bool dog, out List<PetFeedTarget> targets, out List<PetFeedFoodSupply> foods, out int visibleCount, out string status)
         {
             targets = new List<PetFeedTarget>();
             foods = new List<PetFeedFoodSupply>();
             visibleCount = 0;
-            status = string.Empty;
 
             try
             {
-                if (!this.EnsurePetFeedReflection(out status))
-                {
-                    string managedStatus = status;
-                    if (this.TryBuildPetFeedPlanAuraMono(dog, targets, foods, out visibleCount, out status))
-                    {
-                        return true;
-                    }
-
-                    status = managedStatus + ". " + status;
-                    return false;
-                }
-
-                object petSystem = this.petFeedPetSystemInstanceProperty.GetValue(null, null);
-                if (petSystem == null)
-                {
-                    status = "PetSystem unavailable";
-                    return false;
-                }
-
-                object entityTypeValue = Enum.Parse(this.petFeedEntityTypeType, dog ? "dog" : "cat");
-                int maxFullness = this.GetPetFeedMaxFullness(dog);
-                if (maxFullness <= 0)
-                {
-                    status = "fullness limit unavailable";
-                    return false;
-                }
-
-                object petListObj = this.petFeedGetPetComponentDatasMethod.Invoke(petSystem, new object[] { entityTypeValue });
-                int mineCount = 0;
-                int otherCount = 0;
-                int unknownOwnerCount = 0;
-                if (petListObj is IEnumerable petList)
-                {
-                    foreach (object petData in petList)
-                    {
-                        if (!this.TryGetPetFeedTarget(petData, maxFullness, out PetFeedTarget target))
-                        {
-                            continue;
-                        }
-
-                        target.IsDog = dog;
-                        this.TryPopulatePetFeedKnownFavoriteFoodsManaged(petSystem, target);
-                        visibleCount++;
-                        this.CountPetFeedOwner(target, ref mineCount, ref otherCount, ref unknownOwnerCount);
-                        if (this.CanAttemptPetFeedTarget(target))
-                        {
-                            targets.Add(target);
-                        }
-                    }
-                }
-
-                this.petFeedInitFoodsMethod.Invoke(petSystem, new object[] { entityTypeValue });
-                object foodListObj = this.petFeedGetFoodsMethod.Invoke(petSystem, null);
-                if (foodListObj is IEnumerable foodList)
-                {
-                    foreach (object foodObj in foodList)
-                    {
-                        if (this.TryGetPetFeedFoodSupply(foodObj, out PetFeedFoodSupply food) && food.Count > 0 && food.Fullness > 0 && food.NetId != 0U && !food.IsLock)
-                        {
-                            foods.Add(food);
-                        }
-                    }
-                }
-
-                foods.Sort((a, b) =>
-                {
-                    int cmp = a.Fullness.CompareTo(b.Fullness);
-                    if (cmp != 0) return cmp;
-                    return a.StaticId.CompareTo(b.StaticId);
-                });
-                this.RegisterPetFeedFoodOptions(foods);
-
-                if (targets.Count > 0 && foods.Count == 0)
-                {
-                    status = "no usable pet food";
-                    return false;
-                }
-                if (!this.ApplyPetFeedSelectedFoodFilter(foods, targets.Count > 0, out string filterStatus))
-                {
-                    status = filterStatus;
-                    return false;
-                }
-
-                status = "visible=" + visibleCount + this.FormatPetFeedOwnerCounts(mineCount, otherCount, unknownOwnerCount) + " hungry=" + targets.Count + " foods=" + foods.Count + this.FormatPetFeedSelectedFoodStatus();
-                this.PetFeedLog("Plan " + (dog ? "dog" : "cat") + " " + status);
-                return true;
+                return this.TryBuildPetFeedPlanAuraMono(dog, targets, foods, out visibleCount, out status);
             }
             catch (Exception ex)
             {
@@ -1140,270 +1032,6 @@ namespace HeartopiaMod
             return 0;
         }
 
-        private bool EnsurePetFeedReflection(out string status)
-        {
-            status = string.Empty;
-            if (this.petFeedPrepareMethod != null
-                && this.petFeedBeginMethod != null
-                && this.petFeedPetSystemInstanceProperty != null
-                && this.petFeedGetPetComponentDatasMethod != null
-                && this.petFeedInitFoodsMethod != null
-                && this.petFeedGetFoodsMethod != null
-                && this.petFeedEntityTypeType != null)
-            {
-                return true;
-            }
-
-            if (this.petFeedManagedReflectionUnavailable)
-            {
-                status = string.IsNullOrEmpty(this.petFeedManagedReflectionUnavailableStatus)
-                    ? "managed pet feed resolver unavailable"
-                    : this.petFeedManagedReflectionUnavailableStatus;
-                return false;
-            }
-
-            Type protocolType = this.FindLoadedTypeByFullName("XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager");
-            this.petFeedPetSystemType = this.FindLoadedTypeByFullName("XDTGameSystem.GameplaySystem.Pet.PetSystem");
-            this.petFeedEntityTypeType = this.FindLoadedTypeByFullName("EcsClient.XDT.Scene.Shared.Data.SharedData.EntityType");
-            this.petFeedPetTypeType = this.FindLoadedTypeByFullName("XDT.Scene.Shared.Modules.Pet.PetType");
-            this.petFeedStorageTypeType = this.FindLoadedTypeByFullName("EcsClient.XDT.Scene.Shared.Data.StaticPartial.EStorageType");
-
-            if (protocolType == null || this.petFeedPetSystemType == null || this.petFeedEntityTypeType == null || this.petFeedPetTypeType == null || this.petFeedStorageTypeType == null)
-            {
-                List<string> missingTypes = new List<string>();
-                if (protocolType == null)
-                {
-                    missingTypes.Add("PetProtocolManager");
-                }
-
-                if (this.petFeedPetSystemType == null)
-                {
-                    missingTypes.Add("PetSystem");
-                }
-
-                if (this.petFeedEntityTypeType == null)
-                {
-                    missingTypes.Add("EntityType");
-                }
-
-                if (this.petFeedPetTypeType == null)
-                {
-                    missingTypes.Add("PetType");
-                }
-
-                if (this.petFeedStorageTypeType == null)
-                {
-                    missingTypes.Add("EStorageType");
-                }
-
-                status = "missing type(s): " + string.Join(", ", missingTypes.ToArray());
-                IntPtr auraProtocol = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager");
-                IntPtr auraPetSystem = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.Pet.PetSystem");
-                IntPtr auraEntityType = this.FindAuraMonoClassByFullName("EcsClient.XDT.Scene.Shared.Data.SharedData.EntityType");
-                this.petFeedManagedReflectionUnavailable = true;
-                this.petFeedManagedReflectionUnavailableStatus = status;
-                this.PetFeedLog("Resolver failed: " + status
-                    + " protocol=" + (protocolType != null ? protocolType.FullName : "null")
-                    + " petSystem=" + (this.petFeedPetSystemType != null ? this.petFeedPetSystemType.FullName : "null")
-                    + " entityType=" + (this.petFeedEntityTypeType != null ? this.petFeedEntityTypeType.FullName : "null")
-                    + " aura(protocol=" + (auraProtocol != IntPtr.Zero)
-                    + ",petSystem=" + (auraPetSystem != IntPtr.Zero)
-                    + ",entityType=" + (auraEntityType != IntPtr.Zero) + ")");
-                return false;
-            }
-
-            this.petFeedPrepareMethod = this.GetMethodQuiet(
-                protocolType,
-                "PrepareFeed",
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                new[] { typeof(uint) });
-            this.petFeedBeginMethod = this.GetMethodByNameAndParamCountQuiet(protocolType, "BeginFeed", 0)
-                ?? this.GetMethodQuiet(
-                    protocolType,
-                    "BeginFeed",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                    Type.EmptyTypes);
-            this.petFeedPetSystemInstanceProperty = this.petFeedPetSystemType.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy)
-                ?? this.GetDataModuleInstanceProperty(this.petFeedPetSystemType);
-            this.petFeedGetPetComponentDatasMethod = this.GetMethodQuiet(
-                this.petFeedPetSystemType,
-                "GetPetComponentDatas",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                new[] { this.petFeedEntityTypeType });
-            this.petFeedInitFoodsMethod = this.GetMethodQuiet(
-                this.petFeedPetSystemType,
-                "InitFoods",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                new[] { this.petFeedEntityTypeType });
-            this.petFeedInitFoodsForPickerMethod = this.GetMethodQuiet(
-                this.petFeedPetSystemType,
-                "InitFoods",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                new[] { this.petFeedPetTypeType, this.petFeedStorageTypeType });
-            this.petFeedGetFoodsMethod = this.GetMethodQuiet(
-                this.petFeedPetSystemType,
-                "GetFoods",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                Type.EmptyTypes);
-            this.petFeedGetFoodBackpackItemsMethod = this.GetMethodQuiet(
-                this.petFeedPetSystemType,
-                "GetFoodBackpackItems",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                Type.EmptyTypes);
-            this.petFeedGetEatenFavoriteFoodsMethod = this.GetMethodQuiet(
-                this.petFeedPetSystemType,
-                "GetEatenFavoriteFoods",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                new[] { typeof(uint) });
-
-            if (this.petFeedPrepareMethod == null || this.petFeedBeginMethod == null || this.petFeedPetSystemInstanceProperty == null || this.petFeedGetPetComponentDatasMethod == null || this.petFeedInitFoodsMethod == null || this.petFeedInitFoodsForPickerMethod == null || this.petFeedGetFoodsMethod == null || this.petFeedGetFoodBackpackItemsMethod == null)
-            {
-                List<string> missingMethods = new List<string>();
-                if (this.petFeedPrepareMethod == null)
-                {
-                    missingMethods.Add("PrepareFeed(uint)");
-                }
-
-                if (this.petFeedBeginMethod == null)
-                {
-                    missingMethods.Add("BeginFeed(...)");
-                }
-
-                if (this.petFeedPetSystemInstanceProperty == null)
-                {
-                    missingMethods.Add("PetSystem.Instance");
-                }
-
-                if (this.petFeedGetPetComponentDatasMethod == null)
-                {
-                    missingMethods.Add("PetSystem.GetPetComponentDatas(EntityType)");
-                }
-
-                if (this.petFeedInitFoodsMethod == null)
-                {
-                    missingMethods.Add("PetSystem.InitFoods(EntityType)");
-                }
-
-                if (this.petFeedInitFoodsForPickerMethod == null)
-                {
-                    missingMethods.Add("PetSystem.InitFoods(PetType,EStorageType)");
-                }
-
-                if (this.petFeedGetFoodsMethod == null)
-                {
-                    missingMethods.Add("PetSystem.GetFoods()");
-                }
-
-                if (this.petFeedGetFoodBackpackItemsMethod == null)
-                {
-                    missingMethods.Add("PetSystem.GetFoodBackpackItems()");
-                }
-
-                status = "missing method(s): " + string.Join(", ", missingMethods.ToArray());
-                this.petFeedManagedReflectionUnavailable = true;
-                this.petFeedManagedReflectionUnavailableStatus = status;
-                this.PetFeedLog("Resolver failed: " + status
-                    + " protocol=" + protocolType.FullName
-                    + " petSystem=" + this.petFeedPetSystemType.FullName
-                    + " entityType=" + this.petFeedEntityTypeType.FullName);
-                return false;
-            }
-
-            return true;
-        }
-
-        private bool TryGetPetFeedTarget(object petData, int maxFullness, out PetFeedTarget target)
-        {
-            target = null;
-            if (petData == null)
-            {
-                return false;
-            }
-
-            bool? isMine = null;
-            if (this.TryGetObjectMember(petData, "isMine", out object isMineObj) && isMineObj != null)
-            {
-                try
-                {
-                    isMine = Convert.ToBoolean(isMineObj);
-                }
-                catch
-                {
-                }
-            }
-
-            if (!this.TryGetObjectMember(petData, "animalComponentData", out object animalData) || animalData == null)
-            {
-                return false;
-            }
-
-            if (!this.TryReadIntFromMember(animalData, "fullness", out int fullness))
-            {
-                return false;
-            }
-
-            if (!this.TryReadUIntFromMember(animalData, "netId", out uint netId) || netId == 0U)
-            {
-                return false;
-            }
-
-            int entityType = 0;
-            this.TryReadIntFromMember(animalData, "entityType", out entityType);
-            int breedId = 0;
-            this.TryReadIntFromMember(animalData, "breedId", out breedId);
-
-            List<int> favoriteFoods = null;
-            List<int> dislikeFoods = null;
-            this.TryMergePetFeedPreferenceListsManaged(petData, ref favoriteFoods, ref dislikeFoods);
-            this.TryMergePetFeedPreferenceListsManaged(animalData, ref favoriteFoods, ref dislikeFoods);
-            string name = string.Empty;
-            if (this.TryGetObjectMember(animalData, "name", out object nameObj) && nameObj is string petName)
-            {
-                name = petName;
-            }
-
-            string textureId = string.Empty;
-            this.TryGetPetTextureIdManaged(petData, out textureId);
-
-            target = new PetFeedTarget
-            {
-                NetId = netId,
-                CurrentFullness = fullness,
-                MaxFullness = maxFullness,
-                IsMine = isMine,
-                EntityType = entityType,
-                FavoriteFoods = favoriteFoods,
-                DislikeFoods = dislikeFoods,
-                FavoriteSource = favoriteFoods != null && favoriteFoods.Count > 0 ? "properties" : null,
-                Name = name,
-                BreedId = breedId,
-                PetTextureId = textureId
-            };
-            this.TryPopulatePetFeedTableFavoriteFoods(target);
-            return true;
-        }
-
-        private void TryPopulatePetFeedKnownFavoriteFoodsManaged(object petSystem, PetFeedTarget target)
-        {
-            if (petSystem == null || target == null || target.NetId == 0U || this.petFeedGetEatenFavoriteFoodsMethod == null)
-            {
-                return;
-            }
-
-            try
-            {
-                object favoriteObj = this.petFeedGetEatenFavoriteFoodsMethod.Invoke(petSystem, new object[] { target.NetId });
-                if (this.TryReadIntListObject(favoriteObj, out List<int> favoriteFoods) && favoriteFoods.Count > 0)
-                {
-                    this.MergePetFeedIntList(ref target.FavoriteFoods, favoriteFoods);
-                    target.FavoriteSource = string.IsNullOrEmpty(target.FavoriteSource) ? "eatenFavorites" : target.FavoriteSource + "+eatenFavorites";
-                }
-            }
-            catch
-            {
-            }
-        }
-
         private unsafe void TryPopulatePetFeedKnownFavoriteFoodsAuraMono(IntPtr petSystemObj, IntPtr getEatenFavoriteFoodsMethod, PetFeedTarget target)
         {
             if (petSystemObj == IntPtr.Zero || getEatenFavoriteFoodsMethod == IntPtr.Zero || target == null || target.NetId == 0U || auraMonoRuntimeInvoke == null)
@@ -1422,66 +1050,6 @@ namespace HeartopiaMod
                 {
                     this.MergePetFeedIntList(ref target.FavoriteFoods, favoriteFoods);
                     target.FavoriteSource = string.IsNullOrEmpty(target.FavoriteSource) ? "eatenFavorites" : target.FavoriteSource + "+eatenFavorites";
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private void TryPopulatePetFeedTableFavoriteFoods(PetFeedTarget target)
-        {
-            if (target == null || target.BreedId <= 0)
-            {
-                return;
-            }
-
-            try
-            {
-                Type tableDataType = this.FindLoadedTypeByFullName("TableData");
-                if (tableDataType == null)
-                {
-                    return;
-                }
-
-                MethodInfo getAnimalUnit = tableDataType.GetMethod("GetAnimalUnit", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                MethodInfo getAnimalGroup = tableDataType.GetMethod("GetAnimalGroup", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                if (getAnimalUnit == null || getAnimalGroup == null)
-                {
-                    return;
-                }
-
-                object unit = getAnimalUnit.Invoke(null, new object[] { target.BreedId, false });
-                if ((unit == null || !this.TryReadIntFromMember(unit, "groupId", out int groupId) || groupId <= 0)
-                    && !this.TryGetPetFeedFallbackAnimalGroupId(target.BreedId, out groupId))
-                {
-                    return;
-                }
-
-                target.FavoriteGroupId = groupId;
-                object group = getAnimalGroup.Invoke(null, new object[] { groupId, false });
-                if (group == null)
-                {
-                    return;
-                }
-
-                if (string.IsNullOrWhiteSpace(target.PetAvatarIconKey)
-                    && this.TryGetObjectMember(group, "avatarIcon", out object avatarIconObj)
-                    && avatarIconObj is string avatarIcon
-                    && !string.IsNullOrWhiteSpace(avatarIcon))
-                {
-                    target.PetAvatarIconKey = avatarIcon;
-                }
-
-                if (!this.TryReadIntListFromMember(group, "favoriteFood", out List<int> favoriteFoods))
-                {
-                    return;
-                }
-
-                this.MergePetFeedIntList(ref target.FavoriteFoods, favoriteFoods);
-                if (favoriteFoods.Count > 0)
-                {
-                    target.FavoriteSource = string.IsNullOrEmpty(target.FavoriteSource) ? "animalGroup" : target.FavoriteSource + "+animalGroup";
                 }
             }
             catch
@@ -1616,28 +1184,6 @@ namespace HeartopiaMod
                     + "/fav=" + (pet.FavoriteFoods != null ? pet.FavoriteFoods.Count : 0)
                     + "/avatar=" + (string.IsNullOrWhiteSpace(pet.PetAvatarIconKey) ? "none" : pet.PetAvatarIconKey)));
             return " breedKnown=" + breedKnown + " groupKnown=" + groupKnown + " samples=[" + samples + "]";
-        }
-
-        private void TryMergePetFeedPreferenceListsManaged(object obj, ref List<int> favoriteFoods, ref List<int> dislikeFoods)
-        {
-            if (obj == null)
-            {
-                return;
-            }
-
-            if (this.TryReadIntListFromMember(obj, "FavoriteFoods", out List<int> favorites)
-                || this.TryReadIntListFromMember(obj, "favoriteFoods", out favorites)
-                || this.TryReadIntListFromMember(obj, "_favoriteFoods", out favorites))
-            {
-                this.MergePetFeedIntList(ref favoriteFoods, favorites);
-            }
-
-            if (this.TryReadIntListFromMember(obj, "DislikeFoods", out List<int> dislikes)
-                || this.TryReadIntListFromMember(obj, "dislikeFoods", out dislikes)
-                || this.TryReadIntListFromMember(obj, "_dislikeFoods", out dislikes))
-            {
-                this.MergePetFeedIntList(ref dislikeFoods, dislikes);
-            }
         }
 
         private void TryMergePetFeedPreferenceListsAuraMono(IntPtr obj, ref List<int> favoriteFoods, ref List<int> dislikeFoods)
@@ -1913,63 +1459,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.TryCollectPetFeedPetListManaged(dog, pets, out count, out status))
-            {
-                return true;
-            }
-
             return this.TryCollectPetFeedPetListAuraMono(dog, pets, out count, out status);
-        }
-
-        private bool TryCollectPetFeedPetListManaged(bool dog, List<PetFeedTarget> pets, out int count, out string status)
-        {
-            count = 0;
-            status = string.Empty;
-            try
-            {
-                if (!this.EnsurePetFeedReflection(out status))
-                {
-                    return false;
-                }
-
-                object petSystem = this.petFeedPetSystemInstanceProperty.GetValue(null, null);
-                if (petSystem == null)
-                {
-                    status = "PetSystem unavailable";
-                    return false;
-                }
-
-                object entityTypeValue = Enum.Parse(this.petFeedEntityTypeType, dog ? "dog" : "cat");
-                int maxFullness = this.GetPetFeedMaxFullness(dog);
-                object petListObj = this.petFeedGetPetComponentDatasMethod.Invoke(petSystem, new object[] { entityTypeValue });
-                if (petListObj is IEnumerable petList)
-                {
-                    foreach (object petData in petList)
-                    {
-                        if (!this.TryGetPetFeedTarget(petData, maxFullness > 0 ? maxFullness : 100, out PetFeedTarget target))
-                        {
-                            continue;
-                        }
-
-                        target.IsDog = dog;
-                        target.Source = "ownedList";
-                        this.TryPopulatePetFeedKnownFavoriteFoodsManaged(petSystem, target);
-                        if (!pets.Any(existing => existing.NetId == target.NetId))
-                        {
-                            pets.Add(target);
-                            count++;
-                        }
-                    }
-                }
-
-                status = "managed count=" + count;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "managed exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
         }
 
         private unsafe bool TryCollectPetFeedPetListAuraMono(bool dog, List<PetFeedTarget> pets, out int count, out string status)
@@ -2212,29 +1702,6 @@ namespace HeartopiaMod
             this.petFeedAllCoroutine = ModCoroutines.Start(this.PetFeedAllRoutine(pet.IsDog, new List<PetFeedTarget> { target }, foods, visibleCount));
         }
 
-        private bool TryGetPetTextureIdManaged(object petData, out string textureId)
-        {
-            textureId = string.Empty;
-            if (petData == null || !this.TryGetObjectMember(petData, "adoptedTime", out object adoptedObj) || adoptedObj == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (adoptedObj is DateTime adoptedTime)
-                {
-                    textureId = adoptedTime.ToFileTime().ToString();
-                    return !string.IsNullOrWhiteSpace(textureId);
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
         private unsafe bool TryGetPetTextureIdAuraMono(IntPtr petData, out string textureId)
         {
             textureId = string.Empty;
@@ -2280,34 +1747,6 @@ namespace HeartopiaMod
             }
 
             pet.PetTextureLoadAttempted = true;
-            if (!string.IsNullOrWhiteSpace(pet.PetTextureId))
-            {
-                try
-                {
-                    Type utilityType = this.FindLoadedTypeByFullName("XDTBaseService.Services.Texture.LocalTextureCacheUtility");
-                    Type imageEnumType = this.FindLoadedTypeByFullName("XDTBaseService.Services.Cache.ImageEnum");
-                    if (utilityType != null && imageEnumType != null)
-                    {
-                        MethodInfo getLocalTexture = utilityType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                            .FirstOrDefault(method => method.Name == "GetLocalTexture" && method.GetParameters().Length == 5);
-                        if (getLocalTexture != null)
-                        {
-                            object imageEnumPhoto = Enum.Parse(imageEnumType, "Photo");
-                            object[] args = new object[] { pet.PetTextureId, 400, 400, null, imageEnumPhoto };
-                            object result = getLocalTexture.Invoke(null, args);
-                            if (result is bool ok && ok && args[3] is Texture2D texture && texture != null)
-                            {
-                                pet.PetTexture = texture;
-                                return true;
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                }
-            }
-
             if (!string.IsNullOrWhiteSpace(pet.PetAvatarIconKey))
             {
                 List<string> keys = new List<string>
@@ -2806,11 +2245,8 @@ namespace HeartopiaMod
                 return !string.IsNullOrWhiteSpace(displayName);
             }
 
-            if (this.TryResolvePetFeedFoodNameFromBackpackItemTypeManaged(staticId, 0, 0U, out displayName)
-                || this.TryResolvePetFeedFoodNameFromBackpackItemAuraMono(staticId, 0, 0U, out displayName)
-                || this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out displayName)
+            if (this.TryResolvePetFeedFoodNameFromBackpackItemAuraMono(staticId, 0, 0U, out displayName)
                 || this.TryResolvePetFeedFoodNameFromEntityTableAuraMono(staticId, out displayName)
-                || this.TryResolvePetFeedFoodNameFromManagedTable(staticId, out displayName)
                 || this.TryResolvePetFeedFoodNameFromAuraMonoTable(staticId, out displayName))
             {
                 displayName = this.CleanPetFeedFoodName(displayName);
@@ -3400,117 +2836,12 @@ namespace HeartopiaMod
 
         private bool TryCollectPetFeedFoods(bool dog, Dictionary<int, PetFeedFoodSupply> byStaticId, out string status)
         {
-            if (this.TryCollectPetFeedFoodsManaged(dog, byStaticId, out status))
-            {
-                return true;
-            }
-
-            string managedStatus = status;
             if (this.TryCollectPetFeedFoodsAuraMono(dog, byStaticId, out status))
             {
                 return true;
             }
 
-            status = managedStatus + " / " + status;
             return false;
-        }
-
-        private bool TryCollectPetFeedFoodsManaged(bool dog, Dictionary<int, PetFeedFoodSupply> byStaticId, out string status)
-        {
-            status = "managed unavailable";
-            try
-            {
-                if (!this.EnsurePetFeedReflection(out status))
-                {
-                    return false;
-                }
-
-                object petSystem = this.petFeedPetSystemInstanceProperty.GetValue(null, null);
-                if (petSystem == null)
-                {
-                    status = "managed PetSystem unavailable";
-                    return false;
-                }
-
-                int itemCount = 0;
-                int named = 0;
-                foreach (string storageName in new[] { "Backpack", "Warehouse" })
-                {
-                    if (!this.TryGetPetFeedPickerItemsManaged(petSystem, dog, storageName, out IEnumerable items, out string storageStatus))
-                    {
-                        status = "managed " + storageStatus;
-                        return itemCount > 0;
-                    }
-
-                    foreach (object item in items)
-                    {
-                        if (!this.TryReadIntFromMember(item, "staticId", out int staticId) || staticId <= 0)
-                        {
-                            continue;
-                        }
-
-                        int count = this.TryReadIntFromMember(item, "count", out int itemCountValue) ? Math.Max(1, itemCountValue) : 1;
-                        uint netId = this.TryReadUIntFromMember(item, "netId", out uint itemNetId) ? itemNetId : 0U;
-                        string name = this.ReadPetFeedBackpackItemNameManaged(item);
-                        if (string.IsNullOrWhiteSpace(name))
-                        {
-                            int step = this.TryReadIntFromMember(item, "step", out int itemStep) ? itemStep : 0;
-                            this.TryResolvePetFeedFoodNameFromBackpackItemTypeManaged(staticId, step, netId, out name);
-                        }
-                        if (string.IsNullOrWhiteSpace(name))
-                        {
-                            this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out name);
-                        }
-                        name = this.NormalizePetFeedFoodName(staticId, name);
-                        int itemStarRate = this.TryReadPetFeedFoodStarRate(item);
-
-                        if (!byStaticId.TryGetValue(staticId, out PetFeedFoodSupply supply))
-                        {
-                            supply = new PetFeedFoodSupply
-                            {
-                                StaticId = staticId,
-                                Count = 0,
-                                Fullness = this.TryGetPetFeedFoodFullnessCached(staticId, out int fullness) ? fullness : 1,
-                                NetId = netId,
-                                StarRate = itemStarRate,
-                                Name = name,
-                                IsLock = false
-                            };
-                            byStaticId[staticId] = supply;
-                        }
-
-                        supply.Count += count;
-                        if (itemStarRate > supply.StarRate)
-                        {
-                            supply.StarRate = itemStarRate;
-                        }
-                        if (supply.NetId == 0U)
-                        {
-                            supply.NetId = netId;
-                        }
-                        if (!string.IsNullOrWhiteSpace(name))
-                        {
-                            supply.Name = name;
-                            this.petFeedFoodNameByStaticId[staticId] = name;
-                            named++;
-                        }
-
-                        itemCount++;
-                    }
-                }
-
-                status = "managed backpackItems=" + itemCount;
-                if (named > 0)
-                {
-                    status += " named=" + named;
-                }
-                return itemCount > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "managed exception: " + (ex.InnerException ?? ex).Message;
-                return false;
-            }
         }
 
         private unsafe bool TryCollectPetFeedFoodsAuraMono(bool dog, Dictionary<int, PetFeedFoodSupply> byStaticId, out string status)
@@ -3555,15 +2886,6 @@ namespace HeartopiaMod
                         int count = this.TryGetMonoIntMember(item, "count", out int itemCountValue) ? Math.Max(1, itemCountValue) : 1;
                         uint netId = this.TryGetMonoUIntMember(item, "netId", out uint itemNetId) ? itemNetId : 0U;
                         string name = this.ReadPetFeedBackpackItemNameAuraMono(item);
-                        if (string.IsNullOrWhiteSpace(name))
-                        {
-                            int step = this.TryGetMonoIntMember(item, "step", out int itemStep) ? itemStep : 0;
-                            this.TryResolvePetFeedFoodNameFromBackpackItemTypeManaged(staticId, step, netId, out name);
-                        }
-                        if (string.IsNullOrWhiteSpace(name))
-                        {
-                            this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out name);
-                        }
                         name = this.NormalizePetFeedFoodName(staticId, name);
                         int itemStarRate = this.TryReadPetFeedFoodStarRateAuraMono(item);
 
@@ -3612,39 +2934,6 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 status = "AuraMono exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
-        }
-
-        private bool TryGetPetFeedPickerItemsManaged(object petSystem, bool dog, string storageName, out IEnumerable items, out string status)
-        {
-            items = null;
-            status = "picker items unavailable";
-            if (petSystem == null || this.petFeedInitFoodsForPickerMethod == null || this.petFeedGetFoodBackpackItemsMethod == null)
-            {
-                status = "picker methods unavailable";
-                return false;
-            }
-
-            try
-            {
-                object petTypeValue = Enum.Parse(this.petFeedPetTypeType, dog ? "Dog" : "Meow");
-                object storageTypeValue = Enum.Parse(this.petFeedStorageTypeType, storageName);
-                this.petFeedInitFoodsForPickerMethod.Invoke(petSystem, new[] { petTypeValue, storageTypeValue });
-                object itemsObj = this.petFeedGetFoodBackpackItemsMethod.Invoke(petSystem, null);
-                if (itemsObj is IEnumerable enumerable)
-                {
-                    items = enumerable;
-                    status = storageName;
-                    return true;
-                }
-
-                status = "GetFoodBackpackItems returned null for " + storageName;
-                return false;
-            }
-            catch (Exception ex)
-            {
-                status = storageName + " exception: " + (ex.InnerException ?? ex).Message;
                 return false;
             }
         }
@@ -3699,81 +2988,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private int SupplementPetFeedFoodSuppliesFromManagedBackpackItems(object petSystem, Dictionary<int, PetFeedFoodSupply> byStaticId)
-        {
-            if (petSystem == null || byStaticId == null || byStaticId.Count == 0)
-            {
-                return 0;
-            }
-
-            try
-            {
-                MethodInfo getFoodBackpackItemsMethod = petSystem.GetType().GetMethod("GetFoodBackpackItems", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
-                if (getFoodBackpackItemsMethod == null)
-                {
-                    return 0;
-                }
-
-                object itemsObj = getFoodBackpackItemsMethod.Invoke(petSystem, null);
-                if (!(itemsObj is IEnumerable items))
-                {
-                    return 0;
-                }
-
-                int named = 0;
-                foreach (object item in items)
-                {
-                    if (!this.TryReadIntFromMember(item, "staticId", out int staticId) || staticId <= 0)
-                    {
-                        continue;
-                    }
-
-                    string name = this.ReadPetFeedBackpackItemNameManaged(item);
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        int step = this.TryReadIntFromMember(item, "step", out int itemStep) ? itemStep : 0;
-                        uint netId = this.TryReadUIntFromMember(item, "netId", out uint itemNetIdForName) ? itemNetIdForName : 0U;
-                        this.TryResolvePetFeedFoodNameFromBackpackItemTypeManaged(staticId, step, netId, out name);
-                    }
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out name);
-                    }
-                    if (!byStaticId.TryGetValue(staticId, out PetFeedFoodSupply supply))
-                    {
-                        int count = this.TryReadIntFromMember(item, "count", out int itemCount) ? Math.Max(1, itemCount) : 1;
-                        uint netId = this.TryReadUIntFromMember(item, "netId", out uint itemNetId) ? itemNetId : 0U;
-                        supply = new PetFeedFoodSupply
-                        {
-                            StaticId = staticId,
-                            Count = count,
-                            Fullness = this.TryGetPetFeedFoodFullnessCached(staticId, out int fullness) ? fullness : 1,
-                            NetId = netId,
-                            Name = name,
-                            IsLock = false
-                        };
-                        byStaticId[staticId] = supply;
-                    }
-                    else if (!string.IsNullOrWhiteSpace(name) && (string.IsNullOrWhiteSpace(supply.Name) || int.TryParse(supply.Name, out _)))
-                    {
-                        supply.Name = name;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(name))
-                    {
-                        this.petFeedFoodNameByStaticId[staticId] = name;
-                        named++;
-                    }
-                }
-
-                return named;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
         private unsafe int SupplementPetFeedFoodSuppliesFromAuraMonoBackpackItems(IntPtr petSystemObj, Dictionary<int, PetFeedFoodSupply> byStaticId)
         {
             if (petSystemObj == IntPtr.Zero || byStaticId == null || byStaticId.Count == 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
@@ -3812,16 +3026,6 @@ namespace HeartopiaMod
                     }
 
                     string name = this.ReadPetFeedBackpackItemNameAuraMono(item);
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        int step = this.TryGetMonoIntMember(item, "step", out int itemStep) ? itemStep : 0;
-                        uint netId = this.TryGetMonoUIntMember(item, "netId", out uint itemNetIdForName) ? itemNetIdForName : 0U;
-                        this.TryResolvePetFeedFoodNameFromBackpackItemTypeManaged(staticId, step, netId, out name);
-                    }
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out name);
-                    }
                     if (!byStaticId.TryGetValue(staticId, out PetFeedFoodSupply supply))
                     {
                         int count = this.TryGetMonoIntMember(item, "count", out int itemCount) ? Math.Max(1, itemCount) : 1;
@@ -3981,20 +3185,43 @@ namespace HeartopiaMod
 
             try
             {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                MethodInfo method = tableDataType?.GetMethod("GetEntityTypeID", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int) }, null);
-                if (method == null)
+                IntPtr tableDataClass = this.TryGetPetFeedAuraMonoTableDataClass();
+                if (tableDataClass == IntPtr.Zero)
                 {
                     return false;
                 }
 
-                object value = method.Invoke(null, new object[] { staticId });
-                if (value == null)
+                IntPtr getMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetEntityTypeID", 1);
+                if (getMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
                 {
                     return false;
                 }
 
-                entityTypeId = Convert.ToInt32(value);
+                int queryId = staticId;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr boxedResult;
+                unsafe
+                {
+                    IntPtr* args = stackalloc IntPtr[1];
+                    args[0] = (IntPtr)(&queryId);
+                    boxedResult = auraMonoRuntimeInvoke(getMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                }
+
+                if (exc != IntPtr.Zero || boxedResult == IntPtr.Zero || auraMonoObjectUnbox == null)
+                {
+                    return false;
+                }
+
+                IntPtr rawValue = auraMonoObjectUnbox(boxedResult);
+                if (rawValue == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                unsafe
+                {
+                    entityTypeId = *(int*)rawValue;
+                }
                 if (entityTypeId > 0)
                 {
                     this.petFeedEntityTypeByStaticId[staticId] = entityTypeId;
@@ -4047,54 +3274,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.TryGetPetFeedFoodFullnessFromTablesManaged(staticId, out fullness))
-            {
-                return true;
-            }
-
             return this.TryGetPetFeedFoodFullnessFromTablesAuraMono(staticId, out fullness);
-        }
-
-        private bool TryGetPetFeedFoodFullnessFromTablesManaged(int staticId, out int fullness)
-        {
-            fullness = 0;
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                foreach (string methodName in new[] { "GetPetFood", "GetDogfood", "GetCatfood" })
-                {
-                    MethodInfo method = tableDataType.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                    if (method == null)
-                    {
-                        continue;
-                    }
-
-                    object tableObj = method.Invoke(null, new object[] { staticId, false });
-                    if (tableObj == null)
-                    {
-                        continue;
-                    }
-
-                    if (this.TryReadPetFeedFoodFullnessFromTableObject(tableObj, out fullness))
-                    {
-                        return true;
-                    }
-
-                    fullness = 1;
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-
-            fullness = 0;
-            return false;
         }
 
         private unsafe bool TryGetPetFeedFoodFullnessFromTablesAuraMono(int staticId, out int fullness)
@@ -4344,20 +3524,6 @@ namespace HeartopiaMod
             }
 
             string name = string.Empty;
-            if (foodObj != null && this.TryReadPetFeedFoodNameFromManagedObject(foodObj, out name))
-            {
-                return this.CachePetFeedFoodName(staticId, name);
-            }
-
-            if (this.TryResolvePetFeedFoodNameFromManagedTable(staticId, out name))
-            {
-                return this.CachePetFeedFoodName(staticId, name);
-            }
-
-            if (this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out name))
-            {
-                return this.CachePetFeedFoodName(staticId, name);
-            }
 
             if (staticId > 0 && this.TryGetRadarStaticIdIconKey(staticId, out string spriteKey) && !string.IsNullOrWhiteSpace(spriteKey))
             {
@@ -4384,13 +3550,7 @@ namespace HeartopiaMod
                 return this.CachePetFeedFoodName(staticId, name);
             }
 
-            if (this.TryResolvePetFeedFoodNameFromManagedTable(staticId, out name)
-                || this.TryResolvePetFeedFoodNameFromAuraMonoTable(staticId, out name))
-            {
-                return this.CachePetFeedFoodName(staticId, name);
-            }
-
-            if (this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out name))
+            if (this.TryResolvePetFeedFoodNameFromAuraMonoTable(staticId, out name))
             {
                 return this.CachePetFeedFoodName(staticId, name);
             }
@@ -4566,51 +3726,6 @@ namespace HeartopiaMod
             return name.Replace("\r", " ").Replace("\n", " ").Replace("\t", " ");
         }
 
-        private string ReadPetFeedBackpackItemNameManaged(object item)
-        {
-            if (item == null)
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                PropertyInfo nameProperty = item.GetType().GetProperty("Name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                object rawName = nameProperty != null ? nameProperty.GetValue(item, null) : null;
-                if (rawName == null && this.TryGetObjectMember(item, "Name", out object memberName))
-                {
-                    rawName = memberName;
-                }
-                if (rawName != null)
-                {
-                    string value = this.NormalizePetFeedFoodName(this.TryReadIntFromMember(item, "staticId", out int staticId) ? staticId : 0, rawName.ToString());
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        return value;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            if (this.TryReadPetFeedFoodNameFromManagedObject(item, out string name))
-            {
-                return this.NormalizePetFeedFoodName(this.TryReadIntFromMember(item, "staticId", out int staticId) ? staticId : 0, name);
-            }
-
-            if (this.TryGetObjectMember(item, "icon", out object rawIcon) && rawIcon != null)
-            {
-                string icon = this.CleanPetFeedFoodName(rawIcon.ToString());
-                if (!string.IsNullOrWhiteSpace(icon) && !int.TryParse(icon, out _))
-                {
-                    return this.GetAutoSellItemDisplayName(icon);
-                }
-            }
-
-            return string.Empty;
-        }
-
         private string ReadPetFeedBackpackItemNameAuraMono(IntPtr item)
         {
             if (item == IntPtr.Zero)
@@ -4640,278 +3755,6 @@ namespace HeartopiaMod
             }
 
             return string.Empty;
-        }
-
-        private bool TryResolvePetFeedFoodNameFromBackpackItemTypeManaged(int staticId, int step, uint netId, out string name)
-        {
-            name = string.Empty;
-            if (staticId <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type backpackItemType = this.FindLoadedType("BackpackItem", "XDTGameSystem.UISystem.BackPack.BackpackItem", "UISystem.BackPack.BackpackItem");
-                MethodInfo method = backpackItemType?.GetMethod("GetBackPackName", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(int), typeof(uint) }, null);
-                if (method == null)
-                {
-                    return false;
-                }
-
-                object rawName = method.Invoke(null, new object[] { staticId, step, netId });
-                name = this.CleanPetFeedFoodName(rawName?.ToString());
-                return !string.IsNullOrWhiteSpace(name) && !int.TryParse(name, out _);
-            }
-            catch
-            {
-                name = string.Empty;
-                return false;
-            }
-        }
-
-        private bool TryResolvePetFeedFoodNameFromEntityTableManaged(int staticId, out string name)
-        {
-            name = string.Empty;
-            if (staticId <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                MethodInfo method = tableDataType?.GetMethod("GetEntity", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                if (method == null)
-                {
-                    return false;
-                }
-
-                object entityObj = method.Invoke(null, new object[] { staticId, false });
-                if (entityObj == null)
-                {
-                    return false;
-                }
-
-                PropertyInfo nameProperty = entityObj.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                object rawName = nameProperty != null ? nameProperty.GetValue(entityObj, null) : null;
-                if (rawName == null && this.TryGetObjectMember(entityObj, "name", out object memberName))
-                {
-                    rawName = memberName;
-                }
-
-                name = this.CleanPetFeedFoodName(rawName?.ToString());
-                return !string.IsNullOrWhiteSpace(name) && !int.TryParse(name, out _);
-            }
-            catch
-            {
-                name = string.Empty;
-                return false;
-            }
-        }
-
-        private bool TryReadPetFeedFoodNameFromManagedObject(object obj, out string name)
-        {
-            name = string.Empty;
-            if (obj == null)
-            {
-                return false;
-            }
-
-            foreach (string member in new[] { "name", "_name", "Name", "itemName", "_itemName", "ItemName", "displayName", "_displayName", "DisplayName", "icon", "_icon", "Icon", "iconName", "itemIcon" })
-            {
-                if (this.TryGetObjectMember(obj, member, out object raw) && raw != null)
-                {
-                    string value = raw.ToString();
-                    if (!string.IsNullOrWhiteSpace(value) && !int.TryParse(value, out _))
-                    {
-                        name = value;
-                        return true;
-                    }
-                }
-            }
-
-            foreach (string member in new[] { "item", "_item", "itemData", "_itemData", "baseData", "_baseData", "config", "_config", "tableData", "_tableData" })
-            {
-                if (this.TryGetObjectMember(obj, member, out object nested)
-                    && nested != null
-                    && !object.ReferenceEquals(nested, obj)
-                    && this.TryReadPetFeedFoodNameFromManagedObject(nested, out name))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool TryResolvePetFeedFoodNameFromManagedTable(int staticId, out string name)
-        {
-            name = string.Empty;
-            if (staticId <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                foreach (string methodName in new[] { "GetPetFood", "GetDogfood", "GetCatfood", "GetFish", "GetEntity" })
-                {
-                    MethodInfo method = tableDataType.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int), typeof(bool) }, null);
-                    if (method == null)
-                    {
-                        continue;
-                    }
-
-                    object tableObj = method.Invoke(null, new object[] { staticId, false });
-                    if (tableObj == null)
-                    {
-                        continue;
-                    }
-
-                    if (this.TryResolvePetFeedFoodNameFromManagedTableObject(tableObj, staticId, out name)
-                        || this.TryReadPetFeedFoodNameFromManagedObject(tableObj, out name))
-                    {
-                        return true;
-                    }
-                }
-
-                foreach (string methodName in new[] { "GetItem", "GetItems", "GetItemData", "GetItemBase", "GetProp", "GetGoods", "GetFood" })
-                {
-                    foreach (MethodInfo method in tableDataType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                    {
-                        if (!string.Equals(method.Name, methodName, StringComparison.Ordinal)
-                            || method.ReturnType == typeof(void))
-                        {
-                            continue;
-                        }
-
-                        ParameterInfo[] parameters = method.GetParameters();
-                        if (parameters.Length < 1 || parameters.Length > 2 || parameters[0].ParameterType != typeof(int))
-                        {
-                            continue;
-                        }
-
-                        object[] args = parameters.Length == 1 ? new object[] { staticId } : new object[] { staticId, true };
-                        object item = method.Invoke(null, args);
-                        if (item is string text && !string.IsNullOrWhiteSpace(text))
-                        {
-                            name = text;
-                            return true;
-                        }
-                        if (item != null && this.TryReadPetFeedFoodNameFromManagedObject(item, out name))
-                        {
-                            return true;
-                        }
-                    }
-                }
-
-                foreach (string fieldName in new[] { "TableItems", "TableItem", "TableItemDatas", "TableItemBases", "TableProps", "TableGoods", "TableFoods" })
-                {
-                    FieldInfo field = tableDataType.GetField(fieldName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                    object tableObj = field?.GetValue(null);
-                    if (this.TryResolvePetFeedFoodNameFromManagedTableObject(tableObj, staticId, out name))
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
-        private bool TryResolvePetFeedFoodNameFromManagedTableObject(object tableObj, int staticId, out string name)
-        {
-            name = string.Empty;
-            if (tableObj == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (tableObj is IDictionary dictionary)
-                {
-                    object item = null;
-                    if (dictionary.Contains(staticId))
-                    {
-                        item = dictionary[staticId];
-                    }
-                    else
-                    {
-                        foreach (DictionaryEntry entry in dictionary)
-                        {
-                            if (this.ObjectMatchesPetFeedStaticId(entry.Key, staticId))
-                            {
-                                item = entry.Value;
-                                break;
-                            }
-                        }
-                    }
-
-                    return item != null
-                        && (this.TryReadPetFeedFoodNameFromManagedObject(item, out name)
-                            || this.TryResolvePetFeedFoodNameFromManagedLinkedItem(item, staticId, out name));
-                }
-
-                if (tableObj is IEnumerable enumerable)
-                {
-                    foreach (object entry in enumerable)
-                    {
-                        object item = entry;
-                        if (entry != null && this.TryGetObjectMember(entry, "Value", out object value) && value != null)
-                        {
-                            item = value;
-                        }
-
-                        if (item != null
-                            && this.ObjectMatchesPetFeedStaticId(item, staticId)
-                            && (this.TryReadPetFeedFoodNameFromManagedObject(item, out name)
-                                || this.TryResolvePetFeedFoodNameFromManagedLinkedItem(item, staticId, out name)))
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
-        private bool TryResolvePetFeedFoodNameFromManagedLinkedItem(object obj, int staticId, out string name)
-        {
-            name = string.Empty;
-            if (obj == null)
-            {
-                return false;
-            }
-
-            foreach (string member in new[] { "itemId", "_itemId", "ItemId", "goodsId", "_goodsId", "GoodsId", "foodId", "_foodId", "FoodId", "propId", "_propId", "PropId", "templateId", "_templateId", "TemplateId" })
-            {
-                if (!this.TryReadIntFromMember(obj, member, out int linkedId) || linkedId <= 0 || linkedId == staticId)
-                {
-                    continue;
-                }
-
-                if (this.TryResolvePetFeedFoodNameFromManagedTable(linkedId, out name))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private bool ObjectMatchesPetFeedStaticId(object obj, int staticId)
@@ -5130,8 +3973,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (this.TryResolvePetFeedFoodNameFromManagedTable(linkedId, out name)
-                    || this.TryResolvePetFeedFoodNameFromAuraMonoTable(linkedId, out name))
+                if (this.TryResolvePetFeedFoodNameFromAuraMonoTable(linkedId, out name))
                 {
                     return true;
                 }
@@ -5169,20 +4011,7 @@ namespace HeartopiaMod
 
             try
             {
-                if (!this.EnsurePetFeedReflection(out status))
-                {
-                    string managedStatus = status;
-                    if (this.TryInvokePetFeedPrepareAuraMono(petNetId, out status))
-                    {
-                        return true;
-                    }
-
-                    status = managedStatus + ". " + status;
-                    return false;
-                }
-
-                this.petFeedPrepareMethod.Invoke(null, new object[] { petNetId });
-                return true;
+                return this.TryInvokePetFeedPrepareAuraMono(petNetId, out status);
             }
             catch (Exception ex)
             {
@@ -5202,20 +4031,7 @@ namespace HeartopiaMod
 
             try
             {
-                if (!this.EnsurePetFeedReflection(out status))
-                {
-                    string managedStatus = status;
-                    if (this.TryInvokePetFeedBeginAuraMono(petNetId, foodNetIds, out status))
-                    {
-                        return true;
-                    }
-
-                    status = managedStatus + ". " + status;
-                    return false;
-                }
-
-                this.petFeedBeginMethod.Invoke(null, new object[] { petNetId, foodNetIds, 0U });
-                return true;
+                return this.TryInvokePetFeedBeginAuraMono(petNetId, foodNetIds, out status);
             }
             catch (Exception ex)
             {
@@ -5428,46 +4244,6 @@ namespace HeartopiaMod
             }
 
             return true;
-        }
-
-        private int GetPetFeedMaxFullness(bool dog)
-        {
-            try
-            {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                if (tableDataType == null)
-                {
-                    return 0;
-                }
-
-                string fieldName = dog ? "TableDogThemes" : "TableKittyThemes";
-                FieldInfo field = tableDataType.GetField(fieldName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                object tableObj = field?.GetValue(null);
-                if (!(tableObj is IEnumerable table))
-                {
-                    return 0;
-                }
-
-                foreach (object entry in table)
-                {
-                    if (entry == null)
-                    {
-                        continue;
-                    }
-
-                    if (this.TryGetObjectMember(entry, "Value", out object theme)
-                        && theme != null
-                        && this.TryReadIntFromMember(theme, "fullnessThreshold", out int value))
-                    {
-                        return value;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return 0;
         }
 
         private bool TryReadIntFromMember(object obj, string memberName, out int value)
@@ -5793,16 +4569,10 @@ namespace HeartopiaMod
             }
 
             bool eatenPopulated = false;
-            if (this.EnsurePetFeedReflection(out _))
+            if (false)
             {
                 try
                 {
-                    object petSystem = this.petFeedPetSystemInstanceProperty?.GetValue(null, null);
-                    if (petSystem != null)
-                    {
-                        this.TryPopulatePetFeedKnownFavoriteFoodsManaged(petSystem, target);
-                        eatenPopulated = target.FavoriteFoods != null && target.FavoriteFoods.Count > 0;
-                    }
                 }
                 catch
                 {
@@ -5814,10 +4584,7 @@ namespace HeartopiaMod
                 this.TryPopulatePetFeedKnownFavoriteFoodsViaAuraMono(target);
             }
 
-            if (!this.TryPopulatePetFeedSecretFavoritesManaged(target))
-            {
-                this.TryPopulatePetFeedSecretFavoritesAuraMono(target);
-            }
+            this.TryPopulatePetFeedSecretFavoritesAuraMono(target);
         }
 
         private unsafe void TryPopulatePetFeedKnownFavoriteFoodsViaAuraMono(PetFeedTarget target)
@@ -5879,113 +4646,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool EnsurePetFeedEcsFavoriteMetadataReflection()
-        {
-            if (this.petFeedEcsTryGetSpatialServiceMethod != null
-                && this.petFeedPetSpatialTryGetDataOptMethod != null
-                && this.petFeedEntityDataOptTryGetValueMethod != null)
-            {
-                return true;
-            }
-
-            // 2026-07-09 game update renamed PetSpatialDataCenter -> PetGameDataCenter (same [ClientService],
-            // same TryGetDataOpt(EcsEntity/uint, out PetEntityOptData) overloads + order). Field names kept.
-            this.petFeedPetSpatialDataCenterType = this.FindLoadedType(
-                "XDT.Scene.Shared.DataCenter.Pet.PetGameDataCenter",
-                "Il2CppXDT.Scene.Shared.DataCenter.Pet.PetGameDataCenter",
-                "PetGameDataCenter");
-            this.petFeedPetEntityOptDataType = this.FindLoadedType(
-                "XDT.Scene.Shared.Entity.EntityOptData.PetEntityOptData",
-                "Il2CppXDT.Scene.Shared.Entity.EntityOptData.PetEntityOptData",
-                "PetEntityOptData");
-            this.petFeedPetBasePropertyType = this.FindLoadedType(
-                "XDT.Scene.Shared.Modules.Pet.PetBaseProperty",
-                "Il2CppXDT.Scene.Shared.Modules.Pet.PetBaseProperty",
-                "PetBaseProperty");
-            Type entityDataOptType = this.FindLoadedType(
-                "XDT.Scene.Shared.Entity.EntityOptData.EntityDataOpt",
-                "Il2CppXDT.Scene.Shared.Entity.EntityOptData.EntityDataOpt",
-                "EntityDataOpt");
-            Type ecsServiceType = this.FindLoadedType(
-                "XDTDataAndProtocol.ProtocolService.EcsService",
-                "Il2CppXDTDataAndProtocol.ProtocolService.EcsService",
-                "EcsService")
-                ?? this.FindLoadedTypeBySuffix("ProtocolService.EcsService", "EcsService")
-                ?? this.FindLoadedEcsServiceType();
-
-            if (this.petFeedPetSpatialDataCenterType == null
-                || this.petFeedPetEntityOptDataType == null
-                || this.petFeedPetBasePropertyType == null
-                || entityDataOptType == null
-                || ecsServiceType == null)
-            {
-                if (!this.petFeedEcsFavoriteMetadataLoggedUnavailable)
-                {
-                    this.petFeedEcsFavoriteMetadataLoggedUnavailable = true;
-                    this.LogPetFeedFavoriteReport(
-                        "ECS favorite metadata types unavailable. spatial="
-                        + (this.petFeedPetSpatialDataCenterType != null)
-                        + " dataOpt=" + (this.petFeedPetEntityOptDataType != null)
-                        + " baseProperty=" + (this.petFeedPetBasePropertyType != null)
-                        + " entityDataOpt=" + (entityDataOptType != null)
-                        + " ecsService=" + (ecsServiceType != null));
-                }
-
-                return false;
-            }
-
-            MethodInfo tryGetGeneric = ecsServiceType
-                .GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "TryGet" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
-            if (tryGetGeneric == null)
-            {
-                return false;
-            }
-
-            this.petFeedEcsTryGetSpatialServiceMethod = tryGetGeneric.MakeGenericMethod(this.petFeedPetSpatialDataCenterType);
-            this.petFeedPetSpatialTryGetDataOptMethod = this.petFeedPetSpatialDataCenterType.GetMethod(
-                "TryGetDataOpt",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { typeof(uint), this.petFeedPetEntityOptDataType.MakeByRefType() },
-                null);
-            this.petFeedPetEntityOptDataBasePropertyProperty = this.petFeedPetEntityOptDataType.GetProperty(
-                "PetBaseProperty",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            this.petFeedEntityDataOptTryGetValueMethod = entityDataOptType
-                .GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "TryGetValue" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
-
-            return this.petFeedPetSpatialTryGetDataOptMethod != null
-                && this.petFeedPetEntityOptDataBasePropertyProperty != null
-                && this.petFeedEntityDataOptTryGetValueMethod != null;
-        }
-
-        private bool TryResolvePetFeedSpatialDataCenter(out object service)
-        {
-            service = null;
-            if (!this.EnsurePetFeedEcsFavoriteMetadataReflection())
-            {
-                return false;
-            }
-
-            try
-            {
-                object[] args = new object[] { null, false };
-                object result = this.petFeedEcsTryGetSpatialServiceMethod.Invoke(null, args);
-                if (result is bool ok && ok && args[0] != null)
-                {
-                    service = args[0];
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
         private void LogPetFeedAuraSecretDiagnosticOnce(string message)
         {
             if (this.petFeedAuraSecretDiagnosticLogged || string.IsNullOrWhiteSpace(message))
@@ -6004,73 +4664,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (!this.TryPopulatePetFeedSecretFavoritesManaged(target))
-            {
-                this.TryPopulatePetFeedSecretFavoritesAuraMono(target);
-            }
-        }
-
-        private bool TryPopulatePetFeedSecretFavoritesManaged(PetFeedTarget target)
-        {
-            if (target == null || target.NetId == 0U || !this.TryResolvePetFeedSpatialDataCenter(out object service))
-            {
-                return false;
-            }
-
-            int beforeFavorites = target.SecretFavoriteFoods != null ? target.SecretFavoriteFoods.Count : 0;
-            int beforeDislikes = target.SecretDislikeFoods != null ? target.SecretDislikeFoods.Count : 0;
-
-            try
-            {
-                object dataOpt = Activator.CreateInstance(this.petFeedPetEntityOptDataType);
-                object[] dataArgs = new object[] { target.NetId, dataOpt };
-                if (!(this.petFeedPetSpatialTryGetDataOptMethod.Invoke(service, dataArgs) is bool hasData) || !hasData)
-                {
-                    return false;
-                }
-
-                dataOpt = dataArgs[1];
-                object petBaseOpt = this.petFeedPetEntityOptDataBasePropertyProperty.GetValue(dataOpt, null);
-                if (petBaseOpt == null)
-                {
-                    return false;
-                }
-
-                MethodInfo tryGetValue = this.petFeedEntityDataOptTryGetValueMethod.MakeGenericMethod(this.petFeedPetBasePropertyType);
-                object baseProperty = Activator.CreateInstance(this.petFeedPetBasePropertyType);
-                object[] getValueArgs = new object[] { petBaseOpt, baseProperty };
-                if (!(tryGetValue.Invoke(null, getValueArgs) is bool hasBase) || !hasBase)
-                {
-                    return false;
-                }
-
-                baseProperty = getValueArgs[1];
-                if (this.TryReadIntListFromMember(baseProperty, "FavoriteFoods", out List<int> secretFavorites))
-                {
-                    this.MergePetFeedIntList(ref target.SecretFavoriteFoods, secretFavorites);
-                }
-
-                if (this.TryReadIntListFromMember(baseProperty, "DislikeFoods", out List<int> secretDislikes))
-                {
-                    this.MergePetFeedIntList(ref target.SecretDislikeFoods, secretDislikes);
-                }
-
-                if ((target.SecretFavoriteFoods != null && target.SecretFavoriteFoods.Count > 0)
-                    || (target.SecretDislikeFoods != null && target.SecretDislikeFoods.Count > 0))
-                {
-                    target.FavoriteSource = string.IsNullOrEmpty(target.FavoriteSource)
-                        ? "petBaseProperty"
-                        : target.FavoriteSource + "+petBaseProperty";
-                }
-            }
-            catch (Exception ex)
-            {
-                this.LogPetFeedFavoriteReport("Secret favorites managed netId=" + target.NetId + ": " + ex.GetType().Name);
-                return false;
-            }
-
-            return (target.SecretFavoriteFoods != null ? target.SecretFavoriteFoods.Count : 0) > beforeFavorites
-                || (target.SecretDislikeFoods != null ? target.SecretDislikeFoods.Count : 0) > beforeDislikes;
+            this.TryPopulatePetFeedSecretFavoritesAuraMono(target);
         }
 
         private unsafe bool EnsurePetFeedAuraFavoriteMetadataReady()

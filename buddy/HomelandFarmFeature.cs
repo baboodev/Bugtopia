@@ -18066,32 +18066,10 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.TryResolvePetFeedFoodNameFromBackpackItemTypeManaged(staticId, step, netId, out string backpackName)
-                && !this.IsPoorBagItemDisplayName(backpackName, staticId))
-            {
-                displayName = backpackName;
-                return true;
-            }
-
             if (this.TryHomelandFarmTryGetBackPackNameAuraMono(staticId, step, netId, out string auraBackpackName)
                 && !this.IsPoorBagItemDisplayName(auraBackpackName, staticId))
             {
                 displayName = auraBackpackName;
-                return true;
-            }
-
-            if (this.TryResolvePetFeedFoodNameFromEntityTableManaged(staticId, out string entityName)
-                && !this.IsPoorBagItemDisplayName(entityName, staticId))
-            {
-                displayName = entityName;
-                return true;
-            }
-
-            if (managedItem != null
-                && this.TryReadPetFeedFoodNameFromManagedObject(managedItem, out string objectName)
-                && !this.IsPoorBagItemDisplayName(objectName, staticId))
-            {
-                displayName = objectName;
                 return true;
             }
 
