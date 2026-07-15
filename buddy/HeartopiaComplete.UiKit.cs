@@ -295,7 +295,8 @@ namespace HeartopiaMod
                 new Rect(navListRect.x, navListRect.y + 224f, navListRect.width, 40f),
                 new Rect(navListRect.x, navListRect.y + 280f, navListRect.width, 40f),
                 new Rect(navListRect.x, navListRect.y + 336f, navListRect.width, 40f),
-                new Rect(navListRect.x, navListRect.y + 392f, navListRect.width, 40f)
+                new Rect(navListRect.x, navListRect.y + 392f, navListRect.width, 40f),
+                new Rect(navListRect.x, navListRect.y + 448f, navListRect.width, 40f)
             };
             this.DrawSidebarTabButton(sidebarButtonRects[0], "Self", 0);
             this.DrawSidebarTabButton(sidebarButtonRects[1], "Resource Gathering", 2);
@@ -304,7 +305,8 @@ namespace HeartopiaMod
             this.DrawSidebarTabButton(sidebarButtonRects[4], "Radar", 4);
             this.DrawSidebarTabButton(sidebarButtonRects[5], "Teleport", 5);
             this.DrawSidebarTabButton(sidebarButtonRects[6], "Bag / Warehouse", 6);
-            this.DrawSidebarTabButton(sidebarButtonRects[7], "Settings", 7);
+            this.DrawSidebarTabButton(sidebarButtonRects[7], "Research", 9);
+            this.DrawSidebarTabButton(sidebarButtonRects[8], "Settings", 7);
 
             var subTabs = this.GetActiveTopSubTabs();
             if (subTabs.Count > 0)
@@ -404,6 +406,7 @@ namespace HeartopiaMod
                 else if (this.selectedTab == 4) calculatedHeight = this.DrawRadarTab(contentY);
                 else if (this.selectedTab == 5) calculatedHeight = this.DrawTeleportTab(contentY);
                 else if (this.selectedTab == 6) calculatedHeight = this.DrawBulkSelectorTab(contentY);
+                else if (this.selectedTab == 9) calculatedHeight = this.DrawResearchTab(contentY);
                 else if (this.selectedTab == 7) calculatedHeight = this.DrawSettingsTab(contentY);
                 this.tabDrawContentHeight = calculatedHeight;
                 GUI.EndScrollView();

@@ -700,6 +700,7 @@ namespace HeartopiaMod
             this.ProcessGameEventHooksOnUpdate();
             this.ProcessSeaCleanBannerHideOnUpdate();
             this.ProcessLittleWhaleFinderOnUpdate();
+            this.ProcessResearchMonitorOnUpdate();
             this.ProcessSanrioGachaFinderOnUpdate();
             this.ProcessSwimSprintVerticalGuardOnUpdate();
             this.QuestAssistantCollectMonitorTick();

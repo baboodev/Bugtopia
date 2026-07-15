@@ -177,6 +177,10 @@ namespace HeartopiaMod
             {
                 return this.CalculateBulkSelectorTabHeight();
             }
+            if (this.selectedTab == 9)
+            {
+                return this.CalculateResearchTabHeight();
+            }
             if (this.selectedTab == 7)
             {
                 return this.CalculateSettingsTabHeight();
@@ -367,6 +371,7 @@ namespace HeartopiaMod
             if (this.selectedTab == 4) return this.L("Radar");
             if (this.selectedTab == 5) return this.L("Teleport");
             if (this.selectedTab == 6) return this.L("Bag / Warehouse");
+            if (this.selectedTab == 9) return this.L("Research");
             if (this.selectedTab == 7) return this.L("Settings");
             return "Unknown";
         }

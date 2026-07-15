@@ -346,6 +346,7 @@
     <Compile Include="PuzzleNetFeature.cs" />
     <Compile Include="ShopBuyAllFeature.cs" />
     <Compile Include="FaceShopBuyAllFeature.cs" />
+    <Compile Include="ResearchDiagnosticsFeature.cs" />
     <Compile Include="ShopDumpFeature.cs" />
     <Compile Include="ShopQuickBuyFeature.cs" />
     <Compile Include="ShopQuickSellFeature.cs" />

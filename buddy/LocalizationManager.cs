@@ -577,6 +577,20 @@ namespace HeartopiaMod
             { "{0} Items ({1})", "{0} Items ({1})" },
             { "{0} stacks ({1})", "{0} stacks ({1})" },
             { "Logging", "Logging" },
+            // Research Institute
+            { "Research", "Research" },
+            { "Research Institute", "Research Institute" },
+            { "Instruments", "Instruments" },
+            { "Status: {0}", "Status: {0}" },
+            { "Loading instrument data… (enter the main town — the list fills in a moment).", "Loading instrument data… (enter the main town — the list fills in a moment)." },
+            { "Analyzer {0}  ·  Lv {1}", "Analyzer {0}  ·  Lv {1}" },
+            { "idle", "idle" },
+            { "researching {0} · {1}", "researching {0} · {1}" },
+            { "DONE · {0}", "DONE · {0}" },
+            { "SELECT ITEM", "SELECT ITEM" },
+            { "RESEARCH STORE", "RESEARCH STORE" },
+            { "CONTROL CONSOLE", "CONTROL CONSOLE" },
+            { "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab.", "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab." },
         };
 
         // Built-in Spanish fallback strings.
@@ -1136,6 +1150,20 @@ namespace HeartopiaMod
             { "{0} Items ({1})", "{0} objetos ({1})" },
             { "{0} stacks ({1})", "{0} pilas ({1})" },
             { "Logging", "Registros" },
+            // Research Institute (official in-game terms)
+            { "Research", "Investigación" },
+            { "Research Institute", "Laboratorio" },
+            { "Instruments", "Aparatos de investigación" },
+            { "Status: {0}", "Estado: {0}" },
+            { "Loading instrument data… (enter the main town — the list fills in a moment).", "Cargando datos de los aparatos… (entra a tu pueblo principal — la lista se llenará en un momento)." },
+            { "Analyzer {0}  ·  Lv {1}", "Aparato {0}  ·  Nv {1}" },
+            { "idle", "inactivo" },
+            { "researching {0} · {1}", "Investigando {0} · {1}" },
+            { "DONE · {0}", "LISTO · {0}" },
+            { "SELECT ITEM", "Iniciar investigación" },
+            { "RESEARCH STORE", "Tienda del instituto" },
+            { "CONTROL CONSOLE", "Consola de control" },
+            { "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab.", "En vivo desde la caché del servidor. «Iniciar investigación» abre el selector del aparato de investigación (los aparatos ocupados se bloquean hasta terminar). Todo se prepara automáticamente al abrir esta pestaña." },
         };
 
         // Built-in Simplified Chinese fallback strings.
@@ -1695,6 +1723,20 @@ namespace HeartopiaMod
             { "{0} Items ({1})", "{0} 个物品（{1}）" },
             { "{0} stacks ({1})", "{0} 组（{1}）" },
             { "Logging", "日志" },
+            // Research Institute (official in-game terms)
+            { "Research", "研究" },
+            { "Research Institute", "研究室" },
+            { "Instruments", "研究仪" },
+            { "Status: {0}", "状态：{0}" },
+            { "Loading instrument data… (enter the main town — the list fills in a moment).", "正在加载研究仪数据…（进入主城，列表稍后填充）。" },
+            { "Analyzer {0}  ·  Lv {1}", "研究仪{0}  ·  等级{1}" },
+            { "idle", "空闲" },
+            { "researching {0} · {1}", "研究中 {0} · {1}" },
+            { "DONE · {0}", "完成 · {0}" },
+            { "SELECT ITEM", "开始研究" },
+            { "RESEARCH STORE", "研究所商店" },
+            { "CONTROL CONSOLE", "总控台" },
+            { "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab.", "数据来自服务器同步缓存。点击“开始研究”打开该研究仪的研究选择界面（研究中的研究仪在完成前锁定）。打开此标签页时会自动准备一切。" },
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -2244,6 +2286,20 @@ namespace HeartopiaMod
             { "{0} Items ({1})", "{0} itens ({1})" },
             { "{0} stacks ({1})", "{0} pilhas ({1})" },
             { "Logging", "Registros" },
+            // Research Institute (official in-game terms)
+            { "Research", "Pesquisa" },
+            { "Research Institute", "Laboratório de Pesquisa" },
+            { "Instruments", "Dispositivos de Pesquisa" },
+            { "Status: {0}", "Status: {0}" },
+            { "Loading instrument data… (enter the main town — the list fills in a moment).", "Carregando dados dos dispositivos… (entre na sua cidade principal — a lista será preenchida em instantes)." },
+            { "Analyzer {0}  ·  Lv {1}", "Dispositivo {0}  ·  Nv {1}" },
+            { "idle", "ocioso" },
+            { "researching {0} · {1}", "Pesquisando {0} · {1}" },
+            { "DONE · {0}", "PRONTO · {0}" },
+            { "SELECT ITEM", "Pesquisar" },
+            { "RESEARCH STORE", "Loja do Instituto" },
+            { "CONTROL CONSOLE", "Console" },
+            { "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab.", "Ao vivo do cache do servidor. «Pesquisar» abre o seletor do Dispositivo de Pesquisa (dispositivos ocupados ficam bloqueados até terminar). Tudo é preparado automaticamente ao abrir esta aba." },
         };
 
         // Built-in Thai fallback strings.
@@ -2793,6 +2849,20 @@ namespace HeartopiaMod
             { "{0} Items ({1})", "{0} ไอเทม ({1})" },
             { "{0} stacks ({1})", "{0} กอง ({1})" },
             { "Logging", "บันทึก" },
+            // Research Institute (official in-game terms)
+            { "Research", "วิจัย" },
+            { "Research Institute", "ห้องวิจัย" },
+            { "Instruments", "เครื่องมือวิจัย" },
+            { "Status: {0}", "สถานะ: {0}" },
+            { "Loading instrument data… (enter the main town — the list fills in a moment).", "กำลังโหลดข้อมูลเครื่องมือวิจัย… (เข้าเมืองหลักของคุณ รายการจะแสดงในอีกสักครู่)" },
+            { "Analyzer {0}  ·  Lv {1}", "เครื่องมือวิจัย {0}  ·  เลเวล {1}" },
+            { "idle", "ว่าง" },
+            { "researching {0} · {1}", "กำลังวิจัย {0} · {1}" },
+            { "DONE · {0}", "เสร็จ · {0}" },
+            { "SELECT ITEM", "เริ่มการวิจัย" },
+            { "RESEARCH STORE", "ร้านค้าศูนย์วิจัย" },
+            { "CONTROL CONSOLE", "คอนโซลหลัก" },
+            { "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab.", "ข้อมูลสดจากแคชเซิร์ฟเวอร์ กด “เริ่มการวิจัย” เพื่อเปิดหน้าเลือกงานวิจัยของเครื่องมือนั้น (เครื่องที่กำลังวิจัยจะถูกล็อกจนกว่าจะเสร็จ) ทุกอย่างถูกเตรียมโดยอัตโนมัติเมื่อเปิดแท็บนี้" },
         };
 
         // Runtime localization state.

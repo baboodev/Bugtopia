@@ -828,7 +828,30 @@ Research tool for the party **stampede carpets** — Slippery Rug `260242` (`p_m
 - **Step Off** — completes the cycle like a real exit: both `PlayerExit` skills in `ugcSkills` order (AddBuff 1005, +20% for 3 s linger, then RemoveBuff 1003).
 - **Logging** — always on, no toggle: resolution pointers, dictionary walk per-actor lines (netId/staticId/ugcType/pos/dist), full command payloads, invoke results/exceptions.
 
-Skill ids are per-staticId constants recovered from the decrypted `cn.bytes` tables (`Mechanism.ugcSkills` → `Ugcskill` → `UgcServerAction`/`BuffConfig`); the game-side pipeline this replays is `UGCTriggerCase → LocalPlayerComponent.TriggerEnter → PhysInteractionSystem → PhysEventSkill → Action_Command_UgcOperate`. Research: `memory/ugc-mechanism-carpet-interaction.md`.
+Skill ids are per-staticId constants recovered from the decrypted `cn.bytes` tables (`Mechanism.ugcSkills` → `Ugcskill` → `UgcServerAction`/`BuffConfig`); the game-side pipeline this replays is `UGCTriggerCase → LocalPlayerComponent.TriggerEnter → PhysInteractionSystem → PhysEventSkill → Action_Command_UgcOperate`. Research: `/ugc-mechanism-carpet-interaction.md`.
+
+---
+
+## Research Tab
+
+A practical panel for the Research Institute (research store is StoreId **142**). Opening the tab auto-prepares everything: it polls the server-sync instrument cache immediately, arms the level spoof, and force-spawns the institute's client entities (all silent, main-town only) — so the list and buttons are ready without any setup. System map: `.research-record/RESEARCH_STORE_REPORT.md`.
+
+**Instruments** (live from the server-sync cache — works from any location):
+
+| Element | What it does |
+|---------|--------------|
+| Per-analyzer row | `Analyzer N · Lv L` + status: **idle**, **researching &lt;item&gt; · Xh Ym** (countdown interpolated from the last poll), or **DONE · &lt;item&gt;**. Item names via `TableData.GetEntity`. |
+| SELECT ITEM (per row) | Opens that analyzer's `ResearchInstrumentPanel` (the research-item picker). **Greyed out while the analyzer is busy** (still researching). Full start needs the client instrument — the tab force-spawns it on open, so it works from anywhere in the main town; a busy/idle instrument opens fully, netId is the real server netId. |
+| Completion alerts | Background poll (5 s, from OnUpdate) fires a menu notification the moment a running research crosses its completeTime (`Analyzer N finished researching <item> — ready to collect`). One-shot per completion; always on. |
+
+**Panel shortcuts:**
+
+| Button | What it does |
+|--------|--------------|
+| RESEARCH STORE | Opens `ResearchShopPanel` via `UIManager.OpenView`. The level spoof (auto-armed on open) makes it render from any location. |
+| CONTROL CONSOLE | Opens `ResearchControlPanel` (the platform panel) the same way. |
+
+Behind the scenes (no UI, automatic): the level spoof NativeDetours `ResearchSystem.GetResearchLevel()`/`GetResearchExp()` to return the server-sync values when the client read is 0 (so panels don't NRE off the building); force-spawn sets `DynamicMapItemService.creatResearchStuff=true` + dispatches `ShowHideResearchStuffEvent{isShow=true}` to materialise the client entities with their real server netIds. Reads only — research upgrades stay disabled. Session-only, world-gated, AuraMono-gated.
 
 ---
 
