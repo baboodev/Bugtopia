@@ -69,6 +69,9 @@ namespace HeartopiaMod
             public int Fullness = -1;
             public int Vitality = -1;
             public int Chemistry = -1;
+            public int MotionsTotal = -1;
+            public int MotionsUnlocked = -1;
+            public int MotionsLearned = -1;
             public string Message = string.Empty;
         }
 
@@ -110,6 +113,34 @@ namespace HeartopiaMod
         private int petPlayHeadlessDogPreActionMotionId = 0;
         private float petPlayHeadlessDogAnswerNotBefore = -1f;
         private int petPlayHeadlessDogNotReadyRetries = 0;
+
+        // ---- Train-until-learned loop: repeats Play sessions on one pet until every unlocked
+        // action is learned; when the pet runs out of energy it feeds the ENERGY item (the pet-feed
+        // "hobby tool": TableDogfooditem.isHobbyTool / TableCatfooditem.catHobbyTool — Energy Dog
+        // Food / Energy Fish Jerky) via BeginFeed's HobbyToolNetId parameter. ----
+        private enum PetCareTrainLoopPhase
+        {
+            Idle,
+            WaitSession,
+            Delay,
+            FeedPrepare,
+            Feeding
+        }
+
+        private bool petCareTrainLoopEnabled = false;
+        private PetCareTrainLoopPhase petCareTrainLoopPhase = PetCareTrainLoopPhase.Idle;
+        private uint petCareTrainLoopNetId = 0U;
+        private bool petCareTrainLoopIsDog = false;
+        private string petCareTrainLoopName = string.Empty;
+        private float petCareTrainLoopNextActionAt = 0f;
+        private float petCareTrainLoopFeedSentAt = 0f;
+        private uint petCareTrainLoopPendingToolNetId = 0U;
+        private int petCareTrainLoopFeedAttempts = 0;
+        private int petCareTrainLoopSessions = 0;
+        private int petCareTrainLoopZeroSessions = 0;
+        private int petCareTrainLoopLastVitality = -1;
+        private bool petCareTrainLoopForceFeed = false;
+        private readonly Dictionary<int, int> petCareEnergyFoodCache = new Dictionary<int, int>();
 
         // ---- Dog session trace (Auto vs Headless comparison): logs every server event, dog motion
         // change, panel state change and answer send with timestamps while a dog context is active.
@@ -233,18 +264,33 @@ namespace HeartopiaMod
             petCareStatusStyle.normal.textColor = textColor;
 
             int petCareRowCount = this.petCareListVisible ? this.petCareEntries.Count : 0;
-            float petsCardHeight = 82f + petCareRowCount * 72f + (this.petCareListVisible && petCareRowCount == 0 ? 22f : 0f);
+            float petsCardHeight = 116f + petCareRowCount * 72f + (this.petCareListVisible && petCareRowCount == 0 ? 22f : 0f);
             Rect petsRect = new Rect(left, num, width, petsCardHeight);
             GUI.Box(petsRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
             this.DrawCardOutline(petsRect, 1f);
             GUI.Label(new Rect(petsRect.x + 16f, petsRect.y + 12f, 200f, 20f), "MY PETS", labelStyle);
+            GUI.Label(new Rect(petsRect.x + 150f, petsRect.y + 14f, width - 166f, 16f), this.petCareListStatus ?? string.Empty, petCareStatusStyle);
 
             if (GUI.Button(new Rect(petsRect.x + 16f, petsRect.y + 38f, 160f, 30f), this.petCareListVisible ? "Refresh" : "Show My Pets", this.themePrimaryButtonStyle ?? GUI.skin.button))
             {
                 this.petCareListVisible = true;
                 this.RefreshPetCareList();
             }
-            GUI.Label(new Rect(petsRect.x + 188f, petsRect.y + 44f, width - 204f, 18f), this.petCareListStatus ?? string.Empty, petCareStatusStyle);
+
+            // Train-until-learned loop: Play repeats sessions until every unlocked action is
+            // learned, feeding the energy item (Energy Dog Food / Energy Fish Jerky) when tired.
+            bool nextTrainLoop = this.DrawSwitchToggle(
+                new Rect(petsRect.x + 16f, petsRect.y + 74f, width - 32f, 28f),
+                this.petCareTrainLoopEnabled,
+                "Train until all learned (+energy food)");
+            if (nextTrainLoop != this.petCareTrainLoopEnabled)
+            {
+                this.petCareTrainLoopEnabled = nextTrainLoop;
+                if (!nextTrainLoop)
+                {
+                    this.StopPetCareTrainLoop("Train loop switched off.");
+                }
+            }
 
             if (this.petCareListVisible)
             {
@@ -261,7 +307,7 @@ namespace HeartopiaMod
 
                 if (petCareRowCount == 0)
                 {
-                    GUI.Label(new Rect(petsRect.x + 16f, petsRect.y + 76f, width - 32f, 18f), "No owned pets found nearby.", petCareStatusStyle);
+                    GUI.Label(new Rect(petsRect.x + 16f, petsRect.y + 110f, width - 32f, 18f), "No owned pets found nearby.", petCareStatusStyle);
                 }
 
                 bool petCareBusy = this.TryGetPetCareBusyLabel(out string petCareBusyLabel);
@@ -273,7 +319,7 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    float rowTop = petsRect.y + 76f + i * 72f;
+                    float rowTop = petsRect.y + 110f + i * 72f;
                     if (i > 0)
                     {
                         this.DrawCardOutline(new Rect(petsRect.x + 12f, rowTop - 5f, width - 24f, 1f), 1f);
@@ -282,12 +328,24 @@ namespace HeartopiaMod
                     GUI.Label(new Rect(petsRect.x + 16f, rowTop, width - 200f, 18f),
                         (string.IsNullOrEmpty(entry.Name) ? entry.NetId.ToString() : entry.Name) + (entry.IsDog ? "  (dog)" : "  (cat)"),
                         petNameStyle);
-                    GUI.Label(new Rect(petsRect.x + 16f, rowTop + 18f, width - 200f, 18f),
-                        "energy " + (entry.Vitality >= 0 ? entry.Vitality.ToString() : "?")
+
+                    // The buttons occupy only the top ~26px of the row — the stats and message lines
+                    // sit below them and can use the full card width.
+                    string petStatsLine = "energy " + (entry.Vitality >= 0 ? entry.Vitality.ToString() : "?")
                         + " · food " + (entry.Fullness >= 0 ? entry.Fullness.ToString() : "?")
-                        + " · growth " + (entry.Chemistry >= 0 ? entry.Chemistry.ToString() : "?"),
-                        petCareStatusStyle);
-                    GUI.Label(new Rect(petsRect.x + 16f, rowTop + 36f, width - 32f, 18f), entry.Message ?? string.Empty, petCareStatusStyle);
+                        + " · growth " + (entry.Chemistry >= 0 ? entry.Chemistry.ToString() : "?");
+                    if (entry.MotionsTotal >= 0)
+                    {
+                        petStatsLine += entry.IsDog
+                            ? " · actions " + entry.MotionsUnlocked + "/" + entry.MotionsTotal + " · learned " + entry.MotionsLearned
+                            : " · actions " + entry.MotionsTotal + " · learned " + entry.MotionsLearned;
+                    }
+                    else
+                    {
+                        petStatsLine += " · actions ?";
+                    }
+                    GUI.Label(new Rect(petsRect.x + 16f, rowTop + 28f, width - 32f, 18f), petStatsLine, petCareStatusStyle);
+                    GUI.Label(new Rect(petsRect.x + 16f, rowTop + 46f, width - 32f, 18f), entry.Message ?? string.Empty, petCareStatusStyle);
 
                     bool rowIsActiveSession = petCareBusy && this.IsPetCareEntryActiveSession(entry.NetId);
                     if (rowIsActiveSession)
@@ -617,8 +675,9 @@ namespace HeartopiaMod
             bool headlessCatActive = this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle;
             bool headlessDogActive = this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle;
             bool headlessWashActive = this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle;
+            bool trainLoopActive = this.petCareTrainLoopPhase != PetCareTrainLoopPhase.Idle;
             if (!this.petPlayAutoCatEnabled && !this.petPlayAutoDogEnabled && !this.petPlayAutoWashEnabled
-                && !headlessCatActive && !headlessDogActive && !headlessWashActive)
+                && !headlessCatActive && !headlessDogActive && !headlessWashActive && !trainLoopActive)
             {
                 return;
             }
@@ -657,6 +716,11 @@ namespace HeartopiaMod
             if (headlessWashActive)
             {
                 this.UpdateHeadlessWash();
+            }
+
+            if (trainLoopActive)
+            {
+                this.UpdatePetCareTrainLoop();
             }
 
             if (this.petPlayAutoDogEnabled)
@@ -905,6 +969,7 @@ namespace HeartopiaMod
             {
                 this.SetPetCareMessage(endedNetId, status);
                 this.RefreshPetCareEntryStats(endedNetId);
+                this.OnPetCareTrainLoopSessionFinished(endedNetId, this.petPlayHeadlessCatAnswerCount);
             }
             this.PetPlayLog("Headless cat play: " + status);
         }
@@ -1134,6 +1199,7 @@ namespace HeartopiaMod
                     Fullness = pet.CurrentFullness
                 };
                 this.TryLoadPetCareStats(entry);
+                this.TryLoadPetCareMotionCounts(entry);
                 if (oldMessages.TryGetValue(entry.NetId, out string oldMessage))
                 {
                     entry.Message = oldMessage;
@@ -1291,6 +1357,27 @@ namespace HeartopiaMod
         private void OnPetCareFeedEndEvent(GameEventSnapshot e)
         {
             this.RefreshPetCareEntryStats(e.NetId);
+
+            // Train loop: the energy feed completed — verify it actually restored energy and resume.
+            if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Feeding
+                && e.NetId == this.petCareTrainLoopNetId)
+            {
+                for (int i = 0; i < this.petCareEntries.Count; i++)
+                {
+                    PetCareEntry entry = this.petCareEntries[i];
+                    if (entry != null && entry.NetId == e.NetId)
+                    {
+                        if (entry.Vitality > this.petCareTrainLoopLastVitality)
+                        {
+                            this.petCareTrainLoopFeedAttempts = 0;
+                        }
+                        break;
+                    }
+                }
+
+                this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+                this.petCareTrainLoopNextActionAt = Time.unscaledTime + 1.2f;
+            }
         }
 
         private void OnPetCareFavorChangedEvent(GameEventSnapshot e)
@@ -1312,8 +1399,58 @@ namespace HeartopiaMod
                 if (entry != null && entry.NetId == netId)
                 {
                     this.TryLoadPetCareStats(entry);
+                    this.TryLoadPetCareMotionCounts(entry);
                     break;
                 }
+            }
+        }
+
+        // Counts the pet's learning motions: unlocked / total and how many of the unlocked ones are
+        // already learned. Dogs gate unlocks on growth (TableDogLearningMotion.unlockGrowth); cat
+        // motions have no unlock gate (TableKittyLearningMotion has no such field) — all count as
+        // unlocked. Loaded on list refresh and after sessions — not in the per-second stats poll
+        // (it enumerates the whole motion list via AuraMono).
+        private void TryLoadPetCareMotionCounts(PetCareEntry entry)
+        {
+            if (entry == null || entry.NetId == 0U)
+            {
+                return;
+            }
+
+            try
+            {
+                List<PetCareMotionInfo> motions = new List<PetCareMotionInfo>(24);
+                if (!this.TryCollectPetMotionsAuraMono(entry.NetId, entry.IsDog, motions, out int growth, out _) || motions.Count == 0)
+                {
+                    return;
+                }
+
+                int unlocked = 0;
+                int learned = 0;
+                for (int i = 0; i < motions.Count; i++)
+                {
+                    PetCareMotionInfo motion = motions[i];
+                    if (entry.IsDog
+                        && this.TryGetDogLearningMotionUnlockGrowth(motion.Id, out int unlockGrowth)
+                        && growth < unlockGrowth)
+                    {
+                        continue; // locked
+                    }
+
+                    unlocked++;
+                    if (motion.Exp > 0 && motion.Exp >= motion.Exp2Learn)
+                    {
+                        learned++;
+                    }
+                }
+
+                entry.MotionsTotal = motions.Count;
+                entry.MotionsUnlocked = unlocked;
+                entry.MotionsLearned = learned;
+            }
+            catch (Exception ex)
+            {
+                this.PetPlayLog("Pet care motion counts netId=" + entry.NetId + " exception: " + ex.Message);
             }
         }
 
@@ -1355,6 +1492,12 @@ namespace HeartopiaMod
                 return true;
             }
 
+            if (this.petCareTrainLoopPhase != PetCareTrainLoopPhase.Idle)
+            {
+                busy = "train loop";
+                return true;
+            }
+
             busy = string.Empty;
             return false;
         }
@@ -1364,11 +1507,14 @@ namespace HeartopiaMod
             return netId != 0U
                 && ((this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle && this.petPlayHeadlessCatNetId == netId)
                     || (this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle && this.petPlayHeadlessDogNetId == netId)
-                    || (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle && this.petPlayHeadlessWashNetId == netId));
+                    || (this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle && this.petPlayHeadlessWashNetId == netId)
+                    || (this.petCareTrainLoopPhase != PetCareTrainLoopPhase.Idle && this.petCareTrainLoopNetId == netId));
         }
 
         private void StopPetCareActiveSession()
         {
+            this.StopPetCareTrainLoop("Train loop stopped by user after " + this.petCareTrainLoopSessions + " sessions.");
+
             if (this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle)
             {
                 this.StopHeadlessCatPlay("user");
@@ -1401,6 +1547,15 @@ namespace HeartopiaMod
             }
 
             this.TryLoadPetCareStats(entry);
+
+            // Train-until-learned mode: the loop handles hungry/low-energy itself (feeds the energy
+            // item) and repeats sessions until every unlocked action is learned.
+            if (this.petCareTrainLoopEnabled)
+            {
+                this.ArmPetCareTrainLoop(entry);
+                this.SetPetCareMessage(entry.NetId, "Train loop: starting...");
+                return;
+            }
 
             // Same client-side pre-checks the game's interact command does (TeasePetCommand):
             // hungry = fullness <= 0 for owned pets; dog energy = vitality < teaseVitalityPointDecrease.
@@ -1447,6 +1602,319 @@ namespace HeartopiaMod
             }
 
             this.StartHeadlessWash(entry.NetId, entry.Name);
+        }
+
+        // ================= Train-until-learned loop =================
+
+        private void ArmPetCareTrainLoop(PetCareEntry entry)
+        {
+            this.petCareTrainLoopNetId = entry.NetId;
+            this.petCareTrainLoopIsDog = entry.IsDog;
+            this.petCareTrainLoopName = entry.Name ?? string.Empty;
+            this.petCareTrainLoopSessions = 0;
+            this.petCareTrainLoopFeedAttempts = 0;
+            this.petCareTrainLoopZeroSessions = 0;
+            this.petCareTrainLoopForceFeed = false;
+            this.petCareTrainLoopLastVitality = entry.Vitality;
+            this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+            this.petCareTrainLoopNextActionAt = Time.unscaledTime;
+            this.PetPlayLog("Train loop armed for " + (entry.IsDog ? "dog" : "cat") + " netId=" + entry.NetId + ".");
+        }
+
+        private void StopPetCareTrainLoop(string message)
+        {
+            if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Idle)
+            {
+                return;
+            }
+
+            uint netId = this.petCareTrainLoopNetId;
+            this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Idle;
+            this.petCareTrainLoopNetId = 0U;
+            if (netId != 0U && !string.IsNullOrEmpty(message))
+            {
+                this.SetPetCareMessage(netId, message);
+            }
+            this.PetPlayLog("Train loop: " + message);
+        }
+
+        // Called from the cat/dog session Finish paths so the loop can schedule the next step.
+        private void OnPetCareTrainLoopSessionFinished(uint netId, int answersInSession)
+        {
+            if (this.petCareTrainLoopPhase != PetCareTrainLoopPhase.WaitSession
+                || netId != this.petCareTrainLoopNetId)
+            {
+                return;
+            }
+
+            if (answersInSession <= 0)
+            {
+                this.petCareTrainLoopZeroSessions++;
+                // A rejected/empty session is usually low energy the pre-check could not see
+                // (e.g. the cat's server-side vitality gate) — try one feed before giving up.
+                this.petCareTrainLoopForceFeed = true;
+            }
+            else
+            {
+                this.petCareTrainLoopZeroSessions = 0;
+            }
+
+            if (this.petCareTrainLoopZeroSessions >= 3)
+            {
+                this.StopPetCareTrainLoop("Train loop stopped: sessions keep failing (see game toasts).");
+                return;
+            }
+
+            this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+            this.petCareTrainLoopNextActionAt = Time.unscaledTime + 2.5f;
+        }
+
+        private void UpdatePetCareTrainLoop()
+        {
+            float now = Time.unscaledTime;
+            switch (this.petCareTrainLoopPhase)
+            {
+                case PetCareTrainLoopPhase.Delay:
+                    if (now < this.petCareTrainLoopNextActionAt)
+                    {
+                        return;
+                    }
+
+                    this.PetCareTrainLoopDecideNextStep(now);
+                    break;
+
+                case PetCareTrainLoopPhase.FeedPrepare:
+                    if (now < this.petCareTrainLoopNextActionAt)
+                    {
+                        return;
+                    }
+
+                    // Prepare was sent; now begin the feed with ONLY the energy item (hobby tool slot).
+                    if (!this.TryInvokePetFeedBeginAuraMono(this.petCareTrainLoopNetId, new List<uint>(), this.petCareTrainLoopPendingToolNetId, out string beginStatus))
+                    {
+                        this.StopPetCareTrainLoop("Train loop stopped: energy feed failed (" + beginStatus + ").");
+                        return;
+                    }
+
+                    this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Feeding;
+                    this.petCareTrainLoopFeedSentAt = now;
+                    break;
+
+                case PetCareTrainLoopPhase.Feeding:
+                    if (now - this.petCareTrainLoopFeedSentAt > 8f)
+                    {
+                        // No feed-end event — re-check stats and let the decision step judge.
+                        this.RefreshPetCareEntryStats(this.petCareTrainLoopNetId);
+                        this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+                        this.petCareTrainLoopNextActionAt = now + 0.5f;
+                    }
+                    break;
+            }
+        }
+
+        private void PetCareTrainLoopDecideNextStep(float now)
+        {
+            uint netId = this.petCareTrainLoopNetId;
+            this.RefreshPetCareEntryStats(netId);
+
+            PetCareEntry entry = null;
+            for (int i = 0; i < this.petCareEntries.Count; i++)
+            {
+                if (this.petCareEntries[i] != null && this.petCareEntries[i].NetId == netId)
+                {
+                    entry = this.petCareEntries[i];
+                    break;
+                }
+            }
+
+            if (entry == null)
+            {
+                this.StopPetCareTrainLoop("Train loop stopped: pet not in list anymore.");
+                return;
+            }
+
+            if (entry.MotionsTotal >= 0 && entry.MotionsUnlocked >= 0 && entry.MotionsLearned >= entry.MotionsUnlocked)
+            {
+                this.StopPetCareTrainLoop("Train loop DONE: all " + entry.MotionsUnlocked + " unlocked actions learned (sessions=" + this.petCareTrainLoopSessions + ").");
+                return;
+            }
+
+            int dogCost = entry.IsDog ? this.GetDogTeaseVitalityCost() : 0;
+            bool lowEnergy = entry.IsDog
+                ? (dogCost > 0 && entry.Vitality >= 0 && entry.Vitality < dogCost)
+                : entry.Vitality == 0;
+            bool hungry = entry.Fullness == 0;
+
+            if (lowEnergy || hungry || this.petCareTrainLoopForceFeed)
+            {
+                this.petCareTrainLoopForceFeed = false;
+                if (this.petCareTrainLoopFeedAttempts >= 3)
+                {
+                    this.StopPetCareTrainLoop("Train loop stopped: feeding did not restore energy (attempts=" + this.petCareTrainLoopFeedAttempts + ").");
+                    return;
+                }
+
+                if (!this.TryFindPetEnergyFood(entry.IsDog, out uint toolNetId, out string foodName, out int foodVitality, out string findStatus))
+                {
+                    this.StopPetCareTrainLoop("Train loop stopped: no energy food in bag (" + findStatus + ").");
+                    return;
+                }
+
+                this.petCareTrainLoopFeedAttempts++;
+                this.petCareTrainLoopLastVitality = entry.Vitality;
+                this.petCareTrainLoopPendingToolNetId = toolNetId;
+                this.SetPetCareMessage(netId, "Feeding '" + foodName + "' (+"+ foodVitality + " energy)...");
+                this.PetPlayLog("Train loop: feeding energy item '" + foodName + "' netId=" + toolNetId + " to pet " + netId + ".");
+
+                if (!this.TryInvokePetFeedPrepareAuraMono(netId, out string prepStatus))
+                {
+                    this.StopPetCareTrainLoop("Train loop stopped: feed prepare failed (" + prepStatus + ").");
+                    return;
+                }
+
+                this.petCareTrainLoopPhase = PetCareTrainLoopPhase.FeedPrepare;
+                this.petCareTrainLoopNextActionAt = now + 0.25f;
+                return;
+            }
+
+            // Energy and food are fine — run the next training session (postpone while any other
+            // headless session is still winding down).
+            if (this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle
+                || this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle
+                || this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle)
+            {
+                this.petCareTrainLoopNextActionAt = now + 2f;
+                return;
+            }
+
+            this.petCareTrainLoopSessions++;
+            this.petCareTrainLoopPhase = PetCareTrainLoopPhase.WaitSession;
+            if (entry.IsDog)
+            {
+                this.StartHeadlessDogPlay(netId, entry.Name);
+                if (this.petPlayHeadlessDogState == PetPlayHeadlessDogState.Idle)
+                {
+                    this.StopPetCareTrainLoop("Train loop stopped: dog session failed to start.");
+                }
+            }
+            else
+            {
+                this.StartHeadlessCatPlayForTarget(netId, entry.Name);
+                if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Idle)
+                {
+                    this.StopPetCareTrainLoop("Train loop stopped: cat session failed to start.");
+                }
+            }
+        }
+
+        // Finds an ENERGY pet food in the bag: an item whose food-item table row is flagged as the
+        // vitality "hobby tool" (TableDogfooditem.isHobbyTool / TableCatfooditem.catHobbyTool).
+        // Prefers the lowest vitality value to conserve stronger snacks.
+        private bool TryFindPetEnergyFood(bool isDog, out uint itemNetId, out string itemName, out int vitality, out string status)
+        {
+            itemNetId = 0U;
+            itemName = string.Empty;
+            vitality = 0;
+
+            try
+            {
+                Dictionary<int, PetFeedFoodSupply> byStaticId = new Dictionary<int, PetFeedFoodSupply>();
+                this.TryCollectPetFeedFoods(isDog, byStaticId, out status);
+                if (byStaticId.Count == 0)
+                {
+                    status = "food scan empty (" + status + ")";
+                    return false;
+                }
+
+                foreach (KeyValuePair<int, PetFeedFoodSupply> pair in byStaticId)
+                {
+                    PetFeedFoodSupply supply = pair.Value;
+                    if (supply == null || supply.NetId == 0U || supply.Count <= 0 || supply.IsLock)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetPetEnergyFoodVitality(supply.StaticId, isDog, out int itemVitality))
+                    {
+                        continue;
+                    }
+
+                    if (itemNetId == 0U || itemVitality < vitality)
+                    {
+                        itemNetId = supply.NetId;
+                        itemName = string.IsNullOrEmpty(supply.Name) ? ("#" + supply.StaticId) : supply.Name;
+                        vitality = itemVitality;
+                    }
+                }
+
+                status = itemNetId != 0U ? "found" : "no hobby-tool item among " + byStaticId.Count + " foods";
+                return itemNetId != 0U;
+            }
+            catch (Exception ex)
+            {
+                status = "energy food scan exception: " + ex.Message;
+                return false;
+            }
+        }
+
+        // AuraMono table read with a session cache: staticId -> restored vitality (0 = not an
+        // energy item). Uses TableData.GetDogfooditem / GetCatfooditem.
+        private unsafe bool TryGetPetEnergyFoodVitality(int staticId, bool isDog, out int vitality)
+        {
+            if (this.petCareEnergyFoodCache.TryGetValue(staticId, out vitality))
+            {
+                return vitality > 0;
+            }
+
+            vitality = 0;
+            try
+            {
+                if (staticId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                IntPtr tableDataClass = this.TryGetPetFeedAuraMonoTableDataClass();
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr getMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, isDog ? "GetDogfooditem" : "GetCatfooditem", 2);
+                if (getMethod == IntPtr.Zero)
+                {
+                    this.petCareEnergyFoodCache[staticId] = 0;
+                    return false;
+                }
+
+                int queryId = staticId;
+                bool needException = false;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&queryId);
+                args[1] = (IntPtr)(&needException);
+                IntPtr rowObj = auraMonoRuntimeInvoke(getMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+                {
+                    this.petCareEnergyFoodCache[staticId] = 0;
+                    return false;
+                }
+
+                bool isTool = (this.TryGetMonoBoolMember(rowObj, isDog ? "isHobbyTool" : "catHobbyTool", out bool toolFlag) && toolFlag);
+                int toolVitality = 0;
+                if (isTool)
+                {
+                    this.TryGetMonoIntMember(rowObj, isDog ? "hobbyToolVitality" : "catHobbyToolVitality", out toolVitality);
+                }
+
+                vitality = isTool && toolVitality > 0 ? toolVitality : 0;
+                this.petCareEnergyFoodCache[staticId] = vitality;
+                return vitality > 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         // ================= Headless dog training (protocol-only) =================
@@ -1526,6 +1994,7 @@ namespace HeartopiaMod
             {
                 this.SetPetCareMessage(endedNetId, status);
                 this.RefreshPetCareEntryStats(endedNetId);
+                this.OnPetCareTrainLoopSessionFinished(endedNetId, this.petPlayHeadlessDogAnswerCount);
             }
             this.PetPlayLog("Headless dog play: " + status);
         }
@@ -1885,10 +2354,10 @@ namespace HeartopiaMod
         // AuraMono ONLY (managed reflection over XDT* types is dead on this game).
         private bool TryCollectDogMotions(uint dogNetId, List<PetCareMotionInfo> motions, out int growth, out string status)
         {
-            return this.TryCollectDogMotionsAuraMono(dogNetId, motions, out growth, out status);
+            return this.TryCollectPetMotionsAuraMono(dogNetId, true, motions, out growth, out status);
         }
 
-        private unsafe bool TryCollectDogMotionsAuraMono(uint dogNetId, List<PetCareMotionInfo> motions, out int growth, out string status)
+        private unsafe bool TryCollectPetMotionsAuraMono(uint dogNetId, bool isDog, List<PetCareMotionInfo> motions, out int growth, out string status)
         {
             growth = 0;
             status = "AuraMono motion list unavailable.";
@@ -1917,7 +2386,7 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryGetPetFeedAuraEntityTypeValue(true, out int entityTypeValue, out string enumStatus))
+                if (!this.TryGetPetFeedAuraEntityTypeValue(isDog, out int entityTypeValue, out string enumStatus))
                 {
                     status = "AuraMono entity type unavailable: " + enumStatus;
                     return false;
@@ -2012,17 +2481,25 @@ namespace HeartopiaMod
             }
         }
 
+        // Static table data — cache resolved values so repeated count/pick passes cost nothing.
+        private readonly Dictionary<int, int> petCareUnlockGrowthCache = new Dictionary<int, int>();
+
         // AuraMono ONLY: table row via the Mono bridge ("unlockGrowth" resolves to the int property
         // getter — the backing field is a ushort).
         private bool TryGetDogLearningMotionUnlockGrowth(int learningId, out int unlockGrowth)
         {
-            unlockGrowth = 0;
+            if (this.petCareUnlockGrowthCache.TryGetValue(learningId, out unlockGrowth))
+            {
+                return unlockGrowth >= 0;
+            }
+
             try
             {
                 if (this.TryGetAuraMonoDogLearningMotion(learningId, out IntPtr tableObj, out _)
                     && tableObj != IntPtr.Zero
                     && this.TryGetMonoIntMember(tableObj, "unlockGrowth", out unlockGrowth))
                 {
+                    this.petCareUnlockGrowthCache[learningId] = unlockGrowth;
                     return true;
                 }
             }

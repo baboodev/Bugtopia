@@ -4070,7 +4070,14 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryInvokePetFeedBeginAuraMono(uint petNetId, List<uint> foodNetIds, out string status)
+        private bool TryInvokePetFeedBeginAuraMono(uint petNetId, List<uint> foodNetIds, out string status)
+        {
+            return this.TryInvokePetFeedBeginAuraMono(petNetId, foodNetIds, 0U, out status);
+        }
+
+        // toolNetId = the pet-feed "hobby tool" slot (energy snack: Energy Dog Food / Energy Fish
+        // Jerky) — BeginFeed's third parameter; 0 for a plain food-only feed.
+        private unsafe bool TryInvokePetFeedBeginAuraMono(uint petNetId, List<uint> foodNetIds, uint toolNetId, out string status)
         {
             status = "AuraMono BeginFeed unavailable";
             try
@@ -4085,7 +4092,6 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                uint toolNetId = 0U;
                 IntPtr* args = stackalloc IntPtr[3];
                 args[0] = (IntPtr)(&petNetId);
                 args[1] = foodListObj;
