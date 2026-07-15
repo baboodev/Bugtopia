@@ -288,6 +288,7 @@ namespace HeartopiaMod
         private int autoEatAttempts = 0;
         private bool autoEatForceSingleUse = false;
         private float nextAutoEatDirectRetryAt = 0f;
+        private float lastAutoEatTriggerNotifyAt = -999f;
         private float nextAutoRepairToastAllowedAt = 0f;
         private float nextMissingRepairItemNotificationAt = 0f;
         private float nextMissingFoodNotificationAt = 0f;
@@ -1163,7 +1164,14 @@ namespace HeartopiaMod
                     {
                         this.AutoEatRepairLog($"[AutoEat] Energy panel requested StartAutoEat ({this.GetCurrentEnergyDisplay()}, threshold={this.autoEatTriggerPercent}%)");
                         this.StartAutoEat();
-                        this.AddMenuNotification(this.LF("Auto Eat triggered by energy panel ({0})", this.GetAutoEatFoodOptionLabel(this.autoEatFoodType)), new Color(0.45f, 1f, 0.55f));
+                        // Notification throttle: back-to-back re-triggers (energy still under the
+                        // threshold after an eat cycle) kept toasting the same message — one toast
+                        // per 30s is plenty; the log line above still records every trigger.
+                        if (autoEatRepairNow - this.lastAutoEatTriggerNotifyAt >= 30f)
+                        {
+                            this.lastAutoEatTriggerNotifyAt = autoEatRepairNow;
+                            this.AddMenuNotification(this.LF("Auto Eat triggered by energy panel ({0})", this.GetAutoEatFoodOptionLabel(this.autoEatFoodType)), new Color(0.45f, 1f, 0.55f));
+                        }
                     }
                     else if (!this.pendingAutoEatRequest)
                     {
@@ -3733,6 +3741,9 @@ namespace HeartopiaMod
                     {
                         isAutoEating = false;
                         autoEatStep = 0;
+                        // Energy may still sit at/below the trigger — without this cooldown the very
+                        // next stamina event re-triggered StartAutoEat (and its notification) instantly.
+                        nextAutoEatDirectRetryAt = Time.unscaledTime + 5f;
                         this.AutoEatRepairLog($"[Auto Eat] Stopped after max attempts ({autoEatAttempts}) - energy at {this.GetCurrentEnergyDisplay()}");
                         break;
                     }
@@ -3778,6 +3789,9 @@ namespace HeartopiaMod
                         }
                         else
                         {
+                            // Still not full (possibly still at/below the trigger) — same instant
+                            // re-trigger loop as the max-attempts exit without a cooldown.
+                            nextAutoEatDirectRetryAt = Time.unscaledTime + 5f;
                             this.AutoEatRepairLog($"[Auto Eat] Stopped after {autoEatAttempts} attempts - energy at {this.GetCurrentEnergyDisplay()}");
                         }
                     }
