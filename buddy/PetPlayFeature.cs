@@ -140,6 +140,19 @@ namespace HeartopiaMod
         private int petCareTrainLoopZeroSessions = 0;
         private int petCareTrainLoopLastVitality = -1;
         private bool petCareTrainLoopForceFeed = false;
+        private int petCareTrainLoopLastTipId = 0;
+        private float petCareTrainLoopLastTipAt = -999f;
+        private bool petCareTipHookRegistered = false;
+        // UITipEvent (ScriptsRefactory.DataAndProtocol.Events): tipId(int)@0. AnimalProtocolManager.Tip
+        // dispatches it carrying the exact cat tease-begin reject reason.
+        private const string UITipEventName = "ScriptsRefactory.DataAndProtocol.Events.UITipEvent";
+        // Meow tease-begin reject tip ids (from MeowProtocolManager.BeginTeaseResult).
+        private const int MeowTipVitalityLow = 11022;   // needs energy -> feed energy item
+        private const int MeowTipAllLearned = 11023;    // nothing left to learn -> done
+        private const int MeowTipOccupied = 11015;      // pet busy -> wait
+        private const int MeowTipOtherTeasing = 11024;  // another cat is being teased -> wait
+        private const int MeowTipHungry = 11026;        // needs normal food -> stop (loop only feeds energy)
+        private const int MeowTipOwnerStamina = 11033;  // player stamina low -> stop
 
         // ---- Dog session trace (Auto vs Headless comparison): logs every server event, dog motion
         // change, panel state change and answer send with timestamps while a dog context is active.
@@ -1619,6 +1632,7 @@ namespace HeartopiaMod
 
         private void ArmPetCareTrainLoop(PetCareEntry entry)
         {
+            this.EnsurePetCareTipHook();
             this.petCareTrainLoopNetId = entry.NetId;
             this.petCareTrainLoopIsDog = entry.IsDog;
             this.petCareTrainLoopName = entry.Name ?? string.Empty;
@@ -1626,10 +1640,47 @@ namespace HeartopiaMod
             this.petCareTrainLoopFeedAttempts = 0;
             this.petCareTrainLoopZeroSessions = 0;
             this.petCareTrainLoopForceFeed = false;
+            this.petCareTrainLoopLastTipId = 0;
             this.petCareTrainLoopLastVitality = entry.Vitality;
             this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
             this.petCareTrainLoopNextActionAt = Time.unscaledTime;
             this.PetPlayLog("Train loop armed for " + (entry.IsDog ? "dog" : "cat") + " netId=" + entry.NetId + ".");
+        }
+
+        private void EnsurePetCareTipHook()
+        {
+            if (this.petCareTipHookRegistered)
+            {
+                return;
+            }
+
+            this.petCareTipHookRegistered = true;
+            this.RegisterGameEventHook(UITipEventName, 4, this.OnPetCareTipEvent);
+        }
+
+        // Captures the game's tip toasts so the cat train loop can read the EXACT reject reason
+        // (energy / all-learned / busy / hungry / stamina) instead of blindly feeding. Only the meow
+        // tease-begin reject codes are recorded, and only while a cat train loop is running.
+        private void OnPetCareTipEvent(GameEventSnapshot e)
+        {
+            if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Idle || this.petCareTrainLoopIsDog)
+            {
+                return;
+            }
+
+            int tipId = e.ReadInt32(0);
+            switch (tipId)
+            {
+                case MeowTipVitalityLow:
+                case MeowTipAllLearned:
+                case MeowTipOccupied:
+                case MeowTipOtherTeasing:
+                case MeowTipHungry:
+                case MeowTipOwnerStamina:
+                    this.petCareTrainLoopLastTipId = tipId;
+                    this.petCareTrainLoopLastTipAt = Time.unscaledTime;
+                    break;
+            }
         }
 
         private void StopPetCareTrainLoop(string message)
@@ -1666,12 +1717,58 @@ namespace HeartopiaMod
                 return;
             }
 
-            // An empty session almost always means the pet was still BUSY when BeginTease landed —
-            // most often it is still playing the eating animation right after an energy feed (the
-            // server rejects with "occupied"). So DON'T immediately blame energy: back off for
-            // progressively longer and retry. Only probe a feed on every 3rd failure in case the
-            // pre-check genuinely missed low energy.
             this.petCareTrainLoopZeroSessions++;
+
+            // Cats have NO client-side energy threshold (unlike dogs). Instead of guessing, read the
+            // exact reject reason from the game's tip toast (UITipEvent) captured during the session.
+            if (!this.petCareTrainLoopIsDog)
+            {
+                int tip = Time.unscaledTime - this.petCareTrainLoopLastTipAt < 4f ? this.petCareTrainLoopLastTipId : 0;
+                this.petCareTrainLoopLastTipId = 0;
+
+                switch (tip)
+                {
+                    case MeowTipAllLearned:
+                        this.StopPetCareTrainLoop("Train loop DONE: cat has learned every available action.");
+                        return;
+                    case MeowTipOwnerStamina:
+                        this.StopPetCareTrainLoop("Train loop stopped: your stamina is too low - rest first.");
+                        return;
+                    case MeowTipHungry:
+                        this.StopPetCareTrainLoop("Train loop stopped: cat is hungry - feed it normal food first.");
+                        return;
+                    case MeowTipOccupied:
+                    case MeowTipOtherTeasing:
+                        // Temporarily busy — just wait and retry, no feeding.
+                        if (this.petCareTrainLoopZeroSessions >= 8)
+                        {
+                            this.StopPetCareTrainLoop("Train loop stopped: cat stays busy.");
+                            return;
+                        }
+                        this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+                        this.petCareTrainLoopNextActionAt = Time.unscaledTime + 5f;
+                        this.PetPlayLog("Train loop: cat busy (tip " + tip + ") - waiting 5s.");
+                        return;
+                    case MeowTipVitalityLow:
+                    default:
+                        // Low energy (or no tip captured) — feed the energy item and retry. The
+                        // feedAttempts guard stops if energy is already maxed (real cause is elsewhere).
+                        if (this.petCareTrainLoopZeroSessions >= 8)
+                        {
+                            this.StopPetCareTrainLoop("Train loop stopped: cat won't start even after feeding.");
+                            return;
+                        }
+                        this.petCareTrainLoopForceFeed = true;
+                        this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+                        this.petCareTrainLoopNextActionAt = Time.unscaledTime + 2f;
+                        this.PetPlayLog("Train loop: cat needs energy (tip " + (tip == 0 ? "none" : tip.ToString()) + ") - feeding.");
+                        return;
+                }
+            }
+
+            // Dog: the pre-check already gates on the known energy threshold, so an empty session
+            // means the pet was still BUSY (usually the eating animation after a feed). Back off for
+            // progressively longer and retry; only probe a feed on every 3rd failure as a safety net.
             if (this.petCareTrainLoopZeroSessions >= 6)
             {
                 this.StopPetCareTrainLoop("Train loop stopped: sessions keep failing (pet stays busy, or nothing left to learn).");
@@ -1682,7 +1779,7 @@ namespace HeartopiaMod
             float backoff = Mathf.Min(4f + this.petCareTrainLoopZeroSessions * 2f, 14f);
             this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
             this.petCareTrainLoopNextActionAt = Time.unscaledTime + backoff;
-            this.PetPlayLog("Train loop: empty session #" + this.petCareTrainLoopZeroSessions + " (pet likely busy) - retry in " + backoff.ToString("F0") + "s.");
+            this.PetPlayLog("Train loop: empty dog session #" + this.petCareTrainLoopZeroSessions + " (pet likely busy) - retry in " + backoff.ToString("F0") + "s.");
         }
 
         private void UpdatePetCareTrainLoop()
@@ -1804,6 +1901,7 @@ namespace HeartopiaMod
             }
 
             this.petCareTrainLoopSessions++;
+            this.petCareTrainLoopLastTipId = 0; // fresh reject reason for this session
             this.petCareTrainLoopPhase = PetCareTrainLoopPhase.WaitSession;
             if (entry.IsDog)
             {
