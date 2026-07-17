@@ -140,7 +140,6 @@ namespace HeartopiaMod
         private int petCareTrainLoopZeroSessions = 0;
         private int petCareTrainLoopLastVitality = -1;
         private bool petCareTrainLoopForceFeed = false;
-        private readonly Dictionary<int, int> petCareEnergyFoodCache = new Dictionary<int, int>();
 
         // ---- Dog session trace (Auto vs Headless comparison): logs every server event, dog motion
         // change, panel state change and answer send with timestamps while a dog context is active.
@@ -1807,112 +1806,114 @@ namespace HeartopiaMod
             }
         }
 
-        // Finds an ENERGY pet food in the bag: an item whose food-item table row is flagged as the
-        // vitality "hobby tool" (TableDogfooditem.isHobbyTool / TableCatfooditem.catHobbyTool).
-        // Prefers the lowest vitality value to conserve stronger snacks.
-        private bool TryFindPetEnergyFood(bool isDog, out uint itemNetId, out string itemName, out int vitality, out string status)
+        // Finds an ENERGY pet item. These are NOT foods: PetSystem sorts hobby-tool items
+        // (TableDogfooditem.isHobbyTool / TableCatfooditem.catHobbyTool — Energy Dog Food / Energy
+        // Fish Jerky) into a separate _toolItems list exposed via GetTools(); the food collectors
+        // never see them. InitFoods(EntityType) scans the BACKPACK AND THE WAREHOUSE in one pass.
+        // Prefers the lowest-vitality item to conserve stronger snacks.
+        private unsafe bool TryFindPetEnergyFood(bool isDog, out uint itemNetId, out string itemName, out int vitality, out string status)
         {
             itemNetId = 0U;
             itemName = string.Empty;
             vitality = 0;
+            status = "not scanned";
 
             try
             {
-                Dictionary<int, PetFeedFoodSupply> byStaticId = new Dictionary<int, PetFeedFoodSupply>();
-                this.TryCollectPetFeedFoods(isDog, byStaticId, out status);
-                if (byStaticId.Count == 0)
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
                 {
-                    status = "food scan empty (" + status + ")";
+                    status = "AuraMono API unavailable";
                     return false;
                 }
 
-                foreach (KeyValuePair<int, PetFeedFoodSupply> pair in byStaticId)
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Pet.PetSystem", out IntPtr petSystemObj)
+                    || petSystemObj == IntPtr.Zero)
                 {
-                    PetFeedFoodSupply supply = pair.Value;
-                    if (supply == null || supply.NetId == 0U || supply.Count <= 0 || supply.IsLock)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryGetPetEnergyFoodVitality(supply.StaticId, isDog, out int itemVitality))
-                    {
-                        continue;
-                    }
-
-                    if (itemNetId == 0U || itemVitality < vitality)
-                    {
-                        itemNetId = supply.NetId;
-                        itemName = string.IsNullOrEmpty(supply.Name) ? ("#" + supply.StaticId) : supply.Name;
-                        vitality = itemVitality;
-                    }
+                    status = "PetSystem unavailable";
+                    return false;
                 }
 
-                status = itemNetId != 0U ? "found" : "no hobby-tool item among " + byStaticId.Count + " foods";
-                return itemNetId != 0U;
+                IntPtr petSystemClass = auraMonoObjectGetClass(petSystemObj);
+                IntPtr initFoodsMethod = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "InitFoods", 1);
+                IntPtr getToolsMethod = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "GetTools", 0);
+                if (initFoodsMethod == IntPtr.Zero || getToolsMethod == IntPtr.Zero)
+                {
+                    status = "InitFoods(1)/GetTools unavailable initFoods=0x" + initFoodsMethod.ToInt64().ToString("X")
+                        + " getTools=0x" + getToolsMethod.ToInt64().ToString("X");
+                    return false;
+                }
+
+                if (!this.TryGetPetFeedAuraEntityTypeValue(isDog, out int entityTypeValue, out string enumStatus))
+                {
+                    status = "entity type unavailable: " + enumStatus;
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* initArgs = stackalloc IntPtr[1];
+                initArgs[0] = (IntPtr)(&entityTypeValue);
+                auraMonoRuntimeInvoke(initFoodsMethod, petSystemObj, (IntPtr)initArgs, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "InitFoods failed exc=0x" + exc.ToInt64().ToString("X");
+                    return false;
+                }
+
+                exc = IntPtr.Zero;
+                IntPtr toolsObj = auraMonoRuntimeInvoke(getToolsMethod, petSystemObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || toolsObj == IntPtr.Zero)
+                {
+                    status = "GetTools failed exc=0x" + exc.ToInt64().ToString("X");
+                    return false;
+                }
+
+                uint toolsPin = AuraMonoPinNew(toolsObj);
+                List<IntPtr> items = new List<IntPtr>(8);
+                List<uint> itemPins = new List<uint>(8);
+                try
+                {
+                    if (!this.TryEnumerateAuraMonoCollectionItems(toolsObj, items, itemPins) || items.Count == 0)
+                    {
+                        status = "no energy items in backpack or warehouse";
+                        return false;
+                    }
+
+                    foreach (IntPtr toolObj in items)
+                    {
+                        if (toolObj == IntPtr.Zero
+                            || !this.TryGetMonoUInt32Member(toolObj, "NetId", out uint toolNetId) || toolNetId == 0U
+                            || !this.TryGetMonoIntMember(toolObj, "Count", out int toolCount) || toolCount <= 0)
+                        {
+                            continue;
+                        }
+
+                        this.TryGetMonoIntMember(toolObj, "Vitality", out int toolVitality);
+                        if (itemNetId == 0U || toolVitality < vitality)
+                        {
+                            itemNetId = toolNetId;
+                            vitality = toolVitality;
+                            if (!this.TryGetMonoStringMember(toolObj, "Name", out itemName) || string.IsNullOrEmpty(itemName))
+                            {
+                                itemName = this.TryGetMonoIntMember(toolObj, "StaticId", out int toolStaticId)
+                                    ? ("#" + toolStaticId)
+                                    : "energy item";
+                            }
+                        }
+                    }
+
+                    status = itemNetId != 0U ? ("found among " + items.Count + " tool items") : "tool items unreadable";
+                    return itemNetId != 0U;
+                }
+                finally
+                {
+                    AuraMonoPinFree(toolsPin);
+                    FreeAuraMonoPins(itemPins);
+                }
             }
             catch (Exception ex)
             {
-                status = "energy food scan exception: " + ex.Message;
-                return false;
-            }
-        }
-
-        // AuraMono table read with a session cache: staticId -> restored vitality (0 = not an
-        // energy item). Uses TableData.GetDogfooditem / GetCatfooditem.
-        private unsafe bool TryGetPetEnergyFoodVitality(int staticId, bool isDog, out int vitality)
-        {
-            if (this.petCareEnergyFoodCache.TryGetValue(staticId, out vitality))
-            {
-                return vitality > 0;
-            }
-
-            vitality = 0;
-            try
-            {
-                if (staticId <= 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
-                {
-                    return false;
-                }
-
-                IntPtr tableDataClass = this.TryGetPetFeedAuraMonoTableDataClass();
-                if (tableDataClass == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                IntPtr getMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, isDog ? "GetDogfooditem" : "GetCatfooditem", 2);
-                if (getMethod == IntPtr.Zero)
-                {
-                    this.petCareEnergyFoodCache[staticId] = 0;
-                    return false;
-                }
-
-                int queryId = staticId;
-                bool needException = false;
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[2];
-                args[0] = (IntPtr)(&queryId);
-                args[1] = (IntPtr)(&needException);
-                IntPtr rowObj = auraMonoRuntimeInvoke(getMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
-                {
-                    this.petCareEnergyFoodCache[staticId] = 0;
-                    return false;
-                }
-
-                bool isTool = (this.TryGetMonoBoolMember(rowObj, isDog ? "isHobbyTool" : "catHobbyTool", out bool toolFlag) && toolFlag);
-                int toolVitality = 0;
-                if (isTool)
-                {
-                    this.TryGetMonoIntMember(rowObj, isDog ? "hobbyToolVitality" : "catHobbyToolVitality", out toolVitality);
-                }
-
-                vitality = isTool && toolVitality > 0 ? toolVitality : 0;
-                this.petCareEnergyFoodCache[staticId] = vitality;
-                return vitality > 0;
-            }
-            catch
-            {
+                status = "energy item scan exception: " + ex.Message;
                 return false;
             }
         }

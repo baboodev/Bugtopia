@@ -1046,6 +1046,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Warehouse bypass | BagPanel UI hierarchy | WarehouseBypassFeature.cs | W + A |
 | Game UI timings | ConfigManager (Managers._serviceDic), TipConfig, TipShowTimeConfig, LightToastPanel (reader) | GameUiTimingsFeature.cs | A |
 | Carpet Stamp (stampede carpets) | UGCWorld._uActors, UActor (StaticId/UgcType), UgcOperateCommand, UgcOperateMethod, WebRequestUtility.SendCommand, PhysEventSkill/UGCTriggerCase (reference) | CarpetStampFeature.cs | A + S (inflated SendCommand<UgcOperateCommand>) |
+| Sanrio gacha machine finder | UGCWorld._uActors (placed machines 302505 + live scene positions), DynamicObjectManager.GetDynamicObject (MapDynamicResource 11305-07), ConfigManager._mainGameLvlConf.MapEntityPointsAsset (markers 10520-22), TrackData StartTrack pins | SanrioGachaFinderFeature.cs | A |
 
 ---
 

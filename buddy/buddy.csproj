@@ -325,6 +325,7 @@
     <Compile Include="SeaCleanQteFeature.cs" />
     <Compile Include="SeaCleanBannerHideFeature.cs" />
     <Compile Include="LittleWhaleFinderFeature.cs" />
+    <Compile Include="SanrioGachaFinderFeature.cs" />
     <Compile Include="SwimSprintVerticalGuardFeature.cs" />
     <Compile Include="CorruptionCleanseFeature.cs" />
     <Compile Include="BubbleFeature.cs" />

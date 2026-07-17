@@ -106,6 +106,8 @@ namespace HeartopiaMod
             public bool hideSeaCleanBannerEnabled;
             // Little Whale figurine finder (daily photo hide-and-seek, MapDynamicResource 300023-33).
             public bool littleWhaleFinderEnabled;
+            // Sanrio gacha machine finder (event scene machines, MapDynamicResource 11305-07).
+            public bool sanrioGachaFinderEnabled;
             // Custom Swim Sprint (underwater dash SwimSprintConfig override). Duration 0/absent =
             // "use default 0.5s"; slider max (30) = Infinite. Cooldown 0 = instant re-dash.
             public bool swimSprintTweakEnabled;

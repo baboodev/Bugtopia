@@ -88,6 +88,8 @@ namespace HeartopiaMod
 
             y = this.DrawCarpetStampSection(y);
 
+            y = this.DrawSanrioGachaSection(y + 14f);
+
             return y + 20f;
         }
 
