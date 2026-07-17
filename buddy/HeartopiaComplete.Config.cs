@@ -142,6 +142,9 @@ namespace HeartopiaMod
             data.hideSeaCleanBannerEnabled = this.hideSeaCleanBannerEnabled;
             data.littleWhaleFinderEnabled = this.littleWhaleFinderEnabled;
             data.sanrioGachaFinderEnabled = this.sanrioGachaFinderEnabled;
+            data.sanrioDropDayStamp = this.sanrioDropDayStamp;
+            data.sanrioDropTotalToday = this.sanrioDropTotalToday;
+            data.sanrioDropSceneDoneMask = this.sanrioDropSceneDoneMask;
             data.swimSprintTweakEnabled = this.swimSprintTweakEnabled;
             data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
             data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
@@ -329,6 +332,9 @@ namespace HeartopiaMod
             this.hideSeaCleanBannerEnabled = data.hideSeaCleanBannerEnabled;
             this.littleWhaleFinderEnabled = data.littleWhaleFinderEnabled;
             this.sanrioGachaFinderEnabled = data.sanrioGachaFinderEnabled;
+            this.sanrioDropDayStamp = data.sanrioDropDayStamp;
+            this.sanrioDropTotalToday = data.sanrioDropTotalToday;
+            this.sanrioDropSceneDoneMask = data.sanrioDropSceneDoneMask;
             this.swimSprintTweakEnabled = data.swimSprintTweakEnabled;
             this.swimSprintDurationSeconds = data.swimSprintDurationSeconds <= 0f
                 ? SwimSprintDurationDefault

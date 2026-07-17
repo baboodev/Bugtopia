@@ -108,6 +108,10 @@ namespace HeartopiaMod
             public bool littleWhaleFinderEnabled;
             // Sanrio gacha machine finder (event scene machines, MapDynamicResource 11305-07).
             public bool sanrioGachaFinderEnabled;
+            // Sanrio finder daily-drop tracker (successes the mod observed; 06:00 game-day key).
+            public long sanrioDropDayStamp;
+            public int sanrioDropTotalToday;
+            public int sanrioDropSceneDoneMask;
             // Custom Swim Sprint (underwater dash SwimSprintConfig override). Duration 0/absent =
             // "use default 0.5s"; slider max (30) = Infinite. Cooldown 0 = instant re-dash.
             public bool swimSprintTweakEnabled;

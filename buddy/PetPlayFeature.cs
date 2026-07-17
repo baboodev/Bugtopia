@@ -333,16 +333,9 @@ namespace HeartopiaMod
                     string petStatsLine = "energy " + (entry.Vitality >= 0 ? entry.Vitality.ToString() : "?")
                         + " · food " + (entry.Fullness >= 0 ? entry.Fullness.ToString() : "?")
                         + " · growth " + (entry.Chemistry >= 0 ? entry.Chemistry.ToString() : "?");
-                    if (entry.MotionsTotal >= 0)
-                    {
-                        petStatsLine += entry.IsDog
-                            ? " · actions " + entry.MotionsUnlocked + "/" + entry.MotionsTotal + " · learned " + entry.MotionsLearned
-                            : " · actions " + entry.MotionsTotal + " · learned " + entry.MotionsLearned;
-                    }
-                    else
-                    {
-                        petStatsLine += " · actions ?";
-                    }
+                    petStatsLine += entry.MotionsTotal >= 0
+                        ? " · actions " + entry.MotionsUnlocked + "/" + entry.MotionsTotal + " · learned " + entry.MotionsLearned
+                        : " · actions ?";
                     GUI.Label(new Rect(petsRect.x + 16f, rowTop + 28f, width - 32f, 18f), petStatsLine, petCareStatusStyle);
                     GUI.Label(new Rect(petsRect.x + 16f, rowTop + 46f, width - 32f, 18f), entry.Message ?? string.Empty, petCareStatusStyle);
 
@@ -1374,8 +1367,10 @@ namespace HeartopiaMod
                     }
                 }
 
+                // Wait out the eating animation before the next session — starting a tease while the
+                // pet is still eating gets rejected as "occupied" and burns an empty session.
                 this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
-                this.petCareTrainLoopNextActionAt = Time.unscaledTime + 1.2f;
+                this.petCareTrainLoopNextActionAt = Time.unscaledTime + 4.5f;
             }
         }
 
@@ -1424,16 +1419,33 @@ namespace HeartopiaMod
                     return;
                 }
 
+                // Cats: build the set of learning ids still locked at this growth (chemistry) from
+                // the growth-level table; dogs use the per-motion unlockGrowth field.
+                HashSet<int> catLockedIds = null;
+                if (!entry.IsDog && this.TryGetCatGrowthLevels(out List<KeyValuePair<int, int>> levels))
+                {
+                    catLockedIds = new HashSet<int>();
+                    foreach (KeyValuePair<int, int> level in levels)
+                    {
+                        // Key = needGrowth, Value = learningID unlocked at that level.
+                        if (level.Value != 0 && growth < level.Key)
+                        {
+                            catLockedIds.Add(level.Value);
+                        }
+                    }
+                }
+
                 int unlocked = 0;
                 int learned = 0;
                 for (int i = 0; i < motions.Count; i++)
                 {
                     PetCareMotionInfo motion = motions[i];
-                    if (entry.IsDog
-                        && this.TryGetDogLearningMotionUnlockGrowth(motion.Id, out int unlockGrowth)
-                        && growth < unlockGrowth)
+                    bool locked = entry.IsDog
+                        ? (this.TryGetDogLearningMotionUnlockGrowth(motion.Id, out int unlockGrowth) && growth < unlockGrowth)
+                        : (catLockedIds != null && catLockedIds.Contains(motion.Id));
+                    if (locked)
                     {
-                        continue; // locked
+                        continue;
                     }
 
                     unlocked++;
@@ -1646,26 +1658,31 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (answersInSession <= 0)
-            {
-                this.petCareTrainLoopZeroSessions++;
-                // A rejected/empty session is usually low energy the pre-check could not see
-                // (e.g. the cat's server-side vitality gate) — try one feed before giving up.
-                this.petCareTrainLoopForceFeed = true;
-            }
-            else
+            if (answersInSession > 0)
             {
                 this.petCareTrainLoopZeroSessions = 0;
-            }
-
-            if (this.petCareTrainLoopZeroSessions >= 3)
-            {
-                this.StopPetCareTrainLoop("Train loop stopped: sessions keep failing (see game toasts).");
+                this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+                this.petCareTrainLoopNextActionAt = Time.unscaledTime + 2.5f;
                 return;
             }
 
+            // An empty session almost always means the pet was still BUSY when BeginTease landed —
+            // most often it is still playing the eating animation right after an energy feed (the
+            // server rejects with "occupied"). So DON'T immediately blame energy: back off for
+            // progressively longer and retry. Only probe a feed on every 3rd failure in case the
+            // pre-check genuinely missed low energy.
+            this.petCareTrainLoopZeroSessions++;
+            if (this.petCareTrainLoopZeroSessions >= 6)
+            {
+                this.StopPetCareTrainLoop("Train loop stopped: sessions keep failing (pet stays busy, or nothing left to learn).");
+                return;
+            }
+
+            this.petCareTrainLoopForceFeed = this.petCareTrainLoopZeroSessions % 3 == 0;
+            float backoff = Mathf.Min(4f + this.petCareTrainLoopZeroSessions * 2f, 14f);
             this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
-            this.petCareTrainLoopNextActionAt = Time.unscaledTime + 2.5f;
+            this.petCareTrainLoopNextActionAt = Time.unscaledTime + backoff;
+            this.PetPlayLog("Train loop: empty session #" + this.petCareTrainLoopZeroSessions + " (pet likely busy) - retry in " + backoff.ToString("F0") + "s.");
         }
 
         private void UpdatePetCareTrainLoop()
@@ -2484,6 +2501,80 @@ namespace HeartopiaMod
 
         // Static table data — cache resolved values so repeated count/pick passes cost nothing.
         private readonly Dictionary<int, int> petCareUnlockGrowthCache = new Dictionary<int, int>();
+        // Cat motions unlock by GROWTH LEVEL (TableMeowGrowthLevel.needGrowth -> learningID), not by
+        // a per-motion field. Cache the (needGrowth, learningId) level rows once (static table).
+        private List<KeyValuePair<int, int>> petCareCatGrowthLevels;
+
+        // Reads TableData.TableMeowGrowthLevels (static dict<int, TableMeowGrowthLevel>) via AuraMono
+        // into (needGrowth, learningID) pairs. Cached — the table is static. A cat learning motion
+        // is UNLOCKED once the pet's chemistry (growth) reaches the needGrowth of the level that
+        // grants it; motions not granted by any level are unlocked from the start.
+        private unsafe bool TryGetCatGrowthLevels(out List<KeyValuePair<int, int>> levels)
+        {
+            if (this.petCareCatGrowthLevels != null)
+            {
+                levels = this.petCareCatGrowthLevels;
+                return levels.Count > 0;
+            }
+
+            levels = new List<KeyValuePair<int, int>>();
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return false;
+                }
+
+                IntPtr tableDataClass = this.TryGetPetFeedAuraMonoTableDataClass();
+                if (tableDataClass == IntPtr.Zero
+                    || !this.TryGetAuraMonoStaticObjectField(tableDataClass, "TableMeowGrowthLevels", out IntPtr dictObj)
+                    || dictObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                List<IntPtr> entries = new List<IntPtr>(24);
+                List<uint> entryPins = new List<uint>(24);
+                try
+                {
+                    if (!this.TryEnumerateAuraMonoCollectionItems(dictObj, entries, entryPins) || entries.Count == 0)
+                    {
+                        return false;
+                    }
+
+                    foreach (IntPtr kvObj in entries)
+                    {
+                        if (kvObj == IntPtr.Zero
+                            || (!this.TryGetMonoObjectMember(kvObj, "Value", out IntPtr rowObj)
+                                && !this.TryGetMonoObjectMember(kvObj, "value", out rowObj))
+                            || rowObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        this.TryGetMonoIntMember(rowObj, "needGrowth", out int needGrowth);
+                        this.TryGetMonoIntMember(rowObj, "learningID", out int learningId);
+                        if (learningId != 0)
+                        {
+                            levels.Add(new KeyValuePair<int, int>(needGrowth, learningId));
+                        }
+                    }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(entryPins);
+                }
+
+                this.petCareCatGrowthLevels = levels;
+                return levels.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                this.PetPlayLog("Cat growth levels read exception: " + ex.Message);
+                this.petCareCatGrowthLevels = levels; // cache the empty result to avoid re-scanning
+                return false;
+            }
+        }
 
         // AuraMono ONLY: table row via the Mono bridge ("unlockGrowth" resolves to the int property
         // getter — the backing field is a ushort).

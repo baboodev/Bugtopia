@@ -4076,7 +4076,8 @@ namespace HeartopiaMod
         }
 
         // toolNetId = the pet-feed "hobby tool" slot (energy snack: Energy Dog Food / Energy Fish
-        // Jerky) — BeginFeed's third parameter; 0 for a plain food-only feed.
+        // Jerky) — BeginFeed's third parameter; 0 for a plain food-only feed. A tool-only feed
+        // legitimately carries an empty foods list.
         private unsafe bool TryInvokePetFeedBeginAuraMono(uint petNetId, List<uint> foodNetIds, uint toolNetId, out string status)
         {
             status = "AuraMono BeginFeed unavailable";
@@ -4087,7 +4088,7 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (!this.TryCreatePetFeedAuraUIntList(foodNetIds, out IntPtr foodListObj, out status) || foodListObj == IntPtr.Zero)
+                if (!this.TryCreatePetFeedAuraUIntList(foodNetIds, out IntPtr foodListObj, out status, toolNetId != 0U) || foodListObj == IntPtr.Zero)
                 {
                     return false;
                 }
@@ -4151,11 +4152,13 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe bool TryCreatePetFeedAuraUIntList(List<uint> values, out IntPtr listObj, out string status)
+        private unsafe bool TryCreatePetFeedAuraUIntList(List<uint> values, out IntPtr listObj, out string status, bool allowEmpty = false)
         {
             listObj = IntPtr.Zero;
             status = string.Empty;
-            if (values == null || values.Count == 0)
+            // allowEmpty: a tool-only feed (energy snack in BeginFeed's HobbyToolNetId slot) sends a
+            // legitimately EMPTY foods list; regular feeding still treats empty as a caller bug.
+            if (values == null || (values.Count == 0 && !allowEmpty))
             {
                 status = "AuraMono food list empty";
                 return false;

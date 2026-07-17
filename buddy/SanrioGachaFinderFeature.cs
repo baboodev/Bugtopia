@@ -75,7 +75,30 @@ namespace HeartopiaMod
             public bool PinActive;
             public Vector3 PinPos;
             public float LastSeenAt;
+            public bool DoneToday;   // a tracked capsule-drop success happened at this machine today
         }
+
+        // --- Daily drop tracking -------------------------------------------------------------
+        // The per-machine daily counters (InteractionDropRecordComponent: AllTotalCount 5/day,
+        // AlreadyInteraction*Ids 1/day per machine) are [Persistent] SERVER data with no client
+        // reader — the client only learns results via Event<InteractionDropNetworkEvent>
+        // (dropId+ErrorCode). That wrapper is a constructed generic (not hookable by name), but
+        // on every SUCCESS InteractDropSystem re-dispatches the plain GLOBAL PlayerTakeCandyEvent
+        // — we hook that and attribute the success to the nearest known machine within 6 m
+        // (UGC interact range is ~3 m; other interaction drops fire far from any machine).
+        // Tracking is therefore "what the mod observed": interactions done before enabling the
+        // finder (or placed-machine marks after a relog — netIds are per-session) stay unknown.
+        // Scene marks + the daily total persist in the config, keyed to the 06:00 game-day.
+        private const string SanrioTakeCandyEventName = "ScriptsRefactory.DataAndProtocol.Events.PlayerTakeCandyEvent";
+        private const float SanrioDropMatchRadius = 6f;
+        private const int SanrioDropDailyCap = 5;
+
+        private bool sanrioDropHookRegistered;
+        private long sanrioDropDayStamp;      // persisted: game-day index of the counters below
+        private int sanrioDropTotalToday;     // persisted: successes observed today (cap 5)
+        private int sanrioDropSceneDoneMask;  // persisted: bits 0-2 = scene machine collected
+        private float sanrioNextDayCheckAt;
+        private IntPtr sanrioGameTimeMethod = IntPtr.Zero;
 
         private readonly SanrioMachineSlot[] sanrioMachines = new SanrioMachineSlot[SanrioSceneMachineCount];
         private readonly bool[] sanrioPinActive = new bool[SanrioSceneMachineCount];
@@ -144,6 +167,9 @@ namespace HeartopiaMod
             {
                 return;
             }
+
+            this.EnsureSanrioDropHook();
+            this.EnsureSanrioDropDay();
 
             try
             {
@@ -649,6 +675,168 @@ namespace HeartopiaMod
             }
         }
 
+        // One extra hook slot; registered lazily on the first enabled tick, then the handler
+        // self-gates on the toggle (the shared-detour engine keeps hooks for the session).
+        private void EnsureSanrioDropHook()
+        {
+            if (!this.sanrioDropHookRegistered)
+            {
+                this.sanrioDropHookRegistered = this.RegisterGameEventHook(SanrioTakeCandyEventName, 0, this.OnSanrioTakeCandyEvent);
+            }
+        }
+
+        // Roll the persisted counters when the game day (06:00 boundary) changes. Throttled.
+        private void EnsureSanrioDropDay()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.sanrioNextDayCheckAt)
+            {
+                return;
+            }
+            this.sanrioNextDayCheckAt = now + 30f;
+
+            long day = this.GetSanrioGameDayIndex();
+            if (day > 0 && this.sanrioDropDayStamp != day)
+            {
+                bool hadCounts = this.sanrioDropTotalToday > 0 || this.sanrioDropSceneDoneMask != 0;
+                this.sanrioDropDayStamp = day;
+                this.sanrioDropTotalToday = 0;
+                this.sanrioDropSceneDoneMask = 0;
+                foreach (KeyValuePair<uint, SanrioPlacedMachine> kv in this.sanrioPlacedMachines)
+                {
+                    kv.Value.DoneToday = false;
+                }
+                if (hadCounts)
+                {
+                    ModLogger.Msg("[SanrioGacha] daily drop counters reset (game day " + day + ")");
+                }
+                try { this.SaveKeybinds(false); } catch { }
+            }
+        }
+
+        // Game-day index with the 06:00 boundary (the game's daily-refresh convention, cf.
+        // DayIndexFrom2024060106 conditions). Primary: GameTimeUtility.GetCurrentGameTime via
+        // AuraMono — boxed DateTime, unboxed as the raw 8-byte _dateData (kind bits masked off;
+        // never read via the uint member helpers, they truncate boxed longs). Fallback: the
+        // local clock with the same boundary (only day-CHANGE detection matters, so a fixed
+        // offset from server time is harmless as long as it is stable).
+        private unsafe long GetSanrioGameDayIndex()
+        {
+            try
+            {
+                if (this.EnsureAuraMonoApiReady() && this.AttachAuraMonoThread()
+                    && auraMonoRuntimeInvoke != null && auraMonoObjectUnbox != null)
+                {
+                    if (this.sanrioGameTimeMethod == IntPtr.Zero)
+                    {
+                        IntPtr cls = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.GameTimeUtility");
+                        if (cls == IntPtr.Zero)
+                        {
+                            cls = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ProtocolService", "GameTimeUtility");
+                        }
+                        if (cls != IntPtr.Zero)
+                        {
+                            this.sanrioGameTimeMethod = this.FindAuraMonoMethodOnHierarchy(cls, "GetCurrentGameTime", 0);
+                        }
+                    }
+
+                    if (this.sanrioGameTimeMethod != IntPtr.Zero)
+                    {
+                        IntPtr exc = IntPtr.Zero;
+                        IntPtr boxed = auraMonoRuntimeInvoke(this.sanrioGameTimeMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
+                        if (exc == IntPtr.Zero && boxed != IntPtr.Zero)
+                        {
+                            IntPtr raw = auraMonoObjectUnbox(boxed);
+                            if (raw != IntPtr.Zero)
+                            {
+                                long ticks = (long)((*(ulong*)raw) & 0x3FFFFFFFFFFFFFFFUL);
+                                if (ticks > 0)
+                                {
+                                    return (ticks - 6L * TimeSpan.TicksPerHour) / TimeSpan.TicksPerDay;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return (DateTime.Now.Ticks - 6L * TimeSpan.TicksPerHour) / TimeSpan.TicksPerDay;
+        }
+
+        // PlayerTakeCandyEvent = an interaction drop SUCCEEDED just now. Attribute it to the
+        // nearest known machine within 6 m; no machine nearby = some other drop (candy piles,
+        // other events) — ignore. Runs on the main thread (event-hook engine contract).
+        private void OnSanrioTakeCandyEvent(GameEventSnapshot snap)
+        {
+            if (!this.sanrioGachaFinderEnabled)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+                {
+                    return;
+                }
+
+                float bestSqr = SanrioDropMatchRadius * SanrioDropMatchRadius;
+                int bestScene = -1;
+                SanrioPlacedMachine bestPlaced = null;
+                for (int i = 0; i < SanrioSceneMachineCount; i++)
+                {
+                    if (!this.sanrioMachines[i].Present)
+                    {
+                        continue;
+                    }
+                    float d = (this.sanrioMachines[i].Pos - playerPos).sqrMagnitude;
+                    if (d < bestSqr)
+                    {
+                        bestSqr = d;
+                        bestScene = i;
+                        bestPlaced = null;
+                    }
+                }
+                foreach (KeyValuePair<uint, SanrioPlacedMachine> kv in this.sanrioPlacedMachines)
+                {
+                    float d = (kv.Value.Pos - playerPos).sqrMagnitude;
+                    if (d < bestSqr)
+                    {
+                        bestSqr = d;
+                        bestScene = -1;
+                        bestPlaced = kv.Value;
+                    }
+                }
+
+                if (bestScene < 0 && bestPlaced == null)
+                {
+                    return; // unrelated interaction drop
+                }
+
+                this.EnsureSanrioDropDay();
+                if (bestScene >= 0)
+                {
+                    this.sanrioDropSceneDoneMask |= 1 << bestScene;
+                }
+                else
+                {
+                    bestPlaced.DoneToday = true;
+                }
+                this.sanrioDropTotalToday = Math.Min(SanrioDropDailyCap, this.sanrioDropTotalToday + 1);
+                try { this.SaveKeybinds(false); } catch { }
+
+                string what = bestScene >= 0 ? ("Star Town machine " + (bestScene + 1)) : ("placed machine net=" + bestPlaced.NetId);
+                ModLogger.Msg("[SanrioGacha] capsule drop tracked: " + what + " (" + this.sanrioDropTotalToday + "/" + SanrioDropDailyCap + " today)");
+                this.AddMenuNotification(this.LF("Capsule collected — {0}/{1} today", this.sanrioDropTotalToday, SanrioDropDailyCap), new Color(1f, 0.65f, 0.85f));
+            }
+            catch
+            {
+            }
+        }
+
         // Teleport helpers (buttons in the Extra tab).
         private void StartSanrioGachaTeleport(Vector3 pos, string label)
         {
@@ -687,6 +875,13 @@ namespace HeartopiaMod
                 bodyStyle);
             y += 66f;
 
+            // Daily tracker: only what the mod itself observed (drops made before enabling the
+            // finder — or placed-machine marks from a previous login — are unknown to us).
+            GUIStyle counterStyle = new GUIStyle(bodyStyle) { fontStyle = FontStyle.Bold };
+            GUI.Label(new Rect(left, y, 500f, 22f),
+                this.LF("Capsule drops today (tracked): {0}/{1}", this.sanrioDropTotalToday, SanrioDropDailyCap), counterStyle);
+            y += 26f;
+
             Camera cam = Camera.main;
             Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
 
@@ -704,6 +899,10 @@ namespace HeartopiaMod
                 else
                 {
                     text = this.LF("Star Town machine {0}: not found", i + 1);
+                }
+                if ((this.sanrioDropSceneDoneMask & (1 << i)) != 0)
+                {
+                    text += this.L("  ✓ collected today");
                 }
                 GUI.Label(new Rect(left, y, 330f, 22f), text, bodyStyle);
                 if (this.sanrioMachines[i].Present
@@ -738,7 +937,12 @@ namespace HeartopiaMod
                 string text = dist >= 0f
                     ? this.LF("Placed machine: {0}m", (int)dist)
                     : this.L("Placed machine");
-                GUI.Label(new Rect(left, y, 330f, 22f), text + "  (net=" + placed.NetId + ")", bodyStyle);
+                text += "  (net=" + placed.NetId + ")";
+                if (placed.DoneToday)
+                {
+                    text += this.L("  ✓ collected today");
+                }
+                GUI.Label(new Rect(left, y, 330f, 22f), text, bodyStyle);
                 if (this.DrawPrimaryActionButton(new Rect(left + 340f, y - 4f, 130f, 26f), this.L("TELEPORT")))
                 {
                     this.StartSanrioGachaTeleport(placed.Pos, this.L("placed machine"));
