@@ -1066,49 +1066,49 @@ namespace HeartopiaMod
                 {
                     if (this.TryToggleEquipHandToolHotkey(1, out bool unequipped, out _))
                     {
-                        this.AddMenuNotification(unequipped ? "Unequipping Axe" : "Equipping Axe", new Color(0.45f, 1f, 0.55f));
+                        this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Axe" : "Equipping Axe", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 if (this.TryGetModHotkeyDown(this.keyEquipNet))
                 {
                     if (this.TryToggleEquipHandToolHotkey(5, out bool unequipped, out _))
                     {
-                        this.AddMenuNotification(unequipped ? "Unequipping Net" : "Equipping Net", new Color(0.45f, 1f, 0.55f));
+                        this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Net" : "Equipping Net", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 if (this.TryGetModHotkeyDown(this.keyEquipRod))
                 {
                     if (this.TryToggleEquipHandToolHotkey(3, out bool unequipped, out _))
                     {
-                        this.AddMenuNotification(unequipped ? "Unequipping Rod" : "Equipping Rod", new Color(0.45f, 1f, 0.55f));
+                        this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Rod" : "Equipping Rod", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 if (this.TryGetModHotkeyDown(this.keyEquipSprinkler))
                 {
                     if (this.TryToggleEquipHandToolHotkey(2, out bool unequipped, out _))
                     {
-                        this.AddMenuNotification(unequipped ? "Unequipping Sprinkler" : "Equipping Sprinkler", new Color(0.45f, 1f, 0.55f));
+                        this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Sprinkler" : "Equipping Sprinkler", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 if (this.TryGetModHotkeyDown(this.keyEquipBirdScanner))
                 {
                     if (this.TryToggleEquipHandToolHotkey(4, out bool unequipped, out _))
                     {
-                        this.AddMenuNotification(unequipped ? "Unequipping Bird Scanner" : "Equipping Bird Scanner", new Color(0.45f, 1f, 0.55f));
+                        this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Bird Scanner" : "Equipping Bird Scanner", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 if (this.TryGetModHotkeyDown(this.keyEquipPad))
                 {
                     if (this.TryToggleEquipHandToolHotkey(6, out bool unequipped, out _))
                     {
-                        this.AddMenuNotification(unequipped ? "Unequipping Pad" : "Equipping Pad", new Color(0.45f, 1f, 0.55f));
+                        this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Pad" : "Equipping Pad", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 if (this.TryGetModHotkeyDown(this.keyEquipSeaCleaner))
                 {
                     if (this.TryToggleEquipHandToolHotkey(SeaCleanerToolTypeId, out bool unequipped, out _))
                     {
-                        this.AddMenuNotification(unequipped ? "Unequipping Sea Cleaner" : "Equipping Sea Cleaner", new Color(0.45f, 1f, 0.55f));
+                        this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Sea Cleaner" : "Equipping Sea Cleaner", new Color(0.45f, 1f, 0.55f));
                     }
                 }
                 this.ProcessPadBuildHotkeysOnUpdate();
@@ -4386,6 +4386,20 @@ namespace HeartopiaMod
         private GUIStyle themeDangerButtonStyle;
         private GUIStyle themeTopTabStyle;
         private GUIStyle themeTopTabActiveStyle;
+        // Baked 9-slice styles for the segmented sub-tabs and the active nav pill: a single
+        // pre-rendered texture keeps ring+fill corners aligned at fractional window positions
+        // (two stacked DrawRoundedPanel layers drift by a subpixel and leak corner fragments).
+        private GUIStyle themeSegContainerStyle;
+        private GUIStyle themeSegPlateStyle;
+        private GUIStyle themeToastCardStyle;
+        private GUIStyle themeRoundedWhiteStyle;
+        private GUIStyle themeCapsuleWhiteStyle;
+        private GUIStyle themeCapsuleGradientStyle;
+        private GUIStyle themeRoundedRingStyle;
+        private GUIStyle themeBigCardRingStyle;
+        private GUIStyle themeStatusOverlayFrameStyle;
+        private GUIStyle themeBigTintableStyle;
+        private GUIStyle themeSidebarShapeStyle;
         private List<Texture2D> themeTextures = new List<Texture2D>();
         private Texture2D uiCircleTexture;
         private Texture2D uiHueTexture;
@@ -4709,38 +4723,39 @@ namespace HeartopiaMod
         private string selectedLanguage = "en";
         private bool localizationDropdownOpen = false;
 
-        // UI Theme Settings
-        private float uiAccentR = 0.36f;
-        private float uiAccentG = 0.70f;
-        private float uiAccentB = 0.98f;
-        private float uiTextR = 0.95f;
-        private float uiTextG = 0.97f;
-        private float uiTextB = 0.99f;
-        private float uiMainTabTextR = 0.75f;
-        private float uiMainTabTextG = 0.82f;
-        private float uiMainTabTextB = 0.90f;
-        private float uiSubTabTextR = 0.53f;
-        private float uiSubTabTextG = 0.59f;
-        private float uiSubTabTextB = 0.67f;
-        private float uiWindowR = 0.055f;
-        private float uiWindowG = 0.065f;
-        private float uiWindowB = 0.085f;
-        private float uiPanelR = 0.075f;
-        private float uiPanelG = 0.085f;
-        private float uiPanelB = 0.11f;
-        private float uiContentR = 0.095f;
-        private float uiContentG = 0.11f;
-        private float uiContentB = 0.14f;
-        private float uiWindowAlpha = 0.94f;
-        private float uiPanelAlpha = 0.90f;
-        private float uiContentAlpha = 0.86f;
+        // UI Theme Settings — "Bugtopia 2.0" neutral ramp: one hue family bg0..bg3, accent
+        // reserved for interactive/active elements (see DrawWindow / EnsureThemeStyles).
+        private float uiAccentR = 0.31f;
+        private float uiAccentG = 0.78f;
+        private float uiAccentB = 1.00f;
+        private float uiTextR = 0.93f;
+        private float uiTextG = 0.95f;
+        private float uiTextB = 0.976f;
+        private float uiMainTabTextR = 0.545f;
+        private float uiMainTabTextG = 0.584f;
+        private float uiMainTabTextB = 0.655f;
+        private float uiSubTabTextR = 0.357f;
+        private float uiSubTabTextG = 0.392f;
+        private float uiSubTabTextB = 0.471f;
+        private float uiWindowR = 0.039f;
+        private float uiWindowG = 0.051f;
+        private float uiWindowB = 0.071f;
+        private float uiPanelR = 0.059f;
+        private float uiPanelG = 0.075f;
+        private float uiPanelB = 0.106f;
+        private float uiContentR = 0.078f;
+        private float uiContentG = 0.102f;
+        private float uiContentB = 0.141f;
+        private float uiWindowAlpha = 0.96f;
+        private float uiPanelAlpha = 0.96f;
+        private float uiContentAlpha = 0.94f;
         private const float UiScaleMin = 0.50f;
         private const float UiScaleMax = 3.00f;
         private const float UiScaleStep = 0.10f;
         private float uiScale = 1.00f;
         private int uiThemeColorTarget = 0;
         private bool uiThemePickerOpen = false;
-        private string uiThemeHexInput = "#5CB2FA";
+        private string uiThemeHexInput = "#4FC7FF";
 
         // Token: 0x04000016 RID: 22
         private int teleportSubTab = 0;

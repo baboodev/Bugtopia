@@ -244,13 +244,13 @@ namespace HeartopiaMod
             // Each control on one row: toggle + slider + value.
             this.buildingFreeAngleEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeAngleEnabled, " " + this.L("Angle"));
             this.buildingFreeAngleStep = Mathf.RoundToInt(
-                GUI.HorizontalSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeAngleStep, 1f, 90f));
+                this.DrawAccentSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeAngleStep, 1f, 90f, true));
             GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeAngleStep + "°", val);
             y += 26f;
 
             this.buildingFreeGridEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeGridEnabled, " " + this.L("Grid"));
             this.buildingFreeGridCell = Mathf.Round(
-                GUI.HorizontalSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
+                this.DrawAccentSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
             GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeGridCell.ToString("0.00") + "m", val);
             y += 26f;
 
@@ -286,7 +286,7 @@ namespace HeartopiaMod
                 GUI.Label(new Rect(left, y + 2f, 48f, 20f), this.L("Plane"), val);
                 float pClamped = Mathf.Round(Mathf.Clamp(this.buildingPlaneHeight, 0f, 24f) / planeStep) * planeStep;
                 float pSlider = Mathf.Round(
-                    GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), pClamped, 0f, 24f) / planeStep) * planeStep;
+                    this.DrawAccentSlider(new Rect(left + 50f, y + 6f, 150f, 18f), pClamped, 0f, 24f) / planeStep) * planeStep;
                 if (!Mathf.Approximately(pSlider, pClamped))
                 {
                     this.buildingPlaneHeight = pSlider; // user dragged the slider (in-range)
@@ -359,7 +359,7 @@ namespace HeartopiaMod
             // user actually drags it — so the +/- buttons can push the value beyond [lo,hi] and it sticks.
             float clamped = Mathf.Round(Mathf.Clamp(value, lo, hi) * 100f) / 100f;
             float sliderOut = Mathf.Round(
-                GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, lo, hi) * 100f) / 100f;
+                this.DrawAccentSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, lo, hi) * 100f) / 100f;
             if (!Mathf.Approximately(sliderOut, clamped))
             {
                 value = sliderOut;
@@ -390,7 +390,7 @@ namespace HeartopiaMod
             GUI.Label(new Rect(left, y + 2f, 48f, 20f), label, style);
             float clamped = Mathf.Round(Mathf.Clamp(value, -180f, 180f));
             float sliderOut = Mathf.Round(
-                GUI.HorizontalSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, -180f, 180f));
+                this.DrawAccentSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, -180f, 180f, true));
             if (!Mathf.Approximately(sliderOut, clamped))
             {
                 value = sliderOut;

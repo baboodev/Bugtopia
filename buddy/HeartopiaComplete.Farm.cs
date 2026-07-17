@@ -210,7 +210,12 @@ namespace HeartopiaMod
             }
 
             Rect statusBox = new Rect(statusPanel.x + 224f, statusPanel.y + 36f, statusPanel.width - 238f, 60f);
-            this.DrawRoundedPanel(statusBox, 6f, new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f)), panelLine, 1f, new Color(accent.r, accent.g, accent.b, 0.35f));
+            Color statusBoxFill = new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiContentAlpha * 0.55f, 0.12f, 0.74f));
+            this.DrawTintedRoundedBox(statusBox, statusBoxFill);
+            this.DrawCardOutline(statusBox, 1f);
+            GUI.color = new Color(accent.r, accent.g, accent.b, 0.35f);
+            GUI.DrawTexture(new Rect(statusBox.x + 1f, statusBox.y + 1f, statusBox.width - 2f, 1.5f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
             GUI.Label(new Rect(statusBox.x + 12f, statusBox.y + 7f, 92f, 18f), this.L("STATUS"), sectionStyle);
             string modeText = this.auraFarmEnabled ? "Aura Farm" : "No mode";
             GUIStyle modeStyle = new GUIStyle(bodyStyle) { alignment = TextAnchor.MiddleRight, fontSize = 11 };

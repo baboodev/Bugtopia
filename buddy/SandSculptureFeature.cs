@@ -2624,7 +2624,7 @@ namespace HeartopiaMod
 
             GUI.Label(new Rect(left, y, 220f, 22f), this.L("Finish delay") + $": {this.sandFinishDelaySeconds:F1}s", bodyStyle);
             this.sandFinishDelaySeconds = Mathf.Round(
-                GUI.HorizontalSlider(new Rect(left + 240f, y + 6f, 200f, 18f), this.sandFinishDelaySeconds, 0f, 30f) * 2f) / 2f;
+                this.DrawAccentSlider(new Rect(left + 240f, y + 6f, 200f, 18f), this.sandFinishDelaySeconds, 0f, 30f) * 2f) / 2f;
             y += 40f;
 
             GUI.Box(new Rect(left, y, 560f, 130f), string.Empty);

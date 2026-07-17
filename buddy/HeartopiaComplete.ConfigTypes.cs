@@ -268,6 +268,9 @@ namespace HeartopiaMod
         [Serializable]
         public class UiThemeConfigData
         {
+            // Palette schema version; configs saved before the 2.0 redesign carry 0 and their
+            // palette is discarded on load (scale is kept) so the new defaults take effect.
+            public int uiThemeVersion;
             public float uiAccentR;
             public float uiAccentG;
             public float uiAccentB;

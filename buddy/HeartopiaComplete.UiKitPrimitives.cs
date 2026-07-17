@@ -88,22 +88,386 @@ namespace HeartopiaMod
             return Mathf.Clamp(Mathf.Round(scale / UiScaleStep) * UiScaleStep, UiScaleMin, UiScaleMax);
         }
 
+        // ===== Bugtopia 2.0 theme plumbing =====
+        // Cached OS font + derived colors + baked textures used by the redesigned chrome.
+        private Font uiThemeFont;
+        private bool uiThemeFontAttempted;
+        private Texture2D uiAccentGradientTex;
+        private Texture2D uiRoundedRectSprite;
+        private bool uiThemeStylesDirty;
+        private float uiThemeNextRebuildAt;
+        private float uiThemePendingSaveAt = -1f;
+        private readonly Dictionary<string, float> uiToggleAnimStates = new Dictionary<string, float>(64);
+        private int uiToggleAnimFrame = -1;
+        private float uiToggleAnimDt = 0.016f;
+        private float uiToggleAnimPrevTime = -1f;
+
+        // Advances (on Repaint) and returns the 0..1 knob position for an animated switch.
+        private float StepToggleAnim(string key, bool value)
+        {
+            float target = value ? 1f : 0f;
+            float t;
+            if (!this.uiToggleAnimStates.TryGetValue(key, out t))
+            {
+                t = target;
+            }
+
+            if (Event.current == null || Event.current.type == EventType.Repaint)
+            {
+                if (Time.frameCount != this.uiToggleAnimFrame)
+                {
+                    float now = Time.unscaledTime;
+                    this.uiToggleAnimDt = this.uiToggleAnimPrevTime > 0f
+                        ? Mathf.Clamp(now - this.uiToggleAnimPrevTime, 0.001f, 0.05f)
+                        : 0.016f;
+                    this.uiToggleAnimPrevTime = now;
+                    this.uiToggleAnimFrame = Time.frameCount;
+                }
+
+                t = Mathf.MoveTowards(t, target, this.uiToggleAnimDt * 7.5f);
+                this.uiToggleAnimStates[key] = t;
+            }
+
+            return t;
+        }
+
+        // Shared switch renderer: capsule track (accent gradient fades in with the knob) + knob.
+        private void DrawSwitchTrackAndKnob(Rect switchRect, float knobT, bool hovered)
+        {
+            this.EnsureUiPrimitiveTextures();
+            this.DrawCapsule(switchRect, new Color(0.137f, 0.169f, 0.22f, 0.98f));
+            if (knobT > 0.01f)
+            {
+                this.DrawAccentGradientCapsule(switchRect, knobT);
+            }
+
+            float knobD = switchRect.height - 6f;
+            float x0 = switchRect.x + 3f;
+            float x1 = switchRect.xMax - knobD - 3f;
+            Rect knobRect = new Rect(Mathf.Lerp(x0, x1, knobT), switchRect.y + 3f, knobD, knobD);
+            GUI.color = new Color(0f, 0f, 0f, 0.35f);
+            GUI.DrawTexture(new Rect(knobRect.x, knobRect.y + 1.5f, knobD, knobD), this.uiCircleTexture);
+            Color knobColor = Color.Lerp(new Color(0.68f, 0.72f, 0.8f, 1f), Color.white, knobT);
+            GUI.color = hovered ? Color.Lerp(knobColor, Color.white, 0.35f) : knobColor;
+            GUI.DrawTexture(knobRect, this.uiCircleTexture);
+            GUI.color = Color.white;
+        }
+
+        // Soft full-row hover wash behind a control row (no call-site changes needed).
+        private void DrawRowHoverWash(Rect rowRect)
+        {
+            this.DrawTintedRoundedBox(
+                new Rect(rowRect.x - 8f, rowRect.y - 3f, rowRect.width + 16f, rowRect.height + 6f),
+                new Color(1f, 1f, 1f, 0.03f));
+        }
+
+        private Font EnsureUiThemeFont()
+        {
+            if (this.uiThemeFont != null || this.uiThemeFontAttempted)
+            {
+                return this.uiThemeFont;
+            }
+
+            this.uiThemeFontAttempted = true;
+            string[] candidates = new string[] { "Segoe UI Variable Text", "Segoe UI" };
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                try
+                {
+                    Font font = Font.CreateDynamicFontFromOSFont(candidates[i], 14);
+                    if (font != null)
+                    {
+                        font.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                        this.uiThemeFont = font;
+                        break;
+                    }
+                }
+                catch
+                {
+                    // OS font unavailable — keep IMGUI's built-in font.
+                }
+            }
+
+            return this.uiThemeFont;
+        }
+
+        // Second stop of the accent gradient: hue nudged toward the next hue, slightly deeper.
+        private Color GetUiAccentSecondary(Color accent)
+        {
+            float h;
+            float s;
+            float v;
+            Color.RGBToHSV(accent, out h, out s, out v);
+            h = Mathf.Repeat(h + 0.05f, 1f);
+            s = Mathf.Clamp01((s * 1.08f) + 0.04f);
+            v = Mathf.Clamp01(v * 0.9f);
+            return Color.HSVToRGB(h, s, v);
+        }
+
+        // bg3 — control fill one step above the content surface, derived so custom
+        // content colors picked in the theme tab keep a consistent ramp.
+        private Color GetUiControlFill()
+        {
+            return new Color(
+                Mathf.Clamp01(this.uiContentR + 0.032f),
+                Mathf.Clamp01(this.uiContentG + 0.039f),
+                Mathf.Clamp01(this.uiContentB + 0.051f));
+        }
+
+        private Color GetUiTextOnAccent(Color accent)
+        {
+            float luma = (0.299f * accent.r) + (0.587f * accent.g) + (0.114f * accent.b);
+            return luma > 0.62f ? new Color(0.02f, 0.08f, 0.12f) : Color.white;
+        }
+
+        // Rounded on the LEFT two corners only; the right edge is perfectly flat/square all the
+        // way to the texture edge. For the sidebar: it needs to look continuous with the
+        // window's outer rounding on its left/outer edge while butting up flush (no curve, no
+        // gap) against the main content column on its right/inner edge. Squaring off a
+        // symmetric 4-corner-rounded fill by painting an opaque patch over the unwanted
+        // corners only worked while the layer underneath was assumed near-opaque (the patch
+        // color was pre-flattened to approximate "basePanel blended once over windowBase") —
+        // once Window Alpha became genuinely adjustable and low, that patch was still a flat
+        // OPAQUE square with no way to know it should show the game through it too, and it
+        // rendered as a visible solid block at low transparency. Baking the true asymmetric
+        // shape once avoids the problem structurally: every pixel is painted exactly once, at
+        // whatever alpha the caller tints it with, so it stays correct at any transparency.
+        private Texture2D MakeLeftRoundedRectTexture(int size, float radius)
+        {
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            float r = Mathf.Clamp(radius, 1f, (size * 0.5f) - 1f);
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float shapeA;
+                    if (x >= r || (y >= r && y <= size - r))
+                    {
+                        // Right of the rounding margin, or vertically in the flat middle band
+                        // between the two corners: always fully inside.
+                        shapeA = 1f;
+                    }
+                    else
+                    {
+                        float cy = (y < r) ? r : (size - r);
+                        float dxc = x - r;
+                        float dyc = y - cy;
+                        float dist = Mathf.Sqrt((dxc * dxc) + (dyc * dyc));
+                        shapeA = Mathf.Clamp01(r + 0.5f - dist);
+                    }
+
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, shapeA));
+                }
+            }
+
+            tex.Apply();
+            this.themeTextures.Add(tex);
+            return tex;
+        }
+
+        // Tinted per-call via GUI.color — see MakeLeftRoundedRectTexture / themeSidebarShapeStyle.
+        private void DrawTintedLeftRoundedBox(Rect rect, Color tint)
+        {
+            if (rect.width <= 0f || rect.height <= 0f)
+            {
+                return;
+            }
+
+            if (this.themeSidebarShapeStyle == null || this.themeSidebarShapeStyle.normal.background == null)
+            {
+                this.DrawRoundedPanel(rect, 15f, tint, Color.clear, 0f, Color.clear);
+                return;
+            }
+
+            Color prev = GUI.color;
+            GUI.color = tint;
+            GUI.Box(rect, "", this.themeSidebarShapeStyle);
+            GUI.color = prev;
+        }
+
+        private Texture2D MakeRoundedRectTexture(int size, float radius, Color fill, Color ring, float ringWidth)
+        {
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            float r = Mathf.Clamp(radius, 1f, (size * 0.5f) - 1f);
+            float half = size * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = Mathf.Abs(x + 0.5f - half) - (half - r);
+                    float dy = Mathf.Abs(y + 0.5f - half) - (half - r);
+                    float outside = new Vector2(Mathf.Max(dx, 0f), Mathf.Max(dy, 0f)).magnitude
+                        + Mathf.Min(Mathf.Max(dx, dy), 0f) - r + 1f;
+                    float shapeA = Mathf.Clamp01(0.5f - outside);
+                    Color c = fill;
+                    float pixelA = fill.a;
+                    if (ring.a > 0f && ringWidth > 0f)
+                    {
+                        float inside = -outside;
+                        if (inside < ringWidth)
+                        {
+                            float t = Mathf.Clamp01(ringWidth - inside);
+                            c = Color.Lerp(fill, new Color(ring.r, ring.g, ring.b, fill.a), ring.a * t);
+                            pixelA = Mathf.Max(fill.a, ring.a * t);
+                        }
+                    }
+                    tex.SetPixel(x, y, new Color(c.r, c.g, c.b, pixelA * shapeA));
+                }
+            }
+
+            tex.Apply();
+            this.themeTextures.Add(tex);
+            return tex;
+        }
+
+        private Texture2D MakeRoundedGradientTexture(int width, int height, float radius, Color left, Color right)
+        {
+            Texture2D tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            tex.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            float r = Mathf.Clamp(radius, 1f, (Mathf.Min(width, height) * 0.5f) - 1f);
+            float halfW = width * 0.5f;
+            float halfH = height * 0.5f;
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float dx = Mathf.Abs(x + 0.5f - halfW) - (halfW - r);
+                    float dy = Mathf.Abs(y + 0.5f - halfH) - (halfH - r);
+                    float outside = new Vector2(Mathf.Max(dx, 0f), Mathf.Max(dy, 0f)).magnitude
+                        + Mathf.Min(Mathf.Max(dx, dy), 0f) - r + 1f;
+                    float shapeA = Mathf.Clamp01(0.5f - outside);
+                    Color c = Color.Lerp(left, right, width <= 1 ? 0f : (float)x / (width - 1));
+                    tex.SetPixel(x, y, new Color(c.r, c.g, c.b, c.a * shapeA));
+                }
+            }
+
+            tex.Apply();
+            this.themeTextures.Add(tex);
+            return tex;
+        }
+
+        private Texture2D MakeHorizontalGradientTexture(Color left, Color right)
+        {
+            const int width = 64;
+            Texture2D tex = new Texture2D(width, 1, TextureFormat.RGBA32, false);
+            tex.hideFlags = HideFlags.DontUnloadUnusedAsset;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            for (int x = 0; x < width; x++)
+            {
+                tex.SetPixel(x, 0, Color.Lerp(left, right, (float)x / (width - 1)));
+            }
+
+            tex.Apply();
+            this.themeTextures.Add(tex);
+            return tex;
+        }
+
+        private Texture2D EnsureUiAccentGradientTexture()
+        {
+            if (this.uiAccentGradientTex == null)
+            {
+                Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+                this.uiAccentGradientTex = this.MakeHorizontalGradientTexture(accent, this.GetUiAccentSecondary(accent));
+            }
+
+            return this.uiAccentGradientTex;
+        }
+
+        // Capsule filled with the accent→accent2 gradient (toggle-on track, slider fill).
+        // Baked single-texture 9-slice when available (themeCapsuleGradientStyle) — the old
+        // 3-piece assembly (mid rect + 2 clipped half-circle groups) still showed a hairline
+        // seam at rest (full alpha, not just mid-animation) on some toggles: three independently
+        // rasterized quads under a scaled GUI.matrix don't reliably share the exact same edge
+        // pixel. Below the pill-readable size (12px either dimension) just stretches the flat
+        // gradient texture with no rounding — a 1-2px corner radius is invisible at that scale
+        // anyway, and a single textured quad cannot seam with itself.
+        private void DrawAccentGradientCapsule(Rect rect, float alpha = 1f)
+        {
+            if (rect.width <= 0f || rect.height <= 0f)
+            {
+                return;
+            }
+
+            this.EnsureUiPrimitiveTextures();
+            rect = new Rect(Mathf.Round(rect.x), Mathf.Round(rect.y), Mathf.Round(rect.width), Mathf.Round(rect.height));
+
+            if (rect.height < 12f || rect.width < 12f)
+            {
+                GUI.color = new Color(1f, 1f, 1f, alpha);
+                GUI.DrawTexture(rect, this.EnsureUiAccentGradientTexture(), ScaleMode.StretchToFill);
+                GUI.color = Color.white;
+                return;
+            }
+
+            if (this.themeCapsuleGradientStyle != null && this.themeCapsuleGradientStyle.normal.background != null)
+            {
+                GUI.color = new Color(1f, 1f, 1f, alpha);
+                GUI.Box(rect, "", this.themeCapsuleGradientStyle);
+                GUI.color = Color.white;
+                return;
+            }
+
+            // Fallback for the brief pre-EnsureThemeStyles window only.
+            Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, alpha);
+            Color accent2 = this.GetUiAccentSecondary(accent);
+            accent2.a = alpha;
+            float r = Mathf.Max(0f, Mathf.Min(rect.height * 0.5f, rect.width * 0.5f));
+            Rect mid = new Rect(rect.x + r, rect.y, rect.width - (2f * r), rect.height);
+            if (mid.width > 0f)
+            {
+                GUI.color = new Color(1f, 1f, 1f, alpha);
+                GUI.DrawTexture(mid, this.EnsureUiAccentGradientTexture(), ScaleMode.StretchToFill);
+            }
+
+            GUI.BeginGroup(new Rect(rect.x, rect.y, r, rect.height));
+            GUI.color = accent;
+            GUI.DrawTexture(new Rect(0f, 0f, rect.height, rect.height), this.uiCircleTexture);
+            GUI.EndGroup();
+            GUI.BeginGroup(new Rect(rect.xMax - r, rect.y, r, rect.height));
+            GUI.color = accent2;
+            GUI.DrawTexture(new Rect(r - rect.height, 0f, rect.height, rect.height), this.uiCircleTexture);
+            GUI.EndGroup();
+            GUI.color = Color.white;
+        }
+
+        // Quiet hairline ring around a box. Rounded (baked single-texture, themeRoundedRingStyle)
+        // to match the rounded corners already baked into every box background it outlines —
+        // straight hairlines there poked out past the rounded shape as a mismatched rectangular
+        // frame. Thin rects (dividers, degenerate cell borders) keep the old straight-line draw:
+        // there's no meaningful "rounded corner" on a 1px-tall line, and the ring texture's fixed
+        // border would just clip/distort at that size.
         private void DrawCardOutline(Rect rect, float thickness = 1f)
         {
-            Color prev = GUI.color;
-            Color edge = new Color(1f, 1f, 1f, Mathf.Clamp(0.06f + (this.uiPanelAlpha * 0.1f), 0.08f, 0.18f));
-            Color accentTop = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, Mathf.Clamp(0.28f + (this.uiPanelAlpha * 0.28f), 0.25f, 0.6f));
-            Color shadow = new Color(0f, 0f, 0f, 0.28f);
+            Color edge = new Color(1f, 1f, 1f, Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f));
 
+            if (rect.height >= 18f && rect.width >= 18f)
+            {
+                this.EnsureUiPrimitiveTextures();
+                if (this.themeRoundedRingStyle != null && this.themeRoundedRingStyle.normal.background != null)
+                {
+                    Color prevTint = GUI.color;
+                    GUI.color = edge;
+                    GUI.Box(rect, "", this.themeRoundedRingStyle);
+                    GUI.color = prevTint;
+                    return;
+                }
+            }
+
+            Color prev = GUI.color;
             GUI.color = edge;
             GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, thickness), Texture2D.whiteTexture);
             GUI.DrawTexture(new Rect(rect.x, rect.yMax - thickness, rect.width, thickness), Texture2D.whiteTexture);
             GUI.DrawTexture(new Rect(rect.x, rect.y, thickness, rect.height), Texture2D.whiteTexture);
             GUI.DrawTexture(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), Texture2D.whiteTexture);
-            GUI.color = accentTop;
-            GUI.DrawTexture(new Rect(rect.x + 1f, rect.y + 1f, rect.width - 2f, 1f), Texture2D.whiteTexture);
-            GUI.color = shadow;
-            GUI.DrawTexture(new Rect(rect.x + 1f, rect.yMax - 1f, rect.width - 2f, 1f), Texture2D.whiteTexture);
             GUI.color = prev;
         }
 
@@ -111,7 +475,11 @@ namespace HeartopiaMod
         {
             this.EnsureUiPrimitiveTextures();
 
-            float corner = Mathf.Clamp(radius, 0f, Mathf.Min(rect.width, rect.height) * 0.5f);
+            // Integer-aligned rect: the shape is assembled from adjacent rects + corner circles,
+            // and fractional coordinates open subpixel seams (bright/dark 1px stripes) between
+            // the patches when the fill is translucent.
+            rect = new Rect(Mathf.Round(rect.x), Mathf.Round(rect.y), Mathf.Round(rect.width), Mathf.Round(rect.height));
+            float corner = Mathf.Clamp(Mathf.Round(radius), 0f, Mathf.Min(rect.width, rect.height) * 0.5f);
             if (corner <= 0.5f)
             {
                 GUI.color = fill;
@@ -152,9 +520,37 @@ namespace HeartopiaMod
                 GUI.color = Color.white;
             }
 
-            if (borderWidth > 0f)
+            if (borderWidth > 0f && corner > 0.5f)
             {
-                GUI.color = border.a > 0f ? border : new Color(1f, 1f, 1f, 0.12f);
+                // Rounded ring, not 4 straight lines: draw the SAME corner-radius shape again in
+                // the border color (reusing the exact rect+corner already used for the fill
+                // above, so it can't mismatch), then redraw the fill inset by borderWidth on top.
+                // The old straight-line border had square corners sitting on top of the rounded
+                // fill drawn above — they poked out past the curve as a mismatched rectangular
+                // frame (same defect DrawCardOutline had, fixed separately; this is the same bug
+                // living inside DrawRoundedPanel's own border path).
+                Color borderColor = border.a > 0f ? border : new Color(1f, 1f, 1f, 0.12f);
+                this.DrawRoundedPanel(rect, radius, borderColor, Color.clear, 0f, Color.clear);
+                float innerCorner = Mathf.Max(0f, corner - borderWidth);
+                Rect innerRect = new Rect(rect.x + borderWidth, rect.y + borderWidth, rect.width - (2f * borderWidth), rect.height - (2f * borderWidth));
+                if (innerRect.width > 0f && innerRect.height > 0f)
+                {
+                    this.DrawRoundedPanel(innerRect, innerCorner, fill, Color.clear, 0f, Color.clear);
+                }
+
+                if (topAccent.a > 0f)
+                {
+                    GUI.color = topAccent;
+                    GUI.DrawTexture(new Rect(innerRect.x + 1f, innerRect.y + 1f, innerRect.width - 2f, 1.5f), Texture2D.whiteTexture);
+                    GUI.color = Color.white;
+                }
+            }
+            else if (borderWidth > 0f)
+            {
+                // Degenerate (no meaningful corner radius): the old straight-line border is
+                // already correct here, nothing to round.
+                Color borderColor = border.a > 0f ? border : new Color(1f, 1f, 1f, 0.12f);
+                GUI.color = borderColor;
                 GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, borderWidth), Texture2D.whiteTexture);
                 GUI.DrawTexture(new Rect(rect.x, rect.yMax - borderWidth, rect.width, borderWidth), Texture2D.whiteTexture);
                 GUI.DrawTexture(new Rect(rect.x, rect.y, borderWidth, rect.height), Texture2D.whiteTexture);
@@ -170,13 +566,77 @@ namespace HeartopiaMod
             }
         }
 
+        // Shared primitive for translucent hover/wash fills — single baked 9-slice texture,
+        // tinted via GUI.color. See themeRoundedWhiteStyle bake comment for why this exists
+        // instead of DrawRoundedPanel's rect+circle assembly (visible seam at low alpha).
+        private void DrawTintedRoundedBox(Rect rect, Color tint)
+        {
+            if (rect.width <= 0f || rect.height <= 0f)
+            {
+                return;
+            }
+
+            if (this.themeRoundedWhiteStyle == null || this.themeRoundedWhiteStyle.normal.background == null)
+            {
+                this.DrawRoundedPanel(rect, 10f, tint, Color.clear, 0f, Color.clear);
+                return;
+            }
+
+            Color prev = GUI.color;
+            GUI.color = tint;
+            GUI.Box(rect, "", this.themeRoundedWhiteStyle);
+            GUI.color = prev;
+        }
+
+        // Same idea as DrawTintedRoundedBox, but for LARGE chrome (main window slab, sidebar
+        // column) at the bigger radius-15 baked into themeBigTintableStyle. Kept as a separate
+        // function rather than parameterizing DrawTintedRoundedBox so its many existing small-
+        // element call sites can't be accidentally affected.
+        private void DrawTintedBigRoundedBox(Rect rect, Color tint)
+        {
+            if (rect.width <= 0f || rect.height <= 0f)
+            {
+                return;
+            }
+
+            if (this.themeBigTintableStyle == null || this.themeBigTintableStyle.normal.background == null)
+            {
+                this.DrawRoundedPanel(rect, 15f, tint, Color.clear, 0f, Color.clear);
+                return;
+            }
+
+            Color prev = GUI.color;
+            GUI.color = tint;
+            GUI.Box(rect, "", this.themeBigTintableStyle);
+            GUI.color = prev;
+        }
+
         private void DrawExentriSectionPanel(Rect rect, Color accent, Color fill, Color softLine)
         {
-            this.DrawRoundedPanel(rect, 10f, fill, softLine, 1f, Color.clear);
+            // Card = rounded hairline ring (baked single-texture, themeBigCardRingStyle) +
+            // rounded fill; no accent top line in the 2.0 look. The ring can't be a plain
+            // DrawRoundedPanel translucent fill (5.5% alpha) — same seam bug as every other
+            // low-alpha multi-piece fill in this file — and this is the single most-visible
+            // panel in the app (every tab's main card, the LIVE rail).
+            if (this.themeBigCardRingStyle != null && this.themeBigCardRingStyle.normal.background != null)
+            {
+                Color prevTint = GUI.color;
+                GUI.color = new Color(1f, 1f, 1f, 0.055f);
+                GUI.Box(rect, "", this.themeBigCardRingStyle);
+                GUI.color = prevTint;
+            }
+            else
+            {
+                this.DrawRoundedPanel(rect, 14f, new Color(1f, 1f, 1f, 0.055f), Color.clear, 0f, Color.clear);
+            }
 
-            GUI.color = new Color(accent.r, accent.g, accent.b, 0.9f);
-            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, 1.5f), Texture2D.whiteTexture);
-            GUI.color = Color.white;
+            this.DrawRoundedPanel(
+                new Rect(rect.x + 1f, rect.y + 1f, rect.width - 2f, rect.height - 2f),
+                13f,
+                fill,
+                Color.clear,
+                0f,
+                Color.clear);
         }
 
         private bool DrawPrimaryActionButton(Rect rect, string label)
@@ -191,6 +651,13 @@ namespace HeartopiaMod
 
         private bool DrawSwitchToggle(Rect rect, bool value, string label)
         {
+            Event e = Event.current;
+            bool hovered = e != null && rect.Contains(e.mousePosition);
+            if (hovered)
+            {
+                this.DrawRowHoverWash(rect);
+            }
+
             GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
             labelStyle.fontSize = 14;
             labelStyle.fontStyle = FontStyle.Normal;
@@ -198,30 +665,10 @@ namespace HeartopiaMod
             labelStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
             GUI.Label(new Rect(rect.x, rect.y, rect.width - 60f, rect.height), this.L(label), labelStyle);
 
-            this.EnsureUiPrimitiveTextures();
-            Rect switchRect = new Rect(rect.xMax - 46f, rect.y + Mathf.Max(0f, (rect.height - 20f) * 0.5f), 40f, 20f);
-            Rect trackRect = new Rect(switchRect.x, switchRect.y + 1f, switchRect.width, 18f);
-            Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, 0.98f);
-            Color offTrack = new Color(0.16f, 0.16f, 0.22f, 0.98f);
-            Color onTrack = new Color(accent.r * 0.92f, accent.g * 0.72f, accent.b, 1f);
+            Rect switchRect = new Rect(rect.xMax - 48f, rect.y + Mathf.Max(-1f, (rect.height - 22f) * 0.5f), 42f, 22f);
+            float knobT = this.StepToggleAnim(label ?? "toggle", value);
+            this.DrawSwitchTrackAndKnob(switchRect, knobT, hovered);
 
-            if (value)
-            {
-                Rect glowRect = new Rect(trackRect.x - 2f, trackRect.y - 2f, trackRect.width + 4f, trackRect.height + 4f);
-                this.DrawCapsule(glowRect, new Color(accent.r, accent.g, accent.b, 0.28f));
-            }
-
-            this.DrawCapsule(trackRect, value ? onTrack : offTrack);
-
-            float knobDiameter = 14f;
-            float knobX = value ? (trackRect.xMax - knobDiameter - 2f) : (trackRect.x + 2f);
-            Rect knobRect = new Rect(knobX, trackRect.y + (trackRect.height - knobDiameter) * 0.5f, knobDiameter, knobDiameter);
-            Color knobColor = value ? new Color(0.96f, 0.97f, 1f, 1f) : new Color(0.68f, 0.7f, 0.78f, 1f);
-            GUI.color = knobColor;
-            GUI.DrawTexture(knobRect, this.uiCircleTexture);
-            GUI.color = Color.white;
-
-            Event e = Event.current;
             if (e != null && e.type == EventType.MouseDown && e.button == 0 && rect.Contains(e.mousePosition))
             {
                 value = !value;
@@ -245,6 +692,15 @@ namespace HeartopiaMod
 
         private bool DrawWrappedSwitchToggle(Rect rect, bool value, string label, float minHeight = 20f)
         {
+            float rowHeight = Mathf.Max(rect.height, this.GetSwitchToggleHeight(rect.width, label, minHeight));
+            Rect hitRect = new Rect(rect.x, rect.y, rect.width, rowHeight);
+            Event e = Event.current;
+            bool hovered = e != null && hitRect.Contains(e.mousePosition);
+            if (hovered)
+            {
+                this.DrawRowHoverWash(hitRect);
+            }
+
             GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
             labelStyle.fontSize = 14;
             labelStyle.fontStyle = FontStyle.Normal;
@@ -252,35 +708,13 @@ namespace HeartopiaMod
             labelStyle.wordWrap = true;
             labelStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
 
-            float rowHeight = Mathf.Max(rect.height, this.GetSwitchToggleHeight(rect.width, label, minHeight));
             float labelWidth = Mathf.Max(60f, rect.width - 60f);
             GUI.Label(new Rect(rect.x, rect.y, labelWidth, rowHeight), this.L(label), labelStyle);
 
-            this.EnsureUiPrimitiveTextures();
-            Rect switchRect = new Rect(rect.xMax - 46f, rect.y + Mathf.Max(0f, (rowHeight - 20f) * 0.5f), 40f, 20f);
-            Rect trackRect = new Rect(switchRect.x, switchRect.y + 1f, switchRect.width, 18f);
-            Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, 0.98f);
-            Color offTrack = new Color(0.16f, 0.16f, 0.22f, 0.98f);
-            Color onTrack = new Color(accent.r * 0.92f, accent.g * 0.72f, accent.b, 1f);
+            Rect switchRect = new Rect(rect.xMax - 48f, rect.y + Mathf.Max(-1f, (rowHeight - 22f) * 0.5f), 42f, 22f);
+            float knobT = this.StepToggleAnim(label ?? "toggle", value);
+            this.DrawSwitchTrackAndKnob(switchRect, knobT, hovered);
 
-            if (value)
-            {
-                Rect glowRect = new Rect(trackRect.x - 2f, trackRect.y - 2f, trackRect.width + 4f, trackRect.height + 4f);
-                this.DrawCapsule(glowRect, new Color(accent.r, accent.g, accent.b, 0.28f));
-            }
-
-            this.DrawCapsule(trackRect, value ? onTrack : offTrack);
-
-            float knobDiameter = 14f;
-            float knobX = value ? (trackRect.xMax - knobDiameter - 2f) : (trackRect.x + 2f);
-            Rect knobRect = new Rect(knobX, trackRect.y + (trackRect.height - knobDiameter) * 0.5f, knobDiameter, knobDiameter);
-            Color knobColor = value ? new Color(0.96f, 0.97f, 1f, 1f) : new Color(0.68f, 0.7f, 0.78f, 1f);
-            GUI.color = knobColor;
-            GUI.DrawTexture(knobRect, this.uiCircleTexture);
-            GUI.color = Color.white;
-
-            Event e = Event.current;
-            Rect hitRect = new Rect(rect.x, rect.y, rect.width, rowHeight);
             if (e != null && e.type == EventType.MouseDown && e.button == 0 && hitRect.Contains(e.mousePosition))
             {
                 value = !value;
@@ -308,18 +742,17 @@ namespace HeartopiaMod
         private void DrawAccentSliderVisual(Rect rect, float value, float min, float max)
         {
             float t = Mathf.InverseLerp(min, max, value);
-            float lineY = rect.y + rect.height * 0.5f - 2.5f;
-            Rect bgRect = new Rect(rect.x, lineY, rect.width, 5f);
-            Rect fillRect = new Rect(rect.x, lineY, Mathf.Max(5f, rect.width * t), 5f);
-            float thumbX = Mathf.Clamp(rect.x + rect.width * t, rect.x + 6f, rect.xMax - 6f);
-            Rect thumbGlowRect = new Rect(thumbX - 8f, rect.y + rect.height * 0.5f - 8f, 16f, 16f);
-            Rect thumbRect = new Rect(thumbX - 6f, rect.y + rect.height * 0.5f - 6f, 12f, 12f);
+            float lineY = rect.y + (rect.height * 0.5f) - 3f;
+            Rect bgRect = new Rect(rect.x, lineY, rect.width, 6f);
+            Rect fillRect = new Rect(rect.x, lineY, Mathf.Max(6f, rect.width * t), 6f);
+            float thumbX = Mathf.Clamp(rect.x + rect.width * t, rect.x + 8f, rect.xMax - 8f);
+            Rect thumbRect = new Rect(thumbX - 8f, rect.y + (rect.height * 0.5f) - 8f, 16f, 16f);
 
-            this.DrawCapsule(bgRect, new Color(0.18f, 0.19f, 0.24f, 0.92f));
-            this.DrawCapsule(fillRect, new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, 0.94f));
-            GUI.color = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, 0.28f);
-            GUI.DrawTexture(thumbGlowRect, this.uiCircleTexture);
-            GUI.color = new Color(0.95f, 0.97f, 1f, 1f);
+            this.DrawCapsule(bgRect, new Color(0.137f, 0.169f, 0.22f, 0.95f));
+            this.DrawAccentGradientCapsule(fillRect);
+            GUI.color = new Color(0f, 0f, 0f, 0.35f);
+            GUI.DrawTexture(new Rect(thumbRect.x, thumbRect.y + 1.5f, 16f, 16f), this.uiCircleTexture);
+            GUI.color = new Color(0.97f, 0.98f, 1f, 1f);
             GUI.DrawTexture(thumbRect, this.uiCircleTexture);
             GUI.color = Color.white;
         }
@@ -355,16 +788,27 @@ namespace HeartopiaMod
 
         private void EnsureUiPrimitiveTextures()
         {
-            if (this.uiCircleTexture != null)
+            if (this.uiCircleTexture != null && this.uiRoundedRectSprite != null)
             {
                 return;
             }
 
+            if (this.uiCircleTexture != null)
+            {
+                // Circle alive but sprite missing — just rebuild the sprite.
+                this.uiRoundedRectSprite = this.MakeRoundedRectTexture(32, 9f, Color.white, Color.clear, 0f);
+                return;
+            }
+
             int size = 32;
-            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            // Mip-mapped + trilinear + a soft 1px antialiased edge (not a hard 0/1 cutoff):
+            // this sprite is drawn at everything from an 8px live-dot to a 42px switch cap, and
+            // an unmipped hard-edge circle minifies inconsistently at small sizes (visible
+            // shimmer/banding on the switch/nav-bar circle draws).
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
             tex.hideFlags = HideFlags.DontUnloadUnusedAsset;
             tex.wrapMode = TextureWrapMode.Clamp;
-            tex.filterMode = FilterMode.Bilinear;
+            tex.filterMode = FilterMode.Trilinear;
             float radius = (size - 1f) * 0.5f;
             Vector2 c = new Vector2(radius, radius);
             for (int y = 0; y < size; y++)
@@ -372,75 +816,206 @@ namespace HeartopiaMod
                 for (int x = 0; x < size; x++)
                 {
                     float d = Vector2.Distance(new Vector2(x, y), c);
-                    float a = d <= radius ? 1f : 0f;
+                    float a = Mathf.Clamp01(radius - d + 0.5f);
                     tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
                 }
             }
-            tex.Apply();
+            tex.Apply(true);
             this.uiCircleTexture = tex;
             this.themeTextures.Add(tex);
+
+            // White rounded-rect sprite: small translucent chips draw this as ONE tinted quad
+            // (GUI.color) instead of assembling patches, which seams on translucent fills.
+            if (this.uiRoundedRectSprite == null)
+            {
+                this.uiRoundedRectSprite = this.MakeRoundedRectTexture(32, 9f, Color.white, Color.clear, 0f);
+            }
         }
 
+        // Solid-color capsule (arbitrary tint). Baked single-texture 9-slice when the element
+        // reads as a pill (≥12px both dimensions) — see DrawAccentGradientCapsule for why the
+        // old rect+circle-group assembly is unreliable under a scaled GUI.matrix. Below that,
+        // a flat untinted rect: rounding is imperceptible at that thinness and a single quad
+        // can't seam with itself.
         private void DrawCapsule(Rect rect, Color color)
         {
+            if (rect.width <= 0f || rect.height <= 0f)
+            {
+                return;
+            }
+
             this.EnsureUiPrimitiveTextures();
-            float r = rect.height * 0.5f;
-            Rect mid = new Rect(rect.x + r, rect.y, rect.width - 2f * r, rect.height);
-            Rect left = new Rect(rect.x, rect.y, rect.height, rect.height);
-            Rect right = new Rect(rect.xMax - rect.height, rect.y, rect.height, rect.height);
+            rect = new Rect(Mathf.Round(rect.x), Mathf.Round(rect.y), Mathf.Round(rect.width), Mathf.Round(rect.height));
+
+            if (rect.height < 12f || rect.width < 12f)
+            {
+                GUI.color = color;
+                GUI.DrawTexture(rect, Texture2D.whiteTexture);
+                GUI.color = Color.white;
+                return;
+            }
+
+            if (this.themeCapsuleWhiteStyle != null && this.themeCapsuleWhiteStyle.normal.background != null)
+            {
+                GUI.color = color;
+                GUI.Box(rect, "", this.themeCapsuleWhiteStyle);
+                GUI.color = Color.white;
+                return;
+            }
+
+            // Fallback for the brief pre-EnsureThemeStyles window only.
+            float r = Mathf.Max(0f, Mathf.Min(rect.height * 0.5f, rect.width * 0.5f));
             GUI.color = color;
-            GUI.DrawTexture(mid, Texture2D.whiteTexture);
-            GUI.DrawTexture(left, this.uiCircleTexture);
-            GUI.DrawTexture(right, this.uiCircleTexture);
+            Rect mid = new Rect(rect.x + r, rect.y, rect.width - (2f * r), rect.height);
+            if (mid.width > 0f)
+            {
+                GUI.DrawTexture(mid, Texture2D.whiteTexture);
+            }
+
+            GUI.BeginGroup(new Rect(rect.x, rect.y, r, rect.height));
+            GUI.DrawTexture(new Rect(0f, 0f, rect.height, rect.height), this.uiCircleTexture);
+            GUI.EndGroup();
+            GUI.BeginGroup(new Rect(rect.xMax - r, rect.y, r, rect.height));
+            GUI.DrawTexture(new Rect(r - rect.height, 0f, rect.height, rect.height), this.uiCircleTexture);
+            GUI.EndGroup();
             GUI.color = Color.white;
         }
 
         private void DrawQuickStatusPanel(Rect panelRect)
         {
-            GUIStyle title = new GUIStyle(GUI.skin.label);
-            title.fontSize = 14;
-            title.fontStyle = FontStyle.Bold;
-            title.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
+            Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+            Color panelFill = new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiPanelAlpha, 0.15f, 1f));
+            Color textPrimary = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
+            Color textMuted = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB);
+            Color live = new Color(0.24f, 0.86f, 0.59f);
 
-            GUIStyle value = new GUIStyle(GUI.skin.label);
-            value.fontSize = 13;
-            value.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB);
+            this.DrawExentriSectionPanel(panelRect, accent, panelFill, Color.clear);
+            this.EnsureUiPrimitiveTextures();
 
-            GUIStyle none = new GUIStyle(GUI.skin.label);
-            none.fontSize = 12;
-            none.fontStyle = FontStyle.Italic;
-            none.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.55f);
-
-            float x = panelRect.x + 14f;
-            float w = panelRect.width - 28f;
-            float y = panelRect.y + 46f;
             List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
 
+            GUIStyle overline = new GUIStyle(GUI.skin.label);
+            overline.fontSize = 11;
+            overline.fontStyle = FontStyle.Bold;
+            overline.normal.textColor = new Color(textMuted.r, textMuted.g, textMuted.b, 0.95f);
+            GUI.Label(new Rect(panelRect.x + 16f, panelRect.y + 14f, 100f, 18f), this.L("LIVE"), overline);
+
+            string chipText = entries.Count > 0 ? this.LF("{0} active", entries.Count) : this.L("standby");
+            GUIStyle chipStyle = new GUIStyle(GUI.skin.label);
+            chipStyle.fontSize = 10;
+            chipStyle.fontStyle = FontStyle.Normal;
+            chipStyle.alignment = TextAnchor.MiddleCenter;
+            chipStyle.clipping = TextClipping.Overflow;
+            chipStyle.normal.textColor = entries.Count > 0 ? live : textMuted;
+            // No CalcSize here: it under-measures this dynamic-font string in-game (observed
+            // live), so the capsule is sized from the glyph count with generous slack instead.
+            float chipWidth = Mathf.Min(30f + (chipText.Length * 7.5f), panelRect.width - 110f);
+            Rect chipRect = new Rect(panelRect.xMax - 14f - chipWidth, panelRect.y + 12f, chipWidth, 20f);
+            this.DrawCapsule(chipRect, entries.Count > 0 ? new Color(live.r, live.g, live.b, 0.13f) : new Color(1f, 1f, 1f, 0.05f));
+            GUI.Label(chipRect, chipText, chipStyle);
+
+            // Footer: FPS readout (same smoothing fields as the status overlay).
+            Rect footerRect = new Rect(panelRect.x + 1f, panelRect.yMax - 40f, panelRect.width - 2f, 39f);
+            GUI.color = new Color(1f, 1f, 1f, 0.05f);
+            GUI.DrawTexture(new Rect(footerRect.x + 10f, footerRect.y, footerRect.width - 20f, 1f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            float currentFps = Time.unscaledDeltaTime > 0.0001f ? (1f / Time.unscaledDeltaTime) : this.statusOverlaySmoothedFps;
+            if (this.statusOverlaySmoothedFps <= 0f)
+            {
+                this.statusOverlaySmoothedFps = currentFps;
+            }
+            else if (currentFps > 0f)
+            {
+                this.statusOverlaySmoothedFps = Mathf.Lerp(this.statusOverlaySmoothedFps, currentFps, 0.05f);
+            }
+
+            if (Time.unscaledTime >= this.nextStatusOverlayFpsRefreshAt)
+            {
+                this.statusOverlayDisplayedFps = this.statusOverlaySmoothedFps;
+                this.nextStatusOverlayFpsRefreshAt = Time.unscaledTime + 0.35f;
+            }
+
+            string fpsText = this.statusOverlayDisplayedFps > 0f ? Mathf.RoundToInt(this.statusOverlayDisplayedFps).ToString() : "--";
+            GUIStyle fpsLabelStyle = new GUIStyle(GUI.skin.label);
+            fpsLabelStyle.fontSize = 10;
+            fpsLabelStyle.fontStyle = FontStyle.Bold;
+            fpsLabelStyle.normal.textColor = new Color(textMuted.r, textMuted.g, textMuted.b, 0.95f);
+            GUI.Label(new Rect(panelRect.x + 16f, footerRect.y + 12f, 60f, 16f), this.L("FPS"), fpsLabelStyle);
+            GUIStyle fpsValueStyle = new GUIStyle(GUI.skin.label);
+            fpsValueStyle.fontSize = 13;
+            fpsValueStyle.fontStyle = FontStyle.Bold;
+            fpsValueStyle.alignment = TextAnchor.MiddleRight;
+            fpsValueStyle.normal.textColor = textPrimary;
+            GUI.Label(new Rect(panelRect.xMax - 90f, footerRect.y + 10f, 74f, 18f), fpsText, fpsValueStyle);
+
+            float x = panelRect.x + 16f;
+            float w = panelRect.width - 32f;
+            float y = panelRect.y + 44f;
+            float maxY = footerRect.y - 10f;
+
+            if (entries.Count == 0)
+            {
+                GUIStyle none = new GUIStyle(GUI.skin.label);
+                none.fontSize = 12;
+                none.fontStyle = FontStyle.Italic;
+                none.normal.textColor = new Color(textMuted.r, textMuted.g, textMuted.b, 0.6f);
+                GUI.Label(new Rect(x, y + 4f, w, 22f), this.L("No active features"), none);
+                return;
+            }
+
+            GUIStyle title = new GUIStyle(GUI.skin.label);
+            title.fontSize = 13;
+            title.fontStyle = FontStyle.Bold;
+            title.normal.textColor = textPrimary;
+
+            GUIStyle value = new GUIStyle(GUI.skin.label);
+            value.fontSize = 11;
+            value.normal.textColor = new Color(textMuted.r, textMuted.g, textMuted.b, 0.98f);
+
+            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 2.6f));
             for (int i = 0; i < entries.Count; i++)
             {
+                if (y + 20f > maxY)
+                {
+                    int remaining = entries.Count - i;
+                    GUI.Label(new Rect(x, Mathf.Min(y, maxY - 16f), w, 16f), this.LF("+{0} more", remaining), value);
+                    break;
+                }
+
                 LiveFeatureStatusEntry entry = entries[i];
-                GUI.Label(new Rect(x, y, w, 22f), this.L(entry.Label), title);
+
+                // Pulsing live dot with a soft halo.
+                GUI.color = new Color(live.r, live.g, live.b, 0.18f + (0.22f * pulse));
+                GUI.DrawTexture(new Rect(x - 3f, y + 3f, 14f, 14f), this.uiCircleTexture);
+                GUI.color = live;
+                GUI.DrawTexture(new Rect(x, y + 6f, 8f, 8f), this.uiCircleTexture);
+                GUI.color = Color.white;
+
+                GUI.Label(new Rect(x + 18f, y, w - 18f, 18f), this.L(entry.Label), title);
                 y += 19f;
-                GUI.Label(new Rect(x, y, w, 20f), this.L(entry.Summary), value);
-                y += 20f;
+                if (!string.IsNullOrWhiteSpace(entry.Summary))
+                {
+                    GUI.Label(new Rect(x + 18f, y, w - 18f, 16f), this.L(entry.Summary), value);
+                    y += 17f;
+                }
 
                 List<LiveFeatureStatusDetail> details = entry.Details;
                 if (details != null)
                 {
                     for (int j = 0; j < details.Count; j++)
                     {
+                        if (y + 16f > maxY)
+                        {
+                            break;
+                        }
+
                         LiveFeatureStatusDetail detail = details[j];
-                        GUI.Label(new Rect(x, y, w, 20f), this.L(detail.Label) + ": " + this.L(detail.Value), value);
-                        y += 18f;
+                        GUI.Label(new Rect(x + 18f, y, w - 18f, 16f), this.L(detail.Label) + ": " + this.L(detail.Value), value);
+                        y += 16f;
                     }
                 }
 
-                y += 8f;
-            }
-
-            if (entries.Count == 0)
-            {
-                GUI.Label(new Rect(x, y, w, 24f), this.L("No active features"), none);
+                y += 9f;
             }
         }
 
@@ -517,7 +1092,9 @@ namespace HeartopiaMod
             Color overlayFill = new Color(0.08f, 0.10f, 0.13f, 0.94f);
             Color overlayHeaderFill = new Color(0.10f, 0.12f, 0.17f, 0.98f);
             Color overlayFooterFill = new Color(0.07f, 0.08f, 0.11f, 0.98f);
-            Color overlayBorder = new Color(1f, 1f, 1f, 0.07f);
+            // Solid light-gray, not translucent white — the overlay floats over the game and a
+            // translucent ring reads as a bright stripe on light scenes.
+            Color overlayBorder = new Color(0.165f, 0.205f, 0.27f, 0.9f);
             Color badgeFill = new Color(this.uiAccentR * 0.42f, this.uiAccentG * 0.42f, this.uiAccentB * 0.58f, 0.98f);
             Color badgeIdleFill = new Color(0.17f, 0.20f, 0.27f, 0.98f);
 
@@ -555,7 +1132,15 @@ namespace HeartopiaMod
             }
             string fpsText = this.statusOverlayDisplayedFps > 0f ? Mathf.RoundToInt(this.statusOverlayDisplayedFps).ToString() : "--";
 
-            this.DrawRoundedPanel(frameRect, 10f, overlayFill, overlayBorder, 1f, Color.clear);
+            if (this.themeStatusOverlayFrameStyle != null && this.themeStatusOverlayFrameStyle.normal.background != null)
+            {
+                GUI.Box(frameRect, "", this.themeStatusOverlayFrameStyle);
+            }
+            else
+            {
+                this.DrawRoundedPanel(frameRect, 10f, overlayFill, overlayBorder, 1f, Color.clear);
+            }
+
             Rect headerRect = new Rect(frameRect.x + 1f, frameRect.y + 1f, frameRect.width - 2f, 38f);
             Rect footerRect = new Rect(frameRect.x + 1f, frameRect.yMax - 37f, frameRect.width - 2f, 36f);
             Rect bodyRect = new Rect(frameRect.x + 10f, headerRect.yMax + 8f, frameRect.width - 20f, footerRect.y - headerRect.yMax - 16f);

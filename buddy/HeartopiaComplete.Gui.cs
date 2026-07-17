@@ -62,15 +62,10 @@ namespace HeartopiaMod
                 this.targetWindowWidth = 1180f;
                 this.targetWindowHeight = 720f;
 
-                // Auto - Resize Window Height & Width
-                if (Mathf.Abs(this.windowRect.height - this.targetWindowHeight) > 1f)
-                {
-                    this.windowRect.height = Mathf.Lerp(this.windowRect.height, this.targetWindowHeight, Time.unscaledDeltaTime * 10f);
-                }
-                if (Mathf.Abs(this.windowRect.width - this.targetWindowWidth) > 1f)
-                {
-                    this.windowRect.width = Mathf.Lerp(this.windowRect.width, this.targetWindowWidth, Time.unscaledDeltaTime * 10f);
-                }
+                // Fixed size, no lerp: OnGUI runs once per EVENT, so the old per-call lerp gave
+                // Layout and Repaint slightly different window sizes within the same frame.
+                this.windowRect.width = this.targetWindowWidth;
+                this.windowRect.height = this.targetWindowHeight;
 
                 Color prevColor = GUI.color;
                 Color prevBg = GUI.backgroundColor;
@@ -137,8 +132,10 @@ namespace HeartopiaMod
             scale = Mathf.Clamp(scale, UiScaleMin, UiScaleMax);
             float maxX = Mathf.Max(0f, ((float)Screen.width / scale) - this.windowRect.width);
             float maxY = Mathf.Max(0f, ((float)Screen.height / scale) - this.windowRect.height);
-            this.windowRect.x = Mathf.Clamp(this.windowRect.x, 0f, maxX);
-            this.windowRect.y = Mathf.Clamp(this.windowRect.y, 0f, maxY);
+            // Whole-pixel window origin: a dragged fractional position would put every
+            // rounded panel inside on subpixel coordinates (patch seams — see DrawRoundedPanel).
+            this.windowRect.x = Mathf.Round(Mathf.Clamp(this.windowRect.x, 0f, maxX));
+            this.windowRect.y = Mathf.Round(Mathf.Clamp(this.windowRect.y, 0f, maxY));
         }
 
         private float GetSelectedTabEstimatedHeight()
@@ -321,35 +318,46 @@ namespace HeartopiaMod
         private void DrawSidebarTabButton(Rect rect, string label, int tabIndex)
         {
             bool active = this.selectedTab == tabIndex;
+            Event e = Event.current;
+            bool hovered = e != null && rect.Contains(e.mousePosition);
             Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
-            Color fill = active
-                ? new Color(accent.r * 0.18f, accent.g * 0.12f, accent.b * 0.22f, 0.95f)
-                : new Color(0f, 0f, 0f, 0f);
-            if (active)
-            {
-                this.DrawRoundedPanel(rect, 18f, fill, Color.clear, 0f, Color.clear);
-            }
-            else
-            {
-                GUI.color = new Color(1f, 1f, 1f, 0.04f);
-                GUI.DrawTexture(new Rect(rect.x, rect.yMax - 1f, rect.width, 1f), Texture2D.whiteTexture);
-                GUI.color = Color.white;
-            }
 
             if (active)
             {
-                this.EnsureUiPrimitiveTextures();
-                GUI.color = new Color(accent.r, accent.g, accent.b, 0.95f);
-                GUI.DrawTexture(new Rect(rect.xMax - 20f, rect.center.y - 5f, 10f, 10f), this.uiCircleTexture);
+                // Accent-tinted pill (baked 9-slice texture — see themeSegPlateStyle note)
+                // + 3px gradient bar hugging the sidebar edge.
+                if (this.themeSidebarButtonActiveStyle != null && this.themeSidebarButtonActiveStyle.normal.background != null)
+                {
+                    GUI.Box(rect, "", this.themeSidebarButtonActiveStyle);
+                }
+                else
+                {
+                    this.DrawRoundedPanel(rect, 10f, new Color(accent.r, accent.g, accent.b, 0.13f), Color.clear, 0f, Color.clear);
+                }
+
+                // Flat, single-color bar: at 3px wide, rounding is imperceptible anyway, and a
+                // solid flat rect can't seam — the old two-tone (accent/accent2 halves, each its
+                // own rounded panel) showed a bright line at the half-height boundary.
+                Rect barRect = new Rect(rect.x - 7f, rect.y + 9f, 3f, rect.height - 18f);
+                GUI.color = accent;
+                GUI.DrawTexture(barRect, Texture2D.whiteTexture);
                 GUI.color = Color.white;
+            }
+            else if (hovered)
+            {
+                this.DrawTintedRoundedBox(rect, new Color(1f, 1f, 1f, 0.055f));
             }
 
             GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
             labelStyle.alignment = TextAnchor.MiddleLeft;
-            labelStyle.fontStyle = FontStyle.Bold;
-            labelStyle.fontSize = 12;
-            labelStyle.normal.textColor = active ? new Color(this.uiTextR, this.uiTextG, this.uiTextB) : new Color(this.uiMainTabTextR, this.uiMainTabTextG, this.uiMainTabTextB, 0.62f);
-            GUI.Label(new Rect(rect.x + 18f, rect.y, rect.width - 42f, rect.height), this.L(label), labelStyle);
+            labelStyle.fontStyle = active ? FontStyle.Bold : FontStyle.Normal;
+            labelStyle.fontSize = 13;
+            labelStyle.normal.textColor = active
+                ? new Color(this.uiTextR, this.uiTextG, this.uiTextB)
+                : (hovered
+                    ? new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.92f)
+                    : new Color(this.uiMainTabTextR, this.uiMainTabTextG, this.uiMainTabTextB));
+            GUI.Label(new Rect(rect.x + 14f, rect.y, rect.width - 24f, rect.height), this.L(label), labelStyle);
 
             if (GUI.Button(rect, "", GUIStyle.none))
             {
@@ -374,6 +382,20 @@ namespace HeartopiaMod
             if (this.selectedTab == 9) return this.L("Research");
             if (this.selectedTab == 7) return this.L("Settings");
             return "Unknown";
+        }
+
+        private string GetSelectedTabSubtitle()
+        {
+            if (this.selectedTab == 0) return this.L("Player, camera and input");
+            if (this.selectedTab == 2) return this.L("Aura farm and collection");
+            if (this.selectedTab == 3) return this.L("Automation and helpers");
+            if (this.selectedTab == 8) return this.L("Experiments");
+            if (this.selectedTab == 4) return this.L("World scanner");
+            if (this.selectedTab == 5) return this.L("Locations and travel");
+            if (this.selectedTab == 6) return this.L("Bulk item tools");
+            if (this.selectedTab == 9) return this.L("Institute tools");
+            if (this.selectedTab == 7) return this.L("Menu, theme and hotkeys");
+            return string.Empty;
         }
 
         private void SetAutomationSubTab(int subTab)

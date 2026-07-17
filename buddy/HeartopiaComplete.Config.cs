@@ -1639,9 +1639,8 @@ namespace HeartopiaMod
             float rowX = panelX + 14f;
             float rowWidth = panelWidth - 28f;
             Rect rowRect = new Rect(rowX, (float)y, rowWidth, 28f);
-            Color rowFill = new Color(1f, 1f, 1f, 0.025f);
-            Color rowLine = new Color(1f, 1f, 1f, 0.04f);
-            this.DrawRoundedPanel(rowRect, 5f, rowFill, rowLine, 1f, Color.clear);
+            Color rowFill = new Color(1f, 1f, 1f, 0.05f);
+            this.DrawTintedRoundedBox(rowRect, rowFill);
 
             GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
             labelStyle.fontSize = 12;
