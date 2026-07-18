@@ -16,6 +16,18 @@ namespace HeartopiaMod
         private const int WildAnimalFeedMaxItemsPerCommand = 100;
         private const float WildAnimalFeedMinEmptyRatio = 0.02f;
         private const int WildAnimalFeedShopEggStaticId = 46102;
+        // Guard against the GetFoods GC-storm hang: each candidate inspected boxes ~7 Mono-heap
+        // objects (mono_field_get_value_object) + a gchandle pin. A group whose food category is
+        // stockpiled by the thousands (dolphin -> fish for an active fisher) would enumerate every
+        // stack in Backpack+Warehouse synchronously on the main thread -> tens of thousands of
+        // allocations -> SGen GC storm -> 13s main-thread freeze -> hang watchdog kill. Bound the
+        // per-group AuraMono candidate collection two ways: WildAnimalFeedGroupBudgetMs is the HARD
+        // freeze bound (shared across all of a group's passes); WildAnimalFeedMaxItemsPerGroup is a
+        // secondary per-pass item allowance (reset between passes, see ResetWildAnimalFeedGroupItemBudget).
+        // Both sit far above what any trough actually needs (a trough fills from a handful of
+        // high-value foods), so normal feeding is unaffected; only pathological inventories truncate.
+        private const int WildAnimalFeedMaxItemsPerGroup = 1500;
+        private const int WildAnimalFeedGroupBudgetMs = 1500;
         private static readonly string[] WildAnimalFeedStorageNames = { "Backpack", "Warehouse" };
         private static readonly HashSet<int> WildAnimalFeedEggStaticIds = new HashSet<int>
         {
@@ -37,6 +49,14 @@ namespace HeartopiaMod
         };
         private readonly Dictionary<long, int> wildAnimalFeedFullnessByKeyCache = new Dictionary<long, int>();
         private readonly Dictionary<int, HashSet<int>> wildAnimalFeedGroupIdsByStaticIdCache = new Dictionary<int, HashSet<int>>();
+
+        // Per-group AuraMono candidate-collection budget (see WildAnimalFeedMaxItemsPerGroup). Set at
+        // the top of CollectWildAnimalFeedCandidatesAuraMono and read in the item loop. Safe as shared
+        // instance state: feed-all is a single coroutine and this collection runs synchronously on the
+        // main thread with no reentrancy.
+        private int wildAnimalFeedGroupItemsInspected;
+        private int wildAnimalFeedGroupDeadlineTick;
+        private bool wildAnimalFeedGroupBudgetTripped;
 
         private MethodInfo wildAnimalFeedProtocolFeedMethod = null;
         private Type wildAnimalFeedAnimalGroupType = null;
@@ -791,6 +811,14 @@ namespace HeartopiaMod
                 string source = "AuraPreScan/" + storageName + (favoritesOnly ? "/favOnly" : "/all");
                 foreach (IntPtr item in backpackItems)
                 {
+                    // Snapshot items are pinned, but the per-item member reads still box on the Mono
+                    // heap — same GC-storm bound as the live paths.
+                    if (this.WildAnimalFeedGroupBudgetExhausted())
+                    {
+                        break;
+                    }
+
+                    this.wildAnimalFeedGroupItemsInspected++;
                     stats.RawItems++;
                     if (!this.TryBuildWildAnimalFeedFoodCandidateAuraMono(
                         item,
@@ -1635,6 +1663,54 @@ namespace HeartopiaMod
             }
         }
 
+        // Starts a group's budget. The wall-clock deadline is the HARD freeze bound (shared across
+        // every pass for this group, so total main-thread stall stays <= WildAnimalFeedGroupBudgetMs);
+        // the item counter is a secondary per-pass fairness cap, reset between passes so the favOnly
+        // pass can't burn the whole allowance rejecting non-favorites and starve the "all"/backpack
+        // fallbacks. The fallbacks still only run while wall-clock time remains, so the hang can't
+        // return.
+        private void BeginWildAnimalFeedGroupBudget()
+        {
+            this.wildAnimalFeedGroupItemsInspected = 0;
+            this.wildAnimalFeedGroupDeadlineTick = unchecked(Environment.TickCount + WildAnimalFeedGroupBudgetMs);
+            this.wildAnimalFeedGroupBudgetTripped = false;
+        }
+
+        // Reset only the per-pass item allowance; the shared wall-clock deadline (the real freeze
+        // bound) is left intact, so an exhausted deadline still short-circuits the next pass.
+        private void ResetWildAnimalFeedGroupItemBudget()
+        {
+            this.wildAnimalFeedGroupItemsInspected = 0;
+        }
+
+        // True once this group has inspected its item cap or blown its wall-clock budget. Checked in
+        // the per-item extraction loop so a stockpiled food category (dolphin -> fish) can never
+        // freeze the frame past ~1.5s. Environment.TickCount wraps at ~24.9 days; the subtraction is
+        // wrap-safe because the deadline is only ~1.5s ahead.
+        private bool WildAnimalFeedGroupBudgetExhausted()
+        {
+            if (this.wildAnimalFeedGroupItemsInspected >= WildAnimalFeedMaxItemsPerGroup
+                || unchecked(Environment.TickCount - this.wildAnimalFeedGroupDeadlineTick) >= 0)
+            {
+                if (!this.wildAnimalFeedGroupBudgetTripped)
+                {
+                    this.wildAnimalFeedGroupBudgetTripped = true;
+                    this.WildAnimalFeedLogDetail("AuraMono candidate budget hit after "
+                        + this.wildAnimalFeedGroupItemsInspected + " items — truncating (large food inventory).");
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private int WildAnimalFeedGroupRemainingItemBudget()
+        {
+            int remaining = WildAnimalFeedMaxItemsPerGroup - this.wildAnimalFeedGroupItemsInspected;
+            return remaining < 0 ? 0 : remaining;
+        }
+
         private unsafe List<WildAnimalFeedFoodCandidate> CollectWildAnimalFeedCandidatesAuraMono(
             IntPtr wildAnimalSystemObj,
             IntPtr getFoodsMethod,
@@ -1651,6 +1727,7 @@ namespace HeartopiaMod
                 stats = new WildAnimalFeedCollectStats();
             }
 
+            this.BeginWildAnimalFeedGroupBudget();
             this.TryEnsureWildAnimalFeedAuraStorageValues();
             int before = candidates.Count;
             this.AppendWildAnimalFeedCandidatesFromGetFoodsAuraMono(
@@ -1669,6 +1746,7 @@ namespace HeartopiaMod
             if (candidates.Count == 0 && this.wildAnimalFeedPreferFavorites)
             {
                 before = candidates.Count;
+                this.ResetWildAnimalFeedGroupItemBudget();
                 this.AppendWildAnimalFeedCandidatesFromGetFoodsAuraMono(
                     wildAnimalSystemObj,
                     getFoodsMethod,
@@ -1686,6 +1764,7 @@ namespace HeartopiaMod
             if (candidates.Count == 0)
             {
                 before = candidates.Count;
+                this.ResetWildAnimalFeedGroupItemBudget();
                 this.AppendWildAnimalFeedCandidatesFromBackpackAuraMono(
                     groupId,
                     favoriteIds,
@@ -1701,6 +1780,7 @@ namespace HeartopiaMod
                 if (candidates.Count == 0 && this.wildAnimalFeedPreferFavorites)
                 {
                     before = candidates.Count;
+                    this.ResetWildAnimalFeedGroupItemBudget();
                     this.AppendWildAnimalFeedCandidatesFromBackpackAuraMono(
                         groupId,
                         favoriteIds,
@@ -1826,6 +1906,13 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                // Same GC-storm guard as the GetFoods path: this enumerates the WHOLE inventory
+                // (GetAllItem, not just foods), so a big warehouse would freeze the frame outright.
+                if (this.WildAnimalFeedGroupBudgetExhausted())
+                {
+                    break;
+                }
+
                 IntPtr exc = IntPtr.Zero;
                 IntPtr itemsObj;
                 if (getAllItemMethodWithStorage != IntPtr.Zero)
@@ -1846,7 +1933,7 @@ namespace HeartopiaMod
                 }
 
                 List<IntPtr> backpackItems = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, backpackItems))
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, backpackItems, maxItems: this.WildAnimalFeedGroupRemainingItemBudget()))
                 {
                     this.WildAnimalFeedLogDetail("AuraMono Backpack " + storageName + " enumerate failed");
                     continue;
@@ -1856,6 +1943,12 @@ namespace HeartopiaMod
                 string source = "AuraBackpack/" + storageName + (favoritesOnly ? "/favOnly" : "/all");
                 foreach (IntPtr item in backpackItems)
                 {
+                    if (this.WildAnimalFeedGroupBudgetExhausted())
+                    {
+                        break;
+                    }
+
+                    this.wildAnimalFeedGroupItemsInspected++;
                     stats.RawItems++;
                     if (!this.TryBuildWildAnimalFeedFoodCandidateAuraMono(
                         item,
@@ -1901,8 +1994,20 @@ namespace HeartopiaMod
             bool favoritesOnly,
             string source)
         {
+            // Already spent this group's per-pass allowance (or the shared wall-clock deadline) on an
+            // earlier storage — don't even enumerate, just bail.
+            if (this.WildAnimalFeedGroupBudgetExhausted())
+            {
+                return;
+            }
+
+            // Cap the enumerate at the remaining item budget so the enumerate loop itself (a get_Item
+            // invoke per element) can't run the full 8192 on a stockpiled category. NOTE: no pins list
+            // is passed, so the returned foodItems pointers are NOT pinned — they must not be held
+            // across a yield (raw Mono ptrs move on the SGen GC -> AV). The loop below stays fully
+            // synchronous for exactly this reason; do not add yields inside it.
             List<IntPtr> foodItems = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(foodsObj, foodItems))
+            if (!this.TryEnumerateAuraMonoCollectionItems(foodsObj, foodItems, maxItems: this.WildAnimalFeedGroupRemainingItemBudget()))
             {
                 this.WildAnimalFeedLogDetail("AuraMono " + source + " enumerate FAILED");
                 return;
@@ -1910,6 +2015,12 @@ namespace HeartopiaMod
 
             foreach (IntPtr foodObj in foodItems)
             {
+                if (this.WildAnimalFeedGroupBudgetExhausted())
+                {
+                    break;
+                }
+
+                this.wildAnimalFeedGroupItemsInspected++;
                 stats.RawItems++;
                 if (!this.TryGetWildAnimalFoodCandidateAuraMono(foodObj, groupId, favoriteIds, staticFavorites, favoriteAddition, out WildAnimalFeedFoodCandidate candidate, out WildAnimalFeedSkipReason skipReason))
                 {
