@@ -33,10 +33,16 @@ namespace HeartopiaMod
     {
         private void PopulateUiThemeConfig(UiThemeConfigData data)
         {
-            data.uiThemeVersion = 2;
+            data.uiThemeVersion = 4;
             data.uiAccentR = this.uiAccentR;
             data.uiAccentG = this.uiAccentG;
             data.uiAccentB = this.uiAccentB;
+            data.uiHeaderR = this.uiHeaderR;
+            data.uiHeaderG = this.uiHeaderG;
+            data.uiHeaderB = this.uiHeaderB;
+            data.uiSuccessR = this.uiSuccessR;
+            data.uiSuccessG = this.uiSuccessG;
+            data.uiSuccessB = this.uiSuccessB;
             data.uiTextR = this.uiTextR;
             data.uiTextG = this.uiTextG;
             data.uiTextB = this.uiTextB;
@@ -73,6 +79,38 @@ namespace HeartopiaMod
             this.uiAccentR = Mathf.Clamp01(data.uiAccentR);
             this.uiAccentG = Mathf.Clamp01(data.uiAccentG);
             this.uiAccentB = Mathf.Clamp01(data.uiAccentB);
+            if (data.uiThemeVersion < 3)
+            {
+                // Saved before Header Text existed as its own field — match whatever Accent
+                // this save already had, so existing themes look exactly as they did rather
+                // than suddenly showing default-cyan headers against a custom accent.
+                this.uiHeaderR = this.uiAccentR;
+                this.uiHeaderG = this.uiAccentG;
+                this.uiHeaderB = this.uiAccentB;
+            }
+            else
+            {
+                this.uiHeaderR = Mathf.Clamp01(data.uiHeaderR);
+                this.uiHeaderG = Mathf.Clamp01(data.uiHeaderG);
+                this.uiHeaderB = Mathf.Clamp01(data.uiHeaderB);
+            }
+
+            if (data.uiThemeVersion < 4)
+            {
+                // Saved before Success (LIVE panel / "enabled" toast green) existed as its own
+                // field — no prior field to backfill from, so fall back to the fixed default
+                // rather than leaving it at 0/0/0.
+                this.uiSuccessR = 0.24f;
+                this.uiSuccessG = 0.86f;
+                this.uiSuccessB = 0.59f;
+            }
+            else
+            {
+                this.uiSuccessR = Mathf.Clamp01(data.uiSuccessR);
+                this.uiSuccessG = Mathf.Clamp01(data.uiSuccessG);
+                this.uiSuccessB = Mathf.Clamp01(data.uiSuccessB);
+            }
+
             this.uiTextR = Mathf.Clamp01(data.uiTextR);
             this.uiTextG = Mathf.Clamp01(data.uiTextG);
             this.uiTextB = Mathf.Clamp01(data.uiTextB);
@@ -139,6 +177,7 @@ namespace HeartopiaMod
             this.uiAccentGradientTex = null;
             this.uiRoundedRectSprite = null;
             this.uiRingSprite = null;
+            this.uiKnobSprite = null;
             this.uiPickerHueCached = -1f;
             if (this.themeTextures.Count > 0)
             {
@@ -228,6 +267,17 @@ namespace HeartopiaMod
                 this.uiAccentR = Mathf.Clamp01(this.uiAccentR);
                 this.uiAccentG = Mathf.Clamp01(this.uiAccentG);
                 this.uiAccentB = Mathf.Clamp01(this.uiAccentB);
+                // This raw line-by-line format predates Header Text existing as its own field
+                // (nothing writes this legacy format anymore — SaveUiTheme goes through the
+                // unified/versioned config path above), so it can never contain uiHeader* keys.
+                // Match Accent, same backward-compat behavior as ApplyUiThemeConfig's version<3.
+                this.uiHeaderR = this.uiAccentR;
+                this.uiHeaderG = this.uiAccentG;
+                this.uiHeaderB = this.uiAccentB;
+                // Same story for Success — predates this format too, no uiSuccess* keys possible.
+                this.uiSuccessR = 0.24f;
+                this.uiSuccessG = 0.86f;
+                this.uiSuccessB = 0.59f;
                 this.uiTextR = Mathf.Clamp01(this.uiTextR);
                 this.uiTextG = Mathf.Clamp01(this.uiTextG);
                 this.uiTextB = Mathf.Clamp01(this.uiTextB);
@@ -809,7 +859,14 @@ namespace HeartopiaMod
                 // the card on every side: the card shape's antialiased outer pixel row is
                 // semi-transparent, and over a bright scene it reads as a bright stripe along
                 // the top edge unless it blends against this dark halo instead of the game.
-                this.DrawRoundedPanel(new Rect(box.x - 1f, box.y - 1f, box.width + 2f, box.height + 3f), 14f, new Color(0f, 0f, 0f, 0.32f * alpha), Color.clear, 0f, Color.clear);
+                // Height MUST be +2f (1px top + 1px bottom), matching width's +2f — the shadow's
+                // radius (14) is exactly the card's radius (13) plus this 1px inflate, so its
+                // corner arc stays concentric with the card's corner arc only when the inflate is
+                // symmetric on both axes. This was +3f (an extra, asymmetric 1px on the bottom
+                // only), which shifted the bottom corners' arc centers 1px out of concentricity —
+                // top corners stayed fine (symmetric), bottom corners showed an uneven halo gap,
+                // i.e. a stripe specifically at the two bottom corners.
+                this.DrawRoundedPanel(new Rect(box.x - 1f, box.y - 1f, box.width + 2f, box.height + 2f), 14f, new Color(0f, 0f, 0f, 0.32f * alpha), Color.clear, 0f, Color.clear);
                 if (this.themeToastCardStyle != null && this.themeToastCardStyle.normal.background != null)
                 {
                     Color prevToastTint = GUI.color;
@@ -1277,6 +1334,7 @@ namespace HeartopiaMod
             float contentWidth = 580f;
             float rowHeight = 34f;
             Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+            Color headerColor = new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB);
             Color panelFill = new Color(this.uiContentR, this.uiContentG, this.uiContentB, Mathf.Clamp(this.uiPanelAlpha * 0.82f, 0.14f, 0.92f));
             Color panelLine = new Color(accent.r, accent.g, accent.b, 0.24f);
             // Fixed white wash regardless of the Panel/Content Alpha sliders: dark near-black
@@ -1289,7 +1347,7 @@ namespace HeartopiaMod
 
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold, fontSize = 14 };
             GUIStyle sectionStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold, fontSize = 12 };
-            sectionStyle.normal.textColor = accent;
+            sectionStyle.normal.textColor = headerColor;
             GUIStyle rowLabelStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontSize = 12 };
             rowLabelStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f);
             GUIStyle rowValueStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleRight, fontSize = 12, fontStyle = FontStyle.Bold };
@@ -1323,13 +1381,15 @@ namespace HeartopiaMod
             string[] colorTargets = new string[]
             {
                 "Accent",
+                "Header Text",
+                "Success",
                 "Text",
                 "Main Tab Text",
                 "Sub Tab Text",
                 "Panel Bg",
                 "Content Bg"
             };
-            int[] colorTargetIndices = new int[] { 0, 1, 2, 3, 5, 6 };
+            int[] colorTargetIndices = new int[] { 0, 7, 8, 1, 2, 3, 5, 6 };
             float pickerHeight = this.uiThemePickerOpen ? 260f : 0f;
             Rect colorPanel = new Rect(left, (float)num, contentWidth, 42f + (colorTargets.Length * rowHeight) + pickerHeight + 12f);
             this.DrawExentriSectionPanel(colorPanel, accent, panelFill, panelLine);
@@ -1546,6 +1606,12 @@ namespace HeartopiaMod
                 this.uiAccentR = 0.31f;
                 this.uiAccentG = 0.78f;
                 this.uiAccentB = 1.00f;
+                this.uiHeaderR = 0.31f;
+                this.uiHeaderG = 0.78f;
+                this.uiHeaderB = 1.00f;
+                this.uiSuccessR = 0.24f;
+                this.uiSuccessG = 0.86f;
+                this.uiSuccessB = 0.59f;
                 this.uiTextR = 0.93f;
                 this.uiTextG = 0.95f;
                 this.uiTextB = 0.976f;
@@ -1586,7 +1652,9 @@ namespace HeartopiaMod
             if (target == 3) return new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB);
             if (target == 4) return new Color(this.uiWindowR, this.uiWindowG, this.uiWindowB);
             if (target == 5) return new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB);
-            return new Color(this.uiContentR, this.uiContentG, this.uiContentB);
+            if (target == 6) return new Color(this.uiContentR, this.uiContentG, this.uiContentB);
+            if (target == 7) return new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB);
+            return new Color(this.uiSuccessR, this.uiSuccessG, this.uiSuccessB);
         }
 
         private void SetUiThemeColorTargetValue(int target, Color color)
@@ -1615,9 +1683,17 @@ namespace HeartopiaMod
             {
                 this.uiPanelR = color.r; this.uiPanelG = color.g; this.uiPanelB = color.b;
             }
-            else
+            else if (target == 6)
             {
                 this.uiContentR = color.r; this.uiContentG = color.g; this.uiContentB = color.b;
+            }
+            else if (target == 7)
+            {
+                this.uiHeaderR = color.r; this.uiHeaderG = color.g; this.uiHeaderB = color.b;
+            }
+            else
+            {
+                this.uiSuccessR = color.r; this.uiSuccessG = color.g; this.uiSuccessB = color.b;
             }
         }
 

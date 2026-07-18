@@ -58,7 +58,7 @@ namespace HeartopiaMod
             GUIStyle titleStyle = new GUIStyle(GUI.skin.label);
             titleStyle.fontSize = 15;
             titleStyle.fontStyle = FontStyle.Bold;
-            titleStyle.normal.textColor = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+            titleStyle.normal.textColor = new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB);
 
             GUIStyle tinyStyle = new GUIStyle(GUI.skin.label);
             tinyStyle.fontSize = 11;

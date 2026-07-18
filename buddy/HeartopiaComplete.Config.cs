@@ -929,13 +929,14 @@ namespace HeartopiaMod
             float left = 24f;
             float contentWidth = 540f;
             Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+            Color headerColor = new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB);
             Color panelFill = new Color(this.uiContentR, this.uiContentG, this.uiContentB, Mathf.Clamp(this.uiPanelAlpha * 0.82f, 0.14f, 0.92f));
             Color panelLine = new Color(accent.r, accent.g, accent.b, 0.24f);
 
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold, fontSize = 15 };
             headerStyle.normal.textColor = Color.white;
             GUIStyle subHeaderStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold, fontSize = 11 };
-            subHeaderStyle.normal.textColor = accent;
+            subHeaderStyle.normal.textColor = headerColor;
             GUI.Label(new Rect(left, (float)num, contentWidth, 24f), this.L("KEYBIND SETTINGS"), headerStyle);
             num += 26;
 
@@ -1103,6 +1104,7 @@ namespace HeartopiaMod
             float rowHeight = 30f;
             float sectionGap = 14f;
             Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+            Color headerColor = new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB);
             Color panelFill = new Color(this.uiContentR, this.uiContentG, this.uiContentB, Mathf.Clamp(this.uiPanelAlpha * 0.82f, 0.14f, 0.92f));
             Color panelLine = new Color(accent.r, accent.g, accent.b, 0.24f);
 
@@ -1114,7 +1116,7 @@ namespace HeartopiaMod
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold, fontSize = 15 };
             headerStyle.normal.textColor = Color.white;
             GUIStyle subHeaderStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold, fontSize = 11 };
-            subHeaderStyle.normal.textColor = accent;
+            subHeaderStyle.normal.textColor = headerColor;
             GUIStyle rowLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleLeft };
             rowLabelStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
             GUIStyle valueStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
@@ -1668,7 +1670,7 @@ namespace HeartopiaMod
             float y = startY + 8f;
             Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
             Color mutedColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
-            Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+            Color headerColor = new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB);
 
             GUIStyle titleStyle = new GUIStyle(GUI.skin.label)
             {
@@ -1685,7 +1687,7 @@ namespace HeartopiaMod
                 alignment = TextAnchor.UpperLeft,
                 wordWrap = true
             };
-            headingStyle.normal.textColor = accent;
+            headingStyle.normal.textColor = headerColor;
 
             GUIStyle bodyStyle = new GUIStyle(GUI.skin.label)
             {

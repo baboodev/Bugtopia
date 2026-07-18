@@ -138,10 +138,11 @@ namespace HeartopiaMod
             float panelWidth = 580f;
             int num = startY;
             Color accent = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB);
+            Color headerColor = new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB);
             Color panelFill = new Color(this.uiContentR, this.uiContentG, this.uiContentB, Mathf.Clamp(this.uiPanelAlpha * 0.82f, 0.14f, 0.92f));
             Color panelLine = new Color(accent.r, accent.g, accent.b, 0.24f);
             GUIStyle sectionStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold, fontSize = 12 };
-            sectionStyle.normal.textColor = accent;
+            sectionStyle.normal.textColor = headerColor;
             GUIStyle bodyStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontSize = 12 };
             bodyStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f);
             GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontSize = 12, fontStyle = FontStyle.Bold, wordWrap = true };

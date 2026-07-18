@@ -274,6 +274,12 @@ namespace HeartopiaMod
             public float uiAccentR;
             public float uiAccentG;
             public float uiAccentB;
+            public float uiHeaderR;
+            public float uiHeaderG;
+            public float uiHeaderB;
+            public float uiSuccessR;
+            public float uiSuccessG;
+            public float uiSuccessB;
             public float uiTextR;
             public float uiTextG;
             public float uiTextB;

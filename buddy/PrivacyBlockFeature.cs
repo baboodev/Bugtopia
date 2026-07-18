@@ -463,7 +463,7 @@ namespace HeartopiaMod
             float y = startY + 10f;
 
             GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold };
-            headerStyle.normal.textColor = new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, 1f);
+            headerStyle.normal.textColor = new Color(this.uiHeaderR, this.uiHeaderG, this.uiHeaderB, 1f);
             GUIStyle labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12 };
             labelStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.9f);
 

@@ -812,7 +812,7 @@ namespace HeartopiaMod
                     this.PetPlayLog("Cat play " + (this.petPlayAutoCatEnabled ? "enabled" : "disabled"));
                     this.AddMenuNotification(
                         "Auto Cat Play " + (this.petPlayAutoCatEnabled ? "Enabled" : "Disabled"),
-                        this.petPlayAutoCatEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                        this.petPlayAutoCatEnabled ? new Color(this.uiSuccessR, this.uiSuccessG, this.uiSuccessB) : new Color(1f, 0.55f, 0.55f));
                 }
                 if (this.TryGetModHotkeyDown(this.keyAutoDogTrain))
                 {
@@ -820,7 +820,7 @@ namespace HeartopiaMod
                     this.PetPlayLog("Dog train " + (this.petPlayAutoDogEnabled ? "enabled" : "disabled"));
                     this.AddMenuNotification(
                         "Auto Dog Train " + (this.petPlayAutoDogEnabled ? "Enabled" : "Disabled"),
-                        this.petPlayAutoDogEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                        this.petPlayAutoDogEnabled ? new Color(this.uiSuccessR, this.uiSuccessG, this.uiSuccessB) : new Color(1f, 0.55f, 0.55f));
                 }
                 if (this.TryGetModHotkeyDown(this.keyAutoPetWash))
                 {
@@ -828,7 +828,7 @@ namespace HeartopiaMod
                     this.PetPlayLog("Pet wash " + (this.petPlayAutoWashEnabled ? "enabled" : "disabled"));
                     this.AddMenuNotification(
                         "Auto Pet Wash " + (this.petPlayAutoWashEnabled ? "Enabled" : "Disabled"),
-                        this.petPlayAutoWashEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                        this.petPlayAutoWashEnabled ? new Color(this.uiSuccessR, this.uiSuccessG, this.uiSuccessB) : new Color(1f, 0.55f, 0.55f));
                 }
                 if (this.TryGetModHotkeyDown(this.keyFeedAllCats))
                 {
@@ -4728,6 +4728,21 @@ namespace HeartopiaMod
         private float uiAccentR = 0.31f;
         private float uiAccentG = 0.78f;
         private float uiAccentB = 1.00f;
+        // Section/panel title text (e.g. "DISPLAY", "THEME COLORS") — split out from Accent so
+        // the two can diverge: Accent also drives interactive/active elements (toggles, active
+        // tab text, buttons), and a user picking a strong accent for THOSE didn't necessarily
+        // want every section heading in that same color too. Defaults matching uiAccent* so a
+        // fresh install/reset looks identical to before this field existed.
+        private float uiHeaderR = 0.31f;
+        private float uiHeaderG = 0.78f;
+        private float uiHeaderB = 1.00f;
+        // "Enabled"/live-feature green — LIVE panel dots+chip (DrawQuickStatusPanel) and the
+        // small family of toast notifications that report a feature turning ON. Was a hardcoded
+        // literal in both places (two slightly different shades); unified under this field so
+        // both read the same green and it's user-adjustable like every other theme color.
+        private float uiSuccessR = 0.24f;
+        private float uiSuccessG = 0.86f;
+        private float uiSuccessB = 0.59f;
         private float uiTextR = 0.93f;
         private float uiTextG = 0.95f;
         private float uiTextB = 0.976f;

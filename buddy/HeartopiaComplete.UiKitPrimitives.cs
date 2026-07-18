@@ -88,6 +88,28 @@ namespace HeartopiaMod
             return Mathf.Clamp(Mathf.Round(scale / UiScaleStep) * UiScaleStep, UiScaleMin, UiScaleMax);
         }
 
+        // Rounds a local (pre-GUI.matrix) coordinate so it lands on a whole SCREEN pixel once
+        // the menu's uiScale transform is applied. Plain Mathf.Round on the local value only
+        // guarantees a whole LOCAL pixel — GetUiScale() is rarely exactly 1.0 (it auto-fits to
+        // the player's actual resolution), so that local integer still lands on a fractional
+        // screen pixel after the *scale multiply, softening bilinear-stretched small sprites
+        // (toggle knob, slider thumb, status dots) asymmetrically on one edge — the same visible
+        // symptom ("not centered" / "ragged edges") as the un-rounded-rect bug, one step removed.
+        private float RoundToScreenPixel(float localValue)
+        {
+            float scale = this.GetUiScale();
+            return scale > 0.0001f ? Mathf.Round(localValue * scale) / scale : Mathf.Round(localValue);
+        }
+
+        private Rect RoundRectToScreenPixel(Rect r)
+        {
+            float x0 = this.RoundToScreenPixel(r.x);
+            float y0 = this.RoundToScreenPixel(r.y);
+            float x1 = this.RoundToScreenPixel(r.x + r.width);
+            float y1 = this.RoundToScreenPixel(r.y + r.height);
+            return new Rect(x0, y0, x1 - x0, y1 - y0);
+        }
+
         // ===== Bugtopia 2.0 theme plumbing =====
         // Cached OS font + derived colors + baked textures used by the redesigned chrome.
         private Font uiThemeFont;
@@ -95,6 +117,7 @@ namespace HeartopiaMod
         private Texture2D uiAccentGradientTex;
         private Texture2D uiRoundedRectSprite;
         private Texture2D uiRingSprite;
+        private Texture2D uiKnobSprite;
         private bool uiThemeStylesDirty;
         private float uiThemeNextRebuildAt;
         private float uiThemePendingSaveAt = -1f;
@@ -136,6 +159,18 @@ namespace HeartopiaMod
         private void DrawSwitchTrackAndKnob(Rect switchRect, float knobT, bool hovered)
         {
             this.EnsureUiPrimitiveTextures();
+            // Round ONCE, here, and derive both the track and the knob from this same rect,
+            // snapped to whole SCREEN pixels (RoundToScreenPixel, not plain Mathf.Round — the
+            // menu's uiScale matrix means a locally-integer rect can still land on a fractional
+            // screen pixel). DrawCapsule/DrawAccentGradientCapsule already round their OWN copy
+            // of the rect internally, so the track was always pixel-snapped — but the knob's
+            // rect was computed from the raw (usually fractional, since switchRect cascades from
+            // many upstream float row-layout additions) switchRect and drawn unrounded. A
+            // bilinear-stretched texture at a fractional pixel offset softens unevenly left/
+            // right/top/bottom, which reads as "the knob isn't centered" / "ragged edges" even
+            // though the math is symmetric — worse on whichever rows happen to land near a
+            // half-pixel, better on others, matching the reported "some toggles, not all" pattern.
+            switchRect = this.RoundRectToScreenPixel(switchRect);
             this.DrawCapsule(switchRect, new Color(0.137f, 0.169f, 0.22f, 0.98f));
             if (knobT > 0.01f)
             {
@@ -145,12 +180,19 @@ namespace HeartopiaMod
             float knobD = switchRect.height - 6f;
             float x0 = switchRect.x + 3f;
             float x1 = switchRect.xMax - knobD - 3f;
-            Rect knobRect = new Rect(Mathf.Lerp(x0, x1, knobT), switchRect.y + 3f, knobD, knobD);
+            Rect knobRect = this.RoundRectToScreenPixel(new Rect(Mathf.Lerp(x0, x1, knobT), switchRect.y + 3f, knobD, knobD));
+            // Rounded-SQUARE knob (uiKnobSprite, radius 12/32 ≈ 37.5%), not a full circle: the
+            // track's own corner radius was reduced (8, was 11) to fix a degenerate 9-slice at
+            // this track height, so a perfectly round knob read as noticeably MORE rounded than
+            // the track around it. A first pass reused uiRoundedRectSprite (radius 9/32 ≈ 28%,
+            // tuned for other things) and came out too square — this is its own, rounder sprite.
+            // Source and destination are both square (knobD x knobD), so the stretch scales the
+            // rounding proportionally with no distortion.
             GUI.color = new Color(0f, 0f, 0f, 0.35f);
-            GUI.DrawTexture(new Rect(knobRect.x, knobRect.y + 1.5f, knobD, knobD), this.uiCircleTexture);
+            GUI.DrawTexture(new Rect(knobRect.x, knobRect.y + 1.5f, knobRect.width, knobRect.height), this.uiKnobSprite);
             Color knobColor = Color.Lerp(new Color(0.68f, 0.72f, 0.8f, 1f), Color.white, knobT);
             GUI.color = hovered ? Color.Lerp(knobColor, Color.white, 0.35f) : knobColor;
-            GUI.DrawTexture(knobRect, this.uiCircleTexture);
+            GUI.DrawTexture(knobRect, this.uiKnobSprite);
             GUI.color = Color.white;
         }
 
@@ -399,7 +441,7 @@ namespace HeartopiaMod
             }
 
             this.EnsureUiPrimitiveTextures();
-            rect = new Rect(Mathf.Round(rect.x), Mathf.Round(rect.y), Mathf.Round(rect.width), Mathf.Round(rect.height));
+            rect = this.RoundRectToScreenPixel(rect);
 
             if (rect.height < 12f || rect.width < 12f)
             {
@@ -476,10 +518,13 @@ namespace HeartopiaMod
         {
             this.EnsureUiPrimitiveTextures();
 
-            // Integer-aligned rect: the shape is assembled from adjacent rects + corner circles,
-            // and fractional coordinates open subpixel seams (bright/dark 1px stripes) between
-            // the patches when the fill is translucent.
-            rect = new Rect(Mathf.Round(rect.x), Mathf.Round(rect.y), Mathf.Round(rect.width), Mathf.Round(rect.height));
+            // Screen-pixel-aligned rect (RoundToScreenPixel, not plain Mathf.Round — see there):
+            // the shape is assembled from adjacent rects + corner circles, and fractional
+            // coordinates open subpixel seams (bright/dark 1px stripes) between the patches when
+            // the fill is translucent, plus the corner circles individually blur asymmetrically
+            // at a fractional final screen position, same as the toggle knob/slider thumb/status
+            // dot bug.
+            rect = this.RoundRectToScreenPixel(rect);
             float corner = Mathf.Clamp(Mathf.Round(radius), 0f, Mathf.Min(rect.width, rect.height) * 0.5f);
             if (corner <= 0.5f)
             {
@@ -747,7 +792,12 @@ namespace HeartopiaMod
             Rect bgRect = new Rect(rect.x, lineY, rect.width, 6f);
             Rect fillRect = new Rect(rect.x, lineY, Mathf.Max(6f, rect.width * t), 6f);
             float thumbX = Mathf.Clamp(rect.x + rect.width * t, rect.x + 8f, rect.xMax - 8f);
-            Rect thumbRect = new Rect(thumbX - 8f, rect.y + (rect.height * 0.5f) - 8f, 16f, 16f);
+            // Rounded to whole SCREEN pixels — same fix as the switch knob (see
+            // DrawSwitchTrackAndKnob / RoundToScreenPixel): an un-rounded rect fed to a
+            // bilinear-stretched DrawTexture softens asymmetrically at whichever fractional
+            // offset the row happens to land on, and plain Mathf.Round only guarantees a whole
+            // LOCAL pixel — the menu's uiScale matrix can still land it on a fractional screen one.
+            Rect thumbRect = this.RoundRectToScreenPixel(new Rect(thumbX - 8f, rect.y + (rect.height * 0.5f) - 8f, 16f, 16f));
 
             this.DrawCapsule(bgRect, new Color(0.137f, 0.169f, 0.22f, 0.95f));
             this.DrawAccentGradientCapsule(fillRect);
@@ -789,7 +839,7 @@ namespace HeartopiaMod
 
         private void EnsureUiPrimitiveTextures()
         {
-            if (this.uiCircleTexture != null && this.uiRoundedRectSprite != null && this.uiRingSprite != null)
+            if (this.uiCircleTexture != null && this.uiRoundedRectSprite != null && this.uiRingSprite != null && this.uiKnobSprite != null)
             {
                 return;
             }
@@ -807,6 +857,11 @@ namespace HeartopiaMod
                     // A "rounded rect" whose corner radius is (almost) half its size degenerates
                     // into a circle — reusing this instead of writing new per-pixel ring math.
                     this.uiRingSprite = this.MakeRoundedRectTexture(24, 11f, Color.clear, Color.white, 2f);
+                }
+
+                if (this.uiKnobSprite == null)
+                {
+                    this.uiKnobSprite = this.MakeRoundedRectTexture(32, 12f, Color.white, Color.clear, 0f);
                 }
 
                 return;
@@ -846,6 +901,16 @@ namespace HeartopiaMod
             if (this.uiRingSprite == null)
             {
                 this.uiRingSprite = this.MakeRoundedRectTexture(24, 11f, Color.clear, Color.white, 2f);
+            }
+
+            if (this.uiKnobSprite == null)
+            {
+                // Dedicated to the switch knob — deliberately its OWN sprite, not a reuse of
+                // uiRoundedRectSprite (radius 9/32 ≈ 28%, already tuned for other things: hover
+                // chips, icon bodies). A first attempt reused that one for the knob and it read
+                // as too square-ish next to the track. radius 12/32 = 37.5% here gives a rounder
+                // "squircle" the knob needs, without touching uiRoundedRectSprite's own tuning.
+                this.uiKnobSprite = this.MakeRoundedRectTexture(32, 12f, Color.white, Color.clear, 0f);
             }
         }
 
@@ -1002,7 +1067,7 @@ namespace HeartopiaMod
             }
 
             this.EnsureUiPrimitiveTextures();
-            rect = new Rect(Mathf.Round(rect.x), Mathf.Round(rect.y), Mathf.Round(rect.width), Mathf.Round(rect.height));
+            rect = this.RoundRectToScreenPixel(rect);
 
             if (rect.height < 12f || rect.width < 12f)
             {
@@ -1044,7 +1109,7 @@ namespace HeartopiaMod
             Color panelFill = new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Clamp(this.uiPanelAlpha, 0.15f, 1f));
             Color textPrimary = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
             Color textMuted = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB);
-            Color live = new Color(0.24f, 0.86f, 0.59f);
+            Color live = new Color(this.uiSuccessR, this.uiSuccessG, this.uiSuccessB);
 
             this.DrawExentriSectionPanel(panelRect, accent, panelFill, Color.clear);
             this.EnsureUiPrimitiveTextures();
@@ -1063,6 +1128,10 @@ namespace HeartopiaMod
             chipStyle.fontStyle = FontStyle.Normal;
             chipStyle.alignment = TextAnchor.MiddleCenter;
             chipStyle.clipping = TextClipping.Overflow;
+            // Same Segoe UI line-height vertical-centering bias as the button text fix
+            // (themePrimaryButtonStyle/buttonStyle/themeSidebarButtonStyle) — this style is a
+            // fresh GUI.skin.label copy so it didn't inherit that correction.
+            chipStyle.contentOffset = new Vector2(0f, -1f);
             chipStyle.normal.textColor = entries.Count > 0 ? live : textMuted;
             // No CalcSize here: it under-measures this dynamic-font string in-game (observed
             // live), so the capsule is sized from the glyph count with generous slack instead.
@@ -1141,11 +1210,17 @@ namespace HeartopiaMod
 
                 LiveFeatureStatusEntry entry = entries[i];
 
-                // Pulsing live dot with a soft halo.
+                // Pulsing live dot with a soft halo. Rounded to whole SCREEN pixels (not just
+                // local ones — see RoundToScreenPixel) before drawing: GUI.DrawTexture doesn't
+                // self-round like DrawCapsule/DrawRoundedPanel do, panelRect (hence x/y) is
+                // usually fractional, and the menu's uiScale matrix means even a locally-integer
+                // rect can still land on a fractional screen pixel.
+                Rect haloRect = this.RoundRectToScreenPixel(new Rect(x - 3f, y + 3f, 14f, 14f));
+                Rect dotRect = this.RoundRectToScreenPixel(new Rect(x, y + 6f, 8f, 8f));
                 GUI.color = new Color(live.r, live.g, live.b, 0.18f + (0.22f * pulse));
-                GUI.DrawTexture(new Rect(x - 3f, y + 3f, 14f, 14f), this.uiCircleTexture);
+                GUI.DrawTexture(haloRect, this.uiCircleTexture);
                 GUI.color = live;
-                GUI.DrawTexture(new Rect(x, y + 6f, 8f, 8f), this.uiCircleTexture);
+                GUI.DrawTexture(dotRect, this.uiCircleTexture);
                 GUI.color = Color.white;
 
                 GUI.Label(new Rect(x + 18f, y, w - 18f, 18f), this.L(entry.Label), title);

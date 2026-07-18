@@ -480,7 +480,7 @@ namespace HeartopiaMod
                 this.auraNextMeteorObjectScanAt = 0f;
                 this.EnsureAuraCollectColdEventHook();
                 bool ready = this.ResolveAuraFarmRuntimeMethods();
-                this.AddOrUpdateMenuNotification("aura-farm-state", ready ? "Aura Farm enabled" : "Aura Farm enabled, resolver incomplete", ready ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.75f, 0.45f));
+                this.AddOrUpdateMenuNotification("aura-farm-state", ready ? "Aura Farm enabled" : "Aura Farm enabled, resolver incomplete", ready ? new Color(this.uiSuccessR, this.uiSuccessG, this.uiSuccessB) : new Color(1f, 0.75f, 0.45f));
                 if (AuraFarmDebugLogs)
                 {
                     ModLogger.Msg("[AuraFarm] Enabled. MethodsReady=" + ready + " MonoFallbacks=" + AuraUseMonoTargetFallbacks);
