@@ -94,6 +94,7 @@ namespace HeartopiaMod
         private bool uiThemeFontAttempted;
         private Texture2D uiAccentGradientTex;
         private Texture2D uiRoundedRectSprite;
+        private Texture2D uiRingSprite;
         private bool uiThemeStylesDirty;
         private float uiThemeNextRebuildAt;
         private float uiThemePendingSaveAt = -1f;
@@ -788,15 +789,26 @@ namespace HeartopiaMod
 
         private void EnsureUiPrimitiveTextures()
         {
-            if (this.uiCircleTexture != null && this.uiRoundedRectSprite != null)
+            if (this.uiCircleTexture != null && this.uiRoundedRectSprite != null && this.uiRingSprite != null)
             {
                 return;
             }
 
             if (this.uiCircleTexture != null)
             {
-                // Circle alive but sprite missing — just rebuild the sprite.
-                this.uiRoundedRectSprite = this.MakeRoundedRectTexture(32, 9f, Color.white, Color.clear, 0f);
+                // Circle alive but a dependent sprite is missing — just rebuild those.
+                if (this.uiRoundedRectSprite == null)
+                {
+                    this.uiRoundedRectSprite = this.MakeRoundedRectTexture(32, 9f, Color.white, Color.clear, 0f);
+                }
+
+                if (this.uiRingSprite == null)
+                {
+                    // A "rounded rect" whose corner radius is (almost) half its size degenerates
+                    // into a circle — reusing this instead of writing new per-pixel ring math.
+                    this.uiRingSprite = this.MakeRoundedRectTexture(24, 11f, Color.clear, Color.white, 2f);
+                }
+
                 return;
             }
 
@@ -830,6 +842,151 @@ namespace HeartopiaMod
             {
                 this.uiRoundedRectSprite = this.MakeRoundedRectTexture(32, 9f, Color.white, Color.clear, 0f);
             }
+
+            if (this.uiRingSprite == null)
+            {
+                this.uiRingSprite = this.MakeRoundedRectTexture(24, 11f, Color.clear, Color.white, 2f);
+            }
+        }
+
+        // Sidebar nav icons. Primary path: a rasterized PNG baked OFFLINE via GDI+ from the
+        // original artifact-mockup line-icon designs (see HeartopiaComplete.NavIcons.cs) —
+        // proper anti-aliased strokes/curves, unlike anything IMGUI can draw at runtime.
+        // Fallback: the primitive-composed glyphs below (filled circle, clipped half-circle,
+        // ring, straight strokes, rounded blocks), used only if the embedded PNG ever fails to
+        // decode. navIconIndex matches the sidebar's tab order: 0 Self, 1 Resource Gathering,
+        // 2 Features, 3 New Features, 4 Radar, 5 Teleport, 6 Bag/Warehouse, 7 Research,
+        // 8 Settings.
+        private void DrawNavIcon(Rect box, int navIconIndex, Color color)
+        {
+            Texture2D iconTex = this.EnsureNavIconTexture(navIconIndex);
+            if (iconTex != null)
+            {
+                GUI.color = color;
+                GUI.DrawTexture(box, iconTex, ScaleMode.ScaleToFit, true);
+                GUI.color = Color.white;
+                return;
+            }
+
+            this.EnsureUiPrimitiveTextures();
+            GUI.color = color;
+            switch (navIconIndex)
+            {
+                case 0: // Self — head + shoulders
+                {
+                    float headD = box.width * 0.42f;
+                    GUI.DrawTexture(new Rect(box.x + ((box.width - headD) * 0.5f), box.y + (box.height * 0.04f), headD, headD), this.uiCircleTexture);
+                    float bodyD = box.width * 1.05f;
+                    Rect clip = new Rect(box.x, box.y + (box.height * 0.52f), box.width, box.height * 0.46f);
+                    GUI.BeginGroup(clip);
+                    GUI.DrawTexture(new Rect((box.width - bodyD) * 0.5f, 0f, bodyD, bodyD), this.uiCircleTexture);
+                    GUI.EndGroup();
+                    break;
+                }
+
+                case 1: // Resource Gathering — cluster of 3 nodes (a thin bud+stem read as a
+                        // stick at icon scale; a small cluster reads as "gatherable resources"
+                        // using nothing but circles, so proportions can't misjudge as easily).
+                {
+                    float bigD = box.width * 0.46f;
+                    float smallD = box.width * 0.34f;
+                    GUI.DrawTexture(new Rect(box.x + ((box.width - bigD) * 0.5f), box.y + (box.height * 0.02f), bigD, bigD), this.uiCircleTexture);
+                    GUI.DrawTexture(new Rect(box.x + (box.width * 0.02f), box.y + (box.height * 0.52f), smallD, smallD), this.uiCircleTexture);
+                    GUI.DrawTexture(new Rect(box.xMax - (box.width * 0.02f) - smallD, box.y + (box.height * 0.52f), smallD, smallD), this.uiCircleTexture);
+                    break;
+                }
+
+                case 2: // Features — 2x2 grid
+                {
+                    float cell = box.width * 0.40f;
+                    float gap = box.width * 0.20f;
+                    float startX = box.x + ((box.width - (cell * 2f) - gap) * 0.5f);
+                    float startY = box.y + ((box.height - (cell * 2f) - gap) * 0.5f);
+                    GUI.DrawTexture(new Rect(startX, startY, cell, cell), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(startX + cell + gap, startY, cell, cell), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(startX, startY + cell + gap, cell, cell), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(startX + cell + gap, startY + cell + gap, cell, cell), Texture2D.whiteTexture);
+                    break;
+                }
+
+                case 3: // New Features — plus
+                {
+                    float thick = Mathf.Max(2f, box.width * 0.17f);
+                    GUI.DrawTexture(new Rect(box.x + ((box.width - thick) * 0.5f), box.y + (box.height * 0.08f), thick, box.height * 0.84f), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.x + (box.width * 0.08f), box.y + ((box.height - thick) * 0.5f), box.width * 0.84f, thick), Texture2D.whiteTexture);
+                    break;
+                }
+
+                case 4: // Radar — ring + center dot only (a tick through the middle read as a
+                        // circle bisected by a line rather than a scanner/target — dropped it).
+                {
+                    GUI.DrawTexture(box, this.uiRingSprite);
+                    float dotD = box.width * 0.24f;
+                    GUI.DrawTexture(new Rect(box.x + ((box.width - dotD) * 0.5f), box.y + ((box.height - dotD) * 0.5f), dotD, dotD), this.uiCircleTexture);
+                    break;
+                }
+
+                case 5: // Teleport — viewfinder corners
+                {
+                    float armLen = box.width * 0.32f;
+                    float thick = Mathf.Max(1.5f, box.width * 0.13f);
+                    GUI.DrawTexture(new Rect(box.x, box.y, armLen, thick), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.x, box.y, thick, armLen), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.xMax - armLen, box.y, armLen, thick), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.xMax - thick, box.y, thick, armLen), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.x, box.yMax - thick, armLen, thick), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.x, box.yMax - armLen, thick, armLen), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.xMax - armLen, box.yMax - thick, armLen, thick), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.xMax - thick, box.yMax - armLen, thick, armLen), Texture2D.whiteTexture);
+                    break;
+                }
+
+                case 6: // Bag / Warehouse — case (flat rect — the stretched round-rect sprite
+                        // read as a plain pill/oval at this size, no "case" corners left) with a
+                        // handle bracket ("⊓") sitting above it.
+                {
+                    Rect body = new Rect(box.x + (box.width * 0.06f), box.y + (box.height * 0.38f), box.width * 0.88f, box.height * 0.54f);
+                    GUI.DrawTexture(body, Texture2D.whiteTexture);
+
+                    float legW = Mathf.Max(1.5f, box.width * 0.11f);
+                    float legH = box.height * 0.20f;
+                    float leftLegX = box.x + (box.width * 0.30f);
+                    float rightLegX = box.xMax - (box.width * 0.30f) - legW;
+                    float legTopY = body.y - legH;
+                    GUI.DrawTexture(new Rect(leftLegX, legTopY, legW, legH), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(rightLegX, legTopY, legW, legH), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(leftLegX, legTopY, (rightLegX + legW) - leftLegX, legW), Texture2D.whiteTexture);
+                    break;
+                }
+
+                case 7: // Research — flask
+                {
+                    float neckW = Mathf.Max(2f, box.width * 0.22f);
+                    GUI.DrawTexture(new Rect(box.x + ((box.width - neckW) * 0.5f), box.y + (box.height * 0.04f), neckW, box.height * 0.32f), Texture2D.whiteTexture);
+                    // Flat rect, not the stretched round-rect sprite — same reason as the bag
+                    // body: at icon scale it reads as an oval, not a flask with a neck.
+                    Rect flaskBody = new Rect(box.x + (box.width * 0.12f), box.y + (box.height * 0.34f), box.width * 0.76f, box.height * 0.6f);
+                    GUI.DrawTexture(flaskBody, Texture2D.whiteTexture);
+                    break;
+                }
+
+                case 8: // Settings — two sliders (bigger knob-to-track contrast + more vertical
+                        // spread than the first pass, which read as two faint, similar-looking
+                        // marks rather than clearly two distinct slider rows)
+                {
+                    float trackH = Mathf.Max(1.5f, box.width * 0.07f);
+                    float knobD = box.width * 0.32f;
+                    float row1Y = box.y + (box.height * 0.24f);
+                    float row2Y = box.y + (box.height * 0.80f);
+                    GUI.DrawTexture(new Rect(box.x, row1Y - (trackH * 0.5f), box.width, trackH), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.x + (box.width * 0.62f) - (knobD * 0.5f), row1Y - (knobD * 0.5f), knobD, knobD), this.uiCircleTexture);
+                    GUI.DrawTexture(new Rect(box.x, row2Y - (trackH * 0.5f), box.width, trackH), Texture2D.whiteTexture);
+                    GUI.DrawTexture(new Rect(box.x + (box.width * 0.30f) - (knobD * 0.5f), row2Y - (knobD * 0.5f), knobD, knobD), this.uiCircleTexture);
+                    break;
+                }
+            }
+
+            GUI.color = Color.white;
         }
 
         // Solid-color capsule (arbitrary tint). Baked single-texture 9-slice when the element

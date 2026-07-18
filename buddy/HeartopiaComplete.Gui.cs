@@ -315,7 +315,7 @@ namespace HeartopiaMod
             return 780f; // Conservative estimate
         }
 
-        private void DrawSidebarTabButton(Rect rect, string label, int tabIndex)
+        private void DrawSidebarTabButton(Rect rect, string label, int tabIndex, int navIconIndex)
         {
             bool active = this.selectedTab == tabIndex;
             Event e = Event.current;
@@ -348,16 +348,21 @@ namespace HeartopiaMod
                 this.DrawTintedRoundedBox(rect, new Color(1f, 1f, 1f, 0.055f));
             }
 
-            GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
-            labelStyle.alignment = TextAnchor.MiddleLeft;
-            labelStyle.fontStyle = active ? FontStyle.Bold : FontStyle.Normal;
-            labelStyle.fontSize = 13;
-            labelStyle.normal.textColor = active
+            Color contentColor = active
                 ? new Color(this.uiTextR, this.uiTextG, this.uiTextB)
                 : (hovered
                     ? new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.92f)
                     : new Color(this.uiMainTabTextR, this.uiMainTabTextG, this.uiMainTabTextB));
-            GUI.Label(new Rect(rect.x + 14f, rect.y, rect.width - 24f, rect.height), this.L(label), labelStyle);
+
+            Rect iconBox = new Rect(rect.x + 14f, rect.y + ((rect.height - 18f) * 0.5f), 18f, 18f);
+            this.DrawNavIcon(iconBox, navIconIndex, contentColor);
+
+            GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
+            labelStyle.alignment = TextAnchor.MiddleLeft;
+            labelStyle.fontStyle = active ? FontStyle.Bold : FontStyle.Normal;
+            labelStyle.fontSize = 13;
+            labelStyle.normal.textColor = contentColor;
+            GUI.Label(new Rect(iconBox.xMax + 10f, rect.y, rect.width - (iconBox.xMax + 10f - rect.x) - 10f, rect.height), this.L(label), labelStyle);
 
             if (GUI.Button(rect, "", GUIStyle.none))
             {

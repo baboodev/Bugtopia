@@ -138,6 +138,7 @@ namespace HeartopiaMod
             this.uiSvTexture = null;
             this.uiAccentGradientTex = null;
             this.uiRoundedRectSprite = null;
+            this.uiRingSprite = null;
             this.uiPickerHueCached = -1f;
             if (this.themeTextures.Count > 0)
             {
@@ -326,7 +327,7 @@ namespace HeartopiaMod
             int[] navIndices = new int[] { 0, 2, 3, 8, 4, 5, 6, 9, 7 };
             for (int i = 0; i < navLabels.Length; i++)
             {
-                this.DrawSidebarTabButton(new Rect(navListRect.x, navListRect.y + (i * 42f), navListRect.width, 37f), navLabels[i], navIndices[i]);
+                this.DrawSidebarTabButton(new Rect(navListRect.x, navListRect.y + (i * 42f), navListRect.width, 37f), navLabels[i], navIndices[i], i);
             }
 
             // Sidebar footer: name only; click hides the menu.
@@ -928,13 +929,18 @@ namespace HeartopiaMod
             Texture2D windowBg = this.MakeThemeTexture(new Color(0f, 0f, 0f, 0f));
             Texture2D panelBg = this.MakeRoundedRectTexture(32, 12f, panel, new Color(1f, 1f, 1f, 0.05f), 1.2f);
             Texture2D contentBg = this.MakeRoundedRectTexture(32, 12f, contentBase, new Color(1f, 1f, 1f, 0.05f), 1.2f);
-            Texture2D buttonBg = this.MakeRoundedRectTexture(32, 10f,
+            // Radius 7 (not 10): GUI.skin.button is the DEFAULT for every unstyled GUI.Button
+            // call in the whole ~40-file codebase, including small (~20px) buttons/rows in
+            // floating windows outside this redesign's own files (e.g. the Quest Assistant
+            // panel's "Accept All" button and quest-row buttons) — border-sum must stay safely
+            // below the shortest button anyone actually uses, not just the ones checked here.
+            Texture2D buttonBg = this.MakeRoundedRectTexture(32, 7f,
                 new Color(controlFill.r, controlFill.g, controlFill.b, controlAlpha),
                 new Color(1f, 1f, 1f, 0.09f), 1.2f);
-            Texture2D buttonHover = this.MakeRoundedRectTexture(32, 10f,
+            Texture2D buttonHover = this.MakeRoundedRectTexture(32, 7f,
                 new Color(Mathf.Clamp01(controlFill.r + 0.035f), Mathf.Clamp01(controlFill.g + 0.04f), Mathf.Clamp01(controlFill.b + 0.05f), Mathf.Min(1f, controlAlpha + 0.04f)),
                 new Color(1f, 1f, 1f, 0.13f), 1.2f);
-            Texture2D buttonActive = this.MakeRoundedRectTexture(32, 10f,
+            Texture2D buttonActive = this.MakeRoundedRectTexture(32, 7f,
                 new Color(controlFill.r * 0.88f, controlFill.g * 0.88f, controlFill.b * 0.88f, controlAlpha),
                 new Color(1f, 1f, 1f, 0.08f), 1.2f);
             Texture2D tabActive = this.MakeRoundedRectTexture(32, 10f,
@@ -1177,7 +1183,7 @@ namespace HeartopiaMod
             buttonStyle.normal.background = buttonBg;
             buttonStyle.hover.background = buttonHover;
             buttonStyle.active.background = buttonActive;
-            buttonStyle.border = new RectOffset(12, 12, 12, 12);
+            buttonStyle.border = new RectOffset(8, 8, 8, 8);
             buttonStyle.normal.textColor = textPrimary;
             buttonStyle.hover.textColor = textPrimary;
             buttonStyle.active.textColor = accent;

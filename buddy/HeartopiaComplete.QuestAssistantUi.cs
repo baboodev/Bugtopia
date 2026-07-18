@@ -186,7 +186,9 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (GUI.Button(new Rect(w - 116f, 4f, 58f, 20f), "Refresh", GUI.skin.button))
+            // Width 70 (was 58): GUI.skin.button's font is Segoe UI now, wider than the old
+            // default IMGUI font "Refresh" was originally sized for — it no longer fit.
+            if (GUI.Button(new Rect(w - 128f, 4f, 70f, 20f), "Refresh", GUI.skin.button))
             {
                 this.QuestAssistantOnDumpButtonClicked();
             }
