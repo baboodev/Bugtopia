@@ -3201,6 +3201,28 @@ namespace HeartopiaMod
             this.NetCookDiagLog("capture: " + message);
         }
 
+        // Cap enforcement for capture results. With Remember Stoves ON the contract is absolute:
+        // EVERY captured stove stays in the working set, no exceptions — the cap only bounds the
+        // memoryless mode, where it keeps the CLOSEST stoves (post-distance-sort) instead of
+        // whichever the ECS enumeration yielded first.
+        private void TrimNetCookTargetsToClosest(List<NetCookTargetContext> targets, string label)
+        {
+            if (targets == null || targets.Count <= NetCookMaxCaptureTargets)
+            {
+                return;
+            }
+
+            if (this.netCookRememberStoves)
+            {
+                this.NetCookCaptureLog("Keeping all " + targets.Count + " " + label + " (Remember Stoves).");
+                return;
+            }
+
+            int trimmed = targets.Count - NetCookMaxCaptureTargets;
+            targets.RemoveRange(NetCookMaxCaptureTargets, trimmed);
+            this.NetCookCaptureLog("Kept the closest " + NetCookMaxCaptureTargets + " " + label + "; trimmed " + trimmed + " farther one(s).");
+        }
+
         // One target per burner, keyed by the STABLE wire lo. The per-source dedupe keys on
         // cookerNetId:lo, but the view cookerNetId is reassigned across stream-out/in — the same
         // burner captured twice under different view ids passes that dedupe as two targets, and
@@ -7419,6 +7441,7 @@ namespace HeartopiaMod
             }
 
             this.RemoveNetCookDuplicateLevelObjectTargets(targets);
+            this.TrimNetCookTargetsToClosest(targets, "stove(s)");
             status = "Captured " + targets.Count + " nearby stove(s) within " + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m.";
             this.NetCookCaptureLog(status);
             this.LogNetCookTargetSummary(targets);
@@ -7541,7 +7564,7 @@ namespace HeartopiaMod
             int skippedDuplicateCooker = 0;
             foreach (NetCookRegisteredWorldCooker registeredCooker in this.netCookRegisteredWorldCookers.Values)
             {
-                if (targets.Count >= NetCookMaxCaptureTargets)
+                if (targets.Count >= NetCookMaxCaptureScanTargets)
                 {
                     break;
                 }
@@ -7635,7 +7658,7 @@ namespace HeartopiaMod
             int added = 0;
             foreach (NetCookTargetContext registeredTarget in this.netCookRegisteredTargets.Values)
             {
-                if (targets.Count >= NetCookMaxCaptureTargets)
+                if (targets.Count >= NetCookMaxCaptureScanTargets)
                 {
                     break;
                 }
@@ -7999,8 +8022,9 @@ namespace HeartopiaMod
             }
 
             this.RemoveNetCookDuplicateLevelObjectTargets(targets);
-            this.RegisterNetCookTargets(targets);
             this.SortNetCookTargetsByDistanceFromScanOrigin(targets);
+            this.TrimNetCookTargetsToClosest(targets, "cached stove(s)");
+            this.RegisterNetCookTargets(targets);
             status = "Captured " + targets.Count + " cached stove(s) within " + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m.";
             this.NetCookLog(status + (removedOutOfRange > 0 ? " Filtered " + removedOutOfRange + " stale cached target(s)." : string.Empty));
             this.LogNetCookTargetSummary(targets);
@@ -8150,7 +8174,7 @@ namespace HeartopiaMod
                 {
                 for (int i = 0; i < cookBuildComponents.Count; i++)
                 {
-                    if (discoveredTargets.Count >= NetCookMaxCaptureTargets)
+                    if (discoveredTargets.Count >= NetCookMaxCaptureScanTargets)
                     {
                         break;
                     }
@@ -8229,7 +8253,7 @@ namespace HeartopiaMod
                     {
                     for (int entryIndex = 0; entryIndex < burnerEntries.Count; entryIndex++)
                     {
-                        if (discoveredTargets.Count >= NetCookMaxCaptureTargets)
+                        if (discoveredTargets.Count >= NetCookMaxCaptureScanTargets)
                         {
                             break;
                         }
@@ -8331,7 +8355,7 @@ namespace HeartopiaMod
 
                 HashSet<string> seenTargets = new HashSet<string>();
                 HashSet<uint> seenCookerNetIds = new HashSet<uint>();
-                for (int i = 0; i < discoveredTargets.Count && targets.Count < NetCookMaxCaptureTargets; i++)
+                for (int i = 0; i < discoveredTargets.Count && targets.Count < NetCookMaxCaptureScanTargets; i++)
                 {
                     NetCookTargetContext target = discoveredTargets[i];
                     if (target.CookerType <= 0)
@@ -8360,8 +8384,9 @@ namespace HeartopiaMod
                 }
 
                 this.RemoveNetCookDuplicateLevelObjectTargets(targets);
-                this.RegisterNetCookTargets(targets);
                 this.SortNetCookTargetsByDistanceFromScanOrigin(targets);
+                this.TrimNetCookTargetsToClosest(targets, "stove(s)");
+                this.RegisterNetCookTargets(targets);
                 status = "Captured " + targets.Count + " stove(s) from cook-build registry within " + maxScanDistance.ToString("F0") + "m.";
                 this.NetCookLog("Cook-build registry scan entities=" + inspectedEntities + " cookBuilds=" + inspectedCookBuilds + " burners=" + inspectedBurners + " selectedStatic=" + desiredCookerStaticId + " selectedType=" + desiredCookerType + ".");
                 this.NetCookLog(status);

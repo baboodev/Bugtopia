@@ -4880,6 +4880,11 @@ namespace HeartopiaMod
         // (NetCookMaxActionsPerTick) already bounds the frame cost, so a larger capture set only
         // lengthens the round-robin, it doesn't spike a frame.
         private const int NetCookMaxCaptureTargets = 128;
+        // Scan-phase headroom: public kitchens exceed 128 burners, and capping DURING enumeration
+        // keeps whichever stoves the ECS list happens to yield first — the player's own stoves can
+        // fall off the set ("assist skips one of my dishes"). Collect up to this many, sort by
+        // distance, then trim to NetCookMaxCaptureTargets so the closest stoves always win.
+        private const int NetCookMaxCaptureScanTargets = 512;
         private const bool NetCookUnsafeBroadAuraMonoExpansionEnabled = true;
         private const bool NetCookUseMagicSpice = false;
         private const int NetCookBackpackStorageType = 1;
