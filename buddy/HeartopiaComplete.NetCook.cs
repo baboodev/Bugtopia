@@ -8720,6 +8720,15 @@ namespace HeartopiaMod
 
         private bool IsCompatibleNetCookCooker(int cookerStaticId, int cookerType, int desiredCookerStaticId, int desiredCookerType)
         {
+            // Mini Game Assist only relieves danger and collects finished food — those interactions
+            // are cooker-type agnostic, so a mixed kitchen (e.g. stoves + ovens side by side) must be
+            // captured and assisted as ONE set. Type compatibility only matters for mass cook, where
+            // one recipe fits one cooker type (and the recipe filter on start prunes the set anyway).
+            if (this.netCookMiniGameOnly)
+            {
+                return true;
+            }
+
             if (desiredCookerType > 0 && cookerType > 0)
             {
                 return cookerType == desiredCookerType;
