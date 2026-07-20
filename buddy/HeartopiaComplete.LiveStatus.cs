@@ -240,6 +240,13 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Stranger Chat Bypass", "Active"));
             }
 
+            if (this.chatForceTranslateEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry(
+                    "Chat Translate Unlock",
+                    (this.chatForceTranslateSentCount > 0) ? ("Requested " + this.chatForceTranslateSentCount) : "Active"));
+            }
+
             return entries;
         }
 

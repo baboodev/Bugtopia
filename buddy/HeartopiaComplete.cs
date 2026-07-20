@@ -626,6 +626,7 @@ namespace HeartopiaMod
                 this.EnsurePetPlayRuntimePatches();
             }
             this.EnsureStrangerChatBypassPatch();
+            this.EnsureChatForceTranslateFeature();
             WarehouseBypassFeature.Update(this);
             this.EnsureSpawnVehicleResultHooks();
             this.TickSpawnVehicleResultTimeout();

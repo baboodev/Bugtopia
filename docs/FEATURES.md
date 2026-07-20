@@ -156,6 +156,26 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 - Applies additional Harmony patch on demand (`EnsureBypassPatched`).
 - Credits third-party contributor in UI.
 
+### Chat Translate Unlock
+
+- Unlocks chat translation for messages the game refuses to translate: the game tags every
+  message with the **sender's UI language** (`ChatMessageComponent.LangCode`, reported once via
+  `ConnectScene_CS`), not the language of the text — so a player typing e.g. Russian on an
+  English UI produces messages an English-UI receiver gets no Translate button for.
+- Hooks the `ReceiveChatMessage` EventCenter event (scalar fields only) and for non-self
+  messages whose langKey **equals** ours sends
+  `ChatProtocolManager.RequestTranslateStream(msgId, "")` directly (AuraMono static invoke),
+  skipping the client-side langKey gate. Foreign-langKey messages stay with the game's own
+  translate pipeline (its in-panel Translate toggle) — never double-requested, because duplicate
+  stream chunks would corrupt the game's append-only translation cache.
+- Results ride the game's own stream pipeline (`RequestTranslateStreamResultEvent` →
+  `ChatSystem` cache → `TranslateResultUIEvent`), so bubbles/HUD/history update natively.
+  If the server itself decides the text is already in our language it answers
+  `NoNeedToTranslate` (4209) — logged, nothing visible changes.
+- Requires the overseas game build (translation service); server weekly char limits still apply.
+  Toggle persisted in config (`chatForceTranslateEnabled`). Implementation:
+  `ChatForceTranslateFeature.cs`.
+
 ### Game UI — Custom UI Timings (Self → Game UI sub-tab)
 
 - Editable display durations for the game's tip/toast popups: item-obtained bubbles

@@ -1691,6 +1691,7 @@ namespace HeartopiaMod
 
                 num = this.DrawSelfWarehouseAnywhereControl(num);
                 num = this.DrawSelfStrangerChatBypassControl(num);
+                num = this.DrawSelfChatForceTranslateControl(num);
                 num = this.DrawSelfGameSpeedControls(num);
                 num = this.DrawSelfCustomCameraFovControls(num);
                 num = this.DrawSelfAnalogMoveControl(num);
@@ -1791,6 +1792,29 @@ namespace HeartopiaMod
                     this.strangerChatBypassPatchUnavailableLogged = false;
                     this.nextStrangerChatBypassPatchAttemptAt = -999f;
                     this.AddMenuNotification(this.L("Stranger Chat Bypass Disabled"), new Color(0.88f, 0.6f, 0.6f));
+                }
+            }
+
+            return num + 30;
+        }
+
+        private int DrawSelfChatForceTranslateControl(int num)
+        {
+            bool newChatTranslate = this.DrawSwitchToggle(new Rect(20f, (float)num, 260f, 25f), this.chatForceTranslateEnabled, "Chat Translate Unlock");
+            if (newChatTranslate != this.chatForceTranslateEnabled)
+            {
+                this.chatForceTranslateEnabled = newChatTranslate;
+                this.chatForceTranslateUnavailableLogged = false;
+                this.chatForceTranslateNextHookAttemptAt = -999f;
+                this.chatForceTranslateNextResolveAt = -999f;
+                this.SaveKeybinds(false);
+                if (this.chatForceTranslateEnabled)
+                {
+                    this.AddMenuNotification(this.L("Chat Translate Unlock Enabled"), new Color(0.55f, 0.88f, 1f));
+                }
+                else
+                {
+                    this.AddMenuNotification(this.L("Chat Translate Unlock Disabled"), new Color(0.88f, 0.6f, 0.6f));
                 }
             }
 
