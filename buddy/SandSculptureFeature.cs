@@ -33,7 +33,9 @@ namespace HeartopiaMod
         private const float SandApiPostChooseBackoffSeconds = 1.5f;
         private const float SandApiCloseDialogPollSeconds = 0.25f;
         private const float SandApiCloseDialogTimeoutSeconds = 3f;
-        private const float SandApiPlaceBaseBackoffSeconds = 2.5f;
+        private const float SandApiPlaceBaseBackoffSeconds = 2.5f;   // retry backoff after a FAILED place
+        private const float SandPlaceRescanIntervalSeconds = 0.25f;  // fast poll for the just-placed base
+        private const float SandPlacePendingWindowSeconds = 4f;      // max wait for the placed base to spawn
         private const int SandPlaceBaseMaxAttempts = 3;
         private const float SandCollectScanBackoffSeconds = 2.5f;   // idle: no finished sculpture found
         private const float SandCollectTakeBackoffSeconds = 1.5f;   // after a take: wait for the server BuildOptionRespond
@@ -92,6 +94,9 @@ namespace HeartopiaMod
         // teardown window and AV'd (2026-07-09).
         private bool sandAutoPlaceBase;
         private int sandPlaceAttempts;
+        // Set when a place command was just sent; FindBase fast-polls (instead of re-placing)
+        // until the base spawns or this window expires — no fixed post-place sleep.
+        private float sandPlaceSentAt;
         // Auto-collect finished sculptures (own, freshly-made) into the backpack via
         // CharacterProtocolManager.PoseDeleteBuild — runs independently of the sculpt FSM. OFF by
         // default (same continuous-scan crash reason as sandAutoPlaceBase).
@@ -263,6 +268,7 @@ namespace HeartopiaMod
             this.sandPlannedSuccessCount = 0;
             this.sandPlannedPerfectCount = 0;
             this.sandPlaceAttempts = 0;
+            this.sandPlaceSentAt = 0f;
             this.sandLastLoggedStatus = string.Empty;
             if (clearBlacklist)
             {
@@ -482,6 +488,18 @@ namespace HeartopiaMod
             if (!this.TryFindNearestSandBase(out uint baseNetId, out int roughStaticId, out string scanStatus))
             {
                 this.sandLastScanStatus = scanStatus;
+
+                // A place command is in flight: fast-poll for its base instead of re-placing (a
+                // second place here would waste a base item). The window bounds the wait.
+                if (this.sandPlaceSentAt > 0f && now - this.sandPlaceSentAt < SandPlacePendingWindowSeconds)
+                {
+                    this.SandSetAction("waiting for placed base to spawn...");
+                    this.sandApiNextActionAt = now + SandPlaceRescanIntervalSeconds;
+                    return;
+                }
+
+                this.sandPlaceSentAt = 0f;
+
                 // No base in range: optionally place one from the backpack, else keep scanning.
                 if (this.sandAutoPlaceBase && this.sandPlaceAttempts < SandPlaceBaseMaxAttempts)
                 {
@@ -498,6 +516,7 @@ namespace HeartopiaMod
 
             this.sandLastScanStatus = scanStatus;
             this.sandPlaceAttempts = 0; // a base exists now — reset the place-attempt guard
+            this.sandPlaceSentAt = 0f;
             this.sandTargetBaseNetId = baseNetId;
             this.sandLastBaseNetId = baseNetId;
             this.sandTargetRoughStaticId = roughStaticId;
@@ -929,9 +948,11 @@ namespace HeartopiaMod
             {
                 this.SandSetAction("placed base (attempt " + this.sandPlaceAttempts + "): " + placeStatus);
                 this.SandLog("place base: " + placeStatus);
-                // Give the server a moment to spawn the base entity, then rescan.
+                // No fixed sleep: FindBase fast-polls for the spawned base (guarded by
+                // sandPlaceSentAt so it never double-places while the spawn is in flight).
+                this.sandPlaceSentAt = now;
                 this.sandApiState = SandApiState.FindBase;
-                this.sandApiNextActionAt = now + SandApiPlaceBaseBackoffSeconds;
+                this.sandApiNextActionAt = now + SandPlaceRescanIntervalSeconds;
                 return;
             }
 
