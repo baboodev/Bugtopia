@@ -747,7 +747,7 @@ namespace HeartopiaMod
                 string choiceLabel = autoBaitChoice == AutoBaitChoice.Bait
                     ? host.UI_Localize("Item: Bait")
                     : host.UI_Localize("Item: Attractor");
-                if (host.UI_DrawPrimaryActionButton(new Rect(20f, num, 260f, 30f), choiceLabel))
+                if (host.UI_DrawSecondaryActionButton(new Rect(20f, num, 260f, 30f), choiceLabel))
                 {
                     SetAutoBaitChoice(autoBaitChoice == AutoBaitChoice.Bait ? (int)AutoBaitChoice.Attractor : (int)AutoBaitChoice.Bait);
                     Log("Auto Bait item changed to " + autoBaitChoice);
@@ -777,7 +777,7 @@ namespace HeartopiaMod
                 num += 30;
 
                 GUI.Label(new Rect(20f, num, 180f, 24f), host.UI_LocalizeFormat("Remaining: {0}/{1}", autoBaitRemaining, autoBaitMaxCount), small);
-                if (host.UI_DrawPrimaryActionButton(new Rect(190f, num - 3f, 90f, 28f), host.UI_Localize("Reset")))
+                if (host.UI_DrawSecondaryActionButton(new Rect(190f, num - 3f, 90f, 28f), host.UI_Localize("Reset")))
                 {
                     ResetAutoBaitCounter();
                 }

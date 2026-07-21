@@ -306,7 +306,7 @@ namespace HeartopiaMod
                         {
                             this.TeleportToLocation(entry.position);
                         }
-                        if (this.DrawDangerActionButton(new Rect(panelX + 328f, (float)y, 70f, 32f), "DEL"))
+                        if (this.DrawDangerActionButton(new Rect(panelX + 328f, (float)y, 70f, 32f), "Del"))
                         {
                             this.customTeleportList.RemoveAt(i);
                             this.SaveCustomTeleports();

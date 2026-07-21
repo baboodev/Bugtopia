@@ -149,7 +149,7 @@ namespace HeartopiaMod
 
             bool hasForagingMode = this.auraFarmEnabled;
             bool hasRadarLoot = this.AnyRadarLootToggleEnabled();
-            string actionText = this.autoFarmActive ? "STOP FORAGING" : "START FORAGING";
+            string actionText = this.autoFarmActive ? "Stop Foraging" : "Start Foraging";
             Rect statusPanel = new Rect(left, (float)num, panelWidth, 112f);
             this.DrawExentriSectionPanel(statusPanel, accent, panelFill, panelLine);
             GUI.Label(new Rect(statusPanel.x + 14f, statusPanel.y + 12f, statusPanel.width - 28f, 18f), this.L("FORAGING"), sectionStyle);

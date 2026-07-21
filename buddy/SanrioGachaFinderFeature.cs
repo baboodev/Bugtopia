@@ -906,7 +906,7 @@ namespace HeartopiaMod
                 }
                 GUI.Label(new Rect(left, y, 330f, 22f), text, bodyStyle);
                 if (this.sanrioMachines[i].Present
-                    && this.DrawPrimaryActionButton(new Rect(left + 340f, y - 4f, 130f, 26f), this.L("TELEPORT")))
+                    && this.DrawSecondaryActionButton(new Rect(left + 340f, y - 4f, 130f, 26f), this.L("Teleport")))
                 {
                     this.StartSanrioGachaTeleport(this.sanrioMachines[i].Pos, this.LF("Star Town machine {0}", i + 1));
                 }
@@ -943,7 +943,7 @@ namespace HeartopiaMod
                     text += this.L("  ✓ collected today");
                 }
                 GUI.Label(new Rect(left, y, 330f, 22f), text, bodyStyle);
-                if (this.DrawPrimaryActionButton(new Rect(left + 340f, y - 4f, 130f, 26f), this.L("TELEPORT")))
+                if (this.DrawSecondaryActionButton(new Rect(left + 340f, y - 4f, 130f, 26f), this.L("Teleport")))
                 {
                     this.StartSanrioGachaTeleport(placed.Pos, this.L("placed machine"));
                 }

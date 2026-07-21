@@ -45,7 +45,7 @@ namespace HeartopiaMod
             { "Snow Sculpting", "Snow Sculpting" },
             { "Auto Buy", "Auto Buy" },
             { "AUTO BUY (Cooking Store)", "AUTO BUY (Cooking Store)" },
-            { "BUY ALL (COIN)", "BUY ALL (COIN)" },
+            { "BUY ALL (COIN)", "Buy All (Coin)" },
             { "Shop buy-all already running", "Shop buy-all already running" },
             { "Auto Buy: Teleport -> Buy -> Return", "Auto Buy: Teleport -> Buy -> Return" },
             { "ENABLE AUTO FORAGING", "ENABLE AUTO FORAGING" },
@@ -75,8 +75,8 @@ namespace HeartopiaMod
             { "Radar markers: Simple Text", "Radar markers: Simple Text" },
             { "Failed to save radar settings", "Failed to save radar settings" },
             { "Radar Max Distance: {0}m", "Radar Max Distance: {0}m" },
-            { "ENABLE RADAR", "ENABLE RADAR" },
-            { "DISABLE RADAR", "DISABLE RADAR" },
+            { "ENABLE RADAR", "Enable Radar" },
+            { "DISABLE RADAR", "Disable Radar" },
             { "Select All Loots", "Select All Loots" },
             { "Clear All Loots", "Clear All Loots" },
             { "Force Refresh Scan", "Force Refresh Scan" },
@@ -116,7 +116,7 @@ namespace HeartopiaMod
             { "Bunny Hop (hold Space)", "Bunny Hop (hold Space)" },
             { "Bird Vacuum (Client Side)", "Bird Vacuum (Client Side)" },
             { "Custom Camera FOV", "Custom Camera FOV" },
-            { "DISABLE ALL", "DISABLE ALL" },
+            { "DISABLE ALL", "Disable All" },
             { "REFRESH & SCAN", "REFRESH & SCAN" },
             { "Auto Repair", "Auto Repair" },
             { "Eat Selected Food", "Eat Selected Food" },
@@ -162,7 +162,7 @@ namespace HeartopiaMod
             { "Figurine located (style {0}) — {1}m away", "Figurine located (style {0}) — {1}m away" },
             { "Figurine located (style {0})", "Figurine located (style {0})" },
             { "Figurine not found — take the daily task and enter the canyon", "Figurine not found — take the daily task and enter the canyon" },
-            { "TELEPORT TO FIGURINE", "TELEPORT TO FIGURINE" },
+            { "TELEPORT TO FIGURINE", "Teleport to Figurine" },
             { "Map track system is not ready.", "Map track system is not ready." },
             { "Sprint Ignores Space/Ctrl", "Sprint Ignores Space/Ctrl" },
             { "Auto-Cleanse Corrupted", "Auto-Cleanse Corrupted" },
@@ -183,7 +183,7 @@ namespace HeartopiaMod
             { "KEYBIND SETTINGS", "KEYBIND SETTINGS" },
             { "PRESS ANY KEY FOR:", "PRESS ANY KEY OR MOUSE BUTTON FOR:" },
             { "CANCEL", "CANCEL" },
-            { "RESET TO DEFAULTS", "RESET TO DEFAULTS" },
+            { "RESET TO DEFAULTS", "Reset to Defaults" },
             { "Defaults restored (Toggle Menu: Insert)", "Defaults restored (Toggle Menu: Insert)" },
             { "Enable Notifications", "Enable Notifications" },
             { "Notifications enabled", "Notifications enabled" },
@@ -583,9 +583,9 @@ namespace HeartopiaMod
             { "idle", "idle" },
             { "researching {0} · {1}", "researching {0} · {1}" },
             { "DONE · {0}", "DONE · {0}" },
-            { "SELECT ITEM", "SELECT ITEM" },
-            { "RESEARCH STORE", "RESEARCH STORE" },
-            { "CONTROL CONSOLE", "CONTROL CONSOLE" },
+            { "SELECT ITEM", "Select Item" },
+            { "RESEARCH STORE", "Research Store" },
+            { "CONTROL CONSOLE", "Control Console" },
             { "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab.", "Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab." },
         };
 
@@ -611,7 +611,7 @@ namespace HeartopiaMod
             { "Snow Sculpting", "Escultura de nieve" },
             { "Auto Buy", "Compra automática" },
             { "AUTO BUY (Cooking Store)", "COMPRA AUTOMATICA (Tienda de cocina)" },
-            { "BUY ALL (COIN)", "COMPRAR TODO (MONEDAS)" },
+            { "BUY ALL (COIN)", "Comprar Todo (Monedas)" },
             { "Shop buy-all already running", "Compra total ya en curso" },
             { "Auto Buy: Teleport -> Buy -> Return", "Compra automatica: Teletransporte -> Comprar -> Regresar" },
             { "ENABLE AUTO FORAGING", "ACTIVAR RECOLECCION AUTOMATICA" },
@@ -641,8 +641,8 @@ namespace HeartopiaMod
             { "Radar markers: Simple Text", "Marcadores de radar: Texto simple" },
             { "Failed to save radar settings", "No se pudieron guardar los ajustes del radar" },
             { "Radar Max Distance: {0}m", "Distancia maxima del radar: {0}m" },
-            { "ENABLE RADAR", "ACTIVAR RADAR" },
-            { "DISABLE RADAR", "DESACTIVAR RADAR" },
+            { "ENABLE RADAR", "Activar Radar" },
+            { "DISABLE RADAR", "Desactivar Radar" },
             { "Select All Loots", "Seleccionar todo" },
             { "Clear All Loots", "Limpiar todo" },
             { "Force Refresh Scan", "Forzar escaneo" },
@@ -675,7 +675,7 @@ namespace HeartopiaMod
             { "Bunny Hop (hold Space)", "Bunny hop (mantén Espacio)" },
             { "Bird Vacuum (Client Side)", "Vacío de aves (lado del cliente)" },
             { "Custom Camera FOV", "FOV de cámara personalizado" },
-            { "DISABLE ALL", "DESACTIVAR TODO" },
+            { "DISABLE ALL", "Desactivar Todo" },
             { "REFRESH & SCAN", "ACTUALIZAR Y ESCANEAR" },
             { "Auto Repair", "Auto reparar" },
             { "Eat Selected Food", "Comer comida seleccionada" },
@@ -726,7 +726,7 @@ namespace HeartopiaMod
             { "KEYBIND SETTINGS", "AJUSTES DE TECLAS" },
             { "PRESS ANY KEY FOR:", "PULSA UNA TECLA O BOTÓN DEL RATÓN PARA:" },
             { "CANCEL", "CANCELAR" },
-            { "RESET TO DEFAULTS", "RESTAURAR" },
+            { "RESET TO DEFAULTS", "Restaurar" },
             { "Defaults restored (Toggle Menu: Insert)", "Valores restaurados (Menú: Insert)" },
             { "Enable Notifications", "Activar notificaciones" },
             { "Notifications enabled", "Notificaciones activadas" },
@@ -1059,7 +1059,7 @@ namespace HeartopiaMod
             { "Figurine located (style {0}) — {1}m away", "Figurita localizada (estilo {0}) — a {1}m" },
             { "Figurine located (style {0})", "Figurita localizada (estilo {0})" },
             { "Figurine not found — take the daily task and enter the canyon", "Figurita no encontrada — acepta la tarea diaria y entra al cañón" },
-            { "TELEPORT TO FIGURINE", "TELETRANSPORTE A LA FIGURITA" },
+            { "TELEPORT TO FIGURINE", "Teletransporte a la Figurita" },
             { "Map track system is not ready.", "El sistema de marcas del mapa no está listo." },
             { "Sprint Ignores Space/Ctrl", "El sprint ignora Espacio/Ctrl" },
             { "Clean radius: {0:F1}m", "Radio de limpieza: {0:F1}m" },
@@ -1746,7 +1746,7 @@ namespace HeartopiaMod
             { "Snow Sculpting", "Escultura de Neve" },
             { "Auto Buy", "Compra Automática" },
             { "AUTO BUY (Cooking Store)", "COMPRA AUTOMÁTICA (Loja de Culinária)" },
-            { "BUY ALL (COIN)", "COMPRAR TUDO (MOEDAS)" },
+            { "BUY ALL (COIN)", "Comprar Tudo (Moedas)" },
             { "Shop buy-all already running", "Compra total já em execução" },
             { "Auto Buy: Teleport -> Buy -> Return", "Compra automática: Teleporte -> Comprar -> Voltar" },
             { "ENABLE AUTO FORAGING", "ATIVAR COLETA AUTOMÁTICA" },
@@ -1776,8 +1776,8 @@ namespace HeartopiaMod
             { "Radar markers: Simple Text", "Marcadores do radar: Texto simples" },
             { "Failed to save radar settings", "Falha ao salvar configurações do radar" },
             { "Radar Max Distance: {0}m", "Distância máxima do radar: {0} m" },
-            { "ENABLE RADAR", "ATIVAR RADAR" },
-            { "DISABLE RADAR", "DESATIVAR RADAR" },
+            { "ENABLE RADAR", "Ativar Radar" },
+            { "DISABLE RADAR", "Desativar Radar" },
             { "Select All Loots", "Selecionar Todos" },
             { "Clear All Loots", "Limpar Seleção" },
             { "Force Refresh Scan", "Forçar Atualização" },
@@ -1810,7 +1810,7 @@ namespace HeartopiaMod
             { "Bunny Hop (hold Space)", "Bunny hop (segure Espaço)" },
             { "Bird Vacuum (Client Side)", "Aspirador de Pássaros (Cliente)" },
             { "Custom Camera FOV", "FOV da Câmera Customizado" },
-            { "DISABLE ALL", "DESATIVAR TUDO" },
+            { "DISABLE ALL", "Desativar Tudo" },
             { "REFRESH & SCAN", "ATUALIZAR & ESCANEAR" },
             { "Auto Repair", "Reparo Automático" },
             { "Eat Selected Food", "Comer Comida Selecionada" },
@@ -1860,7 +1860,7 @@ namespace HeartopiaMod
             { "KEYBIND SETTINGS", "CONFIGURAÇÕES DE ATALHOS" },
             { "PRESS ANY KEY FOR:", "PRESSIONE QUALQUER TECLA OU BOTÃO DO MOUSE PARA:" },
             { "CANCEL", "CANCELAR" },
-            { "RESET TO DEFAULTS", "RESTAURAR PADRÕES" },
+            { "RESET TO DEFAULTS", "Restaurar Padrões" },
             { "Defaults restored (Toggle Menu: Insert)", "Padrões restaurados (Abrir Menu: Insert)" },
             { "Enable Notifications", "Ativar Notificações" },
             { "Notifications enabled", "Notificações ativadas" },
@@ -2187,7 +2187,7 @@ namespace HeartopiaMod
             { "Figurine located (style {0}) — {1}m away", "Estatueta localizada (estilo {0}) — a {1}m" },
             { "Figurine located (style {0})", "Estatueta localizada (estilo {0})" },
             { "Figurine not found — take the daily task and enter the canyon", "Estatueta não encontrada — aceite a tarefa diária e entre no cânion" },
-            { "TELEPORT TO FIGURINE", "TELEPORTAR ATÉ A ESTATUETA" },
+            { "TELEPORT TO FIGURINE", "Teleportar até a Estatueta" },
             { "Map track system is not ready.", "O sistema de marcas do mapa não está pronto." },
             { "Sprint Ignores Space/Ctrl", "Sprint ignora Espaço/Ctrl" },
             { "Clean radius: {0:F1}m", "Raio de limpeza: {0:F1}m" },
@@ -3049,6 +3049,47 @@ namespace HeartopiaMod
                 ["pictures.draw_hint"] = new HashSet<string>(StringComparer.Ordinal)
                 {
                     "Draw: edit colored Draw/*.png files. Index maps are stored in Draw/.index/ for roundtrip.",
+                },
+                // 2026-07-18 button-hierarchy pass: these keys' ALL-CAPS values were replaced with
+                // sentence case (mockup fidelity). The KEY is unchanged (still the lookup id for
+                // every language), only the displayed VALUE — so existing players' cached
+                // en/es/pt-BR.json files need their old shouty value flagged obsolete here to pick
+                // up the new casing on next load; a fresh install never had the old value cached.
+                ["BUY ALL (COIN)"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "BUY ALL (COIN)", "COMPRAR TODO (MONEDAS)", "COMPRAR TUDO (MOEDAS)",
+                },
+                ["ENABLE RADAR"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "ENABLE RADAR", "ACTIVAR RADAR", "ATIVAR RADAR",
+                },
+                ["DISABLE RADAR"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "DISABLE RADAR", "DESACTIVAR RADAR", "DESATIVAR RADAR",
+                },
+                ["DISABLE ALL"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "DISABLE ALL", "DESACTIVAR TODO", "DESATIVAR TUDO",
+                },
+                ["TELEPORT TO FIGURINE"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "TELEPORT TO FIGURINE", "TELETRANSPORTE A LA FIGURITA", "TELEPORTAR ATÉ A ESTATUETA",
+                },
+                ["RESET TO DEFAULTS"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "RESET TO DEFAULTS", "RESTAURAR", "RESTAURAR PADRÕES",
+                },
+                ["SELECT ITEM"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "SELECT ITEM",
+                },
+                ["RESEARCH STORE"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "RESEARCH STORE",
+                },
+                ["CONTROL CONSOLE"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "CONTROL CONSOLE",
                 },
             };
 

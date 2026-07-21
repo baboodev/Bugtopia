@@ -639,7 +639,7 @@ namespace HeartopiaMod
                     }
                 }
 
-                if (GUI.Button(new Rect(160f, (float)num, 125f, 35f), this.L("Eat Selected Food"), this.themePrimaryButtonStyle))
+                if (this.DrawSecondaryActionButton(new Rect(160f, (float)num, 125f, 35f), "Eat Selected Food"))
                 {
                     if (!this.isRepairing && !this.isAutoEating)
                     {
@@ -1169,7 +1169,7 @@ namespace HeartopiaMod
                     num += 12;
                 }
 
-                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "OPEN SELECTED SHOP"))
+                if (this.DrawSecondaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "Open Selected Shop"))
                 {
                     if (this.TryOpenSelectedForceShop(out string openStatus))
                     {
@@ -1222,7 +1222,7 @@ namespace HeartopiaMod
                 this.shopQuickBuySlotIdInput = GUI.TextField(new Rect(forceLeft + 98f, (float)num, 90f, 28f), this.shopQuickBuySlotIdInput ?? string.Empty, 8);
                 this.shopQuickBuyItemIdInput = GUI.TextField(new Rect(forceLeft + 196f, (float)num, 100f, 28f), this.shopQuickBuyItemIdInput ?? string.Empty, 10);
                 num += 34;
-                if (this.DrawPrimaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "OPEN BUY PANEL"))
+                if (this.DrawSecondaryActionButton(new Rect(forceLeft, (float)num, 220f, 32f), "Open Buy Panel"))
                 {
                     this.StartShopQuickBuyOpenPanel();
                 }
@@ -1236,7 +1236,7 @@ namespace HeartopiaMod
                     new Rect(forceLeft, (float)num, 120f, 28f),
                     this.forceOpenShopManualStoreIdInput ?? string.Empty,
                     8);
-                if (this.DrawPrimaryActionButton(new Rect(forceLeft + 130f, (float)num, 120f, 28f), "OPEN ID"))
+                if (this.DrawSecondaryActionButton(new Rect(forceLeft + 130f, (float)num, 120f, 28f), "Open ID"))
                 {
                     if (this.TryOpenForceShopByManualStoreId(out string manualIdStatus))
                     {
@@ -1257,7 +1257,7 @@ namespace HeartopiaMod
                     new Rect(forceLeft, (float)num, 240f, 28f),
                     this.forceOpenShopManualStoreNameInput ?? string.Empty,
                     64);
-                if (this.DrawPrimaryActionButton(new Rect(forceLeft + 250f, (float)num, 130f, 28f), "OPEN NAME"))
+                if (this.DrawSecondaryActionButton(new Rect(forceLeft + 250f, (float)num, 130f, 28f), "Open Name"))
                 {
                     if (this.TryOpenForceShopByManualStoreName(out string manualNameStatus))
                     {
@@ -1365,13 +1365,13 @@ namespace HeartopiaMod
             float primaryButtonWidth = 130f;
             float actionRowHeight = 34f;
             GUI.enabled = !this.transferScanSourceDropdownOpen;
-            if (this.DrawPrimaryActionButton(new Rect(primaryStartX, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), "SCAN ITEMS"))
+            if (this.DrawSecondaryActionButton(new Rect(primaryStartX, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), "Scan Items"))
             {
                 this.transferItems = this.ScanTransferItems();
                 this.selectedTransferIndex = -1;
                 this.transferBatch.Clear();
             }
-            if (GUI.Button(new Rect(primaryStartX + primaryButtonWidth + 8f, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), this.L("TRANSFER"), this.themePrimaryButtonStyle))
+            if (this.DrawPrimaryActionButton(new Rect(primaryStartX + primaryButtonWidth + 8f, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), "Transfer"))
             {
                 Dictionary<uint, int> pendingMap = this.BuildTransferItemMapForSend(out _);
                 if (pendingMap != null && pendingMap.Count > TransferBatchMaxCount)

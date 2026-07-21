@@ -1182,7 +1182,7 @@ namespace HeartopiaMod
             num += 50;
 
             // Select / Clear shortcuts
-            if (this.DrawPrimaryActionButton(new Rect(20f, (float)num, 125f, 30f), "Select All Loots"))
+            if (this.DrawSecondaryActionButton(new Rect(20f, (float)num, 125f, 30f), "Select All Loots"))
             {
                 this.showMushroomRadar = true;
                 this.showOysterMushroomRadar = true;
@@ -1215,7 +1215,7 @@ namespace HeartopiaMod
                 this.CheckRadarAutoToggle();
                 if (this.isRadarActive) this.RunRadar();
             }
-            if (this.DrawPrimaryActionButton(new Rect(155f, (float)num, 125f, 30f), "Clear All Loots"))
+            if (this.DrawSecondaryActionButton(new Rect(155f, (float)num, 125f, 30f), "Clear All Loots"))
             {
                 this.showMushroomRadar = false;
                 this.showOysterMushroomRadar = false;
@@ -1257,7 +1257,7 @@ namespace HeartopiaMod
             num = this.DrawRadarResourcesDropdown(num);
             num = this.DrawRadarTreesDropdown(num);
             num = this.DrawRadarMiscDropdown(num);
-            bool flag21 = this.DrawPrimaryActionButton(new Rect(20f, (float)num, 260f, 30f), "Force Refresh Scan") && this.isRadarActive;
+            bool flag21 = this.DrawSecondaryActionButton(new Rect(20f, (float)num, 260f, 30f), "Force Refresh Scan") && this.isRadarActive;
             if (flag21)
             {
                 this.RunRadar();

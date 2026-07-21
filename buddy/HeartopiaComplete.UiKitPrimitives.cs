@@ -319,6 +319,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Never rounded its own rect (unlike DrawRoundedPanel/DrawCapsule) — see
+            // RoundToScreenPixel; the outer window ring drawn alongside this (DrawWindow) can
+            // drift apart from it under a non-1.0 effective menu scale otherwise.
+            rect = this.RoundRectToScreenPixel(rect);
             if (this.themeSidebarShapeStyle == null || this.themeSidebarShapeStyle.normal.background == null)
             {
                 this.DrawRoundedPanel(rect, 15f, tint, Color.clear, 0f, Color.clear);
@@ -491,6 +495,11 @@ namespace HeartopiaMod
         private void DrawCardOutline(Rect rect, float thickness = 1f)
         {
             Color edge = new Color(1f, 1f, 1f, Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f));
+            // Same gap as the tinted-box functions: this ring is a raw GUI.Box with no rounding
+            // of its own, while whatever fill it outlines (DrawRoundedPanel/DrawTintedRoundedBox)
+            // now scale-compensates. Round here too so the two layers can't drift apart under a
+            // non-1.0 effective menu scale.
+            rect = this.RoundRectToScreenPixel(rect);
 
             if (rect.height >= 18f && rect.width >= 18f)
             {
@@ -534,16 +543,31 @@ namespace HeartopiaMod
             }
             else
             {
-                float diameter = corner * 2f;
-                Rect center = new Rect(rect.x + corner, rect.y + corner, rect.width - diameter, rect.height - diameter);
-                Rect top = new Rect(rect.x + corner, rect.y, rect.width - diameter, corner);
-                Rect bottom = new Rect(rect.x + corner, rect.yMax - corner, rect.width - diameter, corner);
-                Rect left = new Rect(rect.x, rect.y + corner, corner, rect.height - diameter);
-                Rect right = new Rect(rect.xMax - corner, rect.y + corner, corner, rect.height - diameter);
-                Rect topLeft = new Rect(rect.x, rect.y, corner, corner);
-                Rect topRight = new Rect(rect.xMax - corner, rect.y, corner, corner);
-                Rect bottomLeft = new Rect(rect.x, rect.yMax - corner, corner, corner);
-                Rect bottomRight = new Rect(rect.xMax - corner, rect.yMax - corner, corner, corner);
+                // The 9 sub-rects below must share EXACT boundary values, not just
+                // algebraically-equal expressions: rect.x/y/xMax/yMax are scale-compensated
+                // (RoundToScreenPixel above), but `corner` is a plain unrounded radius, so
+                // `rect.x + corner` is NOT itself scale-compensated. Two adjacent rects computed
+                // from the same "rect.xMax - corner" expression are mathematically identical
+                // floats, but under a non-1.0 effective menu scale the GPU can still round each
+                // one's independently-rasterized edge to a DIFFERENT physical pixel, opening a
+                // 1px gap that shows the (darker) layer behind through it — reported as thin dark
+                // horizontal+vertical lines crossing near a corner. Rounding each shared boundary
+                // ONCE here and building every adjacent rect from that same value closes the gap
+                // regardless of scale.
+                float leftInner = this.RoundToScreenPixel(rect.x + corner);
+                float rightInner = this.RoundToScreenPixel(rect.xMax - corner);
+                float topInner = this.RoundToScreenPixel(rect.y + corner);
+                float bottomInner = this.RoundToScreenPixel(rect.yMax - corner);
+
+                Rect center = new Rect(leftInner, topInner, rightInner - leftInner, bottomInner - topInner);
+                Rect top = new Rect(leftInner, rect.y, rightInner - leftInner, topInner - rect.y);
+                Rect bottom = new Rect(leftInner, bottomInner, rightInner - leftInner, rect.yMax - bottomInner);
+                Rect left = new Rect(rect.x, topInner, leftInner - rect.x, bottomInner - topInner);
+                Rect right = new Rect(rightInner, topInner, rect.xMax - rightInner, bottomInner - topInner);
+                Rect topLeft = new Rect(rect.x, rect.y, leftInner - rect.x, topInner - rect.y);
+                Rect topRight = new Rect(rightInner, rect.y, rect.xMax - rightInner, topInner - rect.y);
+                Rect bottomLeft = new Rect(rect.x, bottomInner, leftInner - rect.x, rect.yMax - bottomInner);
+                Rect bottomRight = new Rect(rightInner, bottomInner, rect.xMax - rightInner, rect.yMax - bottomInner);
 
                 GUI.color = fill;
                 GUI.DrawTexture(center, Texture2D.whiteTexture);
@@ -551,17 +575,21 @@ namespace HeartopiaMod
                 GUI.DrawTexture(bottom, Texture2D.whiteTexture);
                 GUI.DrawTexture(left, Texture2D.whiteTexture);
                 GUI.DrawTexture(right, Texture2D.whiteTexture);
+                // Each corner's circle quadrant is drawn at 2x ITS OWN (now possibly not-quite-
+                // "corner"-sized) group dimensions, not the shared `diameter` — the group's actual
+                // size may deviate from `corner` by a sub-pixel amount post-rounding, and scaling
+                // the circle draw to match keeps each quadrant proportional instead of stretched.
                 GUI.BeginGroup(topLeft);
-                GUI.DrawTexture(new Rect(0f, 0f, diameter, diameter), this.uiCircleTexture);
+                GUI.DrawTexture(new Rect(0f, 0f, topLeft.width * 2f, topLeft.height * 2f), this.uiCircleTexture);
                 GUI.EndGroup();
                 GUI.BeginGroup(topRight);
-                GUI.DrawTexture(new Rect(-corner, 0f, diameter, diameter), this.uiCircleTexture);
+                GUI.DrawTexture(new Rect(-topRight.width, 0f, topRight.width * 2f, topRight.height * 2f), this.uiCircleTexture);
                 GUI.EndGroup();
                 GUI.BeginGroup(bottomLeft);
-                GUI.DrawTexture(new Rect(0f, -corner, diameter, diameter), this.uiCircleTexture);
+                GUI.DrawTexture(new Rect(0f, -bottomLeft.height, bottomLeft.width * 2f, bottomLeft.height * 2f), this.uiCircleTexture);
                 GUI.EndGroup();
                 GUI.BeginGroup(bottomRight);
-                GUI.DrawTexture(new Rect(-corner, -corner, diameter, diameter), this.uiCircleTexture);
+                GUI.DrawTexture(new Rect(-bottomRight.width, -bottomRight.height, bottomRight.width * 2f, bottomRight.height * 2f), this.uiCircleTexture);
                 GUI.EndGroup();
                 GUI.color = Color.white;
             }
@@ -622,6 +650,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Never rounded its own rect (unlike DrawRoundedPanel/DrawCapsule) — see
+            // RoundToScreenPixel; a sibling ring/fill drawn alongside this can drift apart under
+            // a non-1.0 effective menu scale otherwise.
+            rect = this.RoundRectToScreenPixel(rect);
             if (this.themeRoundedWhiteStyle == null || this.themeRoundedWhiteStyle.normal.background == null)
             {
                 this.DrawRoundedPanel(rect, 10f, tint, Color.clear, 0f, Color.clear);
@@ -645,6 +677,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Never rounded its own rect (unlike DrawRoundedPanel/DrawCapsule) — see
+            // RoundToScreenPixel; the outer window ring drawn alongside this (DrawWindow) can
+            // drift apart from it under a non-1.0 effective menu scale otherwise.
+            rect = this.RoundRectToScreenPixel(rect);
             if (this.themeBigTintableStyle == null || this.themeBigTintableStyle.normal.background == null)
             {
                 this.DrawRoundedPanel(rect, 15f, tint, Color.clear, 0f, Color.clear);
@@ -664,6 +700,13 @@ namespace HeartopiaMod
             // DrawRoundedPanel translucent fill (5.5% alpha) — same seam bug as every other
             // low-alpha multi-piece fill in this file — and this is the single most-visible
             // panel in the app (every tab's main card, the LIVE rail).
+            // Round ONCE here, before either layer: DrawRoundedPanel below scale-compensates its
+            // OWN copy of the rect (RoundToScreenPixel), but the ring is a raw GUI.Box with no
+            // rounding of its own — under a non-1.0 effective menu scale the two layers could
+            // land on different final screen pixels despite sharing the same local rect, drifting
+            // apart right at the curved corners where any offset is most visible (reported as
+            // "stripes where the roundings meet").
+            rect = this.RoundRectToScreenPixel(rect);
             if (this.themeBigCardRingStyle != null && this.themeBigCardRingStyle.normal.background != null)
             {
                 Color prevTint = GUI.color;
@@ -693,6 +736,14 @@ namespace HeartopiaMod
         private bool DrawDangerActionButton(Rect rect, string label)
         {
             return GUI.Button(rect, this.L(label), this.themeDangerButtonStyle ?? GUI.skin.button);
+        }
+
+        // For every action row that isn't the one hero action of its card — GUI.skin.button IS
+        // already styled as the mockup's secondary look (bg3 fill + ring, see EnsureThemeStyles),
+        // it just never had its own named helper alongside Primary/Danger.
+        private bool DrawSecondaryActionButton(Rect rect, string label)
+        {
+            return GUI.Button(rect, this.L(label), GUI.skin.button);
         }
 
         private bool DrawSwitchToggle(Rect rect, bool value, string label)

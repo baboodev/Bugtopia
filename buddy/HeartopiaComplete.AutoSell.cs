@@ -223,11 +223,11 @@ namespace HeartopiaMod
             float primaryButtonWidth = Mathf.Max(110f, (primaryAvailableWidth - actionGap) * 0.5f);
             bool blockRowActions = this.autoSellScanSourceDropdownOpen;
             GUI.enabled = !blockRowActions;
-            if (GUI.Button(new Rect(primaryStartX, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), this.L("SELL SELECTED"), this.themePrimaryButtonStyle))
+            if (this.DrawPrimaryActionButton(new Rect(primaryStartX, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), "Sell Selected"))
             {
                 this.ExecuteDirectAutoSell(false);
             }
-            if (this.DrawPrimaryActionButton(new Rect(primaryStartX + primaryButtonWidth + actionGap, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), "SCAN ITEMS"))
+            if (this.DrawSecondaryActionButton(new Rect(primaryStartX + primaryButtonWidth + actionGap, sourceRowY - 3f, primaryButtonWidth, actionRowHeight), "Scan Items"))
             {
                 this.autoSellBagItems = this.ScanBackpackForAutoSellItems();
                 this.autoSellStatus = this.autoSellBagItems.Count > 0
@@ -346,7 +346,7 @@ namespace HeartopiaMod
                 num += 30;
             }
 
-            if (GUI.Button(new Rect(left, (float)num, 120f, 32f), this.L("CLEAR"), this.themeDangerButtonStyle ?? GUI.skin.button))
+            if (GUI.Button(new Rect(left, (float)num, 120f, 32f), this.L("Clear"), this.themeDangerButtonStyle ?? GUI.skin.button))
             {
                 this.autoSellItemKey = "";
                 this.autoSellSelectedStaticId = 0;
@@ -360,11 +360,11 @@ namespace HeartopiaMod
             // OPEN SELL PANEL = coin sell (ItemSellPanel / CmdQuickSell); OPEN TOKEN SELL = Fashionwave /
             // battle-pass token sell (BattlePassSellPanel / CmdBattlePassSell) — the "Available in
             // Fashionwave" panel for the current period token.
-            if (this.DrawPrimaryActionButton(new Rect(left, (float)num, 195f, 32f), "OPEN SELL PANEL"))
+            if (this.DrawSecondaryActionButton(new Rect(left, (float)num, 195f, 32f), "Open Sell Panel"))
             {
                 this.StartShopQuickSellOpenPanel();
             }
-            if (this.DrawPrimaryActionButton(new Rect(left + 205f, (float)num, 195f, 32f), "OPEN TOKEN SELL"))
+            if (this.DrawSecondaryActionButton(new Rect(left + 205f, (float)num, 195f, 32f), "Open Token Sell"))
             {
                 this.StartTokenSellOpenPanel();
             }

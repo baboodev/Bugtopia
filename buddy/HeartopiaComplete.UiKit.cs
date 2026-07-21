@@ -547,6 +547,11 @@ namespace HeartopiaMod
             return this.DrawPrimaryActionButton(rect, label);
         }
 
+        public bool UI_DrawSecondaryActionButton(Rect rect, string label)
+        {
+            return this.DrawSecondaryActionButton(rect, label);
+        }
+
         public float UI_DrawAccentSlider(Rect rect, float value, float min, float max)
         {
             return this.DrawAccentSlider(rect, value, min, max, false);
@@ -1158,7 +1163,15 @@ namespace HeartopiaMod
             // Border kept comfortably below common dropdown/row heights (many cluster around
             // 26-30px) — see the capsule-style comment above for why border-sum too close to
             // the destination size is dangerous (degenerate 9-slice → the whole box vanishes).
-            Texture2D roundedRingBg = this.MakeRoundedRectTexture(32, 7f, Color.clear, Color.white, 1.4f);
+            // ringWidth 2f, not 1.4f: MakeRoundedRectTexture's ring band is sampled at pixel
+            // centers on an integer grid — along a straight edge, consecutive pixels step 1.0
+            // unit through the ring band, but at a corner's 45° point the SDF gradient points
+            // diagonally, so consecutive pixels step sqrt(2)~=1.414 units instead. A ringWidth
+            // below that threshold means far fewer pixels land inside the band exactly at the
+            // corner, so the ring visibly dims/breaks up right where the curve begins — reads as
+            // a seam at the edge-to-corner transition. 2f keeps comfortable margin above sqrt(2)
+            // at every angle (matches uiRingSprite's already-working ringWidth=2f).
+            Texture2D roundedRingBg = this.MakeRoundedRectTexture(32, 7f, Color.clear, Color.white, 2f);
             this.themeRoundedRingStyle = new GUIStyle(GUI.skin.box);
             this.themeRoundedRingStyle.normal.background = roundedRingBg;
             this.themeRoundedRingStyle.onNormal.background = roundedRingBg;
@@ -1169,7 +1182,21 @@ namespace HeartopiaMod
             // of themeRoundedRingStyle: pairing a smaller-radius ring with the panel's
             // radius-13 inset fill reproduces the corner-leak bug (sharper ring corner shows
             // outside the more-rounded fill beneath it).
-            Texture2D bigCardRingBg = this.MakeRoundedRectTexture(32, 14f, Color.clear, Color.white, 1.4f);
+            // ringWidth 2f, not 1.4f — same diagonal-undersampling fix as roundedRingBg above.
+            // Texture size bumped 32->48 (radius/border UNCHANGED, so the visual corner size and
+            // border thickness don't change): at size=32/border=15, the "middle" 9-slice strip is
+            // only 32-15-15=2px wide — and unlike a solid FILL bake (uniform color, safe to
+            // stretch from any width), a RING bake's middle strip has the ring's alpha gradient
+            // baked into it (non-uniform pixel content). Stretching a 2px non-uniform strip across
+            // a 600+px straight edge (this is DrawExentriSectionPanel's outer ring — the big
+            // content card + LIVE rail) leaves bilinear filtering sampling right at the boundary
+            // between that stretched strip and the UNSTRETCHED 15x15 corner patch, which doesn't
+            // blend cleanly — shows as a straight horizontal+vertical seam exactly at the 9-slice
+            // border boundary (15px in from each edge), i.e. "inside" the panel, crossing near
+            // each corner. themeRoundedRingStyle (border=7 on the same 32px texture, 18px middle)
+            // never had this problem — only this bigger-radius/bigger-border ring did. 48px gives
+            // an 18px middle here too, matching that safe margin.
+            Texture2D bigCardRingBg = this.MakeRoundedRectTexture(48, 14f, Color.clear, Color.white, 2f);
             this.themeBigCardRingStyle = new GUIStyle(GUI.skin.box);
             this.themeBigCardRingStyle.normal.background = bigCardRingBg;
             this.themeBigCardRingStyle.onNormal.background = bigCardRingBg;
@@ -1591,17 +1618,17 @@ namespace HeartopiaMod
 
             Rect actionPanel = new Rect(left, (float)num, contentWidth, 66f);
             this.DrawExentriSectionPanel(actionPanel, accent, panelFill, panelLine);
-            if (this.DrawPrimaryActionButton(new Rect(actionPanel.x + 14f, actionPanel.y + 17f, 130f, 32f), "SAVE"))
+            if (this.DrawPrimaryActionButton(new Rect(actionPanel.x + 14f, actionPanel.y + 17f, 130f, 32f), "Save"))
             {
                 this.SaveUiTheme();
             }
 
-            if (this.DrawPrimaryActionButton(new Rect(actionPanel.x + 154f, actionPanel.y + 17f, 130f, 32f), "LOAD"))
+            if (this.DrawSecondaryActionButton(new Rect(actionPanel.x + 154f, actionPanel.y + 17f, 130f, 32f), "Load"))
             {
                 this.LoadUiTheme();
             }
 
-            if (this.DrawDangerActionButton(new Rect(actionPanel.x + 294f, actionPanel.y + 17f, 130f, 32f), "RESET"))
+            if (this.DrawDangerActionButton(new Rect(actionPanel.x + 294f, actionPanel.y + 17f, 130f, 32f), "Reset"))
             {
                 this.uiAccentR = 0.31f;
                 this.uiAccentG = 0.78f;

@@ -433,7 +433,7 @@ namespace HeartopiaMod
             GUI.Label(new Rect(20f, num, 320f, 22f), host.UI_Localize("Fishing Locations"), header);
             num += 28f;
 
-            string actionLabel = active ? "STOP FISHING LOCATIONS" : "START FISHING LOCATIONS";
+            string actionLabel = active ? "Stop Fishing Locations" : "Start Fishing Locations";
             if (host.UI_DrawPrimaryActionButton(new Rect(20f, num, 260f, 35f), actionLabel))
             {
                 if (active)
@@ -484,7 +484,7 @@ namespace HeartopiaMod
                 }
             }
 
-            if (host.UI_DrawPrimaryActionButton(new Rect(20f, num, 260f, 30f), host.UI_Localize("Save Current Location")))
+            if (host.UI_DrawSecondaryActionButton(new Rect(20f, num, 260f, 30f), host.UI_Localize("Save Current Location")))
             {
                 SaveCurrentLocation(host);
             }

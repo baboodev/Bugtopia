@@ -1226,7 +1226,7 @@ namespace HeartopiaMod
 
                     // A busy analyzer can't take a new item — grey out its button.
                     GUI.enabled = !busy;
-                    if (this.DrawPrimaryActionButton(new Rect(left + 420f, y - 2f, 125f, 26f), this.L("SELECT ITEM")) && !busy)
+                    if (this.DrawSecondaryActionButton(new Rect(left + 420f, y - 2f, 125f, 26f), this.L("SELECT ITEM")) && !busy)
                     {
                         this.StartResearchOpenInstrumentPanelForStaticId(inst.StaticId);
                     }
@@ -1239,12 +1239,12 @@ namespace HeartopiaMod
             }
 
             // -- panel shortcuts --
-            if (this.DrawPrimaryActionButton(new Rect(left, y, 200f, 30f), this.L("RESEARCH STORE")))
+            if (this.DrawSecondaryActionButton(new Rect(left, y, 200f, 30f), this.L("RESEARCH STORE")))
             {
                 this.StartResearchOpenPanelDirect(ResearchShopPanelTypeName, "Research Store");
             }
 
-            if (this.DrawPrimaryActionButton(new Rect(left + 210f, y, 200f, 30f), this.L("CONTROL CONSOLE")))
+            if (this.DrawSecondaryActionButton(new Rect(left + 210f, y, 200f, 30f), this.L("CONTROL CONSOLE")))
             {
                 this.StartResearchOpenPanelDirect(ResearchControlPanelTypeName, "Control Console");
             }
