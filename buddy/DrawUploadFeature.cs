@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 
@@ -24,6 +25,20 @@ namespace HeartopiaMod
 
         // Single, easy-to-find work file for the currently-open drawing (extract -> edit -> upload).
         private const string DrawingWorkFileName = "drawing.png";
+
+        // ---- Chunked upload (split the canvas across several DrawingOperation commands) ----
+        // A single whole-canvas op is protocol-valid (verified in-game); chunking exists for
+        // behavioral plausibility vs the game's natural delta-save cadence and to bound the network
+        // frame size on busy canvases. Slider fields live in PicturesDecryptFeature.cs (same class).
+        private const int DrawUploadRunsPerChunkMin = 32;
+        private const int DrawUploadRunsPerChunkMax = 256;
+        private const int DrawUploadRunsPerChunkDefault = 160;
+        private const float DrawUploadChunkDelayMin = 0.05f;
+        private const float DrawUploadChunkDelayMax = 1f;
+        private const float DrawUploadChunkDelayDefault = 0.25f;
+
+        // Handle of the in-flight chunked send (ModCoroutines token); null when idle.
+        private object drawUploadChunkCoroutine = null;
 
         private bool EnsureDrawBoardProtoResolved(out string status)
         {
@@ -106,6 +121,17 @@ namespace HeartopiaMod
             }
 
             return this.TryUnboxMonoUInt32(boxed, out boardNetId);
+        }
+
+        // Cheap "is the drawing session still open" probe for the chunked sender: the focused-board
+        // net id drops to 0 as soon as the player leaves the easel/drawing UI. Transient pointers
+        // only — nothing here survives past the return.
+        private bool IsDrawBoardSessionActive()
+        {
+            IntPtr drawSystem = this.TryGetDrawSystemInstance(out _);
+            return drawSystem != IntPtr.Zero
+                && this.TryGetDrawBoardNetId(drawSystem, out uint boardNetId)
+                && boardNetId != 0U;
         }
 
         // ---- Task 2: DrawingBatchOperationNetworkCommand via DrawBoardProtoManager.DrawingOperation ----
@@ -524,11 +550,153 @@ namespace HeartopiaMod
             }
         }
 
+        // Greedily pack the per-color run lists into sub-dictionaries whose TOTAL run count stays
+        // <= maxRunsPerChunk. A single color's runs may span several chunks (its list is split);
+        // run order within a color is preserved, empty lists are skipped and no individual run is
+        // ever split. Runs paint absolute, non-overlapping pixel ranges, so any partition applies
+        // to the same final image regardless of chunk boundaries.
+        private static List<Dictionary<byte, List<(int Start, int Length)>>> BuildRunChunks(
+            Dictionary<byte, List<(int Start, int Length)>> runs,
+            int maxRunsPerChunk)
+        {
+            List<Dictionary<byte, List<(int Start, int Length)>>> chunks = new List<Dictionary<byte, List<(int Start, int Length)>>>();
+            if (runs == null || runs.Count == 0)
+            {
+                return chunks;
+            }
+
+            if (maxRunsPerChunk < 1)
+            {
+                maxRunsPerChunk = 1;
+            }
+
+            Dictionary<byte, List<(int Start, int Length)>> current = null;
+            int currentCount = 0;
+            foreach (KeyValuePair<byte, List<(int Start, int Length)>> kv in runs)
+            {
+                List<(int Start, int Length)> source = kv.Value;
+                if (source == null || source.Count == 0)
+                {
+                    continue;
+                }
+
+                int taken = 0;
+                while (taken < source.Count)
+                {
+                    if (current == null || currentCount >= maxRunsPerChunk)
+                    {
+                        current = new Dictionary<byte, List<(int Start, int Length)>>();
+                        chunks.Add(current);
+                        currentCount = 0;
+                    }
+
+                    int take = Math.Min(source.Count - taken, maxRunsPerChunk - currentCount);
+                    if (!current.TryGetValue(kv.Key, out List<(int Start, int Length)> slice))
+                    {
+                        slice = new List<(int Start, int Length)>(take);
+                        current[kv.Key] = slice;
+                    }
+
+                    for (int i = 0; i < take; i++)
+                    {
+                        slice.Add(source[taken + i]);
+                    }
+
+                    taken += take;
+                    currentCount += take;
+                }
+            }
+
+            return chunks;
+        }
+
+        // CanvasPainter.DrawStep of the open canvas (public zero-arg getter) — the monotonic
+        // draw-step counter the game's own delta-saves stamp into stepNum. Best-effort: callers
+        // fall back to step base 1 when unavailable.
+        private bool TryReadOpenCanvasDrawStep(out int drawStep)
+        {
+            drawStep = 0;
+            if (!this.TryGetFocusedBoardComponent(out IntPtr boardComp, out _))
+            {
+                return false;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(boardComp, out IntPtr painting, "get_CurrentPainting") || painting == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return this.TryInvokeAuraMonoZeroArg(painting, out IntPtr boxed, "get_DrawStep")
+                && this.TryUnboxMonoInt32(boxed, out drawStep);
+        }
+
+        // Dribble the chunks to the server over time with incrementing stepNum, mirroring the
+        // game's own delta-save cadence. On any failure (or the drawing session going away) stop
+        // early WITHOUT the cosmetic canvas write, so a partial send is visible as such.
+        // GC-safety: no mono IntPtr is ever held across a yield — TrySendDrawingOperation /
+        // IsDrawBoardSessionActive / TryWriteOpenCanvasPixels are each self-contained per call and
+        // return before the next yield.
+        private IEnumerator DrawUploadChunkedSendRoutine(
+            List<Dictionary<byte, List<(int Start, int Length)>>> chunks,
+            byte[] indexBytes,
+            int stepBase,
+            float delaySeconds)
+        {
+            // Step off the synchronous StartCoroutine prologue first: Unity runs a coroutine up to
+            // its first yield inside Start itself, so an immediate failure would hit the finally
+            // (nulling the handle) BEFORE the caller stores it — the dead handle would then wedge
+            // the busy gate. Yielding once up front guarantees the handle is stored first.
+            yield return null;
+
+            try
+            {
+                int total = chunks.Count;
+                for (int i = 0; i < total; i++)
+                {
+                    // Abort cleanly if the session vanished mid-send (panel closed, world change) —
+                    // later chunks would only throw into a dead session.
+                    if (!this.IsDrawBoardSessionActive())
+                    {
+                        ModLogger.Msg("[DrawUpload] chunked upload aborted at chunk " + (i + 1) + "/" + total + ": drawing session gone");
+                        this.picturesLastStatus = "Draw upload: aborted at chunk " + (i + 1) + "/" + total + " (drawing session closed)";
+                        yield break;
+                    }
+
+                    if (!this.TrySendDrawingOperation(chunks[i], stepBase + i, 0, out string st))
+                    {
+                        ModLogger.Msg("[DrawUpload] chunked upload failed at chunk " + (i + 1) + "/" + total + ": " + st);
+                        this.picturesLastStatus = "Draw upload: chunk " + (i + 1) + "/" + total + " failed - " + st;
+                        yield break;
+                    }
+
+                    this.picturesLastStatus = "Draw upload: chunk " + (i + 1) + "/" + total + " sent (step " + (stepBase + i) + ")";
+                    yield return new UnityEngine.WaitForSeconds(delaySeconds);
+                }
+
+                // All chunks landed: update the live canvas ONCE so the game caches/previews our
+                // image on close (fixes the stale thumbnail in the drawing list).
+                this.TryWriteOpenCanvasPixels(indexBytes, out string canvasStatus);
+                ModLogger.Msg("[DrawUpload] chunked upload done: " + total + " chunks | canvas: " + canvasStatus);
+                this.picturesLastStatus = "Draw upload: " + total + " chunks sent | canvas: " + canvasStatus;
+            }
+            finally
+            {
+                this.drawUploadChunkCoroutine = null;
+            }
+        }
+
         // Upload drawing.png to the drawing currently OPEN for editing (DrawingOperation targets the
         // active session). Verifies it matches the open canvas size. Close without manual strokes,
-        // then reopen to verify.
+        // then reopen to verify. Small canvases go out as the proven single op; anything above the
+        // runs-per-chunk budget is split and dribbled by DrawUploadChunkedSendRoutine.
         internal void DrawUploadSendForOpenDrawing()
         {
+            if (this.drawUploadChunkCoroutine != null)
+            {
+                this.picturesLastStatus = "Draw upload: chunked send already running";
+                return;
+            }
+
             if (!this.TryReadOpenCanvasPixels(out _, out int cw, out int ch, out string status))
             {
                 ModLogger.Msg("[DrawUpload] upload: " + status);
@@ -571,18 +739,51 @@ namespace HeartopiaMod
                 return;
             }
 
-            bool ok = this.TrySendDrawingOperation(runs, 1, 0, out string st);
-
-            // Update the live canvas so the game caches/previews our image on close (fixes the
-            // stale thumbnail in the drawing list).
-            string canvasStatus = "skipped";
-            if (ok)
+            int totalRuns = 0;
+            foreach (List<(int Start, int Length)> colorRuns in runs.Values)
             {
-                this.TryWriteOpenCanvasPixels(idx, out canvasStatus);
+                totalRuns += colorRuns != null ? colorRuns.Count : 0;
             }
 
-            ModLogger.Msg("[DrawUpload] upload drawing.png " + fw + "x" + fh + " ok=" + ok + " " + st + " | canvas: " + canvasStatus);
-            this.picturesLastStatus = "Draw upload: " + st + " | canvas: " + canvasStatus;
+            int budget = UnityEngine.Mathf.Clamp(this.drawUploadRunsPerChunk, DrawUploadRunsPerChunkMin, DrawUploadRunsPerChunkMax);
+            if (totalRuns <= budget)
+            {
+                // Fits in one command: keep the proven single-op path (one DrawingOperation, step 1).
+                bool ok = this.TrySendDrawingOperation(runs, 1, 0, out string st);
+
+                // Update the live canvas so the game caches/previews our image on close (fixes the
+                // stale thumbnail in the drawing list).
+                string canvasStatus = "skipped";
+                if (ok)
+                {
+                    this.TryWriteOpenCanvasPixels(idx, out canvasStatus);
+                }
+
+                ModLogger.Msg("[DrawUpload] upload drawing.png " + fw + "x" + fh + " ok=" + ok + " " + st + " | canvas: " + canvasStatus);
+                this.picturesLastStatus = "Draw upload: " + st + " | canvas: " + canvasStatus;
+                return;
+            }
+
+            List<Dictionary<byte, List<(int Start, int Length)>>> chunks = BuildRunChunks(runs, budget);
+            if (chunks.Count == 0)
+            {
+                this.picturesLastStatus = "Draw upload: no chunks to send";
+                return;
+            }
+
+            // Continue the canvas's natural step sequence when the live DrawStep is readable;
+            // otherwise start at 1 (both accepted by the server — steps only need to increment).
+            int stepBase = this.TryReadOpenCanvasDrawStep(out int liveStep) && liveStep >= 0 ? liveStep + 1 : 1;
+            float delay = UnityEngine.Mathf.Clamp(this.drawUploadChunkDelaySeconds, DrawUploadChunkDelayMin, DrawUploadChunkDelayMax);
+            ModLogger.Msg("[DrawUpload] chunked upload start: drawing.png " + fw + "x" + fh + ", " + totalRuns
+                + " runs -> " + chunks.Count + " chunks (budget " + budget + ", delay " + delay.ToString("0.00")
+                + "s, stepBase " + stepBase + ")");
+            this.picturesLastStatus = "Draw upload: sending " + chunks.Count + " chunks (" + totalRuns + " runs)...";
+            this.drawUploadChunkCoroutine = ModCoroutines.Start(this.DrawUploadChunkedSendRoutine(chunks, idx, stepBase, delay));
+            if (this.drawUploadChunkCoroutine == null)
+            {
+                this.picturesLastStatus = "Draw upload: could not start chunked send (coroutine host unavailable)";
+            }
         }
     }
 }

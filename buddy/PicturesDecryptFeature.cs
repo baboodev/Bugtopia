@@ -35,6 +35,11 @@ namespace HeartopiaMod
 
         private object picturesTaskCoroutine = null;
         private string picturesLastStatus = "Idle.";
+
+        // Chunked Draw upload tuning (consumed by DrawUploadSendForOpenDrawing; ranges/defaults in
+        // DrawUploadFeature.cs). Session-only for now — not persisted to Config.xml.
+        private int drawUploadRunsPerChunk = DrawUploadRunsPerChunkDefault;
+        private float drawUploadChunkDelaySeconds = DrawUploadChunkDelayDefault;
         private readonly List<string> picturesChangedRelativePaths = new List<string>();
         private Vector2 picturesChangedScrollPos = Vector2.zero;
         private bool picturesChangedListDirty = true;
@@ -106,6 +111,7 @@ namespace HeartopiaMod
             const float pad = 16f;
             const float rowGap = 10f;
             const float statusH = 56f;
+            const float sliderRowH = 20f;
             float innerW = width - pad * 2f;
             string pathsText = this.LF("pictures.paths", sourcePath, destPath);
             float pathsH = Mathf.Ceil(bodyStyle.CalcHeight(new GUIContent(pathsText), innerW)) + 4f;
@@ -117,6 +123,7 @@ namespace HeartopiaMod
             float sectionHeight = 10f + 22f + pathsH + rowGap
                 + hintH + rowGap
                 + btnH + rowGap + btnH + rowGap + btnH + rowGap
+                + sliderRowH + rowGap + sliderRowH + rowGap
                 + 20f + scrollH + 8f + statusH + pad;
 
             Rect sectionRect = new Rect(left, y, width, sectionHeight);
@@ -170,6 +177,8 @@ namespace HeartopiaMod
                 this.DrawExtractOpenDrawing();
             }
 
+            bool chunkSendBusy = this.drawUploadChunkCoroutine != null;
+            GUI.enabled = !busy && !chunkSendBusy;
             if (GUI.Button(new Rect(innerX + btnW + btnGap, cursorY, btnW, btnH), "Upload drawing.png", GUI.skin.button))
             {
                 this.DrawUploadSendForOpenDrawing();
@@ -177,6 +186,29 @@ namespace HeartopiaMod
 
             GUI.enabled = true;
             cursorY += btnH + rowGap;
+
+            // Chunked-upload tuning: how many runs go into one DrawingOperation and the pause
+            // between commands. Uploads above the budget are split and dribbled like the game's
+            // own delta-saves; smaller ones still go out as a single op.
+            GUI.Label(new Rect(innerX, cursorY, 220f, sliderRowH), "Upload chunk budget: " + this.drawUploadRunsPerChunk + " runs", bodyStyle);
+            this.drawUploadRunsPerChunk = this.UI_DrawAccentIntSlider(
+                new Rect(innerX + 228f, cursorY + 2f, innerW - 228f, 16f),
+                this.drawUploadRunsPerChunk,
+                DrawUploadRunsPerChunkMin,
+                DrawUploadRunsPerChunkMax);
+            cursorY += sliderRowH + rowGap;
+
+            GUI.Label(new Rect(innerX, cursorY, 220f, sliderRowH), "Upload chunk delay: " + this.drawUploadChunkDelaySeconds.ToString("0.00") + "s", bodyStyle);
+            float rawChunkDelay = this.DrawAccentSlider(
+                new Rect(innerX + 228f, cursorY + 2f, innerW - 228f, 16f),
+                this.drawUploadChunkDelaySeconds,
+                DrawUploadChunkDelayMin,
+                DrawUploadChunkDelayMax);
+            this.drawUploadChunkDelaySeconds = Mathf.Clamp(
+                Mathf.Round(rawChunkDelay * 20f) / 20f, // snap to 0.05s steps
+                DrawUploadChunkDelayMin,
+                DrawUploadChunkDelayMax);
+            cursorY += sliderRowH + rowGap;
 
             string changedHeader = hasManifest
                 ? this.LF("pictures.changed_count", this.picturesChangedRelativePaths.Count)
