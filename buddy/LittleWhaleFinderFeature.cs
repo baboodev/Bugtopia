@@ -44,10 +44,12 @@ namespace HeartopiaMod
         private float littleWhaleNextPollAt;
         private string littleWhaleLastStatus = string.Empty;
 
-        // Game-map pin (button): a Furniture-type map TRACK at the figurine position showing the
+        // Game-map pin (AUTOMATIC): a Furniture-type map TRACK at the figurine position showing the
         // figurine's own item icon — dispatched directly via DispatchStartTrack with a reserved
-        // token, so it works regardless of radar state/display mode. Session-only (not persisted);
-        // the sync loop never touches it (it only removes tokens it put into mapTrackInjected).
+        // token, so it works regardless of radar state/display mode. Raised by the poll loop the
+        // moment the figurine resolves and dropped when it stops resolving / the toggle goes off —
+        // there is no manual pin button. Session-only (not persisted); the sync loop never touches
+        // it (it only removes tokens it put into mapTrackInjected).
         private const ulong LittleWhaleMapPinToken = 0x4C57484C50494E01UL; // reserved, no collision with marker tokens
         private bool littleWhaleMapPinActive;
         private Vector3 littleWhaleMapPinPos;
@@ -63,7 +65,7 @@ namespace HeartopiaMod
                     this.littleWhalePresent = false;
                     this.littleWhaleMissStreak = 0;
                 }
-                this.RemoveLittleWhaleMapPin(false);
+                this.RemoveLittleWhaleMapPin();
                 return;
             }
 
@@ -115,14 +117,11 @@ namespace HeartopiaMod
                         + " style=" + (configId - LittleWhaleConfigIdFirst + 1) + " pos=" + pos.ToString("F1"));
                 }
 
-                // Keep an active pin on the refined position (StartTrack re-dispatch with the same
-                // token overwrites the entry).
-                if (this.littleWhaleMapPinActive && (pos - this.littleWhaleMapPinPos).sqrMagnitude > 1f
-                    && this.DispatchStartTrack(LittleWhaleMapPinToken, pos, MapTrackTypeFurniture,
-                        LittleWhaleEntityIdFirst + (configId - LittleWhaleConfigIdFirst), 0u))
-                {
-                    this.littleWhaleMapPinPos = pos;
-                }
+                // Auto-pin: the map marker goes up as soon as the figurine resolves, and follows the
+                // refined position afterwards. Runs every poll, so a pin that could not be dispatched
+                // yet (map track system still warming up, or a world change that wiped the track
+                // list) is retried on the next pass instead of being lost.
+                this.EnsureLittleWhaleMapPin(pos, configId);
                 return;
             }
 
@@ -130,49 +129,38 @@ namespace HeartopiaMod
             {
                 this.littleWhalePresent = false;
                 this.littleWhaleMissStreak = 0;
-                this.RemoveLittleWhaleMapPin(false);
+                this.RemoveLittleWhaleMapPin();
                 ModLogger.Msg("[LittleWhale] figurine no longer resolves (" + this.littleWhaleLastStatus + ").");
             }
         }
 
-        // Button: pin/unpin the figurine on the game map. The pin is a Furniture map track carrying
-        // the figurine's own item staticId, so the big map shows the actual whale-figurine icon
-        // (same mechanism as the Contaminated seashell pin).
-        private void ToggleLittleWhaleMapPin()
+        // Put (or refresh) the figurine's map pin. The pin is a Furniture map track carrying the
+        // figurine's own item staticId, so the big map shows the actual whale-figurine icon (same
+        // mechanism as the Contaminated seashell pin). Called from the poll loop on every hit, so it
+        // must stay quiet and cheap: no notifications, and a re-dispatch only when the position
+        // actually moved (StartTrack with the same token overwrites the entry).
+        private void EnsureLittleWhaleMapPin(Vector3 pos, int configId)
         {
-            if (this.littleWhaleMapPinActive)
+            if (this.littleWhaleMapPinActive && (pos - this.littleWhaleMapPinPos).sqrMagnitude <= 1f)
             {
-                this.RemoveLittleWhaleMapPin(true);
-                return;
-            }
-
-            if (!this.littleWhalePresent)
-            {
-                this.AddMenuNotification(this.L("Little Whale figurine is not located."), new Color(1f, 0.7f, 0.45f));
                 return;
             }
 
             if (!this.EnsureMapTrackReady() || !this.AttachAuraMonoThread())
             {
-                this.AddMenuNotification(this.L("Map track system is not ready."), new Color(1f, 0.7f, 0.45f));
                 return;
             }
 
-            int figurineStaticId = LittleWhaleEntityIdFirst + (this.littleWhaleActiveConfigId - LittleWhaleConfigIdFirst);
-            if (this.DispatchStartTrack(LittleWhaleMapPinToken, this.littleWhaleLastPos, MapTrackTypeFurniture, figurineStaticId, 0u))
+            int figurineStaticId = LittleWhaleEntityIdFirst + (configId - LittleWhaleConfigIdFirst);
+            if (this.DispatchStartTrack(LittleWhaleMapPinToken, pos, MapTrackTypeFurniture, figurineStaticId, 0u))
             {
                 this.littleWhaleMapPinActive = true;
-                this.littleWhaleMapPinPos = this.littleWhaleLastPos;
+                this.littleWhaleMapPinPos = pos;
                 this.littleWhaleMapPinWorldEpoch = HeartopiaComplete.AuraMonoWorldEpoch;
-                this.AddMenuNotification(this.L("Figurine pinned on the game map."), new Color(1f, 0.65f, 0.85f));
-            }
-            else
-            {
-                this.AddMenuNotification(this.L("Map track system is not ready."), new Color(1f, 0.7f, 0.45f));
             }
         }
 
-        private void RemoveLittleWhaleMapPin(bool notify)
+        private void RemoveLittleWhaleMapPin()
         {
             if (!this.littleWhaleMapPinActive)
             {
@@ -189,11 +177,6 @@ namespace HeartopiaMod
             }
             catch
             {
-            }
-
-            if (notify)
-            {
-                this.AddMenuNotification(this.L("Figurine unpinned from the map."), new Color(0.8f, 0.8f, 0.8f));
             }
         }
 

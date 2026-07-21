@@ -979,17 +979,13 @@ namespace HeartopiaMod
                 GUI.Label(new Rect(left, y, 500f, 22f), figurineStatus, bodyStyle);
                 y += 26f;
 
+                // The map pin is raised automatically by the poll loop the moment the figurine
+                // resolves, so the only action left here is the teleport.
                 if (this.littleWhalePresent)
                 {
                     if (this.DrawPrimaryActionButton(new Rect(left, y, 240f, 30f), this.L("TELEPORT TO FIGURINE")))
                     {
                         this.StartLittleWhaleTeleport();
-                    }
-
-                    if (this.DrawPrimaryActionButton(new Rect(left + 250f, y, 200f, 30f),
-                        this.littleWhaleMapPinActive ? this.L("UNPIN FROM MAP") : this.L("SHOW ON MAP")))
-                    {
-                        this.ToggleLittleWhaleMapPin();
                     }
                 }
                 y += this.littleWhalePresent ? 36f : 4f;
