@@ -16,7 +16,8 @@ flowchart TB
     ML --> HC[HeartopiaComplete]
     BEP --> HC
 
-    HC --> UI[IMGUI OnGUI]
+    HC --> UI[uGUI menu shell]
+    HC --> GUI[OnGUI: world overlays only]
     HC --> OU[OnUpdate / OnLateUpdate]
     HC --> MC[ModCoroutines]
     HC --> LOG[ModLogger]
@@ -558,10 +559,14 @@ Uses Windows known folder GUID `A520A1A4-1780-4FF6-BD18-167343C5AF16` (LocalLow)
 
 ## UI Implementation
 
-- Custom IMGUI skin generated at runtime (`DrawExentriSectionPanel`, accent sliders, switch toggles).
-- Theme colors stored as float RGB + alpha; HSV picker generates textures cached in `themeTextures`.
-- Menu blocks game UI optionally via `ShouldBlockGameplayInput()` feeding movement patch.
-- Scroll views compute dynamic content height per tab/sub-tab.
+The menu is **Unity uGUI**, built at runtime by a factory library — there is no IMGUI menu. IMGUI (`OnGUI`) survives only for three screen-space world overlays: resource ESP, debug ESP, mouse-look crosshair.
+
+- **uGUI kit** (`HeartopiaComplete.UguiKit.cs`): buttons, checkbox/switch toggles, sliders, dropdowns, scroll views, tab bars, labels, icons, draggable windows. Rounded shapes are ONE sliced-sprite mesh per element — the reason the menu was migrated off IMGUI, which had to composite each rounded rect from separate pieces that then disagreed on sub-pixel boundaries.
+- **Shell** (`HeartopiaComplete.UguiShell.cs`): sidebar, header, sub-tab bar, per-tab content containers. Tab wiring is by display-position index (`HeartopiaComplete.UguiShellTabIndices.cs`), never by localized label comparison.
+- **Font is hard-pinned to LiberationSans SDF**, with kit labels drawing through a cloned material that zeroes outline/glow/underlay — a game font asset's shared material carries an outline, and its Latin glyphs are ~50% wider than the metrics every rect was sized against. There is deliberately no font picker.
+- Theme colors stored as float RGB + alpha; the HSV picker generates textures cached in `themeTextures`. Theme edits arm a debounced save and a state-preserving shell rebuild, both ticked from `OnUpdate` (`ProcessUiThemePersistenceOnUpdate`) — NOT from the paint loop.
+- Input ownership is a registry: surfaces register themselves MODAL or floating, and `ShouldBlockGameplayInput()` / `UpdateGameUiClickBlockState()` query it. Toasts deliberately register nothing and carry no raycaster, so they never eat clicks.
+- Toasts/notifications render through `HeartopiaComplete.UguiToast.cs` (pool of 6, own canvas); `AddMenuNotification` remains the single producer API.
 
 ---
 

@@ -201,7 +201,7 @@ Used in daily quest submit lists. Mod builds `List<ItemNetPair>` via **AuraMono 
 
 #### UI layer (`XDTGameUI`)
 
-IMGUI mod menu is separate; game UI uses Unity uGUI / TMP. Mod interacts via:
+The mod menu is its own uGUI canvas, separate from the game's UI; both use Unity uGUI / TMP. Mod interacts with the *game's* UI via:
 
 - `GameObject.Find("fixed path")` — fragile hierarchy paths
 - Reflection on panel types (`ScannerStatusPanel`, backpack UI)
@@ -441,7 +441,7 @@ All merge into `public partial class HeartopiaComplete`:
 
 **`OnLateUpdate`:** mouse-look camera, position monitor, camera override, custom FOV.
 
-**`OnGUI`:** full mod menu (IMGUI), radar overlay, resource ESP, notifications.
+**`OnGUI`:** world overlays ONLY — resource ESP, debug ESP, mouse-look crosshair (~47 lines total). The menu, notifications/toasts, status overlay, Quest Assistant window and Building Move Panel are all uGUI now and are driven from `OnUpdate`; IMGUI survives only for these three screen-space overlays, which were never uGUI candidates.
 
 ### 4.4 Component interaction diagram
 
@@ -456,7 +456,7 @@ flowchart LR
         RES[FindLoadedType / TryFindIl2CppClass]
         AURA[EnsureAuraMonoApiReady]
         HARM[Harmony patches]
-        UI[IMGUI menu]
+        UI[uGUI menu shell + toasts]
     end
 
     subgraph farms [Static farms]
@@ -538,8 +538,8 @@ Always referenced (both loaders):
 
 | Reference | Direct mod usage |
 |-----------|------------------|
-| `UnityEngine`, `UnityEngine.*Module` | `GameObject`, `Transform`, `CharacterController`, `Input`, `Camera`, `Time`, IMGUI |
-| `UnityEngine.UI`, `Unity.TextMeshPro` | Bulk selector sprite patch, UI automation |
+| `UnityEngine`, `UnityEngine.*Module` | `GameObject`, `Transform`, `CharacterController`, `Input`, `Camera`, `Time`, IMGUI (world overlays only) |
+| `UnityEngine.UI`, `Unity.TextMeshPro` | The whole mod menu (uGUI kit + shell), bulk selector sprite patch, UI automation |
 | `Il2CppInterop.Runtime` | `Il2CppSystem.*`, `IL2CPP` P/Invoke, `WrapToIl2Cpp()` for BepInEx coroutines |
 | `Assembly-CSharp` | General game stubs (partial) |
 | `Client` / `Il2CppClient` | Client assembly stubs |

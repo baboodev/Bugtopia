@@ -196,7 +196,8 @@ Legacy `{GameFolder}/UserData/` is migrated once on startup if present.
 
 | File | Role |
 |------|------|
-| `HeartopiaComplete.cs` | Core mod logic, IMGUI UI (~59k lines) |
+| `HeartopiaComplete.cs` | Core mod logic + hotkey dispatch (~6.2k lines; the rest of the class is split across `HeartopiaComplete.*.cs` partials) |
+| `HeartopiaComplete.Ugui*.cs` | The entire mod menu: uGUI kit, shell chrome, per-tab content, toasts (35 files, ~32k lines) |
 | `MelonLoaderPlugin.cs` | MelonLoader entry (`#if MELONLOADER`) |
 | `BepInExPlugin.cs` | BepInEx entry + `HeartopiaBehaviour` (`#if BEPINEX`) |
 | `ModLogger.cs` | Unified logging (MelonLogger / BepInEx + file) |

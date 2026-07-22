@@ -350,7 +350,7 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 ### Snow Sculpting
 
-**Tab:** Features → **Snow Sculpting** (`automationSubTab == 2`). Source: `buddy/SnowSculptureFeature.cs` (partial `HeartopiaComplete`).
+**Tab:** Features → **Snow Sculpting** (`UguiShellFeaturesSnowSculptingSubIndex`). Source: `buddy/SnowSculptureFeature.cs` (partial `HeartopiaComplete`); UI in `buddy/HeartopiaComplete.UguiFeaturesPuzzleSnowContent.cs`.
 
 #### Auto Snow Sculpture
 
@@ -382,7 +382,7 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 ### Sand Sculpting
 
-**Tab:** New Features → **Sand Sculpture** (`newFeaturesSubTab == 6`). Source: `buddy/SandSculptureFeature.cs` (partial `HeartopiaComplete`).
+**Tab:** New Features → **Sand Sculpture** (`UguiShellSandSculptureSubIndex`). Source: `buddy/SandSculptureFeature.cs` (partial `HeartopiaComplete`); UI in `buddy/HeartopiaComplete.UguiSandSculptureContent.cs`.
 
 #### Auto Sand Sculpture
 
@@ -744,7 +744,7 @@ Caps still apply as a safety bound on the fallback walk: the inspect cap and glo
 
 ## New Features — Extras (Ice Skating)
 
-The **Extras** sub-tab (`newFeaturesSubTab == 4`) hosts two independent ice-skating tools, drawn top → bottom by `DrawIceSkatingExtrasTab` (`IceSkatingSequenceFeature.cs`), which renders the network-sequence buttons and then calls `DrawExtraTab` (`AutoIceSkatingFeature.cs`) underneath:
+The **Ice Skating** sub-tab (`UguiShellIceSkatingSubIndex`) hosts two independent ice-skating tools, laid out top → bottom in `buddy/HeartopiaComplete.UguiIceSkatingContent.cs`: the network-sequence buttons first, then the auto-skating controls underneath. Backends are `IceSkatingSequenceFeature.cs` and `AutoIceSkatingFeature.cs`:
 
 1. **Perfect Ice Skating** (network sequences) — `IceSkatingSequenceFeature.cs`.
 2. **Auto Ice Skating** (real-time bot) — `AutoIceSkatingFeature.cs`.
