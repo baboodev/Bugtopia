@@ -19,7 +19,7 @@ namespace HeartopiaMod
     //    collections, TryCloseSandModelDialog + SandLogStatus + AddMenuNotification).
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
     //    UguiShellSandSculptureSubIndex = 6, declared with their siblings in
-    //    UguiPhase3Content.cs), never label comparison. The processor gates on the SAME
+    //    UguiShellTabIndices.cs), never label comparison. The processor gates on the SAME
     //    IsUguiShellNewFeaturesSubTabActive function Animal Care's round established.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).

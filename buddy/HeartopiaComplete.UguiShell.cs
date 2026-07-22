@@ -533,7 +533,7 @@ namespace HeartopiaMod
                                 // Phase 3 content wiring is by STATIC display-position index
                                 // (labels are localized — never match on them). Round 1:
                                 // Settings→About; round 2: Settings→Main + Settings→Logging
-                                // (HeartopiaComplete.UguiPhase3SettingsContent.cs); round 4:
+                                // (HeartopiaComplete.UguiSettingsMainContent.cs); round 4:
                                 // Self→Building (HeartopiaComplete.UguiBuildingContent.cs);
                                 // round 5: Self's other four sub-tabs
                                 // (HeartopiaComplete.UguiSelfContent.cs); every other cell stays

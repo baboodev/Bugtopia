@@ -20,7 +20,7 @@ namespace HeartopiaMod
     //    ZERO backend interop additions this round: 2 coroutine refs, 2 slider fields, 1 status
     //    string, 1 list, 1 dirty flag, path/manifest/refresh helpers + the 5 action methods).
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
-    //    UguiShellPicturesSubIndex = 3, declared with their siblings in UguiPhase3Content.cs),
+    //    UguiShellPicturesSubIndex = 3, declared with their siblings in UguiShellTabIndices.cs),
     //    never label comparison. The processor gates on the SAME
     //    IsUguiShellNewFeaturesSubTabActive function Animal Care's round established.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme

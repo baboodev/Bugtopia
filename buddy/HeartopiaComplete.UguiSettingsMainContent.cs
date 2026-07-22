@@ -9,7 +9,7 @@ namespace HeartopiaMod
     // ============================================================================================
     // UGUI SHELL — Phase 3 tab CONTENT, round 2 (migration plan: cosmic-waddling-rainbow.md):
     // Settings→Logging and Settings→Main, combined into one round. Split out of
-    // HeartopiaComplete.UguiPhase3Content.cs (which keeps round 1's About/Research plus the
+    // HeartopiaComplete.UguiShellTabIndices.cs (which keeps round 1's About/Research plus the
     // display-position constants) so no single content file balloons as the remaining tabs land.
     //
     // Ground rules (same as round 1):
@@ -18,7 +18,7 @@ namespace HeartopiaMod
     //    the same action methods. Two independent rendering paths over one backend.
     //  - Wiring is by STATIC display-position index (UguiShellSettingsTabIndex +
     //    UguiShellSettingsMainSubIndex/UguiShellSettingsLoggingSubIndex — declared next to their
-    //    round-1 siblings in UguiPhase3Content.cs), never by localized label comparison.
+    //    round-1 siblings in UguiShellTabIndices.cs), never by localized label comparison.
     //  - Both tabs live inside the already-registered modal shell: no input-ownership entries, no
     //    theme registration of their own (the shell's "UguiShell" rebuilder re-runs these builders).
     //

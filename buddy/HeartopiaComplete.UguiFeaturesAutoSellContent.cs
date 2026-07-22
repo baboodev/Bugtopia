@@ -21,7 +21,7 @@ namespace HeartopiaMod
     //    rendering paths over one backend.
     //  - Wiring is by STATIC display-position index (UguiShellFeaturesTabIndex = 2 +
     //    UguiShellFeaturesAutoSellSubIndex = 4, declared with their siblings in
-    //    UguiPhase3Content.cs), never label comparison. The processor gates on the SAME
+    //    UguiShellTabIndices.cs), never label comparison. The processor gates on the SAME
     //    IsUguiShellFeaturesSubTabActive function the Main round established — no new gate.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).

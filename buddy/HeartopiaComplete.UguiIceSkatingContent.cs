@@ -18,7 +18,7 @@ namespace HeartopiaMod
     //    (all directly on HeartopiaComplete via the two feature partials; ZERO backend interop
     //    additions this round).
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
-    //    UguiShellIceSkatingSubIndex = 4, declared with their siblings in UguiPhase3Content.cs),
+    //    UguiShellIceSkatingSubIndex = 4, declared with their siblings in UguiShellTabIndices.cs),
     //    never label comparison. The processor gates on the SAME
     //    IsUguiShellNewFeaturesSubTabActive function Animal Care's round established.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme

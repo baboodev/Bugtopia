@@ -17,7 +17,7 @@ namespace HeartopiaMod
     //    ZERO backend additions this round (unlike Fishing's interop wrappers): every value the
     //    drawer touches already has a public accessor whose clamp matches the slider's own range.
     //  - Wiring is by STATIC display-position index (UguiShellResourceGatheringTabIndex = 1 +
-    //    UguiShellInsectsSubIndex = 2, declared next to their siblings in UguiPhase3Content.cs;
+    //    UguiShellInsectsSubIndex = 2, declared next to their siblings in UguiShellTabIndices.cs;
     //    Insects = autoFarmSubTab 2 per DrawAutoFarmTab's dispatcher, Farm.cs:128-131), never
     //    label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme

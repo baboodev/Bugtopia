@@ -28,7 +28,7 @@ namespace HeartopiaMod
     //    debounce internally, so this file calls NO Save method anywhere — no SaveKeybinds, no
     //    SaveAllSettings.
     //  - Wiring is by STATIC display-position index (UguiShellResourceGatheringTabIndex = 1 +
-    //    UguiShellBirdsSubIndex = 3, declared next to their siblings in UguiPhase3Content.cs;
+    //    UguiShellBirdsSubIndex = 3, declared next to their siblings in UguiShellTabIndices.cs;
     //    Birds = autoFarmSubTab 3 per DrawAutoFarmTab's dispatcher, Farm.cs:132-135), never
     //    label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
@@ -44,7 +44,7 @@ namespace HeartopiaMod
     //  - Capture Mode is the FIRST dropdown in any Resource Gathering round — the kit's real
     //    CreateUguiDropdown wired exactly like Settings→Main's language dropdown (the
     //    out-bool listenerWired + per-frame poll fallback precedent,
-    //    UguiPhase3SettingsContent.cs). Option strings are pre-localized at build time
+    //    UguiSettingsMainContent.cs). Option strings are pre-localized at build time
     //    (IMGUI's UI_DrawSingleSelectDropdown L()s caption and rows, UiKit.cs:608/638 — the
     //    NotifPos precedent); the backend keeps raw indices.
     //  - IMGUI's `num += captureModeDropdownOpen ? 122 : 80` is an inline-reflow artifact of

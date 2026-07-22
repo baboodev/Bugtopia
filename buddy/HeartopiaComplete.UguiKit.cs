@@ -765,6 +765,38 @@ namespace HeartopiaMod
             catch { }
         }
 
+        // ----------------------------------------------------------------------------------------
+        // Small label helper (first needed by this round's wrapped body/footer text)
+        // ----------------------------------------------------------------------------------------
+
+        // Kit labels default to single-line MidlineLeft; About bodies and the Research status/
+        // footer lines need multi-line wrapping inside a fixed-width rect (the IMGUI drawers use
+        // wordWrap styles for the same strings). Top-left alignment matches IMGUI's UpperLeft.
+        private void TrySetUguiLabelWrapped(GameObject label)
+        {
+            if (label == null)
+            {
+                return;
+            }
+            try
+            {
+                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
+                if (tmp != null)
+                {
+                    tmp.enableWordWrapping = true;
+                    tmp.alignment = TextAlignmentOptions.TopLeft;
+                    return;
+                }
+                Text txt = label.GetComponent<Text>();
+                if (txt != null)
+                {
+                    txt.horizontalOverflow = HorizontalWrapMode.Wrap;
+                    txt.alignment = TextAnchor.UpperLeft;
+                }
+            }
+            catch { }
+        }
+
         private void SetUguiLabelText(GameObject label, string text)
         {
             if (label == null)

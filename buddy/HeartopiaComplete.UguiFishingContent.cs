@@ -21,7 +21,7 @@ namespace HeartopiaMod
     //    accessors + SaveCurrentLocationFromUi + RemoveCustomSpotAt (the removal-plus-index-fixup
     //    extracted so BOTH surfaces share one implementation).
     //  - Wiring is by STATIC display-position index (UguiShellResourceGatheringTabIndex = 1 +
-    //    UguiShellFishingSubIndex = 1, declared next to their siblings in UguiPhase3Content.cs;
+    //    UguiShellFishingSubIndex = 1, declared next to their siblings in UguiShellTabIndices.cs;
     //    Fishing = autoFarmSubTab 1 per DrawAutoFarmTab's dispatcher), never label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own.

@@ -36,7 +36,7 @@ namespace HeartopiaMod
     //    TryRotateFocused / TrySetBuildingPlaneHeight / AddMenuNotification).
     //  - Wiring is by STATIC display-position index (UguiShellSelfTabIndex = 0 +
     //    UguiShellSelfBuildingSubIndex = 1, declared next to their round-1/2/3 siblings in
-    //    UguiPhase3Content.cs). Self's other four sub-tabs are NOT migrated this round.
+    //    UguiShellTabIndices.cs). Self's other four sub-tabs are NOT migrated this round.
     //  - Toggles are kit CHECKBOXES (round-2 deviation note applies — the IMGUI source here uses
     //    raw GUI.Toggle, not the switch pill, so checkboxes are also the closer visual match).
     //  - Notification strings/colors are copied verbatim from DrawFreePlacementControls:323-346

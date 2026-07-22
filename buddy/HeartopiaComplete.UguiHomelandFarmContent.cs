@@ -19,7 +19,7 @@ namespace HeartopiaMod
     //    directly on HeartopiaComplete; ZERO changes to HomelandFarmFeature.cs). Two independent
     //    rendering paths over one backend.
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
-    //    UguiShellHomelandFarmSubIndex = 2, declared with their siblings in UguiPhase3Content.cs;
+    //    UguiShellHomelandFarmSubIndex = 2, declared with their siblings in UguiShellTabIndices.cs;
     //    AnimalCareFeature.cs:39-42 dispatcher: newFeaturesSubTab == 2 → DrawHomelandFarmTab),
     //    never label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme

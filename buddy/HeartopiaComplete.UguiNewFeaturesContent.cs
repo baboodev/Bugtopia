@@ -22,7 +22,7 @@ namespace HeartopiaMod
     //    independent rendering paths over one backend.
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
     //    UguiShellAnimalCareSubIndex = 0, declared next to their siblings in
-    //    UguiPhase3Content.cs — see the derivation there), never label comparison.
+    //    UguiShellTabIndices.cs — see the derivation there), never label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //

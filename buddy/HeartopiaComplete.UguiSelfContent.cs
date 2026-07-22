@@ -18,7 +18,7 @@ namespace HeartopiaMod
     //    rendering paths over one backend.
     //  - Wiring is by STATIC display-position index (UguiShellSelfTabIndex = 0 +
     //    UguiShellSelfMainSubIndex/FunSubIndex/PrivacySubIndex/GameUiSubIndex — declared next to
-    //    their round-1..4 siblings in UguiPhase3Content.cs), never by localized label comparison.
+    //    their round-1..4 siblings in UguiShellTabIndices.cs), never by localized label comparison.
     //  - All four sub-tabs live inside the already-registered modal shell: no input-ownership
     //    entries, no theme registration of their own (the shell's "UguiShell" rebuilder re-runs
     //    these builders with fresh theme colors).

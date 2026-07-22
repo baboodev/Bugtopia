@@ -30,7 +30,7 @@ namespace HeartopiaMod
     //    QuestAssistantOnAcceptAllClicked, QuestAssistantCountReadyToSubmit,
     //    QuestAssistantIsDailyQuestSubmitBusy, SaveKeybinds + the fields).
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
-    //    UguiShellDailyQuestsSubIndex = 1, declared with their siblings in UguiPhase3Content.cs).
+    //    UguiShellDailyQuestsSubIndex = 1, declared with their siblings in UguiShellTabIndices.cs).
     //    The processor gates on the SAME IsUguiShellNewFeaturesSubTabActive function Animal
     //    Care's round established.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme

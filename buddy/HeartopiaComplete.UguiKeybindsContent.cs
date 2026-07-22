@@ -22,7 +22,7 @@ namespace HeartopiaMod
     //    behavior is bit-identical).
     //  - Wiring is by STATIC display-position index (UguiShellSettingsTabIndex +
     //    UguiShellSettingsKeybindsSubIndex, declared with their siblings in
-    //    UguiPhase3Content.cs), never by localized label comparison.
+    //    UguiShellTabIndices.cs), never by localized label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //

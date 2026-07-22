@@ -19,7 +19,7 @@ namespace HeartopiaMod
     //    StartLittleWhaleTeleport, SaveKeybinds, AddMenuNotification, FormatKeybindLabel + the
     //    fields/consts).
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
-    //    UguiShellSeaCleanSubIndex = 7, declared with their siblings in UguiPhase3Content.cs),
+    //    UguiShellSeaCleanSubIndex = 7, declared with their siblings in UguiShellTabIndices.cs),
     //    never label comparison. The processor gates on the SAME
     //    IsUguiShellNewFeaturesSubTabActive function Animal Care's round established.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme

@@ -26,7 +26,7 @@ namespace HeartopiaMod
     //    / SpawnVehicleById / TryGetOnLiveVehicle). Two independent rendering paths, one backend.
     //  - Wiring is by STATIC display-position index (UguiShellTeleportTabIndex = 5 + the nine
     //    UguiShellTeleport*SubIndex constants, declared next to their round-1/2 siblings in
-    //    UguiPhase3Content.cs) — the sub display indices match teleportSubTab's own 0-8 exactly.
+    //    UguiShellTabIndices.cs) — the sub display indices match teleportSubTab's own 0-8 exactly.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs these builders).
     //  - Strings stay UNlocalized for IMGUI parity (DrawTeleportTab/DrawSpawnVehicleTab use raw
@@ -1114,7 +1114,7 @@ namespace HeartopiaMod
             handle.LoadButton = this.CreateUguiPrimaryButton(scrollContent, "LoadButton", "Load Vehicle List",
                 new System.Action(this.OnUguiSpawnVehicleLoadClicked));
             // Checkbox toggles instead of IMGUI switches (round-2 deviation, see
-            // UguiPhase3SettingsContent.cs header); DrawSwitchToggle localizes labels, so these do.
+            // UguiSettingsMainContent.cs header); DrawSwitchToggle localizes labels, so these do.
             handle.GetOnToggle = this.CreateUguiCheckbox(scrollContent, "GetOnToggle",
                 this.L("Get on after spawn"), this.spawnVehicleGetOn,
                 new System.Action<bool>(this.OnUguiSpawnVehicleGetOnChanged));

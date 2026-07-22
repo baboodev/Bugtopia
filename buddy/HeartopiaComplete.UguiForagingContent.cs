@@ -18,7 +18,7 @@ namespace HeartopiaMod
     //    action methods. Two independent rendering paths over one backend.
     //  - Wiring is by STATIC display-position index (UguiShellResourceGatheringTabIndex = 1 +
     //    UguiShellForagingSubIndex = 0 — declared next to their siblings in
-    //    UguiPhase3Content.cs), never by localized label comparison.
+    //    UguiShellTabIndices.cs), never by localized label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //

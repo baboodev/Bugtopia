@@ -20,7 +20,7 @@ namespace HeartopiaMod
     //    every field/method here is already this.-accessible partial-class state.
     //  - Wiring is by STATIC display-position index (UguiShellFeaturesTabIndex = 2 +
     //    UguiShellFeaturesMainSubIndex = 0 — declared next to their siblings in
-    //    UguiPhase3Content.cs), never by localized label comparison.
+    //    UguiShellTabIndices.cs), never by localized label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //

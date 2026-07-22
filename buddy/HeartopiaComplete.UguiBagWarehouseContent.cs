@@ -19,7 +19,7 @@ namespace HeartopiaMod
     //    method it calls (HeartopiaComplete.Transfer.cs) stay fully functional and untouched —
     //    this file only READS the same transfer* fields and CALLS the same action methods.
     //  - Wiring is by STATIC display-position index (UguiShellBagWarehouseTabIndex = 6, declared
-    //    next to its siblings in UguiPhase3Content.cs) in BuildUguiShell's no-subs branch.
+    //    next to its siblings in UguiShellTabIndices.cs) in BuildUguiShell's no-subs branch.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //

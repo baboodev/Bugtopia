@@ -24,7 +24,7 @@ namespace HeartopiaMod
     //    already this.-accessible.
     //  - Wiring is by STATIC display-position index (UguiShellRadarTabIndex = 4 +
     //    UguiShellRadarMainSubIndex/UguiShellRadarSettingsSubIndex = 0/1, declared next to their
-    //    siblings in UguiPhase3Content.cs), never label comparison.
+    //    siblings in UguiShellTabIndices.cs), never label comparison.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs these builders).
     //

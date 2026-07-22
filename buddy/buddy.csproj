@@ -258,8 +258,10 @@
     <Compile Include="HeartopiaComplete.UiKit.cs" />
     <Compile Include="HeartopiaComplete.UguiKit.cs" />
     <Compile Include="HeartopiaComplete.UguiShell.cs" />
-    <Compile Include="HeartopiaComplete.UguiPhase3Content.cs" />
-    <Compile Include="HeartopiaComplete.UguiPhase3SettingsContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiShellTabIndices.cs" />
+    <Compile Include="HeartopiaComplete.UguiAboutContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiResearchContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiSettingsMainContent.cs" />
     <Compile Include="HeartopiaComplete.UguiKeybindsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiThemeContent.cs" />
     <Compile Include="HeartopiaComplete.UguiTeleportContent.cs" />
