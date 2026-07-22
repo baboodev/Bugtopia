@@ -1987,7 +1987,14 @@ namespace HeartopiaMod
             }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDFramework", StringComparison.Ordinal))
             {
-                imageNames = new[] { "XDTBaseService", "XDTBaseService.dll", "XDFramework", "XDFramework.dll", "Client", "Client.dll" };
+                // XDFramework.Expansion engine wrappers (LocalizationManager, …) live in the
+                // EngineWrapper image, not the XDT* gameplay images.
+                imageNames = new[] { "EngineWrapper", "EngineWrapper.dll", "XDTBaseService", "XDTBaseService.dll", "XDFramework", "XDFramework.dll", "Client", "Client.dll" };
+            }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTGUI", StringComparison.Ordinal))
+            {
+                // XDTGUI.Module.* systems (LoginSystem, …) compile into XDTLevelAndEntity.
+                imageNames = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTGameUI", "XDTGameUI.dll", "Client", "Client.dll" };
             }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("EcsClient", StringComparison.Ordinal))
             {

@@ -195,6 +195,9 @@ namespace HeartopiaMod
             data.skipShowOffAnimations = this.skipShowOffAnimations;
             data.persistentHudEnabled = this.persistentHudEnabled;
             data.chatForceTranslateEnabled = this.chatForceTranslateEnabled;
+            data.chatTranslateVerboseLog = this.chatTranslateVerboseLog;
+            data.chatTranslateForceAllLangs = this.chatTranslateForceAllLangs;
+            data.chatTranslatePostcardBypass = this.chatTranslatePostcardBypass;
             data.autoIceSkatingEnabled = this.autoIceSkatingEnabled;
             data.autoIceSkatingMinUltimateScore = this.autoIceSkatingMinUltimateScore;
             data.autoIceSkatingOnlyX2Ultimate = this.autoIceSkatingOnlyX2Ultimate;
@@ -392,6 +395,9 @@ namespace HeartopiaMod
             this.skipShowOffAnimations = data.skipShowOffAnimations;
             this.persistentHudEnabled = data.persistentHudEnabled;
             this.chatForceTranslateEnabled = data.chatForceTranslateEnabled;
+            this.chatTranslateVerboseLog = data.chatTranslateVerboseLog;
+            this.chatTranslateForceAllLangs = data.chatTranslateForceAllLangs;
+            this.chatTranslatePostcardBypass = data.chatTranslatePostcardBypass;
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
             this.autoIceSkatingMinUltimateScore = Mathf.Clamp(data.autoIceSkatingMinUltimateScore, 0, AutoIceSkatingMinUltimateScoreSliderMax);
             this.autoIceSkatingOnlyX2Ultimate = data.autoIceSkatingOnlyX2Ultimate;

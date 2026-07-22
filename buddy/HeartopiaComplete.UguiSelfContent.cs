@@ -85,6 +85,9 @@ namespace HeartopiaMod
             public Toggle WarehouseToggle;
             public Toggle StrangerChatToggle;
             public Toggle ChatTranslateToggle;
+            public Toggle ChatTranslateDebugToggle;
+            public Toggle ChatTranslateForceAllToggle;
+            public Toggle ChatTranslatePostcardToggle;
             public GameObject GameSpeedLabel;   // unconditional
             public string GameSpeedShown;
             public Slider GameSpeedSlider;
@@ -261,6 +264,15 @@ namespace HeartopiaMod
             handle.ChatTranslateToggle = this.CreateUguiCheckbox(scrollContent, "ChatTranslateToggle",
                 this.L("Chat Translate Unlock"), this.chatForceTranslateEnabled,
                 new System.Action<bool>(this.OnUguiSelfChatTranslateToggled));
+            handle.ChatTranslateDebugToggle = this.CreateUguiCheckbox(scrollContent, "ChatTranslateDebugToggle",
+                this.L("Chat Translate: Debug Log"), this.chatTranslateVerboseLog,
+                new System.Action<bool>(this.OnUguiSelfChatTranslateDebugToggled));
+            handle.ChatTranslateForceAllToggle = this.CreateUguiCheckbox(scrollContent, "ChatTranslateForceAllToggle",
+                this.L("Chat Translate: Force ALL Languages"), this.chatTranslateForceAllLangs,
+                new System.Action<bool>(this.OnUguiSelfChatTranslateForceAllToggled));
+            handle.ChatTranslatePostcardToggle = this.CreateUguiCheckbox(scrollContent, "ChatTranslatePostcardToggle",
+                this.L("Chat Translate: Postcard Bypass (test)"), this.chatTranslatePostcardBypass,
+                new System.Action<bool>(this.OnUguiSelfChatTranslatePostcardToggled));
 
             handle.GameSpeedShown = this.LF("Game Speed: {0:F1}x", this.gameSpeed);
             handle.GameSpeedLabel = this.CreateUguiBodyLabel(scrollContent, "GameSpeedLabel", handle.GameSpeedShown, 13f);
@@ -501,6 +513,9 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.WarehouseToggle, this.warehouseBypassEnabled);
                 this.SyncUguiToggleFromField(handle.StrangerChatToggle, this.strangerChatBypassEnabled);
                 this.SyncUguiToggleFromField(handle.ChatTranslateToggle, this.chatForceTranslateEnabled);
+                this.SyncUguiToggleFromField(handle.ChatTranslateDebugToggle, this.chatTranslateVerboseLog);
+                this.SyncUguiToggleFromField(handle.ChatTranslateForceAllToggle, this.chatTranslateForceAllLangs);
+                this.SyncUguiToggleFromField(handle.ChatTranslatePostcardToggle, this.chatTranslatePostcardBypass);
                 this.SyncUguiToggleFromField(handle.CustomFovToggle, this.customCameraFOVEnabled);
                 this.SyncUguiToggleFromField(handle.AnalogMoveToggle, this.analogMoveBridgeEnabled);
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
@@ -771,6 +786,42 @@ namespace HeartopiaMod
             {
                 this.AddMenuNotification(this.L("Chat Translate Unlock Disabled"), new Color(0.88f, 0.6f, 0.6f));
             }
+        }
+
+        private void OnUguiSelfChatTranslateDebugToggled(bool value)
+        {
+            if (value == this.chatTranslateVerboseLog)
+            {
+                return;
+            }
+            this.chatTranslateVerboseLog = value;
+            this.chatTranslateGameStateLogged = false;
+            this.SaveKeybinds(false);
+        }
+
+        private void OnUguiSelfChatTranslateForceAllToggled(bool value)
+        {
+            if (value == this.chatTranslateForceAllLangs)
+            {
+                return;
+            }
+            this.chatTranslateForceAllLangs = value;
+            this.SaveKeybinds(false);
+        }
+
+        private void OnUguiSelfChatTranslatePostcardToggled(bool value)
+        {
+            if (value == this.chatTranslatePostcardBypass)
+            {
+                return;
+            }
+            this.chatTranslatePostcardBypass = value;
+            this.postcardUnavailableLogged = false;
+            this.postcardNextMailIdResolveAt = -999f;
+            this.SaveKeybinds(false);
+            this.AddMenuNotification(
+                value ? this.L("Postcard Translate Bypass On") : this.L("Postcard Translate Bypass Off"),
+                value ? new Color(0.55f, 0.88f, 1f) : new Color(0.88f, 0.6f, 0.6f));
         }
 
         // Gui.cs:1828-1834 — NOT a direct field write: SetGameSpeed clamps + applies the timescale,

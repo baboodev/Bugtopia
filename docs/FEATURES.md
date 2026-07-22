@@ -175,6 +175,19 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 - Requires the overseas game build (translation service); server weekly char limits still apply.
   Toggle persisted in config (`chatForceTranslateEnabled`). Implementation:
   `ChatForceTranslateFeature.cs`.
+- Sub-toggles:
+  - **Debug Log** (`chatTranslateVerboseLog`) — per-message decision trace (sender langKey vs
+    yours, message text, and every server stream result incl. game-initiated) to the mod log.
+    On completion logs the finished translation (`orig -> translated`), not just errors.
+  - **Force ALL Languages** (`chatTranslateForceAllLangs`) — also request foreign-langKey messages,
+    but only when the in-game Translate toggle is off (never double-request the game's own path).
+  - **Postcard Bypass (test)** (`chatTranslatePostcardBypass`) — experimental route around the
+    server's langCode gate. Blocked chat messages are translated via the **postcard** endpoint
+    (`MailProtocolManager.RequestTranslatePostCard`, no source-langCode gate — it detects language
+    from the supplied text), serialized one at a time. Needs ≥1 postcard in the mailbox to borrow a
+    MailId; the translated text is read synchronously via a dedicated detour on
+    `DispatchEvent<PostCardTranslateResultEvent>` and logged. Consumes the shared weekly translate
+    quota. Implementation: `ChatForceTranslateFeature.Postcard.cs`.
 
 ### Game UI — Custom UI Timings (Self → Game UI sub-tab)
 

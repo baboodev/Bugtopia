@@ -169,6 +169,9 @@ namespace HeartopiaMod
             public bool skipShowOffAnimations;
             public bool persistentHudEnabled;
             public bool chatForceTranslateEnabled;
+            public bool chatTranslateVerboseLog;
+            public bool chatTranslateForceAllLangs;
+            public bool chatTranslatePostcardBypass;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             public bool autoIceSkatingOnlyX2Ultimate = true;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using UnityEngine;
 
 namespace HeartopiaMod
@@ -30,8 +31,11 @@ namespace HeartopiaMod
         private const string ChatTranslateStreamResultEventName = "XDTDataAndProtocol.Events.RequestTranslateStreamResultEvent";
         private const int ChatTranslateStreamResultEventBytes = 20;
         private const int ChatTranslateErrorNoNeedToTranslate = 4209; // ErrorCode.NoNeedToTranslate
+        private const int ChatTranslateStreamEventTypeDone = 4;       // TranslateStreamEventType.Done
 
         private bool chatForceTranslateEnabled;
+        private bool chatTranslateVerboseLog;
+        private bool chatTranslateForceAllLangs;
         private bool chatForceTranslateHooksRegistered;
         private float chatForceTranslateNextHookAttemptAt = -999f;
         private float chatForceTranslateNextResolveAt = -999f;
@@ -40,8 +44,14 @@ namespace HeartopiaMod
         private IntPtr chatForceTranslateMethodPtr;
         private bool chatForceTranslateUnavailableLogged;
         private int chatForceTranslateSentCount;
+        private int chatForceTranslateSucceededCount;
+        private IntPtr chatTranslateGetCacheMethodPtr;
         private int chatForceTranslateLastErrorCode;
         private float chatForceTranslateNextErrorLogAt;
+        private bool chatTranslateGameStateLogged;
+        private bool chatTranslateGameToggleValue;
+        private float chatTranslateGameToggleValidUntil = -999f;
+        private IntPtr chatTranslateRecordMsgIdField;
         private readonly HashSet<ulong> chatForceTranslateRequested = new HashSet<ulong>();
 
         // Field offsets inside the snapshotted event payloads. ReceiveChatMessage contains a
@@ -50,10 +60,12 @@ namespace HeartopiaMod
         // the 2*IntPtr.Size boxed header) instead of trusting the C# declaration order. -1 =
         // unresolved; readers fall back to the sequential-layout guess until resolved.
         private int chatTranslateOffPlayerNetId = -1;
+        private int chatTranslateOffShortId = -1;
         private int chatTranslateOffMsgId = -1;
         private int chatTranslateOffLangKey = -1;
         private int chatTranslateOffResultErrorCode = -1;
         private int chatTranslateOffResultMsgId = -1;
+        private int chatTranslateOffResultEventType = -1;
         private bool chatTranslateOffsetsLogged;
 
         private void ChatTranslateLog(string message)
@@ -61,6 +73,16 @@ namespace HeartopiaMod
             if (!string.IsNullOrEmpty(message))
             {
                 ModLogger.Msg("[ChatTranslate] " + message);
+            }
+        }
+
+        // Per-message decision trace for diagnosing "why doesn't player X translate". Enabled by
+        // the "Translate Debug Log" sub-toggle; chat volume is low, so per-message lines are fine.
+        private void ChatTranslateVerbose(string message)
+        {
+            if (this.chatTranslateVerboseLog)
+            {
+                this.ChatTranslateLog(message);
             }
         }
 
@@ -91,7 +113,12 @@ namespace HeartopiaMod
                 this.chatForceTranslateRequested.Clear();
                 this.chatForceTranslateClientLangKey = -1;
                 this.chatForceTranslateMethodPtr = IntPtr.Zero;
+                this.chatTranslateRecordMsgIdField = IntPtr.Zero;
+                this.chatTranslateGetCacheMethodPtr = IntPtr.Zero;
                 this.chatForceTranslateNextResolveAt = -999f;
+                this.chatTranslateGameStateLogged = false;
+                this.chatTranslateGameToggleValidUntil = -999f;
+                this.ResetChatTranslatePostcardWorldState();
             }
 
             float now = Time.unscaledTime;
@@ -113,6 +140,94 @@ namespace HeartopiaMod
                 this.chatForceTranslateNextResolveAt = now + 5f;
                 this.TryResolveChatTranslateEventOffsets();
                 this.TryResolveChatTranslateClientLangKey(out _);
+                this.MaybeLogChatTranslateGameState();
+            }
+
+            // Postcard-endpoint bypass (opt-in): install the result detour, drain captured results,
+            // and pump the serialized send queue.
+            this.UpdateChatTranslatePostcardBypass(now);
+        }
+
+        // One-shot per world (verbose only): the two game-side gates that decide whether the
+        // GAME could translate at all — overseas build flag and the in-panel Translate toggle
+        // (whose getter also folds in the weekly-char / GM limits).
+        private void MaybeLogChatTranslateGameState()
+        {
+            if (!this.chatTranslateVerboseLog || this.chatTranslateGameStateLogged)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoObjectGetClass == null)
+                {
+                    return;
+                }
+
+                string overSeaText = "?";
+                if (this.TryResolveAuraMonoModule("XDTGUI.Module.Login.LoginSystem", out IntPtr loginObj) && loginObj != IntPtr.Zero)
+                {
+                    IntPtr loginClass = auraMonoObjectGetClass(loginObj);
+                    if (loginClass != IntPtr.Zero
+                        && this.TryInvokeAuraMonoBoolGetter(loginObj, loginClass, out bool overSea, "get_IsOverSea", "IsOverSea"))
+                    {
+                        overSeaText = overSea.ToString();
+                    }
+                }
+
+                string gameToggleText = this.TryGetChatTranslateGameToggle(out bool gameOn) ? gameOn.ToString() : "?";
+                this.chatTranslateGameStateLogged = true;
+                this.ChatTranslateLog("Game state: LoginSystem.IsOverSea=" + overSeaText
+                    + " ChatSystem.TranslateOn(effective)=" + gameToggleText
+                    + " clientLangKey=" + this.chatForceTranslateClientLangKey);
+            }
+            catch (Exception ex)
+            {
+                this.ChatTranslateVerbose("Game state probe exception: " + ex.Message);
+            }
+        }
+
+        // Effective in-game Translate toggle (ChatSystem.get_TranslateOn: false when CN build,
+        // toggle off, or weekly/GM limited). Cached for 2 s — read per incoming message otherwise.
+        private bool TryGetChatTranslateGameToggle(out bool effectiveOn)
+        {
+            effectiveOn = this.chatTranslateGameToggleValue;
+            float now = Time.unscaledTime;
+            if (now < this.chatTranslateGameToggleValidUntil)
+            {
+                return true;
+            }
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Chat.ChatSystem", out IntPtr chatSystemObj)
+                    || chatSystemObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr chatSystemClass = auraMonoObjectGetClass(chatSystemObj);
+                if (chatSystemClass == IntPtr.Zero
+                    || !this.TryInvokeAuraMonoBoolGetter(chatSystemObj, chatSystemClass, out bool on, "get_TranslateOn"))
+                {
+                    return false;
+                }
+
+                this.chatTranslateGameToggleValue = on;
+                this.chatTranslateGameToggleValidUntil = now + 2f;
+                effectiveOn = on;
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -126,10 +241,12 @@ namespace HeartopiaMod
                 }
 
                 int offNetId = (this.chatTranslateOffPlayerNetId >= 0) ? this.chatTranslateOffPlayerNetId : 0;
+                int offShortId = (this.chatTranslateOffShortId >= 0) ? this.chatTranslateOffShortId : 8;
                 int offMsgId = (this.chatTranslateOffMsgId >= 0) ? this.chatTranslateOffMsgId : 16;
                 int offLang = (this.chatTranslateOffLangKey >= 0) ? this.chatTranslateOffLangKey : 44;
 
                 uint playerNetId = snap.ReadUInt32(offNetId);
+                long shortId = unchecked((long)snap.ReadUInt64(offShortId));
                 ulong msgId = snap.ReadUInt64(offMsgId);
                 int langKey = snap.ReadInt32(offLang);
                 if (msgId == 0UL)
@@ -137,19 +254,72 @@ namespace HeartopiaMod
                     return;
                 }
 
-                // Never translate our own messages; fail closed while self is unresolved.
-                if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U || playerNetId == selfNetId)
+                bool haveSelf = this.TryResolveSelfPlayerNetId(out uint selfNetId) && selfNetId != 0U;
+                bool haveClientLang = this.TryResolveChatTranslateClientLangKey(out int clientLang);
+                string messageText = null;
+                if (this.chatTranslateVerboseLog)
                 {
+                    this.TryGetChatTranslateMessageText(msgId, out messageText);
+                }
+
+                this.ChatTranslateVerbose("recv msgId=" + msgId
+                    + " player netId=" + playerNetId + " shortId=" + shortId
+                    + " langKey=" + langKey
+                    + " clientLang=" + (haveClientLang ? clientLang.ToString() : "?")
+                    + " self=" + (haveSelf ? selfNetId.ToString() : "?")
+                    + " text=" + ChatTranslateTextForLog(messageText));
+
+                // Never translate our own messages; fail closed while self is unresolved.
+                if (!haveSelf)
+                {
+                    this.ChatTranslateVerbose("  -> skip: self netId unresolved yet.");
                     return;
                 }
 
-                // Only the blocked case: sender's langKey matches ours. Foreign-langKey messages
-                // stay with the game's own translate pipeline (its Translate toggle), so we never
-                // double-request a message — duplicate stream chunks would corrupt the game's
-                // append-only translation cache.
-                if (!this.TryResolveChatTranslateClientLangKey(out int clientLang) || langKey != clientLang)
+                if (playerNetId == selfNetId)
                 {
+                    // Server stamps our own messages with OUR langKey (from ConnectScene_CS) —
+                    // a reflection-free fallback source when the LocalizationManager probes fail.
+                    if (!haveClientLang && langKey >= 0)
+                    {
+                        this.chatForceTranslateClientLangKey = langKey;
+                        this.chatForceTranslateUnavailableLogged = false;
+                        this.ChatTranslateLog("Client language key = " + langKey + " (learned from own message).");
+                    }
+
+                    this.ChatTranslateVerbose("  -> skip: own message.");
                     return;
+                }
+
+                if (!haveClientLang)
+                {
+                    this.ChatTranslateVerbose("  -> skip: client langKey unresolved.");
+                    return;
+                }
+
+                // Same-langKey messages are the blocked case the game never requests — always
+                // ours. Foreign-langKey messages belong to the game's own translate pipeline;
+                // with "Force ALL Languages" we take them ONLY when the game's effective
+                // Translate toggle is off/unreadable — a double request would corrupt the game's
+                // append-only translation cache with duplicate stream chunks.
+                string reason;
+                if (langKey == clientLang)
+                {
+                    reason = "same-langKey (game refuses to translate these)";
+                }
+                else if (!this.chatTranslateForceAllLangs)
+                {
+                    this.ChatTranslateVerbose("  -> skip: foreign langKey, left to the game's translate pipeline (Force ALL off).");
+                    return;
+                }
+                else if (this.TryGetChatTranslateGameToggle(out bool gameOn) && gameOn)
+                {
+                    this.ChatTranslateVerbose("  -> skip: foreign langKey and in-game Translate toggle is ON (game auto-translates; no double request).");
+                    return;
+                }
+                else
+                {
+                    reason = "force-all (in-game Translate toggle off/unreadable)";
                 }
 
                 if (this.chatForceTranslateRequested.Count >= 2048)
@@ -159,12 +329,48 @@ namespace HeartopiaMod
 
                 if (!this.chatForceTranslateRequested.Add(msgId))
                 {
+                    this.ChatTranslateVerbose("  -> skip: already requested.");
                     return;
                 }
 
-                if (!this.TryChatTranslateSendRequest(msgId))
+                // Both endpoints translate the supplied text, so resolve it from ChatSystem.record.
+                if (messageText == null)
+                {
+                    this.TryGetChatTranslateMessageText(msgId, out messageText);
+                }
+
+                // Postcard-endpoint bypass: route through the postcard translator (no source-langKey
+                // gate) instead of the chat endpoint. Needs the text (postcard content can't be empty).
+                if (this.chatTranslatePostcardBypass)
+                {
+                    if (string.IsNullOrEmpty(messageText))
+                    {
+                        this.chatForceTranslateRequested.Remove(msgId);
+                        this.ChatTranslateVerbose("  -> skip postcard route: message text unavailable in ChatSystem.record.");
+                        return;
+                    }
+
+                    this.EnqueueChatTranslatePostcard(msgId, messageText, reason);
+                    return;
+                }
+
+                // The stream endpoint validates OriginalMessage — an empty one comes back as
+                // 4207 TranslateContentInvalid (confirmed live), so mirror the game and always
+                // send the original text, resolved from ChatSystem.record.
+                if (string.IsNullOrEmpty(messageText))
+                {
+                    this.ChatTranslateVerbose("  -> message text unavailable in ChatSystem.record; sending msgId-only request.");
+                }
+
+                if (this.TryChatTranslateSendRequest(msgId, messageText))
+                {
+                    this.ChatTranslateVerbose("  -> translate request SENT (" + reason + ", textChars="
+                        + (messageText != null ? messageText.Length : 0) + ").");
+                }
+                else
                 {
                     this.chatForceTranslateRequested.Remove(msgId);
+                    this.ChatTranslateVerbose("  -> send FAILED (see log above).");
                 }
             }
             catch (Exception ex)
@@ -184,25 +390,255 @@ namespace HeartopiaMod
 
                 int offErr = (this.chatTranslateOffResultErrorCode >= 0) ? this.chatTranslateOffResultErrorCode : 0;
                 int offMsg = (this.chatTranslateOffResultMsgId >= 0) ? this.chatTranslateOffResultMsgId : 8;
+                int offType = (this.chatTranslateOffResultEventType >= 0) ? this.chatTranslateOffResultEventType : 16;
                 int errorCode = snap.ReadInt32(offErr);
                 ulong msgId = snap.ReadUInt64(offMsg);
-                if (msgId == 0UL || errorCode == 0 || !this.chatForceTranslateRequested.Contains(msgId))
+                int eventType = snap.ReadInt32(offType);
+                if (msgId == 0UL)
                 {
                     return;
                 }
 
-                this.chatForceTranslateLastErrorCode = errorCode;
-                float now = Time.unscaledTime;
-                if (now >= this.chatForceTranslateNextErrorLogAt)
+                bool ours = this.chatForceTranslateRequested.Contains(msgId);
+
+                // Verbose: trace EVERY stream result (game-initiated included) — this is the
+                // server's actual verdict per message, the key signal when diagnosing why a
+                // specific player never translates.
+                this.ChatTranslateVerbose("stream result msgId=" + msgId
+                    + " errorCode=" + errorCode
+                    + " eventType=" + ChatTranslateStreamEventTypeName(eventType)
+                    + (ours ? " (our request)" : " (game request)"));
+
+                if (errorCode != 0 && ours)
                 {
-                    this.chatForceTranslateNextErrorLogAt = now + 5f;
-                    this.ChatTranslateLog(errorCode == ChatTranslateErrorNoNeedToTranslate
-                        ? "Server answered NoNeedToTranslate for msg " + msgId + " (text already in our language)."
-                        : "Translate stream error " + errorCode + " for msg " + msgId + ".");
+                    this.chatForceTranslateLastErrorCode = errorCode;
+                    float nowErr = Time.unscaledTime;
+                    if (nowErr >= this.chatForceTranslateNextErrorLogAt)
+                    {
+                        this.chatForceTranslateNextErrorLogAt = nowErr + 5f;
+                        this.TryGetChatTranslateMessageText(msgId, out string messageText);
+                        string suffix = " for msg " + msgId + " text=" + ChatTranslateTextForLog(messageText) + ".";
+                        this.ChatTranslateLog(errorCode == ChatTranslateErrorNoNeedToTranslate
+                            ? "Server answered NoNeedToTranslate" + suffix + " (it judged the text already in our language)"
+                            : "Translate stream error " + errorCode + suffix);
+                    }
+                    return;
+                }
+
+                // Success: on the terminal Done event read the accumulated translation from the
+                // game's own cache (ChatSystem.GetTranslatedCache — a rooted dictionary, so the
+                // returned string is safe to read synchronously) and log the finished text. Logged
+                // for our forced requests always; for game-initiated translations only in verbose.
+                if (errorCode == 0
+                    && eventType == ChatTranslateStreamEventTypeDone
+                    && (ours || this.chatTranslateVerboseLog))
+                {
+                    if (this.TryResolveChatTranslateClientLangKey(out int clientLang)
+                        && this.TryGetChatTranslatedText(msgId, clientLang, out string translated)
+                        && !string.IsNullOrEmpty(translated))
+                    {
+                        this.chatForceTranslateSucceededCount++;
+                        this.TryGetChatTranslateMessageText(msgId, out string original);
+                        this.ChatTranslateLog("Chat translated msg " + msgId
+                            + (ours ? " (forced)" : " (game)")
+                            + ": " + ChatTranslateTextForLog(original)
+                            + " -> " + ChatTranslateTextForLog(translated));
+                    }
                 }
             }
             catch
             {
+            }
+        }
+
+        // Read a completed translation from ChatSystem's cache (GetTranslatedCache(msgId, langKey)).
+        // Returns a mono string OBJECT from a rooted dictionary; read synchronously via the invoke
+        // result — never a deferred raw pointer.
+        private unsafe bool TryGetChatTranslatedText(ulong msgId, int langKey, out string text)
+        {
+            text = null;
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+                {
+                    return false;
+                }
+
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Chat.ChatSystem", out IntPtr chatSystemObj)
+                    || chatSystemObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr chatSystemClass = auraMonoObjectGetClass(chatSystemObj);
+                if (chatSystemClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                if (this.chatTranslateGetCacheMethodPtr == IntPtr.Zero)
+                {
+                    this.chatTranslateGetCacheMethodPtr = this.FindAuraMonoMethodOnHierarchy(chatSystemClass, "GetTranslatedCache", 2);
+                    if (this.chatTranslateGetCacheMethodPtr == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+                }
+
+                ulong msgIdValue = msgId;
+                int langValue = langKey;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&msgIdValue);
+                args[1] = (IntPtr)(&langValue);
+                IntPtr exc = IntPtr.Zero;
+                IntPtr resultStr = auraMonoRuntimeInvoke(this.chatTranslateGetCacheMethodPtr, chatSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || resultStr == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                return this.TryReadMonoString(resultStr, out text) && !string.IsNullOrEmpty(text);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Resolve the original message text by msgId from ChatSystem.record (AuraMono). Runs in
+        // the OnUpdate drain, AFTER the game's own ReceiveChatMessage listeners populated the
+        // record — the unpinned string pointer inside the event snapshot is never dereferenced.
+        // GetChatRecordData() returns a fresh List<ChatRecordData> copy (<= 30 boxed structs);
+        // items are pinned during the walk (SGen moving GC).
+        private bool TryGetChatTranslateMessageText(ulong msgId, out string text)
+        {
+            text = null;
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null
+                    || auraMonoObjectUnbox == null || auraMonoFieldGetOffset == null)
+                {
+                    return false;
+                }
+
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Chat.ChatSystem", out IntPtr chatSystemObj)
+                    || chatSystemObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr chatSystemClass = auraMonoObjectGetClass(chatSystemObj);
+                if (chatSystemClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr getRecords = this.FindAuraMonoMethodOnHierarchy(chatSystemClass, "GetChatRecordData", 0);
+                if (getRecords == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr listObj = auraMonoRuntimeInvoke(getRecords, chatSystemObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || listObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                List<IntPtr> items = new List<IntPtr>();
+                List<uint> pins = new List<uint>();
+                try
+                {
+                    if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins))
+                    {
+                        return false;
+                    }
+
+                    // Newest records sit at the tail — walk backwards.
+                    for (int i = items.Count - 1; i >= 0; i--)
+                    {
+                        IntPtr boxed = items[i];
+                        if (boxed == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        if (this.chatTranslateRecordMsgIdField == IntPtr.Zero)
+                        {
+                            IntPtr recordClass = auraMonoObjectGetClass(boxed);
+                            if (recordClass == IntPtr.Zero)
+                            {
+                                continue;
+                            }
+
+                            this.chatTranslateRecordMsgIdField = this.FindAuraMonoFieldOnHierarchy(recordClass, "msgId");
+                            if (this.chatTranslateRecordMsgIdField == IntPtr.Zero)
+                            {
+                                return false;
+                            }
+                        }
+
+                        // msgId is a ulong — read the full 8 bytes from the unboxed struct (the
+                        // generic member readers truncate boxed 64-bit values to 32 bits).
+                        IntPtr data = auraMonoObjectUnbox(boxed);
+                        if (data == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        int msgIdOffset = (int)auraMonoFieldGetOffset(this.chatTranslateRecordMsgIdField) - 2 * IntPtr.Size;
+                        if (msgIdOffset < 0)
+                        {
+                            return false;
+                        }
+
+                        ulong candidate = unchecked((ulong)Marshal.ReadInt64(data, msgIdOffset));
+                        if (candidate != msgId)
+                        {
+                            continue;
+                        }
+
+                        return this.TryGetMonoStringMember(boxed, "content", out text) && !string.IsNullOrEmpty(text);
+                    }
+
+                    return false;
+                }
+                finally
+                {
+                    FreeAuraMonoPins(pins);
+                }
+            }
+            catch (Exception ex)
+            {
+                this.ChatTranslateVerbose("Message text lookup exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static string ChatTranslateTextForLog(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "<none>";
+            }
+
+            string flat = text.Replace("\r", " ").Replace("\n", " ");
+            return "\"" + (flat.Length > 120 ? flat.Substring(0, 120) + "…" : flat) + "\"";
+        }
+
+        private static string ChatTranslateStreamEventTypeName(int eventType)
+        {
+            switch (eventType)
+            {
+                case 0: return "None";
+                case 1: return "Chunk";
+                case 2: return "Retract";
+                case 3: return "Error";
+                case 4: return "Done";
+                default: return eventType.ToString();
             }
         }
 
@@ -227,6 +663,7 @@ namespace HeartopiaMod
                     if (klass != IntPtr.Zero)
                     {
                         IntPtr netIdField = this.FindAuraMonoFieldOnHierarchy(klass, "playerNetId");
+                        IntPtr shortIdField = this.FindAuraMonoFieldOnHierarchy(klass, "shortId");
                         IntPtr msgIdField = this.FindAuraMonoFieldOnHierarchy(klass, "msgId");
                         IntPtr langField = this.FindAuraMonoFieldOnHierarchy(klass, "langKey");
                         if (netIdField != IntPtr.Zero && msgIdField != IntPtr.Zero && langField != IntPtr.Zero)
@@ -234,6 +671,10 @@ namespace HeartopiaMod
                             this.chatTranslateOffPlayerNetId = (int)auraMonoFieldGetOffset(netIdField) - header;
                             this.chatTranslateOffMsgId = (int)auraMonoFieldGetOffset(msgIdField) - header;
                             this.chatTranslateOffLangKey = (int)auraMonoFieldGetOffset(langField) - header;
+                            if (shortIdField != IntPtr.Zero)
+                            {
+                                this.chatTranslateOffShortId = (int)auraMonoFieldGetOffset(shortIdField) - header;
+                            }
                         }
                     }
                 }
@@ -245,10 +686,15 @@ namespace HeartopiaMod
                     {
                         IntPtr errField = this.FindAuraMonoFieldOnHierarchy(klass, "errorCode");
                         IntPtr msgIdField = this.FindAuraMonoFieldOnHierarchy(klass, "msgId");
+                        IntPtr typeField = this.FindAuraMonoFieldOnHierarchy(klass, "eventType");
                         if (errField != IntPtr.Zero && msgIdField != IntPtr.Zero)
                         {
                             this.chatTranslateOffResultErrorCode = (int)auraMonoFieldGetOffset(errField) - header;
                             this.chatTranslateOffResultMsgId = (int)auraMonoFieldGetOffset(msgIdField) - header;
+                            if (typeField != IntPtr.Zero)
+                            {
+                                this.chatTranslateOffResultEventType = (int)auraMonoFieldGetOffset(typeField) - header;
+                            }
                         }
                     }
                 }
@@ -257,10 +703,12 @@ namespace HeartopiaMod
                 {
                     this.chatTranslateOffsetsLogged = true;
                     this.ChatTranslateLog("Event field offsets: playerNetId=" + this.chatTranslateOffPlayerNetId
+                        + " shortId=" + this.chatTranslateOffShortId
                         + " msgId=" + this.chatTranslateOffMsgId
                         + " langKey=" + this.chatTranslateOffLangKey
                         + " resultErrorCode=" + this.chatTranslateOffResultErrorCode
-                        + " resultMsgId=" + this.chatTranslateOffResultMsgId);
+                        + " resultMsgId=" + this.chatTranslateOffResultMsgId
+                        + " resultEventType=" + this.chatTranslateOffResultEventType);
                 }
             }
             catch (Exception ex)
@@ -276,6 +724,76 @@ namespace HeartopiaMod
             {
                 return true;
             }
+
+            if (this.TryResolveChatTranslateClientLangKeyManaged(out langKey))
+            {
+                this.chatForceTranslateClientLangKey = langKey;
+                this.chatForceTranslateUnavailableLogged = false;
+                this.ChatTranslateLog("Client language key = " + langKey + " (managed interop).");
+                return true;
+            }
+
+            return this.TryResolveChatTranslateClientLangKeyAura(out langKey);
+        }
+
+        // Managed interop path: LocalizationManager is an engine-side IL2CPP class, so the
+        // interop stub is callable via plain reflection (the AuraMono copy lives in the
+        // EngineWrapper mono image and is only the fallback).
+        private bool TryResolveChatTranslateClientLangKeyManaged(out int langKey)
+        {
+            langKey = -1;
+            try
+            {
+                Type type = this.FindLoadedType(
+                    "XDFramework.Expansion.LocalizationManager",
+                    "Il2CppXDFramework.Expansion.LocalizationManager",
+                    "LocalizationManager");
+                if (type == null)
+                {
+                    return false;
+                }
+
+                System.Reflection.PropertyInfo instanceProp = type.GetProperty("Instance",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                object instance = instanceProp != null ? instanceProp.GetValue(null, null) : null;
+                if (instance == null)
+                {
+                    return false;
+                }
+
+                System.Reflection.MethodInfo method = type.GetMethod("GetLanguageKey",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
+                    null, Type.EmptyTypes, null);
+                if (method == null)
+                {
+                    return false;
+                }
+
+                object result = method.Invoke(instance, null);
+                if (result == null)
+                {
+                    return false;
+                }
+
+                int value = Convert.ToInt32(result);
+                if (value < 0)
+                {
+                    return false;
+                }
+
+                langKey = value;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.ChatTranslateVerbose("Managed language key probe failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryResolveChatTranslateClientLangKeyAura(out int langKey)
+        {
+            langKey = -1;
 
             try
             {
@@ -315,7 +833,7 @@ namespace HeartopiaMod
 
                 this.chatForceTranslateClientLangKey = value;
                 this.chatForceTranslateUnavailableLogged = false;
-                this.ChatTranslateLog("Client language key = " + value + ".");
+                this.ChatTranslateLog("Client language key = " + value + " (AuraMono).");
                 langKey = value;
                 return true;
             }
@@ -326,7 +844,7 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryChatTranslateSendRequest(ulong msgId)
+        private unsafe bool TryChatTranslateSendRequest(ulong msgId, string originalText)
         {
             try
             {
@@ -355,13 +873,13 @@ namespace HeartopiaMod
                 }
 
                 // Static invoke: RequestTranslateStream(ulong msgId, string originalMessage).
-                // Empty originalMessage — the server just synced the message entity and resolves
-                // the text by msgId (the game's own non-stream path relies on the same behavior).
+                // The stream endpoint rejects an empty OriginalMessage with 4207
+                // TranslateContentInvalid, so pass the original text (the game does the same).
                 ulong msgIdValue = msgId;
-                IntPtr emptyText = auraMonoStringNew(this.auraMonoRootDomain, string.Empty);
+                IntPtr textObj = auraMonoStringNew(this.auraMonoRootDomain, originalText ?? string.Empty);
                 IntPtr* args = stackalloc IntPtr[2];
                 args[0] = (IntPtr)(&msgIdValue);
-                args[1] = emptyText;
+                args[1] = textObj;
                 IntPtr exc = IntPtr.Zero;
                 auraMonoRuntimeInvoke(this.chatForceTranslateMethodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
                 if (exc != IntPtr.Zero)

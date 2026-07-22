@@ -364,6 +364,7 @@
     <Compile Include="SanrioGachaFinderFeature.cs" />
     <Compile Include="SwimSprintVerticalGuardFeature.cs" />
     <Compile Include="ChatForceTranslateFeature.cs" />
+    <Compile Include="ChatForceTranslateFeature.Postcard.cs" />
     <Compile Include="CorruptionCleanseFeature.cs" />
     <Compile Include="BubbleFeature.cs" />
     <Compile Include="BubbleSpawnRewriteFeature.cs" />

@@ -242,9 +242,13 @@ namespace HeartopiaMod
 
             if (this.chatForceTranslateEnabled)
             {
-                entries.Add(this.CreateLiveFeatureEntry(
-                    "Chat Translate Unlock",
-                    (this.chatForceTranslateSentCount > 0) ? ("Requested " + this.chatForceTranslateSentCount) : "Active"));
+                string summary = this.chatTranslatePostcardBypass ? "Postcard test" : "Active";
+                if (this.chatForceTranslateSentCount > 0)
+                {
+                    summary = "Sent " + this.chatForceTranslateSentCount + " / ok " + this.chatForceTranslateSucceededCount;
+                }
+
+                entries.Add(this.CreateLiveFeatureEntry("Chat Translate Unlock", summary));
             }
 
             return entries;
