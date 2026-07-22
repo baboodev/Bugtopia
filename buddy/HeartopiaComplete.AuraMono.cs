@@ -39,6 +39,15 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Fail closed until the game's Mono side is proven up: mono_field_static_get_value
+            // below reads the class's static data straight off its vtable with NO initialization
+            // check, so on a class the login screen never initialized it dereferences near-null and
+            // takes the whole process down (uncatchable AV — see AuraMonoStaticFieldReadsAllowed).
+            if (!AuraMonoStaticFieldReadsAllowed())
+            {
+                return false;
+            }
+
             IntPtr fieldPtr = auraMonoClassGetFieldFromName(classPtr, fieldName);
             if (fieldPtr == IntPtr.Zero)
             {
@@ -1605,6 +1614,9 @@ namespace HeartopiaMod
                         moduleObj = auraMonoRuntimeInvoke(getter, IntPtr.Zero, IntPtr.Zero, ref exc);
                         if (exc == IntPtr.Zero && moduleObj != IntPtr.Zero)
                         {
+                            // A module handed back by a real invoke proves the game's Mono side is
+                            // up, which is what unlocks the raw static-field reads below/elsewhere.
+                            MarkAuraMonoGameDataLive();
                             this.DirectBackpackVerboseLog("[DirectBackpackMono] Resolved " + fullTypeName + " via " + getterName + ".");
                             return true;
                         }
@@ -1756,6 +1768,9 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // Same liveness proof as the get_Instance path: this came back from a genuine
+                // mono_runtime_invoke, so the game is loaded and static-field reads are safe again.
+                MarkAuraMonoGameDataLive();
                 this.DirectBackpackVerboseLog("[DirectBackpackMono] Resolved " + fullTypeName + " via Managers.GetModule(Type).");
                 return true;
             }

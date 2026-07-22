@@ -158,6 +158,77 @@ namespace HeartopiaMod
         public static int GetSessionCatchCount() => sessionCatchCount;
         public static int GetSessionScaredCount() => sessionScaredCount;
 
+        // ── UGUI Birds content interop (HeartopiaComplete.UguiBirdsContent.cs) ────────────────────────
+        // Read/write exposure for the UGUI twin of DrawSection. Each setter reproduces its IMGUI
+        // block's side effects EXACTLY — including this class's DEBOUNCED save model: arm
+        // pendingSaveAt (+2s), which Update flushes via host.SaveAllSettings once 2s pass with no
+        // further change. The setters NEVER call any Save method directly. The private Log()
+        // calls are debug-only output and deliberately not reproduced (same convention as every
+        // prior UGUI round).
+
+        public static bool GetPerfectPhotoEnabled() => perfectPhotoEnabled;
+        // DrawSection's Perfect Photo block: field write + debounce re-arm, nothing else.
+        public static void SetPerfectPhotoEnabledFromUi(bool value)
+        {
+            if (value == perfectPhotoEnabled) return;
+            perfectPhotoEnabled = value;
+            pendingSaveAt = Time.unscaledTime + 2f;
+        }
+
+        public static string[] GetCaptureModeOptions() => CaptureModeOptions;
+        public static int GetCaptureMode() => captureMode;
+        // DrawSection's FULL Capture Mode change cascade, extracted verbatim so both rendering
+        // surfaces share ONE implementation (the private pending-confirm/burst state cleared here
+        // is otherwise unreachable from outside this class — same reasoning as
+        // FishingRouteFeature.RemoveCustomSpotAt in the Fishing round). The clamp is a defensive
+        // addition: both callers already deliver a valid index, so it never changes a real value.
+        public static void SetCaptureModeFromUi(int value, HeartopiaComplete host)
+        {
+            int clamped = Mathf.Clamp(value, 0, CaptureModeOptions.Length - 1);
+            if (clamped == captureMode) return;
+            captureMode = clamped;
+            pendingSaveAt = Time.unscaledTime + 2f;
+            host?.ClearBirdFarmRuntimeState();
+            _pendingConfirmNetIds.Clear();
+            _pendingTimeoutStrikes.Clear();
+            _pendingConfirmExpiresAt = -999f;
+            multiCatchBurstRemaining = 0;
+            multiCatchBurstTarget = 0;
+        }
+
+        public static float GetCatchCooldown() => catchCooldown;
+        // Catch Cooldown rounds to the nearest TENTH (Mathf.Round(x*10)/10 in DrawSection) —
+        // unlike InsectNetFarm's same-named slider, whose setter does not round.
+        public static void SetCatchCooldownFromUi(float value)
+        {
+            float rounded = Mathf.Round(value * 10f) / 10f;
+            if (Math.Abs(rounded - catchCooldown) <= 0.0001f) return;
+            catchCooldown = rounded;
+            pendingSaveAt = Time.unscaledTime + 2f;
+        }
+
+        public static float GetScanRange() => scanRange;
+        // Scan Range rounds to the nearest WHOLE metre (bare Mathf.Round in DrawSection).
+        public static void SetScanRangeFromUi(float value)
+        {
+            float rounded = Mathf.Round(value);
+            if (Math.Abs(rounded - scanRange) <= 0.0001f) return;
+            scanRange = rounded;
+            pendingSaveAt = Time.unscaledTime + 2f;
+        }
+
+        public static int GetMultiCatchLimit() => multiCatchLimit;
+        public static int GetMaxMultiCatchLimit() => MaxMultiCatchLimit; // private const (10) exposed for the UGUI slider's upper bound
+        // DrawSection uses Mathf.RoundToInt, clamped implicitly by the slider's own
+        // [1, MaxMultiCatchLimit] range — the clamp here makes that contract explicit.
+        public static void SetMultiCatchLimitFromUi(int value)
+        {
+            int rounded = Mathf.Clamp(value, 1, MaxMultiCatchLimit);
+            if (rounded == multiCatchLimit) return;
+            multiCatchLimit = rounded;
+            pendingSaveAt = Time.unscaledTime + 2f;
+        }
+
         private static void ReportSlowTickIfNeeded(long startTicks, int detectedCount, int resolvedCount, int sentCount, string status)
         {
             double elapsedMs = (DateTime.UtcNow.Ticks - startTicks) / (double)TimeSpan.TicksPerMillisecond;
@@ -421,18 +492,15 @@ namespace HeartopiaMod
             }
             num += 30;
 
-            int prevCaptureMode = captureMode;
-            captureMode = host.UI_DrawSingleSelectDropdown(new Rect(20f, num + 22f, 260f, 28f), "Capture Mode", CaptureModeOptions, captureMode, ref captureModeDropdownOpen);
-            if (captureMode != prevCaptureMode)
+            // Change cascade lives in SetCaptureModeFromUi (shared with the UGUI twin — one
+            // implementation, no drift). The drawer result lands in a LOCAL first (the nextEnabled
+            // idiom above): assigning the field before the call would trip the setter's own
+            // already-current guard and silently skip the whole cascade AND the debounced save.
+            int nextCaptureMode = host.UI_DrawSingleSelectDropdown(new Rect(20f, num + 22f, 260f, 28f), "Capture Mode", CaptureModeOptions, captureMode, ref captureModeDropdownOpen);
+            if (nextCaptureMode != captureMode)
             {
-                Log("Capture Mode changed: " + CaptureModeOptions[captureMode]);
-                pendingSaveAt = Time.unscaledTime + 2f;
-                host.ClearBirdFarmRuntimeState();
-                _pendingConfirmNetIds.Clear();
-                _pendingTimeoutStrikes.Clear();
-                _pendingConfirmExpiresAt = -999f;
-                multiCatchBurstRemaining = 0;
-                multiCatchBurstTarget = 0;
+                Log("Capture Mode changed: " + CaptureModeOptions[nextCaptureMode]);
+                SetCaptureModeFromUi(nextCaptureMode, host);
             }
             num += captureModeDropdownOpen ? 122 : 80;
 

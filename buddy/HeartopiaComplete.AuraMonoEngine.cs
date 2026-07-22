@@ -360,6 +360,57 @@ namespace HeartopiaMod
 
         private static bool auraMonoPinningUnavailableLogged;
 
+        // True once the game's Mono side has been PROVEN up by a safe operation. Same fail-closed
+        // shape as AuraMonoPinningAvailable above, for a different unsafe primitive.
+        //
+        // Why this exists (crash, 2026-07-22, WER dump coreclr_49388): opening the UGUI shell on
+        // the LOGIN screen killed the process with an AccessViolationException inside
+        // TryGetAuraMonoStaticObjectField. The two Mono entry points the mod uses are NOT equally
+        // safe before the game is loaded:
+        //   * mono_runtime_invoke  — goes through Mono's managed-invoke machinery, which runs class
+        //     initialization properly and reports failure as a managed exception or a null return.
+        //     Safe at login; the BepInEx log shows it returning null over and over there.
+        //   * mono_field_static_get_value — a RAW read of the class's static data off its vtable,
+        //     with no initialization check. On a game class the login screen has never initialized
+        //     that is a near-null dereference => AV. CoreCLR classes an AV as a corrupted-state
+        //     exception, so NO catch block anywhere up the stack can see it: the process just dies.
+        // Hence: prove liveness using only the safe primitive, and refuse the unsafe one until it
+        // passes. Latching (never cleared, including across world changes) is deliberate — Mono
+        // class initialization is permanent, so once these reads are safe they stay safe, and
+        // re-arming per world would reopen the crash window on every load screen.
+        internal static bool AuraMonoGameDataLive => auraMonoGameDataLive;
+
+        private static bool auraMonoGameDataLive;
+        private static bool auraMonoGameDataNotLiveLogged;
+
+        // Called from the safe (mono_runtime_invoke) resolve paths only — never from a raw
+        // static-field read, which would defeat the whole point.
+        internal static void MarkAuraMonoGameDataLive()
+        {
+            if (auraMonoGameDataLive)
+            {
+                return;
+            }
+            auraMonoGameDataLive = true;
+            ModLogger.Msg("[AuraMono] Game Mono side confirmed live — static-field reads enabled.");
+        }
+
+        // Gate for every raw static-field read. Logs once so a login-screen degradation is visible
+        // in the log without spamming it every frame the menu is open.
+        internal static bool AuraMonoStaticFieldReadsAllowed()
+        {
+            if (auraMonoGameDataLive)
+            {
+                return true;
+            }
+            if (!auraMonoGameDataNotLiveLogged)
+            {
+                auraMonoGameDataNotLiveLogged = true;
+                ModLogger.Msg("[AuraMono] Game not loaded yet — static-field reads refused (would AV). Game-data features stay idle until a module resolves.");
+            }
+            return false;
+        }
+
         internal static uint AuraMonoPinNew(IntPtr obj)
         {
             if (obj == IntPtr.Zero || auraMonoGcHandleNew == null)

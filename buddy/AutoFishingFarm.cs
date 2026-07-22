@@ -229,6 +229,20 @@ namespace HeartopiaMod
         public static string GetLastTargetStatus() => GetDisplayTargetStatus(lastTargetStatus);
         public static float GetDetectRange() => fishShadowDetectRange;
         public static void SetDetectRange(float value) => fishShadowDetectRange = Mathf.Clamp(value, 1f, 200f);
+        // UGUI slider entry — the IMGUI slider block's own behavior (DrawSection ~721-731:
+        // round, change-detect, "Range updated" status, log) as a callable. Deliberately a
+        // SEPARATE method from SetDetectRange, which stays the silent clamp-and-store used by
+        // config load and FishingRouteFeature's forced-200m/restore-snapshot paths.
+        public static void SetDetectRangeFromUi(float value)
+        {
+            float rounded = Mathf.Round(Mathf.Clamp(value, 1f, 200f));
+            if (Math.Abs(rounded - fishShadowDetectRange) > 0.0001f)
+            {
+                fishShadowDetectRange = rounded;
+                lastTargetStatus = "Range updated";
+                Log("Detect range changed to " + rounded.ToString("F0") + "m");
+            }
+        }
         public static float GetInstantCatchSendHz() => instantCatchSendHz;
         public static void SetInstantCatchSendHz(float value) => instantCatchSendHz = Mathf.Clamp(value, InstantCatchSendHzMin, InstantCatchSendHzMax);
 

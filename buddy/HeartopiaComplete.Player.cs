@@ -734,6 +734,12 @@ namespace HeartopiaMod
             {
                 return false;
             }
+            // Raw static read below — refuse before the game is loaded (uncatchable AV, see
+            // AuraMonoStaticFieldReadsAllowed).
+            if (!AuraMonoStaticFieldReadsAllowed())
+            {
+                return false;
+            }
             IntPtr image = this.FindAuraMonoImage(new string[]
             {
                 "XDTDataAndProtocol",

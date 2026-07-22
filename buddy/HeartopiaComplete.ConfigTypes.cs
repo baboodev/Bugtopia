@@ -303,6 +303,9 @@ namespace HeartopiaMod
             public float uiPanelAlpha;
             public float uiContentAlpha;
             public float uiScale;
+            // (No font field: the UGUI shell is hard-pinned to LiberationSans SDF. A "uiFontName"
+            // key from the removed picker may still sit in older saved configs — it is simply
+            // ignored on load.)
         }
 
         [Serializable]

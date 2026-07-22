@@ -99,6 +99,11 @@ namespace HeartopiaMod
         private static bool snapshotAutoFishEnabled;
 
         public static bool Active => active;
+        // Read-only status exposure for the UGUI Fishing content (HeartopiaComplete.
+        // UguiFishingContent.cs) — mirrors what DrawSection reads for its own status lines.
+        public static int CurrentIndex => currentIndex;
+        public static bool PausedForRepair => pausedForRepair;
+        public static string LastStatus => lastStatus;
         public static float SnapshotDetectRange => hasSnapshot ? snapshotDetectRange : AutoFishingFarm.GetDetectRange();
         public static bool SnapshotAutoEatPanel => snapshotAutoEatPanel;
         public static bool SnapshotAutoRepair => snapshotAutoRepair;
@@ -126,9 +131,9 @@ namespace HeartopiaMod
 
         private static bool UseCustomOnly => customSpotsOnly && customSpots.Count > 0;
 
-        private static int TotalSpotCount => UseCustomOnly ? customSpots.Count : FixedSpots.Length + customSpots.Count;
+        public static int TotalSpotCount => UseCustomOnly ? customSpots.Count : FixedSpots.Length + customSpots.Count;
 
-        private static string GetSpotName(int index)
+        public static string GetSpotName(int index)
         {
             int customIndex;
             if (UseCustomOnly)
@@ -510,29 +515,45 @@ namespace HeartopiaMod
 
                 if (removeIndex >= 0)
                 {
-                    // Keep the route pointer stable when the list shrinks under it. Capture the
-                    // index mapping BEFORE removal — dropping the last custom spot flips
-                    // UseCustomOnly back to the full list, which changes the index space.
-                    bool wasCustomOnly = UseCustomOnly;
-                    int removedRouteIndex = wasCustomOnly ? removeIndex : FixedSpots.Length + removeIndex;
-                    customSpots.RemoveAt(removeIndex);
-                    if (active && wasCustomOnly != UseCustomOnly)
-                    {
-                        currentIndex = 0;
-                    }
-                    else if (active && currentIndex >= removedRouteIndex && currentIndex > 0)
-                    {
-                        currentIndex--;
-                    }
-                    if (active && currentIndex >= TotalSpotCount)
-                    {
-                        currentIndex = 0;
-                    }
-                    try { host.UI_SaveKeybinds(false); } catch { }
+                    RemoveCustomSpotAt(removeIndex, host);
                 }
             }
 
             return num + 10f;
+        }
+
+        // UGUI entry for the "Save Current Location" button — a pure pass-through (the private
+        // method is otherwise reachable only from this class's own DrawSection).
+        public static void SaveCurrentLocationFromUi(HeartopiaComplete host) => SaveCurrentLocation(host);
+
+        // Removal + route-pointer fixup, extracted verbatim from DrawSection's old inline block
+        // so both rendering surfaces (IMGUI above, UGUI in HeartopiaComplete.UguiFishingContent.cs)
+        // share ONE implementation. Keeps the route pointer stable when the list shrinks under
+        // it: capture the index mapping BEFORE removal — dropping the last custom spot flips
+        // UseCustomOnly back to the full list, which changes the index space.
+        public static void RemoveCustomSpotAt(int removeIndex, HeartopiaComplete host)
+        {
+            if (removeIndex < 0 || removeIndex >= customSpots.Count)
+            {
+                return;
+            }
+
+            bool wasCustomOnly = UseCustomOnly;
+            int removedRouteIndex = wasCustomOnly ? removeIndex : FixedSpots.Length + removeIndex;
+            customSpots.RemoveAt(removeIndex);
+            if (active && wasCustomOnly != UseCustomOnly)
+            {
+                currentIndex = 0;
+            }
+            else if (active && currentIndex >= removedRouteIndex && currentIndex > 0)
+            {
+                currentIndex--;
+            }
+            if (active && currentIndex >= TotalSpotCount)
+            {
+                currentIndex = 0;
+            }
+            try { host.UI_SaveKeybinds(false); } catch { }
         }
 
         private static void Log(string message)

@@ -581,7 +581,7 @@ namespace HeartopiaMod
         {
             // Cheap per-frame edge detect (no AuraMono): opening the tab forces an immediate poll
             // and queues a one-shot prepare so SELECT ITEM / the panel buttons work right away.
-            bool tabActive = this.selectedTab == 9 && this.showMenu;
+            bool tabActive = (this.selectedTab == 9 && this.showMenu) || this.IsUguiShellResearchTabActive();
             if (tabActive && !this.researchTabWasActive)
             {
                 this.researchMonitorNextPollAt = 0f;

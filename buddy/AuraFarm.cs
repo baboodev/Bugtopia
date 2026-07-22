@@ -2806,7 +2806,10 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (!this.AttachAuraMonoThread() || auraMonoClassVtable == null || auraMonoFieldStaticGetValue == null || auraMonoRuntimeInvoke == null)
+            if (!this.AttachAuraMonoThread() || auraMonoClassVtable == null || auraMonoFieldStaticGetValue == null || auraMonoRuntimeInvoke == null
+                // Raw static read below — refuse before the game is loaded (uncatchable AV, see
+                // AuraMonoStaticFieldReadsAllowed).
+                || !AuraMonoStaticFieldReadsAllowed())
             {
                 if (AuraFarmDebugLogs)
                 {
@@ -5776,7 +5779,10 @@ namespace HeartopiaMod
 
         private bool TryCollectAuraOwnerTargetsViaMonoSelectPriorityArray(IntPtr interactObj, HashSet<uint> output)
         {
-            if (interactObj == IntPtr.Zero || this.auraMonoInteractSystemClassPtr == IntPtr.Zero || this.auraMonoInteractSelectPriorityLengthFieldPtr == IntPtr.Zero || this.auraMonoInteractSelectPriorityInfoArrayFieldPtr == IntPtr.Zero || auraMonoFieldGetValue == null || auraMonoArrayLength == null || auraMonoClassVtable == null || auraMonoFieldStaticGetValue == null)
+            if (interactObj == IntPtr.Zero || this.auraMonoInteractSystemClassPtr == IntPtr.Zero || this.auraMonoInteractSelectPriorityLengthFieldPtr == IntPtr.Zero || this.auraMonoInteractSelectPriorityInfoArrayFieldPtr == IntPtr.Zero || auraMonoFieldGetValue == null || auraMonoArrayLength == null || auraMonoClassVtable == null || auraMonoFieldStaticGetValue == null
+                // Raw static read below — refuse before the game is loaded (uncatchable AV, see
+                // AuraMonoStaticFieldReadsAllowed).
+                || !AuraMonoStaticFieldReadsAllowed())
             {
                 return false;
             }

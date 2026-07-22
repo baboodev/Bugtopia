@@ -553,7 +553,10 @@ namespace HeartopiaMod
                 || auraMonoClassGetFieldFromName == null
                 || auraMonoClassVtable == null
                 || auraMonoFieldStaticGetValue == null
-                || this.auraMonoRootDomain == IntPtr.Zero)
+                || this.auraMonoRootDomain == IntPtr.Zero
+                // Raw static read below — refuse before the game is loaded (uncatchable AV, see
+                // AuraMonoStaticFieldReadsAllowed).
+                || !AuraMonoStaticFieldReadsAllowed())
             {
                 return false;
             }

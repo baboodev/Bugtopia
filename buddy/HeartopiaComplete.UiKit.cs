@@ -223,6 +223,7 @@ namespace HeartopiaMod
                 {
                     this.ApplyUiThemeConfig(config.UiTheme);
                     this.InvalidateThemeCache();
+                    this.MarkUguiKitThemeDirty(); // UGUI mirror — loaded values changed the theme
                     this.uiThemeHexInput = this.ColorToHex(this.GetUiThemeColorTargetValue(this.uiThemeColorTarget));
                     ModLogger.Msg("UI Theme Loaded.");
                     this.AddMenuNotification("UI theme loaded", new Color(0.55f, 0.88f, 1f));
@@ -302,6 +303,7 @@ namespace HeartopiaMod
                 this.uiScale = this.NormalizeUiScale(this.uiScale > 0f ? this.uiScale : 1f);
 
                 this.InvalidateThemeCache();
+                this.MarkUguiKitThemeDirty(); // UGUI mirror — loaded values changed the theme
                 this.uiThemeHexInput = this.ColorToHex(this.GetUiThemeColorTargetValue(this.uiThemeColorTarget));
                 ModLogger.Msg("UI Theme Loaded.");
                 this.AddMenuNotification("UI theme loaded", new Color(0.55f, 0.88f, 1f));
@@ -920,6 +922,11 @@ namespace HeartopiaMod
                 this.uiThemeStylesDirty = false;
                 this.uiThemeNextRebuildAt = Time.unscaledTime + 0.1f;
                 this.InvalidateThemeCache();
+                // UGUI mirror: kit-built windows snapshot theme colors at construction, so the
+                // same theme-values-changed signal queues their state-preserving rebuild
+                // (HeartopiaComplete.UguiKit.cs). Deliberately NOT inside InvalidateThemeCache —
+                // that also runs for non-theme style re-bakes (first draw / teardown recovery).
+                this.MarkUguiKitThemeDirty();
             }
 
             if (this.uiThemePendingSaveAt > 0f && Time.unscaledTime >= this.uiThemePendingSaveAt)
@@ -1630,45 +1637,55 @@ namespace HeartopiaMod
 
             if (this.DrawDangerActionButton(new Rect(actionPanel.x + 294f, actionPanel.y + 17f, 130f, 32f), "Reset"))
             {
-                this.uiAccentR = 0.31f;
-                this.uiAccentG = 0.78f;
-                this.uiAccentB = 1.00f;
-                this.uiHeaderR = 0.31f;
-                this.uiHeaderG = 0.78f;
-                this.uiHeaderB = 1.00f;
-                this.uiSuccessR = 0.24f;
-                this.uiSuccessG = 0.86f;
-                this.uiSuccessB = 0.59f;
-                this.uiTextR = 0.93f;
-                this.uiTextG = 0.95f;
-                this.uiTextB = 0.976f;
-                this.uiMainTabTextR = 0.545f;
-                this.uiMainTabTextG = 0.584f;
-                this.uiMainTabTextB = 0.655f;
-                this.uiSubTabTextR = 0.357f;
-                this.uiSubTabTextG = 0.392f;
-                this.uiSubTabTextB = 0.471f;
-                this.uiWindowR = 0.039f;
-                this.uiWindowG = 0.051f;
-                this.uiWindowB = 0.071f;
-                this.uiPanelR = 0.059f;
-                this.uiPanelG = 0.075f;
-                this.uiPanelB = 0.106f;
-                this.uiContentR = 0.078f;
-                this.uiContentG = 0.102f;
-                this.uiContentB = 0.141f;
-                this.uiWindowAlpha = 0.96f;
-                this.uiPanelAlpha = 0.96f;
-                this.uiContentAlpha = 0.94f;
-                this.uiScale = 1f;
-                this.uiThemeHexInput = this.ColorToHex(new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB));
-                this.KeepMenuWindowOnScreen(this.GetUiScale());
-                this.uiThemeStylesDirty = true;
-                this.uiThemeNextRebuildAt = 0f;
+                this.ResetUiThemeToDefaults();
             }
             num += (int)actionPanel.height + 16;
 
             return (float)num + 10f;
+        }
+
+        // Reset every theme field to the shipped defaults — the ONE shared implementation behind
+        // both Reset buttons (this IMGUI tab and the UGUI twin, HeartopiaComplete.UguiThemeContent.cs
+        // — extracted from the DrawDangerActionButton block above, values unchanged). Deliberately
+        // does NOT call SaveUiTheme and does NOT arm uiThemePendingSaveAt: it only forces an
+        // immediate visual rebuild, leaving the reset values unsaved until an explicit Save.
+        private void ResetUiThemeToDefaults()
+        {
+            this.uiAccentR = 0.31f;
+            this.uiAccentG = 0.78f;
+            this.uiAccentB = 1.00f;
+            this.uiHeaderR = 0.31f;
+            this.uiHeaderG = 0.78f;
+            this.uiHeaderB = 1.00f;
+            this.uiSuccessR = 0.24f;
+            this.uiSuccessG = 0.86f;
+            this.uiSuccessB = 0.59f;
+            this.uiTextR = 0.93f;
+            this.uiTextG = 0.95f;
+            this.uiTextB = 0.976f;
+            this.uiMainTabTextR = 0.545f;
+            this.uiMainTabTextG = 0.584f;
+            this.uiMainTabTextB = 0.655f;
+            this.uiSubTabTextR = 0.357f;
+            this.uiSubTabTextG = 0.392f;
+            this.uiSubTabTextB = 0.471f;
+            this.uiWindowR = 0.039f;
+            this.uiWindowG = 0.051f;
+            this.uiWindowB = 0.071f;
+            this.uiPanelR = 0.059f;
+            this.uiPanelG = 0.075f;
+            this.uiPanelB = 0.106f;
+            this.uiContentR = 0.078f;
+            this.uiContentG = 0.102f;
+            this.uiContentB = 0.141f;
+            this.uiWindowAlpha = 0.96f;
+            this.uiPanelAlpha = 0.96f;
+            this.uiContentAlpha = 0.94f;
+            this.uiScale = 1f;
+            this.uiThemeHexInput = this.ColorToHex(new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB));
+            this.KeepMenuWindowOnScreen(this.GetUiScale());
+            this.uiThemeStylesDirty = true;
+            this.uiThemeNextRebuildAt = 0f;
         }
 
         private Color GetUiThemeColorTargetValue(int target)

@@ -1024,77 +1024,89 @@ namespace HeartopiaMod
 
             if (this.DrawDangerActionButton(new Rect(left, (float)num, contentWidth, 34f), "RESET TO DEFAULTS"))
             {
-                this.keyToggleMenu = KeyCode.Insert;
-                this.keyToggleRadar = KeyCode.None;
-                this.keyAuraFarm = KeyCode.None;
-                this.keyWaterWeedRadius = KeyCode.None;
-                this.keyAutoFish = KeyCode.None;
-                this.keyAutoFishingTeleport = KeyCode.None;
-                this.keyAutoFishShadowNet = KeyCode.None;
-                this.keyBypassUI = KeyCode.None;
-                this.keyDisableAll = KeyCode.None;
-                this.keyInspectPlayer = KeyCode.None;
-                this.keyInspectMove = KeyCode.None;
-                this.keyAutoRepair = KeyCode.None;
-                this.keyAutoJoinFriend = KeyCode.None;
-                this.keyNoclip = KeyCode.None;
-                this.keyCameraToggle = KeyCode.None;
-                this.keyAutoIceSkating = KeyCode.None;
-                this.keyJoinPublic = KeyCode.None;
-                this.keyJoinMyTown = KeyCode.None;
-                this.keyAutoEat = KeyCode.None;
-                this.keyUseBait = KeyCode.None;
-                this.keyUseAttractor = KeyCode.None;
-                this.keyAntiAfk = KeyCode.None;
-                this.autoSnowHotkey = KeyCode.None;
-                this.autoSandHotkey = KeyCode.None;
-                this.seaCleanQteHotkey = KeyCode.None;
-                this.keyEquipSeaCleaner = KeyCode.None;
-                this.keyBypassOverlap = KeyCode.None;
-                this.keyBirdVacuum = KeyCode.None;
-                this.keyGameSpeed1x = KeyCode.None;
-                this.keyGameSpeed2x = KeyCode.None;
-                this.keyGameSpeed5x = KeyCode.None;
-                this.keyGameSpeed10x = KeyCode.None;
-                this.keyEquipAxe = KeyCode.None;
-                this.keyEquipNet = KeyCode.None;
-                this.keyEquipRod = KeyCode.None;
-                this.keyEquipSprinkler = KeyCode.None;
-                this.keyEquipBirdScanner = KeyCode.None;
-                this.keyEquipPad = KeyCode.None;
-                this.keyPadConfirm = KeyCode.None;
-                this.keyPadCancel = KeyCode.None;
-                this.keyPadRotate = KeyCode.None;
-                this.keyPadMove = KeyCode.None;
-                this.keyPadDelete = KeyCode.None;
-                this.keyAutoInsectFarm = KeyCode.None;
-                this.keyAutoBirdFarm = KeyCode.None;
-                this.keyMassCook = KeyCode.None;
-                this.keyAutoPuzzle = KeyCode.None;
-                this.keyAutoCatPlay = KeyCode.None;
-                this.keyAutoDogTrain = KeyCode.None;
-                this.keyAutoPetWash = KeyCode.None;
-                this.keyFeedAllCats = KeyCode.None;
-                this.keyFeedAllDogs = KeyCode.None;
-                this.keySpawnBubble = KeyCode.None;
-                this.notificationsEnabled = true;
-                this.notificationPosition = 5;
-                this.hideIdEnabled = false;
-                this.customDisplayIdEnabled = false;
-                this.customDisplayId = string.Empty;
-                this.fpsBypassEnabled = false;
-                this.fpsBypassTarget = 144;
-                this.ApplyFpsBypass(false);
-                this.lodOverrideMode = 0;
-                this.lodCustomBias = 1f;
-                this.lodCustomMaxLevel = 0;
-                this.RevertLodOverride();
-                this.showStatusOverlay = false;
-                this.SaveKeybinds(false);
-                this.AddMenuNotification(this.L("Defaults restored (Toggle Menu: Insert)"), new Color(1f, 0.75f, 0.75f));
+                this.ResetKeybindSettingsToDefaults();
             }
 
             return (float)num + 38f;
+        }
+
+        // Shared implementation for BOTH rendering surfaces of the Keybinds reset — the IMGUI
+        // RESET TO DEFAULTS button above and the UGUI Settings→Keybinds twin
+        // (HeartopiaComplete.UguiKeybindsContent.cs) — extracted verbatim from the inline
+        // DrawSettingsTab block (the FishingRouteFeature.RemoveCustomSpotAt precedent). NOTE:
+        // this resets more than keybinds — it also restores several Settings→Main fields
+        // (notifications, ID display, FPS bypass, LOD override, status overlay), exactly as the
+        // inline block always did.
+        private void ResetKeybindSettingsToDefaults()
+        {
+            this.keyToggleMenu = KeyCode.Insert;
+            this.keyToggleRadar = KeyCode.None;
+            this.keyAuraFarm = KeyCode.None;
+            this.keyWaterWeedRadius = KeyCode.None;
+            this.keyAutoFish = KeyCode.None;
+            this.keyAutoFishingTeleport = KeyCode.None;
+            this.keyAutoFishShadowNet = KeyCode.None;
+            this.keyBypassUI = KeyCode.None;
+            this.keyDisableAll = KeyCode.None;
+            this.keyInspectPlayer = KeyCode.None;
+            this.keyInspectMove = KeyCode.None;
+            this.keyAutoRepair = KeyCode.None;
+            this.keyAutoJoinFriend = KeyCode.None;
+            this.keyNoclip = KeyCode.None;
+            this.keyCameraToggle = KeyCode.None;
+            this.keyAutoIceSkating = KeyCode.None;
+            this.keyJoinPublic = KeyCode.None;
+            this.keyJoinMyTown = KeyCode.None;
+            this.keyAutoEat = KeyCode.None;
+            this.keyUseBait = KeyCode.None;
+            this.keyUseAttractor = KeyCode.None;
+            this.keyAntiAfk = KeyCode.None;
+            this.autoSnowHotkey = KeyCode.None;
+            this.autoSandHotkey = KeyCode.None;
+            this.seaCleanQteHotkey = KeyCode.None;
+            this.keyEquipSeaCleaner = KeyCode.None;
+            this.keyBypassOverlap = KeyCode.None;
+            this.keyBirdVacuum = KeyCode.None;
+            this.keyGameSpeed1x = KeyCode.None;
+            this.keyGameSpeed2x = KeyCode.None;
+            this.keyGameSpeed5x = KeyCode.None;
+            this.keyGameSpeed10x = KeyCode.None;
+            this.keyEquipAxe = KeyCode.None;
+            this.keyEquipNet = KeyCode.None;
+            this.keyEquipRod = KeyCode.None;
+            this.keyEquipSprinkler = KeyCode.None;
+            this.keyEquipBirdScanner = KeyCode.None;
+            this.keyEquipPad = KeyCode.None;
+            this.keyPadConfirm = KeyCode.None;
+            this.keyPadCancel = KeyCode.None;
+            this.keyPadRotate = KeyCode.None;
+            this.keyPadMove = KeyCode.None;
+            this.keyPadDelete = KeyCode.None;
+            this.keyAutoInsectFarm = KeyCode.None;
+            this.keyAutoBirdFarm = KeyCode.None;
+            this.keyMassCook = KeyCode.None;
+            this.keyAutoPuzzle = KeyCode.None;
+            this.keyAutoCatPlay = KeyCode.None;
+            this.keyAutoDogTrain = KeyCode.None;
+            this.keyAutoPetWash = KeyCode.None;
+            this.keyFeedAllCats = KeyCode.None;
+            this.keyFeedAllDogs = KeyCode.None;
+            this.keySpawnBubble = KeyCode.None;
+            this.notificationsEnabled = true;
+            this.notificationPosition = 5;
+            this.hideIdEnabled = false;
+            this.customDisplayIdEnabled = false;
+            this.customDisplayId = string.Empty;
+            this.fpsBypassEnabled = false;
+            this.fpsBypassTarget = 144;
+            this.ApplyFpsBypass(false);
+            this.lodOverrideMode = 0;
+            this.lodCustomBias = 1f;
+            this.lodCustomMaxLevel = 0;
+            this.RevertLodOverride();
+            this.showStatusOverlay = false;
+            this.SaveKeybinds(false);
+            this.AddMenuNotification(this.L("Defaults restored (Toggle Menu: Insert)"), new Color(1f, 0.75f, 0.75f));
         }
 
         private float DrawSettingsMainTab(int startY)
@@ -1366,6 +1378,9 @@ namespace HeartopiaMod
             {
                 this.showStatusOverlay = newShowOverlay;
                 this.SaveKeybinds(false);
+                // UGUI twin reacts the same frame — same lazy-build/SetActive path the per-frame
+                // driver uses (HeartopiaComplete.UguiStatusOverlay.cs).
+                this.ProcessUguiStatusOverlayOnUpdate();
                 if (this.showStatusOverlay)
                 {
                     this.AddMenuNotification(this.L("Status overlay enabled"), new Color(0.55f, 0.88f, 1f));

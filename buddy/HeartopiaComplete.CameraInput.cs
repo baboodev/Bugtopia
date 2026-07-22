@@ -72,10 +72,160 @@ namespace HeartopiaMod
             GUI.color = previous;
         }
 
+        // ----------------------------------------------------------------------------------------
+        // Input-ownership registry
+        // ----------------------------------------------------------------------------------------
+        // One source of truth for "which mod UI surface should the game ignore input for right
+        // now", queried by BOTH gates that previously hand-enumerated the same ad hoc booleans:
+        //   - click-blocking:    UpdateGameUiClickBlockState (below)
+        //   - movement-blocking: ShouldBlockGameplayInput (HeartopiaComplete.cs)
+        // The two gates stay asymmetric BY DESIGN:
+        //   - MODAL surfaces (mod menu, UGUI shell): while visible, block clicks unconditionally
+        //     (regardless of pointer position) AND count toward movement-blocking (which the
+        //     consumer further gates on the user's blockGameUiWhenMenuOpen setting).
+        //   - FLOATING surfaces (building move panel, quest assistant window, UGUI PoC): block
+        //     clicks only while visible AND pointer-over, bump the blockInputReleaseUntil grace
+        //     timer while pointer-over, and never contribute to movement-blocking.
+        // Registration is idempotent by name (same idiom as RegisterUguiThemeRebuilder).
+        // Delegates MUST read live instance fields on every call (e.g. () => this.uguiShell !=
+        // null && ...) — never capture a window handle object into the closure, or a theme-reload
+        // rebuild (which destroys and recreates the handle) leaves the registry checking a stale,
+        // destroyed window forever.
+
+        private sealed class InputOwnershipSurface
+        {
+            public string Name;
+            public bool IsModal;
+            public Func<bool> IsVisible;
+            public Func<bool> IsPointerOver; // floating surfaces only; null/unused when IsModal
+            public bool WarnedVisible;       // one-shot failure logs (aggregates run every frame)
+            public bool WarnedPointerOver;
+        }
+
+        private readonly List<InputOwnershipSurface> inputOwnershipSurfaces = new List<InputOwnershipSurface>();
+
+        // Idempotent by name — re-registering under the same name updates the entry in place.
+        private void RegisterInputOwnershipSurface(string name, bool isModal, Func<bool> isVisible, Func<bool> isPointerOver)
+        {
+            if (string.IsNullOrEmpty(name) || isVisible == null)
+            {
+                return;
+            }
+
+            InputOwnershipSurface entry = new InputOwnershipSurface
+            {
+                Name = name,
+                IsModal = isModal,
+                IsVisible = isVisible,
+                IsPointerOver = isPointerOver
+            };
+            for (int i = 0; i < this.inputOwnershipSurfaces.Count; i++)
+            {
+                if (this.inputOwnershipSurfaces[i].Name == name)
+                {
+                    this.inputOwnershipSurfaces[i] = entry;
+                    return;
+                }
+            }
+            this.inputOwnershipSurfaces.Add(entry);
+        }
+
+        // The 3 pre-existing surfaces. Their backing fields always exist and are computed per
+        // frame elsewhere (BuildingFreeRotateFeature.cs / HeartopiaComplete.QuestAssistantUi.cs)
+        // — the registry only READS them. Called once from OnInitializeMelon; the two UGUI
+        // surfaces (shell = modal, PoC = floating) register themselves on first build instead.
+        private void RegisterBuiltinInputOwnershipSurfaces()
+        {
+            this.RegisterInputOwnershipSurface("ModMenu", true,
+                () => this.showMenu,
+                null);
+            this.RegisterInputOwnershipSurface("BuildingMovePanel", false,
+                () => this.buildingMovePanelActive,
+                () => this.buildingMovePanelMouseOver);
+            this.RegisterInputOwnershipSurface("QuestAssistantWindow", false,
+                () => this.questAssistantWindowVisible,
+                () => this.questAssistantWindowMouseOver);
+        }
+
+        // Per-entry guarded reads: one broken delegate must never take down the aggregate or the
+        // frame (same defensive convention as ProcessUguiKitThemeOnUpdate), and must fail OPEN
+        // (returning false = don't block) so a broken surface can't wedge game input. Logged once
+        // per entry, not per frame.
+        private bool InputSurfaceVisibleSafe(InputOwnershipSurface entry)
+        {
+            try
+            {
+                return entry.IsVisible != null && entry.IsVisible();
+            }
+            catch (Exception ex)
+            {
+                if (!entry.WarnedVisible)
+                {
+                    entry.WarnedVisible = true;
+                    ModLogger.Msg("[InputOwnership] '" + entry.Name + "' visibility check failed: " + ex.Message);
+                }
+                return false;
+            }
+        }
+
+        private bool InputSurfacePointerOverSafe(InputOwnershipSurface entry)
+        {
+            try
+            {
+                return entry.IsPointerOver != null && entry.IsPointerOver();
+            }
+            catch (Exception ex)
+            {
+                if (!entry.WarnedPointerOver)
+                {
+                    entry.WarnedPointerOver = true;
+                    ModLogger.Msg("[InputOwnership] '" + entry.Name + "' pointer-over check failed: " + ex.Message);
+                }
+                return false;
+            }
+        }
+
+        // Movement-blocking aggregate: any MODAL surface visible. Floating surfaces never count.
+        private bool IsAnyModalInputSurfaceOpen()
+        {
+            for (int i = 0; i < this.inputOwnershipSurfaces.Count; i++)
+            {
+                InputOwnershipSurface entry = this.inputOwnershipSurfaces[i];
+                if (entry.IsModal && this.InputSurfaceVisibleSafe(entry))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Grace-bump aggregate: any FLOATING surface visible with the pointer currently over it.
+        private bool IsAnyFloatingInputSurfacePointerOver()
+        {
+            for (int i = 0; i < this.inputOwnershipSurfaces.Count; i++)
+            {
+                InputOwnershipSurface entry = this.inputOwnershipSurfaces[i];
+                if (!entry.IsModal && this.InputSurfaceVisibleSafe(entry) && this.InputSurfacePointerOverSafe(entry))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Click-blocking aggregate: any modal surface open, OR the pointer over any floating one.
+        // (The blockInputReleaseUntil grace fallback and the autoBuy exclusion stay at the
+        // consumer, wrapping this exactly as they wrapped the old hand-enumerated OR-chain.)
+        private bool ShouldBlockGameUiClicks()
+        {
+            return this.IsAnyModalInputSurfaceOpen() || this.IsAnyFloatingInputSurfacePointerOver();
+        }
+
         private void UpdateGameUiClickBlockState()
         {
-            // Block game clicks while the mod menu is open (+ a short grace period after it closes,
-            // blockInputReleaseUntil). A click landing on the menu must never reach the game.
+            // Block game clicks while any registered MODAL surface is open, or while the pointer
+            // is over a registered FLOATING surface (+ a short grace period after either ends,
+            // blockInputReleaseUntil). A click landing on mod UI must never reach the game.
             //
             // Mechanism: a transparent full-screen uGUI overlay (Canvas + GraphicRaycaster + Image
             // with raycastTarget) sorted on top of every game canvas. The pointer raycast hits the
@@ -85,12 +235,8 @@ namespace HeartopiaMod
             // current cursor when the EventSystem was re-enabled on menu close.
             //
             // autoBuy needs real game-UI clicks, so it stays excluded.
-            // Also block while the cursor is over the auto move-panel (so clicking its toggles / drag
-            // bar never leaks into the game world). blockInputReleaseUntil covers the release grace.
-            bool overMovePanel = this.buildingMovePanelActive && this.buildingMovePanelMouseOver;
-            bool overQuestAssistantWindow = this.questAssistantWindowVisible && this.questAssistantWindowMouseOver;
-            bool shouldBlock = (this.showMenu || overMovePanel || overQuestAssistantWindow || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
-            if (overMovePanel || overQuestAssistantWindow)
+            bool shouldBlock = (this.ShouldBlockGameUiClicks() || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
+            if (this.IsAnyFloatingInputSurfacePointerOver())
             {
                 this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
             }
@@ -114,7 +260,17 @@ namespace HeartopiaMod
                     Canvas canvas = go.AddComponent<Canvas>();
                     canvas.renderMode = RenderMode.ScreenSpaceOverlay;
                     canvas.overrideSorting = true;
-                    canvas.sortingOrder = 32000; // above all game canvases
+                    // Above every game canvas, but BELOW the mod's own UGUI window canvases
+                    // (currently 29400/29500, see HeartopiaComplete.UguiKit.cs file header) and the
+                    // Dropdown popup ceiling (30000) — otherwise, once a mod UGUI window becomes a
+                    // registered input-ownership surface (HeartopiaComplete.CameraInput.cs's
+                    // registry, above), simply opening it makes this overlay active, and if the
+                    // overlay sat ABOVE the window's own canvas it would win every raycast over the
+                    // window too, silently swallowing clicks meant for the window's own controls
+                    // (confirmed live: this was exactly why the UGUI shell/PoC's buttons stopped
+                    // responding to clicks the moment they were registered — dragging still worked
+                    // because drag is polled directly, never routed through the raycaster).
+                    canvas.sortingOrder = 20000;
 
                     go.AddComponent<UnityEngine.UI.GraphicRaycaster>();
 

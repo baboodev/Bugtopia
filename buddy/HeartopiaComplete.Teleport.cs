@@ -1109,6 +1109,13 @@ namespace HeartopiaMod
                 {
                     return GameSceneIdStarTown;
                 }
+                // Raw static read below — refuse before the game is loaded (uncatchable AV, see
+                // AuraMonoStaticFieldReadsAllowed). This one is reachable from the UGUI shell's
+                // build-time Teleport seeding, so it would have been the next login crash.
+                if (!AuraMonoStaticFieldReadsAllowed())
+                {
+                    return GameSceneIdStarTown;
+                }
                 if (this.npcSceneLevelIdField == IntPtr.Zero || this.npcSceneDataCenterVtable == IntPtr.Zero)
                 {
                     IntPtr image = this.FindAuraMonoImage(new string[]

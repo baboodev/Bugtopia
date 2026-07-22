@@ -525,6 +525,10 @@ namespace HeartopiaMod
             this.ApplyMasterConsoleVisibility();
             HeartopiaComplete.Instance = this;
             ModLogger.Msg("Bugtopia initialized!");
+            // Input-ownership registry (HeartopiaComplete.CameraInput.cs): the 3 always-existing
+            // surfaces (mod menu + the two floating panels) register once here; the UGUI shell and
+            // PoC register themselves on first build.
+            this.RegisterBuiltinInputOwnershipSurfaces();
             this.InitializeLocalization();
             this.LoadRadarSpeciesIconIndex();
             this.LoadCustomTeleports();
@@ -703,6 +707,19 @@ namespace HeartopiaMod
             this.ProcessLittleWhaleFinderOnUpdate();
             this.ProcessResearchMonitorOnUpdate();
             this.ProcessSanrioGachaFinderOnUpdate();
+            this.ProcessUguiPocOnUpdate();
+            this.ProcessUguiShellOnUpdate();
+            // Floating UGUI Building Move Panel — deliberately NOT inside ProcessUguiShellOnUpdate
+            // (that early-returns until the shell is first built; this panel must auto-show with
+            // the shell never opened).
+            this.ProcessUguiBuildingMovePanelOnUpdate();
+            // Floating UGUI Quest Assistant window — deliberately NOT inside ProcessUguiShellOnUpdate
+            // (that early-returns until the shell is first built; this window must work with the
+            // shell never opened). Gated on questAssistantWindowVisible ALONE — its IMGUI twin has
+            // no menu-state suppression to replicate.
+            this.ProcessUguiQuestAssistantWindowOnUpdate();
+            this.ProcessUguiKitThemeOnUpdate();
+            this.ProcessUguiStatusOverlayOnUpdate();
             this.ProcessSwimSprintVerticalGuardOnUpdate();
             this.QuestAssistantCollectMonitorTick();
             this.QuestAssistantTalkToNpcMonitorTick();
@@ -747,6 +764,21 @@ namespace HeartopiaMod
             // Check for keybinds (Only if not currently rebinding and not just assigned)
             if (string.IsNullOrEmpty(this.keyBindingActive) && Time.unscaledTime - this.keyBindAssignedAt >= 0.2f)
             {
+                // UGUI proof-of-concept panel (HeartopiaComplete.UguiPoc.cs). Fixed key for the
+                // PoC — not a configurable keybind while it's evaluation-only.
+                if (Input.GetKeyDown(KeyCode.F9))
+                {
+                    this.ToggleUguiPocPanel();
+                }
+                // UGUI shell chrome preview (HeartopiaComplete.UguiShell.cs, Phase 2). Fixed key
+                // while it's placeholder-only.
+                if (Input.GetKeyDown(KeyCode.F10))
+                {
+                    this.ToggleUguiShell();
+                    // The shell is a MODAL input-ownership surface (the real-menu replacement),
+                    // so its toggle gets the same input-release grace the menu hotkey gets below.
+                    this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
+                }
                 if (this.TryGetModHotkeyDown(this.keyToggleMenu))
                 {
                     this.showMenu = !this.showMenu;
@@ -2284,9 +2316,14 @@ namespace HeartopiaMod
 
         public static bool ShouldBlockGameplayInput()
         {
+            // Movement-blocking gate: only MODAL surfaces in the input-ownership registry count
+            // (mod menu + UGUI shell), further gated by the user's blockGameUiWhenMenuOpen
+            // setting. Floating surfaces (move panel / quest assistant / UGUI PoC) contribute
+            // only indirectly, via the shared blockInputReleaseUntil grace timer — exactly as
+            // the old hand-enumerated showMenu check behaved.
             HeartopiaComplete instance = HeartopiaComplete.Instance;
             return instance != null &&
-                   ((instance.showMenu && instance.blockGameUiWhenMenuOpen) ||
+                   ((instance.IsAnyModalInputSurfaceOpen() && instance.blockGameUiWhenMenuOpen) ||
                     Time.unscaledTime < instance.blockInputReleaseUntil);
         }
 
