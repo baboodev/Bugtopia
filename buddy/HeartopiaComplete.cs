@@ -720,6 +720,10 @@ namespace HeartopiaMod
             this.ProcessUguiQuestAssistantWindowOnUpdate();
             this.ProcessUguiKitThemeOnUpdate();
             this.ProcessUguiStatusOverlayOnUpdate();
+            // UGUI toast stack (HeartopiaComplete.UguiToast.cs). Must tick every frame even while
+            // nothing renders: it owns the shared menuNotifications expiry sweep that used to run
+            // inside the IMGUI drawer — without this tick the list would pin at the 6-cap forever.
+            this.ProcessUguiToastsOnUpdate();
             this.ProcessSwimSprintVerticalGuardOnUpdate();
             this.QuestAssistantCollectMonitorTick();
             this.QuestAssistantTalkToNpcMonitorTick();

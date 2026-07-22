@@ -121,7 +121,10 @@ namespace HeartopiaMod
                     this.DrawStatusOverlay(inner);
                 }
 
-                this.DrawMenuNotifications(new Rect(screenW - 280f, 14f, 260f, screenH - 20f));
+                // Menu notifications are UGUI now (HeartopiaComplete.UguiToast.cs, driven from
+                // OnUpdate — which also took over the expiry sweep the IMGUI drawer used to own).
+                // DrawMenuNotifications is kept intact for a one-line revert, but it must never
+                // ALSO run here: two live renderers would double-draw every toast.
             });
 
             this.DrawMouseLookCrosshair();

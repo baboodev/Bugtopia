@@ -112,6 +112,15 @@ namespace HeartopiaMod
         private Texture2D uguiKitCaretTex;
         private Font uguiKitLegacyFont;
         private bool uguiKitFontResolveAttempted;
+        // Font resolve is only FINAL once the pinned LiberationSans SDF was actually found; a
+        // fallback stays provisional and is retried on this cooldown (EnsureUguiFonts runs from
+        // every CreateUguiLabel, so an un-throttled retry would rescan on every single label).
+        private bool uguiKitFontPinned;
+        private float uguiKitFontRetryAt;
+        private bool uguiKitFontFallbackLogged;
+        private TMP_FontAsset uguiKitFontPinnedCandidate; // scratch, cleared at the end of a resolve
+        private TMP_FontAsset uguiKitFontAnyCandidate;
+        private const float UguiFontRetrySeconds = 3f;
         private Sprite[] uguiKitIconSprites; // cache: one Sprite per NavIconPngBase64 index
 
         private const float UguiWindowTitleBarHeight = 58f;
@@ -417,10 +426,25 @@ namespace HeartopiaMod
         // for Dropdown labels (TMP_Dropdown is stripped from this game build).
         private void EnsureUguiFonts()
         {
+            // BUG FIX (2026-07-22, round 2): the resolve used to latch UNCONDITIONALLY on first
+            // call, including when it had to fall back. That was survivable while the shell was the
+            // only thing building labels (by the time you opened the menu, LiberationSans SDF was
+            // loaded), but the UGUI toast stack builds on the FIRST notification — which can fire at
+            // startup, long before TMP's built-in font is in memory. The fallback then latched the
+            // game font for the entire process and the whole menu rendered in it. Log said exactly
+            // that: "LiberationSans SDF not found — falling back to 'FZY4JW_SDF'", then
+            // "[UguiToast] built", and only afterwards the shell.
+            // So a FALLBACK resolve is now provisional, not final: it is retried (throttled, since
+            // this runs from every CreateUguiLabel) until the pinned font shows up, and adopting it
+            // fires a theme rebuild so surfaces already built with the wrong font are re-created.
             if (this.uguiKitFontResolveAttempted)
             {
-                return;
+                if (this.uguiKitFontPinned || Time.unscaledTime < this.uguiKitFontRetryAt)
+                {
+                    return;
+                }
             }
+            bool wasProvisional = this.uguiKitFontResolveAttempted && !this.uguiKitFontPinned;
             this.uguiKitFontResolveAttempted = true;
 
             // BUG FIX (2026-07-22): this used to take the FIRST TMP_FontAsset the scan returned and
@@ -462,12 +486,8 @@ namespace HeartopiaMod
                             break; // pinned target found — stop looking
                         }
                     }
-                    this.uguiKitTmpFont = liberation ?? firstSeen;
-                    if (liberation == null && firstSeen != null)
-                    {
-                        ModLogger.Msg("[UguiKit] LiberationSans SDF not found — falling back to '"
-                            + (firstSeen.name ?? "?") + "' (text metrics may not match the layout).");
-                    }
+                    this.uguiKitFontPinnedCandidate = liberation;
+                    this.uguiKitFontAnyCandidate = firstSeen;
                 }
             }
             catch (Exception ex)
@@ -475,11 +495,45 @@ namespace HeartopiaMod
                 ModLogger.Msg("[UguiKit] TMP font scan failed: " + ex.Message);
             }
 
-            if (this.uguiKitTmpFont == null)
+            // TMP's own default setting is the canonical home of LiberationSans SDF and can hand it
+            // over even on a frame when FindObjectsOfTypeAll has not seen it yet — worth asking
+            // before settling for a game font.
+            if (this.uguiKitFontPinnedCandidate == null)
             {
-                try { this.uguiKitTmpFont = TMP_Settings.defaultFontAsset; }
+                try
+                {
+                    TMP_FontAsset def = TMP_Settings.defaultFontAsset;
+                    if (def != null)
+                    {
+                        if ((def.name ?? string.Empty).IndexOf("LiberationSans", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            this.uguiKitFontPinnedCandidate = def;
+                        }
+                        else if (this.uguiKitFontAnyCandidate == null)
+                        {
+                            this.uguiKitFontAnyCandidate = def;
+                        }
+                    }
+                }
                 catch (Exception ex) { ModLogger.Msg("[UguiKit] TMP_Settings.defaultFontAsset failed: " + ex.Message); }
             }
+
+            this.uguiKitTmpFont = this.uguiKitFontPinnedCandidate ?? this.uguiKitFontAnyCandidate;
+            this.uguiKitFontPinned = this.uguiKitFontPinnedCandidate != null;
+            if (!this.uguiKitFontPinned)
+            {
+                // Provisional: keep rendering with whatever exists, but come back for the real one.
+                this.uguiKitFontRetryAt = Time.unscaledTime + UguiFontRetrySeconds;
+                if (!this.uguiKitFontFallbackLogged)
+                {
+                    this.uguiKitFontFallbackLogged = true;
+                    ModLogger.Msg("[UguiKit] LiberationSans SDF not loaded yet — using '"
+                        + ((this.uguiKitTmpFont != null && this.uguiKitTmpFont.name != null) ? this.uguiKitTmpFont.name : "?")
+                        + "' provisionally; will re-resolve and rebuild once it appears.");
+                }
+            }
+            this.uguiKitFontPinnedCandidate = null;
+            this.uguiKitFontAnyCandidate = null;
 
             // Our OWN material preset, cloned from whichever asset won above. TMP draws outline /
             // glow / drop-shadow from MATERIAL properties, and a game font asset's shared material
@@ -549,7 +603,18 @@ namespace HeartopiaMod
             try { if (this.uguiKitTmpFont != null) tmpName = this.uguiKitTmpFont.name; } catch { }
             try { if (this.uguiKitLegacyFont != null) legacyName = this.uguiKitLegacyFont.name; } catch { }
             ModLogger.Msg("[UguiKit] fonts resolved: TMP=" + tmpName + " legacy=" + legacyName
-                + " flatMaterial=" + (this.uguiKitTmpMaterial != null));
+                + " flatMaterial=" + (this.uguiKitTmpMaterial != null)
+                + " pinned=" + this.uguiKitFontPinned);
+
+            // Late adoption: surfaces already built during the provisional window are wearing the
+            // wrong typeface (labels bind font+material at construction), so queue the SAME
+            // state-preserving rebuild a theme change uses. Safe to call from inside a build —
+            // MarkUguiKitThemeDirty only sets a flag + debounce, it never rebuilds synchronously.
+            if (wasProvisional && this.uguiKitFontPinned)
+            {
+                ModLogger.Msg("[UguiKit] pinned font appeared — rebuilding UGUI surfaces onto it.");
+                this.MarkUguiKitThemeDirty();
+            }
         }
 
         // ⚠️ DEAD END — Windows-installed fonts CANNOT be offered as a font choice on this build.

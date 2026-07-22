@@ -729,32 +729,60 @@ namespace HeartopiaMod
             this.AddMenuNotification(message, color, duration);
         }
 
+        // ----------------------------------------------------------------------------------------
+        // Shared toast lifecycle — used by the LIVE UGUI renderer (HeartopiaComplete.UguiToast.cs,
+        // which ticks the sweep every frame from OnUpdate) and by the dormant IMGUI drawer below
+        // (kept for a one-line revert). Extracted so the two can never disagree about WHICH toasts
+        // exist and WHICH are visible; critically, the sweep no longer lives inside a renderer —
+        // when OnGUI stopped calling DrawMenuNotifications, a renderer-owned sweep would have
+        // stopped pruning and pinned the list at AddOrUpdateMenuNotification's 6-cap forever.
+        // ----------------------------------------------------------------------------------------
+
+        // Reverse RemoveAt instead of RemoveAll: the list holds at most 6 items and this runs
+        // every frame — no per-frame closure allocation for the predicate.
+        private void SweepExpiredMenuNotifications(float now)
+        {
+            for (int i = this.menuNotifications.Count - 1; i >= 0; i--)
+            {
+                HeartopiaComplete.MenuNotification n = this.menuNotifications[i];
+                if (n == null || n.ExpireAt <= now)
+                {
+                    this.menuNotifications.RemoveAt(i);
+                }
+            }
+        }
+
+        // Visibility filter + draw order in one place: newest first (producers Add to the tail),
+        // honoring the notifications toggle — disabled means only Force items surface. An empty
+        // result IS the "draw nothing" signal (covers the old early-outs for empty list and
+        // "disabled with nothing forced").
+        private void CollectVisibleMenuNotificationsNewestFirst(List<HeartopiaComplete.MenuNotification> into)
+        {
+            into.Clear();
+            bool drawAll = this.notificationsEnabled;
+            for (int i = this.menuNotifications.Count - 1; i >= 0; i--)
+            {
+                HeartopiaComplete.MenuNotification item = this.menuNotifications[i];
+                if (item == null || (!drawAll && !item.Force))
+                {
+                    continue;
+                }
+
+                into.Add(item);
+            }
+        }
+
+        // DORMANT since the UGUI cutover: no longer called from OnGUI (HeartopiaComplete.Gui.cs) —
+        // HeartopiaComplete.UguiToast.cs renders menuNotifications now. Kept intact so restoring
+        // IMGUI toasts is the one-line revert of re-adding that call; if restored, it composes the
+        // SAME shared helpers above, so both renderers stay in agreement.
         private void DrawMenuNotifications(Rect area)
         {
             float now = Time.unscaledTime;
-            this.menuNotifications.RemoveAll(n => n == null || n.ExpireAt <= now);
+            this.SweepExpiredMenuNotifications(now);
             if (this.menuNotifications.Count == 0)
             {
                 return;
-            }
-
-            bool drawAll = this.notificationsEnabled;
-            if (!drawAll)
-            {
-                bool hasForcedNotification = false;
-                for (int i = 0; i < this.menuNotifications.Count; i++)
-                {
-                    if (this.menuNotifications[i] != null && this.menuNotifications[i].Force)
-                    {
-                        hasForcedNotification = true;
-                        break;
-                    }
-                }
-
-                if (!hasForcedNotification)
-                {
-                    return;
-                }
             }
 
             GUIStyle style = new GUIStyle(GUI.skin.label);
@@ -767,17 +795,7 @@ namespace HeartopiaMod
             float screenH = this.GetLogicalScreenHeight();
             float maxWidth = Mathf.Clamp(screenW * 0.44f, 260f, 520f);
             List<HeartopiaComplete.MenuNotification> visibleNotifications = new List<HeartopiaComplete.MenuNotification>();
-            for (int i = this.menuNotifications.Count - 1; i >= 0; i--)
-            {
-                HeartopiaComplete.MenuNotification item = this.menuNotifications[i];
-                if (!drawAll && !item.Force)
-                {
-                    continue;
-                }
-
-                visibleNotifications.Add(item);
-            }
-
+            this.CollectVisibleMenuNotificationsNewestFirst(visibleNotifications);
             if (visibleNotifications.Count == 0)
             {
                 return;
