@@ -3801,62 +3801,6 @@ namespace HeartopiaMod
             return "Group #" + groupId;
         }
 
-        private float DrawWildAnimalFeedSection(float startY)
-        {
-            float num = startY;
-            const float left = 40f;
-            const float width = 520f;
-
-            Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
-            GUIStyle labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
-            labelStyle.normal.textColor = textColor;
-
-            Rect wildRect = new Rect(left, num, width, 198f);
-            GUI.Box(wildRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
-            this.DrawCardOutline(wildRect, 1f);
-            GUI.Label(new Rect(wildRect.x + 16f, wildRect.y + 12f, 220f, 20f), "WILD ANIMAL TROUGHS", labelStyle);
-
-            float rowY = wildRect.y + 40f;
-            bool nextFav = this.DrawSwitchToggle(new Rect(wildRect.x + 16f, rowY, 300f, 28f), this.wildAnimalFeedPreferFavorites, this.L("Prefer Favorite Food"));
-            if (nextFav != this.wildAnimalFeedPreferFavorites)
-            {
-                this.wildAnimalFeedPreferFavorites = nextFav;
-            }
-
-            rowY += 42f;
-            bool nextSkipStar = this.DrawSwitchToggle(new Rect(wildRect.x + 16f, rowY, 300f, 28f), this.wildAnimalFeedSkipFiveStarFood, this.L("Skip 5 Star Food"));
-            if (nextSkipStar != this.wildAnimalFeedSkipFiveStarFood)
-            {
-                this.wildAnimalFeedSkipFiveStarFood = nextSkipStar;
-            }
-
-            rowY += 42f;
-            bool nextSkipEgg = this.DrawSwitchToggle(new Rect(wildRect.x + 16f, rowY, 280f, 28f), this.wildAnimalFeedSkipEgg, this.L("Skip Egg"));
-            if (nextSkipEgg != this.wildAnimalFeedSkipEgg)
-            {
-                this.wildAnimalFeedSkipEgg = nextSkipEgg;
-            }
-
-            num += 210f;
-            Rect actionRect = new Rect(left, num, width, 74f);
-            GUI.Box(actionRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
-            this.DrawCardOutline(actionRect, 1f);
-
-            bool busy = this.wildAnimalFeedCoroutine != null || Time.realtimeSinceStartup < this.wildAnimalFeedBusyUntil;
-            GUI.enabled = !busy;
-            if (GUI.Button(new Rect(actionRect.x + 16f, actionRect.y + 22f, 200f, 32f), this.L("Feed All Troughs"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartWildAnimalFeedAll(silent: false);
-            }
-            GUI.enabled = true;
-
-            GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
-            statusStyle.normal.textColor = new Color(textColor.r, textColor.g, textColor.b, 0.82f);
-            num += 84f;
-            GUI.Label(new Rect(left, num, width, 36f), this.wildAnimalFeedLastStatus ?? string.Empty, statusStyle);
-            num += 44f;
-            return num;
-        }
 
         private void WildAnimalFeedLog(string message)
         {

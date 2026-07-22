@@ -77,11 +77,8 @@ namespace HeartopiaMod
             public RectTransform TitleBarRt;
             public Image BackdropSlab;      // hardcoded near-opaque base layer (see CreateUguiWindow)
             public Image BackdropTint;      // theme window-color layer on top of the slab
-            public GameObject ScaleLabel;   // created by EnableUguiWindowScaleKeys
             public Vector2 Size;
             public float Scale = 1f;
-            public KeyCode ScaleUpKey = KeyCode.None;
-            public KeyCode ScaleDownKey = KeyCode.None;
             public bool DragActive;
             public Vector2 DragLastMouse;
             public int DragErrorCount;
@@ -1123,25 +1120,11 @@ namespace HeartopiaMod
             }
         }
 
-        // Opt-in runtime scale: binds keys and adds a "Scale: 1.0x" readout to the title bar.
-        // Multiple windows should use DIFFERENT keys (the frame driver is per-window).
-        private void EnableUguiWindowScaleKeys(UguiWindowHandle win, KeyCode scaleUp, KeyCode scaleDown)
-        {
-            if (win == null || win.TitleBarRt == null)
-            {
-                return;
-            }
-            win.ScaleUpKey = scaleUp;
-            win.ScaleDownKey = scaleDown;
-            if (win.ScaleLabel == null)
-            {
-                win.ScaleLabel = this.CreateUguiMutedLabel(win.TitleBarRt.gameObject.transform, "ScaleLabel",
-                    "Scale: " + win.Scale.ToString("0.0") + "x", 11f);
-                PlaceUguiTopLeft(win.ScaleLabel, win.Size.x - 114f, 16f, 90f, 18f);
-            }
-        }
+        // (EnableUguiWindowScaleKeys — the PoC's opt-in PageUp/PageDown scale test harness with
+        // its "Scale: 1.0x" title-bar readout — was deleted with the PoC in Phase 5. Real windows
+        // scale via SetUguiWindowScale from the shared persisted uiScale.)
 
-        // Per-frame driver: title-bar drag (polled — no ClassInjector components) + scale keys.
+        // Per-frame driver: title-bar drag (polled — no ClassInjector components).
         // Call from an OnUpdate path. No-ops in a few comparisons while the window is hidden.
         private void ProcessUguiWindowFrame(UguiWindowHandle win)
         {
@@ -1151,26 +1134,6 @@ namespace HeartopiaMod
             }
 
             this.ProcessUguiWindowDrag(win);
-
-            if ((win.ScaleUpKey != KeyCode.None || win.ScaleDownKey != KeyCode.None)
-                && string.IsNullOrEmpty(this.keyBindingActive))
-            {
-                try
-                {
-                    if (win.ScaleUpKey != KeyCode.None && Input.GetKeyDown(win.ScaleUpKey))
-                    {
-                        this.SetUguiWindowScale(win, win.Scale + 0.1f);
-                    }
-                    else if (win.ScaleDownKey != KeyCode.None && Input.GetKeyDown(win.ScaleDownKey))
-                    {
-                        this.SetUguiWindowScale(win, win.Scale - 0.1f);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Msg("[UguiKit] scale key error: " + ex.Message);
-                }
-            }
         }
 
         private void ProcessUguiWindowDrag(UguiWindowHandle win)
@@ -1249,7 +1212,6 @@ namespace HeartopiaMod
                 // Screen extent in CANVAS units shrinks as scale grows — a window in bounds at
                 // 1.0x can be out of reach at 2.0x, so re-clamp on every change.
                 this.ClampUguiWindowPosition(win);
-                this.SetUguiLabelText(win.ScaleLabel, "Scale: " + win.Scale.ToString("0.0") + "x");
                 ModLogger.Msg("[UguiKit] " + (win.Root != null ? win.Root.name : "?") + " scaleFactor -> " + win.Scale.ToString("0.0"));
             }
             catch (Exception ex)

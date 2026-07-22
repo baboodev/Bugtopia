@@ -581,7 +581,7 @@ namespace HeartopiaMod
         {
             // Cheap per-frame edge detect (no AuraMono): opening the tab forces an immediate poll
             // and queues a one-shot prepare so SELECT ITEM / the panel buttons work right away.
-            bool tabActive = (this.selectedTab == 9 && this.showMenu) || this.IsUguiShellResearchTabActive();
+            bool tabActive = this.IsUguiShellResearchTabActive(); // IMGUI tab retired (Phase 5)
             if (tabActive && !this.researchTabWasActive)
             {
                 this.researchMonitorNextPollAt = 0f;
@@ -1141,121 +1141,6 @@ namespace HeartopiaMod
 
         // ---- UI -------------------------------------------------------------------------------------
 
-        private float CalculateResearchTabHeight()
-        {
-            // Header + status + Instruments header + one row per instrument (or the empty line) +
-            // the two panel buttons + the footer hint.
-            return 250f + Math.Max(1, this.researchMonitorSnapshot.Count) * 32f;
-        }
 
-        private float DrawResearchTab(int startY)
-        {
-            const float left = 20f;
-            float y = startY;
-
-            Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
-            GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
-            headerStyle.normal.textColor = textColor;
-            GUIStyle bodyStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, wordWrap = true };
-            bodyStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
-            GUIStyle monoStyle = new GUIStyle(GUI.skin.label) { fontSize = 11 };
-            monoStyle.normal.textColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.85f);
-
-            GUI.Label(new Rect(left, y, 520f, 24f), this.L("Research Institute"), headerStyle);
-            y += 30f;
-
-            GUI.Label(new Rect(left, y, 560f, 20f), this.LF("Status: {0}", this.researchDiagStatus), monoStyle);
-            y += 26f;
-
-            // -- instruments (live list + status; auto-loaded on open) --
-            GUI.Label(new Rect(left, y, 400f, 20f), this.L("Instruments"), headerStyle);
-            y += 26f;
-
-            if (!this.researchMonitorHasSnapshot || this.researchMonitorSnapshot.Count == 0)
-            {
-                GUI.Label(new Rect(left, y, 560f, 34f),
-                    this.L("Loading instrument data… (enter the main town — the list fills in a moment)."),
-                    monoStyle);
-                y += 38f;
-            }
-            else
-            {
-                // Interpolate the game clock forward from the last poll so the countdowns tick smoothly.
-                long estNowTicks = this.researchMonitorClockTicks;
-                bool clockSane = estNowTicks >= ResearchSaneClockTicksFloor;
-                if (clockSane)
-                {
-                    estNowTicks += (long)((Time.unscaledTime - this.researchMonitorClockSampledAt) * TimeSpan.TicksPerSecond);
-                }
-
-                for (int i = 0; i < this.researchMonitorSnapshot.Count; i++)
-                {
-                    ResearchInstrumentSnapshot inst = this.researchMonitorSnapshot[i];
-                    string analyzer = this.LF("Analyzer {0}  ·  Lv {1}", inst.StaticId - 2000, inst.Level);
-
-                    bool busy;
-                    string status;
-                    Color statusColor;
-                    if (inst.ResearchingItemId <= 0)
-                    {
-                        busy = false;
-                        status = this.L("idle");
-                        statusColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.7f);
-                    }
-                    else if (inst.CompleteTicks > 0L && clockSane && inst.CompleteTicks <= estNowTicks)
-                    {
-                        // Research finished — the slot is free to pick a new item.
-                        busy = false;
-                        status = this.LF("DONE · {0}", this.ResearchResolveItemName(inst.ResearchingItemId));
-                        statusColor = new Color(0.45f, 1f, 0.55f);
-                    }
-                    else
-                    {
-                        busy = true;
-                        string remain = (inst.CompleteTicks > 0L && clockSane)
-                            ? ResearchFormatRemaining(inst.CompleteTicks - estNowTicks)
-                            : "?";
-                        status = this.LF("researching {0} · {1}", this.ResearchResolveItemName(inst.ResearchingItemId), remain);
-                        statusColor = new Color(1f, 0.85f, 0.45f);
-                    }
-
-                    GUI.Label(new Rect(left, y, 200f, 22f), analyzer, bodyStyle);
-                    GUIStyle statusStyle = new GUIStyle(monoStyle);
-                    statusStyle.normal.textColor = statusColor;
-                    GUI.Label(new Rect(left + 205f, y, 210f, 22f), status, statusStyle);
-
-                    // A busy analyzer can't take a new item — grey out its button.
-                    GUI.enabled = !busy;
-                    if (this.DrawSecondaryActionButton(new Rect(left + 420f, y - 2f, 125f, 26f), this.L("SELECT ITEM")) && !busy)
-                    {
-                        this.StartResearchOpenInstrumentPanelForStaticId(inst.StaticId);
-                    }
-                    GUI.enabled = true;
-
-                    y += 32f;
-                }
-
-                y += 8f;
-            }
-
-            // -- panel shortcuts --
-            if (this.DrawSecondaryActionButton(new Rect(left, y, 200f, 30f), this.L("RESEARCH STORE")))
-            {
-                this.StartResearchOpenPanelDirect(ResearchShopPanelTypeName, "Research Store");
-            }
-
-            if (this.DrawSecondaryActionButton(new Rect(left + 210f, y, 200f, 30f), this.L("CONTROL CONSOLE")))
-            {
-                this.StartResearchOpenPanelDirect(ResearchControlPanelTypeName, "Control Console");
-            }
-
-            y += 38f;
-
-            GUI.Label(new Rect(left, y, 560f, 34f),
-                this.L("Live from the server-sync cache. SELECT ITEM opens that analyzer's research picker (busy analyzers are locked until they finish). Everything is prepared automatically when you open this tab."),
-                monoStyle);
-            y += 40f;
-            return y;
-        }
     }
 }

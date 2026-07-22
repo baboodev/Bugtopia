@@ -38,7 +38,6 @@ namespace HeartopiaMod
         private string puzzleStatus = "Capture a puzzle board first.";
         private int puzzleSentCount = 0;
         private object puzzleSolveCoroutine = null;
-        private bool puzzleUiOpenLogged = false;
         private bool puzzleResolverProbeLogged = false;
         private readonly List<PuzzlePieceContext> puzzlePieces = new List<PuzzlePieceContext>(128);
         private MethodInfo puzzleJoinMethod = null;
@@ -54,72 +53,6 @@ namespace HeartopiaMod
         private IntPtr puzzleAuraMoveMethod = IntPtr.Zero;
         private IntPtr puzzleAuraBingoMethod = IntPtr.Zero;
 
-        private float DrawPuzzleTab(int startY)
-        {
-            return this.DrawPuzzleSection(startY);
-        }
-
-        private float DrawPuzzleSection(int startY)
-        {
-            if (!this.puzzleUiOpenLogged)
-            {
-                this.puzzleUiOpenLogged = true;
-                this.PuzzleLog("Puzzle UI opened. logsEnabled=" + PuzzleLogsEnabled);
-            }
-
-            int num = startY;
-            const float left = 40f;
-            const float width = 520f;
-            Color mutedTextColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.78f);
-
-            GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
-            headerStyle.normal.textColor = Color.white;
-
-            GUIStyle smallStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Bold };
-            smallStyle.normal.textColor = mutedTextColor;
-
-            GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, wordWrap = true };
-            statusStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
-
-            GUIStyle statLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 10, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
-            statLabelStyle.normal.textColor = mutedTextColor;
-
-            GUIStyle statValueStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
-            statValueStyle.normal.textColor = Color.white;
-
-            Rect headerRect = new Rect(left, num, width, 30f);
-            GUI.Label(headerRect, "PUZZLE", headerStyle);
-            num += 42;
-
-            Rect toggleRect = new Rect(left, num, width, 52f);
-            GUI.Box(toggleRect, "", this.themePanelStyle ?? GUI.skin.box);
-            this.DrawCardOutline(toggleRect, 1f);
-
-            bool previousAutoPuzzle = this.puzzleAutoEnabled;
-            this.puzzleAutoEnabled = this.DrawSwitchToggle(new Rect(toggleRect.x + 14f, toggleRect.y + 14f, 250f, 26f), this.puzzleAutoEnabled, "Auto Puzzle");
-            GUI.Label(new Rect(toggleRect.x + 284f, toggleRect.y + 17f, toggleRect.width - 300f, 22f), this.puzzleSolveRunning ? "Solving..." : (this.puzzleAutoEnabled ? "Waiting for puzzle target..." : "Disabled"), statusStyle);
-            if (this.puzzleAutoEnabled != previousAutoPuzzle)
-            {
-                this.SetPuzzleAutoEnabled(this.puzzleAutoEnabled, true);
-            }
-
-            num += 70;
-
-            Rect statusRect = new Rect(left, num, width, 164f);
-            GUI.Box(statusRect, "", this.themePanelStyle ?? GUI.skin.box);
-            this.DrawCardOutline(statusRect, 1f);
-            GUI.Label(new Rect(statusRect.x + 12f, statusRect.y + 8f, statusRect.width - 24f, 18f), "STATUS", smallStyle);
-
-            float statTop = statusRect.y + 34f;
-            float statWidth = (statusRect.width - 36f) / 2f;
-            this.DrawPuzzleStatBox(new Rect(statusRect.x + 12f, statTop, statWidth, 44f), "PIECES", this.puzzlePieces.Count.ToString(), statLabelStyle, statValueStyle);
-            this.DrawPuzzleStatBox(new Rect(statusRect.x + 24f + statWidth, statTop, statWidth, 44f), "SENT", this.puzzleSentCount.ToString(), statLabelStyle, statValueStyle);
-
-            GUI.Label(new Rect(statusRect.x + 12f, statusRect.y + 88f, statusRect.width - 24f, 44f), this.puzzleStatus, statusStyle);
-
-            num += 170;
-            return num + 20f;
-        }
 
         private void SetPuzzleAutoEnabled(bool value, bool notify)
         {
@@ -158,12 +91,6 @@ namespace HeartopiaMod
             this.ResetPuzzleContext("Auto Puzzle stopped.");
         }
 
-        private void DrawPuzzleStatBox(Rect rect, string label, string value, GUIStyle labelStyle, GUIStyle valueStyle)
-        {
-            GUI.Box(rect, "", this.themeTopTabStyle ?? this.themePanelStyle ?? GUI.skin.box);
-            GUI.Label(new Rect(rect.x, rect.y + 4f, rect.width, 16f), label, labelStyle);
-            GUI.Label(new Rect(rect.x, rect.y + 21f, rect.width, 18f), value, valueStyle);
-        }
 
         private bool TryCapturePuzzleFromCurrentTarget()
         {

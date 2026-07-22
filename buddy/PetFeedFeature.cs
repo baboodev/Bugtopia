@@ -53,7 +53,6 @@ namespace HeartopiaMod
         private bool petFeedFoodDropdownOpen = false;
         private int petFeedFoodDropdownScrollIndex = 0;
         private string petFeedFoodSearchText = string.Empty;
-        private bool petFeedFoodScrollbarDragging = false;
         private float petFeedFoodScrollbarDragOffset = 0f;
         private bool petFeedFoodScanInProgress = false;
         private float petFeedNextFoodScanAllowedAt = 0f;
@@ -4492,86 +4491,6 @@ namespace HeartopiaMod
             return pet.FavoriteFoods ?? new List<int>();
         }
 
-        private float GetPetFeedFavoriteUiTableHeight()
-        {
-            if (this.petFeedFavoriteUiRows.Count == 0)
-            {
-                return 0f;
-            }
-
-            int visibleRows = Math.Min(PetFeedFavoriteUiMaxVisibleRows, this.petFeedFavoriteUiRows.Count);
-            return 34f + visibleRows * PetFeedFavoriteUiRowHeight + 20f;
-        }
-
-        private float DrawPetFeedFavoriteFoodsTable(float left, float width, float startY, GUIStyle labelStyle)
-        {
-            if (this.petFeedFavoriteUiRows.Count == 0)
-            {
-                return startY;
-            }
-
-            Breadcrumbs.Tick("petfav.draw");
-            Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
-            Color mutedColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB);
-
-            GUIStyle headerStyle = new GUIStyle(labelStyle)
-            {
-                fontSize = 11,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft
-            };
-            headerStyle.normal.textColor = mutedColor;
-
-            GUIStyle cellStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 11,
-                fontStyle = FontStyle.Normal,
-                alignment = TextAnchor.UpperLeft,
-                wordWrap = true
-            };
-            cellStyle.normal.textColor = textColor;
-
-            float colName = 92f;
-            float innerWidth = width - 32f;
-            float colLike = (innerWidth - colName) * 0.52f;
-            float colDislike = innerWidth - colName - colLike;
-            int visibleRows = Math.Min(PetFeedFavoriteUiMaxVisibleRows, this.petFeedFavoriteUiRows.Count);
-            float headerHeight = 22f;
-            float bodyHeight = visibleRows * PetFeedFavoriteUiRowHeight;
-            float panelHeight = headerHeight + bodyHeight + 18f;
-
-            Rect panelRect = new Rect(left, startY, width, panelHeight);
-            GUI.Box(panelRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
-            this.DrawCardOutline(panelRect, 1f);
-            GUI.Label(new Rect(panelRect.x + 16f, panelRect.y + 8f, 220f, 18f), "FAVORITE FOODS", labelStyle);
-
-            float tableX = panelRect.x + 12f;
-            float tableY = panelRect.y + 30f;
-            GUI.Label(new Rect(tableX, tableY, colName, headerHeight), "name", headerStyle);
-            GUI.Label(new Rect(tableX + colName, tableY, colLike, headerHeight), "like", headerStyle);
-            GUI.Label(new Rect(tableX + colName + colLike, tableY, colDislike, headerHeight), "dislike", headerStyle);
-
-            Rect viewRect = new Rect(tableX, tableY + headerHeight, panelRect.width - 24f, bodyHeight);
-            Rect contentRect = new Rect(0f, 0f, viewRect.width - 18f, this.petFeedFavoriteUiRows.Count * PetFeedFavoriteUiRowHeight);
-            this.petFeedFavoriteUiScroll = GUI.BeginScrollView(viewRect, this.petFeedFavoriteUiScroll, contentRect, false, true);
-
-            for (int i = 0; i < this.petFeedFavoriteUiRows.Count; i++)
-            {
-                PetFeedFavoriteUiRow row = this.petFeedFavoriteUiRows[i];
-                if (row == null)
-                {
-                    continue;
-                }
-
-                float rowY = i * PetFeedFavoriteUiRowHeight;
-                GUI.Label(new Rect(0f, rowY, colName - 4f, PetFeedFavoriteUiRowHeight - 4f), row.Name ?? "?", cellStyle);
-                GUI.Label(new Rect(colName, rowY, colLike - 4f, PetFeedFavoriteUiRowHeight - 4f), row.Like ?? "(none)", cellStyle);
-                GUI.Label(new Rect(colName + colLike, rowY, colDislike - 4f, PetFeedFavoriteUiRowHeight - 4f), row.Dislike ?? "(none)", cellStyle);
-            }
-
-            GUI.EndScrollView();
-            return startY + panelHeight + 14f;
-        }
 
         private void PopulatePetFeedTargetFavoriteMetadata(PetFeedTarget target)
         {

@@ -17,7 +17,8 @@ namespace HeartopiaMod
 
         private void RunAntiAfkTick()
         {
-            if (!this.antiAfkEnabled || this.showMenu)
+            // "Menu open" = any MODAL registry surface (the UGUI shell) — showMenu is retired.
+            if (!this.antiAfkEnabled || this.IsAnyModalInputSurfaceOpen())
             {
                 return;
             }

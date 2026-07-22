@@ -130,22 +130,12 @@ namespace HeartopiaMod
             this.inputOwnershipSurfaces.Add(entry);
         }
 
-        // The 3 pre-existing surfaces. Their backing fields always exist and are computed per
-        // frame elsewhere (BuildingFreeRotateFeature.cs / HeartopiaComplete.QuestAssistantUi.cs)
-        // — the registry only READS them. Called once from OnInitializeMelon; the two UGUI
-        // surfaces (shell = modal, PoC = floating) register themselves on first build instead.
-        private void RegisterBuiltinInputOwnershipSurfaces()
-        {
-            this.RegisterInputOwnershipSurface("ModMenu", true,
-                () => this.showMenu,
-                null);
-            this.RegisterInputOwnershipSurface("BuildingMovePanel", false,
-                () => this.buildingMovePanelActive,
-                () => this.buildingMovePanelMouseOver);
-            this.RegisterInputOwnershipSurface("QuestAssistantWindow", false,
-                () => this.questAssistantWindowVisible,
-                () => this.questAssistantWindowMouseOver);
-        }
+        // Phase 5: no surfaces register at init anymore. The IMGUI trio ("ModMenu" reading
+        // showMenu, plus the two IMGUI floating panels) is retired; every surviving surface is
+        // UGUI and registers itself on first build — shell = MODAL
+        // (HeartopiaComplete.UguiShell.cs), building move panel / quest assistant window =
+        // floating (HeartopiaComplete.UguiBuildingContent.cs /
+        // HeartopiaComplete.UguiQuestAssistantWindowContent.cs).
 
         // Per-entry guarded reads: one broken delegate must never take down the aggregate or the
         // frame (same defensive convention as ProcessUguiKitThemeOnUpdate), and must fail OPEN
@@ -340,7 +330,8 @@ namespace HeartopiaMod
 
         private void UpdateCameraToggleInteractClick()
         {
-            if (!this.mouseLookCaptureActive || this.showMenu)
+            // "Menu open" = any MODAL registry surface (the UGUI shell) — showMenu is retired.
+            if (!this.mouseLookCaptureActive || this.IsAnyModalInputSurfaceOpen())
             {
                 return;
             }
@@ -434,8 +425,9 @@ namespace HeartopiaMod
 
         private void UpdateMouseLookState()
         {
+            // "Menu open" = any MODAL registry surface (the UGUI shell) — showMenu is retired.
             bool shouldCapture = this.mouseLookEnabled &&
-                                 !this.showMenu &&
+                                 !this.IsAnyModalInputSurfaceOpen() &&
                                  Time.unscaledTime >= this.blockInputReleaseUntil;
             if (!shouldCapture && !this.mouseLookEnabled && !this.mouseLookWasCaptureActive && !this.mouseLookCaptureActive)
             {

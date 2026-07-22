@@ -660,7 +660,9 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (!this.showMenu || this.selectedTab != 6)
+            // Phase 5: "user is looking at Bag / Warehouse" is the UGUI shell's tab now (the
+            // IMGUI menu/tab gate is retired). Same cancel-when-hidden behavior.
+            if (!this.IsUguiShellBagWarehouseTabActive())
             {
                 this.transferPendingRescanRetries = 0;
                 return;
@@ -923,7 +925,8 @@ namespace HeartopiaMod
                     {
                         this.selectedTransferIndex = -1;
                     }
-                    this.ClearTransferQtyHold();
+                    // (The IMGUI qty-hold clear that lived here is gone with the IMGUI stepper —
+                    // the UGUI panel owns its own hold state, UguiBagWarehouseContent.cs.)
                 }
                 else if (!this.transferMultiSelectMode)
                 {
@@ -952,108 +955,6 @@ namespace HeartopiaMod
             this.SetTransferTilePickQuantity(entry, itemIndex, current + delta);
         }
 
-        private void ClearTransferQtyHold()
-        {
-            this.transferQtyHoldDirection = 0;
-            this.transferQtyHoldNetId = 0U;
-            this.transferQtyHoldItemIndex = -1;
-        }
-
-        private void BeginTransferQtyHold(int direction, TransferItemEntry entry, int itemIndex)
-        {
-            if (entry == null || entry.NetId == 0U)
-            {
-                return;
-            }
-
-            this.transferQtyHoldDirection = direction;
-            this.transferQtyHoldNetId = entry.NetId;
-            this.transferQtyHoldItemIndex = itemIndex;
-            this.transferQtyHoldStartedAt = Time.unscaledTime;
-            // First step is applied by the click; first repeat after one interval.
-            this.transferQtyHoldLastStepAt = Time.unscaledTime;
-        }
-
-        private void UpdateTransferQtyHoldRepeat()
-        {
-            if (this.transferQtyHoldDirection == 0)
-            {
-                return;
-            }
-
-            if (!this.showMenu || this.selectedTab != 6)
-            {
-                this.ClearTransferQtyHold();
-                return;
-            }
-
-            if (!Input.GetMouseButton(0))
-            {
-                this.ClearTransferQtyHold();
-                return;
-            }
-
-            if (this.transferItems == null
-                || this.transferQtyHoldItemIndex < 0
-                || this.transferQtyHoldItemIndex >= this.transferItems.Count)
-            {
-                this.ClearTransferQtyHold();
-                return;
-            }
-
-            if (this.selectedTransferIndex != this.transferQtyHoldItemIndex)
-            {
-                this.ClearTransferQtyHold();
-                return;
-            }
-
-            TransferItemEntry entry = this.transferItems[this.transferQtyHoldItemIndex];
-            if (entry == null || entry.NetId != this.transferQtyHoldNetId)
-            {
-                this.ClearTransferQtyHold();
-                return;
-            }
-
-            float heldSeconds = Time.unscaledTime - this.transferQtyHoldStartedAt;
-            if (heldSeconds < TransferQtyHoldRepeatDelay)
-            {
-                return;
-            }
-
-            float repeatSeconds = heldSeconds - TransferQtyHoldRepeatDelay;
-            float interval = repeatSeconds >= TransferQtyHoldFastAfterSeconds ? TransferQtyHoldFastInterval : TransferQtyHoldSlowInterval;
-            if (Time.unscaledTime - this.transferQtyHoldLastStepAt < interval)
-            {
-                return;
-            }
-
-            this.AdjustTransferTilePickQuantity(entry, this.transferQtyHoldItemIndex, this.transferQtyHoldDirection);
-            this.transferQtyHoldLastStepAt = Time.unscaledTime;
-        }
-
-        private void DrawTransferQtyStepButton(Rect rect, string label, int direction, TransferItemEntry entry, int itemIndex, GUIStyle style)
-        {
-            Event e = Event.current;
-            if (e != null && e.button == 0 && e.type == EventType.MouseDown && rect.Contains(e.mousePosition))
-            {
-                this.AdjustTransferTilePickQuantity(entry, itemIndex, direction);
-                this.BeginTransferQtyHold(direction, entry, itemIndex);
-                e.Use();
-            }
-
-            bool holdingThisButton = this.transferQtyHoldDirection == direction
-                && this.transferQtyHoldItemIndex == itemIndex
-                && this.transferQtyHoldNetId == entry.NetId
-                && Input.GetMouseButton(0);
-            Color previousBg = GUI.backgroundColor;
-            if (holdingThisButton)
-            {
-                GUI.backgroundColor = new Color(0.35f, 0.55f, 0.65f, 1f);
-            }
-
-            GUI.Button(rect, label, style);
-            GUI.backgroundColor = previousBg;
-        }
 
         private void SelectTransferTile(TransferItemEntry entry, int itemIndex)
         {

@@ -16,8 +16,9 @@ namespace HeartopiaMod
     // title/subtitle (IMGUI parity: logoRect and headerRect share the same y0..56 strip — there
     // is NO generic window title; the kit window is created with a null title and the shell owns
     // the strip, which doubles as the drag region), per-tab sub-tab bar, placeholder content
-    // areas. F10 toggles. Actual tab CONTENT is Phase 3 — this round only proves the navigation
-    // shape for the real 9×(0-9) structure.
+    // areas. The configurable menu hotkey (keyToggleMenu, default Insert) toggles it — Phase 5
+    // retired the IMGUI menu and the F10 dev shortcut with it. Actual tab CONTENT is Phase 3 —
+    // this round only proves the navigation shape for the real 9×(0-9) structure.
     //
     // Source of truth mirrored here (do not invent tabs/orders):
     //  - Display order + labels: navLabels in DrawWindow (HeartopiaComplete.UiKit.cs:376).
@@ -115,7 +116,7 @@ namespace HeartopiaMod
         private const float UguiShellSidebarW = 190f;
 
         // ----------------------------------------------------------------------------------------
-        // Entry points (F10 — see OnUpdate hotkey block)
+        // Entry points (keyToggleMenu — see OnUpdate hotkey block)
         // ----------------------------------------------------------------------------------------
 
         private void ToggleUguiShell()
@@ -154,7 +155,7 @@ namespace HeartopiaMod
                     this.RegisterInputOwnershipSurface("UguiShell", true,
                         () => this.uguiShell != null && this.IsUguiWindowVisible(this.uguiShell.Window),
                         null);
-                    ModLogger.Msg("[UguiShell] shell built and shown (F10 toggles)");
+                    ModLogger.Msg("[UguiShell] shell built and shown (menu hotkey toggles)");
                     return;
                 }
 
@@ -349,7 +350,7 @@ namespace HeartopiaMod
                 if (this.uguiShell != null)
                 {
                     this.SetUguiWindowVisible(this.uguiShell.Window, false);
-                    ModLogger.Msg("[UguiShell] hidden via close/footer click (F10 reopens)");
+                    ModLogger.Msg("[UguiShell] hidden via close/footer click (menu hotkey reopens)");
                 }
             }
             catch (Exception ex)

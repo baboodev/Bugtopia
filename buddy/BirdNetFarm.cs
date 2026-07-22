@@ -13,7 +13,6 @@ namespace HeartopiaMod
         private static bool enabled = false;
         private static bool perfectPhotoEnabled = false;
         private static int captureMode = 0;
-        private static bool captureModeDropdownOpen = false;
         private static float catchCooldown = 1.5f;
         private static float scanRange = 35f;
         private static int multiCatchLimit = 1;
@@ -459,92 +458,6 @@ namespace HeartopiaMod
             }
 
             return false;
-        }
-
-        public static float DrawSection(HeartopiaComplete host, int startY)
-        {
-            int num = startY;
-            GUIStyle small = new GUIStyle(GUI.skin.label) { fontSize = 12 };
-            GUIStyle header = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
-
-            GUI.Label(new Rect(20f, num, 320f, 22f), host.UI_Localize("Auto Bird Farm"), header);
-            num += 28;
-
-            if (host.UI_DrawPrimaryActionButton(new Rect(20f, num, 260f, 35f), "Equip Bird Scanner"))
-            {
-                host.EquipHandTool(4);
-            }
-            num += 45;
-
-            bool nextEnabled = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), enabled, "Auto Bird Farm");
-            if (nextEnabled != enabled)
-            {
-                SetEnabled(nextEnabled, host);
-            }
-            num += 30;
-
-            bool prevPerfectPhotoEnabled = perfectPhotoEnabled;
-            perfectPhotoEnabled = host.UI_DrawSwitchToggle(new Rect(20f, num, 280f, 25f), perfectPhotoEnabled, "Perfect Photo");
-            if (perfectPhotoEnabled != prevPerfectPhotoEnabled)
-            {
-                Log("Perfect Photo changed: " + (perfectPhotoEnabled ? "enabled" : "disabled"));
-                pendingSaveAt = Time.unscaledTime + 2f;
-            }
-            num += 30;
-
-            // Change cascade lives in SetCaptureModeFromUi (shared with the UGUI twin — one
-            // implementation, no drift). The drawer result lands in a LOCAL first (the nextEnabled
-            // idiom above): assigning the field before the call would trip the setter's own
-            // already-current guard and silently skip the whole cascade AND the debounced save.
-            int nextCaptureMode = host.UI_DrawSingleSelectDropdown(new Rect(20f, num + 22f, 260f, 28f), "Capture Mode", CaptureModeOptions, captureMode, ref captureModeDropdownOpen);
-            if (nextCaptureMode != captureMode)
-            {
-                Log("Capture Mode changed: " + CaptureModeOptions[nextCaptureMode]);
-                SetCaptureModeFromUi(nextCaptureMode, host);
-            }
-            num += captureModeDropdownOpen ? 122 : 80;
-
-            GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Status: {0}", host.UI_Localize(GetDisplayStatus(lastStatus))), small);
-            num += 24;
-            GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Tool: {0}", host.UI_Localize(GetDisplayToolStatus(lastToolStatus))), small);
-            num += 24;
-            GUI.Label(new Rect(20f, num, 360f, 20f), host.UI_LocalizeFormat("Birds: {0} caught | {1} scared", sessionCatchCount, sessionScaredCount), small);
-            num += 24;
-
-            GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Catch Cooldown: {0:F1}s", catchCooldown), small);
-            num += 22;
-            float prevCooldown = catchCooldown;
-            catchCooldown = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), catchCooldown, 0.2f, 10f) * 10f) / 10f;
-            if (Math.Abs(catchCooldown - prevCooldown) > 0.0001f)
-            {
-                Log("Catch Cooldown changed to " + catchCooldown.ToString("F1") + "s");
-                pendingSaveAt = Time.unscaledTime + 2f; // debounce
-            }
-            num += 30;
-
-            GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Scan Range: {0:F0}m", scanRange), small);
-            num += 22;
-            float prevRange = scanRange;
-            scanRange = Mathf.Round(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), scanRange, 1f, 100f));
-            if (Math.Abs(scanRange - prevRange) > 0.0001f)
-            {
-                Log("Scan Range changed to " + scanRange.ToString("F0") + "m");
-                pendingSaveAt = Time.unscaledTime + 2f; // debounce
-            }
-            num += 30;
-
-            GUI.Label(new Rect(20f, num, 320f, 20f), host.UI_LocalizeFormat("Multi-Catch Limit: {0}", multiCatchLimit), small);
-            num += 22;
-            int prevMulti = multiCatchLimit;
-            multiCatchLimit = Mathf.RoundToInt(host.UI_DrawAccentSlider(new Rect(20f, num, 260f, 20f), (float)multiCatchLimit, 1f, MaxMultiCatchLimit));
-            if (multiCatchLimit != prevMulti)
-            {
-                Log("Multi-Catch Limit changed to " + multiCatchLimit);
-                pendingSaveAt = Time.unscaledTime + 2f; // debounce
-            }
-            num += 30;
-
-            return num;
         }
 
 

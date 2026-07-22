@@ -907,15 +907,15 @@ namespace HeartopiaMod
                 return;
             }
             this.uiScale = normalized;
-            this.KeepMenuWindowOnScreen(this.GetUiScale());
+            // (The IMGUI KeepMenuWindowOnScreen clamp is gone with the IMGUI window — Phase 5.
+            // The shell re-clamps itself via ProcessUguiShellScaleOnUpdate → SetUguiWindowScale.)
             this.ApplyUiThemeChangedClampAndArm();
         }
 
-        // IMGUI UiKit.cs:1407-1412 — arms unconditionally on click, source parity.
+        // IMGUI UiKit.cs source parity: arms unconditionally on click.
         private void OnUguiThemeScaleResetClicked()
         {
             this.uiScale = 1f;
-            this.KeepMenuWindowOnScreen(this.GetUiScale());
             this.ApplyUiThemeChangedClampAndArm();
         }
 

@@ -771,37 +771,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private float DrawWildAnimalGiftSection(float startY)
-        {
-            float num = startY;
-            const float left = 40f;
-            const float width = 520f;
-
-            Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
-            GUIStyle labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
-            labelStyle.normal.textColor = textColor;
-
-            Rect actionRect = new Rect(left, num, width, 74f);
-            GUI.Box(actionRect, string.Empty, this.themePanelStyle ?? GUI.skin.box);
-            this.DrawCardOutline(actionRect, 1f);
-            GUI.Label(new Rect(actionRect.x + 16f, actionRect.y + 12f, 240f, 20f), "WILD ANIMAL GIFTS", labelStyle);
-
-            bool busy = this.wildAnimalGiftCoroutine != null || Time.realtimeSinceStartup < this.wildAnimalGiftBusyUntil;
-            GUI.enabled = !busy;
-            if (GUI.Button(new Rect(actionRect.x + 16f, actionRect.y + 34f, 220f, 32f), this.L("Claim All Wild Gifts"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartWildAnimalClaimAllGifts(silent: false);
-            }
-
-            GUI.enabled = true;
-
-            GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
-            statusStyle.normal.textColor = new Color(textColor.r, textColor.g, textColor.b, 0.82f);
-            num += 84f;
-            GUI.Label(new Rect(left, num, width, 36f), this.wildAnimalGiftLastStatus ?? string.Empty, statusStyle);
-            num += 44f;
-            return num;
-        }
 
         private void WildAnimalGiftLog(string message)
         {

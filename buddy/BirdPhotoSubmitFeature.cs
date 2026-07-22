@@ -555,27 +555,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private float DrawBirdPhotoSubmitControls(float startY)
-        {
-            float y = startY;
-            const float left = 40f;
-            const float width = 520f;
-
-            bool busy = this.birdPhotoSubmitCoroutine != null || this.dailyQuestSubmitCoroutine != null || this.dailyClaimsCoroutine != null;
-            GUI.enabled = !busy;
-            if (GUI.Button(new Rect(left, y, 240f, 32f), this.L("Submit Bird Photo"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartBirdPhotoAutoSubmit(silent: false);
-            }
-
-            GUI.enabled = true;
-            y += 40f;
-
-            GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
-            statusStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.82f);
-            GUI.Label(new Rect(left, y, width, 28f), this.birdPhotoSubmitLastStatus ?? string.Empty, statusStyle);
-            return y + 36f;
-        }
 
         private void BirdPhotoSubmitLog(string message)
         {

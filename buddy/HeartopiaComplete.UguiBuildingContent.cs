@@ -898,7 +898,7 @@ namespace HeartopiaMod
             try
             {
                 bool shellOpen = this.uguiShell != null && this.IsUguiWindowVisible(this.uguiShell.Window);
-                bool show = this.buildingMovePanelActive && !this.showMenu && !shellOpen;
+                bool show = this.buildingMovePanelActive && !shellOpen; // showMenu retired (Phase 5)
 
                 UguiBuildingMovePanelHandle handle = this.uguiBuildingMovePanel;
                 if (handle == null)

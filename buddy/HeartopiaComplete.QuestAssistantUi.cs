@@ -26,18 +26,12 @@ namespace HeartopiaMod
     // small; follow the RadarConfigData pattern (HeartopiaComplete.ConfigTypes.cs) if wanted later.
     public partial class HeartopiaComplete
     {
-        private const int QuestAssistantWindowId = 0x5B20;
-
+        // Phase 5: the IMGUI floating window (rect/scroll/collapse/mouse-over state + the
+        // GUI.Window id) is gone — HeartopiaComplete.UguiQuestAssistantWindowContent.cs owns its
+        // own window state. Only the shared visibility flag remains: BOTH the UGUI window's gate
+        // and the Daily Quests tab's Show/Hide button go through it (QuestAssistantToggleWindow).
         private bool questAssistantWindowVisible = false;
-        private Rect questAssistantWindowRect = new Rect(160f, 160f, 420f, 450f);
-        private bool questAssistantWindowMouseOver = false;
         private int questAssistantFocusedTaskId = 0;
-        private Vector2 questAssistantScrollPos = Vector2.zero;
-        // Collapse-to-title-bar: when collapsed the window shrinks to just its header row; the full
-        // height is remembered so expanding restores it. Toggled by the header collapse button.
-        private const float QuestAssistantCollapsedHeight = 30f;
-        private bool questAssistantWindowCollapsed = false;
-        private float questAssistantWindowExpandedHeight = 450f;
 
         // Collect auto-stop monitor (Phase 3 follow-up, 2026-07-02): tracks the one quest the
         // "start farming" button was pressed for and auto-stops Aura Farm/Foraging once its first
@@ -83,406 +77,15 @@ namespace HeartopiaMod
         // run once per item, not every OnGUI frame.
         private readonly Dictionary<int, int> questAssistantEntityTypeCache = new Dictionary<int, int>();
 
-        private void QuestAssistantToggleCollapse()
-        {
-            if (!this.questAssistantWindowCollapsed)
-            {
-                this.questAssistantWindowExpandedHeight = this.questAssistantWindowRect.height;
-                this.questAssistantWindowRect.height = QuestAssistantCollapsedHeight;
-                this.questAssistantWindowCollapsed = true;
-            }
-            else
-            {
-                this.questAssistantWindowRect.height = this.questAssistantWindowExpandedHeight;
-                this.questAssistantWindowCollapsed = false;
-            }
-        }
 
         private void QuestAssistantToggleWindow()
         {
             this.questAssistantWindowVisible = !this.questAssistantWindowVisible;
-            if (!this.questAssistantWindowVisible)
-            {
-                this.questAssistantWindowMouseOver = false;
-            }
         }
 
-        private void DrawQuestAssistantWindow()
-        {
-            if (!this.questAssistantWindowVisible)
-            {
-                this.questAssistantWindowMouseOver = false;
-                return;
-            }
 
-            float scale = this.GetUiScale();
-            Matrix4x4 prevMatrix = GUI.matrix;
-            Color pc = GUI.color, pb = GUI.backgroundColor, pcc = GUI.contentColor;
-            try
-            {
-                GUI.color = Color.white;
-                GUI.backgroundColor = Color.white;
-                GUI.contentColor = Color.white;
-                GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
-                this.questAssistantWindowRect = GUI.Window(
-                    QuestAssistantWindowId, this.questAssistantWindowRect, (GUI.WindowFunction)this.DrawQuestAssistantWindowContents,
-                    GUIContent.none, this.themeWindowStyle ?? GUI.skin.window);
-
-                float maxX = Mathf.Max(0f, (Screen.width / Mathf.Max(scale, 0.001f)) - 80f);
-                float maxY = Mathf.Max(0f, (Screen.height / Mathf.Max(scale, 0.001f)) - 40f);
-                this.questAssistantWindowRect.x = Mathf.Clamp(this.questAssistantWindowRect.x, 0f, maxX);
-                this.questAssistantWindowRect.y = Mathf.Clamp(this.questAssistantWindowRect.y, 0f, maxY);
-            }
-            finally
-            {
-                GUI.matrix = prevMatrix;
-                GUI.color = pc;
-                GUI.backgroundColor = pb;
-                GUI.contentColor = pcc;
-            }
-
-            Vector2 sp = new Vector2(Input.mousePosition.x, (float)Screen.height - Input.mousePosition.y);
-            Vector2 lp = scale > 0.001f ? sp / scale : sp;
-            this.questAssistantWindowMouseOver = this.questAssistantWindowRect.Contains(lp);
-            if (this.questAssistantWindowMouseOver)
-            {
-                Event e = Event.current;
-                if (e != null && e.isMouse && e.type != EventType.Used)
-                {
-                    e.Use();
-                }
-            }
-        }
-
-        private void DrawQuestAssistantWindowContents(int id)
-        {
-            float w = this.questAssistantWindowRect.width;
-            float h = this.questAssistantWindowRect.height;
-
-            Color basePanel = new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Max(this.uiPanelAlpha, 0.9f));
-            this.DrawRoundedPanel(new Rect(0f, 0f, w, h), 10f, basePanel, Color.clear, 0f, Color.clear);
-
-            GUIStyle title = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold };
-            title.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(12f, 4f, w - 132f, 20f), "Quest Assistant", title);
-
-            // Hide the whole panel (far right). Re-open it from the mod menu's "Show Floating Window"
-            // button. Drawn before the collapsed early-return so it also works while collapsed.
-            if (GUI.Button(new Rect(w - 28f, 4f, 20f, 20f), "×", GUI.skin.button))
-            {
-                this.QuestAssistantToggleWindow();
-            }
-
-            // Collapse/expand toggle. When collapsed only this header row shows.
-            if (GUI.Button(new Rect(w - 52f, 4f, 20f, 20f), this.questAssistantWindowCollapsed ? "+" : "–", GUI.skin.button))
-            {
-                this.QuestAssistantToggleCollapse();
-            }
-
-            if (this.questAssistantWindowCollapsed)
-            {
-                // Thin title bar only — skip Refresh/status/lists/detail. Keep it draggable.
-                GUI.DragWindow(new Rect(0f, 0f, w, QuestAssistantCollapsedHeight));
-                return;
-            }
-
-            // Width 70 (was 58): GUI.skin.button's font is Segoe UI now, wider than the old
-            // default IMGUI font "Refresh" was originally sized for — it no longer fit.
-            if (GUI.Button(new Rect(w - 128f, 4f, 70f, 20f), "Refresh", GUI.skin.button))
-            {
-                this.QuestAssistantOnDumpButtonClicked();
-            }
-
-            GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 10, wordWrap = true };
-            statusStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.8f);
-            GUI.Label(new Rect(12f, 26f, w - 24f, 16f), this.questAssistantLastStatus ?? string.Empty, statusStyle);
-
-            float extraRowTop = 44f;
-            int availableCount = this.questAssistantAvailable != null ? this.questAssistantAvailable.Count : 0;
-            if (availableCount > 0)
-            {
-                GUI.Label(new Rect(12f, extraRowTop, w - 150f, 22f), "Available to accept: " + availableCount, statusStyle);
-                GUI.enabled = this.questAssistantAcceptAllCoroutine == null;
-                if (GUI.Button(new Rect(w - 130f, extraRowTop - 2f, 118f, 22f), "Accept All", GUI.skin.button))
-                {
-                    this.QuestAssistantOnAcceptAllClicked();
-                }
-
-                GUI.enabled = true;
-                extraRowTop += 24f;
-            }
-
-            int readyToSubmitCount = this.QuestAssistantCountReadyToSubmit();
-            if (readyToSubmitCount > 0)
-            {
-                GUI.Label(new Rect(12f, extraRowTop, w - 150f, 22f), "Ready to submit: " + readyToSubmitCount, statusStyle);
-                GUI.enabled = !this.QuestAssistantIsDailyQuestSubmitBusy();
-                if (GUI.Button(new Rect(w - 130f, extraRowTop - 2f, 118f, 22f), "Submit Items", GUI.skin.button))
-                {
-                    this.StartDailyQuestAutoSubmitItems(false);
-                }
-
-                GUI.enabled = true;
-                extraRowTop += 24f;
-            }
-
-            float listTop = extraRowTop == 44f ? 46f : extraRowTop;
-            const float detailHeight = 150f;
-            float listHeight = Mathf.Max(40f, h - listTop - detailHeight - 12f);
-
-            List<QuestSnapshot> quests = this.questAssistantSnapshot;
-            Rect listOuter = new Rect(12f, listTop, w - 24f, listHeight);
-            const float rowHeight = 22f;
-            float contentHeight = quests != null ? quests.Count * rowHeight : 0f;
-            Rect listInner = new Rect(0f, 0f, listOuter.width - 16f, Mathf.Max(contentHeight, listOuter.height));
-
-            this.questAssistantScrollPos = GUI.BeginScrollView(listOuter, this.questAssistantScrollPos, listInner);
-            if (quests == null || quests.Count == 0)
-            {
-                GUI.Label(new Rect(2f, 2f, listInner.width - 4f, 20f), "(no active quests — click Refresh)", statusStyle);
-            }
-            else
-            {
-                bool focusValid = false;
-                for (int i = 0; i < quests.Count; i++)
-                {
-                    if (quests[i].TaskId == this.questAssistantFocusedTaskId)
-                    {
-                        focusValid = true;
-                        break;
-                    }
-                }
-
-                if (!focusValid)
-                {
-                    this.questAssistantFocusedTaskId = quests[0].TaskId;
-                }
-
-                for (int i = 0; i < quests.Count; i++)
-                {
-                    QuestSnapshot q = quests[i];
-                    bool isFocused = q.TaskId == this.questAssistantFocusedTaskId;
-                    Rect rowRect = new Rect(2f, i * rowHeight, listInner.width - 4f, rowHeight - 2f);
-
-                    GUIStyle rowStyle = new GUIStyle(GUI.skin.button) { fontSize = 11, alignment = TextAnchor.MiddleLeft };
-                    Color prevBg = GUI.backgroundColor;
-                    GUI.backgroundColor = isFocused
-                        ? new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB, 0.85f)
-                        : new Color(1f, 1f, 1f, 0.12f);
-
-                    if (GUI.Button(rowRect, "  " + q.Name + "   " + QuestAssistantSummarizeProgress(q), rowStyle))
-                    {
-                        this.questAssistantFocusedTaskId = q.TaskId;
-                    }
-
-                    GUI.backgroundColor = prevBg;
-                }
-            }
-
-            GUI.EndScrollView();
-
-            float detailTop = listTop + listHeight + 8f;
-            Rect detailRect = new Rect(12f, detailTop, w - 24f, detailHeight);
-            this.DrawCardOutline(detailRect);
-
-            QuestSnapshot focused = null;
-            if (quests != null)
-            {
-                for (int i = 0; i < quests.Count; i++)
-                {
-                    if (quests[i].TaskId == this.questAssistantFocusedTaskId)
-                    {
-                        focused = quests[i];
-                        break;
-                    }
-                }
-            }
-
-            if (focused == null)
-            {
-                GUI.Label(new Rect(detailRect.x + 6f, detailRect.y + 4f, detailRect.width - 12f, 20f), "(select a quest above)", statusStyle);
-            }
-            else
-            {
-                float dy = detailRect.y + 4f;
-                GUIStyle detailTitle = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, wordWrap = true };
-                detailTitle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-                GUI.Label(new Rect(detailRect.x + 6f, dy, detailRect.width - 12f, 20f), focused.Name, detailTitle);
-                dy += 20f;
-
-                GUI.Label(new Rect(detailRect.x + 6f, dy, detailRect.width - 12f, 16f), "Objective: " + QuestAssistantDescribeObjectiveKind(focused.ObjectiveKind), statusStyle);
-                dy += 18f;
-
-                float actionButtonY = detailRect.yMax - 30f;
-                for (int c = 0; c < focused.Conditions.Count && dy < actionButtonY - 4f; c++)
-                {
-                    ConditionSnapshot cond = focused.Conditions[c];
-                    string line = "- " + cond.Description + " (" + cond.Current + "/" + cond.Needed + ")" + (cond.Complete ? " (done)" : string.Empty);
-                    GUI.Label(new Rect(detailRect.x + 6f, dy, detailRect.width - 12f, 32f), line, statusStyle);
-                    dy += 32f;
-                }
-
-                if (focused.ObjectiveKind == QuestObjectiveKind.Collect)
-                {
-                    List<int> targetIds = focused.ObjectiveTargetIds != null && focused.ObjectiveTargetIds.Count > 0
-                        ? focused.ObjectiveTargetIds
-                        : new List<int> { focused.ObjectiveTargetId };
-                    bool monitoringThis = this.questAssistantCollectMonitorActive && this.questAssistantCollectMonitorTaskId == focused.TaskId;
-                    string itemSummary = QuestAssistantSummarizeItemNames(targetIds);
-                    string label = monitoringThis ? ("Stop farming " + itemSummary) : ("Enable radar for " + itemSummary + " + start farming");
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        if (monitoringThis)
-                        {
-                            this.QuestAssistantStopCollectMonitor("stopped manually");
-                        }
-                        else
-                        {
-                            this.QuestAssistantStartCollect(targetIds, focused.TaskId);
-                        }
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.TalkToNpc)
-                {
-                    int npcStaticId = focused.ObjectiveTargetIds != null && focused.ObjectiveTargetIds.Count > 0
-                        ? focused.ObjectiveTargetIds[0]
-                        : focused.ObjectiveTargetId;
-                    string label = "Talk to NPC #" + npcStaticId + " (auto-teleport)";
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        this.QuestAssistantOnTalkToNpcClicked(focused, npcStaticId);
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.SubmitToNpc)
-                {
-                    // Deliberately NOT worded "Submit items" — some CanSubmit-at-an-NPC quests need no
-                    // item hand-off at all (talk/flag-only completion, e.g. "Naughty's Treasure",
-                    // progress doc §29), and whether items are involved isn't known without an
-                    // AuraMono read the button label can't afford to do every OnGUI frame.
-                    string label = "Complete via NPC #" + focused.SubmitNpcId + " — no teleport";
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        this.QuestAssistantOnSubmitToNpcClicked(focused);
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.CatchBird)
-                {
-                    bool monitoringThis = this.questAssistantBirdMonitorActive && this.questAssistantBirdMonitorTaskId == focused.TaskId;
-                    string label = monitoringThis ? "Stop bird farm" : "Start bird farm (auto-catch + auto-exchange)";
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        if (monitoringThis)
-                        {
-                            this.QuestAssistantStopBirdMonitor("stopped manually");
-                        }
-                        else
-                        {
-                            this.QuestAssistantStartCatchBird(focused.TaskId);
-                        }
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.Craft)
-                {
-                    int recipeId = focused.ObjectiveTargetId;
-                    string label = "Craft recipe #" + recipeId + " (remote, no Workbench trip)";
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        this.QuestAssistantOnCraftClicked(focused, recipeId);
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.GoToArea)
-                {
-                    int areaId = focused.ObjectiveTargetId;
-                    string label = "Teleport to area #" + areaId + " (Go there)";
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        this.QuestAssistantOnGoToAreaClicked(focused, areaId);
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.EnterArea)
-                {
-                    int areaId = focused.ObjectiveTargetId;
-                    string label = "Enter area #" + areaId + " (report arrival)";
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        this.QuestAssistantOnEnterAreaClicked(focused, areaId);
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.HomelandFarm)
-                {
-                    bool fertilize = this.QuestAssistantActiveHomelandFarmIsFertilize(focused);
-                    bool booster = fertilize && this.QuestAssistantActiveHomelandFarmEffectType(focused) == HomelandFarmFertilizerEffectGrowthRate;
-                    // Flower seeds can't be planted by the crop sow command (separate flower-bed
-                    // system) — show a disabled button explaining that instead of a dud action (§50).
-                    bool sowBlocked = !fertilize && !this.QuestAssistantActiveSowSeedsAreCropSeeds(focused, out _, out _);
-                    if (sowBlocked)
-                    {
-                        GUI.enabled = false;
-                        GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), "Flower seeds — plant manually (auto-sow is crops-only)", this.themePrimaryButtonStyle ?? GUI.skin.button);
-                        GUI.enabled = true;
-                    }
-                    else
-                    {
-                        string label = booster
-                            ? "Apply Growth Booster in radius"
-                            : (fertilize ? "Fertilize crops in radius" : "Sow crops in radius");
-                        if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                        {
-                            this.QuestAssistantOnHomelandFarmClicked(focused, fertilize);
-                        }
-                    }
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.PurchaseItem)
-                {
-                    GUI.enabled = this.questAssistantPurchaseCoroutine == null;
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), "Buy quest items from shop", this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        this.QuestAssistantOnPurchaseItemClicked(focused);
-                    }
-
-                    GUI.enabled = true;
-                }
-
-                else if (focused.ObjectiveKind == QuestObjectiveKind.CatchFish && focused.ObjectiveAreaId > 0)
-                {
-                    // Location-bound fishing quest ("Catch N fish at <place>", Area trackMark): one
-                    // click teleports into the zone, turns Auto Fish Shadow Net on, and the fish
-                    // monitor turns it back off when the count is reached / the quest completes. §55.
-                    string label = this.questAssistantFishMonitorActive
-                        ? "Auto-fishing for this quest... (click to stop)"
-                        : "Teleport to fishing spot & auto-fish";
-                    if (GUI.Button(new Rect(detailRect.x + 6f, actionButtonY, detailRect.width - 12f, 26f), label, this.themePrimaryButtonStyle ?? GUI.skin.button))
-                    {
-                        this.QuestAssistantOnCatchFishClicked(focused);
-                    }
-                }
-
-                // Phase 5 contextual action buttons (cook) attach the same way once implemented —
-                // the classifier already has everything they need.
-            }
-
-            GUI.DragWindow(new Rect(0f, 0f, w, 22f));
-        }
-
-        private static string QuestAssistantSummarizeProgress(QuestSnapshot q)
-        {
-            if (q.Conditions == null || q.Conditions.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            ConditionSnapshot first = q.Conditions[0];
-            return "(" + first.Current + "/" + first.Needed + ")";
-        }
-
+        // Kept post-IMGUI: the UGUI Quest Assistant window's detail block renders this
+        // (HeartopiaComplete.UguiQuestAssistantWindowContent.cs).
         private static string QuestAssistantDescribeObjectiveKind(QuestObjectiveKind kind)
         {
             switch (kind)
@@ -502,6 +105,18 @@ namespace HeartopiaMod
                 default: return "(not automatable yet)";
             }
         }
+
+        private static string QuestAssistantSummarizeProgress(QuestSnapshot q)
+        {
+            if (q.Conditions == null || q.Conditions.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            ConditionSnapshot first = q.Conditions[0];
+            return "(" + first.Current + "/" + first.Needed + ")";
+        }
+
 
         // ===== Phase 3 — Collect button: best-effort radar category + Aura Farm + Foraging =====
         //

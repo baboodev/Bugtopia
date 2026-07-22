@@ -3612,11 +3612,6 @@ namespace HeartopiaMod
             return this.L("Unavailable");
         }
 
-        private void DrawFoodRepairStatusRow(Rect labelRect, Rect valueRect, string label, string value, GUIStyle labelStyle, GUIStyle valueStyle)
-        {
-            GUI.Label(labelRect, label, labelStyle);
-            GUI.Label(valueRect, value, valueStyle);
-        }
 
         private bool TryCacheEnergyTextObject()
         {

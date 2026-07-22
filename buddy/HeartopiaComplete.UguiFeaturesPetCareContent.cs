@@ -1406,7 +1406,8 @@ namespace HeartopiaMod
             handle.FoodSearchApplied = text;
             this.petFeedFoodSearchText = text;
             this.petFeedFoodDropdownScrollIndex = 0;   // :484 — field write only, never read here
-            this.petFeedFoodScrollbarDragging = false; // :485
+            // (:485's petFeedFoodScrollbarDragging reset is gone — the IMGUI scrollbar died with
+            // the IMGUI Pet Care tab in Phase 5.)
             this.ResetUguiFeaturesPetCareFoodListScroll(handle);
             if (this.petFeedFoodDropdownOpen)
             {

@@ -262,7 +262,8 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (this.showMenu)
+            // "Menu open" = any MODAL registry surface (the UGUI shell) — showMenu is retired.
+            if (this.IsAnyModalInputSurfaceOpen())
             {
                 this.AutoIceSkatingSetStatus("Paused (menu open).", "menu-open");
                 return;
@@ -4038,135 +4039,5 @@ namespace HeartopiaMod
             return !this.TryAutoIceSkatingAuraHashSetContainsInt(usedActions, actionId);
         }
 
-        private float DrawExtraTab(float startY)
-        {
-            const float left = 40f;
-            const float toggleWidth = 520f;
-            const float toggleHeight = 28f;
-            float y = startY + 8f;
-            Color textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB);
-            GUIStyle labelStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 14,
-                wordWrap = true,
-                normal = { textColor = textColor }
-            };
-            GUIStyle headerStyle = new GUIStyle(labelStyle) { fontStyle = FontStyle.Bold };
-
-            GUI.Label(new Rect(left, y, 520f, 24f), "Auto Ice Skating (bot)", headerStyle);
-            y += 28f;
-
-            bool prevEnabled = this.autoIceSkatingEnabled;
-            this.autoIceSkatingEnabled = this.DrawWrappedSwitchToggle(
-                new Rect(left, y, toggleWidth, toggleHeight),
-                this.autoIceSkatingEnabled,
-                "Auto Ice Skating",
-                25f);
-            if (this.autoIceSkatingEnabled != prevEnabled)
-            {
-                if (this.autoIceSkatingEnabled)
-                {
-                    this.autoIceSkatingReflectionRetryAt = -999f;
-                    this.autoIceSkatingLastLoggedStatus = string.Empty;
-                    this.AutoIceSkatingResetPerformingTrackers();
-                    this.AutoIceSkatingInvalidateMaxUltimateCache();
-                    this.AutoIceSkatingLog("enabled", force: true);
-                }
-                else
-                {
-                    this.AutoIceSkatingResetPerformingTrackers();
-                    this.AutoIceSkatingInvalidateMaxUltimateCache();
-                    this.AutoIceSkatingSetStatus("Disabled.", force: true);
-                    this.AutoIceSkatingLog("disabled", force: true);
-                }
-
-                try { this.SaveKeybinds(false); } catch { }
-            }
-
-            y += 36f;
-            GUI.Label(new Rect(left, y, 520f, 44f),
-                "Automatically chains skate tricks at perfect timing. You still control movement.",
-                labelStyle);
-            y += 48f;
-
-            // Ultimate cost slider — minimum final score an ultimate must reach to be cast.
-            GUI.Label(new Rect(left, y, 520f, 22f), "Ultimate cost (min score): " + this.autoIceSkatingMinUltimateScore, labelStyle);
-            y += 24f;
-            float newMinScore = this.DrawAccentSlider(
-                new Rect(left, y, 320f, 20f),
-                this.autoIceSkatingMinUltimateScore,
-                0f,
-                AutoIceSkatingMinUltimateScoreSliderMax);
-            int roundedMinScore = Mathf.RoundToInt(newMinScore / 50f) * 50;
-            if (roundedMinScore != this.autoIceSkatingMinUltimateScore)
-            {
-                this.autoIceSkatingMinUltimateScore = roundedMinScore;
-                this.AutoIceSkatingInvalidateMaxUltimateCache();
-                try { this.SaveKeybinds(false); } catch { }
-            }
-
-            y += 30f;
-
-            bool prevOnlyX2 = this.autoIceSkatingOnlyX2Ultimate;
-            this.autoIceSkatingOnlyX2Ultimate = this.DrawWrappedSwitchToggle(
-                new Rect(left, y, toggleWidth, toggleHeight),
-                this.autoIceSkatingOnlyX2Ultimate,
-                "Only x2 ultimate (skip x1)",
-                22f);
-            if (this.autoIceSkatingOnlyX2Ultimate != prevOnlyX2)
-            {
-                try { this.SaveKeybinds(false); } catch { }
-            }
-
-            y += 32f;
-
-            bool prevLast30s = this.autoIceSkatingLast30sUltimate;
-            this.autoIceSkatingLast30sUltimate = this.DrawWrappedSwitchToggle(
-                new Rect(left, y, toggleWidth, toggleHeight),
-                this.autoIceSkatingLast30sUltimate,
-                "Last 30s ultimate (x1 when timer < 30s)",
-                22f);
-            if (this.autoIceSkatingLast30sUltimate != prevLast30s)
-            {
-                try { this.SaveKeybinds(false); } catch { }
-            }
-
-            y += 32f;
-
-            bool prevPerfectMove = this.autoIceSkatingPerfectMove;
-            this.autoIceSkatingPerfectMove = this.DrawWrappedSwitchToggle(
-                new Rect(left, y, toggleWidth, toggleHeight),
-                this.autoIceSkatingPerfectMove,
-                "Perfect move (off: chain moves as soon as available)",
-                22f);
-            if (this.autoIceSkatingPerfectMove != prevPerfectMove)
-            {
-                try { this.SaveKeybinds(false); } catch { }
-            }
-
-            y += 32f;
-
-            bool prevPreferNew = this.autoIceSkatingPreferNewMove;
-            this.autoIceSkatingPreferNewMove = this.DrawWrappedSwitchToggle(
-                new Rect(left, y, toggleWidth, toggleHeight),
-                this.autoIceSkatingPreferNewMove,
-                "Prefer new move (prioritize unused tricks)",
-                22f);
-            if (this.autoIceSkatingPreferNewMove != prevPreferNew)
-            {
-                try { this.SaveKeybinds(false); } catch { }
-            }
-
-            y += 40f;
-            GUI.Label(new Rect(left, y, 520f, 22f), "Status: " + this.autoIceSkatingLastStatus, labelStyle);
-            y += 24f;
-            if (AutoIceSkatingLogsEnabled)
-            {
-                GUI.Label(new Rect(left, y, 520f, 22f), "Logs: BepInEx/LogOutput.log or MelonLoader/Latest.log", labelStyle);
-                y += 24f;
-            }
-
-            return y + 16f;
-        }
     }
 }

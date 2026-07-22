@@ -215,7 +215,6 @@ namespace HeartopiaMod
         private int autoRepairUseTarget = 2;
         private readonly string[] autoRepairOptions = { "Repair Kit", "Crafty Repair Kit" };
         private readonly string[] autoRepairKeys = { "toolrestorer_toolrestorer_1", "toolrestorer_toolrestorer_2" };
-        private bool autoRepairDropdownOpen = false;
         private bool repairTeleportBackEnabled = false;
         private bool autoRepairOnToastEnabled = false; // Toggle for auto repair via live durability detection
         private bool autoEatOnToastEnabled = false; // Toggle for auto eat via toast notification
@@ -248,8 +247,7 @@ namespace HeartopiaMod
         private readonly string[] autoEatFoodOptions = { "Bad Food", "Blue Jam","Mix Jam", "Bake Mushroom", "Any Food", "Custom Food"};
         private readonly string[] autoEatFoodKeys = { "food_badfood", "food_bluejam", "food_mixjam", "food_bakemushroom", "food_", "food_custom" };
         private string autoEatCustomFoodName = "";
-        private bool autoEatFoodDropdownOpen = false;
-        private bool customFoodPickMode = false; 
+        private bool customFoodPickMode = false;
         private string lastClickedBagFood = "";
         private string[] scannedBagFoods = null;
         private Dictionary<string, Texture2D> scannedBagFoodTextures = new Dictionary<string, Texture2D>(); // Cached food textures (copied to survive bag scrolling)
@@ -525,10 +523,10 @@ namespace HeartopiaMod
             this.ApplyMasterConsoleVisibility();
             HeartopiaComplete.Instance = this;
             ModLogger.Msg("Bugtopia initialized!");
-            // Input-ownership registry (HeartopiaComplete.CameraInput.cs): the 3 always-existing
-            // surfaces (mod menu + the two floating panels) register once here; the UGUI shell and
-            // PoC register themselves on first build.
-            this.RegisterBuiltinInputOwnershipSurfaces();
+            // Input-ownership registry (HeartopiaComplete.CameraInput.cs): every surviving mod
+            // surface is UGUI and registers itself on first build (shell = modal;
+            // building move panel / quest assistant window = floating), so nothing registers
+            // at init anymore — the IMGUI menu and both IMGUI floating panels are retired.
             this.InitializeLocalization();
             this.LoadRadarSpeciesIconIndex();
             this.LoadCustomTeleports();
@@ -621,7 +619,7 @@ namespace HeartopiaMod
             // active check (below) installed it too late and missed the spawn burst.
             this.EnsureNetCookEventHooks();
             this.UpdateNetCookStatusDiagnosticsOnUpdate();
-            if (this.netCookEnabled || this.netCookTargets.Count > 0 || (this.showMenu && this.selectedTab == 3 && this.automationSubTab == 5))
+            if (this.netCookEnabled || this.netCookTargets.Count > 0 || this.IsUguiShellFeaturesSubTabActive(UguiShellFeaturesMassCookSubIndex))
             {
                 this.UpdateNetCookRuntimeReadiness();
             }
@@ -634,7 +632,9 @@ namespace HeartopiaMod
             WarehouseBypassFeature.Update(this);
             this.EnsureSpawnVehicleResultHooks();
             this.TickSpawnVehicleResultTimeout();
-            this.UpdateTransferQtyHoldRepeat();
+            // (UpdateTransferQtyHoldRepeat is gone with the IMGUI Bag/Warehouse tab — the UGUI
+            // panel runs its own +/- hold-repeat with its own state,
+            // HeartopiaComplete.UguiBagWarehouseContent.cs.)
             this.ProcessPendingTransferListRescan();
             this.ProcessPendingAutoSellListRescan();
             this.UpdatePetPlayAutomation();
@@ -707,7 +707,6 @@ namespace HeartopiaMod
             this.ProcessLittleWhaleFinderOnUpdate();
             this.ProcessResearchMonitorOnUpdate();
             this.ProcessSanrioGachaFinderOnUpdate();
-            this.ProcessUguiPocOnUpdate();
             this.ProcessUguiShellOnUpdate();
             // Floating UGUI Building Move Panel — deliberately NOT inside ProcessUguiShellOnUpdate
             // (that early-returns until the shell is first built; this panel must auto-show with
@@ -718,6 +717,12 @@ namespace HeartopiaMod
             // shell never opened). Gated on questAssistantWindowVisible ALONE — its IMGUI twin has
             // no menu-state suppression to replicate.
             this.ProcessUguiQuestAssistantWindowOnUpdate();
+            // Theme dirty-consumption + debounced SaveUiTheme flush (HeartopiaComplete.UiKit.cs).
+            // Used to piggyback on EnsureThemeStyles at the top of OnGUI; with the IMGUI menu
+            // retired the UGUI theme tab is the only theme editor, so the tick must not depend on
+            // the IMGUI paint loop. Runs BEFORE ProcessUguiKitThemeOnUpdate so a dirty flag set
+            // this frame is consumed into MarkUguiKitThemeDirty before the kit's debounce check.
+            this.ProcessUiThemePersistenceOnUpdate();
             this.ProcessUguiKitThemeOnUpdate();
             this.ProcessUguiStatusOverlayOnUpdate();
             // UGUI toast stack (HeartopiaComplete.UguiToast.cs). Must tick every frame even while
@@ -768,24 +773,13 @@ namespace HeartopiaMod
             // Check for keybinds (Only if not currently rebinding and not just assigned)
             if (string.IsNullOrEmpty(this.keyBindingActive) && Time.unscaledTime - this.keyBindAssignedAt >= 0.2f)
             {
-                // UGUI proof-of-concept panel (HeartopiaComplete.UguiPoc.cs). Fixed key for the
-                // PoC — not a configurable keybind while it's evaluation-only.
-                if (Input.GetKeyDown(KeyCode.F9))
-                {
-                    this.ToggleUguiPocPanel();
-                }
-                // UGUI shell chrome preview (HeartopiaComplete.UguiShell.cs, Phase 2). Fixed key
-                // while it's placeholder-only.
-                if (Input.GetKeyDown(KeyCode.F10))
-                {
-                    this.ToggleUguiShell();
-                    // The shell is a MODAL input-ownership surface (the real-menu replacement),
-                    // so its toggle gets the same input-release grace the menu hotkey gets below.
-                    this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
-                }
+                // Main menu hotkey — Phase 5: the configurable keybind now owns the UGUI shell
+                // (the IMGUI menu is retired; the F10 dev shortcut and the F9 PoC key are gone).
+                // The shell is a MODAL input-ownership surface, so its toggle keeps the same
+                // input-release grace the old showMenu toggle had.
                 if (this.TryGetModHotkeyDown(this.keyToggleMenu))
                 {
-                    this.showMenu = !this.showMenu;
+                    this.ToggleUguiShell();
                     this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
                 }
                 if (this.TryGetModHotkeyDown(this.keyToggleRadar))
@@ -1222,10 +1216,9 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.showMenu && this.selectedTab == 3 && this.automationSubTab == 1)
-            {
-                this.RefreshFoodRepairUiStatusSnapshot();
-            }
+            // (The old "IMGUI menu open at Food & Repair" 1Hz snapshot refresh lived here; the
+            // UGUI twin refreshes itself while its sub-tab is active — see
+            // ProcessUguiShellFeaturesFoodRepairOnUpdate — so nothing remains to do per-frame.)
 
             // Update ID display
             this.UpdateIdDisplay();
@@ -2363,80 +2356,6 @@ namespace HeartopiaMod
             return string.Equals(keyName.Trim(), instance.keyToggleMenu.ToString(), StringComparison.OrdinalIgnoreCase);
         }
 
-        private List<(string label, Func<bool> isActive, Action setActive)> GetActiveTopSubTabs()
-        {
-            var tabs = new List<(string label, Func<bool> isActive, Action setActive)>();
-            if (this.selectedTab == 0)
-            {
-                tabs.Add(("Main", () => this.selfSubTab == 0, () => this.SetSelfSubTab(0)));
-                tabs.Add(("Building", () => this.selfSubTab == 1, () => this.SetSelfSubTab(1)));
-                tabs.Add(("Fun", () => this.selfSubTab == 2, () => this.SetSelfSubTab(2)));
-                tabs.Add(("Privacy", () => this.selfSubTab == 3, () => this.SetSelfSubTab(3)));
-                tabs.Add(("Game UI", () => this.selfSubTab == 4, () => this.SetSelfSubTab(4)));
-            }
-            else if (this.selectedTab == 2)
-            {
-                tabs.Add(("Foraging", () => this.autoFarmSubTab == 0, () => this.SetAutoFarmSubTab(0)));
-                tabs.Add(("Fishing", () => this.autoFarmSubTab == 1, () => this.SetAutoFarmSubTab(1)));
-                tabs.Add(("Insects", () => this.autoFarmSubTab == 2, () => this.SetAutoFarmSubTab(2)));
-                tabs.Add(("Birds", () => this.autoFarmSubTab == 3, () => this.SetAutoFarmSubTab(3)));
-                // Auto Draw quick link removed
-            }
-            else if (this.selectedTab == 3)
-            {
-                tabs.Add(("Main", () => this.automationSubTab == 0, () => this.SetAutomationSubTab(0)));
-                tabs.Add(("Food & Repair", () => this.automationSubTab == 1, () => this.SetAutomationSubTab(1)));
-                tabs.Add(("Snow Sculpting", () => this.automationSubTab == 2, () => this.SetAutomationSubTab(2)));
-                tabs.Add(("Auto Buy", () => this.automationSubTab == 3, () => this.SetAutomationSubTab(3)));
-                tabs.Add(("Auto Sell", () => this.automationSubTab == 4, () => this.SetAutomationSubTab(4)));
-                tabs.Add(("Mass Cook", () => this.automationSubTab == 5, () => this.SetAutomationSubTab(5)));
-                tabs.Add(("Puzzle", () => this.automationSubTab == 6, () => this.SetAutomationSubTab(6)));
-                tabs.Add(("Pet Care", () => this.automationSubTab == 7, () => this.SetAutomationSubTab(7)));
-            }
-            else if (this.selectedTab == 8)
-            {
-                tabs.Add(("Animal Care", () => this.newFeaturesSubTab == 0, () => this.SetNewFeaturesSubTab(0)));
-                tabs.Add(("Daily Quests", () => this.newFeaturesSubTab == 1, () => this.SetNewFeaturesSubTab(1)));
-                tabs.Add((this.L("homeland_farm.title"), () => this.newFeaturesSubTab == 2, () => this.SetNewFeaturesSubTab(2)));
-                tabs.Add((this.L("pictures.title"), () => this.newFeaturesSubTab == 3, () => this.SetNewFeaturesSubTab(3)));
-                tabs.Add(("Ice Skating", () => this.newFeaturesSubTab == 4, () => this.SetNewFeaturesSubTab(4)));
-                tabs.Add((this.L("extra.title"), () => this.newFeaturesSubTab == 5, () => this.SetNewFeaturesSubTab(5)));
-                tabs.Add((this.L("Sand Sculpture"), () => this.newFeaturesSubTab == 6, () => this.SetNewFeaturesSubTab(6)));
-                tabs.Add(("Sea Clean", () => this.newFeaturesSubTab == 7, () => this.SetNewFeaturesSubTab(7)));
-                // "Quest Assistant" sub-tab removed 2026-07-04 (§54) — its content moved into "Daily Quests".
-                // "Spawn Vehicle" sub-tab moved to the Teleport tab 2026-07-16 (didn't fit here).
-            }
-            else if (this.selectedTab == 4)
-            {
-                tabs.Add(("Main", () => this.radarSubTab == 0, () => this.SetRadarSubTab(0)));
-                tabs.Add(("Settings", () => this.radarSubTab == 1, () => this.SetRadarSubTab(1)));
-            }
-            else if (this.selectedTab == 5)
-            {
-                tabs.Add(("Home", () => this.teleportSubTab == 0, () => this.SetTeleportSubTab(0)));
-                tabs.Add(("Animal Care", () => this.teleportSubTab == 1, () => this.SetTeleportSubTab(1)));
-                tabs.Add(("NPCs", () => this.teleportSubTab == 2, () => this.SetTeleportSubTab(2)));
-                tabs.Add(("Locations", () => this.teleportSubTab == 3, () => this.SetTeleportSubTab(3)));
-                tabs.Add(("Events", () => this.teleportSubTab == 4, () => this.SetTeleportSubTab(4)));
-                tabs.Add(("House", () => this.teleportSubTab == 5, () => this.SetTeleportSubTab(5)));
-                tabs.Add(("Custom", () => this.teleportSubTab == 6, () => this.SetTeleportSubTab(6)));
-                tabs.Add(("XYZ", () => this.teleportSubTab == 7, () => this.SetTeleportSubTab(7)));
-                tabs.Add(("Spawn Vehicle", () => this.teleportSubTab == 8, () => this.SetTeleportSubTab(8)));
-            }
-            else if (this.selectedTab == 6)
-            {
-                // No sub-tabs for Bag / Warehouse
-            }
-            else if (this.selectedTab == 7)
-            {
-                tabs.Add(("Main", () => this.settingsSubTab == 0, () => this.SetSettingsSubTab(0)));
-                tabs.Add(("Keybinds", () => this.settingsSubTab == 1, () => this.SetSettingsSubTab(1)));
-                tabs.Add(("UI Theme", () => this.settingsSubTab == 2, () => this.SetSettingsSubTab(2)));
-                tabs.Add(("About", () => this.settingsSubTab == 3, () => this.SetSettingsSubTab(3)));
-                tabs.Add(("Logging", () => this.settingsSubTab == 4, () => this.SetSettingsSubTab(4)));
-            }
-            return tabs;
-        }
 
 
 
@@ -4417,31 +4336,9 @@ namespace HeartopiaMod
         // prefixes are gone (anti-cheat surface #4). Post-teleport facing settle countdown:
         private int playerRotationFramesRemaining = 0;
 
-        // IMGUI Theme
-        private bool themeInitialized = false;
-        private GUIStyle themeWindowStyle;
-        private GUIStyle themePanelStyle;
-        private GUIStyle themeContentStyle;
-        private GUIStyle themeSidebarButtonStyle;
-        private GUIStyle themeSidebarButtonActiveStyle;
-        private GUIStyle themePrimaryButtonStyle;
-        private GUIStyle themeDangerButtonStyle;
-        private GUIStyle themeTopTabStyle;
-        private GUIStyle themeTopTabActiveStyle;
-        // Baked 9-slice styles for the segmented sub-tabs and the active nav pill: a single
-        // pre-rendered texture keeps ring+fill corners aligned at fractional window positions
-        // (two stacked DrawRoundedPanel layers drift by a subpixel and leak corner fragments).
-        private GUIStyle themeSegContainerStyle;
-        private GUIStyle themeSegPlateStyle;
-        private GUIStyle themeToastCardStyle;
-        private GUIStyle themeRoundedWhiteStyle;
-        private GUIStyle themeCapsuleWhiteStyle;
-        private GUIStyle themeCapsuleGradientStyle;
-        private GUIStyle themeRoundedRingStyle;
-        private GUIStyle themeBigCardRingStyle;
-        private GUIStyle themeStatusOverlayFrameStyle;
-        private GUIStyle themeBigTintableStyle;
-        private GUIStyle themeSidebarShapeStyle;
+        // Theme texture pool (Phase 5: the IMGUI GUIStyle bake is gone with the IMGUI menu; the
+        // pool now backs the primitive sprites the surviving overlays use plus the UGUI theme
+        // tab's picker textures, and InvalidateThemeCache still destroys/rebuilds them on edits).
         private List<Texture2D> themeTextures = new List<Texture2D>();
         private Texture2D uiCircleTexture;
         private Texture2D uiHueTexture;
@@ -4504,7 +4401,8 @@ namespace HeartopiaMod
         private const string HideAndSeekMorphMarkerPrefix = "HideAndSeekMorphMarker_";
 
         // Token: 0x0400000A RID: 10
-        private bool showMenu = true;
+        // (showMenu is gone — Phase 5 retired the IMGUI menu. "Is the mod menu open" is now the
+        // UGUI shell's visibility via the input-ownership registry: IsAnyModalInputSurfaceOpen.)
         private bool notificationsEnabled = true;
         private int notificationPosition = 5;
         private bool hideIdEnabled = true;
@@ -4532,7 +4430,6 @@ namespace HeartopiaMod
         private bool showStatusOverlay = false;
         private float blockInputReleaseUntil = 0f;
         private List<HeartopiaComplete.MenuNotification> menuNotifications = new List<HeartopiaComplete.MenuNotification>();
-        private bool notificationPositionDropdownOpen = false;
         private bool eventSystemBlockedByMenu = false;
         private bool eventSystemPrevEnabled = true;
         private EventSystem blockedEventSystem = null;
@@ -4547,29 +4444,6 @@ namespace HeartopiaMod
             "Middle Right",
             "Bottom Right"
         };
-
-        // Token: 0x0400000B RID: 11
-        // ========== GUI SIZE AND POSITION ==========
-        // Format: new Rect(X, Y, Width, Height)
-        // 
-        // X: Position from left edge (50 = left side)
-        // Y: Position from top edge (50 = top)
-        // Width: How WIDE the menu is (300 = default, 400 = wider, 250 = narrower)
-        // Height: How TALL the menu is (510 = default, 600 = taller, 400 = shorter)
-        // 
-        // EXAMPLES:
-        // Bigger menu: new Rect(50f, 50f, 400f, 650f)
-        // Smaller menu: new Rect(50f, 50f, 250f, 450f)
-        // 
-        private Rect windowRect = new Rect(120f, 50f, 1060f, 680f);
-        private float targetWindowHeight = 680f;
-        private float targetWindowWidth = 1060f;
-
-        // Token: 0x0400000C RID: 12
-        private int selectedTab = 0;
-
-        // Token: 0x0400000D RID: 13
-        private bool wasMouseOverMenuLastFrame = false;
 
         // Token: 0x0400000E RID: 14
         private int teleportFramesRemaining = 0;
@@ -4758,12 +4632,7 @@ namespace HeartopiaMod
         };
 
         // Token: 0x04000015 RID: 21
-        private Vector2 fastTravelScrollPosition;
-        private Vector2 tabScrollPos = Vector2.zero;
-        private float tabDrawContentHeight = 0f;
-        private int settingsSubTab = 0;
         private string selectedLanguage = "en";
-        private bool localizationDropdownOpen = false;
 
         // UI Theme Settings — "Bugtopia 2.0" neutral ramp: one hue family bg0..bg3, accent
         // reserved for interactive/active elements (see DrawWindow / EnsureThemeStyles).
@@ -4815,9 +4684,6 @@ namespace HeartopiaMod
         private string uiThemeHexInput = "#4FC7FF";
 
         // Token: 0x04000016 RID: 22
-        private int teleportSubTab = 0;
-        // Radar subtab (0 = Main, 1 = Settings)
-        private int radarSubTab = 0;
         // Radar marker visual style: 0 = Default, 1 = Simple Text, 2 = Icon ESP
         private int radarMarkerStyle = 0;
         private float radarMaxDistance = 75f;
@@ -5044,9 +4910,8 @@ namespace HeartopiaMod
         private int autoCookAutoStopMinutes = 0;
         private int autoCookAutoStopSeconds = 0;
         private float autoCookAutoStopAt = -1f;
-        private int autoFarmSubTab = 0; // 0 = Main, 1 = Tree Farm, 2 = Fish Farm, 3 = Insect Farm, 4 = Bird Farm
-        private int automationSubTab = 0; // 0 = Main, 1 = Food & Repair, 2 = Snow Sculpting, 3 = Auto Buy, 4 = Auto Sell, 5 = Mass Cook, 6 = Puzzle, 7 = Pet Care
-        private int selfSubTab = 0; // 0 = Main, 1 = Building, 2 = Fun, 3 = Privacy, 4 = Game UI
+        // (autoFarmSubTab / automationSubTab / selfSubTab are gone — the UGUI shell's per-tab
+        // bars own sub-tab selection now; gates use the IsUguiShell*SubTabActive helpers.)
         private Type cachedFishingGameplayApiType = null;
         private Type cachedFishingSubStateType = null;
         private MethodInfo cachedFishingEnterFishingMethod = null;
@@ -5140,7 +5005,6 @@ namespace HeartopiaMod
         private float autoSellInterval = 5f;
         private int autoSellScanSource = 0; // 0 = Bag, 1 = Warehouse, 2 = Both
         private readonly string[] autoSellScanSourceLabels = new string[] { "Bag", "Warehouse", "Both" };
-        private bool autoSellScanSourceDropdownOpen = false;
         private float nextAutoSellAt = 0f;
         private string autoSellStatus = "Idle";
         private string autoSellLastMatchSummary = "No scan yet";
@@ -5219,7 +5083,6 @@ namespace HeartopiaMod
             "Mermaid Perfume"
         };
         private int forceOpenShopSelectedIndex = 0;
-        private bool forceOpenShopDropdownOpen = false;
         private string forceOpenShopManualStoreIdInput = string.Empty;
         private string forceOpenShopManualStoreNameInput = string.Empty;
         private string forceOpenShopStatus = "No shop selected.";
@@ -5749,21 +5612,19 @@ namespace HeartopiaMod
         private const float TransferQtyHoldRepeatDelay = 0.5f;
         private const float TransferQtyHoldSlowInterval = 0.1f;
         private const float TransferQtyHoldFastInterval = 0.05f;
+        // TransferQtyHoldFastAfterSeconds: the UGUI Bag/Warehouse stepper's hold-repeat reads
+        // this shared threshold (HeartopiaComplete.UguiBagWarehouseContent.cs) — it survives the
+        // IMGUI stepper's deletion on purpose so both eras keep identical timing.
         private const float TransferQtyHoldFastAfterSeconds = 1f;
         private readonly string[] transferScanSourceLabels = { "Bag", "Warehouse" };
         private int transferScanSource = 0;
-        private bool transferScanSourceDropdownOpen = false;
         private bool transferMultiSelectMode = false;
         private bool transferSelectFullStack = false;
         private List<TransferItemEntry> transferItems = null;
         private int selectedTransferIndex = -1;
         private int transferQty = 1;
-        private int transferQtyHoldDirection = 0;
-        private uint transferQtyHoldNetId = 0U;
-        private int transferQtyHoldItemIndex = -1;
-        private float transferQtyHoldStartedAt = 0f;
-        private float transferQtyHoldLastStepAt = 0f;
-        private Vector2 transferItemScrollPos = Vector2.zero;
+        // (transferQtyHold* are gone with the IMGUI stepper — the UGUI Bag/Warehouse panel owns
+        // its own hold-repeat state, HeartopiaComplete.UguiBagWarehouseContent.cs.)
         private string transferStatus = "Idle";
         private float transferPendingRescanAt = 0f;
         private int transferPendingRescanRetries = 0;
@@ -6075,15 +5936,11 @@ namespace HeartopiaMod
             isPatrolActive = false;
             this.RevertLodOverride();
 
-            foreach (Texture2D texture in this.themeTextures)
-            {
-                if (texture != null)
-                {
-                    Object.Destroy(texture);
-                }
-            }
-            this.themeTextures.Clear();
-            this.themeInitialized = false;
+            // Destroy the pooled theme textures AND null the sprite fields that point into the
+            // pool (uiCircleTexture etc.) so the lazy Ensure* builders rebuild them — before
+            // Phase 5 this was a bare pool-destroy + themeInitialized=false and the next OnGUI's
+            // EnsureThemeStyles did the field reset; that path is gone with the IMGUI menu.
+            this.InvalidateThemeCache();
         }
 
 

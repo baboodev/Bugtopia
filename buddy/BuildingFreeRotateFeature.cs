@@ -71,10 +71,11 @@ namespace HeartopiaMod
         // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
         private bool buildingMovePanelActive;
         private bool buildingMovePanelGodMode;   // BuildModule.InGodMode (gates the X/Y/Z jog sliders)
-        private bool buildingMovePanelMouseOver;
+        // (buildingMovePanelMouseOver/Rect are gone with the IMGUI panel — the UGUI panel,
+        // HeartopiaComplete.UguiBuildingContent.cs, owns its own window state and registers its
+        // own floating input-ownership surface.)
         private float buildingMovePanelNextPollAt = -999f;
         private int buildingMovePanelSubState = -1;
-        private Rect buildingMovePanelRect = new Rect(14f, 150f, 360f, 246f);
         private Vector3 buildingMovePanelObjPos;
         private float buildingMovePanelObjYaw;
         private bool buildingMovePanelHasPos;
@@ -213,204 +214,6 @@ namespace HeartopiaMod
         private IntPtr tdVirtualLinkHasChangeField = IntPtr.Zero;
         private float nextBuildingSendResolveAt = -999f;
 
-        private float DrawBuildingTab(float startY)
-        {
-            const float left = 40f;
-            float y = startY;
-
-            GUIStyle headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
-            headerStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(left, y, 460f, 24f), this.L("Free Placement"), headerStyle);
-            y += 30f;
-
-            y = this.DrawFreePlacementControls(left, y);
-            return y + 20f;
-        }
-
-        // Reusable Free Placement controls (free angle / free grid / ignore surface limit). Drawn in
-        // the Building tab and in the auto move-panel. Returns the new y.
-        private float DrawFreePlacementControls(float left, float y)
-        {
-            GUIStyle val = new GUIStyle(GUI.skin.label) { fontSize = 11 };
-            val.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.9f);
-
-            bool prevAngle = this.buildingFreeAngleEnabled;
-            bool prevGrid = this.buildingFreeGridEnabled;
-            bool prevSurface = buildingIgnoreSurfaceLimit;
-
-            bool prevRange = buildingIgnoreRangeHeight;
-            bool prevBypass = this.bypassOverlapEnabled;
-
-            // Each control on one row: toggle + slider + value.
-            this.buildingFreeAngleEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeAngleEnabled, " " + this.L("Angle"));
-            this.buildingFreeAngleStep = Mathf.RoundToInt(
-                this.DrawAccentSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeAngleStep, 1f, 90f, true));
-            GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeAngleStep + "°", val);
-            y += 26f;
-
-            this.buildingFreeGridEnabled = GUI.Toggle(new Rect(left, y, 92f, 22f), this.buildingFreeGridEnabled, " " + this.L("Grid"));
-            this.buildingFreeGridCell = Mathf.Round(
-                this.DrawAccentSlider(new Rect(left + 100f, y + 6f, 150f, 18f), this.buildingFreeGridCell, 0.01f, 0.25f) * 100f) / 100f;
-            GUI.Label(new Rect(left + 256f, y + 2f, 60f, 20f), this.buildingFreeGridCell.ToString("0.00") + "m", val);
-            y += 26f;
-
-            buildingIgnoreSurfaceLimit = GUI.Toggle(new Rect(left, y, 300f, 22f), buildingIgnoreSurfaceLimit, " " + this.L("No surface limit"));
-            // Apply/undo of the detour is driven from UpdateBuildingFreeSnapOverrides (OnUpdate), not here.
-            y += 26f;
-
-            buildingIgnoreRangeHeight = GUI.Toggle(new Rect(left, y, 320f, 22f), buildingIgnoreRangeHeight, " " + this.L("No range/height limit"));
-            y += 26f;
-
-            this.bypassOverlapEnabled = GUI.Toggle(new Rect(left, y, 320f, 22f), this.bypassOverlapEnabled, " " + this.L("Bypass Overlap"));
-            // Apply/undo of the overlap detours is driven from UpdateBuildingFreeSnapOverrides (OnUpdate), not here.
-            y += 26f;
-
-            // X/Y/Z jog of the FOCUSED object — god-mode only (drives GodControl._dstPosition), so the
-            // sliders are hidden outside god mode. Y = height above floor (0..8); X/Z = world move
-            // (centred at 0). Each slider drives a delta applied via TryNudgeFocused.
-            if (this.buildingMovePanelGodMode)
-            {
-                this.DrawBuildingAxisRow(left, y, this.L("Height"), 0f, 8f, new Vector3(0f, 1f, 0f), val,
-                    ref this.buildingFloorHeight, ref this.buildingFloorHeightApplied);
-                y += 26f;
-                this.DrawBuildingAxisRow(left, y, "X", -8f, 8f, new Vector3(1f, 0f, 0f), val,
-                    ref this.buildingFreeX, ref this.buildingFreeXApplied);
-                y += 26f;
-                this.DrawBuildingAxisRow(left, y, "Z", -8f, 8f, new Vector3(0f, 0f, 1f), val,
-                    ref this.buildingFreeZ, ref this.buildingFreeZApplied);
-                y += 26f;
-
-                // Build-plane height (SetPlaneHeight): raises the placement plane/camera for NEW objects.
-                // Fixed 0.5 m granularity — both the slider and the +/- buttons snap to multiples of 0.5.
-                const float planeStep = 0.5f;
-                GUI.Label(new Rect(left, y + 2f, 48f, 20f), this.L("Plane"), val);
-                float pClamped = Mathf.Round(Mathf.Clamp(this.buildingPlaneHeight, 0f, 24f) / planeStep) * planeStep;
-                float pSlider = Mathf.Round(
-                    this.DrawAccentSlider(new Rect(left + 50f, y + 6f, 150f, 18f), pClamped, 0f, 24f) / planeStep) * planeStep;
-                if (!Mathf.Approximately(pSlider, pClamped))
-                {
-                    this.buildingPlaneHeight = pSlider; // user dragged the slider (in-range)
-                }
-                GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), this.buildingPlaneHeight.ToString("0.0") + "m", val);
-                if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
-                {
-                    this.buildingPlaneHeight -= planeStep; // unclamped — may go beyond the slider
-                }
-                if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
-                {
-                    this.buildingPlaneHeight += planeStep;
-                }
-                if (!Mathf.Approximately(this.buildingPlaneHeight, this.buildingPlaneHeightApplied))
-                {
-                    this.buildingPlaneHeightApplied = this.buildingPlaneHeight;
-                    this.TrySetBuildingPlaneHeight(this.buildingPlaneHeight);
-                }
-                y += 26f;
-
-                // Free rotation jog around the field-local axes (beyond the standard yaw-only rotate).
-                // Needs Free angle ON to keep arbitrary degrees through confirm (else snapped to 45/90).
-                this.DrawBuildingRotRow(left, y, "rX", new Vector3(1f, 0f, 0f), val,
-                    ref this.buildingRotX, ref this.buildingRotXApplied);
-                y += 26f;
-                this.DrawBuildingRotRow(left, y, "rY", new Vector3(0f, 1f, 0f), val,
-                    ref this.buildingRotY, ref this.buildingRotYApplied);
-                y += 26f;
-                this.DrawBuildingRotRow(left, y, "rZ", new Vector3(0f, 0f, 1f), val,
-                    ref this.buildingRotZ, ref this.buildingRotZApplied);
-                y += 26f;
-            }
-
-            if (this.buildingFreeAngleEnabled != prevAngle || this.buildingFreeGridEnabled != prevGrid)
-            {
-                this.AddMenuNotification(
-                    "Free build: angle=" + (this.buildingFreeAngleEnabled ? "on" : "off") + " grid=" + (this.buildingFreeGridEnabled ? "on" : "off"),
-                    new Color(0.45f, 1f, 0.55f));
-            }
-            if (buildingIgnoreSurfaceLimit != prevSurface)
-            {
-                this.AddMenuNotification(
-                    "Surface limit " + (buildingIgnoreSurfaceLimit ? "off (place anywhere)" : "on"),
-                    new Color(0.45f, 1f, 0.55f));
-            }
-            if (buildingIgnoreRangeHeight != prevRange)
-            {
-                this.AddMenuNotification(
-                    "Range/height limit " + (buildingIgnoreRangeHeight ? "off (place anywhere)" : "on"),
-                    new Color(0.45f, 1f, 0.55f));
-            }
-            if (this.bypassOverlapEnabled != prevBypass)
-            {
-                this.AddMenuNotification(
-                    "Bypass Overlap " + (this.bypassOverlapEnabled ? "Enabled" : "Disabled"),
-                    this.bypassOverlapEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
-            }
-
-            return y;
-        }
-
-        // One axis jog row: label + slider + value + [-]/[+] buttons. The buttons step by the grid Cell
-        // value; both slider and buttons drive a delta applied to the focused object along axisUnit.
-        private void DrawBuildingAxisRow(float left, float y, string label, float lo, float hi,
-            Vector3 axisUnit, GUIStyle style, ref float value, ref float applied)
-        {
-            float step = Mathf.Clamp(this.buildingFreeGridCell, 0.01f, 0.25f);
-            GUI.Label(new Rect(left, y + 2f, 48f, 20f), label, style);
-            // Feed the slider a clamped value (handle pins at the edge) but only adopt its output when the
-            // user actually drags it — so the +/- buttons can push the value beyond [lo,hi] and it sticks.
-            float clamped = Mathf.Round(Mathf.Clamp(value, lo, hi) * 100f) / 100f;
-            float sliderOut = Mathf.Round(
-                this.DrawAccentSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, lo, hi) * 100f) / 100f;
-            if (!Mathf.Approximately(sliderOut, clamped))
-            {
-                value = sliderOut;
-            }
-            GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), value.ToString("0.00") + "m", style);
-            if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
-            {
-                value = Mathf.Round((value - step) * 100f) / 100f; // unclamped — may go beyond the slider
-            }
-            if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
-            {
-                value = Mathf.Round((value + step) * 100f) / 100f;
-            }
-            if (!Mathf.Approximately(value, applied))
-            {
-                float d = value - applied;
-                applied = value;
-                this.TryNudgeFocused(axisUnit * d);
-            }
-        }
-
-        // One rotation jog row: label + slider (deg) + value + [-]/[+] (15°). Rotates the focused object
-        // around the field-local `localAxis` by the slider/button delta.
-        private void DrawBuildingRotRow(float left, float y, string label,
-            Vector3 localAxis, GUIStyle style, ref float value, ref float applied)
-        {
-            const float rotStep = 15f;
-            GUI.Label(new Rect(left, y + 2f, 48f, 20f), label, style);
-            float clamped = Mathf.Round(Mathf.Clamp(value, -180f, 180f));
-            float sliderOut = Mathf.Round(
-                this.DrawAccentSlider(new Rect(left + 50f, y + 6f, 150f, 18f), clamped, -180f, 180f, true));
-            if (!Mathf.Approximately(sliderOut, clamped))
-            {
-                value = sliderOut;
-            }
-            GUI.Label(new Rect(left + 204f, y + 2f, 46f, 20f), value.ToString("0") + "°", style);
-            if (GUI.Button(new Rect(left + 252f, y, 26f, 20f), "-"))
-            {
-                value -= rotStep; // unclamped — may go beyond the slider
-            }
-            if (GUI.Button(new Rect(left + 280f, y, 26f, 20f), "+"))
-            {
-                value += rotStep;
-            }
-            if (!Mathf.Approximately(value, applied))
-            {
-                float d = value - applied;
-                applied = value;
-                this.TryRotateFocused(localAxis, d);
-            }
-        }
 
         // Rotate the FOCUSED object by deltaDeg around the field-local axis. Writes GodControl._dstRotation
         // (the focus tick slerps to it and confirm packs all 3 euler axes — ToBuildingRotValue). localAxis
@@ -474,7 +277,8 @@ namespace HeartopiaMod
         // mode and when no keys are held it does no AuraMono work. Gated off while the mod menu is open.
         private void ProcessGodCameraMoveOnUpdate()
         {
-            if (this.showMenu)
+            // "Menu open" = any MODAL registry surface (the UGUI shell) — showMenu is retired.
+            if (this.IsAnyModalInputSurfaceOpen())
             {
                 return;
             }
@@ -607,89 +411,6 @@ namespace HeartopiaMod
             this.buildingRotZApplied = 0f;
         }
 
-        // Floating, draggable panel auto-shown while an object is focused/being moved (CraftState.Focus)
-        // and the main mod menu is closed — quick access to the Free Placement toggles in build/move
-        // mode. It's a real GUI.Window: themed background, GUI.DragWindow top strip, and the same
-        // GetUiScale() matrix as the main menu so it honours the mod UI-scale setting. Cursor-over is
-        // fed to the click blocker (UpdateGameUiClickBlockState) so its clicks never reach the game.
-        private void DrawBuildingMovePanel()
-        {
-            if (!this.buildingMovePanelActive || this.showMenu)
-            {
-                this.buildingMovePanelMouseOver = false;
-                return;
-            }
-
-            // Height fits the content: 5 toggles always + 3 X/Y/Z sliders only in god mode.
-            this.buildingMovePanelRect.height = this.buildingMovePanelGodMode ? 368f : 186f;
-
-            float scale = this.GetUiScale();
-            Matrix4x4 prevMatrix = GUI.matrix;
-            Color pc = GUI.color, pb = GUI.backgroundColor, pcc = GUI.contentColor;
-            try
-            {
-                GUI.color = Color.white;
-                GUI.backgroundColor = Color.white;
-                GUI.contentColor = Color.white;
-                GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
-                this.buildingMovePanelRect = GUI.Window(
-                    0x5B0B, this.buildingMovePanelRect, (GUI.WindowFunction)this.DrawBuildingMovePanelWindow,
-                    GUIContent.none, this.themeWindowStyle ?? GUI.skin.window);
-
-                // Keep it on-screen in logical (pre-scale) coords.
-                float maxX = Mathf.Max(0f, (Screen.width / Mathf.Max(scale, 0.001f)) - 80f);
-                float maxY = Mathf.Max(0f, (Screen.height / Mathf.Max(scale, 0.001f)) - 40f);
-                this.buildingMovePanelRect.x = Mathf.Clamp(this.buildingMovePanelRect.x, 0f, maxX);
-                this.buildingMovePanelRect.y = Mathf.Clamp(this.buildingMovePanelRect.y, 0f, maxY);
-            }
-            finally
-            {
-                GUI.matrix = prevMatrix;
-                GUI.color = pc;
-                GUI.backgroundColor = pb;
-                GUI.contentColor = pcc;
-            }
-
-            // Cursor-over (logical coords) → drives the click blocker, and consume the IMGUI event.
-            Vector2 sp = new Vector2(Input.mousePosition.x, (float)Screen.height - Input.mousePosition.y);
-            Vector2 lp = scale > 0.001f ? sp / scale : sp;
-            this.buildingMovePanelMouseOver = this.buildingMovePanelRect.Contains(lp);
-            if (this.buildingMovePanelMouseOver)
-            {
-                Event e = Event.current;
-                if (e != null && e.isMouse && e.type != EventType.Used)
-                {
-                    e.Use();
-                }
-            }
-        }
-
-        private void DrawBuildingMovePanelWindow(int id)
-        {
-            float w = this.buildingMovePanelRect.width;
-
-            // Solid themed background (GUI.Window's style alone renders nothing visible here).
-            Color basePanel = new Color(this.uiPanelR, this.uiPanelG, this.uiPanelB, Mathf.Max(this.uiPanelAlpha, 0.9f));
-            this.DrawRoundedPanel(new Rect(0f, 0f, w, this.buildingMovePanelRect.height), 10f, basePanel, Color.clear, 0f, Color.clear);
-
-            GUIStyle title = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold };
-            title.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            GUI.Label(new Rect(12f, 4f, w - 24f, 18f), this.L("Free Placement"), title);
-
-            // Live object coordinates (refreshed by UpdateBuildingMovePanelState).
-            GUIStyle coord = new GUIStyle(GUI.skin.label) { fontSize = 11 };
-            coord.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f);
-            string coordText = this.buildingMovePanelHasPos
-                ? string.Format("X {0:0.00}  Y {1:0.00}  Z {2:0.00}  {3:0}°",
-                    this.buildingMovePanelObjPos.x, this.buildingMovePanelObjPos.y, this.buildingMovePanelObjPos.z, this.buildingMovePanelObjYaw)
-                : "(" + this.L("no object") + ")";
-            GUI.Label(new Rect(12f, 23f, w - 24f, 18f), coordText, coord);
-
-            this.DrawFreePlacementControls(12f, 44f);
-
-            // Top strip = drag handle (controls start at y=44, so this doesn't eat their clicks).
-            GUI.DragWindow(new Rect(0f, 0f, w, 22f));
-        }
 
         // Poll the build module's CraftState (throttled) to drive the auto move-panel visibility, and
         // while focused refresh the object's live local coordinates for the panel readout.
@@ -821,25 +542,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        // One position-axis row: "<label>" + value text field + -/+ nudge by buildingFreePosStep.
-        private float DrawBuildingPosAxis(float left, float y, string label, float value)
-        {
-            GUI.Label(new Rect(left, y + 2f, 16f, 22f), label);
-            string text = GUI.TextField(new Rect(left + 20f, y, 90f, 22f), value.ToString("0.###"));
-            if (float.TryParse(text, out float parsed))
-            {
-                value = parsed;
-            }
-            if (GUI.Button(new Rect(left + 116f, y, 40f, 22f), "-"))
-            {
-                value -= this.buildingFreePosStep;
-            }
-            if (GUI.Button(new Rect(left + 160f, y, 40f, 22f), "+"))
-            {
-                value += this.buildingFreePosStep;
-            }
-            return value;
-        }
 
         // Plan B for position: keep the focused object's current angle, send an arbitrary local
         // position to the server (BuildMoveData). Bypasses every client placement-surface gate.

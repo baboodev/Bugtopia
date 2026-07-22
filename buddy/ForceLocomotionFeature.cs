@@ -498,7 +498,10 @@ namespace HeartopiaMod
             // GetAsyncKeyState reads the GLOBAL keyboard, so we must gate on window focus ourselves
             // (keys typed into other apps otherwise still drive the swimmer), and on a focused game
             // text field (chat/rename/search — same uGUI InputField check the hotkey guard uses).
-            if (this.showMenu || ShouldBlockGameplayInput()
+            // First clause: any MODAL registry surface open (the UGUI shell) — showMenu is
+            // retired. Kept separate from ShouldBlockGameplayInput on purpose: that gate is
+            // further conditioned on the user's blockGameUiWhenMenuOpen setting.
+            if (this.IsAnyModalInputSurfaceOpen() || ShouldBlockGameplayInput()
                 || !IsGameWindowFocused()
                 || this.IsGameTextInputFocused())
             {

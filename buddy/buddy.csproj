@@ -257,7 +257,6 @@
     <Compile Include="HeartopiaComplete.Reflection.cs" />
     <Compile Include="HeartopiaComplete.UiKit.cs" />
     <Compile Include="HeartopiaComplete.UguiKit.cs" />
-    <Compile Include="HeartopiaComplete.UguiPoc.cs" />
     <Compile Include="HeartopiaComplete.UguiShell.cs" />
     <Compile Include="HeartopiaComplete.UguiPhase3Content.cs" />
     <Compile Include="HeartopiaComplete.UguiPhase3SettingsContent.cs" />

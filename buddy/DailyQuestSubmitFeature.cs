@@ -463,10 +463,6 @@ namespace HeartopiaMod
         }
 
 
-
-
-
-
         private bool TryBuildDailyQuestCheapestSubmitPairsAura(int taskId, out List<DailyQuestSubmitNetPair> pairs, out string status)
         {
             return this.TryBuildDailyQuestCheapestSubmitPairsAuraMono(taskId, out pairs, out status);
@@ -1294,8 +1290,6 @@ namespace HeartopiaMod
         /// </summary>
 
 
-
-
         /// <summary>
         /// Build List&lt;ItemNetPair&gt; in game Mono without Il2Cpp interop types (uses MonoDump/EcsClient image).
         /// An empty (but non-null) pairs list is valid input — the Add-loop and count-check below both
@@ -1554,34 +1548,6 @@ namespace HeartopiaMod
         }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         private unsafe bool TryInvokeDailyQuestClientSubmitNpcAura(int taskId, int submitNpc, IntPtr listPtr, out string status)
         {
             status = string.Empty;
@@ -1662,7 +1628,6 @@ namespace HeartopiaMod
         }
 
 
-
         private unsafe bool TryCollectDailyQuestOrdersForSubmit(out List<IntPtr> orders, out IntPtr unused, out string status)
         {
             orders = new List<IntPtr>();
@@ -1713,45 +1678,6 @@ namespace HeartopiaMod
             return this.NormalizeAutoSellStarRate(starRate) >= 5;
         }
 
-        private float DrawDailyQuestSubmitControls(float startY)
-        {
-            float y = startY;
-            const float left = 40f;
-            const float width = 520f;
-
-            bool busy = this.dailyQuestSubmitCoroutine != null || this.birdPhotoSubmitCoroutine != null || this.dailyClaimsCoroutine != null;
-            GUI.enabled = !busy;
-            if (GUI.Button(new Rect(left, y, 240f, 32f), this.L("Auto Submit Daily Items"), this.themePrimaryButtonStyle ?? GUI.skin.button))
-            {
-                this.StartDailyQuestAutoSubmitItems(silent: false);
-            }
-
-            GUI.enabled = true;
-            y += 40f;
-
-            bool nextSkipFiveStar = this.DrawSwitchToggle(
-                new Rect(left, y, 300f, 28f),
-                this.dailyQuestSubmitSkipFiveStar,
-                this.L("Skip 5 Star Items"));
-            if (nextSkipFiveStar != this.dailyQuestSubmitSkipFiveStar)
-            {
-                this.dailyQuestSubmitSkipFiveStar = nextSkipFiveStar;
-                try
-                {
-                    this.SaveKeybinds(false);
-                }
-                catch
-                {
-                }
-            }
-
-            y += 34f;
-
-            GUIStyle statusStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
-            statusStyle.normal.textColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.82f);
-            GUI.Label(new Rect(left, y, width, 28f), this.dailyQuestSubmitLastStatus ?? string.Empty, statusStyle);
-            return y + 36f;
-        }
 
         private void DailyQuestSubmitLog(string message)
         {
