@@ -285,16 +285,14 @@ namespace HeartopiaMod
             {
                 for (int i = 0; i < handle.Toggles.Count && i < handle.Bindings.Length; i++)
                 {
-                    Toggle tog = handle.Toggles[i];
-                    if (tog == null)
-                    {
-                        continue;
-                    }
-                    bool live = handle.Bindings[i].Get();
-                    if (tog.isOn != live)
-                    {
-                        tog.SetIsOnWithoutNotify(live); // NEVER isOn = — that fires onValueChanged
-                    }
+                    // BUG FIX (2026-07-22): this loop used to inline a bare SetIsOnWithoutNotify,
+                    // which only resyncs isOn on a value MISMATCH and never touches the checkmark
+                    // graphic — so after this tab was hidden and reshown (menu close+reopen, or a
+                    // sub-tab switch), all 39 checkmarks rendered opaque/checked regardless of their
+                    // true state (the CrossFadeAlpha OnEnable race — full explanation in
+                    // SyncUguiToggleFromField). The Settings→Main toggles already route through that
+                    // fixed helper; Logging was the one path still on the old inline pattern.
+                    this.SyncUguiToggleFromField(handle.Toggles[i], handle.Bindings[i].Get());
                 }
             }
             catch (Exception ex)
