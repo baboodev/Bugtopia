@@ -1,6 +1,6 @@
 # Game Events — Full List (generated)
 
-Auto-generated from `ilspy-dumps/` — every `struct ... : IEvent`. Total: 1496 types.
+Auto-generated from `ilspy-dumps/` — every `struct ... : IEvent`. Total: 1498 types.
 Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.md).
 
 
@@ -206,7 +206,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 
 - `SwitchMainLevel`
 
-## XDTDataAndProtocol.Events (841)
+## XDTDataAndProtocol.Events (843)
 
 - `AchievementToast`
 - `ActivityEndEvent`
@@ -409,6 +409,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `FishingStickInputUpdated`
 - `FishingThrowCommandEvent`
 - `FrameSyncEvent`
+- `FullScreenLightShowEvent`
 - `G2UEntitySpawnedEvent`
 - `G2UHandholdEvent`
 - `G2UHandholdSelectEvent`
@@ -719,6 +720,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `PollutantAttachedToHostEvent`
 - `PollutantCleanedEvent`
 - `PollutantDetachedFromHostEvent`
+- `PollutantHiddenStateChangedOnHostEvent`
 - `PollutantPointClearedEvent`
 - `PollutantSpawnChildrenEvent`
 - `PostCardTranslateResultEvent`
@@ -1637,4 +1639,3 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 ## XDTLevelAndEntity.GameplaySystem (1)
 
 - `EnterFieldEvent`
-
