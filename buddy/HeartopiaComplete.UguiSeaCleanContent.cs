@@ -488,7 +488,7 @@ namespace HeartopiaMod
             int styleNo = 0;
             if (present)
             {
-                styleNo = this.littleWhaleActiveConfigId - LittleWhaleConfigIdFirst + 1;   // :970
+                styleNo = this.GetLittleWhaleStyleNumber(this.littleWhaleActiveConfigId);   // color index (:970)
                 sig = 1 | (styleNo << 1);
                 Camera figCam = Camera.main;                                               // :968
                 distInt = figCam != null

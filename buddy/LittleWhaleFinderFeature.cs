@@ -23,13 +23,32 @@ namespace HeartopiaMod
     // teleport mirror the Rainbow Whale tracker.
     public partial class HeartopiaComplete
     {
-        private const int LittleWhaleConfigIdFirst = 300023; // MapDynamicResource ids, styles 1-11
-        private const int LittleWhaleConfigIdLast = 300033;
+        // MapDynamicResource spawn (config) ids. The 2026-07-23 "Whale Season" update grew the pool
+        // from 11 to 16 styles: spawns 300023-300038, daily tasks 1106401-1106416, figurines
+        // 302565-302580. Task->config is still linear (config = 300023 + (taskId - 1106401)); ONLY the
+        // config->figurine icon lookup is shuffled (see LittleWhaleFigurineByConfig). Missing the new
+        // range was the live regression: a day whose daily rolled a new style (1106412-1106416) fell
+        // outside the finder's window, so nothing was located/pinned.
+        private const int LittleWhaleConfigIdFirst = 300023;
+        private const int LittleWhaleConfigIdLast = 300038;
         private const int LittleWhaleTaskIdFirst = 1106401;  // daily "找到小鲸鱼" task per style
-        private const int LittleWhaleTaskIdLast = 1106411;
-        private const int LittleWhaleEntityIdFirst = 302565; // style-1 figurine staticId
+        private const int LittleWhaleTaskIdLast = 1106416;
+        private const int LittleWhaleEntityIdFirst = 302565; // color-1 figurine staticId (浅蓝喷水小鲸鱼)
         private const float LittleWhalePollInterval = 3f;
         private const int LittleWhaleMissesToLose = 3;
+
+        // config id -> figurine entity staticId (the map-pin icon / color). NOT a linear offset: the
+        // MapDynamicResource table shuffles color<->spot (300032->302575, 300033->302574, and the five
+        // new spots 300034-300038 -> 302577/302578/302579/302580/302576). Baked straight from the
+        // table so the pin shows the actual whale color; refresh alongside the id ranges when the
+        // season adds styles.
+        private static readonly Dictionary<int, int> LittleWhaleFigurineByConfig = new Dictionary<int, int>
+        {
+            { 300023, 302565 }, { 300024, 302566 }, { 300025, 302567 }, { 300026, 302568 },
+            { 300027, 302569 }, { 300028, 302570 }, { 300029, 302571 }, { 300030, 302572 },
+            { 300031, 302573 }, { 300032, 302575 }, { 300033, 302574 }, { 300034, 302577 },
+            { 300035, 302578 }, { 300036, 302579 }, { 300037, 302580 }, { 300038, 302576 },
+        };
 
         private const string DynamicObjectManagerTypeName =
             "ScriptsRefactory.LevelAndEntity.BaseSystem.LevelScene.DynamicObjectManager";
@@ -114,7 +133,7 @@ namespace HeartopiaMod
                     this.littleWhalePresent = true;
                     this.AddMenuNotification(this.L("Little Whale figurine located!"), new Color(1f, 0.65f, 0.85f));
                     ModLogger.Msg("[LittleWhale] figurine located: config=" + configId
-                        + " style=" + (configId - LittleWhaleConfigIdFirst + 1) + " pos=" + pos.ToString("F1"));
+                        + " style=" + this.GetLittleWhaleStyleNumber(configId) + " pos=" + pos.ToString("F1"));
                 }
 
                 // Auto-pin: the map marker goes up as soon as the figurine resolves, and follows the
@@ -151,13 +170,31 @@ namespace HeartopiaMod
                 return;
             }
 
-            int figurineStaticId = LittleWhaleEntityIdFirst + (configId - LittleWhaleConfigIdFirst);
+            int figurineStaticId = this.GetLittleWhaleFigurineStaticId(configId);
             if (this.DispatchStartTrack(LittleWhaleMapPinToken, pos, MapTrackTypeFurniture, figurineStaticId, 0u))
             {
                 this.littleWhaleMapPinActive = true;
                 this.littleWhaleMapPinPos = pos;
                 this.littleWhaleMapPinWorldEpoch = HeartopiaComplete.AuraMonoWorldEpoch;
             }
+        }
+
+        // config id -> figurine staticId (map-pin icon). Falls back to the linear guess only if the
+        // baked table is somehow missing the id, so a future season addition degrades to a plausible
+        // icon instead of none.
+        private int GetLittleWhaleFigurineStaticId(int configId)
+        {
+            return LittleWhaleFigurineByConfig.TryGetValue(configId, out int staticId)
+                ? staticId
+                : LittleWhaleEntityIdFirst + (configId - LittleWhaleConfigIdFirst);
+        }
+
+        // Display "style" = the figurine's color index (1..N), derived from its staticId so the label
+        // matches the whale the player sees — NOT the spot index (config offset), which the table
+        // shuffles relative to color.
+        private int GetLittleWhaleStyleNumber(int configId)
+        {
+            return this.GetLittleWhaleFigurineStaticId(configId) - LittleWhaleEntityIdFirst + 1;
         }
 
         private void RemoveLittleWhaleMapPin()
