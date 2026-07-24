@@ -11,7 +11,8 @@
     <RootNamespace>buddy</RootNamespace>
     <TargetFramework>net6.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <LangVersion>8.0</LangVersion>
+    <!-- 10.0 for the global using in GlobalUsings.cs (per-loader TMPro namespace) -->
+    <LangVersion>10.0</LangVersion>
     <Nullable>disable</Nullable>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin\$(Loader)\$(Configuration)\</OutputPath>
@@ -236,6 +237,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="GlobalUsings.cs" />
     <Compile Include="AnimalCareFeature.cs" />
     <Compile Include="CarpetStampFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
