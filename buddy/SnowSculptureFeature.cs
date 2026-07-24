@@ -28,6 +28,47 @@ namespace HeartopiaMod
 
         private const float SnowApiReportIntervalSeconds = 0.01f;
 
+        // Event-driven finalize: the server dispatches the per-netId
+        // S2C_SnowSculptingFinishEvent when SnowSculptingFinishComponent syncs (the sculpture is
+        // computed and takeable) — SnowSculptureProtocolManager.UpdateSnowSculpture:
+        // EventCenter.DispatchEvent(netId, in @event). Hooking it replaces the blind
+        // SnowApiFinalizeDelaySeconds wait between StopSculpting and the gather.
+        private const string SnowFinishEventFullName = "XDTDataAndProtocol.Events.S2C_SnowSculptingFinishEvent";
+        // Payload = { SnowSculptingFinishedKind kind } (int32: 0=Fail 1=Success 2=Hidden).
+        private const int SnowFinishEventPayloadBytes = 4;
+        // Poll cadence while awaiting the finish event (local field compare only — no interop).
+        private const float SnowApiFinalizeEventPollSeconds = 0.05f;
+        // Ceiling when the hook is live but the event never arrives (missed dispatch): gather
+        // blindly after this long. Hook-not-installed runs keep the legacy 2 s blind wait.
+        private const float SnowApiFinalizeTimeoutSeconds = 4f;
+
+        // Start confirmation: the optimistic fill+start is verified before any reports are
+        // spent. S2C_SnowSculptingStartEvent (per-netId, empty payload) fires when the base
+        // component syncs to Started; S2C_StartSculptingResultEvent (GLOBAL, {bool isSucceed})
+        // is the direct ack of OUR StartSnowSculptingNetworkCommand — isSucceed=false (e.g. the
+        // placed ball EXPIRED in Prepared before the start landed: the "Expired. Please place
+        // again" toast) means the session never began, and reporting would burn a full void
+        // cycle (20 wasted sends + the finalize ceiling).
+        private const string SnowStartEventFullName = "XDTDataAndProtocol.Events.S2C_SnowSculptingStartEvent";
+        private const string SnowStartResultEventFullName = "XDTDataAndProtocol.Events.S2C_StartSculptingResultEvent";
+        private const int SnowStartResultEventPayloadBytes = 1;
+        // Wait for either signal this long, then proceed optimistically (missed-event escape
+        // hatch): only an EXPLICIT rejected ack resets the cycle, a silent timeout behaves like
+        // the pre-confirmation code.
+        private const float SnowStartConfirmTimeoutSeconds = 1.5f;
+        // Consecutive explicit rejections before self-disabling (a stuck base would otherwise
+        // fill-spam forever at the retry cadence).
+        private const int SnowStartMaxConsecFails = 8;
+
+        // Tunable pacing bounds (UGUI sliders on the Snow Sculpting tab; persisted in config).
+        // Defaults mirror the historical constants. The reliable channel is ORDERED (fill ->
+        // start -> report -> stop -> gather arrive server-side in send order), so both delays
+        // can be pushed toward zero — a too-early send is rejected harmlessly and retried.
+        internal const float SnowStartDelayMin = 0f;
+        internal const float SnowStartDelayMax = 1f;
+        internal const float SnowNextCycleDelayMin = 0f;
+        internal const float SnowNextCycleDelayMax = 1.5f;
+
         private bool autoSnowEnabled = false;
         private int snowClickCount = 0;
         private uint snowApiTargetNetId = 0;
@@ -39,6 +80,28 @@ namespace HeartopiaMod
         private uint snowApiKnownBaseNetId = 0;
         private bool autoSnowWasEnabled = false;
         private float snowApiNextAttemptAt = 0f;
+        private bool snowFinishEventHookRegistered;
+        // Written by the finish-event handler (main-thread drain) when the event fires for the
+        // ACTIVE target base; consumed by the finalize branch. 0 = not seen this cycle.
+        private uint snowFinishEventSeenNetId;
+        private float snowFinishEventSeenAt;
+        // Start-confirmation state (see the constants above).
+        private uint snowStartEventSeenNetId;     // Started sync seen for the active target
+        private float snowStartResultFailedAt;    // last isSucceed=false ack (0 = none yet)
+        private bool snowStartConfirmed;          // reports may flow
+        private float snowStartPendingSince;      // optimistic-lock timestamp
+        private int snowStartConsecFails;         // explicit rejections in a row
+        // Slider-tunable delays (bounds above; persisted via config).
+        private float snowStartDelaySeconds = SnowApiStartBackoffSeconds;
+        private float snowNextCycleDelaySeconds = SnowApiRetryBackoffSeconds;
+        // Snowball session budget: auto-disable after this many sculptures (1 ball each);
+        // 0 = no limit. Persisted; the used counter resets on every enable.
+        private int snowballUseLimit = 0;
+        private int snowballsUsedThisRun = 0;
+        // Bag snowball count for the UI (BackPackSystem.GetUsableItemCount, throttled).
+        private int snowBagCountCached = -1;
+        private float snowBagCountNextRefreshAt = 0f;
+        private IntPtr snowAuraMonoGetUsableItemCountMethod;
         private KeyCode autoSnowHotkey = KeyCode.None;
         private bool isListeningForAutoSnowHotkey = false;
 
@@ -123,6 +186,8 @@ namespace HeartopiaMod
             if (this.autoSnowEnabled && !this.autoSnowWasEnabled)
             {
                 this.ResetSnowApiProgress();
+                this.snowballsUsedThisRun = 0;
+                this.EnsureSnowFinishEventHook();
             }
 
             this.autoSnowWasEnabled = this.autoSnowEnabled;
@@ -143,6 +208,13 @@ namespace HeartopiaMod
             this.snowApiLastGatheredNetId = 0;
             this.snowApiKnownBaseNetId = 0;
             this.snowApiNextAttemptAt = 0f;
+            this.snowFinishEventSeenNetId = 0;
+            this.snowFinishEventSeenAt = 0f;
+            this.snowStartEventSeenNetId = 0;
+            this.snowStartResultFailedAt = 0f;
+            this.snowStartConfirmed = false;
+            this.snowStartPendingSince = 0f;
+            this.snowStartConsecFails = 0;
         }
 
         private void DisableAutoSnowSculpture(string reason)
@@ -166,6 +238,76 @@ namespace HeartopiaMod
             this.snowApiStopSent = false;
             this.snowApiStopSentAt = 0f;
             this.snowApiLastGatheredNetId = justGatheredNetId;
+            this.snowFinishEventSeenNetId = 0;
+            this.snowFinishEventSeenAt = 0f;
+            this.snowStartEventSeenNetId = 0;
+            this.snowStartConfirmed = false;
+            this.snowStartPendingSince = 0f;
+        }
+
+        // Lazy, once per session: hook the snow events via the shared EventHook engine
+        // (installed on a later frame; until IsGameEventHookInstalled reports live, both the
+        // finalize branch and the start-confirmation gate degrade to the legacy blind paths).
+        private void EnsureSnowFinishEventHook()
+        {
+            if (this.snowFinishEventHookRegistered)
+            {
+                return;
+            }
+
+            this.snowFinishEventHookRegistered = true;
+            this.RegisterGameEventHookByNetId(
+                SnowFinishEventFullName,
+                SnowFinishEventPayloadBytes,
+                this.OnSnowSculptingFinishEvent);
+            this.RegisterGameEventHookByNetId(
+                SnowStartEventFullName,
+                0,
+                this.OnSnowSculptingStartEvent);
+            this.RegisterGameEventHook(
+                SnowStartResultEventFullName,
+                SnowStartResultEventPayloadBytes,
+                this.OnSnowStartSculptingResultEvent);
+        }
+
+        // Main-thread drain handler. Bases finished by OTHER players nearby dispatch here too —
+        // only record the active target so a neighbour's finish can't mask ours between polls.
+        private void OnSnowSculptingFinishEvent(GameEventSnapshot e)
+        {
+            if (e.NetId == 0u || e.NetId != this.snowApiTargetNetId)
+            {
+                return;
+            }
+
+            this.snowFinishEventSeenNetId = e.NetId;
+            this.snowFinishEventSeenAt = Time.unscaledTime;
+            this.SnowSculptureLog("finish event netId=" + e.NetId + " kind=" + e.ReadInt32(0));
+        }
+
+        // Base component synced to Started — the authoritative "session began" signal.
+        private void OnSnowSculptingStartEvent(GameEventSnapshot e)
+        {
+            if (e.NetId == 0u || e.NetId != this.snowApiTargetNetId)
+            {
+                return;
+            }
+
+            this.snowStartEventSeenNetId = e.NetId;
+            this.SnowSculptureLog("start event netId=" + e.NetId);
+        }
+
+        // Direct ack of a StartSnowSculptingNetworkCommand (GLOBAL — only the self player sends
+        // these). Success is ignored (the per-netId Started sync above is the confirm signal);
+        // an explicit rejection is what the confirmation gate keys its retry on.
+        private void OnSnowStartSculptingResultEvent(GameEventSnapshot e)
+        {
+            if (e.ReadBool(0))
+            {
+                return;
+            }
+
+            this.snowStartResultFailedAt = Time.unscaledTime;
+            this.SnowSculptureLog("start result: REJECTED");
         }
 
         private void SnowSculptureLog(string message)
@@ -500,10 +642,15 @@ namespace HeartopiaMod
                         this.snowApiSuccessScore = 0;
                         this.snowApiStopSent = false;
                         this.snowApiStopSentAt = 0f;
+                        // Arm the start-confirmation gate for this attempt.
+                        this.snowStartEventSeenNetId = 0;
+                        this.snowStartConfirmed = false;
+                        this.snowStartPendingSince = unscaledTime;
                         this.snowSculptureLastActionStatus = "started (optimistic)";
                         this.SnowSculptureLogStatus("start: " + startStatus + " -> target=" + this.snowApiKnownBaseNetId);
                         // brief pause so the server processes fill+start before the first report
-                        this.snowApiNextAttemptAt = unscaledTime + SnowApiStartBackoffSeconds;
+                        // (slider-tunable; the ordered channel makes 0 safe, just retry-prone)
+                        this.snowApiNextAttemptAt = unscaledTime + Mathf.Max(0f, this.snowStartDelaySeconds);
                     }
                     else
                     {
@@ -536,11 +683,80 @@ namespace HeartopiaMod
                 this.snowApiKnownBaseNetId = targetNetId;
                 this.snowApiRoundCount = 0;
                 this.snowApiSuccessScore = 0;
+                // Status/panel-resolved target = the session is already live server-side (the
+                // client status only reflects an accepted start) — no confirmation needed.
+                this.snowStartConfirmed = true;
+                this.snowStartConsecFails = 0;
                 this.SnowSculptureLogStatus("target resolved netId=" + targetNetId + " (" + targetStatus + ")");
             }
 
+            // Confirm the optimistic start before spending reports. An explicit REJECTED ack
+            // (the "Expired. Please place again" family) resets to the resolve path — its fresh
+            // PutSnowBall replaces the expired fill, so recovery costs one backoff instead of a
+            // void cycle (20 dead reports + the finalize ceiling). A silent timeout proceeds
+            // optimistically (missed-event escape hatch), and hook-not-installed runs skip the
+            // gate entirely (legacy behavior).
+            if (this.snowApiRoundCount < SnowSculptureMaxRound && !this.snowStartConfirmed)
+            {
+                if (this.snowApiTargetNetId != 0
+                    && this.snowStartEventSeenNetId == this.snowApiTargetNetId)
+                {
+                    this.snowStartConfirmed = true;
+                    this.snowStartConsecFails = 0;
+                    this.SnowSculptureLogStatus("start confirmed (event)");
+                }
+                else if (!this.IsGameEventHookInstalled(SnowStartResultEventFullName))
+                {
+                    this.snowStartConfirmed = true;
+                }
+                else if (this.snowStartPendingSince > 0f
+                         && this.snowStartResultFailedAt >= this.snowStartPendingSince)
+                {
+                    this.snowStartConsecFails++;
+                    this.SnowSculptureLogStatus("start REJECTED by server (fail "
+                        + this.snowStartConsecFails + "/" + SnowStartMaxConsecFails + ") -> refill+retry");
+                    if (this.snowStartConsecFails >= SnowStartMaxConsecFails)
+                    {
+                        this.DisableAutoSnowSculpture(
+                            "start rejected " + this.snowStartConsecFails + "x in a row");
+                        return;
+                    }
+
+                    this.snowApiTargetNetId = 0; // back to resolve -> fresh PutSnowBall + start
+                    this.snowApiNextAttemptAt = unscaledTime + SnowApiRetryBackoffSeconds;
+                    return;
+                }
+                else if (unscaledTime - this.snowStartPendingSince >= SnowStartConfirmTimeoutSeconds)
+                {
+                    this.snowStartConfirmed = true;
+                    this.SnowSculptureLogStatus("start unconfirmed after "
+                        + SnowStartConfirmTimeoutSeconds + "s -> proceeding optimistically");
+                }
+                else
+                {
+                    this.snowSculptureLastActionStatus = "confirming start...";
+                    this.snowApiNextAttemptAt = unscaledTime + SnowApiFinalizeEventPollSeconds;
+                    return;
+                }
+            }
+
+            // Server already finalized the target mid-rounds (finish event seen — e.g. the session
+            // hit its server-side cap early): skip the remaining reports and go straight to
+            // finalize/take. Stop on an already-stopped base is rejected harmlessly.
+            if (this.snowApiRoundCount < SnowSculptureMaxRound
+                && this.snowApiTargetNetId != 0
+                && this.snowFinishEventSeenNetId == this.snowApiTargetNetId)
+            {
+                this.SnowSculptureLogStatus("finish event during rounds (round " + this.snowApiRoundCount + ") -> finalize");
+                this.snowApiRoundCount = SnowSculptureMaxRound;
+            }
+
             // Round 20 reached -> finalize: StopSculpting (server computes the sculpture from the
-            // accumulated score), wait for finalization, then GatherSnowSculpture (the take).
+            // accumulated score), then GatherSnowSculpture (the take). Gather timing is
+            // event-driven while the finish hook is live (per-netId S2C_SnowSculptingFinishEvent,
+            // typically well under a second after stop) with SnowApiFinalizeTimeoutSeconds as the
+            // missed-event ceiling; the legacy blind SnowApiFinalizeDelaySeconds wait applies when
+            // the hook isn't installed.
             if (this.snowApiRoundCount >= SnowSculptureMaxRound)
             {
                 if (!this.snowApiStopSent)
@@ -550,24 +766,46 @@ namespace HeartopiaMod
                     this.snowApiStopSentAt = unscaledTime;
                     this.snowSculptureLastActionStatus = "finalizing...";
                     this.SnowSculptureLogStatus("stop: " + stopStatus);
-                    this.snowApiNextAttemptAt = unscaledTime + SnowApiFinalizeDelaySeconds;
+                    this.snowApiNextAttemptAt = unscaledTime
+                        + (this.IsGameEventHookInstalled(SnowFinishEventFullName)
+                            ? SnowApiFinalizeEventPollSeconds
+                            : SnowApiFinalizeDelaySeconds);
                     return;
                 }
 
-                if (unscaledTime - this.snowApiStopSentAt < SnowApiFinalizeDelaySeconds)
+                bool finishSeen = this.snowApiTargetNetId != 0
+                                  && this.snowFinishEventSeenNetId == this.snowApiTargetNetId;
+                float sinceStop = unscaledTime - this.snowApiStopSentAt;
+                if (!finishSeen)
                 {
-                    this.snowSculptureLastActionStatus = "finalizing...";
-                    this.snowApiNextAttemptAt = unscaledTime + SnowApiRetryBackoffSeconds;
-                    return;
+                    bool hookLive = this.IsGameEventHookInstalled(SnowFinishEventFullName);
+                    float ceiling = hookLive ? SnowApiFinalizeTimeoutSeconds : SnowApiFinalizeDelaySeconds;
+                    if (sinceStop < ceiling)
+                    {
+                        this.snowSculptureLastActionStatus = hookLive ? "finalizing (event)..." : "finalizing...";
+                        this.snowApiNextAttemptAt = unscaledTime
+                            + (hookLive ? SnowApiFinalizeEventPollSeconds : SnowApiRetryBackoffSeconds);
+                        return;
+                    }
                 }
 
                 this.TryGatherSnowSculpture(this.snowApiTargetNetId, out string gatherStatus);
                 uint gatheredNetId = this.snowApiTargetNetId;
-                this.SnowSculptureLogStatus("gather: " + gatherStatus);
+                this.SnowSculptureLogStatus("gather (" + (finishSeen ? "event" : "timeout")
+                    + " +" + sinceStop.ToString("F2") + "s): " + gatherStatus);
                 this.PrepareSnowApiForNextSculpture(gatheredNetId);
+                this.snowballsUsedThisRun++;
+                this.snowBagCountNextRefreshAt = 0f; // bag changed — let the UI counter refresh now
                 this.snowSculptureLastActionStatus = "complete (gathered); waiting for next";
                 this.AddMenuNotification("Snow sculpture complete: " + gatherStatus, new Color(0.45f, 1f, 0.55f));
-                this.snowApiNextAttemptAt = unscaledTime + SnowApiRetryBackoffSeconds;
+                // Session budget: 1 sculpture == 1 snowball, so gathers are the consumption count.
+                if (this.snowballUseLimit > 0 && this.snowballsUsedThisRun >= this.snowballUseLimit)
+                {
+                    this.DisableAutoSnowSculpture("snowball limit reached (" + this.snowballsUsedThisRun + " used)");
+                    return;
+                }
+
+                this.snowApiNextAttemptAt = unscaledTime + Mathf.Max(0f, this.snowNextCycleDelaySeconds);
                 return;
             }
 
@@ -1389,6 +1627,81 @@ namespace HeartopiaMod
             }
 
             status = "Moved " + sentStacks + " snowball stack(s), qty " + sentQty + " -> Bag";
+            this.snowBagCountNextRefreshAt = 0f; // bag changed — let the UI counter refresh now
+            return true;
+        }
+
+        // Bag snowball count for the UI. Throttled to 1 s between real reads; -1 = unknown
+        // (pre-login / AuraMono not up). BackPackSystem.GetUsableItemCount(staticId,
+        // inSelfField:false) == backpack-only count — no enum arg, no collection enumeration.
+        internal int GetSnowballBagCountThrottled()
+        {
+            float now = Time.unscaledTime;
+            if (now < this.snowBagCountNextRefreshAt)
+            {
+                return this.snowBagCountCached;
+            }
+
+            this.snowBagCountNextRefreshAt = now + 1f;
+            if (this.TryCountBackpackSnowballsAura(out int count))
+            {
+                this.snowBagCountCached = count;
+            }
+
+            return this.snowBagCountCached;
+        }
+
+        private unsafe bool TryCountBackpackSnowballsAura(out int count)
+        {
+            count = 0;
+
+            // The module walk reads static fields (Managers) — hard-gated pre-login (uncatchable
+            // AV otherwise), and the UGUI shell CAN be open before world load.
+            if (!AuraMonoStaticFieldReadsAllowed()
+                || !this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            // Re-resolve the BackPackSystem object every call (GC can move it); only the method
+            // descriptor is cached — same rule as TryResolveBackpackSnowballNetId.
+            if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPackSystemObj)
+                || backPackSystemObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (this.snowAuraMonoGetUsableItemCountMethod == IntPtr.Zero)
+            {
+                IntPtr backPackClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(backPackSystemObj) : IntPtr.Zero;
+                this.snowAuraMonoGetUsableItemCountMethod = this.FindAuraMonoMethodOnHierarchy(backPackClass, "GetUsableItemCount", 2);
+                if (this.snowAuraMonoGetUsableItemCountMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            int staticId = SnowballStaticId;
+            byte inSelfField = 0; // mono bool == 1 byte; false = backpack only
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&staticId);
+            args[1] = (IntPtr)(&inSelfField);
+            IntPtr boxed = auraMonoRuntimeInvoke(this.snowAuraMonoGetUsableItemCountMethod, backPackSystemObj, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (this.TryUnboxMonoInt32(boxed, out count))
+            {
+                return true;
+            }
+
+            ulong raw = this.TryReadMonoUnsignedIntegral(boxed);
+            count = raw <= int.MaxValue ? (int)raw : 0;
             return true;
         }
 

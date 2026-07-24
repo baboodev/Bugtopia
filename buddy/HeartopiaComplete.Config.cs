@@ -206,6 +206,9 @@ namespace HeartopiaMod
             data.autoIceSkatingPreferNewMove = this.autoIceSkatingPreferNewMove;
             data.iceSkatingChallengeEndScore = this.iceSkatingChallengeEndScore;
             data.shopBuyAllMaxPerItem = this.shopBuyAllMaxPerItem;
+            data.snowStartDelaySeconds = this.snowStartDelaySeconds;
+            data.snowNextCycleDelaySeconds = this.snowNextCycleDelaySeconds;
+            data.snowballUseLimit = this.snowballUseLimit;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
             data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
             data.bubbleSpawnAtPlayerEnabled = this.bubbleSpawnAtPlayerEnabled;
@@ -412,6 +415,11 @@ namespace HeartopiaMod
                 data.shopBuyAllMaxPerItem > 0 ? data.shopBuyAllMaxPerItem : 200,
                 1,
                 999999);
+            // Plain clamps (no >0 fallback): 0 is a legal user value for all three; configs saved
+            // before these fields existed get the ConfigData initializers (0.3 / 0.5 / 0).
+            this.snowStartDelaySeconds = Mathf.Clamp(data.snowStartDelaySeconds, SnowStartDelayMin, SnowStartDelayMax);
+            this.snowNextCycleDelaySeconds = Mathf.Clamp(data.snowNextCycleDelaySeconds, SnowNextCycleDelayMin, SnowNextCycleDelayMax);
+            this.snowballUseLimit = Mathf.Max(0, data.snowballUseLimit);
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
             this.bubbleSpawnAtPlayerEnabled = data.bubbleSpawnAtPlayerEnabled;
@@ -681,6 +689,9 @@ namespace HeartopiaMod
                         else if (line.Contains("autoIceSkatingEnabled")) this.autoIceSkatingEnabled = GetJsonInt(line, "\"autoIceSkatingEnabled\":") != 0;
                         else if (line.Contains("fastBubbleGenEnabled")) this.fastBubbleGenEnabled = GetJsonInt(line, "\"fastBubbleGenEnabled\":") != 0;
                         else if (line.Contains("bubbleBubblesPerMinute")) this.bubbleBubblesPerMinute = Mathf.Clamp(GetJsonFloat(line, "\"bubbleBubblesPerMinute\":"), 0f, 100f);
+                        else if (line.Contains("snowStartDelaySeconds")) this.snowStartDelaySeconds = Mathf.Clamp(GetJsonFloat(line, "\"snowStartDelaySeconds\":"), SnowStartDelayMin, SnowStartDelayMax);
+                        else if (line.Contains("snowNextCycleDelaySeconds")) this.snowNextCycleDelaySeconds = Mathf.Clamp(GetJsonFloat(line, "\"snowNextCycleDelaySeconds\":"), SnowNextCycleDelayMin, SnowNextCycleDelayMax);
+                        else if (line.Contains("snowballUseLimit")) this.snowballUseLimit = Mathf.Max(0, GetJsonInt(line, "\"snowballUseLimit\":"));
                         else if (line.Contains("bubbleSpawnAtPlayerEnabled")) this.bubbleSpawnAtPlayerEnabled = GetJsonInt(line, "\"bubbleSpawnAtPlayerEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectEnabled")) this.autoBubbleCollectEnabled = GetJsonInt(line, "\"autoBubbleCollectEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = Mathf.Clamp(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"), 0f, 100f);

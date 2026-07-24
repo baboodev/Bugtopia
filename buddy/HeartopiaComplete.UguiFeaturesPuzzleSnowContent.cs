@@ -79,9 +79,17 @@ namespace HeartopiaMod
     //    is stored into snowMoveSnowballsStatus and shown as the notification — green
     //    (0.45,1,0.55) on true, red (1,0.55,0.55) on false. The trailing status label
     //    (:1069-1074, muted subTabText @ 0.92, wrapped 11) renders only while non-empty.
-    //  - Two conditional blocks → relayout-on-signature (Foraging's idiom): box slot y=88
-    //    (+100 shown / +20 hidden) → button 280x32 (+38) → optional status label (+40);
+    //  - Two conditional blocks → relayout-on-signature (Foraging's idiom): box slot
+    //    (+122 shown / +20 hidden) → button 280x32 (+38) → optional status label (+40);
     //    content height = final cursor + 16 (the source returns the bare cursor, no own pad).
+    //  - 2026-07-25 additions (NEW functionality — no IMGUI source, kit idioms; the "zero
+    //    backend additions" ground rule no longer holds for these): bag snowball counter
+    //    (GetSnowballBagCountThrottled, 1s-throttled AuraMono GetUsableItemCount), snowball
+    //    budget InputField (snowballUseLimit, 0 = all, IceSkating parse-clamp-writeback),
+    //    and two persisted pacing sliders (snowStartDelaySeconds / snowNextCycleDelaySeconds,
+    //    0.05s snap). Fixed rows between toggle and box: bag 88 (+24) → limit 112 (+30) →
+    //    sliders 142/168 (+26 each) → box slot base moves 88→194, box 80→102 (3rd line
+    //    "Balls used"). Relayout signature unchanged.
     //
     // Cross-surface sync cadence: toggles re-sync per gated frame via SetIsOnWithoutNotify
     // (SyncUguiToggleFromField); Puzzle's 3-way run status is a zero-alloc literal pick, and
@@ -347,11 +355,27 @@ namespace HeartopiaMod
 
             public Toggle AutoToggle;             // flag + 2-color notification only
 
+            // 2026-07-25 additions (new functionality, no IMGUI source): bag counter, snowball
+            // budget field, and the two pacing sliders. All fixed-position (built between the
+            // toggle and the status box), so the relayout signature is unchanged.
+            public GameObject BagCountLabel;      // "Snowballs in bag: N" (0.5s tick, 1s scan throttle)
+            public string BagCountShown;
+            public InputField LimitField;         // budget, 0 = all (parse-clamp-writeback idiom)
+            public string LimitSeen;
+            public Slider StartDelaySlider;       // snowStartDelaySeconds (persisted)
+            public GameObject StartDelayLabel;
+            public string StartDelayShown;
+            public Slider NextDelaySlider;        // snowNextCycleDelaySeconds (persisted)
+            public GameObject NextDelayLabel;
+            public string NextDelayShown;
+
             public GameObject StatusBox;          // conditional plain box (autoSnowEnabled)
             public GameObject RoundLine;          // "Round: {n}/20  (total {m})" (0.5s tick)
             public string RoundShown;
             public GameObject ApiLine;            // "API: {status}" (0.5s tick)
             public string ApiShown;
+            public GameObject BallsLine;          // "Balls used: X ..." (0.5s tick)
+            public string BallsShown;
 
             public GameObject MoveButton;         // repositions with the box's visibility
             public GameObject MoveStatusLabel;    // conditional (snowMoveSnowballsStatus non-empty)
@@ -378,6 +402,29 @@ namespace HeartopiaMod
         {
             // Gui.cs:1046.
             return $"API: {this.snowSculptureLastActionStatus}";
+        }
+
+        private string BuildUguiFeaturesSnowBagCountText()
+        {
+            int count = this.GetSnowballBagCountThrottled();
+            return "Snowballs in bag: " + (count < 0 ? "?" : count.ToString());
+        }
+
+        private string BuildUguiFeaturesSnowStartDelayText()
+        {
+            return "Start delay: " + this.snowStartDelaySeconds.ToString("F2") + "s";
+        }
+
+        private string BuildUguiFeaturesSnowNextDelayText()
+        {
+            return "Next-cycle delay: " + this.snowNextCycleDelaySeconds.ToString("F2") + "s";
+        }
+
+        private string BuildUguiFeaturesSnowBallsText()
+        {
+            return this.snowballUseLimit > 0
+                ? "Balls used: " + this.snowballsUsedThisRun + " / " + this.snowballUseLimit
+                : "Balls used: " + this.snowballsUsedThisRun + " (no limit)";
         }
 
         private int ComputeUguiFeaturesSnowLayoutSignature()
@@ -448,16 +495,51 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFeaturesSnowAutoToggled));
             PlaceUguiTopLeft(handle.AutoToggle.gameObject, 8f, 48f, 360f, 30f);
 
+            // -------- Bag counter (2026-07-25 addition; 0.5s tick over a 1s-throttled read) -----
+            handle.BagCountShown = this.BuildUguiFeaturesSnowBagCountText();
+            handle.BagCountLabel = this.CreateUguiLabel(scrollContent, "BagCount",
+                handle.BagCountShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.BagCountLabel, 8f, 88f, handle.PanelW, 20f);
+
+            // -------- Snowball budget (0 = all; IceSkating parse-clamp-writeback idiom) --------
+            GameObject limitCaption = this.CreateUguiLabel(scrollContent, "LimitCaption",
+                this.L("Snowball limit (0 = all)"), 12f, textColor, false);
+            PlaceUguiTopLeft(limitCaption, 8f, 112f, 170f, 22f);
+            handle.LimitSeen = this.snowballUseLimit.ToString();
+            handle.LimitField = this.CreateUguiInputField(scrollContent, "LimitField",
+                handle.LimitSeen, 6, new System.Action<string>(this.OnUguiFeaturesSnowLimitEdited));
+            PlaceUguiTopLeft(handle.LimitField.gameObject, 186f, 112f, 80f, 22f);
+
+            // -------- Pacing sliders (persisted; label-left + slider-right row shape) --------
+            handle.StartDelayShown = this.BuildUguiFeaturesSnowStartDelayText();
+            handle.StartDelayLabel = this.CreateUguiLabel(scrollContent, "StartDelayLabel",
+                handle.StartDelayShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.StartDelayLabel, 8f, 142f, 200f, 22f);
+            handle.StartDelaySlider = this.CreateUguiSlider(scrollContent, "StartDelaySlider",
+                SnowStartDelayMin, SnowStartDelayMax, this.snowStartDelaySeconds,
+                false, new System.Action<float>(this.OnUguiFeaturesSnowStartDelayChanged));
+            PlaceUguiTopLeft(handle.StartDelaySlider.gameObject, 216f, 145f, handle.PanelW - 216f, 20f);
+
+            handle.NextDelayShown = this.BuildUguiFeaturesSnowNextDelayText();
+            handle.NextDelayLabel = this.CreateUguiLabel(scrollContent, "NextDelayLabel",
+                handle.NextDelayShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.NextDelayLabel, 8f, 168f, 200f, 22f);
+            handle.NextDelaySlider = this.CreateUguiSlider(scrollContent, "NextDelaySlider",
+                SnowNextCycleDelayMin, SnowNextCycleDelayMax, this.snowNextCycleDelaySeconds,
+                false, new System.Action<float>(this.OnUguiFeaturesSnowNextDelayChanged));
+            PlaceUguiTopLeft(handle.NextDelaySlider.gameObject, 216f, 171f, handle.PanelW - 216f, 20f);
+
             // -------- Conditional plain status box (:1043 — DEFAULT GUI.skin.box; Sand
-            // Sculpture's plain-box convention: ControlFill @ 0.55 + neutral gray ring) --------
+            // Sculpture's plain-box convention: ControlFill @ 0.55 + neutral gray ring). Now 3
+            // lines (Balls added 2026-07-25) -> 102 high; sits below the new controls at 194. ----
             handle.StatusBox = this.CreateUguiGo("StatusBox", scrollContent);
-            PlaceUguiTopLeft(handle.StatusBox, 8f, 88f, handle.PanelW, 80f);
+            PlaceUguiTopLeft(handle.StatusBox, 8f, 194f, handle.PanelW, 102f);
             Color boxFill = this.UguiKitControlFill();
             this.AddUguiImage(handle.StatusBox, new Color(boxFill.r, boxFill.g, boxFill.b, 0.55f), true, 1f);
             this.AddUguiRingOverlay(handle.StatusBox, new Color(0.88f, 0.92f, 0.97f, 0.16f), 1f);
 
-            // Lines at box-local +10/+8 and +10/+30, 400x22, fontSize 12 (:1044-1046 — the 400
-            // width is absolute in the source, kept).
+            // Lines at box-local +10/+8, +10/+30, +10/+52, 400x22, fontSize 12 (:1044-1046 — the
+            // 400 width is absolute in the source, kept).
             handle.RoundShown = this.BuildUguiFeaturesSnowRoundText();
             handle.RoundLine = this.CreateUguiLabel(handle.StatusBox.transform, "RoundLine",
                 handle.RoundShown, 12f, textColor, false);
@@ -467,6 +549,11 @@ namespace HeartopiaMod
             handle.ApiLine = this.CreateUguiLabel(handle.StatusBox.transform, "ApiLine",
                 handle.ApiShown, 12f, textColor, false);
             PlaceUguiTopLeft(handle.ApiLine, 10f, 30f, 400f, 22f);
+
+            handle.BallsShown = this.BuildUguiFeaturesSnowBallsText();
+            handle.BallsLine = this.CreateUguiLabel(handle.StatusBox.transform, "BallsLine",
+                handle.BallsShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.BallsLine, 10f, 52f, 400f, 22f);
 
             // -------- Move button (:1054 — themePrimaryButtonStyle, 280x32; position owned by
             // the relayout because the box above it comes and goes) --------
@@ -489,20 +576,22 @@ namespace HeartopiaMod
         }
 
         // Positions everything from the CURRENT autoSnowEnabled / move-status state — the UGUI
-        // analog of the IMGUI branch's num accumulation (Gui.cs:1031-1077): header 8 (+40) →
-        // toggle 48 (+40) → box slot 88 (+100 shown / +20 hidden) → button (+38) → optional
-        // status label (+40). Reposition/SetActive only; nothing is rebuilt.
+        // analog of the IMGUI branch's num accumulation (Gui.cs:1031-1077), shifted by the
+        // 2026-07-25 fixed rows: header 8 (+40) → toggle 48 (+40) → bag counter 88 (+24) →
+        // limit row 112 (+30) → delay sliders 142/168 (+26 each) → box slot 194 (+122 shown,
+        // 102-high 3-line box / +20 hidden) → button (+38) → optional status label (+40).
+        // Reposition/SetActive only; nothing is rebuilt.
         private void RelayoutUguiShellFeaturesSnow(UguiShellFeaturesSnowHandle handle)
         {
             bool autoOn = this.autoSnowEnabled;
             bool hasMoveStatus = !string.IsNullOrEmpty(this.snowMoveSnowballsStatus);
 
-            float yCur = 88f;
+            float yCur = 194f;
             SetUguiGoActive(handle.StatusBox, autoOn);
             if (autoOn)
             {
-                PlaceUguiTopLeft(handle.StatusBox, 8f, yCur, handle.PanelW, 80f);
-                yCur += 100f;
+                PlaceUguiTopLeft(handle.StatusBox, 8f, yCur, handle.PanelW, 102f);
+                yCur += 122f;
             }
             else
             {
@@ -550,8 +639,10 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.MoveStatusLabel, ref handle.MoveStatusShown,
                     this.snowMoveSnowballsStatus);
 
-                // The two box lines change from the feature's background machinery and their
-                // texts are allocating interpolations — 0.5s tick (file header).
+                // The box lines change from the feature's background machinery and their
+                // texts are allocating interpolations — 0.5s tick (file header). The bag counter
+                // rides the same tick (its backing read is 1s-throttled internally), and the
+                // sliders/field re-sync WithoutNotify against external edits (config load).
                 if (Time.unscaledTime >= handle.NextSlowSyncAt)
                 {
                     handle.NextSlowSyncAt = Time.unscaledTime + 0.5f;
@@ -559,6 +650,26 @@ namespace HeartopiaMod
                         this.BuildUguiFeaturesSnowRoundText());
                     this.SyncUguiSelfLabelText(handle.ApiLine, ref handle.ApiShown,
                         this.BuildUguiFeaturesSnowApiText());
+                    this.SyncUguiSelfLabelText(handle.BallsLine, ref handle.BallsShown,
+                        this.BuildUguiFeaturesSnowBallsText());
+                    this.SyncUguiSelfLabelText(handle.BagCountLabel, ref handle.BagCountShown,
+                        this.BuildUguiFeaturesSnowBagCountText());
+                    this.SyncUguiSelfLabelText(handle.StartDelayLabel, ref handle.StartDelayShown,
+                        this.BuildUguiFeaturesSnowStartDelayText());
+                    this.SyncUguiSelfLabelText(handle.NextDelayLabel, ref handle.NextDelayShown,
+                        this.BuildUguiFeaturesSnowNextDelayText());
+                    SyncUguiInputFieldFromBackingField(handle.LimitField, ref handle.LimitSeen,
+                        this.snowballUseLimit.ToString());
+                    if (handle.StartDelaySlider != null
+                        && Mathf.Abs(handle.StartDelaySlider.value - this.snowStartDelaySeconds) > 0.0005f)
+                    {
+                        handle.StartDelaySlider.SetValueWithoutNotify(this.snowStartDelaySeconds);
+                    }
+                    if (handle.NextDelaySlider != null
+                        && Mathf.Abs(handle.NextDelaySlider.value - this.snowNextCycleDelaySeconds) > 0.0005f)
+                    {
+                        handle.NextDelaySlider.SetValueWithoutNotify(this.snowNextCycleDelaySeconds);
+                    }
                 }
 
                 // Conditional-layout signature (status box + move-status label).
@@ -594,6 +705,75 @@ namespace HeartopiaMod
             this.AddMenuNotification(
                 $"Auto Snow Sculpture {(this.autoSnowEnabled ? "Enabled" : "Disabled")}",
                 this.autoSnowEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+        }
+
+        // Pacing sliders (2026-07-25): snap to the nearest 0.05 s (the Pictures delay-slider
+        // granularity), equal-guard, persist via SaveKeybinds(false), refresh the value label.
+        private void OnUguiFeaturesSnowStartDelayChanged(float value)
+        {
+            float snapped = Mathf.Clamp(Mathf.Round(value * 20f) / 20f, SnowStartDelayMin, SnowStartDelayMax);
+            if (Mathf.Abs(snapped - this.snowStartDelaySeconds) <= 0.0001f)
+            {
+                return;
+            }
+            this.snowStartDelaySeconds = snapped;
+            try { this.SaveKeybinds(false); } catch { }
+            UguiShellFeaturesSnowHandle handle = this.uguiShellFeaturesSnow;
+            if (handle != null)
+            {
+                this.SyncUguiSelfLabelText(handle.StartDelayLabel, ref handle.StartDelayShown,
+                    this.BuildUguiFeaturesSnowStartDelayText());
+            }
+        }
+
+        private void OnUguiFeaturesSnowNextDelayChanged(float value)
+        {
+            float snapped = Mathf.Clamp(Mathf.Round(value * 20f) / 20f, SnowNextCycleDelayMin, SnowNextCycleDelayMax);
+            if (Mathf.Abs(snapped - this.snowNextCycleDelaySeconds) <= 0.0001f)
+            {
+                return;
+            }
+            this.snowNextCycleDelaySeconds = snapped;
+            try { this.SaveKeybinds(false); } catch { }
+            UguiShellFeaturesSnowHandle handle = this.uguiShellFeaturesSnow;
+            if (handle != null)
+            {
+                this.SyncUguiSelfLabelText(handle.NextDelayLabel, ref handle.NextDelayShown,
+                    this.BuildUguiFeaturesSnowNextDelayText());
+            }
+        }
+
+        // Snowball budget (2026-07-25) — the IceSkating ChallengeScore parse-clamp-writeback
+        // idiom: persist only on an actual value change; non-numeric text is left as typed
+        // (Seen cache) so the 0.5s re-sync doesn't clobber in-progress editing.
+        private void OnUguiFeaturesSnowLimitEdited(string text)
+        {
+            UguiShellFeaturesSnowHandle handle = this.uguiShellFeaturesSnow;
+            if (handle == null)
+            {
+                return;
+            }
+            string raw = text ?? string.Empty;
+            if (int.TryParse(raw, out int parsed))
+            {
+                int prev = this.snowballUseLimit;
+                this.snowballUseLimit = Mathf.Clamp(parsed, 0, 999999);
+                if (this.snowballUseLimit != prev)
+                {
+                    try { this.SaveKeybinds(false); } catch { }
+                }
+                string normalized = this.snowballUseLimit.ToString();
+                handle.LimitSeen = normalized;
+                if (handle.LimitField != null
+                    && !string.Equals(normalized, raw, StringComparison.Ordinal))
+                {
+                    try { handle.LimitField.SetTextWithoutNotify(normalized); } catch { }
+                }
+            }
+            else
+            {
+                handle.LimitSeen = raw;
+            }
         }
 
         // Gui.cs:1054-1066 — the SAME out-string is stored into snowMoveSnowballsStatus AND shown
