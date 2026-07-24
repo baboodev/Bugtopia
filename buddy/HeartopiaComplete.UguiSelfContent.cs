@@ -320,7 +320,8 @@ namespace HeartopiaMod
         {
             return (this.mouseLookEnabled ? 1 : 0)
                  | (this.noclipEnabled ? 2 : 0)
-                 | (this.antiAfkEnabled ? 4 : 0);
+                 | (this.antiAfkEnabled ? 4 : 0)
+                 | (this.chatForceTranslateEnabled ? 8 : 0);
         }
 
         // Positions every Main control from the CURRENT conditional state — the UGUI analog of
@@ -435,6 +436,32 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.ChatTranslateToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
+
+            // Chat Translate sub-toggles: indented, shown only while the feature is on.
+            bool chatTranslate = this.chatForceTranslateEnabled;
+            SetUguiGoActive(handle.ChatTranslateDebugToggle != null ? handle.ChatTranslateDebugToggle.gameObject : null, chatTranslate);
+            SetUguiGoActive(handle.ChatTranslateForceAllToggle != null ? handle.ChatTranslateForceAllToggle.gameObject : null, chatTranslate);
+            SetUguiGoActive(handle.ChatTranslatePostcardToggle != null ? handle.ChatTranslatePostcardToggle.gameObject : null, chatTranslate);
+            if (chatTranslate)
+            {
+                float subX = rowX + 16f;
+                float subW = rowW - 16f;
+                if (handle.ChatTranslateDebugToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.ChatTranslateDebugToggle.gameObject, subX, yCur, subW, 24f);
+                }
+                yCur += 28f;
+                if (handle.ChatTranslateForceAllToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.ChatTranslateForceAllToggle.gameObject, subX, yCur, subW, 24f);
+                }
+                yCur += 28f;
+                if (handle.ChatTranslatePostcardToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.ChatTranslatePostcardToggle.gameObject, subX, yCur, subW, 24f);
+                }
+                yCur += 28f;
+            }
 
             if (handle.GameSpeedLabel != null)
             {
