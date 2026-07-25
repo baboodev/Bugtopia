@@ -64,17 +64,20 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // ONLY the static check belongs here. An INSTANCE field's offset is a small object
+            // offset that would index into the static block — that is the near-null read this guard
+            // exists to stop.
+            //
+            // ⚠️ Do NOT also reject FIELD_ATTRIBUTE_LITERAL (0x40) or offset == -1. Tried on
+            // 2026-07-25 and immediately reported as broken: enum MEMBERS are literal fields, and
+            // reading them is exactly what TryReadAuraMonoStaticIntField does for EStorageType
+            // (Backpack/Warehouse) and EntityType (crop seed / dog / cat). mono_field_static_get_value
+            // handles both cases itself — literals come from the metadata constant blob and
+            // thread-statics from mono_get_special_static_data — so rejecting them here broke the
+            // homeland-farm seed & fertilizer lists and made the animal-food scan skip the warehouse,
+            // while fixing nothing.
             const uint FieldAttributeStatic = 0x0010;
-            const uint FieldAttributeLiteral = 0x0040; // const — no runtime storage at all
-            uint fieldFlags = auraMonoFieldGetFlags(fieldPtr);
-            if ((fieldFlags & FieldAttributeStatic) == 0 || (fieldFlags & FieldAttributeLiteral) != 0)
-            {
-                return false;
-            }
-
-            // Thread/context statics live in per-thread special storage, not in vtable->data; mono
-            // marks them with offset -1. Reading one through this path is not what callers mean.
-            if (auraMonoFieldGetOffset != null && auraMonoFieldGetOffset(fieldPtr) == uint.MaxValue)
+            if ((auraMonoFieldGetFlags(fieldPtr) & FieldAttributeStatic) == 0)
             {
                 return false;
             }
