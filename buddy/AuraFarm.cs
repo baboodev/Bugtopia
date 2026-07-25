@@ -2818,8 +2818,9 @@ namespace HeartopiaMod
                 return;
             }
 
-            IntPtr axeCheckerVtable = auraMonoClassVtable(this.auraMonoRootDomain, this.auraMonoAxeCheckerClassPtr);
-            if (axeCheckerVtable == IntPtr.Zero)
+            // Vtable of the field's DECLARING class + static-ness check (TryGetAuraMonoStaticFieldVtable) —
+            // a hierarchy-inherited field read off this class's vtable is an uncatchable AV.
+            if (!this.TryGetAuraMonoStaticFieldVtable(this.auraMonoAxeCheckerInstanceFieldPtr, out IntPtr axeCheckerVtable))
             {
                 if (AuraFarmDebugLogs)
                 {
@@ -5800,8 +5801,7 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, this.auraMonoInteractSystemClassPtr);
-                if (vtable == IntPtr.Zero)
+                if (!this.TryGetAuraMonoStaticFieldVtable(this.auraMonoInteractSelectPriorityInfoArrayFieldPtr, out IntPtr vtable))
                 {
                     return false;
                 }

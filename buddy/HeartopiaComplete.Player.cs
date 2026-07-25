@@ -759,8 +759,7 @@ namespace HeartopiaMod
             {
                 return false;
             }
-            IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, classPtr);
-            if (vtable == IntPtr.Zero)
+            if (!this.TryGetAuraMonoStaticFieldVtable(fieldPtr, out IntPtr vtable))
             {
                 return false;
             }

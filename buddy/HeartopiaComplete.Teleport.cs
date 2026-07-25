@@ -837,7 +837,13 @@ namespace HeartopiaMod
                         return GameSceneIdStarTown;
                     }
                     IntPtr fieldPtr = auraMonoClassGetFieldFromName(classPtr, "LevelId");
-                    IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, classPtr);
+                    IntPtr vtable = IntPtr.Zero;
+                    if (fieldPtr != IntPtr.Zero)
+                    {
+                        // Vtable of the class that DECLARES LevelId (see TryGetAuraMonoStaticFieldVtable);
+                        // both are cached together below, so this validates the cached pair.
+                        this.TryGetAuraMonoStaticFieldVtable(fieldPtr, out vtable);
+                    }
                     if (fieldPtr == IntPtr.Zero || vtable == IntPtr.Zero)
                     {
                         this.NpcTeleportError("DataCenter.LevelId field not found — falling back to StarTown scene for map-spot lookups");

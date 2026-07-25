@@ -31,6 +31,64 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
+        // The ONLY sanctioned way to obtain the vtable for a raw mono_field_static_get_value read.
+        //
+        // CRASH FIX (2026-07-25, WER dump coreclr_25388): opening the UGUI shell died with an
+        // AccessViolationException in TryGetAuraMonoStaticObjectField, on the snow-sculpting tab's
+        // bag counter resolving BackPackSystem. mono_class_get_field_from_name walks the class
+        // HIERARCHY, so the "_instance" it returned for BackPackSystem is the static field of the
+        // BASE class DataModule<BackPackSystem>. mono_field_static_get_value then reads
+        // vtable->data + field->offset — and the vtable passed was the CHILD's, whose static storage
+        // is a different (here empty/NULL) block, because BackPackSystem declares no statics of its
+        // own. Near-null dereference => uncatchable AV, process dies.
+        // This is NOT what AuraMonoStaticFieldReadsAllowed guards: that latch proves the game's Mono
+        // side is up, which says nothing about WHICH class owns the field. Hence, for every raw
+        // static read: the field must really be static, must not be a const or a thread-static, and
+        // the vtable must belong to the class that DECLARES it. Exports missing => refuse (the old
+        // behaviour was a coin flip between garbage and a crash).
+        private bool TryGetAuraMonoStaticFieldVtable(IntPtr fieldPtr, out IntPtr vtable)
+        {
+            vtable = IntPtr.Zero;
+            if (fieldPtr == IntPtr.Zero || auraMonoClassVtable == null || this.auraMonoRootDomain == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (auraMonoFieldGetFlags == null || auraMonoFieldGetParent == null)
+            {
+                if (!auraMonoStaticFieldGuardUnavailableLogged)
+                {
+                    auraMonoStaticFieldGuardUnavailableLogged = true;
+                    ModLogger.Msg("[AuraMono] mono_field_get_flags/mono_field_get_parent unavailable — raw static-field reads disabled (unguarded reads can crash the process).");
+                }
+                return false;
+            }
+
+            const uint FieldAttributeStatic = 0x0010;
+            const uint FieldAttributeLiteral = 0x0040; // const — no runtime storage at all
+            uint fieldFlags = auraMonoFieldGetFlags(fieldPtr);
+            if ((fieldFlags & FieldAttributeStatic) == 0 || (fieldFlags & FieldAttributeLiteral) != 0)
+            {
+                return false;
+            }
+
+            // Thread/context statics live in per-thread special storage, not in vtable->data; mono
+            // marks them with offset -1. Reading one through this path is not what callers mean.
+            if (auraMonoFieldGetOffset != null && auraMonoFieldGetOffset(fieldPtr) == uint.MaxValue)
+            {
+                return false;
+            }
+
+            IntPtr declaringClass = auraMonoFieldGetParent(fieldPtr);
+            if (declaringClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            vtable = auraMonoClassVtable(this.auraMonoRootDomain, declaringClass);
+            return vtable != IntPtr.Zero;
+        }
+
         private unsafe bool TryGetAuraMonoStaticObjectField(IntPtr classPtr, string fieldName, out IntPtr valueObj)
         {
             valueObj = IntPtr.Zero;
@@ -54,8 +112,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, classPtr);
-            if (vtable == IntPtr.Zero)
+            if (!this.TryGetAuraMonoStaticFieldVtable(fieldPtr, out IntPtr vtable))
             {
                 return false;
             }

@@ -181,6 +181,12 @@ namespace HeartopiaMod
         private delegate uint MonoFieldGetOffsetDelegate(IntPtr field);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate uint MonoFieldGetFlagsDelegate(IntPtr field);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr MonoFieldGetParentDelegate(IntPtr field);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoClassVtableDelegate(IntPtr domain, IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -291,6 +297,14 @@ namespace HeartopiaMod
 
         private static MonoFieldGetOffsetDelegate auraMonoFieldGetOffset;
 
+        // Both required by TryGetAuraMonoStaticObjectField to make a raw static read safe: the flags
+        // prove the field IS static, the parent gives the class whose vtable actually owns its
+        // storage (mono_class_get_field_from_name walks the hierarchy, so the field can belong to a
+        // base class). Missing exports => that read refuses instead of guessing.
+        private static MonoFieldGetFlagsDelegate auraMonoFieldGetFlags;
+
+        private static MonoFieldGetParentDelegate auraMonoFieldGetParent;
+
         private static MonoClassVtableDelegate auraMonoClassVtable;
 
         private static MonoFieldStaticGetValueDelegate auraMonoFieldStaticGetValue;
@@ -359,6 +373,8 @@ namespace HeartopiaMod
         internal static bool AuraMonoPinningAvailable => auraMonoGcHandleNew != null && auraMonoGcHandleFree != null;
 
         private static bool auraMonoPinningUnavailableLogged;
+
+        private static bool auraMonoStaticFieldGuardUnavailableLogged;
 
         // True once the game's Mono side has been PROVEN up by a safe operation. Same fail-closed
         // shape as AuraMonoPinningAvailable above, for a different unsafe primitive.
@@ -913,6 +929,8 @@ namespace HeartopiaMod
             auraMonoArrayAddrWithSize = this.GetAuraMonoExport<MonoArrayAddrWithSizeDelegate>(monoModule, "mono_array_addr_with_size");
             auraMonoArrayElementSize = this.GetAuraMonoExport<MonoArrayElementSizeDelegate>(monoModule, "mono_array_element_size");
             auraMonoFieldGetOffset = this.GetAuraMonoExport<MonoFieldGetOffsetDelegate>(monoModule, "mono_field_get_offset");
+            auraMonoFieldGetFlags = this.GetAuraMonoExport<MonoFieldGetFlagsDelegate>(monoModule, "mono_field_get_flags");
+            auraMonoFieldGetParent = this.GetAuraMonoExport<MonoFieldGetParentDelegate>(monoModule, "mono_field_get_parent");
             auraMonoArrayNew = this.GetAuraMonoExport<MonoArrayNewDelegate>(monoModule, "mono_array_new");
             auraMonoClassVtable = this.GetAuraMonoExport<MonoClassVtableDelegate>(monoModule, "mono_class_vtable");
             auraMonoFieldStaticGetValue = this.GetAuraMonoExport<MonoFieldStaticGetValueDelegate>(monoModule, "mono_field_static_get_value");

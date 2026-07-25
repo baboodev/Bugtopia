@@ -560,16 +560,17 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, classPtr);
-            if (vtable == IntPtr.Zero)
-            {
-                return false;
-            }
-
             foreach (string fieldName in fieldNames)
             {
                 IntPtr fieldPtr = auraMonoClassGetFieldFromName(classPtr, fieldName);
                 if (fieldPtr == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                // Per-field: the name lookup walks the hierarchy, so the owning class (and hence the
+                // vtable holding its static storage) can differ from classPtr.
+                if (!this.TryGetAuraMonoStaticFieldVtable(fieldPtr, out IntPtr vtable))
                 {
                     continue;
                 }

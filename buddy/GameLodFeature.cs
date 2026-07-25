@@ -664,8 +664,10 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, this.gameLodLoaderManagerClass);
-            if (vtable == IntPtr.Zero)
+            // FindAuraMonoFieldOnHierarchy can return a BASE class's field — it must then be read off
+            // that class's vtable, never this one's (TryGetAuraMonoStaticFieldVtable; the mismatch is
+            // an uncatchable AV).
+            if (!this.TryGetAuraMonoStaticFieldVtable(field, out IntPtr vtable))
             {
                 return false;
             }
