@@ -745,6 +745,7 @@ namespace HeartopiaMod
             this.QuestAssistantFishMonitorTick();
             this.QuestAssistantAutoRefreshOnUpdate();
             this.ProcessPrivacyBlockOnUpdate();
+            this.ProcessInstantTeleportOnUpdate();
             this.ProcessVehicleBypassOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();
             this.FlushPendingGameSpeedConfigSave();

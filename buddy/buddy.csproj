@@ -323,6 +323,7 @@
     <Compile Include="HeartopiaComplete.Lobby.cs" />
     <Compile Include="HeartopiaComplete.WorldEntities.cs" />
     <Compile Include="HeartopiaComplete.WorldReady.cs" />
+    <Compile Include="InstantTeleportFeature.cs" />
     <Compile Include="HeartopiaComplete.Config.cs" />
     <Compile Include="HeartopiaComplete.Gui.cs" />
     <Compile Include="HeartopiaComplete.Player.cs" />

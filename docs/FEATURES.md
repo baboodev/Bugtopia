@@ -158,6 +158,40 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 - The Settings → "reset position" button is unaffected (different entry point).
 - Persisted; default off. Source: `buddy/OutOfBoundsGuardFeature.cs`.
 
+### Instant Teleport
+
+- Skips the game's animated transfer for in-game teleports (teleport points, dialogue, quests, UGC):
+  no `SwitchScenePanel` splash, no fixed 2 s + 1 s waits (`LevelScriptableConfig
+  .TransferAnimationLimitTime` / `TransferLoadingLimitTime`), and no uninterruptible
+  `PlayerSwitchSceneOn` action — that action is configured `InterruptFlags.Null`, which is what
+  freezes movement for ~3 s in vanilla.
+- One Mono `NativeDetour` on `TransferCommand.IsExecutable` returning `-1`
+  (`InteractErrorCode.Invalid`). `EventCommand<T>.ExecuteAsync` then skips `OnExecuteAsync`
+  entirely through the game's own path, and `PlayerInteraction.ToastInteractError` explicitly
+  ignores `Invalid`, so the refusal is silent. The warp itself is driven from a
+  the **command argument itself** — the `in TransferCommandEvent` pointer the detour receives
+  (`switchSceneType` / `targetPos` / `angle`, offsets resolved at runtime from the struct metadata)
+  — through the mod's normal `TeleportToLocation` path, which also redirects to the vehicle when
+  driving. The argument is the only source that covers every producer: the command is built from
+  `PlayerTeleportation`, from `CommonTeleportation` (the ordinary teleport-point round trip), from
+  `PlayerFieldTeleportation`, and from two places with no event at all.
+- Only `SwitchSceneType.Story` transfers with a validated target are refused; everything else
+  forwards to the original, so the Settings → "reset position" button and the fishing-ship
+  out-of-bounds rescue keep their vanilla behaviour.
+- **Cross-level teleports are untouched by construction**: `TeleportModule.PlayerTeleportation`
+  routes those to `TransferToRoom` → `LoginSystem.TeleportToRoomLevel`, which never goes through
+  `TransferCommand`. Room/world transfers keep their normal loading screen.
+- **Wait For Field Load** (second toggle, default on): after the warp, hold the player on the
+  target until `EntityUtil.IsFieldLoaded(inFieldOwnerId)` reports the destination field streamed in
+  (bounded at 6 s, re-assert every 0.15 s), then release. This is vanilla's `WaitUntilRendered`
+  protection against dropping through unloaded terrain, minus the fixed wait — normally a fraction
+  of a second. Off = single warp, free to move immediately. If the probe can't be resolved on the
+  build, it falls back to a 0.6 s blind hold.
+- Skipped side effects of the vanilla command: it also closed the fullscreen panel the teleport was
+  triggered from (the map may stay open) and exited the current player state first (we warp as-is,
+  like every other mod teleport).
+- Persisted; default off. Source: `buddy/InstantTeleportFeature.cs`.
+
 ### Anti-AFK
 
 - Periodically simulates mouse input to reduce idle kick.

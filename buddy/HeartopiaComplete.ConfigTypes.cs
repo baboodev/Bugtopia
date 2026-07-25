@@ -108,6 +108,10 @@ namespace HeartopiaMod
             // (PlayerFishingShipComponent.TryBackToShip / LeaveShipThenTeleportToSafePos).
             // Default false = vanilla: leaving the scene's detect box teleports you to a safe point.
             public bool disableOobTeleportEnabled;
+            // Instant Teleport: refuse the game's animated transfer command and warp directly.
+            // The wait-for-field companion defaults to ON (old configs keep the initializer).
+            public bool instantTeleportEnabled;
+            public bool instantTeleportWaitFieldLoaded = true;
             // Little Whale figurine finder (daily photo hide-and-seek, MapDynamicResource 300023-33).
             public bool littleWhaleFinderEnabled;
             // Sanrio gacha machine finder (event scene machines, MapDynamicResource 11305-07).

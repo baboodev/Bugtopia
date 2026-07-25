@@ -71,6 +71,8 @@ namespace HeartopiaMod
             public Toggle CrosshairToggle;      // only visible while Camera Toggle is on
             public Toggle NoclipToggle;
             public Toggle DisableOobToggle;
+            public Toggle InstantTeleportToggle;
+            public Toggle InstantTeleportWaitFieldToggle;
             public Toggle VehicleBypassToggle;
             public Toggle VehicleBypassServerToggle;
             public GameObject NoclipSpeedLabel; // only visible while Noclip is on
@@ -232,6 +234,12 @@ namespace HeartopiaMod
             handle.DisableOobToggle = this.CreateUguiCheckbox(scrollContent, "DisableOobToggle",
                 this.L("Disable OOB Teleport"), this.disableOobTeleportEnabled,
                 new System.Action<bool>(this.OnUguiSelfDisableOobToggled));
+            handle.InstantTeleportToggle = this.CreateUguiCheckbox(scrollContent, "InstantTeleportToggle",
+                this.L("Instant Teleport"), this.instantTeleportEnabled,
+                new System.Action<bool>(this.OnUguiSelfInstantTeleportToggled));
+            handle.InstantTeleportWaitFieldToggle = this.CreateUguiCheckbox(scrollContent, "InstantTeleportWaitFieldToggle",
+                this.L("Instant Teleport: Wait For Field Load"), this.instantTeleportWaitFieldLoaded,
+                new System.Action<bool>(this.OnUguiSelfInstantTeleportWaitFieldToggled));
             handle.VehicleBypassToggle = this.CreateUguiCheckbox(scrollContent, "VehicleBypassToggle",
                 this.L("Vehicle Bypass"), this.vehicleBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfVehicleBypassToggled));
@@ -370,6 +378,16 @@ namespace HeartopiaMod
             if (handle.DisableOobToggle != null)
             {
                 PlaceUguiTopLeft(handle.DisableOobToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.InstantTeleportToggle != null)
+            {
+                PlaceUguiTopLeft(handle.InstantTeleportToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.InstantTeleportWaitFieldToggle != null)
+            {
+                PlaceUguiTopLeft(handle.InstantTeleportWaitFieldToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
             if (handle.VehicleBypassToggle != null)
@@ -544,6 +562,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CrosshairToggle, this.showMouseLookCrosshair);
                 this.SyncUguiToggleFromField(handle.NoclipToggle, this.noclipEnabled);
                 this.SyncUguiToggleFromField(handle.DisableOobToggle, this.disableOobTeleportEnabled);
+                this.SyncUguiToggleFromField(handle.InstantTeleportToggle, this.instantTeleportEnabled);
+                this.SyncUguiToggleFromField(handle.InstantTeleportWaitFieldToggle, this.instantTeleportWaitFieldLoaded);
                 this.SyncUguiToggleFromField(handle.VehicleBypassToggle, this.vehicleBypassEnabled);
                 this.SyncUguiToggleFromField(handle.VehicleBypassServerToggle, this.vehicleBypassServerEventsEnabled);
                 this.SyncUguiToggleFromField(handle.AntiAfkToggle, this.antiAfkEnabled);
@@ -671,6 +691,37 @@ namespace HeartopiaMod
             this.AddMenuNotification(
                 this.L("Disable OOB Teleport") + " " + (this.disableOobTeleportEnabled ? "Enabled" : "Disabled"),
                 this.disableOobTeleportEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+        }
+
+        // Instant Teleport (InstantTeleportFeature). Persisted; the IsExecutable detour installs
+        // lazily behind the world-ready gate, so ON only takes effect once it is live (log line).
+        // Turning it off leaves the detour in place forwarding to the original = vanilla sequence.
+        private void OnUguiSelfInstantTeleportToggled(bool value)
+        {
+            if (value == this.instantTeleportEnabled)
+            {
+                return;
+            }
+            this.instantTeleportEnabled = value;
+            this.SaveKeybinds(false);
+            this.AddMenuNotification(
+                this.L("Instant Teleport") + " " + (this.instantTeleportEnabled ? "Enabled" : "Disabled"),
+                this.instantTeleportEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+        }
+
+        // Companion toggle: hold the player on the destination until the field reports loaded
+        // (vanilla's WaitUntilRendered, minus the fixed 3 s). Off = single warp, move immediately.
+        private void OnUguiSelfInstantTeleportWaitFieldToggled(bool value)
+        {
+            if (value == this.instantTeleportWaitFieldLoaded)
+            {
+                return;
+            }
+            this.instantTeleportWaitFieldLoaded = value;
+            this.SaveKeybinds(false);
+            this.AddMenuNotification(
+                this.L("Instant Teleport: Wait For Field Load") + " " + (this.instantTeleportWaitFieldLoaded ? "Enabled" : "Disabled"),
+                this.instantTeleportWaitFieldLoaded ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
         }
 
         // Gui.cs:1623-1630 — notification only, both directions; no save in the source.

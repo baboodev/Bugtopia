@@ -217,6 +217,7 @@ namespace HeartopiaMod
             this.gameUiTimingsNextApplyAt = -999f;
             this.sanrioNextConfigWalkAt = -999f;
             this.avatarPatchNextTryAt = -999f;
+            this.instantTeleportNextAttemptAt = -999f;
             return true;
         }
 
