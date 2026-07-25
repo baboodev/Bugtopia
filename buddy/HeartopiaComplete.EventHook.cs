@@ -264,8 +264,13 @@ namespace HeartopiaMod
                 && e.Installed;
         }
 
-        // Called from OnUpdate: installs any not-yet-installed detours (once images are up) and
-        // drains buffered dispatches to handlers.
+        // Called from OnUpdate: drains buffered dispatches to handlers, and runs the install pass in
+        // the ONE mode that is safe for the current state:
+        //   * no world yet  -> transport only (LoadingOpened/LoadingClosed, the gate's own signal).
+        //                      Everything else waits for InstallGameEventHooksOnWorldReady.
+        //   * world is up   -> full pass, which only matters as catch-up for hooks registered AFTER
+        //                      the gate callback finished (a feature switched on mid-session).
+        // Both are early-outs the moment nothing is pending.
         private void ProcessGameEventHooksOnUpdate()
         {
             if (this.gameEventHookSlotCount == 0)
@@ -273,27 +278,72 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.EnsureGameEventHooksInstalled();
+            this.EnsureGameEventHooksInstalled(transportOnly: !this.IsWorldReady);
             this.DrainGameEventHooks();
         }
 
-        // Throttle for the install pass. NOT a world-ready gate on purpose: this installer is the
-        // transport the world-ready gate itself rides on (LoadingOpened/LoadingClosed), so gating it
-        // on IsWorldReady would be circular — the gate could then only ever fire through its
-        // player-present fallback. What it WAS doing was running a full resolve pass (AuraMono
-        // ready-check + FindAuraMonoClassByFullName("XDTGame.Core.EventCenter") + one class lookup
-        // per pending event) EVERY frame from the first frame, i.e. for the whole login screen.
-        // Half a second is far below any latency that matters here — the detour still lands on the
-        // first pass after Mono comes up — and the world-ready callback re-arms it immediately when
-        // a world load brings new images.
+        // World-ready gating of the install pass.
+        //
+        // Installing a detour means resolving the event struct's MonoClass and inflating
+        // EventCenter.DispatchEvent<T> through mono_metadata_get_generic_inst +
+        // mono_class_inflate_generic_method. On the login/load menu the game's Mono images are only
+        // partially up: a class can resolve by name while inflating a generic over it faults inside
+        // the runtime — an uncatchable native AV that takes the process down at startup with nothing
+        // in the log (WER xdt.exe.7988/30332: inflate of DispatchEvent<StartCookEvent>).
+        //
+        // So the pass runs from the world-ready gate. The ONE thing that cannot wait for the gate is
+        // the gate's own transport (LoadingOpened/LoadingClosed) — that would be circular — so the
+        // OnUpdate path installs those two and nothing else, still behind the 0.5 s throttle.
+        // Registration stays ungated (metadata only); only the native install moved.
         private const float GameEventHookInstallRetrySeconds = 0.5f;
         private float gameEventHookNextInstallAttemptAt = -999f;
 
-        private void EnsureGameEventHooksInstalled()
+        private const string GameEventHooksWorldReadyCallbackName = "GameEventHooksInstall";
+        private bool gameEventHooksWorldReadyRegistered;
+
+        private static bool IsGameEventGateTransport(GameEventHookEntry entry)
+        {
+            return entry != null
+                && (string.Equals(entry.EventFullName, WorldLoadingOpenedEventName, StringComparison.Ordinal)
+                    || string.Equals(entry.EventFullName, WorldLoadingClosedEventName, StringComparison.Ordinal));
+        }
+
+        // World-ready callback: install everything still pending. Returns true only when nothing is
+        // pending any more, so the gate keeps retrying (bounded) while an image is still loading and
+        // re-runs on the next world load for hooks registered after this one.
+        private bool InstallGameEventHooksOnWorldReady()
+        {
+            if (this.gameEventHooksHardFailed)
+            {
+                return true;
+            }
+
+            this.gameEventHookNextInstallAttemptAt = -999f; // gate-driven pass ignores the bootstrap throttle
+            this.EnsureGameEventHooksInstalled(transportOnly: false);
+
+            for (int i = 0; i < this.gameEventHookSlotCount; i++)
+            {
+                GameEventHookEntry e = this.gameEventHookSlots[i];
+                if (e != null && !e.InstallAttempted)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void EnsureGameEventHooksInstalled(bool transportOnly)
         {
             if (this.gameEventHooksHardFailed)
             {
                 return;
+            }
+
+            if (!this.gameEventHooksWorldReadyRegistered)
+            {
+                this.gameEventHooksWorldReadyRegistered = true;
+                this.RegisterWorldReadyCallback(GameEventHooksWorldReadyCallbackName, this.InstallGameEventHooksOnWorldReady);
             }
 
             float installNow = UnityEngine.Time.unscaledTime;
@@ -307,7 +357,7 @@ namespace HeartopiaMod
             for (int i = 0; i < this.gameEventHookSlotCount; i++)
             {
                 GameEventHookEntry e = this.gameEventHookSlots[i];
-                if (e != null && !e.InstallAttempted)
+                if (e != null && !e.InstallAttempted && (!transportOnly || IsGameEventGateTransport(e)))
                 {
                     anyPending = true;
                     break;
@@ -348,6 +398,10 @@ namespace HeartopiaMod
                     if (entry == null || entry.InstallAttempted)
                     {
                         continue;
+                    }
+                    if (transportOnly && !IsGameEventGateTransport(entry))
+                    {
+                        continue; // waits for the world-ready gate (generic inflate AVs pre-world)
                     }
 
                     this.TryInstallGameEventDetour(entry, eventCenterClass, compile);

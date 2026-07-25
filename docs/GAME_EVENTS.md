@@ -116,6 +116,17 @@ regardless of who (if anyone) subscribed. This is wrapped in a reusable engine:
 
 ### Public API
 
+> **Install timing (since 2026-07-26).** `RegisterGameEventHook` only records metadata — it may be
+> called from anywhere, at any time, and does **not** need the world. The native detour, however, is
+> installed from the **world-ready gate** (`InstallGameEventHooksOnWorldReady`), not from `OnUpdate`:
+> inflating `DispatchEvent<T>` while the game's Mono images are half-up faults inside the runtime
+> and takes the process down with an uncatchable AV (WER `xdt.exe.7988`/`30332`, inflate of
+> `DispatchEvent<StartCookEvent>`). The only pair installed without the gate is the gate's own
+> transport, `LoadingOpenedEvent`/`LoadingClosedEvent` — gating those would be circular.
+> Consequence for callers: a hook registered at startup starts firing shortly after the loading
+> splash clears, not before. Never add your own retry loop to `OnUpdate` to "help" it —
+> see [TECHNICAL.md §World-ready gate](TECHNICAL.md#world-ready-gate-heartopiacompleteworldreadycs).
+
 ```csharp
 // payloadBytes = the event struct's size from the dump (how many bytes to snapshot; 0 for empty
 // events like *CloseEvent). The handler runs on the Unity main thread (OnUpdate drain), so it may

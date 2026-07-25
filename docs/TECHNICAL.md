@@ -214,16 +214,49 @@ this.ResetWorldReadyCallback("MyFeature"); // re-arm after a toggle flips on
 if (!this.IsGameDataQueryable) return false;   // == static reads allowed AND world up
 ```
 
-Rules of thumb:
+### Rule for new code: register on the gate, do not poll from `OnUpdate`
 
-- **`RegisterGameEventHook` calls do NOT belong behind the gate.** Registration is metadata-only
-  (a dictionary entry); the EventHook engine installs the native detour lazily as soon as Mono is
-  up. Deferring registration only risks missing early dispatches. Their private "retry every 30 s"
-  wrappers are pointless too — the call can only fail on slot-pool exhaustion.
-- **Mono class/method resolution, `mono_compile_method` and `NativeDetour` installs DO.** Those
-  need the game's images and are the whole reason the gate exists.
+**Anything that has to resolve, compile or hook game code registers a world-ready callback. Do not
+add another `Ensure*()` call to `OnUpdate`, and do not write a new `nextXxxAttemptAt` retry timer.**
+
+```csharp
+// WRONG — the classic shape this codebase spent a refactor removing.
+// Runs from the first frame, i.e. the whole login screen, resolving types that do not exist yet.
+private void ProcessMyFeatureOnUpdate()
+{
+    if (Time.unscaledTime >= this.myNextAttemptAt)
+    {
+        this.myNextAttemptAt = Time.unscaledTime + 5f;
+        this.EnsureMyDetour();          // fails ~every 5 s until a world happens to exist
+    }
+}
+
+// RIGHT — one attempt per world load, retried (bounded) only while a world is actually up.
+this.RegisterWorldReadyCallback("MyFeature", this.TryInstallMyDetour);
+```
+
+`OnUpdate` stays for per-frame *work* (drains, input, UI ticks). Resolution and installation belong
+to the gate. If a per-frame path must also check readiness, gate it with `IsWorldReady` (or
+`IsGameDataQueryable` for UI-driven game-data reads) rather than letting it attempt and fail.
+
+Corollaries:
+
+- **Event-hook registration vs. install.** `RegisterGameEventHook` itself is metadata-only (a
+  dictionary entry) and may be called from anywhere, at any time — but since 2026-07-26 the engine
+  no longer installs the native detour "as soon as Mono is up". Installing means inflating
+  `EventCenter.DispatchEvent<T>` over the event struct, and on the login/load menu that inflate
+  faults **inside the Mono runtime** — an uncatchable AV that killed the process at startup with
+  nothing in the log (WER `xdt.exe.7988` / `30332`, inflate of `DispatchEvent<StartCookEvent>`).
+  So `ProcessGameEventHooksOnUpdate` installs only the gate's own transport
+  (`LoadingOpenedEvent` / `LoadingClosedEvent` — gating those would be circular) and every other
+  detour is installed from `InstallGameEventHooksOnWorldReady`. Registering early is still correct;
+  it just no longer means installing early.
+- **Mono class/method resolution, `mono_compile_method` and `NativeDetour` installs** are the whole
+  reason the gate exists — never run them speculatively.
 - **Never tear a detour down on world change** (see the world-change corruption note below); the
   gate is for *installing*, and Mono detours are image-lifetime.
+- **A feature toggle flipping on mid-session** does not need its own timer either: call
+  `ResetWorldReadyCallback("MyFeature")` to re-arm the gate callback for the current world.
 
 Every start-time warm-up now goes through the gate. `OnWorldReadyRearmWarmups`
 (`HeartopiaComplete.WorldReady.cs`) is the single registered callback that re-arms all of their
@@ -248,9 +281,10 @@ and nothing polls before it.
 
 Two deliberate exceptions, both **registration**, not resolution:
 
-- `EnsureGameEventHooksInstalled` — the transport the gate itself rides on; gating it would be
-  circular. It got a 0.5 s throttle instead of running a full resolve pass every frame, and the
-  gate re-arms it per world.
+- `EnsureGameEventHooksInstalled` — installs the gate's own transport
+  (`LoadingOpenedEvent`/`LoadingClosedEvent`) and nothing else while there is no world
+  (`transportOnly: !IsWorldReady`); gating that pair would be circular. It is throttled to 0.5 s,
+  and every other detour installs from `InstallGameEventHooksOnWorldReady`.
 - `EnsureSpawnVehicleResultHooks` — metadata-only registration, must not miss early dispatches;
   got a 30 s retry throttle so a failed registration stops re-attempting every frame.
 

@@ -145,6 +145,19 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 - Speed and boost configurable; persisted in config.
 - Blocks normal character controller motion while active.
 
+### Disable OOB Teleport
+
+- Suppresses the game's out-of-bounds rescue: the client checks the local player's position every
+  frame against the current scene's `GameSceneConfig.detectMin/detectMax` box and teleports you to a
+  safe point when you leave it (e.g. SeaWorld is capped at `y = 0`, so surfacing in the open sea
+  yanks you back). Detection *and* teleport are entirely client-side — the server never corrects the
+  local player's position.
+- Two Mono `NativeDetour`s on `PlayerFishingShipComponent` (`TryBackToShip` → true = short-circuit,
+  `LeaveShipThenTeleportToSafePos` → no-op), installed lazily behind the world-ready gate; with the
+  toggle off both forward to the originals, so vanilla behaviour is byte-exact.
+- The Settings → "reset position" button is unaffected (different entry point).
+- Persisted; default off. Source: `buddy/OutOfBoundsGuardFeature.cs`.
+
 ### Anti-AFK
 
 - Periodically simulates mouse input to reduce idle kick.

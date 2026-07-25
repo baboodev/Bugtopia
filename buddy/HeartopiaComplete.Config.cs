@@ -140,6 +140,7 @@ namespace HeartopiaMod
             data.seaCleanCleanNoDelay = this.seaCleanCleanNoDelay;
             data.autoCleanseCorruptedEnabled = this.autoCleanseCorruptedEnabled;
             data.hideSeaCleanBannerEnabled = this.hideSeaCleanBannerEnabled;
+            data.disableOobTeleportEnabled = this.disableOobTeleportEnabled;
             data.littleWhaleFinderEnabled = this.littleWhaleFinderEnabled;
             data.sanrioGachaFinderEnabled = this.sanrioGachaFinderEnabled;
             data.sanrioDropDayStamp = this.sanrioDropDayStamp;
@@ -362,6 +363,7 @@ namespace HeartopiaMod
             this.seaCleanCleanNoDelay = data.seaCleanCleanNoDelay;
             this.autoCleanseCorruptedEnabled = data.autoCleanseCorruptedEnabled;
             this.hideSeaCleanBannerEnabled = data.hideSeaCleanBannerEnabled;
+            this.disableOobTeleportEnabled = data.disableOobTeleportEnabled;
             this.littleWhaleFinderEnabled = data.littleWhaleFinderEnabled;
             this.sanrioGachaFinderEnabled = data.sanrioGachaFinderEnabled;
             this.sanrioDropDayStamp = data.sanrioDropDayStamp;

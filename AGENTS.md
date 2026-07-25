@@ -14,6 +14,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | Core code | `partial class HeartopiaComplete` split **by domain** across ~39 `buddy/HeartopiaComplete*.cs` files (`HeartopiaComplete.cs` is now ~6k lines of lifecycle glue) |
 | Game access | Reflection, Mono `NativeDetour`, EventCenter hooks, `WebRequestUtility.SendCommand`, IL2CPP native API, **AuraMono** (`mono_runtime_invoke`) |
 | Hard rule | **No RVA / offset patching** — resolve types and methods at runtime |
+| Hard rule | **Warm-ups and hook installs run on the world-ready gate, not from `OnUpdate`** — register with `RegisterWorldReadyCallback` (`buddy/HeartopiaComplete.WorldReady.cs`); never add a new `Ensure*()` poll or `nextXxxAttemptAt` retry timer to `OnUpdate`. Resolving/inflating/compiling game code before a world exists fails at best and AVs the process at worst — see [TECHNICAL.md §World-ready gate](docs/TECHNICAL.md#world-ready-gate-heartopiacompleteworldreadycs) |
 | Hard rule | **No new IL2CPP `.text` patches** — never `[HarmonyPatch]` / `harmony.Patch(...)` on GameAssembly / UnityPlayer / Il2Cpp-interop methods (native **Themis** integrity-hashes module `.text`; the mod ships **zero**). Hook via Mono `NativeDetour`, AuraMono, or an EventCenter dispatch-detour — see [TYPE_RESOLUTION.md §Integration strategies](docs/TYPE_RESOLUTION.md#integration-strategies-after-type-is-found) |
 
 ---

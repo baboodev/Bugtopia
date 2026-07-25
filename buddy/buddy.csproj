@@ -396,6 +396,7 @@
     <Compile Include="ShopQuickSellFeature.cs" />
     <Compile Include="ItemDumpFeature.cs" />
     <Compile Include="NoclipFeature.cs" />
+    <Compile Include="OutOfBoundsGuardFeature.cs" />
     <Compile Include="VehicleBypassFeature.cs" />
     <Compile Include="VehicleTeleportFeature.cs" />
     <Compile Include="SpawnVehicleFeature.cs" />

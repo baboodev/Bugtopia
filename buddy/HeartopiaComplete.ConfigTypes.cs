@@ -104,6 +104,10 @@ namespace HeartopiaMod
             // "Hide Crystal Clear Banner" — suppress the sea-clean cleanliness-stage banner
             // (SeaCleanCleanBannerPanel). Default false = banner shows as vanilla.
             public bool hideSeaCleanBannerEnabled;
+            // "Disable OOB Teleport" — suppress the client-side out-of-bounds rescue
+            // (PlayerFishingShipComponent.TryBackToShip / LeaveShipThenTeleportToSafePos).
+            // Default false = vanilla: leaving the scene's detect box teleports you to a safe point.
+            public bool disableOobTeleportEnabled;
             // Little Whale figurine finder (daily photo hide-and-seek, MapDynamicResource 300023-33).
             public bool littleWhaleFinderEnabled;
             // Sanrio gacha machine finder (event scene machines, MapDynamicResource 11305-07).

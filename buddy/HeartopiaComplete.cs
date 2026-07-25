@@ -710,6 +710,7 @@ namespace HeartopiaMod
             this.ProcessPersistentHudOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
             this.ProcessSeaCleanBannerHideOnUpdate();
+            this.ProcessOutOfBoundsGuardOnUpdate();
             this.ProcessLittleWhaleFinderOnUpdate();
             this.ProcessResearchMonitorOnUpdate();
             this.ProcessSanrioGachaFinderOnUpdate();

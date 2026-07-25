@@ -70,6 +70,7 @@ namespace HeartopiaMod
             public Toggle CameraToggle;
             public Toggle CrosshairToggle;      // only visible while Camera Toggle is on
             public Toggle NoclipToggle;
+            public Toggle DisableOobToggle;
             public Toggle VehicleBypassToggle;
             public Toggle VehicleBypassServerToggle;
             public GameObject NoclipSpeedLabel; // only visible while Noclip is on
@@ -228,6 +229,9 @@ namespace HeartopiaMod
             handle.NoclipToggle = this.CreateUguiCheckbox(scrollContent, "NoclipToggle",
                 this.L("Noclip"), this.noclipEnabled,
                 new System.Action<bool>(this.OnUguiSelfNoclipToggled));
+            handle.DisableOobToggle = this.CreateUguiCheckbox(scrollContent, "DisableOobToggle",
+                this.L("Disable OOB Teleport"), this.disableOobTeleportEnabled,
+                new System.Action<bool>(this.OnUguiSelfDisableOobToggled));
             handle.VehicleBypassToggle = this.CreateUguiCheckbox(scrollContent, "VehicleBypassToggle",
                 this.L("Vehicle Bypass"), this.vehicleBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfVehicleBypassToggled));
@@ -361,6 +365,11 @@ namespace HeartopiaMod
             if (handle.NoclipToggle != null)
             {
                 PlaceUguiTopLeft(handle.NoclipToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.DisableOobToggle != null)
+            {
+                PlaceUguiTopLeft(handle.DisableOobToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
             if (handle.VehicleBypassToggle != null)
@@ -534,6 +543,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CameraToggle, this.mouseLookEnabled);
                 this.SyncUguiToggleFromField(handle.CrosshairToggle, this.showMouseLookCrosshair);
                 this.SyncUguiToggleFromField(handle.NoclipToggle, this.noclipEnabled);
+                this.SyncUguiToggleFromField(handle.DisableOobToggle, this.disableOobTeleportEnabled);
                 this.SyncUguiToggleFromField(handle.VehicleBypassToggle, this.vehicleBypassEnabled);
                 this.SyncUguiToggleFromField(handle.VehicleBypassServerToggle, this.vehicleBypassServerEventsEnabled);
                 this.SyncUguiToggleFromField(handle.AntiAfkToggle, this.antiAfkEnabled);
@@ -645,6 +655,22 @@ namespace HeartopiaMod
             {
                 this.ClearNoclipVehicleOverride();
             }
+        }
+
+        // Disable OOB Teleport (OutOfBoundsGuardFeature). Persisted; the Mono hooks install lazily
+        // behind the world-ready gate, so ON only takes effect once they are live (log line).
+        // Turning it off leaves the hooks in place forwarding to the originals = vanilla rescue.
+        private void OnUguiSelfDisableOobToggled(bool value)
+        {
+            if (value == this.disableOobTeleportEnabled)
+            {
+                return;
+            }
+            this.disableOobTeleportEnabled = value;
+            this.SaveKeybinds(false);
+            this.AddMenuNotification(
+                this.L("Disable OOB Teleport") + " " + (this.disableOobTeleportEnabled ? "Enabled" : "Disabled"),
+                this.disableOobTeleportEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
         }
 
         // Gui.cs:1623-1630 — notification only, both directions; no save in the source.
