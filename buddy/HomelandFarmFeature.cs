@@ -565,6 +565,10 @@ namespace HeartopiaMod
         private bool homelandFarmBackpackReflectionUnavailable = false;
         private bool homelandFarmInventoryReflectionResolved = false;
         private bool homelandFarmInventoryReflectionUnavailable = false;
+        // Latched once the aura runtime is up and the managed `Entities` wrapper still isn't there
+        // (permanent on this build) — see TryEnsureHomelandFarmEntitiesGetComponentsReady.
+        private bool homelandFarmEntitiesGetComponentsUnavailable = false;
+        private string homelandFarmEntitiesGetComponentsUnavailableStatus = string.Empty;
         private bool homelandFarmTableDataReflectionResolved = false;
         private float homelandFarmNextRuntimeResolveAt = 0f;
         private const float HomelandFarmRuntimeResolveRetryIntervalSeconds = 0.5f;
@@ -2065,6 +2069,15 @@ namespace HeartopiaMod
                 && this.homelandFarmCropItemDataType != null)
             {
                 return true;
+            }
+
+            // Managed reflection already proved unavailable on this build (EnsureHomelandFarmReflectionReady
+            // latches it after its one type sweep: "missing type(s): ... DataCenter, CropItemData,
+            // CropBoxItemData ..."). Those are the very types this resolves, so re-scanning for them
+            // every 30 s forever is pure waste — callers use the AuraMono component path.
+            if (this.homelandFarmManagedReflectionUnavailable)
+            {
+                return false;
             }
 
             // Not (fully) resolved. The resolution below reloads interop, clears reflection miss
@@ -11866,6 +11879,19 @@ namespace HeartopiaMod
         private bool TryEnsureHomelandFarmEntitiesGetComponentsReady(out string status)
         {
             status = string.Empty;
+
+            // Fail-latch. Everything below — interop reload, miss-cache clear, four type-lookup
+            // strategies ending in a full-assembly FindTypeBySignature sweep — is UNTHROTTLED, and
+            // on this build it can never succeed: the managed `Entities` wrapper does not exist
+            // (live log: "entitiesType=False auraEntitiesType=False"). Callers fall back to the
+            // AuraMono component path, which is the one that actually works. Latching only once the
+            // aura farm runtime is up keeps an early-world miss retryable.
+            if (this.homelandFarmEntitiesGetComponentsUnavailable)
+            {
+                status = this.homelandFarmEntitiesGetComponentsUnavailableStatus;
+                return false;
+            }
+
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
             this.ClearModReflectionLookupMissCaches();
             this.ResolveAuraFarmRuntimeMethods();
@@ -11938,6 +11964,13 @@ namespace HeartopiaMod
                 status = "Entities.GetComponents unavailable (entitiesType="
                     + (this.homelandFarmEntitiesType != null)
                     + " auraEntitiesType=" + (this.auraEntitiesType != null) + ").";
+                if (this.auraFarmMethodsReady)
+                {
+                    // Aura runtime is up and the type still isn't there ⇒ it isn't coming.
+                    this.homelandFarmEntitiesGetComponentsUnavailable = true;
+                    this.homelandFarmEntitiesGetComponentsUnavailableStatus = status;
+                }
+
                 return false;
             }
 
@@ -18540,6 +18573,15 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // CropPlantPoint / CropProtocolManager are part of the same managed set that
+            // EnsureHomelandFarmReflectionReady already latched as absent on this build (live log:
+            // "Sow managed reflection: cropPlantPoint=False cropProtocol=False seedingMethod=False").
+            // Sowing runs through the AuraMono protocol path; stop re-scanning for the dead one.
+            if (this.homelandFarmManagedReflectionUnavailable)
+            {
+                return false;
+            }
+
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
 
             if (this.homelandFarmCropPlantPointType == null)
@@ -22128,71 +22170,25 @@ namespace HeartopiaMod
         }
 
 
-        private bool TryHomelandFarmWarmupPrefetchInteropMethods()
-        {
-            this.TryEnsureHomelandFarmInteropAssembliesLoaded();
-            this.EnsureHomelandFarmSowManagedReflection();
+        // (TryHomelandFarmWarmupPrefetchInteropMethods removed 2026-07-26.) It was warmup-only and
+        // prefetched CropProtocolManager.CropSeeding / AddManure through managed reflection —
+        // types this build does not have, so it resolved nothing on every start ("seedingInterop=
+        // False"). The two sow/manure interop call sites resolve the same methods lazily on demand
+        // anyway, so nothing lost the prefetch it relied on.
 
-            if (this.homelandFarmCropSeedingInteropMethod == null)
-            {
-                if (this.homelandFarmCropSeedingMethod != null)
-                {
-                    this.homelandFarmCropSeedingInteropMethod = this.homelandFarmCropSeedingMethod;
-                }
-                else
-                {
-                    Type cropProtocolType = this.homelandFarmCropProtocolManagerType
-                        ?? this.ResolveHomelandFarmManagedType(
-                            "CropProtocolManager",
-                            "XDTDataAndProtocol.ProtocolService.Plant.CropProtocolManager");
-                    if (cropProtocolType != null)
-                    {
-                        if (this.homelandFarmCropProtocolManagerType == null)
-                        {
-                            this.homelandFarmCropProtocolManagerType = cropProtocolType;
-                        }
-
-                        this.homelandFarmCropSeedingInteropMethod = this.ResolveHomelandFarmCropSeedingMethod()
-                            ?? this.GetMethodByNameAndParamCountQuiet(cropProtocolType, "CropSeeding", 2);
-                    }
-                }
-            }
-
-            if (this.homelandFarmCropAddManureInteropMethod == null)
-            {
-                Type cropProtocolType = this.homelandFarmCropProtocolManagerType
-                    ?? this.ResolveHomelandFarmManagedType(
-                        "CropProtocolManager",
-                        "XDTDataAndProtocol.ProtocolService.Plant.CropProtocolManager");
-                if (cropProtocolType != null)
-                {
-                    if (this.homelandFarmCropProtocolManagerType == null)
-                    {
-                        this.homelandFarmCropProtocolManagerType = cropProtocolType;
-                    }
-
-                    this.homelandFarmCropAddManureInteropMethod = this.ResolveHomelandFarmListOnlyStaticMethod(
-                        cropProtocolType,
-                        "AddManure");
-                }
-            }
-
-            return this.homelandFarmCropSeedingInteropMethod != null || this.homelandFarmCropAddManureInteropMethod != null;
-        }
-
+        // Reports what the warmup actually prefetched. It must never RESOLVE anything — the old
+        // version called TryEnsureHomelandFarmComponentDataManagedReflection() inline, i.e. ran a
+        // full managed type sweep just to print "componentData=False".
         private void LogHomelandFarmWarmupPrefetchSummary()
         {
             this.HomelandFarmLog(
-                "Warmup cache: managed=" + this.homelandFarmManagedReflectionReady
-                + " aura=" + this.homelandFarmAuraReflectionReady
-                + " componentData=" + this.TryEnsureHomelandFarmComponentDataManagedReflection()
+                "Warmup cache: aura=" + this.homelandFarmAuraReflectionReady
                 + " scanner=" + this.homelandFarmScannerTypesResolved
                 + " auraFarm=" + this.auraFarmMethodsReady
-                + " sow=" + (this.homelandFarmCropPlantPointType != null && this.homelandFarmCropSeedingMethod != null)
-                + " seedingInterop=" + (this.homelandFarmCropSeedingInteropMethod != null)
                 + " toolEquip=" + this.homelandFarmToolEquipTypesResolved
                 + " inventory=" + this.homelandFarmInventoryReflectionResolved
-                + " levelObjectCache=" + this.homelandFarmAuraLevelObjectPositionCache.Count + ".");
+                + " levelObjectCache=" + this.homelandFarmAuraLevelObjectPositionCache.Count
+                + (this.homelandFarmManagedReflectionReady ? " managed=True" : string.Empty) + ".");
         }
 
         private void EnsureHomelandFarmWarmupStarted()
@@ -22218,16 +22214,11 @@ namespace HeartopiaMod
             yield return null;
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
             yield return null;
+            // Resolves the aura path and latches "managed reflection unavailable" for the rest of
+            // the session (this build has none of the managed EcsClient/XDT wrappers).
             this.EnsureHomelandFarmReflectionReady();
             yield return null;
-            this.TryEnsureHomelandFarmComponentDataManagedReflection();
-            yield return null;
             this.EnsureHomelandFarmScannerTypes();
-            this.TryEnsureHomelandFarmEntitiesGetComponentsReady(out string getComponentsStatus);
-            if (!string.IsNullOrEmpty(getComponentsStatus))
-            {
-                this.HomelandFarmLog("Warmup GetComponents: " + getComponentsStatus);
-            }
 
             while (!this.auraFarmMethodsReady)
             {
@@ -22257,9 +22248,6 @@ namespace HeartopiaMod
             }
 
             yield return null;
-            this.EnsureHomelandFarmSowManagedReflection();
-            this.TryHomelandFarmWarmupPrefetchInteropMethods();
-            yield return null;
             this.TryHomelandFarmEnsureToolEquipTypes();
             this.TryHomelandFarmEnsureNetworkCommandTypes(out _);
             yield return null;
@@ -22275,7 +22263,7 @@ namespace HeartopiaMod
             yield return null;
             this.TryHomelandFarmCacheAuraLevelObjectPositions(true, allowDictionaryScan: true);
             this.LogHomelandFarmWarmupPrefetchSummary();
-            this.HomelandFarmLog("Warmup complete (reflection + scanner + sow + inventory + level-object cache prefetched).");
+            this.HomelandFarmLog("Warmup complete (aura protocol + scanner + inventory + level-object cache prefetched).");
             this.homelandFarmWarmupComplete = true;
             this.homelandFarmWarmupCoroutine = null;
         }
