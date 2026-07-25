@@ -96,6 +96,10 @@ namespace HeartopiaMod
         private static int instantTeleportArgSwitchSceneTypeOffset = -1;
         private static int instantTeleportArgTargetPosOffset = -1;
         private static int instantTeleportArgAngleOffset = -1;
+        // `Action<Vector3> action` — a completion callback the caller attached to the transfer. We
+        // never call it; we only test it for null, because a non-null one means the vanilla
+        // sequence has work to finish that we must not swallow (see the bus note in the body).
+        private static int instantTeleportArgActionOffset = -1;
         private bool instantTeleportArgOffsetsResolved;
 
         private const int InstantTeleportSwitchSceneTypeStory = 1; // SwitchSceneType.Story
@@ -128,6 +132,7 @@ namespace HeartopiaMod
         // (the interact command is executed from game code on it), so no interlocking is needed —
         // the body only writes four floats and raises the flag last.
         private static volatile bool instantTeleportPendingWarp;
+        private static volatile bool instantTeleportPendingCompletion;
         private static float instantTeleportPendingX;
         private static float instantTeleportPendingY;
         private static float instantTeleportPendingZ;
@@ -140,6 +145,12 @@ namespace HeartopiaMod
         private bool instantTeleportHasRot;
         private float instantTeleportHoldUntil;
         private float instantTeleportNextReassertAt;
+
+        // TransferProtocolManager.EndTransferToCourierStation() — public static void, no args.
+        // Resolved at INSTALL time: without it we could refuse a courier transfer and never close
+        // it, so the feature refuses to arm rather than risk a stuck server-side state.
+        private IntPtr instantTeleportEndTransferMethod = IntPtr.Zero;
+        private bool instantTeleportEndTransferLogged;
 
         private IntPtr instantTeleportEntityUtilClass = IntPtr.Zero;
         private IntPtr instantTeleportIsFieldLoadedMethod = IntPtr.Zero;
@@ -220,6 +231,12 @@ namespace HeartopiaMod
                 if (!this.TryResolveInstantTeleportArgOffsets())
                 {
                     return; // retries on the cadence; a hard miss burns the tried-flag below
+                }
+
+                // And the courier-handshake closer, for the same reason (see the body comment).
+                if (!this.TryResolveInstantTeleportEndTransferMethod())
+                {
+                    return;
                 }
 
                 IntPtr cls = this.FindAuraMonoClassInImages(
@@ -304,10 +321,12 @@ namespace HeartopiaMod
             IntPtr typeField = this.FindAuraMonoFieldOnHierarchy(argClass, "switchSceneType");
             IntPtr posField = this.FindAuraMonoFieldOnHierarchy(argClass, "targetPos");
             IntPtr angleField = this.FindAuraMonoFieldOnHierarchy(argClass, "angle");
-            if (typeField == IntPtr.Zero || posField == IntPtr.Zero || angleField == IntPtr.Zero)
+            IntPtr actionField = this.FindAuraMonoFieldOnHierarchy(argClass, "action");
+            if (typeField == IntPtr.Zero || posField == IntPtr.Zero || angleField == IntPtr.Zero
+                || actionField == IntPtr.Zero)
             {
                 this.instantTeleportHookTried = true;
-                ModLogger.Msg("[InstantTeleport] TransferCommandEvent fields (switchSceneType/targetPos/angle)"
+                ModLogger.Msg("[InstantTeleport] TransferCommandEvent fields (switchSceneType/targetPos/angle/action)"
                     + " not found — feature off (game update?).");
                 return false;
             }
@@ -318,47 +337,135 @@ namespace HeartopiaMod
             int typeOffset = (int)auraMonoFieldGetOffset(typeField) - header;
             int posOffset = (int)auraMonoFieldGetOffset(posField) - header;
             int angleOffset = (int)auraMonoFieldGetOffset(angleField) - header;
+            int actionOffset = (int)auraMonoFieldGetOffset(actionField) - header;
 
             const int maxStructSpan = 256;
-            bool sane = typeOffset >= 0 && posOffset >= 0 && angleOffset >= 0
+            bool sane = typeOffset >= 0 && posOffset >= 0 && angleOffset >= 0 && actionOffset >= 0
                 && typeOffset + 4 <= maxStructSpan
                 && posOffset + 12 <= maxStructSpan
                 && angleOffset + 4 <= maxStructSpan
-                && (typeOffset % 4) == 0 && (posOffset % 4) == 0 && (angleOffset % 4) == 0;
+                && actionOffset + IntPtr.Size <= maxStructSpan
+                && (typeOffset % 4) == 0 && (posOffset % 4) == 0 && (angleOffset % 4) == 0
+                && (actionOffset % IntPtr.Size) == 0;
             if (!sane)
             {
                 this.instantTeleportHookTried = true;
                 ModLogger.Msg("[InstantTeleport] TransferCommandEvent layout looks wrong (type=" + typeOffset
-                    + " pos=" + posOffset + " angle=" + angleOffset + ") — feature off.");
+                    + " pos=" + posOffset + " angle=" + angleOffset + " action=" + actionOffset + ") — feature off.");
                 return false;
             }
 
             instantTeleportArgSwitchSceneTypeOffset = typeOffset;
             instantTeleportArgTargetPosOffset = posOffset;
             instantTeleportArgAngleOffset = angleOffset;
+            instantTeleportArgActionOffset = actionOffset;
             this.instantTeleportArgOffsetsResolved = true;
             ModLogger.Msg("[InstantTeleport] TransferCommandEvent layout: switchSceneType@" + typeOffset
-                + " targetPos@" + posOffset + " angle@" + angleOffset + ".");
+                + " targetPos@" + posOffset + " angle@" + angleOffset + " action@" + actionOffset + ".");
             return true;
+        }
+
+        private bool TryResolveInstantTeleportEndTransferMethod()
+        {
+            if (this.instantTeleportEndTransferMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            IntPtr cls = this.FindAuraMonoClassByFullName(
+                "XDTDataAndProtocol.ProtocolService.Tranfer.TransferProtocolManager");
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassInImages(
+                    "XDTDataAndProtocol.ProtocolService.Tranfer", "TransferProtocolManager",
+                    new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll" });
+            }
+            if (cls == IntPtr.Zero)
+            {
+                return false; // image not up yet — retry on the cadence
+            }
+
+            this.instantTeleportEndTransferMethod = this.FindAuraMonoMethodOnHierarchy(
+                cls, "EndTransferToCourierStation", 0);
+            if (this.instantTeleportEndTransferMethod == IntPtr.Zero)
+            {
+                this.instantTeleportHookTried = true;
+                ModLogger.Msg("[InstantTeleport] TransferProtocolManager.EndTransferToCourierStation() not found"
+                    + " — feature off (without it a fast-travel would stay open on the server).");
+                return false;
+            }
+
+            return true;
+        }
+
+        // Closes the courier-station handshake in place of the callback we swallowed: exactly what
+        // DefaultModule's callback does after verifying arrival within 1 m — which holds here by
+        // construction, we warped onto the target.
+        private void SendInstantTeleportTransferEnd()
+        {
+            if (this.instantTeleportEndTransferMethod == IntPtr.Zero
+                || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                ModLogger.Msg("[InstantTeleport] could not send EndTransferToCourierStation —"
+                    + " turn the toggle off and ride a fast-travel point once to clear the server state.");
+                return;
+            }
+
+            try
+            {
+                IntPtr exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(this.instantTeleportEndTransferMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    ModLogger.Msg("[InstantTeleport] EndTransferToCourierStation threw — fast-travel state may stay open.");
+                    return;
+                }
+
+                if (!this.instantTeleportEndTransferLogged)
+                {
+                    this.instantTeleportEndTransferLogged = true;
+                    ModLogger.Msg("[InstantTeleport] fast-travel handshake closed (EndTransferToCourierStation sent)"
+                        + " — the courier transfer does not stay open on the server.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[InstantTeleport] EndTransferToCourierStation failed: " + ex.Message);
+            }
         }
 
         // Reverse-pinvoke body. Allocation-free: a volatile bool, four raw float reads off the `in`
         // argument, then either the refusal code or a plain forward of the untouched (self, arg)
         // pair. No Mono calls, no throw — the warp itself is queued for the main-thread tick.
         //
-        // Refuses ONLY a Story transfer with a usable target. Everything else forwards to the
-        // original, so the Settings "reset position" button (SwitchSceneType.Setting, no target)
-        // and the fishing-ship OOB rescue keep their vanilla behaviour, and a layout surprise
-        // degrades to "vanilla teleport" instead of "teleport into garbage coordinates".
+        // Refuses ONLY a Story transfer with a usable target; a layout surprise degrades to
+        // "vanilla teleport", never to a warp into garbage. Settings "reset position"
+        // (SwitchSceneType.Setting, no target) and the fishing-ship OOB rescue forward untouched.
+        //
+        // ⚠ COURIER-STATION HANDSHAKE. The map's fast-travel points ARE courier stations, and that
+        // ride is the one teleport with server-side state: BusTransferCommand sends
+        // StartTransferToCourierStationCommand, the server adds the [Sync][Persistent("Ttcs")]
+        // TransferringToCourierStationComponent, and EndTransferToCourierStationCommand is sent
+        // from the `action` callback the transfer invokes on arrival
+        // (DefaultModule._OnProcessTransferToCourierStation, which first checks the player really is
+        // within 1 m of the target). Refusing the command swallows that callback, so we owe the
+        // server the End ourselves — see ConsumeInstantTeleportPendingWarp. Not sending it leaves
+        // the player flagged "transferring" permanently (persisted), and since the handler ignores
+        // IsNewRequest, every login re-fires the component and drags the player back to the station.
+        // We warp exactly onto the target, so vanilla's 1 m arrival check holds by construction.
+        // The completion callback is the marker: today `action != null` only ever comes from that
+        // courier handler (verified: it is the single caller that passes one).
         private static unsafe int InstantTeleportIsExecutableDetourBody(IntPtr self, IntPtr arg)
         {
             if (instantTeleportActive && arg != IntPtr.Zero
                 && instantTeleportArgSwitchSceneTypeOffset >= 0
                 && instantTeleportArgTargetPosOffset >= 0
-                && instantTeleportArgAngleOffset >= 0)
+                && instantTeleportArgAngleOffset >= 0
+                && instantTeleportArgActionOffset >= 0)
             {
                 byte* p = (byte*)arg;
                 int switchSceneType = *(int*)(p + instantTeleportArgSwitchSceneTypeOffset);
+                IntPtr completionCallback = *(IntPtr*)(p + instantTeleportArgActionOffset);
                 if (switchSceneType == InstantTeleportSwitchSceneTypeStory)
                 {
                     float x = *(float*)(p + instantTeleportArgTargetPosOffset);
@@ -375,6 +482,9 @@ namespace HeartopiaMod
                         instantTeleportPendingY = y;
                         instantTeleportPendingZ = z;
                         instantTeleportPendingAngle = angle;
+                        // We swallowed the arrival callback — the tick must close the courier
+                        // handshake in its place.
+                        instantTeleportPendingCompletion = completionCallback != IntPtr.Zero;
                         instantTeleportPendingWarp = true; // raised last — the tick reads it first
                         instantTeleportRefusedOnce = true;
                         return InstantTeleportRefuseCode; // InteractErrorCode.Invalid — silent, no tip
@@ -405,6 +515,8 @@ namespace HeartopiaMod
                 return;
             }
             instantTeleportPendingWarp = false;
+            bool owesTransferEnd = instantTeleportPendingCompletion;
+            instantTeleportPendingCompletion = false;
 
             Vector3 pos = new Vector3(instantTeleportPendingX, instantTeleportPendingY, instantTeleportPendingZ);
             // The command carries a yaw in degrees (the game's TransferToPos(pos, angle) argument).
@@ -433,6 +545,15 @@ namespace HeartopiaMod
             else
             {
                 this.TeleportToLocation(pos);
+            }
+
+            // Close the courier handshake right after the warp, in the same order vanilla does it
+            // (arrive, verify, End). Sent unconditionally of the field hold: the server only cares
+            // that the ride is over, and delaying it behind a 6 s hold would be the one thing that
+            // makes the transfer duration look odd.
+            if (owesTransferEnd)
+            {
+                this.SendInstantTeleportTransferEnd();
             }
 
             if (this.instantTeleportWaitFieldLoaded)

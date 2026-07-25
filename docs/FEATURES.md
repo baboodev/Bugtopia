@@ -178,6 +178,15 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 - Only `SwitchSceneType.Story` transfers with a validated target are refused; everything else
   forwards to the original, so the Settings → "reset position" button and the fishing-ship
   out-of-bounds rescue keep their vanilla behaviour.
+- **Courier-station handshake.** The map's fast-travel points are courier stations, and that ride is
+  the one teleport with server-side state: `StartTransferToCourierStationCommand` → the server adds
+  the persisted, synced `TransferringToCourierStationComponent` → the transfer's `action` callback
+  sends `EndTransferToCourierStationCommand` once it has verified the player is within 1 m of the
+  target. Refusing the command swallows that callback, so the feature **sends the End itself** right
+  after the warp (the 1 m check holds by construction — it warps onto the target). Without it the
+  player would stay flagged "transferring" permanently and be dragged back to the station on every
+  login. `EndTransferToCourierStation` is resolved at install time; if it is missing the feature
+  refuses to arm rather than risk leaving that state open.
 - **Cross-level teleports are untouched by construction**: `TeleportModule.PlayerTeleportation`
   routes those to `TransferToRoom` → `LoginSystem.TeleportToRoomLevel`, which never goes through
   `TransferCommand`. Room/world transfers keep their normal loading screen.
