@@ -421,6 +421,27 @@ namespace HeartopiaMod
         private uint homelandFarmCachedPlayerNetId = 0U;
         private float homelandFarmCachedPlayerNetIdAt = 0f;
         private const float HomelandFarmPlayerNetIdCacheTtlSeconds = 5f;
+        // Same story one level up. Resolving ONE sow point re-derives four values that are
+        // player/field-global and therefore identical for every box of a pass: the in-field owner,
+        // the craft field netId, that field's buildWorld matrices, and the craft preview rotation.
+        // They were resolved per box, so "Sow all" on 40 planters paid 160 redundant aura/managed
+        // round-trips — the ~2s gap between "finding empties..." and "Found 40 empty slot(s)". The
+        // TTL is longer than a pass (~0.2s) and short enough to re-resolve after a field change.
+        private const float HomelandFarmSowContextCacheTtlSeconds = 1f;
+        private uint homelandFarmCachedFieldOwnerNetId = 0U;
+        private bool homelandFarmCachedFieldOwnerOk = false;
+        private float homelandFarmCachedFieldOwnerAt = float.NegativeInfinity;
+        private uint homelandFarmCachedCraftFieldNetId = 0U;
+        private bool homelandFarmCachedCraftFieldOk = false;
+        private float homelandFarmCachedCraftFieldAt = float.NegativeInfinity;
+        private uint homelandFarmCachedCraftMatricesFieldNetId = 0U;
+        private Matrix4x4 homelandFarmCachedCraftLocalToWorld = Matrix4x4.identity;
+        private Matrix4x4 homelandFarmCachedCraftWorldToLocal = Matrix4x4.identity;
+        private bool homelandFarmCachedCraftMatricesOk = false;
+        private float homelandFarmCachedCraftMatricesAt = float.NegativeInfinity;
+        private Quaternion homelandFarmCachedSowPreviewRotation = Quaternion.identity;
+        private bool homelandFarmCachedSowPreviewRotationOk = false;
+        private float homelandFarmCachedSowPreviewRotationAt = float.NegativeInfinity;
         // Sow-all resolves each empty planter via per-box AuraMono GetLevelObject + matrix reads.
         // Doing 30 boxes in one synchronous frame overwhelms the mono runtime and crashes (native
         // AV). The slot scan is a coroutine that yields every N boxes; results land in these fields.
@@ -14190,7 +14211,30 @@ namespace HeartopiaMod
             return 0U;
         }
 
+        // Memoized: player-global, but read once PER TARGET inside every radius loop (the empty-planter
+        // check alone called it 40 times on a sow-all). See HomelandFarmSowContextCacheTtlSeconds.
         private bool TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint fieldOwnerNetId)
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now - this.homelandFarmCachedFieldOwnerAt < HomelandFarmSowContextCacheTtlSeconds)
+            {
+                fieldOwnerNetId = this.homelandFarmCachedFieldOwnerNetId;
+                return this.homelandFarmCachedFieldOwnerOk;
+            }
+
+            bool ok = this.TryHomelandFarmGetSelfPlayInFieldOwnerNetIdUncached(out fieldOwnerNetId);
+            if (!ok)
+            {
+                fieldOwnerNetId = 0U;
+            }
+
+            this.homelandFarmCachedFieldOwnerNetId = fieldOwnerNetId;
+            this.homelandFarmCachedFieldOwnerOk = ok;
+            this.homelandFarmCachedFieldOwnerAt = now;
+            return ok;
+        }
+
+        private bool TryHomelandFarmGetSelfPlayInFieldOwnerNetIdUncached(out uint fieldOwnerNetId)
         {
             fieldOwnerNetId = 0U;
             // AURA FIRST: the managed self-player reads below are dead on this build (types absent)
@@ -19175,20 +19219,34 @@ namespace HeartopiaMod
             return false;
         }
 
+        // Memoized: resolved once per sow point, i.e. once per box, before this.
         private bool TryHomelandFarmTryGetCraftFieldNetId(out uint fieldNetId)
         {
-            fieldNetId = 0U;
-            if (this.TryGetManagedSelfPlayerObject(out object localPlayer, out _)
-                && localPlayer != null)
+            float now = Time.realtimeSinceStartup;
+            if (now - this.homelandFarmCachedCraftFieldAt < HomelandFarmSowContextCacheTtlSeconds)
             {
-                if ((this.TryGetUIntMember(localPlayer, "inFieldNetId", out fieldNetId)
-                        || this.TryGetUIntMember(localPlayer, "InFieldNetId", out fieldNetId))
-                    && fieldNetId != 0U)
-                {
-                    return true;
-                }
+                fieldNetId = this.homelandFarmCachedCraftFieldNetId;
+                return this.homelandFarmCachedCraftFieldOk;
             }
 
+            bool ok = this.TryHomelandFarmTryGetCraftFieldNetIdUncached(out fieldNetId);
+            if (!ok)
+            {
+                fieldNetId = 0U;
+            }
+
+            this.homelandFarmCachedCraftFieldNetId = fieldNetId;
+            this.homelandFarmCachedCraftFieldOk = ok;
+            this.homelandFarmCachedCraftFieldAt = now;
+            return ok;
+        }
+
+        private bool TryHomelandFarmTryGetCraftFieldNetIdUncached(out uint fieldNetId)
+        {
+            fieldNetId = 0U;
+            // AURA FIRST, for the same reason as TryHomelandFarmGetSelfPlayInFieldOwnerNetId: the
+            // managed self-player chain is dead on this build and every miss re-scans loaded types.
+            // Leaving it first cost that type sweep on EVERY box of a sow-all.
             if (this.EnsureAuraMonoApiReady() && this.AttachAuraMonoThread())
             {
                 string[] fieldNetIdMembers = { "inFieldNetId", "InFieldNetId" };
@@ -19210,6 +19268,17 @@ namespace HeartopiaMod
                             return true;
                         }
                     }
+                }
+            }
+
+            if (this.TryGetManagedSelfPlayerObject(out object localPlayer, out _)
+                && localPlayer != null)
+            {
+                if ((this.TryGetUIntMember(localPlayer, "inFieldNetId", out fieldNetId)
+                        || this.TryGetUIntMember(localPlayer, "InFieldNetId", out fieldNetId))
+                    && fieldNetId != 0U)
+                {
+                    return true;
                 }
             }
 
@@ -19585,7 +19654,41 @@ namespace HeartopiaMod
             return worldToLocal != Matrix4x4.identity || localToWorld != Matrix4x4.identity;
         }
 
+        // Memoized per field: the aura path costs two mono_runtime_invokes (FieldSystem getter +
+        // GetField) plus a buildWorld member walk, and the field's transform does not move — but it
+        // ran once per box on sow-all. Keyed by fieldNetId so a different field never reads a stale
+        // matrix; the TTL covers the field itself being rebuilt in build mode.
         private bool TryHomelandFarmTryGetFieldCraftMatrices(
+            uint fieldNetId,
+            out Matrix4x4 localToWorld,
+            out Matrix4x4 worldToLocal)
+        {
+            localToWorld = Matrix4x4.identity;
+            worldToLocal = Matrix4x4.identity;
+            if (fieldNetId == 0U)
+            {
+                return false;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            if (this.homelandFarmCachedCraftMatricesFieldNetId == fieldNetId
+                && now - this.homelandFarmCachedCraftMatricesAt < HomelandFarmSowContextCacheTtlSeconds)
+            {
+                localToWorld = this.homelandFarmCachedCraftLocalToWorld;
+                worldToLocal = this.homelandFarmCachedCraftWorldToLocal;
+                return this.homelandFarmCachedCraftMatricesOk;
+            }
+
+            bool resolved = this.TryHomelandFarmTryGetFieldCraftMatricesUncached(fieldNetId, out localToWorld, out worldToLocal);
+            this.homelandFarmCachedCraftMatricesFieldNetId = fieldNetId;
+            this.homelandFarmCachedCraftLocalToWorld = localToWorld;
+            this.homelandFarmCachedCraftWorldToLocal = worldToLocal;
+            this.homelandFarmCachedCraftMatricesOk = resolved;
+            this.homelandFarmCachedCraftMatricesAt = now;
+            return resolved;
+        }
+
+        private bool TryHomelandFarmTryGetFieldCraftMatricesUncached(
             uint fieldNetId,
             out Matrix4x4 localToWorld,
             out Matrix4x4 worldToLocal)
@@ -19688,8 +19791,28 @@ namespace HeartopiaMod
             return rectMatrix != Matrix4x4.identity;
         }
 
+        // Memoized: camera-global, and the result is quantized to 90° anyway, so one resolve per pass
+        // is both cheaper and more consistent (every box of a batch gets the same orientation, like
+        // the game's own multi-place craft). It used to walk player → cameraComponent →
+        // cameraTransform → eulerAngles once per box.
+        private bool TryHomelandFarmTryResolveSowPreviewWorldRotation(out Quaternion worldRotation)
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now - this.homelandFarmCachedSowPreviewRotationAt < HomelandFarmSowContextCacheTtlSeconds)
+            {
+                worldRotation = this.homelandFarmCachedSowPreviewRotation;
+                return this.homelandFarmCachedSowPreviewRotationOk;
+            }
+
+            bool ok = this.TryHomelandFarmTryResolveSowPreviewWorldRotationUncached(out worldRotation);
+            this.homelandFarmCachedSowPreviewRotation = worldRotation;
+            this.homelandFarmCachedSowPreviewRotationOk = ok;
+            this.homelandFarmCachedSowPreviewRotationAt = now;
+            return ok;
+        }
+
         // CraftMode_Multiple OnEnterPlacing: camera yaw + 180 before alignment refines preview rotation.
-        private unsafe bool TryHomelandFarmTryResolveSowPreviewWorldRotation(out Quaternion worldRotation)
+        private unsafe bool TryHomelandFarmTryResolveSowPreviewWorldRotationUncached(out Quaternion worldRotation)
         {
             worldRotation = Quaternion.identity;
             if (!this.TryHomelandFarmTryGetAuraLocalPlayerObject(out IntPtr playerObj, out _)
@@ -20694,7 +20817,12 @@ namespace HeartopiaMod
             return this.TryHomelandFarmReadComponentInt(cropBoxData, out int cropCount, "cropCount", "CropCount") && cropCount > 0;
         }
 
-        private bool TryHomelandFarmIsEmptyCropPlanter(uint netId, uint playerNetId, HashSet<uint> occupiedCropBoxNetIds, bool skipLiveBoxValidation = false)
+        private bool TryHomelandFarmIsEmptyCropPlanter(
+            uint netId,
+            uint playerNetId,
+            HashSet<uint> occupiedCropBoxNetIds,
+            bool skipLiveBoxValidation = false,
+            bool skipExistenceRead = false)
         {
             if (netId == 0U || !this.EnsureHomelandFarmReflectionReady())
             {
@@ -20720,7 +20848,12 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out _, out _, "CropBoxItemData"))
+            // Existence probe. Costs a full GetAllComponents walk plus a class-name string + hint
+            // match per component — ~20ms per box — and it only re-confirms "this entity exists and
+            // carries a CropBox component". Callers that took the netId straight out of a crop-box
+            // classification done in the SAME pass already know that, so they opt out.
+            if (!skipExistenceRead
+                && !this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out _, out _, "CropBoxItemData"))
             {
                 return false;
             }
@@ -21040,7 +21173,10 @@ namespace HeartopiaMod
                 }
 
                 bool capturedBox = onCapturedOwnField && this.homelandFarmCapturedSowPointByBoxNetId.ContainsKey(netId);
-                if (this.TryHomelandFarmIsEmptyCropPlanter(netId, playerNetId, occupiedCropBoxNetIds, skipLiveBoxValidation: capturedBox)
+                // Every id in cropBoxNetIds came from a crop-box classification run earlier in THIS
+                // pass (last-scan set / ClassifyFarmNetId / CropBoxComponent scan), so the existence
+                // probe inside the check is pure repetition. The ownership check still runs.
+                if (this.TryHomelandFarmIsEmptyCropPlanter(netId, playerNetId, occupiedCropBoxNetIds, skipLiveBoxValidation: capturedBox, skipExistenceRead: true)
                     && this.TryHomelandFarmAppendEmptyPlanterPoint(netId, usedLevelObjectNetIds, plantPoints, maxSlots, ref statusNote))
                 {
                     emptyBoxCount++;
