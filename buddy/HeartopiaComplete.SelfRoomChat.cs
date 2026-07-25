@@ -41,9 +41,25 @@ namespace HeartopiaMod
             ModLogger.Msg("[StrangerChat] " + message);
         }
 
+        // First attempt per world is driven by the world-ready gate (LoadingClosedEvent) instead of
+        // the blind 5 s timer: the toggle is restored from Config.xml at startup, so without the
+        // gate this walked the Mono runtime on the login screen — every attempt guaranteed to fail
+        // and the SelfRoomSystem lookup poking a runtime that has no game data yet.
+        // After the first success the 3 s re-apply cadence stays: the gate is a plain instance
+        // field the game itself rewrites (entering/leaving a room), so this is sustained
+        // enforcement, not a one-shot install.
+        private const string StrangerChatWorldReadyCallbackName = "StrangerChatBypass";
+
         private void EnsureStrangerChatBypassPatch()
         {
             if (!this.strangerChatBypassEnabled)
+            {
+                return;
+            }
+
+            this.RegisterWorldReadyCallback(StrangerChatWorldReadyCallbackName, this.TryStrangerChatBypassWorldReadyAttempt);
+
+            if (!this.IsWorldReady)
             {
                 return;
             }
@@ -56,6 +72,25 @@ namespace HeartopiaMod
 
             this.nextStrangerChatBypassPatchAttemptAt = now + (this.strangerChatBypassPatchApplied ? 3f : 5f);
             this.TryApplyAuraMonoStrangerChatBypass();
+        }
+
+        // Runs once per world load, right after the splash closes. A new world means a new
+        // SelfRoomSystem instance, so the captured "original" value from the previous world is
+        // stale — drop it and let the first attempt re-capture.
+        private bool TryStrangerChatBypassWorldReadyAttempt()
+        {
+            if (!this.strangerChatBypassEnabled)
+            {
+                return true; // nothing to do this world; the toggle re-arms this on its next flip
+            }
+
+            this.strangerChatBypassPatchApplied = false;
+            this.strangerChatBypassPatchUnavailableLogged = false;
+            this.strangerChatOriginalInSelfRoom = false;
+            this.strangerChatOriginalInSelfRoomValid = false;
+            this.nextStrangerChatBypassPatchAttemptAt = -999f;
+            this.TryApplyAuraMonoStrangerChatBypass();
+            return this.strangerChatBypassPatchApplied;
         }
 
         private void TryApplyAuraMonoStrangerChatBypass()

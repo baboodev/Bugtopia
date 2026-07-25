@@ -595,6 +595,11 @@ namespace HeartopiaMod
             Breadcrumbs.Tick("OnUpdate");
             // World-epoch poll: invalidates AuraMono object caches after a scene/world change.
             this.UpdateAuraMonoWorldEpoch();
+            // World-ready gate (HeartopiaComplete.WorldReady.cs): tracks the game's own
+            // LoadingOpened/LoadingClosed events and runs every registered warmup / hook install
+            // once the world is actually up. Must tick BEFORE the feature ticks below so a feature
+            // reading IsWorldReady this frame sees the state the events left.
+            this.ProcessWorldReadyOnUpdate();
             // Direct game-icon loads (docs/ITEM_ICON_PIPELINE.md): drain completed sprite loads,
             // time out stuck ones. No-op (two dictionary count checks) while idle.
             this.ProcessGameIconLoads();

@@ -238,9 +238,35 @@ namespace HeartopiaMod
 
         internal bool WarehouseHomelandHookInstalled => warehouseHomelandTrampoline != null;
 
+        private const string WarehouseHomelandWorldReadyCallbackName = "WarehouseBypassHomelandHook";
+
+        // World-ready wrapper (LoadingClosedEvent): the install pass needs the XDTLevelAndEntity
+        // image, which only exists once a world is up. Returns true when there is nothing left to
+        // install, so the gate stops calling it.
+        private bool TryWarehouseHomelandHookWorldReadyInstall()
+        {
+            if (warehouseHomelandTrampoline != null || this.warehouseHomelandHookTried)
+            {
+                return true;
+            }
+
+            this.warehouseHomelandNextHookAttemptAt = -999f;
+            this.EnsureWarehouseHomelandHook();
+            return warehouseHomelandTrampoline != null || this.warehouseHomelandHookTried;
+        }
+
         internal void EnsureWarehouseHomelandHook()
         {
             if (warehouseHomelandTrampoline != null || this.warehouseHomelandHookTried)
+            {
+                return;
+            }
+
+            this.RegisterWorldReadyCallback(WarehouseHomelandWorldReadyCallbackName, this.TryWarehouseHomelandHookWorldReadyInstall);
+
+            // Before the world exists the GameplayApi lookup below can only fail — the 5 s retry
+            // used to spin against the login screen for as long as the user sat there.
+            if (!this.IsWorldReady)
             {
                 return;
             }

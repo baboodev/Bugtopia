@@ -127,18 +127,13 @@ namespace HeartopiaMod
         private int gameLodVegetationPrefAtSceneLoad = -1;
 
         // Loading-screen gate (the game's own signal, per user request "wait for the splash to go
-        // away"): XDTGameSystem.UI.LoadingOpenedEvent / LoadingClosedEvent are empty structs
-        // dispatched globally around every world load. While the screen is up we keep the world
-        // completely stock — including PC_LODBIAS, which TreeLoad reads in OnEnable: leaving OUR
-        // value there makes the scene build every instance block at LOD0 during the load itself.
-        private const string GameLodLoadingOpenedEventName = "XDTGameSystem.UI.LoadingOpenedEvent";
-        private const string GameLodLoadingClosedEventName = "XDTGameSystem.UI.LoadingClosedEvent";
-        private const float GameLodLoadingClosedGraceSeconds = 3f;
+        // away"). The LoadingOpenedEvent / LoadingClosedEvent tracking that used to live here is now
+        // the shared world-ready gate (HeartopiaComplete.WorldReady.cs) — this feature just
+        // subscribes. While the screen is up we keep the world completely stock — including
+        // PC_LODBIAS, which TreeLoad reads in OnEnable: leaving OUR value there makes the scene
+        // build every instance block at LOD0 during the load itself.
+        private const string GameLodWorldReadyCallbackName = "GameLodApply";
         private bool gameLodLoadingHooksRegistered = false;
-        private float gameLodNextLoadingHookAttemptAt = 0f;
-        private bool gameLodLoadingScreenVisible = false;
-        private float gameLodLoadingClosedAt = 0f;
-        private bool gameLodLoadingEventsSeen = false;
 
         // Pending one-shot work queued by UI handlers; executed inside the guarded tick.
         private bool gameLodFurnitureRevertPending = false;
@@ -596,41 +591,31 @@ namespace HeartopiaMod
             }
         }
 
-        // Loading-screen hooks. Registration retries every 30 s until it takes (the EventCenter
-        // dispatch detour needs the game's Mono side up), same shape as the chat-translate hooks.
+        // Subscribe to the shared world-ready gate. One-shot: the gate owns the event registration
+        // (and its retry), so there is nothing to re-attempt here.
         private void EnsureGameLodLoadingHooks(float now)
         {
-            if (this.gameLodLoadingHooksRegistered || now < this.gameLodNextLoadingHookAttemptAt)
+            if (this.gameLodLoadingHooksRegistered)
             {
                 return;
             }
 
-            this.gameLodNextLoadingHookAttemptAt = now + 30f;
-            try
-            {
-                // Empty structs (Size = 1) → 0 payload bytes.
-                bool opened = this.RegisterGameEventHook(GameLodLoadingOpenedEventName, 0,
-                    new Action<GameEventSnapshot>(this.OnGameLodLoadingOpened));
-                bool closed = this.RegisterGameEventHook(GameLodLoadingClosedEventName, 0,
-                    new Action<GameEventSnapshot>(this.OnGameLodLoadingClosed));
-                this.gameLodLoadingHooksRegistered = opened && closed;
-                if (this.gameLodLoadingHooksRegistered)
-                {
-                    ModLogger.Msg("[GameLod] loading-screen hooks registered (LoadingOpened/LoadingClosed)"
-                        + " — heavy settings now wait for the splash to disappear");
-                }
-            }
-            catch (Exception ex)
-            {
-                this.GameLodLogOnce("loading hook registration failed: " + ex.Message);
-            }
+            this.gameLodLoadingHooksRegistered = true;
+            this.RegisterWorldLoadingStartedCallback(this.OnGameLodLoadingOpened);
+            this.RegisterWorldReadyCallback(GameLodWorldReadyCallbackName, this.OnGameLodWorldReady);
         }
 
-        private void OnGameLodLoadingOpened(GameEventSnapshot snapshot)
+        // World-ready: apply on the very next tick instead of waiting out the apply interval.
+        // Always "done" — the per-section gates in GameLodTickApplySections do the real work.
+        private bool OnGameLodWorldReady()
         {
-            this.gameLodLoadingEventsSeen = true;
-            this.gameLodLoadingScreenVisible = true;
-            this.gameLodLoadingClosedAt = 0f;
+            this.nextGameLodApplyAt = 0f;
+            ModLogger.Msg("[GameLod] world ready — heavy settings apply once the world settles.");
+            return true;
+        }
+
+        private void OnGameLodLoadingOpened()
+        {
             this.gameLodHeavyApplyLogged = false;
             // Hand the game back its own PC_LODBIAS for the whole load: TreeLoad reads the key in
             // OnEnable, so our raised value would otherwise make the scene build every instance
@@ -647,16 +632,6 @@ namespace HeartopiaMod
             }
             ModLogger.Msg("[GameLod] loading screen opened — stock settings for the load"
                 + (this.gameLodVegetationApplyDuringLoad ? " (terrain detail kept raised by request)" : ""));
-        }
-
-        private void OnGameLodLoadingClosed(GameEventSnapshot snapshot)
-        {
-            this.gameLodLoadingEventsSeen = true;
-            this.gameLodLoadingScreenVisible = false;
-            this.gameLodLoadingClosedAt = Time.unscaledTime;
-            this.nextGameLodApplyAt = 0f;
-            ModLogger.Msg("[GameLod] loading screen closed — heavy settings apply in "
-                + GameLodLoadingClosedGraceSeconds.ToString("0.#") + "s");
         }
 
         // The game's OWN "world is ready" signal: LoaderManager.IsRun (public static bool). The
@@ -741,26 +716,17 @@ namespace HeartopiaMod
             }
 
             // Gate, strongest signal first:
-            //  1. the loading screen must be GONE (LoadingClosedEvent) + a short grace,
+            //  1. the shared world-ready gate — loading screen GONE (LoadingClosedEvent) + grace,
+            //     with its own player-present fallback for builds where the events never arrive,
             //  2. the game's post-warmup flag LoaderManager.IsRun must be true,
             //  3. a local player must exist and have been around for a moment.
-            // (1) only participates once the hooks have actually fired at least once, so a build
-            // where the events never arrive still settles on (2)+(3) instead of hanging forever.
             bool loaderRunning = true;
             if (this.TryGameLodIsLoaderManagerRunning(out bool isRun))
             {
                 loaderRunning = isRun;
             }
 
-            bool loadingScreenClear = true;
-            if (this.gameLodLoadingEventsSeen)
-            {
-                loadingScreenClear = !this.gameLodLoadingScreenVisible
-                    && this.gameLodLoadingClosedAt > 0f
-                    && now - this.gameLodLoadingClosedAt >= GameLodLoadingClosedGraceSeconds;
-            }
-
-            bool settled = loaderRunning && loadingScreenClear
+            bool settled = loaderRunning && this.IsWorldReady
                 && ((this.gameLodPlayerSeenAt > 0f && now - this.gameLodPlayerSeenAt >= GameLodWorldSettleSeconds)
                     || (now - this.gameLodSceneSeenAt >= GameLodWorldSettleFallbackSeconds));
             if (settled && !this.gameLodHeavyApplyLogged)

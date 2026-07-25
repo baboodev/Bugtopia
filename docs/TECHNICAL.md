@@ -178,6 +178,56 @@ is an AuraMono discovery probe, not a Harmony patch.
 
 ---
 
+## World-ready gate (`HeartopiaComplete.WorldReady.cs`)
+
+Warm-ups and hook installs must not run before the game has a live world. `OnUpdate` starts
+ticking on the **login screen**, where no game image resolves, every Mono lookup fails, and raw
+static-field reads AV uncatchably. Features used to each carry their own blind retry timer
+(3 s / 5 s / 10 s / 30 s) that simply burned attempts until a world happened to exist.
+
+The gate turns the game's own loading-screen events into a single shared signal:
+
+| Item | Value |
+|------|-------|
+| Events | `XDTGameSystem.UI.LoadingOpenedEvent` / `XDTGameSystem.UI.LoadingClosedEvent` (empty structs → 0 payload bytes, global dispatch) |
+| Transport | `RegisterGameEventHook` (EventCenter dispatch-detour, see [GAME_EVENTS.md](./GAME_EVENTS.md)) |
+| Grace after close | `WorldReadyGraceSeconds` = 1.5 s |
+| Fallback | `AuraMonoGameDataLive` + a local player present for 5 s (used when the events never arrive) |
+| Epoch | `WorldReadyEpoch` — +1 per world load; callbacks re-run once per epoch |
+
+API:
+
+```csharp
+// One-shot-per-world work. Return true when done, false to be retried ~1 s later
+// (bounded: 30 attempts per world load, then it sleeps until the next one).
+RegisterWorldReadyCallback("MyFeature", () => this.TryInstallMyDetour());
+
+// Splash appeared: hand settings back to the game, drop per-world caches.
+RegisterWorldLoadingStartedCallback(this.OnMyFeatureWorldLoadingStarted);
+
+bool ready = this.IsWorldReady;            // gate for anything that needs a live world
+this.ResetWorldReadyCallback("MyFeature"); // re-arm after a toggle flips on
+```
+
+Rules of thumb:
+
+- **`RegisterGameEventHook` calls do NOT belong behind the gate.** Registration is metadata-only
+  (a dictionary entry); the EventHook engine installs the native detour lazily as soon as Mono is
+  up. Deferring registration only risks missing early dispatches. Their private "retry every 30 s"
+  wrappers are pointless too — the call can only fail on slot-pool exhaustion.
+- **Mono class/method resolution, `mono_compile_method` and `NativeDetour` installs DO.** Those
+  need the game's images and are the whole reason the gate exists.
+- **Never tear a detour down on world change** (see the world-change corruption note below); the
+  gate is for *installing*, and Mono detours are image-lifetime.
+
+Users of the gate today: `GameLodFeature` (heavy LOD sections + the PC_LODBIAS hand-back on
+loading-open), `VehicleBypassFeature`, the Warehouse Anywhere `IsPlayerInHomeLand` detour
+(`HeartopiaComplete.Transfer.cs`) and the Stranger Chat bypass
+(`HeartopiaComplete.SelfRoomChat.cs`) — the three toggles that are restored from `Config.xml` at
+startup and would otherwise start poking the runtime at the login screen.
+
+---
+
 ## Movement and Teleport Model
 
 ### Static flags on `HeartopiaComplete`

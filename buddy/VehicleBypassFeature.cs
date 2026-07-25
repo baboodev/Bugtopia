@@ -231,11 +231,18 @@ namespace HeartopiaMod
                 this.TryVehicleBypassRefreshDrivingContext();
             }
 
+            // Detour installation is driven by the world-ready gate (LoadingClosedEvent). The
+            // toggles are restored from Config.xml at startup, so before the gate this resolved
+            // Mono classes / compiled methods on the login screen: every pass failed and the
+            // 3 s timer just burned attempts until a world happened to exist. The timer stays as
+            // the in-world retry cadence for images that stream in a beat late.
+            this.RegisterWorldReadyCallback(VehicleBypassWorldReadyCallbackName, this.TryVehicleBypassWorldReadyInstall);
+
             bool needClientHooks = clientOn && !this.VehicleBypassClientHooksApplied();
             bool needServerHooks = serverOn && !this.VehicleBypassServerHooksApplied();
             if (needClientHooks || needServerHooks)
             {
-                if (Time.unscaledTime >= this.vehicleBypassNextHookAttemptAt)
+                if (this.IsWorldReady && Time.unscaledTime >= this.vehicleBypassNextHookAttemptAt)
                 {
                     this.vehicleBypassNextHookAttemptAt = Time.unscaledTime + VehicleBypassHookRetrySeconds;
                     this.EnsureVehicleBypassDetours(clientOn, serverOn);
@@ -260,6 +267,27 @@ namespace HeartopiaMod
             {
                 this.TryVehicleBypassProcessPendingSummon();
             }
+        }
+
+        private const string VehicleBypassWorldReadyCallbackName = "VehicleBypass";
+
+        // One install pass per world load, fired the moment the loading splash clears. The Mono
+        // detours themselves are image-lifetime and survive a world change untouched — nothing is
+        // torn down here (see memory: native-detour world-change teardown corrupts the heap), the
+        // pass simply covers the first world and any hook that could not be resolved earlier.
+        private bool TryVehicleBypassWorldReadyInstall()
+        {
+            bool clientOn = this.vehicleBypassEnabled;
+            bool serverOn = this.vehicleBypassServerEventsEnabled;
+            if (this.vehicleBypassHooksHardFailed || (!clientOn && !serverOn))
+            {
+                return true;
+            }
+
+            this.vehicleBypassNextHookAttemptAt = Time.unscaledTime + VehicleBypassHookRetrySeconds;
+            this.EnsureVehicleBypassDetours(clientOn, serverOn);
+            return (!clientOn || this.VehicleBypassClientHooksApplied())
+                && (!serverOn || this.VehicleBypassServerHooksApplied());
         }
 
         private bool VehicleBypassClientHooksApplied()

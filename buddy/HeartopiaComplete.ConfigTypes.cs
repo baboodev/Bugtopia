@@ -189,6 +189,12 @@ namespace HeartopiaMod
             public bool analogMoveBridgeEnabled;
             public bool skipShowOffAnimations;
             public bool persistentHudEnabled;
+            // Self-tab bypass toggles. These were session-only until now even though their UI
+            // handlers already called SaveKeybinds — the fields simply had no home in the config.
+            public bool vehicleBypassEnabled;
+            public bool vehicleBypassServerEventsEnabled;
+            public bool warehouseBypassEnabled;
+            public bool strangerChatBypassEnabled;
             public bool chatForceTranslateEnabled;
             public bool chatTranslateVerboseLog;
             public bool chatTranslateForceAllLangs;

@@ -215,6 +215,10 @@ namespace HeartopiaMod
             data.analogMoveBridgeEnabled = this.analogMoveBridgeEnabled;
             data.skipShowOffAnimations = this.skipShowOffAnimations;
             data.persistentHudEnabled = this.persistentHudEnabled;
+            data.vehicleBypassEnabled = this.vehicleBypassEnabled;
+            data.vehicleBypassServerEventsEnabled = this.vehicleBypassServerEventsEnabled;
+            data.warehouseBypassEnabled = this.warehouseBypassEnabled;
+            data.strangerChatBypassEnabled = this.strangerChatBypassEnabled;
             data.chatForceTranslateEnabled = this.chatForceTranslateEnabled;
             data.chatTranslateVerboseLog = this.chatTranslateVerboseLog;
             data.chatTranslateForceAllLangs = this.chatTranslateForceAllLangs;
@@ -440,6 +444,14 @@ namespace HeartopiaMod
             this.analogMoveBridgeEnabled = data.analogMoveBridgeEnabled;
             this.skipShowOffAnimations = data.skipShowOffAnimations;
             this.persistentHudEnabled = data.persistentHudEnabled;
+            // Plain assignment is enough: ApplyKeybindConfig only ever runs once, from LoadKeybinds
+            // at startup (HeartopiaComplete.cs:533), so every retry/latch field is still at its
+            // freshly-constructed value and the per-feature OnUpdate gates pick the flags up from
+            // there. The install work itself is deferred to the world-ready gate.
+            this.vehicleBypassEnabled = data.vehicleBypassEnabled;
+            this.vehicleBypassServerEventsEnabled = data.vehicleBypassServerEventsEnabled;
+            this.warehouseBypassEnabled = data.warehouseBypassEnabled;
+            this.strangerChatBypassEnabled = data.strangerChatBypassEnabled;
             this.chatForceTranslateEnabled = data.chatForceTranslateEnabled;
             this.chatTranslateVerboseLog = data.chatTranslateVerboseLog;
             this.chatTranslateForceAllLangs = data.chatTranslateForceAllLangs;
