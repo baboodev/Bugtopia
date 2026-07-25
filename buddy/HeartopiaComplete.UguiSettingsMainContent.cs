@@ -180,7 +180,8 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogSnowSculpture, v => MasterLogSnowSculpture = v, "Snow Sculpture"),
                 new UguiLoggingToggleBinding(() => MasterLogSeaCleanQte, v => MasterLogSeaCleanQte = v, "Sea Clean QTE"),
                 new UguiLoggingToggleBinding(() => MasterLogCorruptionCleanse, v => MasterLogCorruptionCleanse = v, "Corruption Cleanse"),
-                new UguiLoggingToggleBinding(() => MasterLogUnderwaterRadar, v => MasterLogUnderwaterRadar = v, "Underwater Radar")
+                new UguiLoggingToggleBinding(() => MasterLogUnderwaterRadar, v => MasterLogUnderwaterRadar = v, "Underwater Radar"),
+                new UguiLoggingToggleBinding(() => MasterLogGameLod, v => MasterLogGameLod = v, "Game LOD")
             };
         }
 
@@ -552,7 +553,7 @@ namespace HeartopiaMod
             handle.LodBiasLabel = this.CreateUguiBodyLabel(performance.transform, "LodBiasLabel",
                 this.LF("LOD bias: {0:0.##}", this.lodCustomBias), 13f);
             handle.LodBiasSlider = this.CreateUguiSlider(performance.transform, "LodBiasSlider",
-                0.25f, 4f, this.lodCustomBias, false,
+                0.25f, 16f, this.lodCustomBias, false,
                 new System.Action<float>(this.OnUguiSettingsMainLodBiasChanged));
             handle.LodMaxLabel = this.CreateUguiBodyLabel(performance.transform, "LodMaxLabel",
                 this.LF("Max LOD level: {0}", this.lodCustomMaxLevel), 13f);
@@ -1208,7 +1209,7 @@ namespace HeartopiaMod
             {
                 return;
             }
-            this.lodCustomBias = Mathf.Clamp(value, 0.25f, 4f);
+            this.lodCustomBias = Mathf.Clamp(value, 0.25f, 16f);
             this.nextLodOverrideApplyAt = 0f;
             this.ApplyLodOverride(true);
             this.SaveKeybinds(false);

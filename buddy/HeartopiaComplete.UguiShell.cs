@@ -191,6 +191,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellSelfFunOnUpdate();
             this.ProcessUguiShellSelfPrivacyOnUpdate();
             this.ProcessUguiShellSelfGameUiOnUpdate();
+            this.ProcessUguiShellSelfGameLodOnUpdate();
             this.ProcessUguiShellBagWarehouseOnUpdate();
             this.ProcessUguiShellForagingOnUpdate();
             this.ProcessUguiShellFishingOnUpdate();
@@ -387,7 +388,7 @@ namespace HeartopiaMod
                 };
                 string[][] subTabLabels = new string[][]
                 {
-                    new string[] { "Main", "Building", "Fun", "Privacy", "Game UI" },
+                    new string[] { "Main", "Building", "Fun", "Privacy", "Game UI", "Game LOD" },
                     new string[] { "Foraging", "Fishing", "Insects", "Birds" },
                     new string[] { "Main", "Food & Repair", "Snow Sculpting", "Auto Buy", "Auto Sell", "Mass Cook", "Puzzle", "Pet Care" },
                     new string[] { "Animal Care", "Daily Quests", this.L("homeland_farm.title"), this.L("pictures.title"), "Ice Skating", this.L("extra.title"), this.L("Sand Sculpture"), "Sea Clean" },
@@ -561,6 +562,13 @@ namespace HeartopiaMod
                                 else if (i == UguiShellSelfTabIndex && j == UguiShellSelfGameUiSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSelfGameUiContent(
+                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                }
+                                else if (i == UguiShellSelfTabIndex && j == UguiShellSelfGameLodSubIndex)
+                                {
+                                    // Self → Game LOD (GameLodFeature.cs world detail overrides;
+                                    // HeartopiaComplete.UguiGameLodContent.cs). New page, no IMGUI twin.
+                                    subContents[j] = this.BuildUguiShellSelfGameLodContent(
                                         container.transform, 0f, 36f, contentColW, contentH - 36f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsAboutSubIndex)

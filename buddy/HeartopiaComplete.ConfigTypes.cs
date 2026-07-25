@@ -161,6 +161,27 @@ namespace HeartopiaMod
             public int lodOverrideMode;
             public float lodCustomBias;
             public int lodCustomMaxLevel;
+            public bool gameLodFurnitureEnabled;
+            public int gameLodFurnitureMaxObjects;
+            public int gameLodFurnitureDistance;
+            public int gameLodFurnitureMeshDistance;
+            public bool gameLodForceLod0Enabled;
+            public bool gameLodBrgBiasEnabled;
+            public float gameLodBrgBias;
+            public bool gameLodVegetationEnabled;
+            public int gameLodVegetationPref;      // legacy (pre-2026-07-25): raw PC_LODBIAS value
+            public float gameLodVegetationMult;
+            public int gameLodVegetationBaselinePref;
+            public int gameLodVegetationTargetPref;
+            public bool gameLodVegetationApplyDuringLoad;
+            public bool gameLodSignificanceOffEnabled;
+            public bool gameLodNineCellEnabled;
+            public float gameLodNineCellMult;
+            public bool gameLodShadowEnabled;
+            public float gameLodShadowDistance;
+            public bool gameLodHlodEnabled;
+            public float gameLodHlodMult;
+            public bool gameLodXdLodEnabled;
             public bool customCameraFOVEnabled;
             public float cameraFOV;
             public bool hideJumpButtonEnabled;

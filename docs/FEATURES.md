@@ -200,6 +200,51 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 - Sliders 0.5–15 s + "Reset to game defaults" button; persisted in config
   (`gameUiTimingsEnabled` / `gameUiTimingSeconds`). Implementation: `GameUiTimingsFeature.cs`.
 
+### Game LOD — World Detail / Draw Distance (Self → Game LOD sub-tab)
+
+Overrides the game's five client-side LOD/streaming systems so more world objects render, further
+away, at higher quality. All controls default OFF, re-apply idempotently every ~2.5 s (world
+reloads / mode switches recreate the managers), and revert to game defaults when switched off.
+Implementation: `GameLodFeature.cs` + `HeartopiaComplete.UguiGameLodContent.cs`; research map in
+memory `world-lod-streaming-map`.
+
+| Section | Controls | Mechanism (all AuraMono; mirrors the game's own debug `ObserverPanel` where one exists) |
+|---------|----------|------------------------------------------------------------------------------------------|
+| Furniture & buildings | toggle + max objects (60–5000), draw distance (100–9999 m), mesh detail distance (100–2000 m) | `IRenderingSystem.LoaderManager.SetParam(max, loadNum, 20, strucLoadNum, dist[4], dist[4], meshDis)` via `Managers._serviceDic` walk + `LayerDistanceCulling.Instance.enabled=false` (the `ObserverPanel.SetHomeland` recipe); per-frame budgets scale with the cap (`max/500` clamped 3–10, `max/125` clamped 20–40) instead of the game's flat 3/frame, which meant ~28 s of pop-in at cap 5000; revert re-reads `RenderLoadConfig` getters (`RevertBuildLoader` recipe) and re-enables the culler |
+| Mesh quality | Force max mesh detail toggle; LOD-bias boost toggle + slider ×1–×4 | static `BrgManager.ForeceLOD0` (game's own typo) + `AreaPriorityManager.UpdateGlobalLodBias` — re-asserted because the low-FPS governor in SignificanceManager drops the bias to 0.2 |
+| Vegetation, rocks & islands | toggle + absolute detail value (10–1000, default 300) + "Also apply while the world loads" + "Rebake now" | writes PlayerPrefs `PC_LODBIAS` = **the slider value verbatim** — a QUALITY factor: `TreeLoad` computes `num = pref/10` and divides its baked thresholds by it, and those thresholds behave like `screenRelativeTransitionHeight` (bigger = swap sooner), so **higher pref = high-poly held further** (proven live: 30→3 made the swap closer, 30→300 gave the wanted distance). The game's own value is captured **once** at config load and **persisted** (`gameLodVegetationBaselinePref`) purely so the toggle can restore it; it is sanity-capped at 100, since anything higher is the mod's own output rather than a game setting. **Terrain and island chunks bake this value at chunk-load time**, so a post-load rebake (which only reaches instance blocks under `QualityLoader`) can never fix the chunks that loaded behind the splash screen — hence the explicit "Also apply while the world loads" checkbox: on = full terrain detail everywhere but slower loading, off (default) = fast loading with coarser chunks near spawn. Applied by rebaking `TreeLoad.SetAllDynamicInstanceBlockEnable(false→true)` + `HomeLoad.Inst` OnDisable/OnEnable (fails loudly when the scene has no `QualityLoader` root); re-asserted + auto-rebaked when the game's settings UI overwrites the key. **This is the lever for big baked scenery** (islands, cliffs, rocks): BRG geometry has no `Renderer` and no collider, so it never appears in physics or renderer scans |
+| Landscape (HLOD + scene chunks) | toggle + distance multiplier ×1–×4 | **IL2CPP interop, not AuraMono**, two subsystems under one toggle: (a) `Unity.HLODSystem.Streaming.HLODController` public fields `hlod1/2LoadAndVisDistance`; (b) **`SceneLoader.SceneLoaderRoot.configs[]`** — the base-scene chunk streamer that owns rock/island low-poly→high-poly swaps: multiplies `loadDistance`/`unloadDistance` and every `hlodDistances[]` element (element writes hit the live array the LoadLayer holds). Both found via `FindObjectsOfType` + `FindObjectsOfTypeAll` fallback; originals per instance, restored on revert; applies live |
+| Props (XDLod) | force-max-detail toggle | walk `XDLodManager.Instance.xdlodgroupmap.Keys` (AuraMono, pinned, budget 300 + rotation) → `XDLodGroupComponent.ForceLOD(0)`; only groups the mod forced (tracked by netId) are `ForceLOD(-1)`-reverted — game-forced NPC groups untouched; skips groups already forced by the game |
+| Characters & NPCs | full-character-detail toggle | `SignificanceManager.Enable=false` (DataModule instance; exactly what photo mode does) — re-asserted because mode exits set it back |
+| Live entities | toggle + range multiplier ×1–×5 | 3 s walk over `Entities.GetComponents<LevelEntityComponent>` (pinned), boosts registered nine-cell ranges via public `SetForceNineCell(short)`; originals remembered per netId and restored on revert. Capped by the server AOI — the server must have synced the entity |
+| Shadows | toggle + distance 50–800 m | URP asset `shadowDistance` via `RenderingSettings.Instance.GetCurrentURPAsset()` (the `ObserverPanel.SetShadowDistance` path); original captured and restored |
+
+Unity's own LODGroup bias/max-level stays in Settings → Main → Performance (`LodSettingsFeature.cs`);
+its Custom bias cap was raised 4 → 16 (2026-07-25) because scenery LODGroups still swapped visibly at 4.
+
+**Load-time behaviour:** the heavy sections (Furniture & buildings, Landscape, and the vegetation
+rebake) are **deferred until the world settles**. The gate is the game's own post-warmup signal —
+**`LoaderManager.IsRun`** (public static bool, read through AuraMono): `XDTwonScene_ShaderWarmup` sets
+it `false` at scene init and `true` only once `ShaderWarmupControllerExport.GetLoadPercent() >= 1f`,
+which is exactly when the game itself allows furniture streaming. On top of that we wait 8 s after a
+local player position appears (45 s hard fallback); an unreadable flag counts as "not ready". Scene
+changes reset the timer, drop stale per-instance baselines, and **clear any pending vegetation
+rebake** — a freshly loaded scene already built its instance blocks from the current `PC_LODBIAS`
+(`TreeLoad` reads it in `OnEnable`), so rebaking there is both redundant and expensive (it re-creates
+every material and re-triggers shader-variant compilation mid-load). Reverts are never deferred.
+
+**Verbose logging** is a normal session-only flag in **Settings → Logging → "Game LOD"** (off by
+default). Turning it on re-arms the diagnostics: the dedup set and the "already reported" latches are
+cleared, so the read-only resolve probe (every class/method/field this feature touches) and the
+first-walk lines are reproduced on demand rather than swallowed as duplicates.
+
+**Diagnostics** (`Dump nearby LOD objects to log` button): scene + live `lodBias`/`maxLODLevel`/`PC_LODBIAS`
+(with the mod's baseline/target) + `QualityLoader` child count, every `SceneLoaderRoot` layer's live
+distances, the FARTHEST Unity `LODGroup`s within 250 m, a renderer cone (>40 m, ≤12° off view centre)
+and a camera raycast. Reading it: object listed with a `LODGroup` ⇒ `QualitySettings.lodBias` owns it;
+listed without ⇒ streamed geometry; **not listed at all while facing big scenery ⇒ BRG/InstanceBlock
+(no `Renderer`, no collider) ⇒ `PC_LODBIAS` owns it**.
+
 ---
 
 ## Resource Gathering

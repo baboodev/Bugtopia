@@ -689,6 +689,7 @@ namespace HeartopiaMod
                 this.nextFpsBypassApplyAt = Time.unscaledTime + 0.5f;
             }
             this.ProcessLodOverrideOnUpdate();
+            this.ProcessGameLodFeatureOnUpdate();
             this.ProcessHideJumpButtonOnUpdate();
             this.ProcessBunnyHopOnUpdate();
             this.ProcessForceLocomotionOnUpdate();

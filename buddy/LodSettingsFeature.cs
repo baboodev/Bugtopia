@@ -59,7 +59,9 @@ namespace HeartopiaMod
                     maxLevel = LodPerformanceMaxLevel;
                     return;
                 case LodOverrideModeCustom:
-                    bias = Mathf.Clamp(this.lodCustomBias, 0.25f, 4f);
+                    // Custom cap raised 4 → 16 (2026-07-25): scenery LODGroups still swapped
+                    // visibly at bias 4; 16 holds LOD0 to ~4x the "Better" preset's distance.
+                    bias = Mathf.Clamp(this.lodCustomBias, 0.25f, 16f);
                     maxLevel = Mathf.Clamp(this.lodCustomMaxLevel, 0, 4);
                     return;
                 default:
@@ -158,7 +160,7 @@ namespace HeartopiaMod
         private void SyncLodOverrideAfterConfigLoad()
         {
             this.lodOverrideMode = Mathf.Clamp(this.lodOverrideMode, LodOverrideModeDefault, LodOverrideModeCustom);
-            this.lodCustomBias = Mathf.Clamp(this.lodCustomBias <= 0f ? 1f : this.lodCustomBias, 0.25f, 4f);
+            this.lodCustomBias = Mathf.Clamp(this.lodCustomBias <= 0f ? 1f : this.lodCustomBias, 0.25f, 16f);
             this.lodCustomMaxLevel = Mathf.Clamp(this.lodCustomMaxLevel, 0, 4);
             if (this.lodOverrideMode == LodOverrideModeDefault)
             {

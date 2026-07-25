@@ -58,6 +58,11 @@ namespace HeartopiaMod
         private const int UguiShellSelfPrivacySubIndex = 3;          // "Privacy" within Self's subs
         private const int UguiShellSelfGameUiSubIndex = 4;           // "Game UI" within Self's subs
 
+        // Self → Game LOD (world detail / draw distance overrides, GameLodFeature.cs +
+        // HeartopiaComplete.UguiGameLodContent.cs). New page with NO IMGUI twin — appended at the
+        // END of Self's sub array so the existing display indices above stay stable.
+        private const int UguiShellSelfGameLodSubIndex = 5;          // "Game LOD" within Self's subs
+
         // Bag/Warehouse (Phase 3 item 5, HeartopiaComplete.UguiBagWarehouseContent.cs): display
         // position 6 carries internal id 6 (UguiShellInternalTabIds[6]) = IMGUI selectedTab 6 =
         // DrawBulkSelectorTab (HeartopiaComplete.Gui.cs:1305). No sub-tabs (subTabLabels[6] is

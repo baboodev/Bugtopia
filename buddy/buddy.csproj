@@ -269,6 +269,7 @@
     <Compile Include="HeartopiaComplete.UguiTeleportContent.cs" />
     <Compile Include="HeartopiaComplete.UguiBuildingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSelfContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiGameLodContent.cs" />
     <Compile Include="HeartopiaComplete.UguiBagWarehouseContent.cs" />
     <Compile Include="HeartopiaComplete.UguiForagingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiFishingContent.cs" />
@@ -343,6 +344,7 @@
     <Compile Include="InsectNetFarm.cs" />
     <Compile Include="LocalizationManager.cs" />
     <Compile Include="LodSettingsFeature.cs" />
+    <Compile Include="GameLodFeature.cs" />
     <Compile Include="HideJumpButtonFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
     <Compile Include="PersistentHudFeature.cs" />
