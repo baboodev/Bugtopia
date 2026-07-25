@@ -102,6 +102,14 @@ namespace HeartopiaMod
                 return;
             }
 
+            // World-ready gate (LoadingClosedEvent) on the APPLY path only: TipShowTimeConfig is a
+            // live-world config object and the toggle is persisted, so the 0.5 s apply/resolve used
+            // to run from the first frame. A pending RESTORE is teardown and stays ungated.
+            if (this.gameUiTimingsEnabled && !this.gameUiTimingsRestorePending && !this.IsWorldReady)
+            {
+                return;
+            }
+
             if (now < this.gameUiTimingsNextApplyAt)
             {
                 return;

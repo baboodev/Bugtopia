@@ -134,8 +134,11 @@ namespace HeartopiaMod
                 }
             }
 
-            // Warm the offset/langKey/method caches off the hot path while enabled.
-            if (now >= this.chatForceTranslateNextResolveAt)
+            // Warm the offset/langKey/method caches off the hot path while enabled. World-ready
+            // gate: the toggle is persisted, so before it this walked the Mono runtime every 5 s
+            // from the first frame. (The hook registration above stays ungated on purpose —
+            // metadata only, and the engine must not miss early dispatches.)
+            if (this.IsWorldReady && now >= this.chatForceTranslateNextResolveAt)
             {
                 this.chatForceTranslateNextResolveAt = now + 5f;
                 this.TryResolveChatTranslateEventOffsets();

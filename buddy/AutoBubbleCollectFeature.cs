@@ -148,7 +148,8 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (Time.unscaledTime < this.bubbleCreateNextInstallAttemptAt)
+            // World-ready gate (LoadingClosedEvent); persisted toggle, Mono detour on CreateBubble.
+            if (!this.IsWorldReady || Time.unscaledTime < this.bubbleCreateNextInstallAttemptAt)
             {
                 return;
             }

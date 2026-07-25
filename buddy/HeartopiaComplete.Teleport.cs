@@ -814,8 +814,11 @@ namespace HeartopiaMod
                 }
                 // Raw static read below — refuse before the game is loaded (uncatchable AV, see
                 // AuraMonoStaticFieldReadsAllowed). This one is reachable from the UGUI shell's
-                // build-time Teleport seeding, so it would have been the next login crash.
-                if (!AuraMonoStaticFieldReadsAllowed())
+                // build-time Teleport seeding, so it would have been the next login crash — hence
+                // the stricter IsGameDataQueryable (world up, not just "an image resolved").
+                // DataCenter.LevelId is meaningless without a world anyway; the StarTown fallback
+                // below is the same answer the read would produce.
+                if (!this.IsGameDataQueryable)
                 {
                     return GameSceneIdStarTown;
                 }

@@ -146,7 +146,8 @@ namespace HeartopiaMod
 
         private void EnsureBubbleSpawnDetoursInstalled()
         {
-            if (Time.unscaledTime < this.bubbleSpawnNextInstallAttemptAt)
+            // World-ready gate (LoadingClosedEvent); persisted toggle, Mono detours.
+            if (!this.IsWorldReady || Time.unscaledTime < this.bubbleSpawnNextInstallAttemptAt)
             {
                 return;
             }

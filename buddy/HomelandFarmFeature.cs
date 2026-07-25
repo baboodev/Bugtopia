@@ -1104,7 +1104,13 @@ namespace HeartopiaMod
             // so drains keep up whenever the detours fire.
             this.PumpHomelandFarmEventDiag();
 
-            if (!this.IsHomelandFarmSceneLoadFinished())
+            // World-ready gate first (LoadingClosedEvent): IsHomelandFarmSceneLoadFinished below is
+            // an AuraMono INVOKE of ClientHelperService.IsSceneLoadFinished, and it used to run
+            // twice a second from the first frame — the whole login screen, with nothing to invoke
+            // against. The game's own probe is still the final word once a world exists; the gate
+            // just stops us asking before then. The timers are re-armed on world-ready
+            // (OnWorldReadyRearmWarmups), so the warmup starts the moment the splash clears.
+            if (!this.IsWorldReady || !this.IsHomelandFarmSceneLoadFinished())
             {
                 return;
             }

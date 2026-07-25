@@ -175,7 +175,8 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (now < this.postcardNextMailIdResolveAt)
+            // Mail only exists in a live world (world-ready gate; the toggle is persisted).
+            if (!this.IsWorldReady || now < this.postcardNextMailIdResolveAt)
             {
                 return false;
             }
@@ -342,6 +343,14 @@ namespace HeartopiaMod
         private void EnsurePostcardResultDetour()
         {
             if (this.postcardDetourInstalled || this.postcardDetourInstallAttempted)
+            {
+                return;
+            }
+
+            // World-ready gate: every early-out below is a "retry next frame", so before the gate
+            // this ran a full class-resolve pass EVERY frame while the (persisted) postcard-bypass
+            // toggle was on — including the whole login screen, where neither class exists.
+            if (!this.IsWorldReady)
             {
                 return;
             }

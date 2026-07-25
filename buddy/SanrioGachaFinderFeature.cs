@@ -440,6 +440,13 @@ namespace HeartopiaMod
                 return;
             }
 
+            // World-ready gate (LoadingClosedEvent): the config manager this walks is a live-world
+            // service and the finder toggle is persisted.
+            if (!this.IsWorldReady)
+            {
+                return;
+            }
+
             float now = Time.unscaledTime;
             if (now < this.sanrioNextConfigWalkAt)
             {

@@ -82,6 +82,13 @@ namespace HeartopiaMod
                 return;
             }
 
+            // World-ready gate (LoadingClosedEvent): persisted toggle, so this 5 s retry used to
+            // run from the first frame; the swim FSM it detours only exists in a live world.
+            if (!this.IsWorldReady)
+            {
+                return;
+            }
+
             float now = Time.unscaledTime;
             if (now < this.swimVerticalNextAttemptAt)
             {

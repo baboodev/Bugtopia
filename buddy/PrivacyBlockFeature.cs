@@ -105,6 +105,14 @@ namespace HeartopiaMod
                 return;
             }
 
+            // World-ready gate (LoadingClosedEvent): the privacy flags are persisted, so the 5 s
+            // install retry used to start on the login screen where the target classes don't exist.
+            // The timer is re-armed on world-ready, so the hooks land right after the splash.
+            if (!this.IsWorldReady)
+            {
+                return;
+            }
+
             if (Time.unscaledTime < this.privacyBlockNextHookAttemptAt)
             {
                 return;

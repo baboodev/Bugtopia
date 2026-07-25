@@ -8,6 +8,11 @@
 #   E2: "mono_runtime_invoke" re-resolved outside the engine home - same bypass via a new delegate.
 #   E3: a cross-frame MonoObject* cache declared as a raw IntPtr field (name ending in Obj/obj) -
 #       bdwgc collects the object once the game drops its last reference; use AuraMonoObjectCache.
+#   E4: auraMonoClassVtable(...) called outside HeartopiaComplete.AuraMono.cs - mono_class_vtable
+#       must be paired with the class that DECLARES the field, and mono_class_get_field_from_name /
+#       FindAuraMonoFieldOnHierarchy walk the hierarchy, so the searched class is often the WRONG
+#       one (uncatchable AV: child vtable + base-class field offset -> near-null deref, WER
+#       coreclr_25388). The only sanctioned pairing is TryGetAuraMonoStaticFieldVtable.
 #
 # WARNINGS (reported, do not fail):
 #   W1: an IntPtr local in a coroutine declared before a `yield return` and referenced after it -
@@ -35,6 +40,9 @@ foreach ($f in $files) {
     # calls the raw invoke from its gather paths. Both are the legitimate home for the
     # raw export; everything else must go through the guarded auraMonoRuntimeInvoke.
     $isEngineHome = $f.Name -eq "AuraFarm.cs" -or $f.Name -eq "HeartopiaComplete.AuraMonoEngine.cs"
+    # TryGetAuraMonoStaticFieldVtable (the one guarded pairing of mono_class_vtable with a field)
+    # lives here; nothing else may call the raw export.
+    $isVtableHome = $f.Name -eq "HeartopiaComplete.AuraMono.cs"
     $lines = Get-Content $f.FullName
 
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -47,6 +55,9 @@ foreach ($f in $files) {
         }
         if (-not $isEngineHome -and $line -match '"mono_runtime_invoke"') {
             $lintErrors.Add("E2 $loc - do not re-resolve mono_runtime_invoke; the only binding lives in HeartopiaComplete.AuraMonoEngine.cs behind InvokeAuraMonoChecked.")
+        }
+        if (-not $isVtableHome -and $line -match 'auraMonoClassVtable\s*\(') {
+            $lintErrors.Add("E4 $loc - mono_class_vtable must be paired with the field's DECLARING class; call TryGetAuraMonoStaticFieldVtable (HeartopiaComplete.AuraMono.cs) instead of auraMonoClassVtable directly.")
         }
         if ($line -match 'private\s+(static\s+)?IntPtr\s+(\w*(?:Obj|obj))\s*(=\s*IntPtr\.Zero\s*)?;') {
             $fieldName = $Matches[2]

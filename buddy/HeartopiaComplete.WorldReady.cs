@@ -85,6 +85,21 @@ namespace HeartopiaMod
             }
         }
 
+        // Stronger sibling of AuraMonoStaticFieldReadsAllowed() for game-data reads driven by the
+        // UI instead of by gameplay.
+        //
+        // That latch only proves the game's Mono side is live (some image resolved) — it says
+        // NOTHING about a world existing. The UGUI shell can be opened on the load menu, and its
+        // build/refresh paths then walk modules that are not constructed yet: that is exactly how
+        // the snow tab's bag counter reached BackPackSystem and took the process down with an
+        // uncatchable AV (WER coreclr_25388; the raw-read guard TryGetAuraMonoStaticFieldVtable is
+        // the safety net, this is the "don't even ask" gate).
+        //
+        // Use it for anything a panel build or a per-frame UI refresh triggers. Do NOT use it for
+        // lobby/menu features that legitimately work before a world exists (join friend, join town)
+        // or for the loading pipeline itself.
+        internal bool IsGameDataQueryable => AuraMonoStaticFieldReadsAllowed() && this.IsWorldReady;
+
         // Register work that must run once per world load — warmups, Mono class/method resolution,
         // NativeDetour installs. `attempt` returns true when it is done for this world and false to
         // be retried a second later (bounded, see WorldReadyCallbackMaxAttemptsPerEpoch).
@@ -150,8 +165,59 @@ namespace HeartopiaMod
         {
             float now = Time.unscaledTime;
             this.EnsureWorldLoadingHooks(now);
+            this.EnsureBuiltInWorldReadyWarmups();
             this.UpdateWorldReadyFallback(now);
             this.DrainWorldReadyCallbacks(now);
+        }
+
+        private bool worldReadyBuiltInWarmupsRegistered;
+
+        // Registered ONCE, from the first tick. Every feature whose resolve/install used to poll on
+        // its own blind timer now (a) refuses to run before IsWorldReady and (b) gets its timer
+        // re-armed here the moment a world comes up — so nothing waits out a 3-30 s cooldown after
+        // the splash clears, and nothing polls while there is no world to resolve against.
+        //
+        // Registering centrally (instead of per feature, per frame) keeps the hot paths
+        // allocation-free: a lambda handed to RegisterWorldReadyCallback every frame would be a new
+        // delegate object every frame, dedup by name notwithstanding.
+        private void EnsureBuiltInWorldReadyWarmups()
+        {
+            if (this.worldReadyBuiltInWarmupsRegistered)
+            {
+                return;
+            }
+
+            this.worldReadyBuiltInWarmupsRegistered = true;
+            this.RegisterWorldReadyCallback("BuiltInWarmups", this.OnWorldReadyRearmWarmups);
+        }
+
+        // -999f is the codebase idiom for "attempt on the next tick".
+        private bool OnWorldReadyRearmWarmups()
+        {
+            // Event-hook detours: a fresh world can bring images whose event types were unresolvable
+            // before, so give the installer an immediate pass instead of waiting out its throttle.
+            this.gameEventHookNextInstallAttemptAt = -999f;
+
+            // A — unconditional warmups.
+            this.homelandFarmNextSceneLoadFinishedProbeAt = -999f;
+            this.homelandFarmNextRuntimeResolveAt = -999f;
+            this.instrumentHotkeyGuardNextResolveAt = -999f;
+            this.spawnVehicleNextHookAttemptAt = -999f;
+
+            // B — warmups behind a persisted toggle.
+            this.chatForceTranslateNextResolveAt = -999f;
+            this.postcardNextMailIdResolveAt = -999f;
+            this.privacyBlockNextHookAttemptAt = -999f;
+            this.seaCleanBannerNextAttemptAt = -999f;
+            this.swimVerticalNextAttemptAt = -999f;
+            this.nextBubbleFeaturePatchAttemptAt = -999f;
+            this.bubbleSpawnNextInstallAttemptAt = -999f;
+            this.bubbleCreateNextInstallAttemptAt = -999f;
+            this.movementInputRetryAt = -999f;
+            this.gameUiTimingsNextApplyAt = -999f;
+            this.sanrioNextConfigWalkAt = -999f;
+            this.avatarPatchNextTryAt = -999f;
+            return true;
         }
 
         // The loading hooks themselves cannot wait for the world — they are what tells us the world

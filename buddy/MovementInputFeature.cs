@@ -66,7 +66,9 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (Time.unscaledTime < this.movementInputRetryAt)
+            // World-ready gate (LoadingClosedEvent): MonoInputManager is a live-world service and
+            // the toggle is persisted, so this 3 s resolve used to spin on the login screen.
+            if (!this.IsWorldReady || Time.unscaledTime < this.movementInputRetryAt)
             {
                 return this.movementInputReady;
             }

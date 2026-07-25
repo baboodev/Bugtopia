@@ -207,6 +207,11 @@ RegisterWorldLoadingStartedCallback(this.OnMyFeatureWorldLoadingStarted);
 
 bool ready = this.IsWorldReady;            // gate for anything that needs a live world
 this.ResetWorldReadyCallback("MyFeature"); // re-arm after a toggle flips on
+
+// UI-driven game-data reads (panel build / per-frame refresh):
+// AuraMonoStaticFieldReadsAllowed() only proves an image resolved, and the shell CAN be open on
+// the load menu — that path AV'd on BackPackSystem (WER coreclr_25388).
+if (!this.IsGameDataQueryable) return false;   // == static reads allowed AND world up
 ```
 
 Rules of thumb:
@@ -220,11 +225,37 @@ Rules of thumb:
 - **Never tear a detour down on world change** (see the world-change corruption note below); the
   gate is for *installing*, and Mono detours are image-lifetime.
 
-Users of the gate today: `GameLodFeature` (heavy LOD sections + the PC_LODBIAS hand-back on
-loading-open), `VehicleBypassFeature`, the Warehouse Anywhere `IsPlayerInHomeLand` detour
-(`HeartopiaComplete.Transfer.cs`) and the Stranger Chat bypass
-(`HeartopiaComplete.SelfRoomChat.cs`) — the three toggles that are restored from `Config.xml` at
-startup and would otherwise start poking the runtime at the login screen.
+Every start-time warm-up now goes through the gate. `OnWorldReadyRearmWarmups`
+(`HeartopiaComplete.WorldReady.cs`) is the single registered callback that re-arms all of their
+retry timers on each world load, so nothing waits out a 3–30 s cooldown after the splash clears —
+and nothing polls before it.
+
+| Warm-up | Old trigger | Now |
+|---|---|---|
+| GameLod heavy sections + PC_LODBIAS hand-back | own copy of the loading events | gate |
+| VehicleBypass detours | 3 s blind retry | gate + in-world retry |
+| Warehouse `IsPlayerInHomeLand` detour | 5 s | gate |
+| Stranger Chat bypass | 5 s / 3 s | gate + 3 s in-world re-apply |
+| HomelandFarm warmup (`IsSceneLoadFinished` Mono invoke ×2/s) | 0.5 s from frame 1 | gate, then the game's own probe |
+| Instrument-panel resolve (hotkey guard) | 0.2 s, per hotkey check | gate (no world ⇒ no panel) |
+| Chat translate resolve / postcard detour + mailId | 5 s / per frame | gate |
+| PrivacyBlock, SeaClean banner, SwimSprint vertical guard | 5 s each | gate |
+| Bubble ×3 (fast gen, spawn rewrite, auto-collect) | 5 s each | gate |
+| Analog move bridge (`MonoInputManager`) | 3 s | gate |
+| Game UI timings apply (restore stays ungated) | 0.5 s | gate |
+| Map avatar/name detours ×6 | 2 s | gate (install side only; Undo stays ungated) |
+| Sanrio config walk | 15 s | gate |
+
+Two deliberate exceptions, both **registration**, not resolution:
+
+- `EnsureGameEventHooksInstalled` — the transport the gate itself rides on; gating it would be
+  circular. It got a 0.5 s throttle instead of running a full resolve pass every frame, and the
+  gate re-arms it per world.
+- `EnsureSpawnVehicleResultHooks` — metadata-only registration, must not miss early dispatches;
+  got a 30 s retry throttle so a failed registration stops re-attempting every frame.
+
+`ProcessLodOverrideOnUpdate` is not in the table on purpose: it only writes Unity
+`QualitySettings`, touches no Mono, and re-asserts forever (it has no "success" to wait for).
 
 ---
 

@@ -46,7 +46,9 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (Time.unscaledTime < this.nextBubbleFeaturePatchAttemptAt)
+            // World-ready gate (LoadingClosedEvent) — the bubble/activity classes only exist in a
+            // live world, and the 5 s retry otherwise starts on the login screen.
+            if (!this.IsWorldReady || Time.unscaledTime < this.nextBubbleFeaturePatchAttemptAt)
             {
                 return;
             }

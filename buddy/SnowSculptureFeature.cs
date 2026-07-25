@@ -1656,8 +1656,10 @@ namespace HeartopiaMod
             count = 0;
 
             // The module walk reads static fields (Managers) — hard-gated pre-login (uncatchable
-            // AV otherwise), and the UGUI shell CAN be open before world load.
-            if (!AuraMonoStaticFieldReadsAllowed()
+            // AV otherwise), and the UGUI shell CAN be open before world load. This counter is
+            // built/refreshed by the snow tab, so it uses IsGameDataQueryable: the world must
+            // actually be up, not merely "some game image resolved". Pre-world the tab shows "?".
+            if (!this.IsGameDataQueryable
                 || !this.EnsureAuraMonoApiReady()
                 || !this.AttachAuraMonoThread()
                 || auraMonoRuntimeInvoke == null)

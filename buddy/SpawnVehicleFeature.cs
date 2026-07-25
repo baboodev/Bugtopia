@@ -361,6 +361,8 @@ namespace HeartopiaMod
         // engine can't reach.
         private bool spawnVehicleUpdateHookInstalled;
         private bool spawnVehicleTipHookInstalled;
+        private const float SpawnVehicleHookRetrySeconds = 30f;
+        private float spawnVehicleNextHookAttemptAt = -999f;
 
         // Called UNCONDITIONALLY from OnUpdate (not gated on the Spawn button/tab) — RegisterGameEventHook
         // only ADDS the entry; the actual NativeDetour attach happens lazily over later OnUpdate frames
@@ -373,6 +375,22 @@ namespace HeartopiaMod
         // human can possibly click Spawn.
         private void EnsureSpawnVehicleResultHooks()
         {
+            // Registration is metadata-only, so it deliberately does NOT wait for the world (the
+            // engine installs the detour lazily and we must not miss early dispatches). It does get
+            // a throttle: RegisterGameEventHook can only fail on slot-pool exhaustion, and the
+            // un-throttled version re-attempted that failure every single frame, forever.
+            if (this.spawnVehicleUpdateHookInstalled && this.spawnVehicleTipHookInstalled)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.spawnVehicleNextHookAttemptAt)
+            {
+                return;
+            }
+            this.spawnVehicleNextHookAttemptAt = now + SpawnVehicleHookRetrySeconds;
+
             // Each hook is guarded independently — RegisterGameEventHook adds ANOTHER handler on every
             // call for a name already installed, so a combined all-or-nothing flag would re-register (and
             // double-fire) whichever one succeeded first if the other failed and this ran again later.

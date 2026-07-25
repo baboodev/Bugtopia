@@ -277,12 +277,31 @@ namespace HeartopiaMod
             this.DrainGameEventHooks();
         }
 
+        // Throttle for the install pass. NOT a world-ready gate on purpose: this installer is the
+        // transport the world-ready gate itself rides on (LoadingOpened/LoadingClosed), so gating it
+        // on IsWorldReady would be circular — the gate could then only ever fire through its
+        // player-present fallback. What it WAS doing was running a full resolve pass (AuraMono
+        // ready-check + FindAuraMonoClassByFullName("XDTGame.Core.EventCenter") + one class lookup
+        // per pending event) EVERY frame from the first frame, i.e. for the whole login screen.
+        // Half a second is far below any latency that matters here — the detour still lands on the
+        // first pass after Mono comes up — and the world-ready callback re-arms it immediately when
+        // a world load brings new images.
+        private const float GameEventHookInstallRetrySeconds = 0.5f;
+        private float gameEventHookNextInstallAttemptAt = -999f;
+
         private void EnsureGameEventHooksInstalled()
         {
             if (this.gameEventHooksHardFailed)
             {
                 return;
             }
+
+            float installNow = UnityEngine.Time.unscaledTime;
+            if (installNow < this.gameEventHookNextInstallAttemptAt)
+            {
+                return;
+            }
+            this.gameEventHookNextInstallAttemptAt = installNow + GameEventHookInstallRetrySeconds;
 
             bool anyPending = false;
             for (int i = 0; i < this.gameEventHookSlotCount; i++)

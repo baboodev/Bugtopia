@@ -2403,6 +2403,20 @@ namespace HeartopiaMod
                 return;
             }
             this.avatarPatchNextTryAt = now + 2f;
+
+            // World-ready gate (LoadingClosedEvent). radarPlayerAvatarsAll / radarBigMapSpots are
+            // persisted, so with either of them on this used to resolve + install six Mono detours
+            // (GetPlayerName, GetUserProfile, IsAcquaintance, IsTracked, avatar, friend-gate) every
+            // 2 s from the first frame — none of those classes exist before a world.
+            // Only the INSTALL side waits: when both toggles are off we fall through to the Undo
+            // branches as before, so turning a toggle off still reverts immediately. Returning
+            // early (rather than letting the install branch fail) also keeps us from running the
+            // detour teardown during a world load.
+            if ((this.radarPlayerAvatarsAll || this.radarBigMapSpots) && !this.IsWorldReady)
+            {
+                return;
+            }
+
             avatarForceFriendActive = this.radarPlayerAvatarsAll;
             if (this.radarPlayerAvatarsAll)
             {

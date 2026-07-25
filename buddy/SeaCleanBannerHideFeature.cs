@@ -72,6 +72,13 @@ namespace HeartopiaMod
                 return;
             }
 
+            // World-ready gate (LoadingClosedEvent): persisted toggle, so this 5 s retry used to
+            // run from the first frame against a runtime with no sea-clean UI in it.
+            if (!this.IsWorldReady)
+            {
+                return;
+            }
+
             float now = Time.unscaledTime;
             if (now < this.seaCleanBannerNextAttemptAt)
             {

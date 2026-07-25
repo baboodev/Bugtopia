@@ -205,6 +205,15 @@ namespace HeartopiaMod
 
             // Fallback path: the detour hasn't installed yet. Reuse the legacy poll, but only its
             // open/closed bit now (the per-key layout set is no longer used for blocking).
+            // World-ready gate: this poll walks the UI service graph looking for an open instrument
+            // panel, and it is driven by EVERY hotkey check — so before the gate it ran 5×/s from
+            // the first frame. No world ⇒ no instrument panel ⇒ no hotkey conflict, so refusing
+            // here is also the correct answer, not just the cheap one.
+            if (!this.IsWorldReady)
+            {
+                return false;
+            }
+
             this.EnsureInstrumentHotkeyGuardUpdated();
             return this.instrumentHotkeyBlockedKeys.Count > 0;
         }
