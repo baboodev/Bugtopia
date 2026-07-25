@@ -102,11 +102,9 @@ namespace HeartopiaMod
                 {
                     return;
                 }
-                TextMeshProUGUI tmp = t.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
+                if (UguiTmpTypesLoadable())
                 {
-                    tmp.fontSize = size;
-                    return;
+                    try { if (this.UguiKitTmpTrySetFontSize(t.gameObject, size)) return; } catch { }
                 }
                 Text txt = t.GetComponent<Text>();
                 if (txt != null)

@@ -259,6 +259,7 @@
     <Compile Include="HeartopiaComplete.Reflection.cs" />
     <Compile Include="HeartopiaComplete.UiKit.cs" />
     <Compile Include="HeartopiaComplete.UguiKit.cs" />
+    <Compile Include="HeartopiaComplete.UguiKitTmp.cs" />
     <Compile Include="HeartopiaComplete.UguiShell.cs" />
     <Compile Include="HeartopiaComplete.UguiShellTabIndices.cs" />
     <Compile Include="HeartopiaComplete.UguiAboutContent.cs" />

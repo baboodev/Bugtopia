@@ -475,14 +475,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetRightAligned(label)) return; } catch { }
+            }
             try
             {
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
-                {
-                    tmp.alignment = TextAlignmentOptions.MidlineRight;
-                    return;
-                }
                 Text txt = label.GetComponent<Text>();
                 if (txt != null)
                 {

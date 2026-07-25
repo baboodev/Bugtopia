@@ -263,12 +263,12 @@ namespace HeartopiaMod
                     return fallback;
                 }
                 float h = -1f;
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
+                bool tmpMeasured = false;
+                if (UguiTmpTypesLoadable())
                 {
-                    h = tmp.GetPreferredValues(text, width, 0f).y;
+                    tmpMeasured = this.UguiKitTmpMeasureWrappedHeightFromLabel(label, text, width, out h);
                 }
-                else
+                if (!tmpMeasured)
                 {
                     // Legacy fallback (only reachable if the kit's TMP creation fell back):
                     // preferredHeight wraps at the label's own rect width — set before measuring.

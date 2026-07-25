@@ -30,7 +30,9 @@ namespace HeartopiaMod
     //
     // Hard-won interop facts baked into this file (verified against gameassembly-dumps for THIS
     // game build, Unity 2020.3.13 — do not rediscover):
-    //  - UnityEngine.UI survived IL2CPP stripping intact; TMPro namespace is UNprefixed.
+    //  - UnityEngine.UI survived IL2CPP stripping intact. The TMP namespace is UNprefixed (TMPro)
+    //    in the BepInEx interop but PREFIXED (Il2CppTMPro) in MelonLoader's — which is why every
+    //    TMP type ref lives in UguiKitTmp.cs behind the UguiTmpTypesLoadable() runtime probe.
     //  - TMP_Dropdown / TMP_InputField are STRIPPED — Dropdown caption/items must be legacy Text
     //    (Dropdown.captionText/itemText are typed Text), which is why the kit resolves a legacy
     //    Font alongside the TMP font.
@@ -102,7 +104,8 @@ namespace HeartopiaMod
         private Sprite uguiKitRoundedSprite;
         private Texture2D uguiKitRingTex;
         private Sprite uguiKitRingSprite;
-        private TMP_FontAsset uguiKitTmpFont;
+        // TMP_FontAsset, held as Object — TMP type refs are confined to UguiKitTmp.cs (JIT isolation).
+        private UnityObject uguiKitTmpFont;
         private Material uguiKitTmpMaterial; // our OWN preset — never the font asset's shared one
         private Sprite uguiKitCaretSprite;   // dropdown "▼" indicator
         private Texture2D uguiKitCaretTex;
@@ -114,8 +117,10 @@ namespace HeartopiaMod
         private bool uguiKitFontPinned;
         private float uguiKitFontRetryAt;
         private bool uguiKitFontFallbackLogged;
-        private TMP_FontAsset uguiKitFontPinnedCandidate; // scratch, cleared at the end of a resolve
-        private TMP_FontAsset uguiKitFontAnyCandidate;
+        // Set when the runtime probe finds no TMP types under this flavor's compile-time namespace
+        // (universal DLL under the other loader's interop) — legacy Text is FINAL for the session,
+        // so the provisional font-retry loop is suppressed (the namespace can never appear later).
+        private bool uguiKitTmpUnavailable;
         private const float UguiFontRetrySeconds = 3f;
         private Sprite[] uguiKitIconSprites; // cache: one Sprite per NavIconPngBase64 index
 
@@ -435,7 +440,7 @@ namespace HeartopiaMod
             // fires a theme rebuild so surfaces already built with the wrong font are re-created.
             if (this.uguiKitFontResolveAttempted)
             {
-                if (this.uguiKitFontPinned || Time.unscaledTime < this.uguiKitFontRetryAt)
+                if (this.uguiKitFontPinned || this.uguiKitTmpUnavailable || Time.unscaledTime < this.uguiKitFontRetryAt)
                 {
                     return;
                 }
@@ -443,80 +448,22 @@ namespace HeartopiaMod
             bool wasProvisional = this.uguiKitFontResolveAttempted && !this.uguiKitFontPinned;
             this.uguiKitFontResolveAttempted = true;
 
-            // BUG FIX (2026-07-22): this used to take the FIRST TMP_FontAsset the scan returned and
-            // latch it for the process. Which one that is depends on what happens to be loaded the
-            // first time the menu opens, so the whole UI silently changed typeface between runs —
-            // logs show "TMP=LiberationSans SDF" when opened at the login screen vs
-            // "TMP=FZY4JW_SDF" (a GAME font) when opened in-world. That caused two reported bugs at
-            // once: the game font's material carries an OUTLINE (game UI text is outlined so it
-            // reads over the world), and its Latin glyphs are far wider (~9px/char vs ~6px), so
-            // labels this layout was measured against started overrunning their rects.
-            // The font is now HARD-PINNED to LiberationSans SDF — no user choice (the picker was
-            // built, then removed once OS fonts proved impossible and the only real alternatives
-            // were the game's own outlined, much wider assets). LiberationSans is TMP's built-in:
-            // always loaded, clean material, and the exact metrics every rect in this kit was sized
-            // against. First-found stays as a last resort ONLY so the UI still renders text if the
-            // built-in ever goes missing; it is not a preference.
-            try
+            // The TMP half (font scan + pin + flat-material clone) lives in UguiKitTmp.cs — JIT
+            // isolation, see that file's header. An absent probe means this DLL is running under
+            // the loader whose interop uses the OTHER TMP namespace (universal build): legacy Text
+            // is then the permanent mode for the session.
+            bool tmpLoadable = UguiTmpTypesLoadable();
+            if (tmpLoadable)
             {
-                var found = Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<TMP_FontAsset>());
-                if (found != null)
-                {
-                    TMP_FontAsset firstSeen = null;
-                    TMP_FontAsset liberation = null;
-                    for (int i = 0; i < found.Length; i++)
-                    {
-                        TMP_FontAsset fa = (found[i] != null) ? found[i].TryCast<TMP_FontAsset>() : null;
-                        if (fa == null)
-                        {
-                            continue;
-                        }
-                        if (firstSeen == null)
-                        {
-                            firstSeen = fa;
-                        }
-                        string faName = fa.name ?? string.Empty;
-                        if (faName.IndexOf("LiberationSans", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            liberation = fa;
-                            break; // pinned target found — stop looking
-                        }
-                    }
-                    this.uguiKitFontPinnedCandidate = liberation;
-                    this.uguiKitFontAnyCandidate = firstSeen;
-                }
+                try { this.UguiKitTmpResolveFonts(); }
+                catch (Exception ex) { ModLogger.Msg("[UguiKit] TMP font resolve threw: " + ex.Message); }
             }
-            catch (Exception ex)
+            else
             {
-                ModLogger.Msg("[UguiKit] TMP font scan failed: " + ex.Message);
+                this.uguiKitTmpUnavailable = true;
             }
 
-            // TMP's own default setting is the canonical home of LiberationSans SDF and can hand it
-            // over even on a frame when FindObjectsOfTypeAll has not seen it yet — worth asking
-            // before settling for a game font.
-            if (this.uguiKitFontPinnedCandidate == null)
-            {
-                try
-                {
-                    TMP_FontAsset def = TMP_Settings.defaultFontAsset;
-                    if (def != null)
-                    {
-                        if ((def.name ?? string.Empty).IndexOf("LiberationSans", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            this.uguiKitFontPinnedCandidate = def;
-                        }
-                        else if (this.uguiKitFontAnyCandidate == null)
-                        {
-                            this.uguiKitFontAnyCandidate = def;
-                        }
-                    }
-                }
-                catch (Exception ex) { ModLogger.Msg("[UguiKit] TMP_Settings.defaultFontAsset failed: " + ex.Message); }
-            }
-
-            this.uguiKitTmpFont = this.uguiKitFontPinnedCandidate ?? this.uguiKitFontAnyCandidate;
-            this.uguiKitFontPinned = this.uguiKitFontPinnedCandidate != null;
-            if (!this.uguiKitFontPinned)
+            if (!this.uguiKitFontPinned && tmpLoadable)
             {
                 // Provisional: keep rendering with whatever exists, but come back for the real one.
                 this.uguiKitFontRetryAt = Time.unscaledTime + UguiFontRetrySeconds;
@@ -526,41 +473,6 @@ namespace HeartopiaMod
                     ModLogger.Msg("[UguiKit] LiberationSans SDF not loaded yet — using '"
                         + ((this.uguiKitTmpFont != null && this.uguiKitTmpFont.name != null) ? this.uguiKitTmpFont.name : "?")
                         + "' provisionally; will re-resolve and rebuild once it appears.");
-                }
-            }
-            this.uguiKitFontPinnedCandidate = null;
-            this.uguiKitFontAnyCandidate = null;
-
-            // Our OWN material preset, cloned from whichever asset won above. TMP draws outline /
-            // glow / drop-shadow from MATERIAL properties, and a game font asset's shared material
-            // has them dialled in for readability over the world — which is where the reported
-            // outline came from. Zeroing them on the SHARED material would restyle the game's own
-            // text, so clone once and hand every kit label the clone instead (one instance for the
-            // whole UI, not one per label). SetFloat on a property this shader lacks is a no-op, so
-            // the list is safe to over-specify. If the clone fails we simply keep the stock look.
-            if (this.uguiKitTmpFont != null)
-            {
-                try
-                {
-                    Material srcMat = this.uguiKitTmpFont.material;
-                    if (srcMat != null)
-                    {
-                        Material flat = new Material(srcMat);
-                        flat.name = srcMat.name + " (Bugtopia flat)";
-                        flat.SetFloat("_OutlineWidth", 0f);
-                        flat.SetFloat("_OutlineSoftness", 0f);
-                        flat.SetFloat("_GlowPower", 0f);
-                        flat.SetFloat("_GlowOuter", 0f);
-                        flat.SetFloat("_UnderlayDilate", 0f);
-                        flat.SetFloat("_UnderlaySoftness", 0f);
-                        flat.SetFloat("_UnderlayOffsetX", 0f);
-                        flat.SetFloat("_UnderlayOffsetY", 0f);
-                        this.uguiKitTmpMaterial = flat;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Msg("[UguiKit] TMP flat material clone failed (keeping stock look): " + ex.Message);
                 }
             }
 
@@ -637,55 +549,20 @@ namespace HeartopiaMod
         {
             this.EnsureUguiFonts();
             GameObject go = this.CreateUguiGo(name, parent);
-            if (this.uguiKitTmpFont != null)
+            if (this.uguiKitTmpFont != null && UguiTmpTypesLoadable())
             {
-                try
-                {
-                    TextMeshProUGUI tmp = go.AddComponent<TextMeshProUGUI>();
-                    tmp.font = this.uguiKitTmpFont;
-                    if (this.uguiKitTmpMaterial != null)
-                    {
-                        // Outline/glow/shadow-free preset (EnsureUguiFonts) — assigning the SHARED
-                        // material keeps all kit labels on one material, so this stays a single
-                        // draw-call batch instead of instancing a material per label.
-                        try { tmp.fontSharedMaterial = this.uguiKitTmpMaterial; } catch { }
-                    }
-                    tmp.fontSize = size;
-                    tmp.color = color;
-                    // Wrap by default (2026-07-22): a label that outgrows its rect should flow onto
-                    // a second line wherever the rect has the height for one, and only fall back to
-                    // the "…" below when it genuinely has nowhere to go. Single-line labels are
-                    // unaffected — wrapping only does anything once the text exceeds the width.
-                    // (TMP 2.0 renamed this to textWrappingMode/TextWrappingModes; enableWordWrapping
-                    // is the [FormerlySerializedAs] alias and still the one that exists on this
-                    // build's stripped TMP, so it stays.)
-                    tmp.enableWordWrapping = true;
-                    // BUG FIX (2026-07-22): TMP's DEFAULT overflowMode is Overflow — text longer
-                    // than its rect keeps rendering straight past the edge and draws OVER whatever
-                    // sits next to it. Reported on Auto Sell (the selected-item key line rendering
-                    // under the "Auto" checkbox, the star-info hint spilling out of the 205px left
-                    // column and across "Keep Per Item"), but it was never an Auto Sell bug: those
-                    // rects are correctly sized and stop short of their neighbours, and EVERY label
-                    // in the app had the same behaviour, so any string long enough would collide.
-                    // Ellipsis keeps the glyphs inside the rect and trims with "…" instead, which
-                    // makes a too-long label a readability question rather than a layout collision.
-                    // Applies to wrapped labels too (TrySetUguiLabelWrapped): they wrap on width as
-                    // before and only ellipsize past the rect HEIGHT.
-                    tmp.overflowMode = TextOverflowModes.Ellipsis;
-                    tmp.alignment = centered ? TextAlignmentOptions.Center : TextAlignmentOptions.MidlineLeft;
-                    tmp.raycastTarget = false;
-                    tmp.text = text;
-                    return go;
-                }
+                // TMP construction lives in UguiKitTmp.cs (JIT isolation). BuiltBroken = a half-
+                // initialized TMP graphic claimed the CanvasRenderer — adding a second Graphic to
+                // the GO would be invalid, so that case returns too.
+                int tmpResult = UguiTmpLabelNotBuilt;
+                try { tmpResult = this.UguiKitTmpBuildLabel(go, name, size, color, centered, text); }
                 catch (Exception ex)
                 {
-                    ModLogger.Msg("[UguiKit] TMP label '" + name + "' failed, using legacy Text: " + ex.Message);
-                    if (go.GetComponent<TextMeshProUGUI>() != null)
-                    {
-                        // A half-initialized TMP graphic already claimed the CanvasRenderer; a
-                        // second Graphic on the same GO is invalid — keep the broken TMP.
-                        return go;
-                    }
+                    ModLogger.Msg("[UguiKit] TMP label '" + name + "' threw before building: " + ex.Message);
+                }
+                if (tmpResult != UguiTmpLabelNotBuilt)
+                {
+                    return go;
                 }
             }
 
@@ -747,14 +624,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetBold(label)) return; } catch { }
+            }
             try
             {
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
-                {
-                    tmp.fontStyle = FontStyles.Bold; // enum verified present in this build's TMP
-                    return;
-                }
                 Text txt = label.GetComponent<Text>();
                 if (txt != null)
                 {
@@ -777,15 +652,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetWrapped(label)) return; } catch { }
+            }
             try
             {
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
-                {
-                    tmp.enableWordWrapping = true;
-                    tmp.alignment = TextAlignmentOptions.TopLeft;
-                    return;
-                }
                 Text txt = label.GetComponent<Text>();
                 if (txt != null)
                 {
@@ -802,14 +674,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetText(label, text)) return; } catch { }
+            }
             try
             {
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
-                {
-                    tmp.text = text;
-                    return;
-                }
                 Text txt = label.GetComponent<Text>();
                 if (txt != null)
                 {
@@ -825,14 +695,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetColor(label, color)) return; } catch { }
+            }
             try
             {
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
-                {
-                    tmp.color = color;
-                    return;
-                }
                 Text txt = label.GetComponent<Text>();
                 if (txt != null)
                 {

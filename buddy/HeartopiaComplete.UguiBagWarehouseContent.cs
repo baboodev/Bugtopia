@@ -462,15 +462,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetWrappedTop(label)) return; } catch { }
+            }
             try
             {
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
-                {
-                    tmp.enableWordWrapping = true;
-                    tmp.alignment = TextAlignmentOptions.Top;
-                    return;
-                }
                 Text txt = label.GetComponent<Text>();
                 if (txt != null)
                 {

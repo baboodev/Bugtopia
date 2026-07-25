@@ -77,7 +77,9 @@ namespace HeartopiaMod
             public Image Dot;
             public GameObject Label;
             public RectTransform LabelRt;
-            public TextMeshProUGUI LabelTmp; // null when the kit fell back to legacy Text
+            // TMP component held as Object (TMP typerefs live only in UguiKitTmp.cs — JIT
+            // isolation); null when the kit fell back to legacy Text.
+            public UnityEngine.Object LabelTmp;
             public Text LabelLegacy;         // null on the TMP path
             public GameObject Progress;
             public RectTransform ProgressRt;
@@ -340,7 +342,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(label, 48f, 6f, 200f, 26f);
             card.Label = label;
             card.LabelRt = label.GetComponent<RectTransform>();
-            card.LabelTmp = label.GetComponent<TextMeshProUGUI>();
+            card.LabelTmp = UguiTmpTypesLoadable() ? this.UguiKitTmpGetLabelComponent(label) : null;
             card.LabelLegacy = card.LabelTmp == null ? label.GetComponent<Text>() : null;
 
             // Progress bar: FLAT image (no sprite). At 2.5px tall a 9-slice is the degenerate-
@@ -572,8 +574,7 @@ namespace HeartopiaMod
                 {
                     // String overload = single-line preferred size of THIS string (the IMGUI
                     // equivalent was style.CalcSize) — bold/size come from the component state.
-                    Vector2 pref = card.LabelTmp.GetPreferredValues(msg);
-                    textW = pref.x;
+                    this.UguiKitTmpMeasureFromComponent(card.LabelTmp, msg, 0f, true, out textW);
                 }
                 else if (card.LabelLegacy != null)
                 {
@@ -629,8 +630,7 @@ namespace HeartopiaMod
                 {
                     // (string, width, 0) overload = wrapped height of THIS string at the given
                     // width (the IMGUI equivalent was style.CalcHeight(content, textWidth)).
-                    Vector2 pref = card.LabelTmp.GetPreferredValues(msg, textWidth, 0f);
-                    textH = pref.y;
+                    this.UguiKitTmpMeasureFromComponent(card.LabelTmp, msg, textWidth, false, out textH);
                 }
                 else if (card.LabelLegacy != null)
                 {

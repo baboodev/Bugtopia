@@ -309,14 +309,12 @@ namespace HeartopiaMod
             {
                 return;
             }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetItalic(label)) return; } catch { }
+            }
             try
             {
-                TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
-                {
-                    tmp.fontStyle = FontStyles.Italic;
-                    return;
-                }
                 Text txt = label.GetComponent<Text>();
                 if (txt != null)
                 {
