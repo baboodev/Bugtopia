@@ -254,6 +254,10 @@ namespace HeartopiaMod
                 "100%", new System.Action(this.OnUguiThemeScaleResetClicked));
             PlaceUguiTopLeft(scaleReset, panelW - 14f - 94f, 42f, 94f, 26f);
 
+            // The legacy-vs-TMP renderer switch lives in Settings -> Main, directly under the
+            // language dropdown: it only applies to CJK locales, so it belongs with the language
+            // choice rather than with the theme's display settings.
+
             // No Font row here on purpose: the UGUI shell's font is HARD-PINNED to LiberationSans
             // SDF in EnsureUguiFonts. A picker was built and then removed — OS fonts are impossible
             // on this build (see the dead-end note in HeartopiaComplete.UguiKit.cs), which left only

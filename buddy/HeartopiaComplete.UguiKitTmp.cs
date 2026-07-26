@@ -419,5 +419,359 @@ namespace HeartopiaMod
             value = tmp.GetPreferredValues(text, width, 0f).y;
             return true;
         }
+
+        // CJK fallback wiring (see EnsureUguiKitCjkFallback in HeartopiaComplete.UguiKit.cs for the
+        // why). Returns the fallback's display name once wired, or null to retry later. TMP-free
+        // signature: `probeChar` is an int codepoint and the result is a plain string, so callers
+        // JIT without pulling in TMP types.
+        // Full inventory of every route a CJK-capable TMP font could arrive by. Logged once so the
+        // question "does a usable Chinese font asset exist in this process at all?" is answered by
+        // evidence instead of by a single FindObjectsOfTypeAll call that came back with two Latin
+        // fonts. Returns the asset if found, else null.
+        // Route 4 — load the game's own font bundles off disk.
+        //
+        // Established by decrypting StreamingAssets/AssetBundle/fonts_*.ab (UnityCN, AB key
+        // "27v8HxLIptguw3Jn" capped at 0x6f — see the tabledata-decryption research):
+        //   fonts_1f32e5f8.ab  4.80 MB  Font:FZY4JW              <- SOURCE font (the actual TTF)
+        //   fonts_511c4845.ab  0.01 MB  MonoBehaviour:FZY4JW_SDF <- the TMP font asset + atlas
+        //   fonts_76ab0d41.ab  0.01 MB  FZY4K_SDF
+        //   fonts_7ca52680.ab  0.01 MB  Kanit-Medium SDF   (Thai)
+        //   fonts_1b0e2909.ab  0.01 MB  Jua-Regular SDF    (Korean)
+        //   fonts_67944a8c.ab  0.01 MB  MPLUSRounded1c-Bold SDF (Japanese)
+        // A ~10 KB bundle covering all of CJK proves those SDF assets are DYNAMIC: the atlas ships
+        // nearly empty and glyphs are rasterized on demand from sourceFontFile. Two consequences:
+        //  (1) HasCharacter must be asked with tryAddCharacter:true — the plain form only reports
+        //      what is already in the atlas, which is why the first attempt found nothing;
+        //  (2) the SOURCE bundle has to be loaded too, or the dynamic asset has no TTF to
+        //      rasterize from. Unity does not auto-resolve a bundle dependency that is not loaded.
+        // Sizes are used instead of hardcoded hash names so a content patch (which renames these
+        // files) does not silently break it: small bundles hold the SDF assets, the big ones the
+        // source fonts. Already-loaded bundles throw and are skipped.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private TMP_FontAsset UguiKitTmpLoadCjkFontFromBundles(int probeChar, System.Text.StringBuilder report,
+            System.Collections.Generic.List<TMP_FontAsset> cjkFound)
+        {
+            string dir;
+            try { dir = Application.streamingAssetsPath + "/AssetBundle"; }
+            catch (Exception ex) { report.Append("bundleDir=<err ").Append(ex.Message).Append("> "); return null; }
+
+            string[] files;
+            try
+            {
+                if (!System.IO.Directory.Exists(dir))
+                {
+                    report.Append("bundleDir=missing ");
+                    return null;
+                }
+                files = System.IO.Directory.GetFiles(dir, "fonts_*.ab");
+            }
+            catch (Exception ex) { report.Append("bundleList=<err ").Append(ex.Message).Append("> "); return null; }
+
+            // Source fonts first (largest), then the SDF assets (smallest). Same reason as above:
+            // the dynamic asset needs its TTF present before it can add a glyph.
+            Array.Sort(files, (a, b) =>
+            {
+                long la = 0, lb = 0;
+                try { la = new System.IO.FileInfo(a).Length; } catch { }
+                try { lb = new System.IO.FileInfo(b).Length; } catch { }
+                return lb.CompareTo(la);
+            });
+
+            int loaded = 0;
+            TMP_FontAsset best = null;
+            report.Append("bundles=").Append(files.Length).Append(' ');
+            for (int pass = 0; pass < 2 && best == null; pass++)
+            {
+                for (int i = 0; i < files.Length; i++)
+                {
+                    long len = 0;
+                    try { len = new System.IO.FileInfo(files[i]).Length; } catch { }
+                    bool big = len > 262144;
+                    if (pass == 0 ? !big : big)
+                    {
+                        continue; // pass 0 = source fonts, pass 1 = the small SDF bundles
+                    }
+                    AssetBundle ab = null;
+                    try { ab = AssetBundle.LoadFromFile(files[i]); }
+                    catch { continue; }        // already loaded by the game, or undecryptable
+                    if (ab == null)
+                    {
+                        continue;
+                    }
+                    loaded++;
+                    if (pass == 0)
+                    {
+                        continue;              // source fonts: loading them is the whole point
+                    }
+                    try
+                    {
+                        var assets = ab.LoadAllAssets(Il2CppInterop.Runtime.Il2CppType.Of<TMP_FontAsset>());
+                        if (assets == null)
+                        {
+                            continue;
+                        }
+                        for (int k = 0; k < assets.Length; k++)
+                        {
+                            TMP_FontAsset fa = (assets[k] != null) ? assets[k].TryCast<TMP_FontAsset>() : null;
+                            if (fa == null)
+                            {
+                                continue;
+                            }
+                            bool cjk = false;
+                            try { cjk = fa.HasCharacter((char)probeChar, false, true); }
+                            catch { }
+                            if (!cjk)
+                            {
+                                continue;
+                            }
+                            report.Append("bundleHit='").Append(fa.name ?? "?").Append("' ");
+                            // Keep EVERY CJK font, not just one. The game ships several with
+                            // different coverage (FZY4JW / FZY4K / MPLUSRounded1c / Jua / Kanit),
+                            // and picking a single one rendered "characters mixed with boxes"
+                            // whenever the chosen font lacked a glyph. As a TMP fallback CHAIN
+                            // their coverage adds up, so a glyph missing from one is found in the
+                            // next. FZY4JW is preferred as the head of the chain (it is the game's
+                            // primary CJK face — its source TTF is the 4.8 MB bundle, the largest),
+                            // so the common case stays visually consistent.
+                            if (best == null || (fa.name ?? string.Empty).IndexOf("FZY4JW", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                best = fa;
+                            }
+                            if (!cjkFound.Contains(fa))
+                            {
+                                cjkFound.Add(fa);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            report.Append("bundlesLoaded=").Append(loaded).Append(' ');
+            return best;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private TMP_FontAsset UguiKitTmpFindCjkFontAsset(int probeChar, System.Text.StringBuilder report,
+            System.Collections.Generic.List<TMP_FontAsset> cjkFound)
+        {
+            TMP_FontAsset best = null;
+
+            // Route 1 — every loaded font asset. tryAddCharacter:true is the important part: a
+            // DYNAMIC font asset reports false for a glyph that is not in its atlas yet, even when
+            // its source font could render it. Round 1 asked without this flag and wrongly rejected
+            // every candidate.
+            try
+            {
+                var all = Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<TMP_FontAsset>());
+                report.Append("assets=[");
+                if (all != null)
+                {
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        TMP_FontAsset fa = (all[i] != null) ? all[i].TryCast<TMP_FontAsset>() : null;
+                        if (fa == null)
+                        {
+                            continue;
+                        }
+                        bool cjk = false;
+                        try { cjk = fa.HasCharacter((char)probeChar, false, true); }
+                        catch { try { cjk = fa.HasCharacter((char)probeChar); } catch { } }
+                        if (i > 0) { report.Append(", "); }
+                        report.Append(fa.name ?? "?").Append(cjk ? "*CJK" : "");
+                        if (cjk && best == null)
+                        {
+                            best = fa;
+                        }
+                    }
+                }
+                report.Append("] ");
+            }
+            catch (Exception ex) { report.Append("assets=<err ").Append(ex.Message).Append("> "); }
+
+            // Route 2 — TMP's global settings: the game may register its CJK font as the project
+            // default or in the GLOBAL fallback list, which is a different list from any single
+            // font asset's own fallbackFontAssetTable.
+            try
+            {
+                TMP_FontAsset def = TMP_Settings.defaultFontAsset;
+                report.Append("tmpDefault=").Append(def != null ? (def.name ?? "?") : "null").Append(' ');
+                if (best == null && def != null && def.HasCharacter((char)probeChar, false, true))
+                {
+                    best = def;
+                }
+                var globals = TMP_Settings.fallbackFontAssets;
+                report.Append("tmpGlobalFallbacks=[");
+                if (globals != null)
+                {
+                    for (int i = 0; i < globals.Count; i++)
+                    {
+                        TMP_FontAsset fa = globals[i];
+                        if (fa == null)
+                        {
+                            continue;
+                        }
+                        if (i > 0) { report.Append(", "); }
+                        report.Append(fa.name ?? "?");
+                        if (best == null && fa.HasCharacter((char)probeChar, false, true))
+                        {
+                            best = fa;
+                        }
+                    }
+                }
+                report.Append("] ");
+            }
+            catch (Exception ex) { report.Append("tmpSettings=<err ").Append(ex.Message).Append("> "); }
+
+            // Route 3 — the game's own live text components. If Chinese is on screen anywhere, the
+            // font drawing it is reachable here even when the asset scan above missed it (different
+            // load path / not registered as a standalone asset object). Capped: a big scene holds
+            // thousands of these and we only need the first CJK-capable hit.
+            if (best == null)
+            {
+                try
+                {
+                    var texts = Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<TextMeshProUGUI>());
+                    int scanned = 0;
+                    report.Append("liveTextScan=");
+                    if (texts != null)
+                    {
+                        for (int i = 0; i < texts.Length && scanned < 4000; i++)
+                        {
+                            TextMeshProUGUI t = (texts[i] != null) ? texts[i].TryCast<TextMeshProUGUI>() : null;
+                            if (t == null)
+                            {
+                                continue;
+                            }
+                            scanned++;
+                            TMP_FontAsset fa = t.font;
+                            if (fa != null && fa.HasCharacter((char)probeChar, false, true))
+                            {
+                                best = fa;
+                                report.Append(scanned).Append("->FOUND '").Append(fa.name ?? "?").Append("' ");
+                                break;
+                            }
+                        }
+                    }
+                    if (best == null) { report.Append(scanned).Append("->none "); }
+                }
+                catch (Exception ex) { report.Append("liveTextScan=<err ").Append(ex.Message).Append("> "); }
+            }
+
+            // Route 4 — nothing in memory: load the game's own font bundles off disk.
+            if (best == null)
+            {
+                try { best = this.UguiKitTmpLoadCjkFontFromBundles(probeChar, report, cjkFound); }
+                catch (Exception ex) { report.Append("bundleLoad=<err ").Append(ex.Message).Append("> "); }
+            }
+
+            return best;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private string UguiKitTmpEnsureCjkFallback()
+        {
+            TMP_FontAsset primary = (this.uguiKitTmpFont != null) ? this.uguiKitTmpFont.TryCast<TMP_FontAsset>() : null;
+            if (primary == null)
+            {
+                return null;
+            }
+
+            // Already covered (a non-Latin pin, or a previous pass wired something in).
+            try
+            {
+                if (primary.HasCharacter((char)UguiCjkProbeChar, true, true))
+                {
+                    return "(covered)";
+                }
+            }
+            catch { }
+
+            System.Text.StringBuilder report = new System.Text.StringBuilder();
+            System.Collections.Generic.List<TMP_FontAsset> cjkFound = new System.Collections.Generic.List<TMP_FontAsset>();
+            TMP_FontAsset cjk = this.UguiKitTmpFindCjkFontAsset(UguiCjkProbeChar, report, cjkFound);
+            ModLogger.Msg("[UguiKit] CJK font hunt: primary=" + (primary.name ?? "?") + " " + report.ToString()
+                + "=> " + (cjk != null ? ("USING '" + (cjk.name ?? "?") + "'") : "NONE FOUND (legacy Text will be used)"));
+
+            if (cjk == null)
+            {
+                return null; // caller retries; legacy Text carries CJK meanwhile
+            }
+            if (!cjkFound.Contains(cjk))
+            {
+                cjkFound.Insert(0, cjk);
+            }
+
+            var table = primary.fallbackFontAssetTable;
+            if (table == null)
+            {
+                return null;
+            }
+
+            // Wire the PREFERRED font first and then every other CJK face found, so TMP can chain
+            // through them: a glyph missing from the head of the chain is looked up in the next
+            // entry instead of rendering as a box. Picking a single font is what produced the
+            // reported "characters mixed with boxes".
+            System.Text.StringBuilder wired = new System.Text.StringBuilder();
+            for (int n = 0; n < cjkFound.Count; n++)
+            {
+                TMP_FontAsset fa = (n == 0) ? cjk : cjkFound[n];
+                if (n > 0 && fa.Pointer == cjk.Pointer)
+                {
+                    continue; // preferred one already wired as the head
+                }
+                bool present = false;
+                for (int i = 0; i < table.Count; i++)
+                {
+                    if (table[i] != null && table[i].Pointer == fa.Pointer)
+                    {
+                        present = true;
+                        break;
+                    }
+                }
+                if (present)
+                {
+                    continue;
+                }
+                // Flatten the fallback's OWN material before wiring it. Our flat-material clone is
+                // assigned per-label and therefore only covers the PRIMARY font: TMP renders
+                // fallback glyphs in a separate sub-mesh using the FALLBACK asset's material, so
+                // CJK text was arriving with the game's face intact — outline on, face dilated —
+                // which reads as "too bold / hard to read" next to the flat Latin text. Same
+                // properties as the primary clone plus _FaceDilate, which literally fattens the
+                // glyph body. Safe to mutate: these assets were loaded from disk BY US
+                // (AssetBundle.LoadFromFile throws for a bundle the game already holds, so anything
+                // we hold is our own instance) — the game's own text is untouched.
+                try
+                {
+                    Material fbSrc = fa.material;
+                    if (fbSrc != null)
+                    {
+                        Material fbFlat = new Material(fbSrc);
+                        fbFlat.name = (fbSrc.name ?? "?") + " (Bugtopia flat)";
+                        fbFlat.SetFloat("_OutlineWidth", 0f);
+                        fbFlat.SetFloat("_OutlineSoftness", 0f);
+                        fbFlat.SetFloat("_FaceDilate", 0f);
+                        fbFlat.SetFloat("_GlowPower", 0f);
+                        fbFlat.SetFloat("_GlowOuter", 0f);
+                        fbFlat.SetFloat("_UnderlayDilate", 0f);
+                        fbFlat.SetFloat("_UnderlaySoftness", 0f);
+                        fbFlat.SetFloat("_UnderlayOffsetX", 0f);
+                        fbFlat.SetFloat("_UnderlayOffsetY", 0f);
+                        fa.material = fbFlat;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Msg("[UguiKit] fallback '" + (fa.name ?? "?") + "' flatten failed: " + ex.Message);
+                }
+
+                table.Add(fa);
+                if (wired.Length > 0) { wired.Append(", "); }
+                wired.Append(fa.name ?? "?");
+            }
+            ModLogger.Msg("[UguiKit] CJK fallback chain behind " + (primary.name ?? "?") + ": ["
+                + (wired.Length > 0 ? wired.ToString() : "already wired") + "] tableCount=" + table.Count);
+            return cjk.name;
+        }
     }
 }

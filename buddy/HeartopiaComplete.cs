@@ -4688,6 +4688,8 @@ namespace HeartopiaMod
         private const float UiScaleMax = 3.00f;
         private const float UiScaleStep = 0.10f;
         private float uiScale = 1.00f;
+        // Settings -> UI Theme -> DISPLAY: draw kit labels with legacy Text instead of TMP.
+        private bool uiLegacyTextRenderer = false;
         private int uiThemeColorTarget = 0;
         private bool uiThemePickerOpen = false;
         private string uiThemeHexInput = "#4FC7FF";

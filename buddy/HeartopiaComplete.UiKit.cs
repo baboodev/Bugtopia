@@ -65,11 +65,14 @@ namespace HeartopiaMod
             data.uiPanelAlpha = this.uiPanelAlpha;
             data.uiContentAlpha = this.uiContentAlpha;
             data.uiScale = this.uiScale;
+            data.uiLegacyTextRenderer = this.uiLegacyTextRenderer;
         }
 
         private void ApplyUiThemeConfig(UiThemeConfigData data)
         {
             if (data == null) return;
+            // Read before the palette version gate — the renderer choice is orthogonal to colours.
+            this.uiLegacyTextRenderer = data.uiLegacyTextRenderer;
             if (data.uiThemeVersion < 2)
             {
                 // Pre-redesign palette: keep the new defaults, honor only the saved scale.

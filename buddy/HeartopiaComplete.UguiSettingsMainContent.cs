@@ -317,6 +317,7 @@ namespace HeartopiaMod
             public GameObject GeneralPanel;
             public GameObject LangLabel;
             public Dropdown LangDropdown;
+            public Toggle LegacyTextToggle;
             public bool LangListenerWired;
             public int LangLastValue;               // poll-fallback change detection
             public string[] LangCodes;              // codes snapshot matching the dropdown options
@@ -463,6 +464,14 @@ namespace HeartopiaMod
                 languageNames, langInitial,
                 new System.Action<int>(this.OnUguiSettingsMainLanguagePicked), out langWired);
             handle.LangListenerWired = langWired;
+
+            // Renderer switch, directly under the language row because it only applies to CJK
+            // locales (see UguiKitUseLegacyTextForLanguage) — TMP draws SDF glyphs from the game's
+            // Chinese font asset, legacy Text rasterizes through a dynamic Font + the OS fallback
+            // chain. Hidden entirely on Latin locales, where TMP is always the right answer.
+            handle.LegacyTextToggle = this.CreateUguiCheckbox(general.transform, "LegacyTextToggle",
+                this.L("Legacy text renderer"), this.uiLegacyTextRenderer,
+                new System.Action<bool>(this.OnUguiSettingsMainLegacyTextChanged));
 
             handle.NotifToggle = this.CreateUguiCheckbox(general.transform, "NotifToggle",
                 this.L("Enable Notifications"), this.notificationsEnabled,
@@ -624,6 +633,17 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.LangDropdown.gameObject, panelW - 16f - dropW, gy, dropW, 30f);
             }
             gy += 38f;
+            // CJK-only row: hidden (and costing no height) on Latin locales.
+            bool legacyRow = UguiLanguageNeedsCjk(this.selectedLanguage);
+            SetUguiGoActive(handle.LegacyTextToggle != null ? handle.LegacyTextToggle.gameObject : null, legacyRow);
+            if (legacyRow)
+            {
+                if (handle.LegacyTextToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.LegacyTextToggle.gameObject, 16f, gy, innerW, 24f);
+                }
+                gy += 30f;
+            }
             if (handle.NotifToggle != null)
             {
                 PlaceUguiTopLeft(handle.NotifToggle.gameObject, 16f, gy, innerW, 24f);
@@ -831,6 +851,7 @@ namespace HeartopiaMod
 
                 // Cross-surface toggle re-sync (fields are also editable from the IMGUI tab).
                 this.SyncUguiToggleFromField(handle.NotifToggle, this.notificationsEnabled);
+                this.SyncUguiToggleFromField(handle.LegacyTextToggle, this.uiLegacyTextRenderer);
                 this.SyncUguiToggleFromField(handle.AutoStartToggle, this.autoClickStartEnabled);
                 this.SyncUguiToggleFromField(handle.AutoCloseToggle, this.autoCloseAnnouncementEnabled);
                 this.SyncUguiToggleFromField(handle.HideIdToggle, this.hideIdEnabled);
@@ -979,6 +1000,22 @@ namespace HeartopiaMod
                 return; // re-pick of the current language — IMGUI would no-op visibly too
             }
             this.SetLocalizationLanguage(code, true);
+        }
+
+        // Renderer switch (CJK locales only). Labels bind their component type at CONSTRUCTION, so
+        // this needs the same state-preserving rebuild a theme change uses; saved immediately
+        // rather than on the theme debounce because it is a discrete choice, not a dragged value.
+        private void OnUguiSettingsMainLegacyTextChanged(bool value)
+        {
+            if (value == this.uiLegacyTextRenderer)
+            {
+                return;
+            }
+            this.uiLegacyTextRenderer = value;
+            try { this.SaveUiTheme(); }
+            catch (Exception ex) { ModLogger.Msg("[UguiShell] renderer switch save failed: " + ex.Message); }
+            this.MarkUguiKitThemeDirty();
+            ModLogger.Msg("[UguiKit] text renderer -> " + (value ? "legacy UnityEngine.UI.Text" : "TMP"));
         }
 
         // IMGUI Config.cs:1170-1183 — notification only when turning ON.

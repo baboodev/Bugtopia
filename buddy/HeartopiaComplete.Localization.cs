@@ -71,6 +71,15 @@ namespace HeartopiaMod
             this.selectedLanguage = LocalizationManager.CurrentLanguage;
             this.SaveKeybinds(false);
 
+            // BUG FIX (2026-07-25): switching language left the open menu in the OLD language until
+            // something else happened to rebuild it (a theme edit, or a game restart). uGUI is
+            // RETAINED mode — every label resolved its text through L()/LF() once, at construction —
+            // so changing the language changes nothing already on screen. Queue the same
+            // state-preserving rebuild a theme change uses: it re-runs every content builder, which
+            // re-resolves every string, and restores the active tab/sub-tab and window placement.
+            // (The IMGUI menu never needed this: immediate mode re-resolved every string per frame.)
+            this.MarkUguiKitThemeDirty();
+
             if (showNotification)
             {
                 this.AddMenuNotification(this.LF("Language switched to {0}", LocalizationManager.GetLanguageDisplayName(this.selectedLanguage)), new Color(0.55f, 0.88f, 1f));

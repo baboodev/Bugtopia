@@ -115,6 +115,11 @@ namespace HeartopiaMod
         // fallback stays provisional and is retried on this cooldown (EnsureUguiFonts runs from
         // every CreateUguiLabel, so an un-throttled retry would rescan on every single label).
         private bool uguiKitFontPinned;
+        // CJK fallback: LiberationSans SDF carries no CJK glyphs, so Chinese/Japanese/Korean text
+        // renders as tofu boxes without one. Name of the font asset currently wired in as fallback
+        // (null = none yet); the resolve is retried until a CJK-capable asset is loaded.
+        private string uguiKitCjkFallbackName;
+        private float uguiKitCjkRetryAt;
         private float uguiKitFontRetryAt;
         private bool uguiKitFontFallbackLogged;
         // Set when the runtime probe finds no TMP types under this flavor's compile-time namespace
@@ -122,6 +127,69 @@ namespace HeartopiaMod
         // so the provisional font-retry loop is suppressed (the namespace can never appear later).
         private bool uguiKitTmpUnavailable;
         private const float UguiFontRetrySeconds = 3f;
+        // U+4E2D 中 — probe glyph for "can this font render Chinese".
+        private const int UguiCjkProbeChar = 0x4E2D;
+
+        // TMP vs legacy Text, decided by UI language.
+        //
+        // BUG FIX (2026-07-25, round 3 — the one that actually works). Chinese rendered as tofu
+        // boxes because LiberationSans SDF has no CJK glyphs. Round 1 probed loaded font assets with
+        // HasCharacter and found none; round 2 dropped the probe and wired every loaded font asset
+        // in as a TMP fallback. The diagnostic round 2 added is what settled it:
+        //     CJK fallback pass: primary=LiberationSans SDF
+        //     candidates=[LiberationSans SDF - Fallback] newlyAdded=[none] tableCount=1
+        // The ONLY other font asset in memory is TMP's own Latin fallback, and "FZY4JW" (the game's
+        // Chinese font, which an earlier session did pick up) appears ZERO times in this session's
+        // log. So there is no CJK-capable TMP_FontAsset to fall back TO, and no amount of retrying
+        // conjures one. Building one from an OS font is a proven dead end on this build — see the
+        // CreateFontAsset note further down.
+        //
+        // Legacy UnityEngine.UI.Text, however, renders CJK here TODAY: it draws through a dynamic
+        // Font (builtin Arial), and Unity's dynamic-font path resolves missing glyphs against the
+        // OS font chain. The proof was on screen the whole time — the Localization dropdown shows
+        // "简体中文" correctly, and dropdown captions are the one place the kit already uses legacy
+        // Text (TMP_Dropdown is stripped from this build).
+        //
+        // So for a CJK/Thai UI the kit builds legacy labels instead of TMP ones. The cost is real
+        // but small and scoped to those languages: no SDF crispness, and the flat-material outline
+        // strip does not apply (legacy Text has no outline to begin with). Correct text beats
+        // prettier boxes. Latin locales are untouched and keep TMP.
+        // Legacy is the LAST RESORT, not the plan: TMP with a real CJK font asset is preferred
+        // whenever one can be found (see UguiKitTmpFindCjkFontAsset, which hunts three separate
+        // routes). Only when that hunt comes back empty does the kit fall back to legacy Text —
+        // which is guaranteed to render CJK here because it draws through a dynamic Font and Unity
+        // resolves missing glyphs against the OS font chain.
+        private bool UguiKitUseLegacyTextForLanguage()
+        {
+            // Latin locales ALWAYS get TMP: legacy Text has no upside there (TMP is sharper and
+            // scales properly), and the whole layout was measured against TMP metrics. The switch
+            // is scoped to CJK, which is the only place the two renderers genuinely trade off.
+            if (!UguiLanguageNeedsCjk(this.selectedLanguage))
+            {
+                return false;
+            }
+            if (this.uiLegacyTextRenderer)
+            {
+                return true; // explicit user choice (Settings -> UI Theme -> DISPLAY)
+            }
+            this.EnsureUguiKitCjkFallback();
+            return this.uguiKitCjkFallbackName == null; // no CJK font asset available -> legacy
+        }
+
+        // Languages whose glyphs LiberationSans SDF cannot render. Prefix match so regional variants
+        // (zh-CN / zh-TW / ja-JP ...) all count; Thai is included because LiberationSans has no Thai
+        // either, and it is already a shipped UI language.
+        private static bool UguiLanguageNeedsCjk(string languageCode)
+        {
+            if (string.IsNullOrEmpty(languageCode))
+            {
+                return false;
+            }
+            return languageCode.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+                || languageCode.StartsWith("ja", StringComparison.OrdinalIgnoreCase)
+                || languageCode.StartsWith("ko", StringComparison.OrdinalIgnoreCase)
+                || languageCode.StartsWith("th", StringComparison.OrdinalIgnoreCase);
+        }
         private Sprite[] uguiKitIconSprites; // cache: one Sprite per NavIconPngBase64 index
 
         private const float UguiWindowTitleBarHeight = 58f;
@@ -425,6 +493,64 @@ namespace HeartopiaMod
 
         // Resolve fonts once per session. TMP for everything possible; legacy Font is REQUIRED
         // for Dropdown labels (TMP_Dropdown is stripped from this game build).
+        // BUG FIX (2026-07-25): switching the menu to 简体中文 rendered every translated label as
+        // tofu boxes. Not a localization bug — the strings were correct; LiberationSans SDF (the
+        // font we hard-pinned for its Latin metrics) simply has no CJK glyphs. TMP resolves a
+        // missing glyph through the PRIMARY font's fallbackFontAssetTable, so wiring the game's
+        // own Chinese font asset in there fixes CJK while leaving Latin on LiberationSans.
+        //
+        // The CJK asset is detected by ASKING (HasCharacter) rather than by name — the game's font
+        // is currently FZY4JW_SDF, but a name check would silently break the day that changes, and
+        // the failure mode (tofu) is not obvious in a Latin locale.
+        //
+        // Idempotent and retried: the game font may not be loaded when the fallback is first
+        // pinned (login screen), so this runs on every resolve and every shell rebuild until it
+        // lands. Mutating LiberationSans' own fallback table is deliberate and low-risk — the game
+        // renders with its own font, LiberationSans is TMP's built-in that only this mod uses.
+        private void EnsureUguiKitCjkFallback()
+        {
+            if (this.uguiKitCjkFallbackName != null || this.uguiKitTmpFont == null || this.uguiKitTmpUnavailable)
+            {
+                return;
+            }
+            // Only a CJK UI language needs this. Gating on the language also means the first hunt
+            // happens when the user actually switches to 简体中文 — by which point the game is fully
+            // loaded — rather than at startup when almost nothing is in memory yet.
+            if (!UguiLanguageNeedsCjk(this.selectedLanguage))
+            {
+                return;
+            }
+            // Throttle: this is reached from EnsureUguiFonts, which every CreateUguiLabel calls —
+            // an unthrottled FindObjectsOfTypeAll here would scan once per label.
+            if (Time.unscaledTime < this.uguiKitCjkRetryAt)
+            {
+                return;
+            }
+            this.uguiKitCjkRetryAt = Time.unscaledTime + UguiFontRetrySeconds;
+
+            // The TMP-typed work lives in UguiKitTmp.cs (JIT isolation — this file may not name TMP
+            // types), and is only reachable once the probe confirms this flavor's TMP is loadable.
+            if (!UguiTmpTypesLoadable())
+            {
+                return;
+            }
+            try
+            {
+                this.uguiKitCjkFallbackName = this.UguiKitTmpEnsureCjkFallback();
+                if (this.uguiKitCjkFallbackName != null)
+                {
+                    // A real CJK font asset landed AFTER the shell was built with legacy labels —
+                    // rebuild so those labels come back as TMP. TMP also caches generated meshes, so
+                    // a rebuild is what makes an already-rendered label pick the new fallback up.
+                    this.MarkUguiKitThemeDirty();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiKit] CJK font hunt failed (legacy Text will carry CJK): " + ex.Message);
+            }
+        }
+
         private void EnsureUguiFonts()
         {
             // BUG FIX (2026-07-22, round 2): the resolve used to latch UNCONDITIONALLY on first
@@ -442,6 +568,10 @@ namespace HeartopiaMod
             {
                 if (this.uguiKitFontPinned || this.uguiKitTmpUnavailable || Time.unscaledTime < this.uguiKitFontRetryAt)
                 {
+                    // Still try to land the CJK fallback: the pinned font can settle (login screen)
+                    // long before the game's Chinese font asset is loaded, and once pinned this
+                    // method takes the early-out forever. Self-throttled, so this stays cheap.
+                    this.EnsureUguiKitCjkFallback();
                     return;
                 }
             }
@@ -506,13 +636,16 @@ namespace HeartopiaMod
                 catch { }
             }
 
+            this.EnsureUguiKitCjkFallback();
+
             string tmpName = "<null>";
             string legacyName = "<null>";
             try { if (this.uguiKitTmpFont != null) tmpName = this.uguiKitTmpFont.name; } catch { }
             try { if (this.uguiKitLegacyFont != null) legacyName = this.uguiKitLegacyFont.name; } catch { }
             ModLogger.Msg("[UguiKit] fonts resolved: TMP=" + tmpName + " legacy=" + legacyName
                 + " flatMaterial=" + (this.uguiKitTmpMaterial != null)
-                + " pinned=" + this.uguiKitFontPinned);
+                + " pinned=" + this.uguiKitFontPinned
+                + " cjkFallback=" + (this.uguiKitCjkFallbackName ?? "none"));
 
             // Late adoption: surfaces already built during the provisional window are wearing the
             // wrong typeface (labels bind font+material at construction), so queue the SAME
@@ -549,7 +682,7 @@ namespace HeartopiaMod
         {
             this.EnsureUguiFonts();
             GameObject go = this.CreateUguiGo(name, parent);
-            if (this.uguiKitTmpFont != null && UguiTmpTypesLoadable())
+            if (this.uguiKitTmpFont != null && UguiTmpTypesLoadable() && !this.UguiKitUseLegacyTextForLanguage())
             {
                 // TMP construction lives in UguiKitTmp.cs (JIT isolation). BuiltBroken = a half-
                 // initialized TMP graphic claimed the CanvasRenderer — adding a second Graphic to
@@ -621,6 +754,19 @@ namespace HeartopiaMod
         private void TrySetUguiLabelBold(GameObject label)
         {
             if (label == null)
+            {
+                return;
+            }
+            // BUG FIX (2026-07-25): Chinese rendered "too bold and hard to read". NOT the outline —
+            // the log confirmed the flat material was applied, and TMP derives a fallback's material
+            // from the LABEL's material anyway, so the game font's outline never reached us.
+            // The real cause is SYNTHETIC bold: the CJK face has no real bold cut, so TMP fakes one
+            // by dilating the glyph body. On Latin that is fine; on a 12px CJK ideograph — dozens of
+            // strokes inside the same em box — the dilated strokes merge into a blob.
+            // The kit calls this from 113 sites (sidebar, headers, LIVE rail, buttons), so gating it
+            // here fixes all of them at once. Weight/emphasis for CJK comes from colour and size in
+            // this UI, which is also the normal convention for Chinese typography.
+            if (UguiLanguageNeedsCjk(this.selectedLanguage))
             {
                 return;
             }
