@@ -39,6 +39,21 @@ namespace HeartopiaMod
             public GameObject FurnitureStatusLabel;
             public string FurnitureStatusShown;
 
+            // UGC Texture Cache — moved here from the Pictures sub-tab (2026-07-26): blank UGC
+            // photo textures turned out to be a side effect of this section's own draw-distance
+            // extension (see GameLodFeature.cs TryGameLodFurnitureApply header + project memory
+            // ugc-texture-cache-blank-fix / world-lod-streaming-map r13), so the mitigation controls
+            // now live next to the setting that triggers the problem.
+            public GameObject CachePurgeButton;
+            public GameObject CachePurgeStatusLabel;
+            public string CachePurgeStatusShown;
+            public Toggle CacheRaiseLimitToggle;
+            public GameObject CacheCapacityLabel;
+            public string CacheCapacityShown;
+            public Slider CacheCapacitySlider;
+            public GameObject CacheApplyStatusLabel;
+            public string CacheApplyStatusShown;
+
             public Toggle ForceLod0Toggle;
             public Toggle BrgBiasToggle;
             public GameObject BrgBiasLabel;
@@ -175,6 +190,54 @@ namespace HeartopiaMod
                 handle.FurnitureStatusShown, 11f, hintColor, false);
             this.TrySetUguiLabelWrapped(handle.FurnitureStatusLabel);
             PlaceUguiTopLeft(handle.FurnitureStatusLabel, pad, yCur, rowW, 18f);
+            yCur += 28f;
+
+            // ---------------- UGC TEXTURE CACHE ----------------
+            GameObject ugcHeader = this.CreateUguiHeaderLabel(scrollContent, "UgcCacheHeader",
+                this.L("UGC TEXTURE CACHE"), 12f);
+            PlaceUguiTopLeft(ugcHeader, pad, yCur, rowW, 18f);
+            yCur += 24f;
+
+            GameObject ugcHint = this.CreateUguiLabel(scrollContent, "UgcCacheHint",
+                this.L("Photo frames, screens and custom-photo furniture can render blank/white — either the game's own 100-item texture cache evicting mid-session (Purge + raise capacity below help), or the furniture setting above streaming in too many at once and overwhelming downloads. If Purge doesn't help, try lowering furniture draw distance/count first."),
+                11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(ugcHint);
+            PlaceUguiTopLeft(ugcHint, pad, yCur, rowW, 44f);
+            yCur += 50f;
+
+            handle.CachePurgeButton = this.CreateUguiSecondaryButton(scrollContent, "CachePurgeButton",
+                this.L("Purge Texture Cache"), new System.Action(this.OnUguiUgcCachePurgeClicked));
+            PlaceUguiTopLeft(handle.CachePurgeButton, pad, yCur, 180f, 24f);
+            yCur += 30f;
+
+            handle.CachePurgeStatusShown = this.BuildUguiUgcCachePurgeStatusText();
+            handle.CachePurgeStatusLabel = this.CreateUguiLabel(scrollContent, "CachePurgeStatus",
+                handle.CachePurgeStatusShown, 11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(handle.CachePurgeStatusLabel);
+            PlaceUguiTopLeft(handle.CachePurgeStatusLabel, pad, yCur, rowW, 18f);
+            yCur += 26f;
+
+            handle.CacheRaiseLimitToggle = this.CreateUguiCheckbox(scrollContent, "CacheRaiseLimitToggle",
+                this.L("Raise cache capacity"), this.ugcCacheRaiseLimitEnabled,
+                new System.Action<bool>(this.OnUguiUgcCacheRaiseLimitToggled));
+            PlaceUguiTopLeft(handle.CacheRaiseLimitToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 30f;
+
+            handle.CacheCapacityShown = this.BuildUguiUgcCacheCapacityText();
+            handle.CacheCapacityLabel = this.CreateUguiBodyLabel(scrollContent, "CacheCapacityLabel",
+                handle.CacheCapacityShown, 13f);
+            PlaceUguiTopLeft(handle.CacheCapacityLabel, pad, yCur + 2f, labelW, 20f);
+            handle.CacheCapacitySlider = this.CreateUguiSlider(scrollContent, "CacheCapacitySlider",
+                UgcCacheMinCapacity, UgcCacheMaxCapacity, this.ugcCacheTargetCapacity, true,
+                new System.Action<float>(this.OnUguiUgcCacheCapacityChanged));
+            PlaceUguiTopLeft(handle.CacheCapacitySlider.gameObject, sliderX, yCur + 3f, sliderW, 20f);
+            yCur += 28f;
+
+            handle.CacheApplyStatusShown = this.BuildUguiUgcCacheApplyStatusText();
+            handle.CacheApplyStatusLabel = this.CreateUguiLabel(scrollContent, "CacheApplyStatus",
+                handle.CacheApplyStatusShown, 11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(handle.CacheApplyStatusLabel);
+            PlaceUguiTopLeft(handle.CacheApplyStatusLabel, pad, yCur, rowW, 18f);
             yCur += 28f;
 
             // ---------------- MESH QUALITY ----------------
@@ -451,6 +514,21 @@ namespace HeartopiaMod
             return string.IsNullOrEmpty(status) ? this.L("Status: idle") : this.LF("Status: {0}", status);
         }
 
+        private string BuildUguiUgcCachePurgeStatusText()
+        {
+            return string.IsNullOrWhiteSpace(this.ugcCachePurgeStatus) ? "Idle." : this.ugcCachePurgeStatus;
+        }
+
+        private string BuildUguiUgcCacheApplyStatusText()
+        {
+            return string.IsNullOrWhiteSpace(this.ugcCacheApplyStatus) ? "Idle." : this.ugcCacheApplyStatus;
+        }
+
+        private string BuildUguiUgcCacheCapacityText()
+        {
+            return this.LF("Cache size: {0} items", Mathf.Clamp(this.ugcCacheTargetCapacity, UgcCacheMinCapacity, UgcCacheMaxCapacity));
+        }
+
         private float GameLodVegetationSliderValue()
         {
             return Mathf.Clamp(this.gameLodVegetationTargetPref, 10, 1000);
@@ -511,6 +589,22 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.FurnitureMeshLabel, ref handle.FurnitureMeshShown,
                     this.LF("Mesh detail distance: {0} m", this.gameLodFurnitureMeshDistance));
 
+                // UGC Texture Cache — independent of the busy/toggle gating above, its own
+                // coroutine + own toggle (Pictures sub-tab precedent, moved here 2026-07-26).
+                this.SetUguiButtonInteractable(handle.CachePurgeButton, !this.IsUgcCachePurgeBusy());
+                this.SyncUguiToggleFromField(handle.CacheRaiseLimitToggle, this.ugcCacheRaiseLimitEnabled);
+                if (handle.CacheCapacitySlider != null
+                    && Mathf.Abs(handle.CacheCapacitySlider.value - this.ugcCacheTargetCapacity) > 0.5f)
+                {
+                    handle.CacheCapacitySlider.SetValueWithoutNotify(this.ugcCacheTargetCapacity);
+                }
+                this.SyncUguiSelfLabelText(handle.CacheCapacityLabel, ref handle.CacheCapacityShown,
+                    this.BuildUguiUgcCacheCapacityText());
+                // Purge status updates progressively mid-coroutine — every-frame diff (cheap:
+                // alloc-free until the text actually changes).
+                this.SyncUguiSelfLabelText(handle.CachePurgeStatusLabel, ref handle.CachePurgeStatusShown,
+                    this.BuildUguiUgcCachePurgeStatusText());
+
                 if (handle.BrgBiasSlider != null
                     && Mathf.Abs(handle.BrgBiasSlider.value - this.gameLodBrgBias) > 0.005f)
                 {
@@ -557,6 +651,8 @@ namespace HeartopiaMod
                     handle.NextSlowSyncAt = Time.unscaledTime + 0.5f;
                     this.SyncUguiSelfLabelText(handle.FurnitureStatusLabel, ref handle.FurnitureStatusShown,
                         this.BuildUguiGameLodStatusText(this.gameLodFurnitureStatus));
+                    this.SyncUguiSelfLabelText(handle.CacheApplyStatusLabel, ref handle.CacheApplyStatusShown,
+                        this.BuildUguiUgcCacheApplyStatusText());
                     this.SyncUguiSelfLabelText(handle.BrgStatusLabel, ref handle.BrgStatusShown,
                         this.BuildUguiGameLodStatusText(this.gameLodBrgStatus));
                     this.SyncUguiSelfLabelText(handle.VegetationStatusLabel, ref handle.VegetationStatusShown,
@@ -632,6 +728,39 @@ namespace HeartopiaMod
             }
             this.gameLodFurnitureMeshDistance = rounded;
             this.nextGameLodApplyAt = 0f;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiUgcCachePurgeClicked()
+        {
+            this.StartUgcCachePurge();
+        }
+
+        private void OnUguiUgcCacheRaiseLimitToggled(bool value)
+        {
+            if (value == this.ugcCacheRaiseLimitEnabled)
+            {
+                return;
+            }
+            this.ugcCacheRaiseLimitEnabled = value;
+            this.nextUgcCacheApplyAt = 0f;
+            this.AddMenuNotification(value ? this.L("UGC texture cache limit raised") : this.L("UGC texture cache limit reverting"),
+                new Color(0.55f, 1f, 0.65f));
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiUgcCacheCapacityChanged(float value)
+        {
+            int rounded = Mathf.Clamp(Mathf.RoundToInt(value / 50f) * 50, UgcCacheMinCapacity, UgcCacheMaxCapacity);
+            if (rounded == this.ugcCacheTargetCapacity)
+            {
+                return;
+            }
+            this.ugcCacheTargetCapacity = rounded;
+            if (this.ugcCacheRaiseLimitEnabled)
+            {
+                this.nextUgcCacheApplyAt = 0f;
+            }
             try { this.SaveKeybinds(false); } catch { }
         }
 

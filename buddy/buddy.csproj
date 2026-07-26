@@ -348,6 +348,7 @@
     <Compile Include="LocalizationManager.cs" />
     <Compile Include="LodSettingsFeature.cs" />
     <Compile Include="GameLodFeature.cs" />
+    <Compile Include="UgcTextureCacheFeature.cs" />
     <Compile Include="HideJumpButtonFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
     <Compile Include="PersistentHudFeature.cs" />

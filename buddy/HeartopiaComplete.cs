@@ -695,6 +695,7 @@ namespace HeartopiaMod
             }
             this.ProcessLodOverrideOnUpdate();
             this.ProcessGameLodFeatureOnUpdate();
+            this.ProcessUgcTextureCacheFeatureOnUpdate();
             this.ProcessHideJumpButtonOnUpdate();
             this.ProcessBunnyHopOnUpdate();
             this.ProcessForceLocomotionOnUpdate();

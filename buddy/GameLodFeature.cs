@@ -210,6 +210,11 @@ namespace HeartopiaMod
         private IntPtr gameLodBrgManagerClass = IntPtr.Zero;
         private IntPtr gameLodLayerCullingClass = IntPtr.Zero;
         private IntPtr gameLodRenderingSettingsClass = IntPtr.Zero;
+        private IntPtr gameLodPhotoFrameClass = IntPtr.Zero;
+
+        // PhotoFrameComponent.PhotoLodDis ships as { 100f, 100f, 100f } — the value the revert
+        // path restores. See TryGameLodSetPhotoRequestDistance for why this matters.
+        private const float GameLodStockPhotoLodDistance = 100f;
 
         private FeatureBreakerState gameLodApplyBreaker;
         private FeatureBreakerState gameLodNineCellBreaker;
@@ -1275,15 +1280,28 @@ namespace HeartopiaMod
                                 return false;
                             }
 
-                            // Pacing: the game (and ObserverPanel) uses 3 objects/frame, which at a
-                            // raised cap means thousands of frames of visible pop-in — 5000 objects
-                            // at 3/frame is ~28 s of gameplay. Scale the per-frame budget with the
-                            // cap so a big world fills in a few seconds instead, but stay well under
-                            // the "load everything at once" hitching territory.
+                            // Pacing: FIXED at the game's own vanilla per-frame rate (3 objects/frame,
+                            // same as ObserverPanel's default), deliberately NOT scaled up with `max`
+                            // anymore (2026-07-26). It used to scale (max/500, up to 10/frame) so a
+                            // big raised cap would visually fill in within a few seconds instead of
+                            // ~28s — see git history — but that meant a high max+distance dumped
+                            // hundreds of new furniture instances into the scene within a couple of
+                            // seconds after a teleport/town-entry. A meaningful fraction of "furniture"
+                            // is UGC-photo-bearing (frames/screens/puzzles), and each one kicks off its
+                            // own texture download the instant it's created — so a fast fill-in meant a
+                            // burst of simultaneous downloads far beyond what the base game (capped at
+                            // 60 objects total) ever has to handle at once, which is the confirmed cause
+                            // of the blank/white UGC textures (see ugc-texture-cache-blank-fix project
+                            // memory: purge + raising the LRU cache to 2000 did NOT fix it; disabling
+                            // this draw-distance extension did). Keeping the per-frame rate at the
+                            // vanilla constant instead trades faster pop-in (now spread over more
+                            // seconds at a high max/distance) for not overwhelming the download
+                            // pipeline — max object count and distance are UNCHANGED, only how fast the
+                            // client walks up to that ceiling.
                             int max = Mathf.Clamp(this.gameLodFurnitureMaxObjects, 60, 5000);
-                            int loadNum = Mathf.Clamp(max / 500, 3, 10);
+                            int loadNum = 3;
                             int unloadNum = 20;
-                            int strucLoadNum = Mathf.Clamp(max / 125, 20, 40);
+                            int strucLoadNum = 20;
                             int meshDis = Mathf.Clamp(this.gameLodFurnitureMeshDistance, 100, 2000);
                             IntPtr* args = stackalloc IntPtr[7];
                             args[0] = (IntPtr)(&max);
@@ -1324,6 +1342,14 @@ namespace HeartopiaMod
             // ObserverPanel.SetHomeland also drops the layer distance culler; non-fatal if missing.
             this.TryGameLodSetLayerCullingEnabled(false, out string cullingStatus);
             this.GameLodLogOnce("furniture: LayerDistanceCulling disable: " + cullingStatus);
+
+            // Push the photo-request radius out to match the spawn radius, or every frame beyond
+            // the game's hardcoded 100 m renders white — see TryGameLodSetPhotoRequestDistance.
+            // Add the ring-corner margin (spawn is a square ring, the request gate is a sphere):
+            // sqrt(3) covers the 3D box diagonal, so nothing can spawn outside the request sphere.
+            float photoDis = Mathf.Clamp(this.gameLodFurnitureDistance * 1.75f, 100f, 20000f);
+            this.TryGameLodSetPhotoRequestDistance(photoDis, out string photoStatus);
+            this.GameLodLogOnce("furniture: photo request distance: " + photoStatus);
             status = "ok";
             return true;
         }
@@ -1480,6 +1506,10 @@ namespace HeartopiaMod
             // Stock behavior has the layer distance culler active.
             this.TryGameLodSetLayerCullingEnabled(true, out string cullingStatus);
             this.GameLodLogOnce("furniture: LayerDistanceCulling re-enable: " + cullingStatus);
+
+            // Back to the game's own hardcoded PhotoFrameComponent.PhotoLodDis value.
+            this.TryGameLodSetPhotoRequestDistance(GameLodStockPhotoLodDistance, out string photoStatus);
+            this.GameLodLogOnce("furniture: photo request distance revert: " + photoStatus);
             status = "ok";
             return true;
         }
@@ -1489,6 +1519,97 @@ namespace HeartopiaMod
             value = 0;
             return this.TryGameLodInvokeObject(configObj, methodName, out IntPtr boxed)
                 && this.TryGameLodUnboxInt32(boxed, out value);
+        }
+
+        // ----------------------------------------------------------------------------------------
+        // THE blank-UGC-photo fix (2026-07-26). Root cause, confirmed in the decompiled source:
+        //
+        //   PhotoFrameComponent.PhotoLodDis = new float[3] { 100f, 100f, 100f };   // hardcoded
+        //   OnSpawned():  _lodDisSqr = PhotoLodDis[type-1] ^ 2;
+        //   Tick():       if (!_haveCache && _loader == null
+        //                     && sqrDist(selfPlayer, entity) < _lodDisSqr)  -> Create(loader)
+        //
+        // A photo frame only ever REQUESTS its photo within 100 m. Vanilla furniture streaming
+        // distances are RenderLoadConfig.LoadDis = [80, 30, 30, 24] per voxel tier, and photo
+        // frames / screens / display items are ordinary furniture = tier 2/3, i.e. vanilla spawns
+        // them only within 24-30 m — far INSIDE the 100 m request radius. The game's design
+        // silently depends on furniture-spawn-radius << photo-request-radius, so the 100 m gate
+        // never binds and every frame you can see has already fetched its photo.
+        //
+        // This feature inverts that relationship: it applies ONE distance to all four tiers, and
+        // its slider bottoms out at 100 (TryGameLodFurnitureApply clamps 100..9999). So even at
+        // the LOWEST possible setting, photo-bearing furniture spawns out to 100 m — and because
+        // the voxel streamer expands in square RINGS (validDis = dis/cellSize, Chebyshev), the box
+        // corners reach ~dist*sqrt(2) horizontally, i.e. ~140 m at a setting of 100 — while the
+        // photo request gate stays a 100 m EUCLIDEAN SPHERE. Every frame spawned in that shell is
+        // visible but never requests its texture, so it renders white until you walk closer.
+        // That is exactly why no slider value helped and only switching the feature off did:
+        // there is no setting where spawn-radius stays under the hardcoded 100 m gate.
+        //
+        // Fix: move the gate out with us. PhotoLodDis is `public static readonly float[]` — the
+        // reference is readonly, the CONTENTS are not — so we write its 3 elements via
+        // mono_array_addr_with_size (same element-write technique already used for the
+        // SceneLoaderRoot hlodDistances arrays). Caveat, deliberate: OnSpawned caches _lodDisSqr
+        // per component, so this only affects frames spawned AFTER the write — which is precisely
+        // the ones streaming in at distance, the ones that were blank. Already-spawned nearby
+        // frames were never broken.
+        private unsafe bool TryGameLodSetPhotoRequestDistance(float distance, out string status)
+        {
+            status = "PhotoFrameComponent unavailable";
+            if (auraMonoArrayAddrWithSize == null || auraMonoArrayLength == null)
+            {
+                return false;
+            }
+
+            if (this.gameLodPhotoFrameClass == IntPtr.Zero)
+            {
+                // Fully qualified: there is a SECOND, unrelated PhotoFrameComponent stub under
+                // ...Gameplay.Component.GuiChar with empty method bodies — resolving by bare name
+                // could bind the wrong one.
+                this.gameLodPhotoFrameClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Gameplay.Component.Homeland.PhotoFrameComponent");
+            }
+
+            if (this.gameLodPhotoFrameClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryGetAuraMonoStaticObjectField(this.gameLodPhotoFrameClass, "PhotoLodDis", out IntPtr arrayObj)
+                || arrayObj == IntPtr.Zero)
+            {
+                status = "PhotoLodDis not initialized yet";
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(arrayObj);
+            try
+            {
+                int length = (int)auraMonoArrayLength(arrayObj);
+                if (length <= 0 || length > 16)
+                {
+                    status = "PhotoLodDis unexpected length " + length;
+                    return false;
+                }
+
+                for (int i = 0; i < length; i++)
+                {
+                    IntPtr slot = auraMonoArrayAddrWithSize(arrayObj, 4, (UIntPtr)i);
+                    if (slot == IntPtr.Zero)
+                    {
+                        status = "PhotoLodDis element " + i + " unreachable";
+                        return false;
+                    }
+                    *(float*)slot = distance;
+                }
+
+                status = "ok (" + distance.ToString("0") + " m)";
+                return true;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
         }
 
         private unsafe bool TryGameLodSetLayerCullingEnabled(bool enabled, out string status)

@@ -305,6 +305,8 @@ namespace HeartopiaMod
             public bool autoSellFestivalTokensEnabled;
             public bool auraFarmLootCollectEnabled;
             public float auraFarmLootCollectDistance;
+            public bool ugcCacheRaiseLimitEnabled;
+            public int ugcCacheTargetCapacity;
         }
 
         [Serializable]

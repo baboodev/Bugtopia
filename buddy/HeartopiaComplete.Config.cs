@@ -211,6 +211,8 @@ namespace HeartopiaMod
             data.gameLodHlodEnabled = this.gameLodHlodEnabled;
             data.gameLodHlodMult = this.gameLodHlodMult;
             data.gameLodXdLodEnabled = this.gameLodXdLodEnabled;
+            data.ugcCacheRaiseLimitEnabled = this.ugcCacheRaiseLimitEnabled;
+            data.ugcCacheTargetCapacity = this.ugcCacheTargetCapacity;
             data.customCameraFOVEnabled = this.customCameraFOVEnabled;
             data.cameraFOV = this.cameraFOV;
             data.hideJumpButtonEnabled = this.hideJumpButtonEnabled;
@@ -443,6 +445,9 @@ namespace HeartopiaMod
             this.gameLodHlodMult = data.gameLodHlodMult;
             this.gameLodXdLodEnabled = data.gameLodXdLodEnabled;
             this.SyncGameLodAfterConfigLoad();
+            this.ugcCacheRaiseLimitEnabled = data.ugcCacheRaiseLimitEnabled;
+            this.ugcCacheTargetCapacity = data.ugcCacheTargetCapacity;
+            this.SyncUgcCacheAfterConfigLoad();
             this.customCameraFOVEnabled = data.customCameraFOVEnabled;
             this.cameraFOV = data.cameraFOV;
             this.hideJumpButtonEnabled = data.hideJumpButtonEnabled;
@@ -941,6 +946,9 @@ namespace HeartopiaMod
             this.SetGameLodShadowEnabled(false);
             this.SetGameLodHlodEnabled(false);
             this.SetGameLodXdLodEnabled(false);
+            this.ugcCacheRaiseLimitEnabled = false;
+            this.ugcCacheTargetCapacity = 500;
+            this.nextUgcCacheApplyAt = 0f;
             this.gameLodFurnitureMaxObjects = 1500;
             this.gameLodFurnitureDistance = 9999;
             this.gameLodFurnitureMeshDistance = 1000;
