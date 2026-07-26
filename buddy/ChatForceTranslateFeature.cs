@@ -344,6 +344,15 @@ namespace HeartopiaMod
 
                 // Postcard-endpoint bypass: route through the postcard translator (no source-langKey
                 // gate) instead of the chat endpoint. Needs the text (postcard content can't be empty).
+                // Once the route disarmed (no postcard to borrow a MailId from) stop queueing —
+                // the backlog would never drain.
+                if (this.chatTranslatePostcardBypass && this.postcardRouteDisarmed)
+                {
+                    this.chatForceTranslateRequested.Remove(msgId);
+                    this.ChatTranslateVerbose("  -> skip: postcard route disabled (see the DISABLED line above).");
+                    return;
+                }
+
                 if (this.chatTranslatePostcardBypass)
                 {
                     if (string.IsNullOrEmpty(messageText))
