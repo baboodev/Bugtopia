@@ -922,6 +922,10 @@ namespace HeartopiaMod
             this.chatTranslatePostcardBypass = value;
             this.postcardUnavailableLogged = false;
             this.postcardNextMailIdResolveAt = -999f;
+            // Re-arm the give-up latch so flipping the toggle retries from scratch.
+            this.postcardRouteDisarmed = false;
+            this.postcardEmptyMailboxStrikes = 0;
+            this.postcardLastPumpState = string.Empty;
             this.SaveKeybinds(false);
             this.AddMenuNotification(
                 value ? this.L("Postcard Translate Bypass On") : this.L("Postcard Translate Bypass Off"),

@@ -54,7 +54,6 @@ namespace HeartopiaMod
             public GameObject CacheApplyStatusLabel;
             public string CacheApplyStatusShown;
 
-            public Toggle ForceLod0Toggle;
             public Toggle BrgBiasToggle;
             public GameObject BrgBiasLabel;
             public string BrgBiasShown;
@@ -246,12 +245,10 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(brgHeader, pad, yCur, rowW, 18f);
             yCur += 24f;
 
-            handle.ForceLod0Toggle = this.CreateUguiCheckbox(scrollContent, "ForceLod0Toggle",
-                this.L("Force max mesh detail (BRG LOD0)"), this.gameLodForceLod0Enabled,
-                new System.Action<bool>(this.OnUguiGameLodForceLod0Toggled));
-            PlaceUguiTopLeft(handle.ForceLod0Toggle.gameObject, pad, yCur, rowW, 24f);
-            yCur += 30f;
-
+            // "Force max mesh detail (BRG LOD0)" was removed 2026-07-27: it blanked every UGC
+            // texture (photos, puzzles, drawing boards, display shelves). The flag makes the game's
+            // native batch builder discard per-instance override materials — unfixable from here,
+            // and the LOD-bias toggle below reaches the same visual goal safely.
             handle.BrgBiasToggle = this.CreateUguiCheckbox(scrollContent, "BrgBiasToggle",
                 this.L("Boost furniture LOD bias"), this.gameLodBrgBiasEnabled,
                 new System.Action<bool>(this.OnUguiGameLodBrgBiasToggled));
@@ -555,7 +552,6 @@ namespace HeartopiaMod
             try
             {
                 this.SyncUguiToggleFromField(handle.FurnitureToggle, this.gameLodFurnitureEnabled);
-                this.SyncUguiToggleFromField(handle.ForceLod0Toggle, this.gameLodForceLod0Enabled);
                 this.SyncUguiToggleFromField(handle.BrgBiasToggle, this.gameLodBrgBiasEnabled);
                 this.SyncUguiToggleFromField(handle.VegetationToggle, this.gameLodVegetationEnabled);
                 this.SyncUguiToggleFromField(handle.VegetationDuringLoadToggle, this.gameLodVegetationApplyDuringLoad);
@@ -761,18 +757,6 @@ namespace HeartopiaMod
             {
                 this.nextUgcCacheApplyAt = 0f;
             }
-            try { this.SaveKeybinds(false); } catch { }
-        }
-
-        private void OnUguiGameLodForceLod0Toggled(bool value)
-        {
-            if (value == this.gameLodForceLod0Enabled)
-            {
-                return;
-            }
-            this.SetGameLodForceLod0Enabled(value);
-            this.AddMenuNotification(value ? this.L("Max mesh detail on") : this.L("Max mesh detail off"),
-                new Color(0.55f, 1f, 0.65f));
             try { this.SaveKeybinds(false); } catch { }
         }
 

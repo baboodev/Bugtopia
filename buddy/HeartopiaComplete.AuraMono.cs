@@ -2084,6 +2084,11 @@ namespace HeartopiaMod
             {
                 imageNames = new[] { "EcsSystem", "EcsSystem.dll", "Client", "Client.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll" };
             }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("Sazabi", StringComparison.Ordinal))
+            {
+                // Sazabi.World.Shared.* (PostCard, MailBase, …) compile into the EcsClient image.
+                imageNames = new[] { "EcsClient", "EcsClient.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll" };
+            }
             else
             {
                 imageNames = new[]

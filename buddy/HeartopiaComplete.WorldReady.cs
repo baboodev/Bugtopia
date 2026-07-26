@@ -4,7 +4,46 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Central "the world is up" gate, driven by the game's own loading-screen events.
+    // Monotonic ladder describing how far the game has got. Compare with >= — new rungs may be
+    // inserted later, so never switch on exact equality for "at least this far" checks.
+    internal enum WorldStage
+    {
+        // Nothing known: the game's Mono side has not been confirmed live yet.
+        None = 0,
+        // Mono is live (some image resolved) but the level FSM has not been read yet — either
+        // GameWorld is still unresolved, or we are on the legacy event-only path.
+        MonoLive,
+        // A level transition is in flight (GameWorld.isSwitching). Covers login->town, town->home,
+        // home->town and every scene transfer, INCLUDING the ones that show no loading splash.
+        Loading,
+        // A PLAYABLE level finished loading and no transition is running, but it has not had its
+        // settle grace yet. The login level never reaches this rung — it stays at MonoLive — so
+        // `>= LevelLoaded` already means "a real world is loaded".
+        LevelLoaded,
+        // A playable world (not login) has been loaded and has had WorldReadyGraceSeconds to settle.
+        WorldReady,
+        // ...and it has since had time to actually quieten down: a local player has existed for
+        // WorldSettleSeconds (or the hard fallback elapsed). This is the rung for genuinely HEAVY
+        // work — anything that triggers mass asset loading — which is why Game LOD waits for it.
+        WorldSettled
+    }
+
+    // Central "the world is up" gate.
+    //
+    // PRIMARY source is the game's own level state machine, polled via GameWorld (see
+    // HeartopiaComplete.GameWorldProbe.cs). The loading-screen EVENTS below are kept only as a
+    // fallback for the window before GameWorld resolves (~T+55..60s on a cold start) and for builds
+    // where it cannot be resolved at all. Phase 3 removes them entirely — they are the one hook
+    // that must install pre-world, and installing them is what aborts the process
+    // (see project memory: eventhook-preworld-inflate-abort).
+    //
+    // Why the FSM beats the events, both measured live:
+    //   * The events cannot tell the LOGIN level from a real world — both emit LoadingOpened/Closed
+    //     — so the gate used to report IsWorldReady=Y while sitting on the login screen.
+    //     GameWorld reports levelType 0 there (1 = town, 3 = micro-home).
+    //   * Homeland enter/exit emits NO loading events at all. The gate stayed "ready" through the
+    //     whole tear-down + 53s rebuild and never bumped the epoch, so per-world caches keyed on it
+    //     were never invalidated. The FSM shows the full Loaded->UnLoading->Loading->Loaded arc.
     //
     // XDTGameSystem.UI.LoadingOpenedEvent / LoadingClosedEvent are empty structs (Size = 1, so 0
     // payload bytes) dispatched globally around every world load — login, town/homeland change,
@@ -23,9 +62,6 @@ namespace HeartopiaMod
     // a few seconds". Nothing ever hangs waiting for an event that will not arrive.
     public partial class HeartopiaComplete
     {
-        internal const string WorldLoadingOpenedEventName = "XDTGameSystem.UI.LoadingOpenedEvent";
-        internal const string WorldLoadingClosedEventName = "XDTGameSystem.UI.LoadingClosedEvent";
-
         // Grace after the splash disappears before callbacks run. The loading screen closes a beat
         // before the world settles; a short pause keeps resolves off the busiest frames without
         // being long enough for the user to notice a feature "not working yet".
@@ -34,19 +70,36 @@ namespace HeartopiaMod
         // Fallback path: how long a local player must have existed before we call it a world.
         private const float WorldReadyFallbackSettleSeconds = 5f;
 
+        // WorldSettled: how long a local player must have been around after the world came up, and
+        // the hard cap that declares it settled anyway if the player never resolves. These are the
+        // values Game LOD used privately before this rung existed — kept identical so its behaviour
+        // does not change with the move.
+        private const float WorldSettleSeconds = 8f;
+        private const float WorldSettleFallbackSeconds = 45f;
+
         // Per-epoch retry for callbacks that report "not satisfied yet" (an image can still be
         // streaming in right after the splash). 1 s x 30 = ~30 s of retries per world load, then
         // the callback sleeps until the next one.
         private const float WorldReadyCallbackRetrySeconds = 1f;
         private const int WorldReadyCallbackMaxAttemptsPerEpoch = 30;
 
-        private const float WorldReadyHookRetrySeconds = 30f;
+
+        // GameLevelState.Loaded — see ilspy-dumps/XDTBaseService/XDTGame.Core/GameLevelState.cs
+        // { None, Initilizing, Initilized, Loading, Loaded, UnLoading, Unloaded, Destroying, Destroyed }.
+        private const int GameLevelStateLoaded = 4;
+
+        // Level types observed live (GameWorld.EnterLevel call sites corroborate: MonoApp/LoginSystem
+        // pass 0, LoginPanel passes 1, BuildModule passes 3). Anything > 0 is a playable world.
+        internal const int WorldLevelTypeLogin = 0;
+        internal const int WorldLevelTypeTown = 1;      // StarTown, scene id 1
+        internal const int WorldLevelTypeMicroHome = 3; // homeland, scene id 4
 
         private sealed class WorldReadyCallbackEntry
         {
             public string Name;
             // Returns true when the work is done for this world; false = retry shortly.
             public Func<bool> Attempt;
+            public WorldStage MinStage;
             public int LastEpochDone;
             public int AttemptsThisEpoch;
             public int AttemptsEpoch;
@@ -57,31 +110,135 @@ namespace HeartopiaMod
         private readonly List<WorldReadyCallbackEntry> worldReadyCallbacks = new List<WorldReadyCallbackEntry>();
         private readonly List<Action> worldLoadingStartedCallbacks = new List<Action>();
 
-        private bool worldLoadingHooksRegistered;
-        private float worldNextLoadingHookAttemptAt = 0f;
-        private bool worldLoadingEventsSeen;
-        private bool worldLoadingScreenVisible;
-
-        // Time the current world's "ready" signal arrived (loading closed, or the fallback settle).
+        // Time the current world's "ready" signal arrived (FSM said loaded, or the fallback settle).
         // 0 while there is no live world.
         private float worldReadySignalAt = 0f;
         private int worldReadyEpoch = 0;
         private float worldFallbackPlayerSeenAt = 0f;
+        // First moment a local player was seen in THIS world; reset whenever the gate closes.
+        private float worldSettlePlayerSeenAt = 0f;
+
+        // ---- Level-FSM view, fed by ProcessGameWorldProbeOnUpdate. worldProbeValid latches true on
+        // the first good read and back to false if the probe gives up, so the player-presence
+        // fallback can take back over rather than the gate freezing on a stale picture. ----
+        private bool worldProbeValid;
+        private bool worldProbeLevelLoaded;
+        private bool worldProbeInTransition;
+        private int worldProbeLevelType = -1;
+        private int worldProbeSceneId = -1;
+
+        // Level identity of the world currently loaded. -1 until the probe has read it.
+        internal int CurrentLevelType => this.worldProbeLevelType;
+        internal int CurrentSceneId => this.worldProbeSceneId;
+
+        // A playable world, as opposed to the login level (or nothing loaded at all).
+        internal bool IsInPlayableWorld => this.worldProbeValid && this.worldProbeLevelType > WorldLevelTypeLogin;
+
+        // Named level checks. All false while the probe has not read a level yet, so they are safe
+        // to use as "definitely in X" tests and never as "definitely NOT in X".
+        internal bool IsInLoginLevel => this.worldProbeValid && this.worldProbeLevelType == WorldLevelTypeLogin;
+        internal bool IsInTownLevel => this.worldProbeValid && this.worldProbeLevelType == WorldLevelTypeTown;
+        internal bool IsInMicroHomeLevel => this.worldProbeValid && this.worldProbeLevelType == WorldLevelTypeMicroHome;
+
+        // True once the world has had time to quieten down — the rung heavy work waits for.
+        private bool IsWorldSettledNow
+        {
+            get
+            {
+                if (!this.IsWorldReady)
+                {
+                    return false;
+                }
+
+                float now = Time.unscaledTime;
+                return (this.worldSettlePlayerSeenAt > 0f && now - this.worldSettlePlayerSeenAt >= WorldSettleSeconds)
+                    || (now - this.worldReadySignalAt >= WorldSettleFallbackSeconds);
+            }
+        }
+
+        // How far along the game is right now. See the WorldStage doc comment.
+        internal WorldStage CurrentWorldStage
+        {
+            get
+            {
+                if (!AuraMonoGameDataLive)
+                {
+                    return WorldStage.None;
+                }
+
+                if (!this.worldProbeValid)
+                {
+                    // Fallback path (GameWorld unresolvable): the player-presence heuristic cannot
+                    // describe the level, so claim no more than the gate itself has established.
+                    if (!this.IsWorldReady)
+                    {
+                        return WorldStage.MonoLive;
+                    }
+
+                    return this.IsWorldSettledNow ? WorldStage.WorldSettled : WorldStage.WorldReady;
+                }
+
+                if (this.worldProbeInTransition)
+                {
+                    return WorldStage.Loading;
+                }
+
+                // The login level sits at MonoLive, NOT LevelLoaded, even though it is genuinely
+                // "loaded and not transitioning". Measured 2026-07-26: on the login screen every
+                // probed game type resolves perfectly (GameWorld, LocalTextureCacheService,
+                // PhotoFrameComponent, RenderLoadConfig, DownLoadTexture2dAdvancedLoader — all OK
+                // across five images). So a caller cannot tell login from a real world by asking
+                // whether types resolve; it only finds out later, when a static-field read or an
+                // invoke against an unconstructed service AVs. That is a silent failure, so the
+                // ladder encodes the distinction itself and `>= LevelLoaded` is safe by
+                // construction. Lobby/menu features that legitimately run there (join friend, join
+                // town) use `>= MonoLive` plus IsInLoginLevel, which says what it means.
+                if (!this.worldProbeLevelLoaded || this.worldProbeLevelType <= WorldLevelTypeLogin)
+                {
+                    return WorldStage.MonoLive;
+                }
+
+                if (!this.IsWorldReady)
+                {
+                    return WorldStage.LevelLoaded;
+                }
+
+                return this.IsWorldSettledNow ? WorldStage.WorldSettled : WorldStage.WorldReady;
+            }
+        }
 
         // Increments once per world load. Caches keyed on this are dropped when the world changes.
         internal int WorldReadyEpoch => this.worldReadyEpoch;
 
-        // True while the game's loading splash is up (only meaningful once the hooks have fired).
-        internal bool IsWorldLoadingScreenVisible => this.worldLoadingScreenVisible;
+        // True while a level transition is in flight. Note this is BROADER than the old
+        // splash-visible meaning it replaced: homeland swaps run a full transition with no splash
+        // at all, and this now covers them.
+        internal bool IsWorldLoadingScreenVisible => this.worldProbeValid && this.worldProbeInTransition;
 
-        // The gate itself: a live world that has had WorldReadyGraceSeconds to settle.
+        // The gate itself: a live PLAYABLE world that has had WorldReadyGraceSeconds to settle.
         internal bool IsWorldReady
         {
             get
             {
-                return !this.worldLoadingScreenVisible
-                    && this.worldReadySignalAt > 0f
-                    && Time.unscaledTime - this.worldReadySignalAt >= WorldReadyGraceSeconds;
+                if (this.worldReadySignalAt <= 0f
+                    || Time.unscaledTime - this.worldReadySignalAt < WorldReadyGraceSeconds)
+                {
+                    return false;
+                }
+
+                if (this.worldProbeValid)
+                {
+                    // Authoritative once the FSM is readable: a loaded, non-login level with no
+                    // transition running. This is what closes the gate during a homeland swap,
+                    // which produces no loading events whatsoever.
+                    return this.worldProbeLevelLoaded
+                        && !this.worldProbeInTransition
+                        && this.worldProbeLevelType > WorldLevelTypeLogin;
+                }
+
+                // Probe not up (yet): the standing signal can only have come from the
+                // player-presence fallback, which already required a live world.
+                return true;
             }
         }
 
@@ -107,6 +264,13 @@ namespace HeartopiaMod
         // thread from OnUpdate, and only with a live world.
         internal void RegisterWorldReadyCallback(string name, Func<bool> attempt)
         {
+            this.RegisterWorldStageCallback(name, WorldStage.WorldReady, attempt);
+        }
+
+        // Same contract, but the caller picks how far the game must be. Use a lower rung only when
+        // the work genuinely does not need a playable world — most things want WorldReady.
+        internal void RegisterWorldStageCallback(string name, WorldStage minStage, Func<bool> attempt)
+        {
             if (attempt == null)
             {
                 return;
@@ -124,6 +288,7 @@ namespace HeartopiaMod
             {
                 Name = name ?? "<unnamed>",
                 Attempt = attempt,
+                MinStage = minStage,
                 LastEpochDone = -1,
                 AttemptsEpoch = -1
             });
@@ -164,10 +329,15 @@ namespace HeartopiaMod
         private void ProcessWorldReadyOnUpdate()
         {
             float now = Time.unscaledTime;
-            this.EnsureWorldLoadingHooks(now);
             this.EnsureBuiltInWorldReadyWarmups();
             this.UpdateWorldReadyFallback(now);
+            this.UpdateWorldSettleTracking(now);
             this.DrainWorldReadyCallbacks(now);
+
+            // Phase-1 read-only observation of the game's own level FSM, for comparison against the
+            // gate above (HeartopiaComplete.GameWorldProbe.cs). Self-gated on its Logging toggle and
+            // feeds nothing — remove this call, and the gate behaves exactly as before.
+            this.ProcessGameWorldProbeOnUpdate(now);
         }
 
         private bool worldReadyBuiltInWarmupsRegistered;
@@ -221,44 +391,81 @@ namespace HeartopiaMod
             return true;
         }
 
-        // The loading hooks themselves cannot wait for the world — they are what tells us the world
-        // arrived. RegisterGameEventHook is metadata-only (the EventHook engine installs the native
-        // detour lazily once Mono is up), so one call is normally enough; the retry only covers the
-        // "registration refused" cases (slot pool exhausted).
-        private void EnsureWorldLoadingHooks(float now)
+        // NOTE (phase 3, 2026-07-26): the LoadingOpenedEvent / LoadingClosedEvent hooks that used to
+        // live here are GONE, along with EnsureWorldLoadingHooks and their two handlers.
+        //
+        // They were the only hooks in the mod that had to install before a world existed — the gate
+        // could not wait for the signal that tells it a world arrived — and installing them means
+        // inflating EventCenter.DispatchEvent<T>, which on half-loaded Mono images makes the runtime
+        // g_assert and abort() the process. That was an intermittent, uncatchable startup crash
+        // (WER xdt.exe.34488, plus 7988/30332 in the same family). Removing them removes the entire
+        // pre-world generic-inflate surface rather than trying to make it safe.
+        //
+        // Nothing regressed by dropping them: the level FSM is strictly more informative. It also
+        // reports the LOGIN level (which the events could not distinguish from a real world) and
+        // homeland swaps (which emit no loading events at all).
+
+        // Fed by the GameWorld probe on every successful read (~4 Hz). This is what makes the gate
+        // track homeland swaps and tell the login level apart from a real world.
+        private void ApplyGameWorldProbeSample(int state, bool switching, int sceneId, int levelType)
         {
-            if (this.worldLoadingHooksRegistered || now < this.worldNextLoadingHookAttemptAt)
+            bool levelChanged = sceneId != this.worldProbeSceneId || levelType != this.worldProbeLevelType;
+
+            this.worldProbeValid = true;
+            this.worldProbeLevelLoaded = state == GameLevelStateLoaded;
+            this.worldProbeInTransition = switching;
+            this.worldProbeSceneId = sceneId;
+            this.worldProbeLevelType = levelType;
+
+            bool worldUp = this.worldProbeLevelLoaded && !switching && levelType > WorldLevelTypeLogin;
+            if (worldUp)
+            {
+                // MarkWorldReadySignal is a no-op while a signal is already standing, so a steady
+                // world does not re-arm the grace or churn the epoch every 250 ms.
+                this.MarkWorldReadySignal("GameWorld FSM (levelType " + levelType + ", scene " + sceneId + ")");
+                return;
+            }
+
+            // Not a live playable world: drop the standing signal so the NEXT arrival counts as a
+            // fresh world (new epoch -> per-world caches invalidated, callbacks re-run). The
+            // `> 0f` test alone is the right guard — at startup nothing has marked ready yet, and
+            // if the EVENT path had marked ready (including the login-level false positive) then
+            // clearing it here is exactly the correction we want.
+            if (this.worldReadySignalAt > 0f)
+            {
+                this.CloseWorldGate(switching
+                    ? ("level transition started" + (levelChanged ? " -> levelType " + levelType : string.Empty))
+                    : "level no longer loaded");
+            }
+        }
+
+        // Notes when a local player first showed up in the current world — the WorldSettled input.
+        // Cheap: one position read per frame only while the gate is open and not settled yet.
+        private void UpdateWorldSettleTracking(float now)
+        {
+            if (this.worldReadySignalAt <= 0f || this.worldSettlePlayerSeenAt > 0f)
             {
                 return;
             }
 
-            this.worldNextLoadingHookAttemptAt = now + WorldReadyHookRetrySeconds;
             try
             {
-                bool opened = this.RegisterGameEventHook(WorldLoadingOpenedEventName, 0,
-                    new Action<GameEventSnapshot>(this.OnWorldLoadingOpenedEvent));
-                bool closed = this.RegisterGameEventHook(WorldLoadingClosedEventName, 0,
-                    new Action<GameEventSnapshot>(this.OnWorldLoadingClosedEvent));
-                this.worldLoadingHooksRegistered = opened && closed;
-                if (this.worldLoadingHooksRegistered)
+                if (this.TryGetLocalPlayerPosition(out Vector3 playerPos) && playerPos != Vector3.zero)
                 {
-                    ModLogger.Msg("[WorldReady] loading-screen hooks registered (LoadingOpened/LoadingClosed)"
-                        + " — warmups and hook installs now wait for the world.");
+                    this.worldSettlePlayerSeenAt = now;
                 }
             }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[WorldReady] loading hook registration failed: " + ex.Message);
-            }
+            catch { }
         }
 
-        private void OnWorldLoadingOpenedEvent(GameEventSnapshot snapshot)
+        // Single place that tears the gate down, whichever source noticed. Fires the
+        // loading-started callbacks (hand settings back to the game, drop per-world caches).
+        private void CloseWorldGate(string reason)
         {
-            this.worldLoadingEventsSeen = true;
-            this.worldLoadingScreenVisible = true;
             this.worldReadySignalAt = 0f;
             this.worldFallbackPlayerSeenAt = 0f;
-            ModLogger.Msg("[WorldReady] loading screen opened — world gate closed.");
+            this.worldSettlePlayerSeenAt = 0f;
+            ModLogger.Msg("[WorldReady] gate closed — " + reason + ".");
 
             for (int i = 0; i < this.worldLoadingStartedCallbacks.Count; i++)
             {
@@ -270,11 +477,19 @@ namespace HeartopiaMod
             }
         }
 
-        private void OnWorldLoadingClosedEvent(GameEventSnapshot snapshot)
+        // Called by the probe when it gives up, so the gate falls back to the event/player path
+        // instead of freezing on the last picture the FSM gave it.
+        private void OnGameWorldProbeUnavailable()
         {
-            this.worldLoadingEventsSeen = true;
-            this.worldLoadingScreenVisible = false;
-            this.MarkWorldReadySignal("LoadingClosedEvent");
+            if (!this.worldProbeValid)
+            {
+                return;
+            }
+
+            this.worldProbeValid = false;
+            this.worldProbeLevelLoaded = false;
+            this.worldProbeInTransition = false;
+            ModLogger.Msg("[WorldReady] GameWorld probe unavailable — falling back to loading events + player presence.");
         }
 
         private void MarkWorldReadySignal(string source)
@@ -290,12 +505,20 @@ namespace HeartopiaMod
                 + " — deferred warmups/hooks run in " + WorldReadyGraceSeconds.ToString("0.#") + "s.");
         }
 
-        // Safety net for builds where the loading events never reach us. Requires the game's Mono
-        // side to be confirmed live (an image resolved) AND a local player to have existed for a
-        // few seconds — the same pair GameLod used before this gate existed.
+        // Last-resort safety net for builds where GameWorld cannot be resolved at all (a future
+        // update renames or moves it). Requires the game's Mono side to be confirmed live (an image
+        // resolved) AND a local player to have existed for a few seconds — the same pair GameLod
+        // used before this gate existed. This is now the ONLY fallback: the loading events are gone.
         private void UpdateWorldReadyFallback(float now)
         {
-            if (this.worldReadySignalAt > 0f || this.worldLoadingScreenVisible)
+            // The FSM knows better and knows it sooner; two sources marking "ready" would race, and
+            // the player-presence heuristic cannot tell a half-loaded level from a settled one.
+            if (this.worldProbeValid)
+            {
+                return;
+            }
+
+            if (this.worldReadySignalAt > 0f)
             {
                 return;
             }
@@ -327,24 +550,23 @@ namespace HeartopiaMod
 
             if (now - this.worldFallbackPlayerSeenAt >= WorldReadyFallbackSettleSeconds)
             {
-                this.MarkWorldReadySignal(this.worldLoadingEventsSeen
-                    ? "player-present fallback (loading events seen but no close)"
-                    : "player-present fallback (no loading events)");
+                this.MarkWorldReadySignal("player-present fallback (GameWorld FSM unavailable)");
             }
         }
 
         private void DrainWorldReadyCallbacks(float now)
         {
-            if (this.worldReadyCallbacks.Count == 0 || !this.IsWorldReady)
+            if (this.worldReadyCallbacks.Count == 0)
             {
                 return;
             }
 
+            WorldStage stage = this.CurrentWorldStage;
             int epoch = this.worldReadyEpoch;
             for (int i = 0; i < this.worldReadyCallbacks.Count; i++)
             {
                 WorldReadyCallbackEntry entry = this.worldReadyCallbacks[i];
-                if (entry.LastEpochDone == epoch || now < entry.NextAttemptAt)
+                if (stage < entry.MinStage || entry.LastEpochDone == epoch || now < entry.NextAttemptAt)
                 {
                     continue;
                 }

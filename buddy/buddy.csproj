@@ -323,6 +323,7 @@
     <Compile Include="HeartopiaComplete.Lobby.cs" />
     <Compile Include="HeartopiaComplete.WorldEntities.cs" />
     <Compile Include="HeartopiaComplete.WorldReady.cs" />
+    <Compile Include="HeartopiaComplete.GameWorldProbe.cs" />
     <Compile Include="InstantTeleportFeature.cs" />
     <Compile Include="HeartopiaComplete.Config.cs" />
     <Compile Include="HeartopiaComplete.Gui.cs" />
@@ -438,9 +439,16 @@
           DestinationFolder="%(UnifiedDeployDir.Identity)"
           ContinueOnError="true"
           Condition="'@(UnifiedDeployDir)' != '' and Exists('$(OutputPath)bugtopia.pdb')" />
+    <!-- Gate the success line on the copy ACTUALLY having happened. It used to be conditioned on
+         the destination folder merely existing, so a locked DLL (game running) still printed
+         "Deployed" while the file on disk stayed at the previous build — the MSB3021 warning that
+         did fire is easy to miss in a filtered build log. Trusting that line cost a debugging
+         round; now silence means nothing was copied. -->
     <Message Importance="high"
              Text="Deployed bugtopia.dll -> %(UnifiedDeployDir.Identity)"
-             Condition="'@(UnifiedDeployDir)' != ''" />
+             Condition="'@(DeployedDll)' != ''" />
+    <Warning Text="bugtopia.dll was NOT deployed (destination locked — is the game running?). The game folder still has the PREVIOUS build."
+             Condition="'@(UnifiedDeployDir)' != '' and '@(DeployedDll)' == ''" />
     <Warning Text="No loader folder found under $(HeartopiaDir) to deploy bugtopia.dll into (Loader=$(Loader))."
              Condition="'@(UnifiedDeployDir)' == ''" />
   </Target>

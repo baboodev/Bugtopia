@@ -18,9 +18,12 @@ namespace HeartopiaMod
     //     LayerDistanceCulling.Instance.enabled=false + LoaderManager.SetParam(max, 3, 20, 20,
     //     dist[4], dist[4], meshDis). Revert = the ObserverPanel.RevertBuildLoader recipe
     //     (re-read RenderLoadConfig getters, SetParam with defaults, culling back on).
-    //  2. BRG MESH QUALITY — BrgManager.ForeceLOD0 (static, native icall) forces max mesh LOD on
-    //     all batched furniture; AreaPriorityManager.UpdateGlobalLodBias raises the per-area bias
-    //     (re-asserted, because SignificanceManager's low-FPS governor drops it to 0.2).
+    //  2. BRG MESH QUALITY — AreaPriorityManager.UpdateGlobalLodBias raises the per-area LOD bias
+    //     (re-asserted, because SignificanceManager's low-FPS governor drops it to 0.2). NOTE: the
+    //     obvious-looking alternative, BrgManager.ForeceLOD0, is a TRAP and was removed 2026-07-27 —
+    //     it makes the game's native batch builder discard per-instance override materials, blanking
+    //     every UGC texture. Bias is the only safe lever here; see project memory
+    //     brg-forcelod0-destroys-material-override.
     //  3. VEGETATION / NEIGHBOR HOUSES — TreeLoad/HomeLoad divide their baked LOD threshold
     //     distances by PlayerPrefs "PC_LODBIAS"/10 at load time (default 10 = x1; 5 = x2; 1 = x10).
     //     Nothing else writes that key. Changing it needs a rebake:
@@ -51,7 +54,6 @@ namespace HeartopiaMod
         internal int gameLodFurnitureDistance = 9999;      // 100..9999 m (game default 80/30/30/24)
         internal int gameLodFurnitureMeshDistance = 1000;  // 100..2000 m (game default 100)
 
-        internal bool gameLodForceLod0Enabled = false;
         internal bool gameLodBrgBiasEnabled = false;
         internal float gameLodBrgBias = 2f;                // 1..4 (game default 1)
 
@@ -118,11 +120,9 @@ namespace HeartopiaMod
         // before the world is considered ready, and the furniture cap queues thousands of extra
         // asset loads. Deferring costs nothing visually — the extra content streams in behind the
         // player a few seconds later — and keeps load times close to stock.
-        private const float GameLodWorldSettleSeconds = 8f;
-        private const float GameLodWorldSettleFallbackSeconds = 45f;
+        // The settle timings that used to live here (8 s player-present / 45 s fallback) moved to
+        // the shared gate as WorldStage.WorldSettled — see HeartopiaComplete.WorldReady.cs.
         private string gameLodLastSceneName = string.Empty;
-        private float gameLodSceneSeenAt = 0f;
-        private float gameLodPlayerSeenAt = 0f;
         private bool gameLodHeavyApplyLogged = false;
         private int gameLodVegetationPrefAtSceneLoad = -1;
 
@@ -137,7 +137,6 @@ namespace HeartopiaMod
 
         // Pending one-shot work queued by UI handlers; executed inside the guarded tick.
         private bool gameLodFurnitureRevertPending = false;
-        private bool gameLodForceLod0RevertPending = false;
         private bool gameLodBrgBiasRevertPending = false;
         private bool gameLodSignificanceRevertPending = false;
         private bool gameLodNineCellRevertPending = false;
@@ -210,11 +209,6 @@ namespace HeartopiaMod
         private IntPtr gameLodBrgManagerClass = IntPtr.Zero;
         private IntPtr gameLodLayerCullingClass = IntPtr.Zero;
         private IntPtr gameLodRenderingSettingsClass = IntPtr.Zero;
-        private IntPtr gameLodPhotoFrameClass = IntPtr.Zero;
-
-        // PhotoFrameComponent.PhotoLodDis ships as { 100f, 100f, 100f } — the value the revert
-        // path restores. See TryGameLodSetPhotoRequestDistance for why this matters.
-        private const float GameLodStockPhotoLodDistance = 100f;
 
         private FeatureBreakerState gameLodApplyBreaker;
         private FeatureBreakerState gameLodNineCellBreaker;
@@ -351,8 +345,6 @@ namespace HeartopiaMod
                 this.gameLodBrgManagerClass = brgClass;
             }
             allOk &= this.GameLodProbe("BrgManager class", brgClass != IntPtr.Zero, GameLodPtr(brgClass));
-            allOk &= this.GameLodProbe("BrgManager.set_ForeceLOD0",
-                brgClass != IntPtr.Zero && this.FindAuraMonoMethodOnHierarchy(brgClass, "set_ForeceLOD0", 1) != IntPtr.Zero);
 
             IntPtr areaPriorityClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.BaseSystem.RenderPriorityManager.AreaPriorityManager");
             allOk &= this.GameLodProbe("AreaPriorityManager class", areaPriorityClass != IntPtr.Zero, GameLodPtr(areaPriorityClass));
@@ -502,11 +494,11 @@ namespace HeartopiaMod
                 }
             }
 
-            bool anyEnabled = this.gameLodFurnitureEnabled || this.gameLodForceLod0Enabled
+            bool anyEnabled = this.gameLodFurnitureEnabled
                 || this.gameLodBrgBiasEnabled || this.gameLodSignificanceOffEnabled
                 || this.gameLodNineCellEnabled || this.gameLodShadowEnabled
                 || this.gameLodHlodEnabled || this.gameLodXdLodEnabled;
-            bool anyPending = this.gameLodFurnitureRevertPending || this.gameLodForceLod0RevertPending
+            bool anyPending = this.gameLodFurnitureRevertPending
                 || this.gameLodBrgBiasRevertPending || this.gameLodSignificanceRevertPending
                 || this.gameLodNineCellRevertPending || this.gameLodShadowRevertPending
                 || this.gameLodVegetationRebakePending || this.gameLodHlodRevertPending
@@ -683,19 +675,17 @@ namespace HeartopiaMod
             return true;
         }
 
-        // True once the world is up and has had a moment to settle. Scene changes reset the timer
-        // AND drop the per-instance baselines (a new scene brings new objects with fresh ids).
+        // True once the world is up and has had a moment to settle. A scene change still drops the
+        // per-instance baselines here (a new scene brings new objects with fresh ids); the settle
+        // TIMING itself is the shared gate's job now.
         private bool IsGameLodHeavyApplyAllowed()
         {
-            float now = Time.unscaledTime;
             string scene = string.Empty;
             try { scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name ?? string.Empty; } catch { }
 
             if (!string.Equals(scene, this.gameLodLastSceneName, StringComparison.Ordinal))
             {
                 this.gameLodLastSceneName = scene;
-                this.gameLodSceneSeenAt = now;
-                this.gameLodPlayerSeenAt = 0f;
                 this.gameLodHeavyApplyLogged = false;
                 this.gameLodSceneLoaderBaselines.Clear();
                 this.gameLodHlodOriginals.Clear();
@@ -710,32 +700,21 @@ namespace HeartopiaMod
                 catch { this.gameLodVegetationPrefAtSceneLoad = -1; }
             }
 
-            if (this.gameLodPlayerSeenAt <= 0f)
-            {
-                try
-                {
-                    if (this.TryGetLocalPlayerPosition(out Vector3 playerPos) && playerPos != Vector3.zero)
-                    {
-                        this.gameLodPlayerSeenAt = now;
-                    }
-                }
-                catch { }
-            }
-
-            // Gate, strongest signal first:
-            //  1. the shared world-ready gate — loading screen GONE (LoadingClosedEvent) + grace,
-            //     with its own player-present fallback for builds where the events never arrive,
-            //  2. the game's post-warmup flag LoaderManager.IsRun must be true,
-            //  3. a local player must exist and have been around for a moment.
+            // Two conditions, and only one of them is still ours:
+            //  1. WorldStage.WorldSettled — the shared gate now owns "a playable world has been up
+            //     and quiet for a while". It reads the game's level FSM, so unlike the old
+            //     event-based check it also closes during a homeland swap (which emits no loading
+            //     events at all) and never reports ready on the login screen. The player-presence
+            //     timing that used to live here moved there unchanged (8 s / 45 s fallback).
+            //  2. LoaderManager.IsRun — genuinely specific to this feature: the furniture streamer's
+            //     own post-shader-warmup flag, which nothing else cares about.
             bool loaderRunning = true;
             if (this.TryGameLodIsLoaderManagerRunning(out bool isRun))
             {
                 loaderRunning = isRun;
             }
 
-            bool settled = loaderRunning && this.IsWorldReady
-                && ((this.gameLodPlayerSeenAt > 0f && now - this.gameLodPlayerSeenAt >= GameLodWorldSettleSeconds)
-                    || (now - this.gameLodSceneSeenAt >= GameLodWorldSettleFallbackSeconds));
+            bool settled = loaderRunning && this.CurrentWorldStage >= WorldStage.WorldSettled;
             if (settled && !this.gameLodHeavyApplyLogged)
             {
                 this.gameLodHeavyApplyLogged = true;
@@ -792,25 +771,16 @@ namespace HeartopiaMod
                 }
             }
 
-            // BRG force LOD0.
-            if (this.gameLodForceLod0RevertPending)
-            {
-                if (this.TryGameLodSetForceLod0(false, out string lod0RevertStatus))
-                {
-                    this.gameLodForceLod0RevertPending = false;
-                    this.GameLodLogOnce("force-lod0 revert: ok");
-                }
-                else
-                {
-                    this.GameLodLogOnce("force-lod0 revert: " + lod0RevertStatus);
-                }
-            }
-            else if (this.gameLodForceLod0Enabled && heavyOk)
-            {
-                this.TryGameLodSetForceLod0(true, out string lod0Status);
-                this.gameLodBrgStatus = lod0Status;
-                this.GameLodLogOnce("force-lod0 apply: " + lod0Status);
-            }
+            // REMOVED 2026-07-27: "Force max mesh detail (BRG LOD0)". BrgManager.ForeceLOD0 is read
+            // in exactly one place in the game — native _BrgRenderSystem._Add — and when true that
+            // function DISCARDS the per-instance override material array and rebuilds the batch from
+            // meshInfo.lodMaterials[0], the shared prefab material. UGC textures (photos, puzzles,
+            // drawing boards, display shelves, ...) only ever live on per-instance CLONES of those
+            // materials, so forcing LOD0 blanked every one of them. Confirmed by disassembling the
+            // live GameAssembly.dll; see project memory brg-forcelod0-destroys-material-override.
+            // Not fixable from here (the array is dropped inside IL2CPP native code), and redundant:
+            // "Boost furniture LOD bias" below achieves the same visual goal via lodDist/bias, which
+            // never touches materials.
 
             // BRG global bias (re-asserted: the low-FPS governor writes 0.2 over it).
             if (this.gameLodBrgBiasRevertPending)
@@ -828,10 +798,7 @@ namespace HeartopiaMod
             else if (this.gameLodBrgBiasEnabled && heavyOk)
             {
                 this.TryGameLodApplyBrgBias(this.gameLodBrgBias, out string biasStatus);
-                if (!this.gameLodForceLod0Enabled)
-                {
-                    this.gameLodBrgStatus = biasStatus;
-                }
+                this.gameLodBrgStatus = biasStatus;
                 this.GameLodLogOnce("brg-bias apply: " + biasStatus);
             }
 
@@ -1343,13 +1310,6 @@ namespace HeartopiaMod
             this.TryGameLodSetLayerCullingEnabled(false, out string cullingStatus);
             this.GameLodLogOnce("furniture: LayerDistanceCulling disable: " + cullingStatus);
 
-            // Push the photo-request radius out to match the spawn radius, or every frame beyond
-            // the game's hardcoded 100 m renders white — see TryGameLodSetPhotoRequestDistance.
-            // Add the ring-corner margin (spawn is a square ring, the request gate is a sphere):
-            // sqrt(3) covers the 3D box diagonal, so nothing can spawn outside the request sphere.
-            float photoDis = Mathf.Clamp(this.gameLodFurnitureDistance * 1.75f, 100f, 20000f);
-            this.TryGameLodSetPhotoRequestDistance(photoDis, out string photoStatus);
-            this.GameLodLogOnce("furniture: photo request distance: " + photoStatus);
             status = "ok";
             return true;
         }
@@ -1507,9 +1467,6 @@ namespace HeartopiaMod
             this.TryGameLodSetLayerCullingEnabled(true, out string cullingStatus);
             this.GameLodLogOnce("furniture: LayerDistanceCulling re-enable: " + cullingStatus);
 
-            // Back to the game's own hardcoded PhotoFrameComponent.PhotoLodDis value.
-            this.TryGameLodSetPhotoRequestDistance(GameLodStockPhotoLodDistance, out string photoStatus);
-            this.GameLodLogOnce("furniture: photo request distance revert: " + photoStatus);
             status = "ok";
             return true;
         }
@@ -1519,97 +1476,6 @@ namespace HeartopiaMod
             value = 0;
             return this.TryGameLodInvokeObject(configObj, methodName, out IntPtr boxed)
                 && this.TryGameLodUnboxInt32(boxed, out value);
-        }
-
-        // ----------------------------------------------------------------------------------------
-        // THE blank-UGC-photo fix (2026-07-26). Root cause, confirmed in the decompiled source:
-        //
-        //   PhotoFrameComponent.PhotoLodDis = new float[3] { 100f, 100f, 100f };   // hardcoded
-        //   OnSpawned():  _lodDisSqr = PhotoLodDis[type-1] ^ 2;
-        //   Tick():       if (!_haveCache && _loader == null
-        //                     && sqrDist(selfPlayer, entity) < _lodDisSqr)  -> Create(loader)
-        //
-        // A photo frame only ever REQUESTS its photo within 100 m. Vanilla furniture streaming
-        // distances are RenderLoadConfig.LoadDis = [80, 30, 30, 24] per voxel tier, and photo
-        // frames / screens / display items are ordinary furniture = tier 2/3, i.e. vanilla spawns
-        // them only within 24-30 m — far INSIDE the 100 m request radius. The game's design
-        // silently depends on furniture-spawn-radius << photo-request-radius, so the 100 m gate
-        // never binds and every frame you can see has already fetched its photo.
-        //
-        // This feature inverts that relationship: it applies ONE distance to all four tiers, and
-        // its slider bottoms out at 100 (TryGameLodFurnitureApply clamps 100..9999). So even at
-        // the LOWEST possible setting, photo-bearing furniture spawns out to 100 m — and because
-        // the voxel streamer expands in square RINGS (validDis = dis/cellSize, Chebyshev), the box
-        // corners reach ~dist*sqrt(2) horizontally, i.e. ~140 m at a setting of 100 — while the
-        // photo request gate stays a 100 m EUCLIDEAN SPHERE. Every frame spawned in that shell is
-        // visible but never requests its texture, so it renders white until you walk closer.
-        // That is exactly why no slider value helped and only switching the feature off did:
-        // there is no setting where spawn-radius stays under the hardcoded 100 m gate.
-        //
-        // Fix: move the gate out with us. PhotoLodDis is `public static readonly float[]` — the
-        // reference is readonly, the CONTENTS are not — so we write its 3 elements via
-        // mono_array_addr_with_size (same element-write technique already used for the
-        // SceneLoaderRoot hlodDistances arrays). Caveat, deliberate: OnSpawned caches _lodDisSqr
-        // per component, so this only affects frames spawned AFTER the write — which is precisely
-        // the ones streaming in at distance, the ones that were blank. Already-spawned nearby
-        // frames were never broken.
-        private unsafe bool TryGameLodSetPhotoRequestDistance(float distance, out string status)
-        {
-            status = "PhotoFrameComponent unavailable";
-            if (auraMonoArrayAddrWithSize == null || auraMonoArrayLength == null)
-            {
-                return false;
-            }
-
-            if (this.gameLodPhotoFrameClass == IntPtr.Zero)
-            {
-                // Fully qualified: there is a SECOND, unrelated PhotoFrameComponent stub under
-                // ...Gameplay.Component.GuiChar with empty method bodies — resolving by bare name
-                // could bind the wrong one.
-                this.gameLodPhotoFrameClass = this.FindAuraMonoClassByFullName(
-                    "XDTLevelAndEntity.Gameplay.Component.Homeland.PhotoFrameComponent");
-            }
-
-            if (this.gameLodPhotoFrameClass == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            if (!this.TryGetAuraMonoStaticObjectField(this.gameLodPhotoFrameClass, "PhotoLodDis", out IntPtr arrayObj)
-                || arrayObj == IntPtr.Zero)
-            {
-                status = "PhotoLodDis not initialized yet";
-                return false;
-            }
-
-            uint pin = AuraMonoPinNew(arrayObj);
-            try
-            {
-                int length = (int)auraMonoArrayLength(arrayObj);
-                if (length <= 0 || length > 16)
-                {
-                    status = "PhotoLodDis unexpected length " + length;
-                    return false;
-                }
-
-                for (int i = 0; i < length; i++)
-                {
-                    IntPtr slot = auraMonoArrayAddrWithSize(arrayObj, 4, (UIntPtr)i);
-                    if (slot == IntPtr.Zero)
-                    {
-                        status = "PhotoLodDis element " + i + " unreachable";
-                        return false;
-                    }
-                    *(float*)slot = distance;
-                }
-
-                status = "ok (" + distance.ToString("0") + " m)";
-                return true;
-            }
-            finally
-            {
-                AuraMonoPinFree(pin);
-            }
         }
 
         private unsafe bool TryGameLodSetLayerCullingEnabled(bool enabled, out string status)
@@ -1667,46 +1533,12 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Section 2: BRG mesh quality (ForeceLOD0 static flag + AreaPriorityManager global bias)
+        // Section 2: BRG mesh quality (AreaPriorityManager global bias)
+        //
+        // TryGameLodSetForceLod0 used to live here and is gone — see the note in the apply tick.
+        // Short version: BrgManager.ForeceLOD0 makes the game's own native batch builder throw away
+        // per-instance override materials, blanking every UGC texture. Bias is the safe lever.
         // ----------------------------------------------------------------------------------------
-        private unsafe bool TryGameLodSetForceLod0(bool on, out string status)
-        {
-            status = "BrgManager unavailable";
-            IntPtr klass = this.GameLodEngineWrapperClass(ref this.gameLodBrgManagerClass,
-                "ScriptsRefactory.BaseService.RenderSystem.Brg", "BrgManager");
-            if (klass == IntPtr.Zero)
-            {
-                klass = this.FindAuraMonoClassByFullName("ScriptsRefactory.BaseService.RenderSystem.Brg.BrgManager");
-                this.gameLodBrgManagerClass = klass;
-            }
-            if (klass == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            // The game's own typo: "ForeceLOD0".
-            IntPtr setter = this.FindAuraMonoMethodOnHierarchy(klass, "set_ForeceLOD0", 1);
-            if (setter == IntPtr.Zero)
-            {
-                status = "BrgManager.set_ForeceLOD0 missing";
-                return false;
-            }
-
-            bool value = on;
-            IntPtr* args = stackalloc IntPtr[1];
-            args[0] = (IntPtr)(&value);
-            IntPtr exc = IntPtr.Zero;
-            auraMonoRuntimeInvoke(setter, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero)
-            {
-                status = "set_ForeceLOD0 invoke exception";
-                return false;
-            }
-
-            status = on ? this.L("Max mesh detail forced (BRG LOD0).") : "ok";
-            return true;
-        }
-
         private unsafe bool TryGameLodApplyBrgBias(float bias, out string status)
         {
             if (!this.TryResolveGameLodService("XDTLevelAndEntity.BaseSystem.RenderingManager.IRenderingSystem",
@@ -3183,21 +3015,6 @@ namespace HeartopiaMod
             }
             this.gameLodFurnitureEnabled = value;
             this.gameLodFurnitureRevertPending = !value;
-            this.nextGameLodApplyAt = 0f;
-        }
-
-        internal void SetGameLodForceLod0Enabled(bool value)
-        {
-            if (this.gameLodForceLod0Enabled == value)
-            {
-                return;
-            }
-            this.gameLodForceLod0Enabled = value;
-            this.gameLodForceLod0RevertPending = !value;
-            if (!value)
-            {
-                this.gameLodBrgStatus = this.L("Reverted to game defaults.");
-            }
             this.nextGameLodApplyAt = 0f;
         }
 

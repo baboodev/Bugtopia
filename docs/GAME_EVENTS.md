@@ -120,11 +120,13 @@ regardless of who (if anyone) subscribed. This is wrapped in a reusable engine:
 > called from anywhere, at any time, and does **not** need the world. The native detour, however, is
 > installed from the **world-ready gate** (`InstallGameEventHooksOnWorldReady`), not from `OnUpdate`:
 > inflating `DispatchEvent<T>` while the game's Mono images are half-up faults inside the runtime
-> and takes the process down with an uncatchable AV (WER `xdt.exe.7988`/`30332`, inflate of
-> `DispatchEvent<StartCookEvent>`). The only pair installed without the gate is the gate's own
-> transport, `LoadingOpenedEvent`/`LoadingClosedEvent` — gating those would be circular.
-> Consequence for callers: a hook registered at startup starts firing shortly after the loading
-> splash clears, not before. Never add your own retry loop to `OnUpdate` to "help" it —
+> and makes the runtime abort the process (WER `xdt.exe.7988`/`30332` on
+> `DispatchEvent<StartCookEvent>`, `xdt.exe.34488` on `DispatchEvent<LoadingOpenedEvent>`).
+> **There are no exceptions any more:** the gate used to exempt its own transport
+> (`LoadingOpenedEvent`/`LoadingClosedEvent`), but those hooks were deleted in phase 3 — the gate
+> reads the game's level FSM (`GameWorld`) directly instead, so nothing needs to install pre-world.
+> Consequence for callers: a hook registered at startup starts firing shortly after the world comes
+> up, not before. Never add your own retry loop to `OnUpdate` to "help" it —
 > see [TECHNICAL.md §World-ready gate](TECHNICAL.md#world-ready-gate-heartopiacompleteworldreadycs).
 
 ```csharp

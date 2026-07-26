@@ -194,7 +194,6 @@ namespace HeartopiaMod
             data.gameLodFurnitureMaxObjects = this.gameLodFurnitureMaxObjects;
             data.gameLodFurnitureDistance = this.gameLodFurnitureDistance;
             data.gameLodFurnitureMeshDistance = this.gameLodFurnitureMeshDistance;
-            data.gameLodForceLod0Enabled = this.gameLodForceLod0Enabled;
             data.gameLodBrgBiasEnabled = this.gameLodBrgBiasEnabled;
             data.gameLodBrgBias = this.gameLodBrgBias;
             data.gameLodVegetationEnabled = this.gameLodVegetationEnabled;
@@ -427,7 +426,6 @@ namespace HeartopiaMod
             this.gameLodFurnitureMaxObjects = data.gameLodFurnitureMaxObjects;
             this.gameLodFurnitureDistance = data.gameLodFurnitureDistance;
             this.gameLodFurnitureMeshDistance = data.gameLodFurnitureMeshDistance;
-            this.gameLodForceLod0Enabled = data.gameLodForceLod0Enabled;
             this.gameLodBrgBiasEnabled = data.gameLodBrgBiasEnabled;
             this.gameLodBrgBias = data.gameLodBrgBias;
             this.gameLodVegetationEnabled = data.gameLodVegetationEnabled;
@@ -938,7 +936,6 @@ namespace HeartopiaMod
             this.lodCustomMaxLevel = 0;
             this.RevertLodOverride();
             this.SetGameLodFurnitureEnabled(false);
-            this.SetGameLodForceLod0Enabled(false);
             this.SetGameLodBrgBiasEnabled(false);
             this.SetGameLodVegetationEnabled(false);
             this.SetGameLodSignificanceOffEnabled(false);

@@ -264,13 +264,15 @@ namespace HeartopiaMod
                 && e.Installed;
         }
 
-        // Called from OnUpdate: drains buffered dispatches to handlers, and runs the install pass in
-        // the ONE mode that is safe for the current state:
-        //   * no world yet  -> transport only (LoadingOpened/LoadingClosed, the gate's own signal).
-        //                      Everything else waits for InstallGameEventHooksOnWorldReady.
-        //   * world is up   -> full pass, which only matters as catch-up for hooks registered AFTER
-        //                      the gate callback finished (a feature switched on mid-session).
-        // Both are early-outs the moment nothing is pending.
+        // Called from OnUpdate: drains buffered dispatches to handlers, and — ONLY once a world is
+        // up — runs a catch-up install pass for hooks registered after the gate callback already
+        // finished (a feature switched on mid-session). It never installs before that, because
+        // inflating DispatchEvent<T> on half-loaded Mono images aborts the process.
+        //
+        // There is no longer a "transport" exemption: the world-ready gate reads the game's level
+        // FSM directly (GameWorld) instead of listening for LoadingOpened/LoadingClosed, so nothing
+        // here has to run before a world exists. That exemption was the last pre-world inflate left
+        // and it is what crashed startup — see project memory eventhook-preworld-inflate-abort.
         private void ProcessGameEventHooksOnUpdate()
         {
             if (this.gameEventHookSlotCount == 0)
@@ -278,7 +280,15 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.EnsureGameEventHooksInstalled(transportOnly: !this.IsWorldReady);
+            // Registration is metadata-only and must happen regardless, or the gate would never
+            // know to call us; the INSTALL below is the part that needs a live world.
+            this.EnsureGameEventHooksWorldReadyRegistered();
+
+            if (this.IsWorldReady)
+            {
+                this.EnsureGameEventHooksInstalled();
+            }
+
             this.DrainGameEventHooks();
         }
 
@@ -287,26 +297,19 @@ namespace HeartopiaMod
         // Installing a detour means resolving the event struct's MonoClass and inflating
         // EventCenter.DispatchEvent<T> through mono_metadata_get_generic_inst +
         // mono_class_inflate_generic_method. On the login/load menu the game's Mono images are only
-        // partially up: a class can resolve by name while inflating a generic over it faults inside
-        // the runtime — an uncatchable native AV that takes the process down at startup with nothing
-        // in the log (WER xdt.exe.7988/30332: inflate of DispatchEvent<StartCookEvent>).
+        // partially up: a class can resolve by name while inflating a generic over it makes the
+        // runtime g_assert and abort() the process — uncatchable, nothing useful in the log
+        // (WER xdt.exe.7988 / 30332 on DispatchEvent<StartCookEvent>, xdt.exe.34488 on
+        // DispatchEvent<LoadingOpenedEvent>).
         //
-        // So the pass runs from the world-ready gate. The ONE thing that cannot wait for the gate is
-        // the gate's own transport (LoadingOpened/LoadingClosed) — that would be circular — so the
-        // OnUpdate path installs those two and nothing else, still behind the 0.5 s throttle.
-        // Registration stays ungated (metadata only); only the native install moved.
+        // So EVERY install runs from the world-ready gate, with no exceptions left. The gate itself
+        // no longer needs an event to know a world exists — it polls GameWorld's level FSM — which
+        // is what allowed the last exemption to go away. Registration stays ungated (metadata only).
         private const float GameEventHookInstallRetrySeconds = 0.5f;
         private float gameEventHookNextInstallAttemptAt = -999f;
 
         private const string GameEventHooksWorldReadyCallbackName = "GameEventHooksInstall";
         private bool gameEventHooksWorldReadyRegistered;
-
-        private static bool IsGameEventGateTransport(GameEventHookEntry entry)
-        {
-            return entry != null
-                && (string.Equals(entry.EventFullName, WorldLoadingOpenedEventName, StringComparison.Ordinal)
-                    || string.Equals(entry.EventFullName, WorldLoadingClosedEventName, StringComparison.Ordinal));
-        }
 
         // World-ready callback: install everything still pending. Returns true only when nothing is
         // pending any more, so the gate keeps retrying (bounded) while an image is still loading and
@@ -319,7 +322,7 @@ namespace HeartopiaMod
             }
 
             this.gameEventHookNextInstallAttemptAt = -999f; // gate-driven pass ignores the bootstrap throttle
-            this.EnsureGameEventHooksInstalled(transportOnly: false);
+            this.EnsureGameEventHooksInstalled();
 
             for (int i = 0; i < this.gameEventHookSlotCount; i++)
             {
@@ -333,18 +336,27 @@ namespace HeartopiaMod
             return true;
         }
 
-        private void EnsureGameEventHooksInstalled(bool transportOnly)
+        // Metadata-only and safe at any time; kept separate from the install pass so OnUpdate can
+        // do this before a world exists without dragging the inflate along with it.
+        private void EnsureGameEventHooksWorldReadyRegistered()
+        {
+            if (this.gameEventHooksHardFailed || this.gameEventHooksWorldReadyRegistered)
+            {
+                return;
+            }
+
+            this.gameEventHooksWorldReadyRegistered = true;
+            this.RegisterWorldReadyCallback(GameEventHooksWorldReadyCallbackName, this.InstallGameEventHooksOnWorldReady);
+        }
+
+        private void EnsureGameEventHooksInstalled()
         {
             if (this.gameEventHooksHardFailed)
             {
                 return;
             }
 
-            if (!this.gameEventHooksWorldReadyRegistered)
-            {
-                this.gameEventHooksWorldReadyRegistered = true;
-                this.RegisterWorldReadyCallback(GameEventHooksWorldReadyCallbackName, this.InstallGameEventHooksOnWorldReady);
-            }
+            this.EnsureGameEventHooksWorldReadyRegistered();
 
             float installNow = UnityEngine.Time.unscaledTime;
             if (installNow < this.gameEventHookNextInstallAttemptAt)
@@ -357,7 +369,7 @@ namespace HeartopiaMod
             for (int i = 0; i < this.gameEventHookSlotCount; i++)
             {
                 GameEventHookEntry e = this.gameEventHookSlots[i];
-                if (e != null && !e.InstallAttempted && (!transportOnly || IsGameEventGateTransport(e)))
+                if (e != null && !e.InstallAttempted)
                 {
                     anyPending = true;
                     break;
@@ -399,11 +411,9 @@ namespace HeartopiaMod
                     {
                         continue;
                     }
-                    if (transportOnly && !IsGameEventGateTransport(entry))
-                    {
-                        continue; // waits for the world-ready gate (generic inflate AVs pre-world)
-                    }
 
+                    // No per-entry exemption any more: every caller of this method has already
+                    // established that a world is up, so every pending hook may inflate now.
                     this.TryInstallGameEventDetour(entry, eventCenterClass, compile);
                 }
             }

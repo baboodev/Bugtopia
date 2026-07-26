@@ -185,15 +185,25 @@ ticking on the **login screen**, where no game image resolves, every Mono lookup
 static-field reads AV uncatchably. Features used to each carry their own blind retry timer
 (3 s / 5 s / 10 s / 30 s) that simply burned attempts until a world happened to exist.
 
-The gate turns the game's own loading-screen events into a single shared signal:
+The gate polls the game's own level state machine and turns it into a single shared signal:
 
 | Item | Value |
 |------|-------|
-| Events | `XDTGameSystem.UI.LoadingOpenedEvent` / `XDTGameSystem.UI.LoadingClosedEvent` (empty structs → 0 payload bytes, global dispatch) |
-| Transport | `RegisterGameEventHook` (EventCenter dispatch-detour, see [GAME_EVENTS.md](./GAME_EVENTS.md)) |
-| Grace after close | `WorldReadyGraceSeconds` = 1.5 s |
-| Fallback | `AuraMonoGameDataLive` + a local player present for 5 s (used when the events never arrive) |
+| Source | `XDTGame.Core.GameWorld` (image `XDTBaseService`) — public static `state` / `isSwitching` / `gameLevel`, polled ~4 Hz by `HeartopiaComplete.GameWorldProbe.cs`. No detour, no generic inflation, no raw static-field read |
+| Ready condition | `state == Loaded && !isSwitching && levelType > 0` (level types: **0 = login, 1 = town, 3 = micro-home**) |
+| Grace | `WorldReadyGraceSeconds` = 1.5 s |
+| Fallback | `AuraMonoGameDataLive` + a local player present for 5 s — used only if `GameWorld` cannot be resolved at all |
 | Epoch | `WorldReadyEpoch` — +1 per world load; callbacks re-run once per epoch |
+| Stages | `WorldStage`: `None < MonoLive < Loading < LevelLoaded < WorldReady < WorldSettled` (compare with `>=`). The **login level stays at `MonoLive`** — `>= LevelLoaded` therefore means "a real world is loaded" |
+| `WorldSettled` | `WorldReady` + a local player present 8 s (45 s hard fallback). The rung for heavy, asset-loading work — Game LOD gates on it |
+| Level helpers | `CurrentLevelType` / `CurrentSceneId`, `IsInPlayableWorld`, `IsInLoginLevel`, `IsInTownLevel`, `IsInMicroHomeLevel` |
+
+**The loading-screen events were removed in 2026-07-26 phase 3.** They could not distinguish the
+login level from a real world (the gate used to report ready on the login screen), they were not
+emitted at all for homeland enter/exit (the gate stayed "ready" through a full tear-down and rebuild
+and never bumped the epoch), and — decisively — they were the only hooks that had to install before
+a world existed, which meant inflating `DispatchEvent<T>` on half-loaded Mono images and aborting the
+process at startup. The FSM answers all three.
 
 API:
 
@@ -202,11 +212,23 @@ API:
 // (bounded: 30 attempts per world load, then it sleeps until the next one).
 RegisterWorldReadyCallback("MyFeature", () => this.TryInstallMyDetour());
 
-// Splash appeared: hand settings back to the game, drop per-world caches.
+// Same, but pick the rung yourself — e.g. heavy asset-loading work waits for WorldSettled.
+RegisterWorldStageCallback("MyHeavyFeature", WorldStage.WorldSettled, () => this.ApplyHeavyThing());
+
+// A level transition STARTED: hand settings back to the game, drop per-world caches. Fires for
+// homeland swaps too, which show no loading splash at all.
 RegisterWorldLoadingStartedCallback(this.OnMyFeatureWorldLoadingStarted);
 
 bool ready = this.IsWorldReady;            // gate for anything that needs a live world
+bool heavy = this.CurrentWorldStage >= WorldStage.WorldSettled;
 this.ResetWorldReadyCallback("MyFeature"); // re-arm after a toggle flips on
+
+// Which world am I in? (all false until the FSM has been read — safe as "definitely X",
+// never as "definitely not X")
+if (this.IsInMicroHomeLevel) { /* homeland-only behaviour */ }
+
+// Lobby/menu features that legitimately run before a world exists:
+if (this.CurrentWorldStage >= WorldStage.MonoLive && this.IsInLoginLevel) { /* join friend/town */ }
 
 // UI-driven game-data reads (panel build / per-frame refresh):
 // AuraMonoStaticFieldReadsAllowed() only proves an image resolved, and the shell CAN be open on
@@ -247,9 +269,11 @@ Corollaries:
   `EventCenter.DispatchEvent<T>` over the event struct, and on the login/load menu that inflate
   faults **inside the Mono runtime** — an uncatchable AV that killed the process at startup with
   nothing in the log (WER `xdt.exe.7988` / `30332`, inflate of `DispatchEvent<StartCookEvent>`).
-  So `ProcessGameEventHooksOnUpdate` installs only the gate's own transport
-  (`LoadingOpenedEvent` / `LoadingClosedEvent` — gating those would be circular) and every other
-  detour is installed from `InstallGameEventHooksOnWorldReady`. Registering early is still correct;
+  Since phase 3 there is **no exemption at all**: `ProcessGameEventHooksOnUpdate` registers the
+  gate callback (metadata only) and installs nothing until `IsWorldReady`; every detour is installed
+  from `InstallGameEventHooksOnWorldReady`. The old "gate transport" carve-out is gone along with
+  the loading events themselves — it was the last pre-world inflate and it aborted startup
+  (WER `xdt.exe.34488`, `DispatchEvent<LoadingOpenedEvent>`). Registering early is still correct;
   it just no longer means installing early.
 - **Mono class/method resolution, `mono_compile_method` and `NativeDetour` installs** are the whole
   reason the gate exists — never run them speculatively.
@@ -279,14 +303,16 @@ and nothing polls before it.
 | Map avatar/name detours ×6 | 2 s | gate (install side only; Undo stays ungated) |
 | Sanrio config walk | 15 s | gate |
 
-Two deliberate exceptions, both **registration**, not resolution:
+Deliberate exceptions, all **registration**, not resolution:
 
-- `EnsureGameEventHooksInstalled` — installs the gate's own transport
-  (`LoadingOpenedEvent`/`LoadingClosedEvent`) and nothing else while there is no world
-  (`transportOnly: !IsWorldReady`); gating that pair would be circular. It is throttled to 0.5 s,
-  and every other detour installs from `InstallGameEventHooksOnWorldReady`.
+- `EnsureGameEventHooksWorldReadyRegistered` — hands the installer to the gate. Metadata only; the
+  install pass itself (`EnsureGameEventHooksInstalled`, 0.5 s throttle) now runs only once
+  `IsWorldReady`, plus from `InstallGameEventHooksOnWorldReady`.
 - `EnsureSpawnVehicleResultHooks` — metadata-only registration, must not miss early dispatches;
   got a 30 s retry throttle so a failed registration stops re-attempting every frame.
+- The `GameWorld` probe (`ProcessGameWorldProbeOnUpdate`) polls from frame one by design — it is
+  what *produces* the gate signal. It only invokes public static property getters (no detour, no
+  inflation, no raw static read) and disables itself after 5 consecutive failures.
 
 `ProcessLodOverrideOnUpdate` is not in the table on purpose: it only writes Unity
 `QualitySettings`, touches no Mono, and re-asserts forever (it has no "success" to wait for).
