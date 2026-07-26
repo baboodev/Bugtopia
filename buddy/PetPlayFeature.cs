@@ -54,6 +54,12 @@ namespace HeartopiaMod
         private uint petPlayHeadlessCatNetId = 0U;
         private float petPlayHeadlessCatStartSentAt = 0f;
         private float petPlayHeadlessCatLastActivityAt = 0f;
+        // The server's TeaseCatStartResultEvent only lands once the cat has physically WALKED OVER to
+        // the player (MeowConst.TeaseArriveDistance) — that can take far longer than a network ack.
+        // A short timeout here used to end the FSM while the real session was still coming up, and
+        // with "Auto Cat Play" off that silently disabled the QTE answering (the handler gates on
+        // headless-active OR the toggle). Keep this only as a lost-session safety net.
+        private const float PetPlayHeadlessCatStartTimeoutSeconds = 60f;
         private int petPlayHeadlessCatAnswerCount = 0;
         private int petPlayHeadlessCatLastExitReason = -1;
         private bool petPlayHeadlessCatHooksRegistered = false;
@@ -466,6 +472,15 @@ namespace HeartopiaMod
             bool headlessCat = headlessActive && catNetId == this.petPlayHeadlessCatNetId;
             if (headlessCat)
             {
+                // A QTE for our cat IS proof the session is live — the start ack can lag behind (it
+                // only arrives once the cat has walked over), so confirm the FSM from the question
+                // itself instead of waiting for it.
+                if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Starting)
+                {
+                    this.petPlayHeadlessCatState = PetPlayHeadlessCatState.Active;
+                    this.PetPlayLog("Headless cat play: first QTE arrived - session confirmed active (no start ack needed).");
+                }
+
                 this.petPlayHeadlessCatLastActivityAt = Time.unscaledTime;
             }
 
@@ -696,9 +711,12 @@ namespace HeartopiaMod
         {
             float now = Time.unscaledTime;
             if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Starting
-                && now - this.petPlayHeadlessCatStartSentAt > 6f)
+                && now - this.petPlayHeadlessCatStartSentAt > PetPlayHeadlessCatStartTimeoutSeconds)
             {
-                this.FinishHeadlessCatPlay("Start timeout: no TeaseCatStartResultEvent within 6s.");
+                // Cancel too — otherwise a session that DID start server-side keeps running orphaned.
+                this.TryInvokeCatCancelTease(this.petPlayHeadlessCatNetId);
+                this.FinishHeadlessCatPlay("Start timeout: no session within "
+                    + PetPlayHeadlessCatStartTimeoutSeconds.ToString("F0") + "s - cancelled.");
             }
             else if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Active
                 && now - this.petPlayHeadlessCatLastActivityAt > 45f)
