@@ -45,6 +45,27 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(intro, pad, yCur, innerW, 40f);
             yCur += 44f;
 
+            // Bugtopia News link — a real button (not just text), directly under the intro so it
+            // is visible without scrolling. Icon + label, same pairing as the sidebar footer, and
+            // the same BugtopiaNewsUrl constant so the two can never drift apart.
+            GameObject newsBtn = this.CreateUguiSecondaryButton(block.transform, "NewsButton",
+                string.Empty, new System.Action(this.OnUguiShellNewsClicked));
+            PlaceUguiTopLeft(newsBtn, pad, yCur, 170f, 30f);
+            Image newsIcon = this.CreateUguiIcon(newsBtn.transform, UguiTelegramIconIndex, 15f, this.UguiKitAccent());
+            if (newsIcon != null)
+            {
+                RectTransform newsIconRt = newsIcon.rectTransform;
+                newsIconRt.anchorMin = new Vector2(0f, 0.5f);
+                newsIconRt.anchorMax = new Vector2(0f, 0.5f);
+                newsIconRt.pivot = new Vector2(0f, 0.5f);
+                newsIconRt.anchoredPosition = new Vector2(12f, 0f);
+                newsIcon.raycastTarget = false; // clicks belong to the button itself
+            }
+            GameObject newsLabel = this.CreateUguiLabel(newsBtn.transform, "NewsLabel",
+                "Bugtopia News", 12f, this.UguiKitTextColor(), false);
+            StretchUguiFill(newsLabel, 34f, 0f, 8f, 0f);
+            yCur += 38f;
+
             GameObject h1 = this.CreateUguiHeaderLabel(block.transform, "WhatHeading", this.L("What it does"), 13f);
             PlaceUguiTopLeft(h1, pad, yCur, innerW, 20f);
             yCur += 22f;
