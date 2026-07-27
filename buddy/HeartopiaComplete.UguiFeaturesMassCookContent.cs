@@ -306,33 +306,33 @@ namespace HeartopiaMod
             Color textColor = this.UguiKitTextColor();
 
             // -------- Header + pill (:87-91) --------
-            GameObject header = this.CreateUguiLabel(scrollContent, "Header", "MASS COOK", 15f, Color.white, false);
+            GameObject header = this.CreateUguiLabel(scrollContent, "Header", this.L("MASS COOK"), 15f, Color.white, false);
             this.TrySetUguiLabelBold(header);
             PlaceUguiTopLeft(header, rowX, 8f, rowW - 96f, 30f);
 
             GameObject pill = this.CreateUguiGo("StatusPill", scrollContent);
             PlaceUguiTopLeft(pill, rowX + rowW - 86f, 11f, 86f, 24f); // header y + 3 (:89)
             handle.PillBg = this.AddUguiImage(pill, this.UguiKitControlFill(), true, 1.5f);
-            handle.PillLabel = this.CreateUguiLabel(pill.transform, "Label", "READY", 11f, mutedTextColor, true);
+            handle.PillLabel = this.CreateUguiLabel(pill.transform, "Label", this.L("READY"), 11f, mutedTextColor, true);
             this.TrySetUguiLabelBold(handle.PillLabel);
             StretchUguiFill(handle.PillLabel, 2f, 0f, 2f, 0f);
 
             // -------- Capture / Reset row (:93-124) --------
             handle.CaptureButton = this.CreateUguiPrimaryButton(scrollContent, "CaptureButton",
-                "Capture Stoves", new System.Action(this.OnUguiFeaturesMassCookCaptureClicked));
+                this.L("Capture Stoves"), new System.Action(this.OnUguiFeaturesMassCookCaptureClicked));
             PlaceUguiTopLeft(handle.CaptureButton, rowX, 50f, halfW, 36f);
 
             // Style-flip pair (file header): same rect, same handler, SetActive by netCookEnabled.
             handle.ResetButtonDefault = this.CreateUguiSecondaryButton(scrollContent, "ResetButtonDefault",
-                "Reset Capture", new System.Action(this.OnUguiFeaturesMassCookResetClicked));
+                this.L("Reset Capture"), new System.Action(this.OnUguiFeaturesMassCookResetClicked));
             PlaceUguiTopLeft(handle.ResetButtonDefault, rowX + halfW + 10f, 50f, halfW, 36f);
             handle.ResetButtonDanger = this.CreateUguiDangerButton(scrollContent, "ResetButtonDanger",
-                "Reset Capture", new System.Action(this.OnUguiFeaturesMassCookResetClicked));
+                this.L("Reset Capture"), new System.Action(this.OnUguiFeaturesMassCookResetClicked));
             PlaceUguiTopLeft(handle.ResetButtonDanger, rowX + halfW + 10f, 50f, halfW, 36f);
 
             // -------- Clean Up Finished Food (:126-133) --------
             handle.CleanupButton = this.CreateUguiPrimaryButton(scrollContent, "CleanupButton",
-                "Clean Up Finished Food", new System.Action(this.OnUguiFeaturesMassCookCleanupClicked));
+                this.L("Clean Up Finished Food"), new System.Action(this.OnUguiFeaturesMassCookCleanupClicked));
             PlaceUguiTopLeft(handle.CleanupButton, rowX, 100f, rowW, 36f);
 
             // -------- The five toggles (:135-208) — DrawSwitchToggle localizes, so L() here --------
@@ -358,11 +358,11 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.StatusDiagToggle.gameObject, rowX, 302f, rowW, 24f);
 
             // -------- ASSIST MODE card (:210-225 — mini-game branch; height via relayout) --------
-            const string assistModeDescription = "Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.";
+            string assistModeDescription = this.L("Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.");
             handle.AssistCard = this.CreateUguiGo("AssistCard", scrollContent);
             this.AddUguiImage(handle.AssistCard, this.UguiKitPanelBg(), true, 1f);
             GameObject assistTitle = this.CreateUguiLabel(handle.AssistCard.transform, "AssistTitle",
-                "ASSIST MODE", 11f, mutedTextColor, false);
+                this.L("ASSIST MODE"), 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(assistTitle);
             PlaceUguiTopLeft(assistTitle, 12f, 8f, rowW - 24f, 18f);
             handle.AssistDescLabel = this.CreateUguiLabel(handle.AssistCard.transform, "AssistDesc",
@@ -380,7 +380,7 @@ namespace HeartopiaMod
             }
 
             // -------- RECIPE label + dropdown header (:229-241 — recipe branch) --------
-            handle.RecipeLabel = this.CreateUguiLabel(scrollContent, "RecipeLabel", "RECIPE", 11f, mutedTextColor, false);
+            handle.RecipeLabel = this.CreateUguiLabel(scrollContent, "RecipeLabel", this.L("RECIPE"), 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(handle.RecipeLabel);
 
             handle.RecipeHeader = this.CreateUguiGo("RecipeHeader", scrollContent);
@@ -411,7 +411,7 @@ namespace HeartopiaMod
             this.AddUguiImage(handle.RecipePanel, this.UguiKitPanelBg(), true, 1f);
 
             GameObject searchLabel = this.CreateUguiLabel(handle.RecipePanel.transform, "SearchLabel",
-                "Search", 11f, mutedTextColor, false);
+                this.L("Search"), 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(searchLabel);
             PlaceUguiTopLeft(searchLabel, 18f, 12f, 52f, 20f); // :250-253 panel-local
             handle.RecipeSearchApplied = this.netCookRecipeSearchText ?? string.Empty;
@@ -445,7 +445,7 @@ namespace HeartopiaMod
             catch { }
 
             handle.RecipeEmptyLabel = this.CreateUguiLabel(recipeListContent, "EmptyLabel",
-                "No recipes match your search.", 11f, textColor, false);
+                this.L("No recipes match your search."), 11f, textColor, false);
             this.TrySetUguiLabelBold(handle.RecipeEmptyLabel);
             PlaceUguiTopLeft(handle.RecipeEmptyLabel, 8f, 6f, rowW - 8f - 22f - 16f, 22f); // :269
             handle.RecipeEmptyLabel.SetActive(false);
@@ -460,7 +460,7 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFeaturesMassCookUseAllIngredientsToggled));
 
             handle.DishLimitLabel = this.CreateUguiLabel(scrollContent, "DishLimitLabel",
-                "DISH LIMIT (0 = unlimited)", 11f, mutedTextColor, false);
+                this.L("DISH LIMIT (0 = unlimited)"), 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(handle.DishLimitLabel);
             handle.DishMaxShown = this.netCookMaxCookQuantity > 0
                 ? ("Ingredients max: " + this.netCookMaxCookQuantity)
@@ -474,10 +474,10 @@ namespace HeartopiaMod
                 new System.Action<string>(this.OnUguiFeaturesMassCookQtyChanged));
 
             // -------- Start/Stop pair (:336-350 — file header) --------
-            handle.StartShown = this.netCookMiniGameOnly ? "START MINI GAME ASSIST" : "START MASS COOK";
+            handle.StartShown = this.netCookMiniGameOnly ? this.L("START MINI GAME ASSIST") : this.L("START MASS COOK");
             handle.StartButton = this.CreateUguiPrimaryButton(scrollContent, "StartButton",
                 handle.StartShown, new System.Action(this.OnUguiFeaturesMassCookStartStopClicked));
-            handle.StopShown = this.netCookMiniGameOnly ? "STOP MINI GAME ASSIST" : "STOP MASS COOK";
+            handle.StopShown = this.netCookMiniGameOnly ? this.L("STOP MINI GAME ASSIST") : this.L("STOP MASS COOK");
             handle.StopButton = this.CreateUguiDangerButton(scrollContent, "StopButton",
                 handle.StopShown, new System.Action(this.OnUguiFeaturesMassCookStartStopClicked));
 
@@ -487,7 +487,7 @@ namespace HeartopiaMod
             float settingsW = rowW - 24f;
 
             GameObject delayLabel = this.CreateUguiLabel(handle.SettingsCard.transform, "DelayLabel",
-                "COOK DELAY", 11f, mutedTextColor, false);
+                this.L("COOK DELAY"), 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(delayLabel);
             PlaceUguiTopLeft(delayLabel, 12f, 10f, settingsW * 0.55f, 18f);
             handle.DelayShown = string.Format("{0:F2}s", this.netCookInterval);
@@ -500,7 +500,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.DelaySlider.gameObject, 12f, 30f, settingsW, 20f);
 
             GameObject radiusLabel = this.CreateUguiLabel(handle.SettingsCard.transform, "RadiusLabel",
-                "SCAN RADIUS", 11f, mutedTextColor, false);
+                this.L("SCAN RADIUS"), 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(radiusLabel);
             PlaceUguiTopLeft(radiusLabel, 12f, 68f, settingsW * 0.55f, 18f);
             handle.RadiusShown = string.Format("{0:F0}m", this.netCookScanRadiusMeters);
@@ -518,7 +518,7 @@ namespace HeartopiaMod
             this.AddUguiImage(handle.StatusCard, this.UguiKitPanelBg(), true, 1f);
 
             GameObject statusTitle = this.CreateUguiLabel(handle.StatusCard.transform, "StatusTitle",
-                "STATUS", 11f, mutedTextColor, false);
+                this.L("STATUS"), 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(statusTitle);
             PlaceUguiTopLeft(statusTitle, 12f, 8f, rowW - 24f, 18f);
 
@@ -527,7 +527,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(stovesBox, 12f, 32f, statW, 42f);
             this.AddUguiImage(stovesBox, this.UguiKitControlFill(), true, 1f);
             GameObject stovesCaption = this.CreateUguiLabel(stovesBox.transform, "Caption",
-                "STOVES", 10f, mutedTextColor, true);
+                this.L("STOVES"), 10f, mutedTextColor, true);
             this.TrySetUguiLabelBold(stovesCaption);
             PlaceUguiTopLeft(stovesCaption, 0f, 4f, statW, 16f);
             handle.StovesShown = this.netCookTargets.Count.ToString();
@@ -540,7 +540,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(sentBox, 12f + statW + 12f, 32f, statW, 42f);
             this.AddUguiImage(sentBox, this.UguiKitControlFill(), true, 1f);
             GameObject sentCaption = this.CreateUguiLabel(sentBox.transform, "Caption",
-                "SENT", 10f, mutedTextColor, true);
+                this.L("SENT"), 10f, mutedTextColor, true);
             this.TrySetUguiLabelBold(sentCaption);
             PlaceUguiTopLeft(sentCaption, 0f, 4f, statW, 16f);
             handle.SentShown = this.netCookSentCount.ToString();
@@ -684,7 +684,7 @@ namespace HeartopiaMod
                 }
             }
             catch { }
-            this.SetUguiLabelText(handle.PillLabel, on ? "RUNNING" : "READY");
+            this.SetUguiLabelText(handle.PillLabel, on ? this.L("RUNNING") : this.L("READY"));
             this.SetUguiLabelColor(handle.PillLabel, on
                 ? new Color(0.45f, 1f, 0.55f)
                 : new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.78f));
@@ -699,13 +699,13 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.StartButton, !on);
 
             // :336-338 — captions also depend on miniGameOnly, so both twins re-sync per call.
-            string startText = this.netCookMiniGameOnly ? "START MINI GAME ASSIST" : "START MASS COOK";
+            string startText = this.netCookMiniGameOnly ? this.L("START MINI GAME ASSIST") : this.L("START MASS COOK");
             if (!string.Equals(startText, handle.StartShown, StringComparison.Ordinal))
             {
                 handle.StartShown = startText;
                 this.SetUguiButtonLabel(handle.StartButton, startText);
             }
-            string stopText = this.netCookMiniGameOnly ? "STOP MINI GAME ASSIST" : "STOP MASS COOK";
+            string stopText = this.netCookMiniGameOnly ? this.L("STOP MINI GAME ASSIST") : this.L("STOP MASS COOK");
             if (!string.Equals(stopText, handle.StopShown, StringComparison.Ordinal))
             {
                 handle.StopShown = stopText;
@@ -1025,7 +1025,7 @@ namespace HeartopiaMod
             try
             {
                 this.ResetNetCookCaptureContext("Captured stoves reset. Capture stoves again.");
-                this.AddMenuNotification("Mass cook captured stoves reset", new Color(1f, 0.75f, 0.45f));
+                this.AddMenuNotification(this.L("Mass cook captured stoves reset"), new Color(1f, 0.75f, 0.45f));
             }
             catch (Exception ex)
             {

@@ -395,7 +395,7 @@ namespace HeartopiaMod
             // Camera-stuck warning — IMGUI paints it OVER the status text's lower half
             // (y+42 vs y+29..53); same overlapping placement kept for parity.
             handle.CameraStuckLabel = this.CreateUguiLabel(statusBox.transform, "CameraStuck",
-                "Camera stuck fix running", 11f, new Color(1f, 0.45f, 0.45f), false);
+                this.L("Camera stuck fix running"), 11f, new Color(1f, 0.45f, 0.45f), false);
             this.TrySetUguiLabelBold(handle.CameraStuckLabel);
             PlaceUguiTopLeft(handle.CameraStuckLabel, 12f, 42f, boxW - 24f, 16f);
             SetUguiGoActive(handle.CameraStuckLabel, this.cameraStuckDisplayTimer > 0f);
@@ -450,7 +450,7 @@ namespace HeartopiaMod
                 this.L("Auto Stop Timer"), this.autoFarmAutoStopEnabled,
                 new System.Action<bool>(this.OnUguiForagingAutoStopToggled));
 
-            handle.TimerCaption = this.CreateUguiBodyLabel(settings.transform, "TimerCaption", "Timer", 13f);
+            handle.TimerCaption = this.CreateUguiBodyLabel(settings.transform, "TimerCaption", this.L("Timer"), 13f);
             handle.HoursSeen = this.autoFarmAutoStopHoursInput ?? string.Empty;
             handle.HoursField = this.CreateUguiInputField(settings.transform, "HoursField",
                 handle.HoursSeen, 2, new System.Action<string>(this.OnUguiForagingAutoStopHoursEdited));

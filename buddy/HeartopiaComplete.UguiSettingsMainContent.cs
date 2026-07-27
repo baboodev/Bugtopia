@@ -212,7 +212,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(title, pad, 12f, w - pad * 2f, 26f);
 
             GameObject intro = this.CreateUguiMutedLabel(block.transform, "Intro",
-                "Extended Logging — session only, not saved. Toggles the verbose debug logs each feature writes to the mod log.",
+                this.L("Extended Logging — session only, not saved. Toggles the verbose debug logs each feature writes to the mod log."),
                 12f);
             this.TrySetUguiLabelWrapped(intro);
             PlaceUguiTopLeft(intro, pad, 42f, w - pad * 2f, 36f);

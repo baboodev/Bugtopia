@@ -215,7 +215,9 @@ namespace HeartopiaMod
                     return this.BuildUguiShellTeleportSpawnVehicleContent(parent, x, y, w, h);
 
                 default:
-                    return this.BuildUguiShellPlaceholder(parent, this.L("Teleport"), "?", x, y, w, h);
+                    // Unreachable — all nine Teleport subs are cased above; the kit tab bar
+                    // tolerates a null content entry.
+                    return null;
             }
         }
 
@@ -294,12 +296,12 @@ namespace HeartopiaMod
             this.AddUguiImage(block, this.UguiKitContentBg(), true, 1f);
             handle.Root = block;
 
-            handle.HeaderLabel = this.CreateUguiBodyLabel(block.transform, "Header", "Home Position", 13f);
-            handle.TpHomeButton = this.CreateUguiPrimaryButton(block.transform, "TpHome", "TP Home",
+            handle.HeaderLabel = this.CreateUguiBodyLabel(block.transform, "Header", this.L("Home Position"), 13f);
+            handle.TpHomeButton = this.CreateUguiPrimaryButton(block.transform, "TpHome", this.L("TP Home"),
                 new System.Action(this.TeleportToHome));
             handle.HomeSetLabel = this.CreateUguiLabel(block.transform, "HomeSet", "", 12f, Color.green, false);
             handle.StatusLabel = this.CreateUguiLabel(block.transform, "Status", "", 12f, Color.yellow, false);
-            handle.CopyButton = this.CreateUguiSecondaryButton(block.transform, "CopyPos", "Copy Position",
+            handle.CopyButton = this.CreateUguiSecondaryButton(block.transform, "CopyPos", this.L("Copy Position"),
                 new System.Action(this.OnUguiTeleportHomeCopyClicked));
             handle.CurrentPosLabel = this.CreateUguiBodyLabel(block.transform, "CurrentPos", "", 12f);
             this.TrySetUguiLabelWrapped(handle.CurrentPosLabel);
@@ -412,11 +414,11 @@ namespace HeartopiaMod
             {
                 Vector3 p = playerObj.transform.position;
                 this.SetUguiLabelText(handle.CurrentPosLabel,
-                    $"Current Position:\n({p.x:F1}, {p.y:F1}, {p.z:F1})");
+                    this.LF("Current Position:\n({0:F1}, {1:F1}, {2:F1})", p.x, p.y, p.z));
             }
             else
             {
-                this.SetUguiLabelText(handle.CurrentPosLabel, "Current Position:\nPlayer not found");
+                this.SetUguiLabelText(handle.CurrentPosLabel, this.L("Current Position:\nPlayer not found"));
             }
         }
 
@@ -460,7 +462,7 @@ namespace HeartopiaMod
                 this.customTPX = p.x.ToString("F3");
                 this.customTPY = p.y.ToString("F3");
                 this.customTPZ = p.z.ToString("F3");
-                this.AddMenuNotification("Current position copied to clipboard and XYZ fields", new Color(0.55f, 0.88f, 1f));
+                this.AddMenuNotification(this.L("Current position copied to clipboard and XYZ fields"), new Color(0.55f, 0.88f, 1f));
             }
             catch (Exception ex)
             {
@@ -503,11 +505,11 @@ namespace HeartopiaMod
             handle.StatusLabel = this.CreateUguiLabel(block.transform, "Status", "", 12f, Color.yellow, false);
             PlaceUguiTopLeft(handle.StatusLabel, pad, 12f, w - pad * 2f, 22f);
 
-            GameObject refreshBtn = this.CreateUguiSecondaryButton(block.transform, "Refresh", "Refresh NPCs",
+            GameObject refreshBtn = this.CreateUguiSecondaryButton(block.transform, "Refresh", this.L("Refresh NPCs"),
                 new System.Action(this.OnUguiTeleportNpcsRefreshClicked));
             PlaceUguiTopLeft(refreshBtn, pad, 40f, 120f, 26f);
 
-            GameObject searchLabel = this.CreateUguiBodyLabel(block.transform, "SearchLabel", "Search", 12f);
+            GameObject searchLabel = this.CreateUguiBodyLabel(block.transform, "SearchLabel", this.L("Search"), 12f);
             PlaceUguiTopLeft(searchLabel, pad + 132f, 43f, 48f, 20f);
 
             // LIVE per-keystroke filtering — IMGUI recomputes the filtered list from
@@ -741,7 +743,7 @@ namespace HeartopiaMod
 
             const float pad = 16f;
 
-            GameObject nameLabel = this.CreateUguiBodyLabel(block.transform, "NameLabel", "Name:", 12f);
+            GameObject nameLabel = this.CreateUguiBodyLabel(block.transform, "NameLabel", this.L("Name:"), 12f);
             PlaceUguiTopLeft(nameLabel, pad, 15f, 45f, 22f);
 
             // Click-time-read only (IMGUI's Save reads this.customTeleportName at press time) —
@@ -751,11 +753,11 @@ namespace HeartopiaMod
                 handle.NameFieldSeen, 0, null);
             PlaceUguiTopLeft(handle.NameField.gameObject, pad + 48f, 12f, 160f, 26f);
 
-            GameObject saveBtn = this.CreateUguiSecondaryButton(block.transform, "Save", "Save",
+            GameObject saveBtn = this.CreateUguiSecondaryButton(block.transform, "Save", this.L("Save"),
                 new System.Action(this.OnUguiTeleportCustomSaveClicked));
             PlaceUguiTopLeft(saveBtn, pad + 216f, 12f, 70f, 26f);
 
-            handle.SavedHeader = this.CreateUguiBodyLabel(block.transform, "SavedHeader", "Saved Teleports", 12f);
+            handle.SavedHeader = this.CreateUguiBodyLabel(block.transform, "SavedHeader", this.L("Saved Teleports"), 12f);
             PlaceUguiTopLeft(handle.SavedHeader, pad, 50f, 260f, 20f);
 
             Transform rowsContent;
@@ -940,7 +942,7 @@ namespace HeartopiaMod
 
             const float pad = 16f;
 
-            GameObject header = this.CreateUguiBodyLabel(block.transform, "Header", "Direct XYZ Teleport", 13f);
+            GameObject header = this.CreateUguiBodyLabel(block.transform, "Header", this.L("Direct XYZ Teleport"), 13f);
             PlaceUguiTopLeft(header, pad, 20f, 260f, 22f);
 
             // Click-time-read only (IMGUI parses at button press) — no onValueChanged on any of
@@ -964,7 +966,7 @@ namespace HeartopiaMod
             handle.ZField = this.CreateUguiInputField(block.transform, "ZField", handle.ZFieldSeen, 0, null);
             PlaceUguiTopLeft(handle.ZField.gameObject, pad + 254f, 52f, 90f, 26f);
 
-            GameObject tpBtn = this.CreateUguiPrimaryButton(block.transform, "TeleportXyz", "Teleport to XYZ",
+            GameObject tpBtn = this.CreateUguiPrimaryButton(block.transform, "TeleportXyz", this.L("Teleport to XYZ"),
                 new System.Action(this.OnUguiTeleportXyzClicked));
             PlaceUguiTopLeft(tpBtn, pad, 90f, 344f, 32f);
 
@@ -1103,15 +1105,14 @@ namespace HeartopiaMod
             Color statusColor = new Color(muted.r, muted.g, muted.b, 0.9f); // IMGUI statusStyle alpha
 
             // IMGUI headerStyle is bold 14 in the PRIMARY text color (not the header/accent color).
-            handle.GarageHeader = this.CreateUguiLabel(scrollContent, "GarageHeader", "Spawn Vehicle", 14f, text, false);
+            handle.GarageHeader = this.CreateUguiLabel(scrollContent, "GarageHeader", this.L("Spawn Vehicle"), 14f, text, false);
             this.TrySetUguiLabelBold(handle.GarageHeader);
             handle.GarageHint = this.CreateUguiLabel(scrollContent, "GarageHint",
-                "All vehicles in the game table (TableCar). Press Spawn to send a summon command to the "
-                + "server. Vehicles you don't own are rejected server-side with a \"summon failed\" tip.",
+                this.L("All vehicles in the game table (TableCar). Press Spawn to send a summon command to the server. Vehicles you don't own are rejected server-side with a \"summon failed\" tip."),
                 11f, hintColor, false);
             this.TrySetUguiLabelWrapped(handle.GarageHint);
 
-            handle.LoadButton = this.CreateUguiPrimaryButton(scrollContent, "LoadButton", "Load Vehicle List",
+            handle.LoadButton = this.CreateUguiPrimaryButton(scrollContent, "LoadButton", this.L("Load Vehicle List"),
                 new System.Action(this.OnUguiSpawnVehicleLoadClicked));
             // Checkbox toggles instead of IMGUI switches (round-2 deviation, see
             // UguiSettingsMainContent.cs header); DrawSwitchToggle localizes labels, so these do.
@@ -1133,16 +1134,14 @@ namespace HeartopiaMod
             this.AddUguiImage(handle.Divider, Color.white, false, 1f); // IMGUI: whiteTexture 1px line
 
             handle.LiveHeader = this.CreateUguiLabel(scrollContent, "LiveHeader",
-                "Live Vehicles In World (any owner)", 14f, text, false);
+                this.L("Live Vehicles In World (any owner)"), 14f, text, false);
             this.TrySetUguiLabelBold(handle.LiveHeader);
             handle.LiveHint = this.CreateUguiLabel(scrollContent, "LiveHint",
-                "Vehicles already spawned nearby/loaded — someone else's parked car, an NPC's, or an "
-                + "event vehicle. The normal \"get in\" interact has no ownership check, only seat "
-                + "availability, so this calls it directly. Getting on someone's vehicle is visible to them.",
+                this.L("Vehicles already spawned nearby/loaded — someone else's parked car, an NPC's, or an event vehicle. The normal \"get in\" interact has no ownership check, only seat availability, so this calls it directly. Getting on someone's vehicle is visible to them."),
                 11f, hintColor, false);
             this.TrySetUguiLabelWrapped(handle.LiveHint);
 
-            handle.ScanButton = this.CreateUguiPrimaryButton(scrollContent, "ScanButton", "Scan Live Vehicles",
+            handle.ScanButton = this.CreateUguiPrimaryButton(scrollContent, "ScanButton", this.L("Scan Live Vehicles"),
                 new System.Action(this.OnUguiSpawnVehicleScanClicked));
             handle.LiveStatusShown = this.liveVehicleStatus ?? string.Empty;
             handle.LiveStatusLabel = this.CreateUguiLabel(scrollContent, "LiveStatus",
@@ -1228,7 +1227,7 @@ namespace HeartopiaMod
             yCur += 30f;
             PlaceUguiTopLeft(handle.GarageHint, left, yCur, w, 44f);
             yCur += 48f;
-            this.SetUguiButtonLabel(handle.LoadButton, this.spawnVehicleListLoaded ? "Refresh List" : "Load Vehicle List");
+            this.SetUguiButtonLabel(handle.LoadButton, this.spawnVehicleListLoaded ? this.L("Refresh List") : this.L("Load Vehicle List"));
             PlaceUguiTopLeft(handle.LoadButton, left, yCur, 200f, 32f);
             if (handle.GetOnToggle != null)
             {
@@ -1296,7 +1295,7 @@ namespace HeartopiaMod
             yCur += 30f;
             PlaceUguiTopLeft(handle.LiveHint, left, yCur, w, 58f);
             yCur += 62f;
-            this.SetUguiButtonLabel(handle.ScanButton, this.liveVehicleListLoaded ? "Rescan" : "Scan Live Vehicles");
+            this.SetUguiButtonLabel(handle.ScanButton, this.liveVehicleListLoaded ? this.L("Rescan") : this.L("Scan Live Vehicles"));
             PlaceUguiTopLeft(handle.ScanButton, left, yCur, 200f, 32f);
             yCur += 42f;
             PlaceUguiTopLeft(handle.LiveStatusLabel, left, yCur, w, 34f);

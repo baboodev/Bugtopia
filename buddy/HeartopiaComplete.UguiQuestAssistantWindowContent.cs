@@ -252,7 +252,7 @@ namespace HeartopiaMod
                 // ---- Header (outside Body — title + collapse + close work while collapsed) ----
 
                 // :165-167 — bold 13 title in uiText.
-                GameObject title = this.CreateUguiLabel(panelT, "Title", "Quest Assistant",
+                GameObject title = this.CreateUguiLabel(panelT, "Title", this.L("Quest Assistant"),
                     13f, this.UguiKitTextColor(), false);
                 this.TrySetUguiLabelBold(title);
                 PlaceUguiTopLeft(title, 12f, 4f, UguiQaWindowW - 132f, 20f);
@@ -279,7 +279,7 @@ namespace HeartopiaMod
                 // early-return; sitting inside Body reproduces that). Ungated: the dump method
                 // carries its own busy/min-interval guards (Daily Quests round note).
                 GameObject refreshBtn = this.CreateUguiSecondaryButton(body.transform, "RefreshButton",
-                    "Refresh", new System.Action(this.OnUguiQuestAssistantRefreshClicked));
+                    this.L("Refresh"), new System.Action(this.OnUguiQuestAssistantRefreshClicked));
                 PlaceUguiTopLeft(refreshBtn, UguiQaWindowW - 128f, 4f, 70f, 20f);
 
                 // :196-198 — the shared statusStyle role: fontSize 10, wordWrap, uiText @ 0.8.
@@ -298,7 +298,7 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.AcceptLabel, 12f, 44f, UguiQaWindowW - 150f, 22f);
                 handle.AcceptLabel.SetActive(false);
                 handle.AcceptButton = this.CreateUguiSecondaryButton(body.transform, "AcceptAllButton",
-                    "Accept All", new System.Action(this.OnUguiQuestAssistantAcceptAllClicked));
+                    this.L("Accept All"), new System.Action(this.OnUguiQuestAssistantAcceptAllClicked));
                 PlaceUguiTopLeft(handle.AcceptButton, UguiQaWindowW - 130f, 42f, 118f, 22f);
                 handle.AcceptButton.SetActive(false);
 
@@ -307,7 +307,7 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.SubmitLabel, 12f, 44f, UguiQaWindowW - 150f, 22f);
                 handle.SubmitLabel.SetActive(false);
                 handle.SubmitButton = this.CreateUguiSecondaryButton(body.transform, "SubmitItemsButton",
-                    "Submit Items", new System.Action(this.OnUguiQuestAssistantSubmitItemsClicked));
+                    this.L("Submit Items"), new System.Action(this.OnUguiQuestAssistantSubmitItemsClicked));
                 PlaceUguiTopLeft(handle.SubmitButton, UguiQaWindowW - 130f, 42f, 118f, 22f);
                 handle.SubmitButton.SetActive(false);
 
@@ -337,7 +337,7 @@ namespace HeartopiaMod
 
                 // :240-243 — the empty-state hint inside the (empty) list area.
                 handle.EmptyLabel = this.CreateUguiLabel(scrollContent, "EmptyHint",
-                    "(no active quests — click Refresh)", 10f, statusColor, false);
+                    this.L("(no active quests — click Refresh)"), 10f, statusColor, false);
                 PlaceUguiTopLeft(handle.EmptyLabel, 2f, 2f, UguiQaListRowW, 20f);
                 handle.EmptyLabel.SetActive(false);
 
@@ -351,7 +351,7 @@ namespace HeartopiaMod
 
                 // :301-304 — the no-selection placeholder (same slot as the name; exclusive).
                 handle.DetailPlaceholder = this.CreateUguiLabel(detail.transform, "Placeholder",
-                    "(select a quest above)", 10f, statusColor, false);
+                    this.L("(select a quest above)"), 10f, statusColor, false);
                 PlaceUguiTopLeft(handle.DetailPlaceholder, 6f, 4f, UguiQaDetailInnerW, 20f);
 
                 // :308-311 — bold 12 wrapped quest name.
@@ -508,7 +508,7 @@ namespace HeartopiaMod
                 handle.AcceptShownCount = acceptCount;
                 if (acceptCount > 0)
                 {
-                    this.SetUguiLabelText(handle.AcceptLabel, "Available to accept: " + acceptCount); // :204
+                    this.SetUguiLabelText(handle.AcceptLabel, this.LF("Available to accept: {0}", acceptCount)); // :204
                 }
             }
             if (readyCount != handle.SubmitShownCount)
@@ -516,7 +516,7 @@ namespace HeartopiaMod
                 handle.SubmitShownCount = readyCount;
                 if (readyCount > 0)
                 {
-                    this.SetUguiLabelText(handle.SubmitLabel, "Ready to submit: " + readyCount); // :218
+                    this.SetUguiLabelText(handle.SubmitLabel, this.LF("Ready to submit: {0}", readyCount)); // :218
                 }
             }
 

@@ -486,7 +486,7 @@ namespace HeartopiaMod
             handle.PickerRoot = picker;
 
             handle.PickerHeader = this.CreateUguiLabel(picker.transform, "SelectFoodHeader",
-                "Select Food:", 13f, new Color(1f, 0.85f, 0.4f), false);
+                this.L("Select Food:"), 13f, new Color(1f, 0.85f, 0.4f), false);
             this.TrySetUguiLabelBold(handle.PickerHeader);
 
             Transform listContent;
@@ -511,10 +511,10 @@ namespace HeartopiaMod
             catch { }
 
             handle.PickerEmptyLabel = this.CreateUguiLabel(picker.transform, "NoItemsLabel",
-                "No food items found. Open your bag and try again.", 13f,
+                this.L("No food items found. Open your bag and try again."), 13f,
                 new Color(1f, 0.55f, 0.55f), false);
             handle.PickerScanningLabel = this.CreateUguiLabel(picker.transform, "ScanningLabel",
-                "Open your bag to scan for food items...", 13f,
+                this.L("Open your bag to scan for food items..."), 13f,
                 new Color(1f, 0.85f, 0.4f), false);
 
             handle.PickerSelectedShown = string.Empty;
@@ -522,13 +522,13 @@ namespace HeartopiaMod
                 handle.PickerSelectedShown, 13f, new Color(0.45f, 1f, 0.55f), false);
 
             // Rescan/Done = themePrimaryButtonStyle, Cancel = themeDangerButtonStyle in source
-            // (:983/:991/:1001); labels are RAW there (plain GUI.Button — file header).
+            // (:983/:991/:1001).
             handle.RescanButton = this.CreateUguiPrimaryButton(picker.transform, "RescanButton",
-                "Rescan", new System.Action(this.OnUguiFeaturesFoodRepairRescanClicked));
+                this.L("Rescan"), new System.Action(this.OnUguiFeaturesFoodRepairRescanClicked));
             handle.DoneButton = this.CreateUguiPrimaryButton(picker.transform, "DoneButton",
-                "Done", new System.Action(this.OnUguiFeaturesFoodRepairDoneClicked));
+                this.L("Done"), new System.Action(this.OnUguiFeaturesFoodRepairDoneClicked));
             handle.CancelButton = this.CreateUguiDangerButton(picker.transform, "CancelButton",
-                "Cancel", new System.Action(this.OnUguiFeaturesFoodRepairCancelClicked));
+                this.L("Cancel"), new System.Action(this.OnUguiFeaturesFoodRepairCancelClicked));
 
             this.SyncUguiFeaturesFoodRepairFoodRows(handle);
             handle.LayoutSignature = this.ComputeUguiFeaturesFoodRepairLayoutSignature();

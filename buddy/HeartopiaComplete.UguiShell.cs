@@ -388,15 +388,15 @@ namespace HeartopiaMod
                 };
                 string[][] subTabLabels = new string[][]
                 {
-                    new string[] { "Main", "Building", "Fun", "Privacy", "Game UI", "Game LOD" },
-                    new string[] { "Foraging", "Fishing", "Insects", "Birds" },
-                    new string[] { "Main", "Food & Repair", "Snow Sculpting", "Auto Buy", "Auto Sell", "Mass Cook", "Puzzle", "Pet Care" },
-                    new string[] { "Animal Care", "Daily Quests", this.L("homeland_farm.title"), this.L("pictures.title"), "Ice Skating", this.L("extra.title"), this.L("Sand Sculpture"), "Sea Clean" },
-                    new string[] { "Main", "Settings" },
-                    new string[] { "Home", "Animal Care", "NPCs", "Locations", "Events", "House", "Custom", "XYZ", "Spawn Vehicle" },
+                    new string[] { this.L("Main"), this.L("Building"), this.L("Fun"), this.L("Privacy"), this.L("Game UI"), this.L("Game LOD") },
+                    new string[] { this.L("Foraging"), this.L("Fishing"), this.L("Insects"), this.L("Birds") },
+                    new string[] { this.L("Main"), this.L("Food & Repair"), this.L("Snow Sculpting"), this.L("Auto Buy"), this.L("Auto Sell"), this.L("Mass Cook"), this.L("Puzzle"), this.L("Pet Care") },
+                    new string[] { this.L("Animal Care"), this.L("Daily Quests"), this.L("homeland_farm.title"), this.L("pictures.title"), this.L("Ice Skating"), this.L("extra.title"), this.L("Sand Sculpture"), this.L("Sea Clean") },
+                    new string[] { this.L("Main"), this.L("Settings") },
+                    new string[] { this.L("Home"), this.L("Animal Care"), this.L("NPCs"), this.L("Locations"), this.L("Events"), this.L("House"), this.L("Custom"), this.L("XYZ"), this.L("Spawn Vehicle") },
                     new string[0], // Bag / Warehouse — no sub-tabs
                     new string[0], // Research — no sub-tabs
-                    new string[] { "Main", "Keybinds", "UI Theme", "About", "Logging" }
+                    new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging") }
                 };
 
                 shell = new UguiShellHandle();
@@ -537,8 +537,8 @@ namespace HeartopiaMod
                                 // (HeartopiaComplete.UguiSettingsMainContent.cs); round 4:
                                 // Self→Building (HeartopiaComplete.UguiBuildingContent.cs);
                                 // round 5: Self's other four sub-tabs
-                                // (HeartopiaComplete.UguiSelfContent.cs); every other cell stays
-                                // a placeholder.
+                                // (HeartopiaComplete.UguiSelfContent.cs). The migration is
+                                // complete: every cell has a real builder.
                                 if (i == UguiShellSelfTabIndex && j == UguiShellSelfBuildingSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSelfBuildingContent(
@@ -782,12 +782,9 @@ namespace HeartopiaMod
                                     subContents[j] = this.BuildUguiShellFeaturesPetCareContent(
                                         container.transform, 0f, 36f, contentColW, contentH - 36f);
                                 }
-                                else
-                                {
-                                    subContents[j] = this.BuildUguiShellPlaceholder(
-                                        container.transform, tabLabels[i], subs[j],
-                                        0f, 36f, contentColW, contentH - 36f);
-                                }
+                                // Every sub cell has a real builder above (the migration is
+                                // complete); an unmatched cell would simply stay null, which the
+                                // kit tab bar tolerates (null-checked before SetActive).
                             }
                             // One flat kit tab bar per main tab; width per label like the IMGUI
                             // segmented control (Teleport's 9 labels can't fit uniformly).
@@ -811,10 +808,8 @@ namespace HeartopiaMod
                             {
                                 this.BuildUguiShellBagWarehouseContent(container.transform, 0f, 0f, contentColW, contentH);
                             }
-                            else
-                            {
-                                this.BuildUguiShellPlaceholder(container.transform, tabLabels[i], null, 0f, 0f, contentColW, contentH);
-                            }
+                            // Every sub-less tab has a real builder above (the migration is
+                            // complete); an unmatched tab would simply show an empty container.
                             shell.SubTabBars.Add(null);
                         }
                     }
@@ -867,22 +862,6 @@ namespace HeartopiaMod
                 catch { }
                 this.uguiShell = null;
             }
-        }
-
-        // Placeholder content block (Phase 3 replaces these with real migrated tab content).
-        private GameObject BuildUguiShellPlaceholder(Transform parent, string tabLabel, string subTabLabel,
-            float x, float y, float w, float h)
-        {
-            GameObject block = this.CreateUguiGo("Placeholder_" + (subTabLabel ?? "Main"), parent);
-            PlaceUguiTopLeft(block, x, y, w, h);
-            this.AddUguiImage(block, this.UguiKitContentBg(), true, 1f);
-
-            string what = string.IsNullOrEmpty(subTabLabel) ? tabLabel : (tabLabel + " / " + subTabLabel);
-            GameObject title = this.CreateUguiBodyLabel(block.transform, "What", "Content for: " + what, 14f);
-            PlaceUguiTopLeft(title, 16f, 12f, w - 32f, 22f);
-            GameObject note = this.CreateUguiMutedLabel(block.transform, "Note", "Placeholder — real content migrates here in Phase 3.", 12f);
-            PlaceUguiTopLeft(note, 16f, 38f, w - 32f, 18f);
-            return block;
         }
 
         // Persistent LIVE rail — UGUI mirror of DrawQuickStatusPanel (UiKitPrimitives.cs:1157):

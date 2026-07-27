@@ -377,7 +377,7 @@ namespace HeartopiaMod
             Color accent = this.UguiKitAccent();
 
             // -------- Header (:236) --------
-            GameObject header = this.CreateUguiLabel(scrollContent, "Header", "PET CARE", 15f, Color.white, false);
+            GameObject header = this.CreateUguiLabel(scrollContent, "Header", this.L("PET CARE"), 15f, Color.white, false);
             this.TrySetUguiLabelBold(header);
             PlaceUguiTopLeft(header, rowX, 8f, rowW, 30f);
 
@@ -385,7 +385,7 @@ namespace HeartopiaMod
             GameObject trainCard = this.CreateUguiGo("TrainingCard", scrollContent);
             PlaceUguiTopLeft(trainCard, rowX, 50f, rowW, 160f);
             this.AddUguiImage(trainCard, this.UguiKitPanelBg(), true, 1f);
-            GameObject trainTitle = this.CreateUguiLabel(trainCard.transform, "Title", "TRAINING", 12f, textColor, false);
+            GameObject trainTitle = this.CreateUguiLabel(trainCard.transform, "Title", this.L("TRAINING"), 12f, textColor, false);
             this.TrySetUguiLabelBold(trainTitle);
             PlaceUguiTopLeft(trainTitle, 16f, 12f, 180f, 20f);
 
@@ -406,7 +406,7 @@ namespace HeartopiaMod
             // -------- MY PETS card (:270-377 — dynamic height via relayout) --------
             handle.PetsCard = this.CreateUguiGo("PetsCard", scrollContent);
             this.AddUguiImage(handle.PetsCard, this.UguiKitPanelBg(), true, 1f);
-            GameObject petsTitle = this.CreateUguiLabel(handle.PetsCard.transform, "Title", "MY PETS", 12f, textColor, false);
+            GameObject petsTitle = this.CreateUguiLabel(handle.PetsCard.transform, "Title", this.L("MY PETS"), 12f, textColor, false);
             this.TrySetUguiLabelBold(petsTitle);
             PlaceUguiTopLeft(petsTitle, 16f, 12f, 130f, 20f);
             handle.PetsStatusShown = this.petCareListStatus ?? string.Empty;
@@ -414,7 +414,7 @@ namespace HeartopiaMod
                 handle.PetsStatusShown, 11f, textColor, false);
             PlaceUguiTopLeft(handle.PetsStatusLabel, 150f, 14f, rowW - 166f, 16f); // :284
 
-            handle.RefreshShown = this.petCareListVisible ? "Refresh" : "Show My Pets";
+            handle.RefreshShown = this.petCareListVisible ? this.L("Refresh") : this.L("Show My Pets");
             handle.RefreshButton = this.CreateUguiPrimaryButton(handle.PetsCard.transform, "RefreshButton",
                 handle.RefreshShown, new System.Action(this.OnUguiFeaturesPetCareRefreshClicked));
             PlaceUguiTopLeft(handle.RefreshButton, 16f, 38f, 160f, 30f); // :286
@@ -425,18 +425,18 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.TrainLoopToggle.gameObject, 16f, 74f, rowW - 32f, 28f); // :294-297
 
             handle.PetsEmptyLabel = this.CreateUguiLabel(handle.PetsCard.transform, "EmptyLabel",
-                "No owned pets found nearby.", 11f, textColor, false);
+                this.L("No owned pets found nearby."), 11f, textColor, false);
             PlaceUguiTopLeft(handle.PetsEmptyLabel, 16f, 110f, rowW - 32f, 18f); // :322
             handle.PetsEmptyLabel.SetActive(false);
 
             // -------- PET FOOD card (:379-588 — dynamic height via relayout) --------
             handle.FoodCard = this.CreateUguiGo("FoodCard", scrollContent);
             this.AddUguiImage(handle.FoodCard, this.UguiKitPanelBg(), true, 1f);
-            GameObject foodTitle = this.CreateUguiLabel(handle.FoodCard.transform, "Title", "PET FOOD", 12f, textColor, false);
+            GameObject foodTitle = this.CreateUguiLabel(handle.FoodCard.transform, "Title", this.L("PET FOOD"), 12f, textColor, false);
             this.TrySetUguiLabelBold(foodTitle);
             PlaceUguiTopLeft(foodTitle, 16f, 12f, 180f, 20f);
 
-            GameObject foodCaption = this.CreateUguiLabel(handle.FoodCard.transform, "Caption", "Pet Food", 12f, textColor, false);
+            GameObject foodCaption = this.CreateUguiLabel(handle.FoodCard.transform, "Caption", this.L("Pet Food"), 12f, textColor, false);
             this.TrySetUguiLabelBold(foodCaption);
             PlaceUguiTopLeft(foodCaption, 16f, 45f, 72f, 20f); // :423 — foodY + 5
 
@@ -476,7 +476,7 @@ namespace HeartopiaMod
             arrowRt.anchoredPosition = new Vector2(-8f, 0f);
             arrowRt.sizeDelta = new Vector2(16f, 26f);
 
-            handle.ScanShown = "Scan Food";
+            handle.ScanShown = this.L("Scan Food");
             handle.ScanButton = this.CreateUguiPrimaryButton(handle.FoodCard.transform, "ScanButton",
                 handle.ScanShown, new System.Action(this.OnUguiFeaturesPetCareScanFoodClicked));
             PlaceUguiTopLeft(handle.ScanButton, rowW - 116f, 40f, 100f, 28f); // :445
@@ -497,7 +497,7 @@ namespace HeartopiaMod
             // Placeholder (:470-481): sibling label OVER the field (raycastTarget=false from the
             // kit), italic, uiText@0.48, active only while the field is empty (file header).
             handle.FoodSearchPlaceholder = this.CreateUguiLabel(handle.FoodPanel.transform, "SearchPlaceholder",
-                "Search pet food...", 12f,
+                this.L("Search pet food..."), 12f,
                 new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.48f), false);
             this.TrySetUguiFeaturesPetCareLabelItalic(handle.FoodSearchPlaceholder);
             PlaceUguiTopLeft(handle.FoodSearchPlaceholder, 17f, 7f, panelW - 34f, 24f); // :480
@@ -530,7 +530,7 @@ namespace HeartopiaMod
             // -------- FEEDING card (:590-624, 160 tall; position via relayout) --------
             handle.FeedCard = this.CreateUguiGo("FeedCard", scrollContent);
             this.AddUguiImage(handle.FeedCard, this.UguiKitPanelBg(), true, 1f);
-            GameObject feedTitle = this.CreateUguiLabel(handle.FeedCard.transform, "Title", "FEEDING", 12f, textColor, false);
+            GameObject feedTitle = this.CreateUguiLabel(handle.FeedCard.transform, "Title", this.L("FEEDING"), 12f, textColor, false);
             this.TrySetUguiLabelBold(feedTitle);
             PlaceUguiTopLeft(feedTitle, 16f, 12f, 180f, 20f);
 
@@ -553,7 +553,7 @@ namespace HeartopiaMod
             // -------- FAVORITE FOODS card (PetFeedFeature.cs:4503-4571 — zero-when-empty) --------
             handle.FavCard = this.CreateUguiGo("FavCard", scrollContent);
             this.AddUguiImage(handle.FavCard, this.UguiKitPanelBg(), true, 1f);
-            GameObject favTitle = this.CreateUguiLabel(handle.FavCard.transform, "Title", "FAVORITE FOODS", 12f, textColor, false);
+            GameObject favTitle = this.CreateUguiLabel(handle.FavCard.transform, "Title", this.L("FAVORITE FOODS"), 12f, textColor, false);
             this.TrySetUguiLabelBold(favTitle);
             PlaceUguiTopLeft(favTitle, 16f, 8f, 220f, 18f); // :4543
 
@@ -563,13 +563,13 @@ namespace HeartopiaMod
             float favColName = 92f;
             float favColLike = (favInnerW - favColName) * 0.52f;
             float favColDislike = favInnerW - favColName - favColLike;
-            GameObject favHeadName = this.CreateUguiLabel(handle.FavCard.transform, "HeadName", "name", 11f, favHeaderColor, false);
+            GameObject favHeadName = this.CreateUguiLabel(handle.FavCard.transform, "HeadName", this.L("name"), 11f, favHeaderColor, false);
             this.TrySetUguiLabelBold(favHeadName);
             PlaceUguiTopLeft(favHeadName, 16f, 30f, favColName, 22f); // :4547
-            GameObject favHeadLike = this.CreateUguiLabel(handle.FavCard.transform, "HeadLike", "like", 11f, favHeaderColor, false);
+            GameObject favHeadLike = this.CreateUguiLabel(handle.FavCard.transform, "HeadLike", this.L("like"), 11f, favHeaderColor, false);
             this.TrySetUguiLabelBold(favHeadLike);
             PlaceUguiTopLeft(favHeadLike, 16f + favColName, 30f, favColLike, 22f);
-            GameObject favHeadDislike = this.CreateUguiLabel(handle.FavCard.transform, "HeadDislike", "dislike", 11f, favHeaderColor, false);
+            GameObject favHeadDislike = this.CreateUguiLabel(handle.FavCard.transform, "HeadDislike", this.L("dislike"), 11f, favHeaderColor, false);
             this.TrySetUguiLabelBold(favHeadDislike);
             PlaceUguiTopLeft(favHeadDislike, 16f + favColName + favColLike, 30f, favColDislike, 22f);
 
@@ -706,14 +706,14 @@ namespace HeartopiaMod
             // otherwise (all themePrimaryButtonStyle in source). Closures capture the ROW HANDLE —
             // BoundEntry is rebound every frame, so clicks always act on the live entry.
             UguiPetCarePetRowHandle captured = row;
-            row.StopButton = this.CreateUguiPrimaryButton(root.transform, "StopButton", "Stop",
+            row.StopButton = this.CreateUguiPrimaryButton(root.transform, "StopButton", this.L("Stop"),
                 new System.Action(() => this.OnUguiFeaturesPetCarePetStopClicked(captured)));
             PlaceUguiTopLeft(row.StopButton, rowW - 96f, 0f, 80f, 26f); // :358
             row.StopButton.SetActive(false);
-            row.PlayButton = this.CreateUguiPrimaryButton(root.transform, "PlayButton", "Play",
+            row.PlayButton = this.CreateUguiPrimaryButton(root.transform, "PlayButton", this.L("Play"),
                 new System.Action(() => this.OnUguiFeaturesPetCarePetPlayClicked(captured)));
             PlaceUguiTopLeft(row.PlayButton, rowW - 180f, 0f, 80f, 26f); // :366
-            row.WashButton = this.CreateUguiPrimaryButton(root.transform, "WashButton", "Wash",
+            row.WashButton = this.CreateUguiPrimaryButton(root.transform, "WashButton", this.L("Wash"),
                 new System.Action(() => this.OnUguiFeaturesPetCarePetWashClicked(captured)));
             PlaceUguiTopLeft(row.WashButton, rowW - 96f, 0f, 80f, 26f); // :370
 
@@ -1140,7 +1140,7 @@ namespace HeartopiaMod
                 // MY PETS live pieces: status label (:284) + the caption swap (:286).
                 this.SyncUguiSelfLabelText(handle.PetsStatusLabel, ref handle.PetsStatusShown,
                     this.petCareListStatus ?? string.Empty);
-                string refreshText = this.petCareListVisible ? "Refresh" : "Show My Pets";
+                string refreshText = this.petCareListVisible ? this.L("Refresh") : this.L("Show My Pets");
                 if (!string.Equals(refreshText, handle.RefreshShown, StringComparison.Ordinal))
                 {
                     handle.RefreshShown = refreshText;
@@ -1163,7 +1163,7 @@ namespace HeartopiaMod
                 bool canScanPetFood = !this.petFeedFoodScanInProgress
                     && now >= this.petFeedNextFoodScanAllowedAt;
                 this.SetUguiButtonInteractable(handle.ScanButton, canScanPetFood);
-                string scanText = canScanPetFood ? "Scan Food" : "Wait...";
+                string scanText = canScanPetFood ? this.L("Scan Food") : this.L("Wait...");
                 if (!string.Equals(scanText, handle.ScanShown, StringComparison.Ordinal))
                 {
                     handle.ScanShown = scanText;

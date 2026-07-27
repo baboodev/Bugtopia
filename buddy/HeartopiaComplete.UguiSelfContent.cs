@@ -304,9 +304,9 @@ namespace HeartopiaMod
             handle.AnalogMoveToggle = this.CreateUguiCheckbox(scrollContent, "AnalogMoveToggle",
                 this.L("Analog Move (gamepad stick)"), this.analogMoveBridgeEnabled,
                 new System.Action<bool>(this.OnUguiSelfAnalogMoveToggled));
-            // Static help line — unlocalized in the IMGUI drawer (raw GUI.Label), kept verbatim.
+            // Static help line.
             handle.AnalogMoveHint = this.CreateUguiLabel(scrollContent, "AnalogMoveHint",
-                "Drives the character from the gamepad left stick (and WASD).",
+                this.L("Drives the character from the gamepad left stick (and WASD)."),
                 11f, new Color(muted.r, muted.g, muted.b, 0.85f), false);
             this.TrySetUguiLabelWrapped(handle.AnalogMoveHint);
 
@@ -1270,8 +1270,8 @@ namespace HeartopiaMod
             Color counterColor = new Color(muted.r, muted.g, muted.b, 0.9f); // IMGUI labelStyle 0.9 alpha
             float yCur = 12f;
 
-            // IMGUI header: "Privacy", bold 13, header color, unlocalized.
-            GameObject header = this.CreateUguiHeaderLabel(block.transform, "Header", "Privacy", 13f);
+            // IMGUI header: "Privacy", bold 13, header color.
+            GameObject header = this.CreateUguiHeaderLabel(block.transform, "Header", this.L("Privacy"), 13f);
             PlaceUguiTopLeft(header, pad, yCur, rowW, 22f);
             yCur += 28f;
 
@@ -1580,7 +1580,7 @@ namespace HeartopiaMod
         {
             Array.Copy(GameUiTimingGameDefaults, this.gameUiTimingSeconds, this.gameUiTimingSeconds.Length);
             try { this.SaveKeybinds(false); } catch { }
-            this.AddMenuNotification("UI timings reset to game defaults", new Color(0.45f, 0.85f, 1f));
+            this.AddMenuNotification(this.L("UI timings reset to game defaults"), new Color(0.45f, 0.85f, 1f));
         }
     }
 }

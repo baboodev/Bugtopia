@@ -272,25 +272,25 @@ namespace HeartopiaMod
                 this.L("craft.open"), new System.Action(this.OnUguiExtraOpenCraftClicked));
             PlaceUguiTopLeft(craftButton, 8f, 42f, 200f, 34f);
 
-            // ==================== Part 2 — Carpet Stamp (UNLOCALIZED literals) ====================
+            // ==================== Part 2 — Carpet Stamp ====================
 
             // CarpetStampFeature.cs:470-472.
             GameObject carpetHeader = this.CreateUguiLabel(scrollContent, "CarpetHeader",
-                "Carpet Stamp (Slippery Rug)", 14f, headerColor, false);
+                this.L("Carpet Stamp (Slippery Rug)"), 14f, headerColor, false);
             this.TrySetUguiLabelBold(carpetHeader);
             PlaceUguiTopLeft(carpetHeader, 8f, 84f, 460f, 24f);
 
             // :475 — a plain default GUI.Label → kit body label (the Radar credits mapping).
             GameObject carpetHint = this.CreateUguiBodyLabel(scrollContent, "CarpetHint",
-                "Scan party carpets on the map, send a single step-on (server speed buff).", 13f);
+                this.L("Scan party carpets on the map, send a single step-on (server speed buff)."), 13f);
             PlaceUguiTopLeft(carpetHint, 8f, 112f, panelW, 20f);
 
             // :478-483 primary Scan / :485 plain-button Step On Nearest → Secondary tier.
             GameObject scanButton = this.CreateUguiPrimaryButton(scrollContent, "ScanCarpetsButton",
-                "Scan Carpets", new System.Action(this.OnUguiExtraCarpetScanClicked));
+                this.L("Scan Carpets"), new System.Action(this.OnUguiExtraCarpetScanClicked));
             PlaceUguiTopLeft(scanButton, 8f, 136f, 200f, 30f);
             GameObject stepNearestButton = this.CreateUguiSecondaryButton(scrollContent, "StepOnNearestButton",
-                "Step On Nearest", new System.Action(this.OnUguiExtraCarpetStepOnNearestClicked));
+                this.L("Step On Nearest"), new System.Action(this.OnUguiExtraCarpetStepOnNearestClicked));
             PlaceUguiTopLeft(stepNearestButton, 218f, 136f, 200f, 30f);
 
             // :514 — live status line ("Status: " prefix is a source literal).
@@ -588,7 +588,7 @@ namespace HeartopiaMod
                             }
                         });
                     GameObject scanOnly = this.CreateUguiBodyLabel(row.Root.transform, "ScanOnly",
-                        "(scan only)", 12f);
+                        this.L("(scan only)"), 12f);
                     PlaceUguiTopLeft(scanOnly, handle.PanelW - 116f, 0f, 116f, 22f);
                     scanOnly.SetActive(false);
                     handle.CarpetRows.Add(row);

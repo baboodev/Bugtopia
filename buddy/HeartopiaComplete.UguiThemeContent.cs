@@ -19,9 +19,9 @@ namespace HeartopiaMod
     //  - Wiring is by STATIC display-position index (UguiShellSettingsTabIndex = 8 +
     //    UguiShellSettingsUiThemeSubIndex = 2 — Settings' sub array {"Main","Keybinds","UI Theme",
     //    "About","Logging"}, matching settingsSubTab == 2, HeartopiaComplete.cs:2425), never by
-    //    localized label comparison. NOTE: DrawUiThemeTab localizes NOTHING — every string here
-    //    ("UI THEME", "DISPLAY", row names, "Current"/"Original", "Hex:", button captions) is a
-    //    plain literal in the source, so this twin keeps them unlocalized too.
+    //    localized label comparison. NOTE: every display string here ("UI THEME", "DISPLAY",
+    //    row names, "Current"/"Original", "Hex:", button captions) goes through L() — the old
+    //    IMGUI-parity "keep unlocalized" rule died with the IMGUI menu.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //
@@ -233,17 +233,17 @@ namespace HeartopiaMod
             float pad = 12f;
             float panelW = handle.ContentWidth - pad * 2f;
 
-            // IMGUI headerStyle here is bold 14 (NOT localized in the source — parity kept).
-            handle.HeaderLabel = this.CreateUguiHeaderLabel(scrollContent, "Title", "UI THEME", 14f);
+            // IMGUI headerStyle here is bold 14.
+            handle.HeaderLabel = this.CreateUguiHeaderLabel(scrollContent, "Title", this.L("UI THEME"), 14f);
 
             // ---------------- DISPLAY ----------------
             // CreateUguiSettingsMainPanel mirrors DrawExentriSectionPanel with the SAME fill/line
             // formula the theme tab passes it — reused, not duplicated (its 11pt header vs the
             // source's 12pt sectionStyle is the accepted sibling-tab look).
-            GameObject display = this.CreateUguiSettingsMainPanel(scrollContent, "DisplayPanel", "DISPLAY");
+            GameObject display = this.CreateUguiSettingsMainPanel(scrollContent, "DisplayPanel", this.L("DISPLAY"));
             handle.DisplayPanel = display;
 
-            handle.ScaleShown = "UI Scale: " + Mathf.RoundToInt(this.uiScale * 100f) + "%";
+            handle.ScaleShown = this.LF("UI Scale: {0}%", Mathf.RoundToInt(this.uiScale * 100f));
             handle.ScaleLabel = this.CreateUguiBodyLabel(display.transform, "ScaleLabel", handle.ScaleShown, 13f);
             PlaceUguiTopLeft(handle.ScaleLabel, 14f, 46f, 150f, 22f);
             handle.ScaleSlider = this.CreateUguiSlider(display.transform, "ScaleSlider",
@@ -265,7 +265,7 @@ namespace HeartopiaMod
             // rect here was sized against. Don't re-add it.
 
             // ---------------- THEME COLORS ----------------
-            GameObject colors = this.CreateUguiSettingsMainPanel(scrollContent, "ColorsPanel", "THEME COLORS");
+            GameObject colors = this.CreateUguiSettingsMainPanel(scrollContent, "ColorsPanel", this.L("THEME COLORS"));
             handle.ColorsPanel = colors;
 
             int initialHighlight = this.uiThemePickerOpen ? this.uiThemeColorTarget : -1;
@@ -286,7 +286,7 @@ namespace HeartopiaMod
                 rowBtn.targetGraphic = rowBg;
                 rowBtn.onClick.AddListener(new System.Action(() => this.OnUguiThemeColorRowClicked(targetCopy)));
 
-                GameObject rowLabel = this.CreateUguiBodyLabel(row.transform, "Label", UguiThemeColorTargetNames[i], 12f);
+                GameObject rowLabel = this.CreateUguiBodyLabel(row.transform, "Label", this.L(UguiThemeColorTargetNames[i]), 12f);
                 PlaceUguiTopLeft(rowLabel, 12f, 4f, 220f, 22f);
 
                 // Swatch (18x18) inside a 24x24 wrap whose white ring is the "picker open on this
@@ -311,11 +311,11 @@ namespace HeartopiaMod
             this.BuildUguiThemePickerArea(handle, colors.transform, panelW);
 
             // ---------------- TRANSPARENCY ----------------
-            GameObject transparency = this.CreateUguiSettingsMainPanel(scrollContent, "TransparencyPanel", "TRANSPARENCY");
+            GameObject transparency = this.CreateUguiSettingsMainPanel(scrollContent, "TransparencyPanel", this.L("TRANSPARENCY"));
             handle.TransparencyPanel = transparency;
 
             float alphaSliderW = panelW - 164f - 52f - 14f - 8f;
-            GameObject windowAlphaLabel = this.CreateUguiBodyLabel(transparency.transform, "WindowAlphaLabel", "Window Alpha", 13f);
+            GameObject windowAlphaLabel = this.CreateUguiBodyLabel(transparency.transform, "WindowAlphaLabel", this.L("Window Alpha"), 13f);
             PlaceUguiTopLeft(windowAlphaLabel, 14f, 44f, 150f, 20f);
             handle.WindowAlphaSlider = this.CreateUguiSlider(transparency.transform, "WindowAlphaSlider",
                 0.15f, 1f, this.uiWindowAlpha, false,
@@ -325,7 +325,7 @@ namespace HeartopiaMod
             handle.WindowAlphaValue = this.CreateUguiBodyLabel(transparency.transform, "WindowAlphaValue", handle.WindowAlphaShown, 12f);
             PlaceUguiTopLeft(handle.WindowAlphaValue, panelW - 14f - 52f, 44f, 52f, 20f);
 
-            GameObject panelAlphaLabel = this.CreateUguiBodyLabel(transparency.transform, "PanelAlphaLabel", "Panel Alpha", 13f);
+            GameObject panelAlphaLabel = this.CreateUguiBodyLabel(transparency.transform, "PanelAlphaLabel", this.L("Panel Alpha"), 13f);
             PlaceUguiTopLeft(panelAlphaLabel, 14f, 78f, 150f, 20f);
             handle.PanelAlphaSlider = this.CreateUguiSlider(transparency.transform, "PanelAlphaSlider",
                 0.15f, 1f, this.uiPanelAlpha, false,
@@ -335,7 +335,7 @@ namespace HeartopiaMod
             handle.PanelAlphaValue = this.CreateUguiBodyLabel(transparency.transform, "PanelAlphaValue", handle.PanelAlphaShown, 12f);
             PlaceUguiTopLeft(handle.PanelAlphaValue, panelW - 14f - 52f, 78f, 52f, 20f);
 
-            GameObject contentAlphaLabel = this.CreateUguiBodyLabel(transparency.transform, "ContentAlphaLabel", "Content Alpha", 13f);
+            GameObject contentAlphaLabel = this.CreateUguiBodyLabel(transparency.transform, "ContentAlphaLabel", this.L("Content Alpha"), 13f);
             PlaceUguiTopLeft(contentAlphaLabel, 14f, 112f, 150f, 20f);
             handle.ContentAlphaSlider = this.CreateUguiSlider(transparency.transform, "ContentAlphaSlider",
                 0.15f, 1f, this.uiContentAlpha, false,
@@ -349,13 +349,13 @@ namespace HeartopiaMod
             // Panel-only card in the source (no section header) — same panel chrome, no title.
             GameObject action = this.CreateUguiSettingsMainPanel(scrollContent, "ActionPanel", "");
             handle.ActionPanel = action;
-            GameObject saveBtn = this.CreateUguiPrimaryButton(action.transform, "SaveButton", "Save",
+            GameObject saveBtn = this.CreateUguiPrimaryButton(action.transform, "SaveButton", this.L("Save"),
                 new System.Action(this.OnUguiThemeSaveClicked));
             PlaceUguiTopLeft(saveBtn, 14f, 17f, 130f, 32f);
-            GameObject loadBtn = this.CreateUguiSecondaryButton(action.transform, "LoadButton", "Load",
+            GameObject loadBtn = this.CreateUguiSecondaryButton(action.transform, "LoadButton", this.L("Load"),
                 new System.Action(this.OnUguiThemeLoadClicked));
             PlaceUguiTopLeft(loadBtn, 154f, 17f, 130f, 32f);
-            GameObject resetBtn = this.CreateUguiDangerButton(action.transform, "ResetButton", "Reset",
+            GameObject resetBtn = this.CreateUguiDangerButton(action.transform, "ResetButton", this.L("Reset"),
                 new System.Action(this.OnUguiThemeResetClicked));
             PlaceUguiTopLeft(resetBtn, 294f, 17f, 130f, 32f);
 
@@ -423,7 +423,7 @@ namespace HeartopiaMod
             Color initialOpaque = initialColor;
             initialOpaque.a = 1f;
 
-            GameObject currentLabel = this.CreateUguiBodyLabel(picker.transform, "CurrentLabel", "Current", 12f);
+            GameObject currentLabel = this.CreateUguiBodyLabel(picker.transform, "CurrentLabel", this.L("Current"), 12f);
             PlaceUguiTopLeft(currentLabel, previewX, 8f, 100f, 16f);
             GameObject currentSwatch = this.CreateUguiGo("CurrentSwatch", picker.transform);
             PlaceUguiTopLeft(currentSwatch, previewX, 26f, 72f, 64f);
@@ -433,7 +433,7 @@ namespace HeartopiaMod
 
             Color initialOriginal = this.uguiThemeOriginalValid ? this.uguiThemeOriginalColor : initialOpaque;
             initialOriginal.a = 1f;
-            GameObject originalLabel = this.CreateUguiBodyLabel(picker.transform, "OriginalLabel", "Original", 12f);
+            GameObject originalLabel = this.CreateUguiBodyLabel(picker.transform, "OriginalLabel", this.L("Original"), 12f);
             PlaceUguiTopLeft(originalLabel, previewX, 98f, 100f, 16f);
             GameObject originalSwatch = this.CreateUguiGo("OriginalSwatch", picker.transform);
             PlaceUguiTopLeft(originalSwatch, previewX, 116f, 72f, 64f);
@@ -451,12 +451,12 @@ namespace HeartopiaMod
 
             // Hex row — click-time-read InputField (Teleport XYZ precedent): value read on Apply,
             // external changes (drags rewrite uiThemeHexInput) re-synced via the Seen cache.
-            GameObject hexLabel = this.CreateUguiBodyLabel(picker.transform, "HexLabel", "Hex:", 12f);
+            GameObject hexLabel = this.CreateUguiBodyLabel(picker.transform, "HexLabel", this.L("Hex:"), 12f);
             PlaceUguiTopLeft(hexLabel, 14f, 234f, 40f, 22f);
             handle.HexField = this.CreateUguiInputField(picker.transform, "HexField", this.uiThemeHexInput, 0, null);
             PlaceUguiTopLeft(handle.HexField.gameObject, 56f, 232f, 140f, 26f);
             handle.HexSeen = this.uiThemeHexInput;
-            GameObject applyBtn = this.CreateUguiSecondaryButton(picker.transform, "ApplyButton", "Apply",
+            GameObject applyBtn = this.CreateUguiSecondaryButton(picker.transform, "ApplyButton", this.L("Apply"),
                 new System.Action(this.OnUguiThemeHexApplyClicked));
             PlaceUguiTopLeft(applyBtn, 204f, 232f, 78f, 26f);
         }
@@ -819,7 +819,7 @@ namespace HeartopiaMod
 
         private void SyncUguiThemeControls(UguiShellThemeHandle handle)
         {
-            string scaleText = "UI Scale: " + Mathf.RoundToInt(this.uiScale * 100f) + "%";
+            string scaleText = this.LF("UI Scale: {0}%", Mathf.RoundToInt(this.uiScale * 100f));
             if (!string.Equals(scaleText, handle.ScaleShown, StringComparison.Ordinal))
             {
                 handle.ScaleShown = scaleText;

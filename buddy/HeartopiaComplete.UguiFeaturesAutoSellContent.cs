@@ -115,10 +115,10 @@ namespace HeartopiaMod
     //    internally → ONE this.L each ("Auto", "Festival For Tokens", "Sell Whole Stack",
     //    "Sell Every Match", "Match Similar Items", "Hide Item List", "Sell Selected",
     //    "Scan Items", "Open Sell Panel", "Open Token Sell"); explicit L("Clear");
-    //    LF("Interval: {0:F0}s"/"Cap: {0}"/"Keep Per Item: {0}"/"{0} Items ({1})"). Everything
-    //    else ("Match Item", the examples line, star info, sell-mode help, "Cap: ignored",
-    //    "Status", every status/hint/summary string, the dropdown options) is RAW in source and
-    //    stays raw.
+    //    LF("Interval: {0:F0}s"/"Cap: {0}"/"Keep Per Item: {0}"/"{0} Items ({1})"); "Match Item"
+    //    and "Status" are localized too. Everything else (the examples line — literal item keys —
+    //    star info, sell-mode help, "Cap: ignored", every status/hint/summary string, the
+    //    dropdown options) is RAW in source and stays raw.
     //  - Narrow-panel adaptation (contentColW 484 vs the source's 580px panel — the Bag/Warehouse
     //    precedent): row ORDER, heights and y-advances are the source's; column x/widths scale to
     //    panelW (left/right settings columns 205 each, cells (panelW-22)/6 wide instead of 92).
@@ -393,7 +393,7 @@ namespace HeartopiaMod
             float colRightW = panelW - colRightX - 12f;
 
             GameObject matchLabel = this.CreateUguiLabel(setCard.transform, "MatchItemLabel",
-                "Match Item", 12f, textColor, false);                             // raw in source (:141)
+                this.L("Match Item"), 12f, textColor, false);
             this.TrySetUguiLabelBold(matchLabel);
             PlaceUguiTopLeft(matchLabel, 12f, 9f, colW, 20f);
             handle.MatchKeySeen = this.autoSellItemKey ?? string.Empty;
@@ -498,7 +498,7 @@ namespace HeartopiaMod
             this.AddUguiImage(statusCard, this.UguiKitPanelBg(), true, 1f);
             this.AddUguiRingOverlay(statusCard, handle.RingNormal, 1f);
             GameObject statusCaption = this.CreateUguiLabel(statusCard.transform, "Caption",
-                "Status", 12f, textColor, false);                                 // raw in source (:248)
+                this.L("Status"), 12f, textColor, false);
             this.TrySetUguiLabelBold(statusCaption);
             PlaceUguiTopLeft(statusCaption, 12f, 7f, 62f, 18f);
             handle.StatusShown = this.autoSellStatus ?? "Idle";

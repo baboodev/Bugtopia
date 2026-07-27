@@ -194,9 +194,9 @@ namespace HeartopiaMod
             Color cardRing = new Color(1f, 1f, 1f,
                 Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f));
 
-            // -------- Header (:90-91 — UNLOCALIZED literal, bold 15 WHITE) --------
+            // -------- Header (:90-91 — bold 15 WHITE) --------
             GameObject header = this.CreateUguiLabel(scrollContent, "Header",
-                "PUZZLE", 15f, Color.white, false);
+                this.L("PUZZLE"), 15f, Color.white, false);
             this.TrySetUguiLabelBold(header);
             PlaceUguiTopLeft(header, 8f, 8f, panelW, 30f);
 
@@ -223,7 +223,7 @@ namespace HeartopiaMod
             this.AddUguiRingOverlay(statusCard, cardRing, 1f);
 
             GameObject statusCaption = this.CreateUguiLabel(statusCard.transform, "Caption",
-                "STATUS", 11f, mutedColor, false);
+                this.L("STATUS"), 11f, mutedColor, false);
             this.TrySetUguiLabelBold(statusCaption);
             PlaceUguiTopLeft(statusCaption, 12f, 8f, panelW - 24f, 18f);
 

@@ -300,8 +300,7 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiTransferFullStackChanged));
             PlaceUguiTopLeft(handle.FullStackToggle.gameObject, pad + toggleW + 12f, 186f, toggleW, 24f);
 
-            // Batch bar (conditional — positioned by relayout). "Clear batch" is raw text in the
-            // IMGUI drawer (no L()), so it stays raw here.
+            // Batch bar (conditional — positioned by relayout).
             handle.BatchBar = this.CreateUguiGo("BatchBar", block.transform);
             this.AddUguiImage(handle.BatchBar, this.UguiKitPanelBg(), true, 1f);
             this.AddUguiRingOverlay(handle.BatchBar, handle.RingNormal, 1f);
@@ -309,7 +308,7 @@ namespace HeartopiaMod
             this.TrySetUguiLabelBold(handle.BatchLabel);
             PlaceUguiTopLeft(handle.BatchLabel, 12f, 8f, innerW - 140f, 20f);
             GameObject clearBatchBtn = this.CreateUguiSecondaryButton(handle.BatchBar.transform, "ClearBatch",
-                "Clear batch", new System.Action(this.OnUguiTransferClearBatchClicked));
+                this.L("Clear batch"), new System.Action(this.OnUguiTransferClearBatchClicked));
             PlaceUguiTopLeft(clearBatchBtn, innerW - 118f, 5f, 106f, 24f);
             handle.BatchBar.SetActive(false);
 

@@ -308,19 +308,19 @@ namespace HeartopiaMod
 
             // -------- Header (:4056 — bold 14; source 520 → panelW) --------
             GameObject botHeader = this.CreateUguiLabel(scrollContent, "BotHeader",
-                "Auto Ice Skating (bot)", 14f, textColor, false);
+                this.L("Auto Ice Skating (bot)"), 14f, textColor, false);
             this.TrySetUguiLabelBold(botHeader);
             PlaceUguiTopLeft(botHeader, 8f, 122f, panelW, 24f);
 
             // -------- Master toggle (:4059-4084 — the cascade lives in the handler) --------
             handle.AutoToggle = this.CreateUguiCheckbox(scrollContent, "AutoIceSkating",
-                "Auto Ice Skating", this.autoIceSkatingEnabled,
+                this.L("Auto Ice Skating"), this.autoIceSkatingEnabled,
                 new System.Action<bool>(this.OnUguiIceSkatingAutoToggled));
             PlaceUguiTopLeft(handle.AutoToggle.gameObject, 8f, 150f, panelW, 28f);
 
             // -------- Static hint (:4087-4089 — fontSize 14 wordWrap, 520x44 → panelW) --------
             GameObject hint = this.CreateUguiLabel(scrollContent, "Hint",
-                "Automatically chains skate tricks at perfect timing. You still control movement.",
+                this.L("Automatically chains skate tricks at perfect timing. You still control movement."),
                 14f, textColor, false);
             this.TrySetUguiLabelWrapped(hint);
             PlaceUguiTopLeft(hint, 8f, 186f, panelW, 44f);
@@ -338,22 +338,22 @@ namespace HeartopiaMod
 
             // -------- Four flag+save toggles (:4110-4158) --------
             handle.OnlyX2Toggle = this.CreateUguiCheckbox(scrollContent, "OnlyX2Ultimate",
-                "Only x2 ultimate (skip x1)", this.autoIceSkatingOnlyX2Ultimate,
+                this.L("Only x2 ultimate (skip x1)"), this.autoIceSkatingOnlyX2Ultimate,
                 new System.Action<bool>(this.OnUguiIceSkatingOnlyX2Toggled));
             PlaceUguiTopLeft(handle.OnlyX2Toggle.gameObject, 8f, 288f, panelW, 28f);
 
             handle.Last30sToggle = this.CreateUguiCheckbox(scrollContent, "Last30sUltimate",
-                "Last 30s ultimate (x1 when timer < 30s)", this.autoIceSkatingLast30sUltimate,
+                this.L("Last 30s ultimate (x1 when timer < 30s)"), this.autoIceSkatingLast30sUltimate,
                 new System.Action<bool>(this.OnUguiIceSkatingLast30sToggled));
             PlaceUguiTopLeft(handle.Last30sToggle.gameObject, 8f, 320f, panelW, 28f);
 
             handle.PerfectMoveToggle = this.CreateUguiCheckbox(scrollContent, "PerfectMove",
-                "Perfect move (off: chain moves as soon as available)", this.autoIceSkatingPerfectMove,
+                this.L("Perfect move (off: chain moves as soon as available)"), this.autoIceSkatingPerfectMove,
                 new System.Action<bool>(this.OnUguiIceSkatingPerfectMoveToggled));
             PlaceUguiTopLeft(handle.PerfectMoveToggle.gameObject, 8f, 352f, panelW, 28f);
 
             handle.PreferNewToggle = this.CreateUguiCheckbox(scrollContent, "PreferNewMove",
-                "Prefer new move (prioritize unused tricks)", this.autoIceSkatingPreferNewMove,
+                this.L("Prefer new move (prioritize unused tricks)"), this.autoIceSkatingPreferNewMove,
                 new System.Action<bool>(this.OnUguiIceSkatingPreferNewToggled));
             PlaceUguiTopLeft(handle.PreferNewToggle.gameObject, 8f, 384f, panelW, 28f);
 

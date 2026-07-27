@@ -405,12 +405,12 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(handle.Status3Label);
             PlaceUguiTopLeft(handle.Status3Label, 8f, 432f, panelW, 28f);
 
-            // ==================== Part 4 — Quest Assistant (UNLOCALIZED literals) ====================
+            // ==================== Part 4 — Quest Assistant ====================
 
             // :1233-1235 — bold 14 uiText header (NOT the kit header color); dispatcher's +40
             // gap puts it at 508.
             GameObject qaHeader = this.CreateUguiLabel(scrollContent, "QaHeader",
-                "Quest Assistant", 14f, headerColor, false);
+                this.L("Quest Assistant"), 14f, headerColor, false);
             this.TrySetUguiLabelBold(qaHeader);
             PlaceUguiTopLeft(qaHeader, 8f, 508f, 460f, 24f);
 
@@ -419,12 +419,12 @@ namespace HeartopiaMod
             // the window toggle (plain GUI.skin.button → Secondary, ALWAYS enabled, caption
             // swaps on questAssistantWindowVisible).
             handle.DumpButton = this.CreateUguiPrimaryButton(scrollContent, "DumpQuestsButton",
-                "Dump Active Quests", new System.Action(this.OnUguiDailyQuestsDumpClicked));
+                this.L("Dump Active Quests"), new System.Action(this.OnUguiDailyQuestsDumpClicked));
             PlaceUguiTopLeft(handle.DumpButton, 8f, UguiDailyQuestsQaRow1Y, 200f, 32f);
             this.SetUguiButtonInteractable(handle.DumpButton, !this.questAssistantBusy);
 
             handle.WindowButton = this.CreateUguiSecondaryButton(scrollContent, "WindowToggleButton",
-                this.questAssistantWindowVisible ? "Hide Floating Window" : "Show Floating Window",
+                this.questAssistantWindowVisible ? this.L("Hide Floating Window") : this.L("Show Floating Window"),
                 new System.Action(this.OnUguiDailyQuestsWindowToggleClicked));
             PlaceUguiTopLeft(handle.WindowButton, 218f, UguiDailyQuestsQaRow1Y, 220f, 32f);
             handle.WindowLabelState = this.questAssistantWindowVisible ? 1 : 0;
@@ -433,12 +433,12 @@ namespace HeartopiaMod
             // slots; visibility/labels/gates owned by the sync, the row's 40px advance by the
             // relayout. Both plain GUI.skin.button in source → Secondary tier.
             handle.AcceptAllButton = this.CreateUguiSecondaryButton(scrollContent, "AcceptAllButton",
-                "Accept All (0)", new System.Action(this.OnUguiDailyQuestsAcceptAllClicked));
+                this.L("Accept All (0)"), new System.Action(this.OnUguiDailyQuestsAcceptAllClicked));
             PlaceUguiTopLeft(handle.AcceptAllButton, 8f, UguiDailyQuestsQaRow2Y, 180f, 32f);
             handle.AcceptAllButton.SetActive(false);
 
             handle.SubmitReadyButton = this.CreateUguiSecondaryButton(scrollContent, "SubmitReadyButton",
-                "Submit Ready Items (0)", new System.Action(this.OnUguiDailyQuestsSubmitReadyClicked));
+                this.L("Submit Ready Items (0)"), new System.Action(this.OnUguiDailyQuestsSubmitReadyClicked));
             PlaceUguiTopLeft(handle.SubmitReadyButton, 198f, UguiDailyQuestsQaRow2Y, 200f, 32f);
             handle.SubmitReadyButton.SetActive(false);
 
@@ -451,7 +451,7 @@ namespace HeartopiaMod
             // :1283-1286 — the empty-state hint (source literal; 620x40 role → panelW x40,
             // wrapped — it is ~2 lines at this width; visibility/position owned by the relayout).
             handle.EmptyHintLabel = this.CreateUguiLabel(scrollContent, "QaEmptyHint",
-                "(no active quests resolved yet — click Refresh, then check bugtopia.log for [QuestAssistant] lines)",
+                this.L("(no active quests resolved yet — click Refresh, then check bugtopia.log for [QuestAssistant] lines)"),
                 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.EmptyHintLabel);
             handle.EmptyHintLabel.SetActive(false);
@@ -554,7 +554,7 @@ namespace HeartopiaMod
             {
                 handle.WindowLabelState = windowState;
                 this.SetUguiButtonLabel(handle.WindowButton,
-                    windowState == 1 ? "Hide Floating Window" : "Show Floating Window");
+                    windowState == 1 ? this.L("Hide Floating Window") : this.L("Show Floating Window"));
             }
 
             // :1251-1260 — Accept All: visible while the available list is non-empty; the live
@@ -567,7 +567,7 @@ namespace HeartopiaMod
                 handle.AcceptAllShownCount = acceptCount;
                 if (acceptCount > 0)
                 {
-                    this.SetUguiButtonLabel(handle.AcceptAllButton, "Accept All (" + acceptCount + ")");
+                    this.SetUguiButtonLabel(handle.AcceptAllButton, this.LF("Accept All ({0})", acceptCount));
                 }
             }
             this.SetUguiButtonInteractable(handle.AcceptAllButton, this.questAssistantAcceptAllCoroutine == null);
@@ -582,7 +582,7 @@ namespace HeartopiaMod
                 handle.SubmitReadyShownCount = submitCount;
                 if (submitCount > 0)
                 {
-                    this.SetUguiButtonLabel(handle.SubmitReadyButton, "Submit Ready Items (" + submitCount + ")");
+                    this.SetUguiButtonLabel(handle.SubmitReadyButton, this.LF("Submit Ready Items ({0})", submitCount));
                 }
             }
             this.SetUguiButtonInteractable(handle.SubmitReadyButton, !this.QuestAssistantIsDailyQuestSubmitBusy());
@@ -870,7 +870,7 @@ namespace HeartopiaMod
                 {
                     handle.WindowLabelState = windowState;
                     this.SetUguiButtonLabel(handle.WindowButton,
-                        windowState == 1 ? "Hide Floating Window" : "Show Floating Window");
+                        windowState == 1 ? this.L("Hide Floating Window") : this.L("Show Floating Window"));
                 }
             }
             catch { }

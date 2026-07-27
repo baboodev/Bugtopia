@@ -76,9 +76,8 @@ namespace HeartopiaMod
     //  - The two DrawSwitchToggle rows render as kit CHECKBOXES, not sliding switches
     //    (Settings-round precedent, restated by Bag/Warehouse: CreateUguiSwitch's pill visuals
     //    ignore SetIsOnWithoutNotify and it replays onChanged once per theme rebuild — the
-    //    checkbox follows WithoutNotify re-syncs for free). Their labels are the source's RAW
-    //    UNLOCALIZED literals ("Event Diagnostics (log)" / "Event-driven auto-farm (no
-    //    rescan)" — :22485/:22497 pass them straight, no L()).
+    //    checkbox follows WithoutNotify re-syncs for free). Their labels ("Event Diagnostics
+    //    (log)" / "Event-driven auto-farm (no rescan)") are localized via L().
     //  - The auto-fertilize GUI.Toggle's leading " " spacer (:22266) is an IMGUI spacing hack;
     //    the kit checkbox spaces structurally, so the label is L("homeland_farm.auto_fertilize")
     //    without it.
@@ -662,15 +661,15 @@ namespace HeartopiaMod
             this.TrySetUguiButtonLabelSize(handle.OpsButtons[8], 12f);
 
             // -------- 6+7. The two trailing toggles (y=906 / y=940 — :22480-22499) --------
-            // Kit checkboxes with the source's RAW literals (file header). Event Diagnostics'
-            // handler keeps the source change guard; Event-driven is a bare flag assignment.
+            // Event Diagnostics' handler keeps the source change guard; Event-driven is a bare
+            // flag assignment.
             handle.EventDiagToggle = this.CreateUguiCheckbox(scrollContent, "EventDiagToggle",
-                "Event Diagnostics (log)", this.homelandFarmEventDiagEnabled,
+                this.L("Event Diagnostics (log)"), this.homelandFarmEventDiagEnabled,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDiagToggled));
             PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 924f, panelW, 28f);
 
             handle.EventDrivenToggle = this.CreateUguiCheckbox(scrollContent, "EventDrivenToggle",
-                "Event-driven auto-farm (no rescan)", this.homelandFarmAutoEventDriven,
+                this.L("Event-driven auto-farm (no rescan)"), this.homelandFarmAutoEventDriven,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDrivenToggled));
             PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 958f, panelW, 28f);
 

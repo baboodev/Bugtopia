@@ -50,9 +50,8 @@ namespace HeartopiaMod
     // precedent for card sections). The two status labels are NOT children of the cards: the
     // IMGUI drawers paint them on the tab background at the card's left edge BELOW each action
     // card (feed :3856, gift :801) — mirrored as free labels on the scroll content. Card
-    // headers "WILD ANIMAL TROUGHS" / "WILD ANIMAL GIFTS" are UNLOCALIZED source literals
-    // (plain GUI.Label, no L() — :3817/:787); the toggle/button labels DO go through L(),
-    // matching each IMGUI call site exactly.
+    // headers "WILD ANIMAL TROUGHS" / "WILD ANIMAL GIFTS" and the toggle/button labels all
+    // go through L().
     //
     // Positions replay the source's cursor math verbatim (content top margin 8 standing in for
     // startY, the Foraging convention):
@@ -193,8 +192,8 @@ namespace HeartopiaMod
             Color statusColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.82f);
 
             // -------- WILD ANIMAL TROUGHS card (fixed 198px, feed :3814-3838) --------
-            // Header is an UNLOCALIZED source literal (:3817); the kit panel chrome carries it.
-            GameObject troughs = this.CreateUguiSettingsMainPanel(scrollContent, "TroughsPanel", "WILD ANIMAL TROUGHS");
+            // The kit panel chrome carries the header.
+            GameObject troughs = this.CreateUguiSettingsMainPanel(scrollContent, "TroughsPanel", this.L("WILD ANIMAL TROUGHS"));
             PlaceUguiTopLeft(troughs, 8f, 8f, panelW, 198f);
 
             // Rows replay the source rowY chain: +40, then += 42 twice; widths 300/300/280.
@@ -231,7 +230,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.FeedStatusLabel, 8f, 302f, panelW, 36f);
 
             // -------- WILD ANIMAL GIFTS card (feed returns 346; h=74, gift :784-796) --------
-            GameObject gifts = this.CreateUguiSettingsMainPanel(scrollContent, "GiftsPanel", "WILD ANIMAL GIFTS");
+            GameObject gifts = this.CreateUguiSettingsMainPanel(scrollContent, "GiftsPanel", this.L("WILD ANIMAL GIFTS"));
             PlaceUguiTopLeft(gifts, 8f, 346f, panelW, 74f);
 
             handle.GiftButton = this.CreateUguiPrimaryButton(gifts.transform, "ClaimGiftsButton",

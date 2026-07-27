@@ -29,10 +29,10 @@ namespace HeartopiaMod
     //  - LOCALIZATION: this feature uses dot-namespaced translation KEYS (pictures.title,
     //    pictures.paths, pictures.draw_hint, pictures.decrypt_all, pictures.encrypt_changed,
     //    pictures.scan_changed, pictures.changed_count, pictures.manifest_missing) — passed
-    //    through this.L/this.LF untouched, never substituted with literal English. FOUR strings
-    //    are deliberately UNLOCALIZED source literals and stay that way: the "Extract open
-    //    drawing" / "Upload drawing.png" buttons (:175/:182) and the two slider label prefixes
-    //    "Upload chunk budget: {N} runs" / "Upload chunk delay: {N:0.00}s" (:193/:201).
+    //    through this.L/this.LF untouched, never substituted with literal English. The
+    //    "Extract open drawing" / "Upload drawing.png" buttons (:175/:182) are localized; the
+    //    two slider label prefixes "Upload chunk budget: {N} runs" / "Upload chunk delay:
+    //    {N:0.00}s" (:193/:201) remain unlocalized source literals.
     //  - TWO INDEPENDENT BUSY FLAGS with the source's exact GUI.enabled scoping (:145-187):
     //    busy = picturesTaskCoroutine != null gates decrypt_all, encrypt_changed, scan_changed
     //    AND "Extract open drawing" (all four sit inside the :147 GUI.enabled = !busy scope);
@@ -387,12 +387,12 @@ namespace HeartopiaMod
             handle.ScanButton = this.CreateUguiSecondaryButton(card.transform, "ScanChangedButton",
                 this.L("pictures.scan_changed"), new System.Action(this.OnUguiPicturesScanChangedClicked));
 
-            // -------- Button row 3: extract | upload (:175-185 — Secondary, UNLOCALIZED;
+            // -------- Button row 3: extract | upload (:175-185 — Secondary;
             // extract gated !busy, upload !busy && !chunkSendBusy — file header) --------
             handle.ExtractButton = this.CreateUguiSecondaryButton(card.transform, "ExtractButton",
-                "Extract open drawing", new System.Action(this.OnUguiPicturesExtractClicked));
+                this.L("Extract open drawing"), new System.Action(this.OnUguiPicturesExtractClicked));
             handle.UploadButton = this.CreateUguiSecondaryButton(card.transform, "UploadButton",
-                "Upload drawing.png", new System.Action(this.OnUguiPicturesUploadClicked));
+                this.L("Upload drawing.png"), new System.Action(this.OnUguiPicturesUploadClicked));
 
             bool busy = this.IsUguiPicturesTaskBusy();
             bool chunkSendBusy = this.IsUguiPicturesChunkSendBusy();
