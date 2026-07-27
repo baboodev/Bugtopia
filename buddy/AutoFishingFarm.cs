@@ -136,6 +136,10 @@ namespace HeartopiaMod
         }
 
         // --- Auto Bait: throw a bait/attractor when no fish has been in scan range for N seconds ---
+        // `autoBaitMaxCount` is a per-session BUDGET of throws, not a bag limit — it neither knows
+        // nor cares how many baits are in the backpack (a bag that runs out fails the throw and
+        // backs off instead of spending budget). **0 = UNLIMITED**: throw for as long as the bag
+        // holds out. The budget refills on enable, on a max change, and via the Reset button.
         public enum AutoBaitChoice { Bait = 0, Attractor = 1 }
         private const float AutoBaitNoFishSecondsMin = 3f;
         private const float AutoBaitNoFishSecondsMax = 60f;
@@ -294,6 +298,12 @@ namespace HeartopiaMod
         }
         public static bool GetSkipBaitAnimEnabled() => skipBaitAnimEnabled;
         public static void SetSkipBaitAnimEnabled(bool value) => skipBaitAnimEnabled = value;
+        // Max = 0 means UNLIMITED (2026-07-28, by request): the counter stops being a budget and the
+        // feature throws for as long as the bag has baits. Everything that used to read
+        // `autoBaitRemaining > 0` must go through HasAutoBaitBudget instead — with an unlimited
+        // budget the remaining counter sits at 0 forever, so the old test would read as "exhausted".
+        public static bool IsAutoBaitUnlimited => autoBaitMaxCount <= 0;
+        public static bool HasAutoBaitBudget => IsAutoBaitUnlimited || autoBaitRemaining > 0;
         public static int GetAutoBaitRemaining() => autoBaitRemaining;
         public static void ResetAutoBaitCounter()
         {
@@ -322,7 +332,7 @@ namespace HeartopiaMod
                 noFishSinceAt = now;
             }
 
-            if (autoBaitRemaining <= 0 || now < nextAutoBaitAt)
+            if (!HasAutoBaitBudget || now < nextAutoBaitAt)
             {
                 return;
             }
@@ -335,13 +345,23 @@ namespace HeartopiaMod
             bool useBait = autoBaitChoice == AutoBaitChoice.Bait;
             if (host.TryThrowFishBaitForAuto(useBait, out string kind))
             {
-                autoBaitRemaining--;
+                if (!IsAutoBaitUnlimited)
+                {
+                    autoBaitRemaining--;
+                }
+
                 nextAutoBaitAt = now + AutoBaitMinCooldown;
                 noFishSinceAt = now;   // restart the window while the server spawns fish
                 LastAutoBaitAt = now;
-                Log($"Auto Bait thrown ({kind}); remaining={autoBaitRemaining}/{autoBaitMaxCount}");
-                try { host.UI_AddMenuNotification(host.UI_Localize("Auto Bait thrown") + " (" + autoBaitRemaining + ")", new Color(0.45f, 1f, 0.55f)); } catch { }
-                if (autoBaitRemaining == 0)
+                Log($"Auto Bait thrown ({kind}); remaining={(IsAutoBaitUnlimited ? "unlimited" : autoBaitRemaining + "/" + autoBaitMaxCount)}");
+                try
+                {
+                    string toast = host.UI_Localize("Auto Bait thrown")
+                        + (IsAutoBaitUnlimited ? string.Empty : " (" + autoBaitRemaining + ")");
+                    host.UI_AddMenuNotification(toast, new Color(0.45f, 1f, 0.55f));
+                }
+                catch { }
+                if (!IsAutoBaitUnlimited && autoBaitRemaining == 0)
                 {
                     try { host.UI_AddMenuNotification(host.UI_Localize("Auto Bait limit reached"), new Color(1f, 0.65f, 0.45f)); } catch { }
                 }

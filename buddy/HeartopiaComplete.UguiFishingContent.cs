@@ -290,7 +290,7 @@ namespace HeartopiaMod
             handle.BaitChoiceButton = this.CreateUguiSecondaryButton(scrollContent, "BaitChoiceButton",
                 handle.BaitChoiceShown, new System.Action(this.OnUguiFishingBaitChoiceClicked));
 
-            handle.BaitMaxShown = this.LF("Max: {0}", AutoFishingFarm.GetAutoBaitMaxCount());
+            handle.BaitMaxShown = this.BuildUguiFishingBaitMaxText();
             handle.BaitMaxLabel = this.CreateUguiBodyLabel(scrollContent, "BaitMaxLabel", handle.BaitMaxShown, 12f);
             // Slider range [0,50] = the SOURCE slider's own bounds (the setter clamps 0-999;
             // deliberately NOT widened to match it).
@@ -304,8 +304,7 @@ namespace HeartopiaMod
                 UguiFishingNoFishMin, UguiFishingNoFishMax, AutoFishingFarm.GetAutoBaitNoFishSeconds(), true,
                 new System.Action<float>(this.OnUguiFishingNoFishChanged));
 
-            handle.RemainingShown = this.LF("Remaining: {0}/{1}",
-                AutoFishingFarm.GetAutoBaitRemaining(), AutoFishingFarm.GetAutoBaitMaxCount());
+            handle.RemainingShown = this.BuildUguiFishingBaitRemainingText();
             handle.RemainingLabel = this.CreateUguiBodyLabel(scrollContent, "RemainingLabel", handle.RemainingShown, 12f);
             handle.BaitResetButton = this.CreateUguiSecondaryButton(scrollContent, "BaitResetButton",
                 this.L("Reset"), new System.Action(this.OnUguiFishingBaitResetClicked));
@@ -407,6 +406,23 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
+        // Max = 0 is UNLIMITED, not "zero throws" — the two labels must say so, or the slider at its
+        // left edge reads exactly like the feature being off. Both the builder and the per-frame
+        // sync go through these, so the two surfaces can never drift.
+        private string BuildUguiFishingBaitMaxText()
+        {
+            return AutoFishingFarm.IsAutoBaitUnlimited
+                ? this.L("Max: unlimited")
+                : this.LF("Max: {0}", AutoFishingFarm.GetAutoBaitMaxCount());
+        }
+
+        private string BuildUguiFishingBaitRemainingText()
+        {
+            return AutoFishingFarm.IsAutoBaitUnlimited
+                ? this.L("Remaining: unlimited")
+                : this.LF("Remaining: {0}/{1}", AutoFishingFarm.GetAutoBaitRemaining(), AutoFishingFarm.GetAutoBaitMaxCount());
+        }
+
         // Relayout — the UGUI analog of both IMGUI cursor chains from the Auto Bait conditional
         // down (AutoFishingFarm.cs:745-790 + all of FishingRouteFeature.DrawSection), including
         // the `num + 10f` hand-off between them. Reposition/SetActive/resize only.
@@ -574,7 +590,7 @@ namespace HeartopiaMod
                         handle.BaitMaxSlider.SetValueWithoutNotify(maxCount);
                     }
                     this.SyncUguiSelfLabelText(handle.BaitMaxLabel, ref handle.BaitMaxShown,
-                        this.LF("Max: {0}", maxCount));
+                        this.BuildUguiFishingBaitMaxText());
 
                     float noFish = AutoFishingFarm.GetAutoBaitNoFishSeconds();
                     if (handle.NoFishSlider != null && Mathf.Abs(handle.NoFishSlider.value - noFish) > 0.0005f)
@@ -585,7 +601,7 @@ namespace HeartopiaMod
                         this.LF("No-fish: {0:F0}s", noFish));
 
                     this.SyncUguiSelfLabelText(handle.RemainingLabel, ref handle.RemainingShown,
-                        this.LF("Remaining: {0}/{1}", AutoFishingFarm.GetAutoBaitRemaining(), maxCount));
+                        this.BuildUguiFishingBaitRemainingText());
                 }
 
                 // Route action label + active-only status lines.

@@ -1224,7 +1224,7 @@ namespace HeartopiaMod
         {
             if (slice == FarmSlice.Fish
                 && AutoFishingFarm.GetAutoBaitEnabled()
-                && AutoFishingFarm.GetAutoBaitRemaining() > 0)
+                && AutoFishingFarm.HasAutoBaitBudget)
             {
                 return Mathf.Max(emptySliceSeconds, AutoFishingFarm.GetAutoBaitNoFishSeconds() + 3f);
             }

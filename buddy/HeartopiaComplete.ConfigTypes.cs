@@ -220,6 +220,7 @@ namespace HeartopiaMod
             public float snowStartDelaySeconds = 0.3f;      // fill+start -> first report pause
             public float snowNextCycleDelaySeconds = 0.5f;  // gather -> next fill pause
             public int snowballUseLimit = 0;                // sculptures per run; 0 = unlimited
+            public int snowQteSuccessCount = 20;            // perfect QTE reports per sculpture (0-20)
             public bool fastBubbleGenEnabled;
             public float bubbleBubblesPerMinute;
             public bool bubbleSpawnAtPlayerEnabled;

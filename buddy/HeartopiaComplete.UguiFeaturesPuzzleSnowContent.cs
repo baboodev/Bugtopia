@@ -86,9 +86,11 @@ namespace HeartopiaMod
     //    backend additions" ground rule no longer holds for these): bag snowball counter
     //    (GetSnowballBagCountThrottled, 1s-throttled AuraMono GetUsableItemCount), snowball
     //    budget InputField (snowballUseLimit, 0 = all, IceSkating parse-clamp-writeback),
-    //    and two persisted pacing sliders (snowStartDelaySeconds / snowNextCycleDelaySeconds,
-    //    0.05s snap). Fixed rows between toggle and box: bag 88 (+24) → limit 112 (+30) →
-    //    sliders 142/168 (+26 each) → box slot base moves 88→194, box 80→102 (3rd line
+    //    two persisted pacing sliders (snowStartDelaySeconds / snowNextCycleDelaySeconds,
+    //    0.05s snap), and the QTE-successes slider (snowQteSuccessCount 0-20 whole, = perfect
+    //    reports per sculpture; legit session is 20 QTEs, so 20 = max quality, default).
+    //    Fixed rows between toggle and box: bag 88 (+24) → limit 112 (+30) → sliders
+    //    142/168/194 (+26 each) → box slot base moves 88→220, box 80→102 (3rd line
     //    "Balls used"). Relayout signature unchanged.
     //
     // Cross-surface sync cadence: toggles re-sync per gated frame via SetIsOnWithoutNotify
@@ -368,6 +370,9 @@ namespace HeartopiaMod
             public Slider NextDelaySlider;        // snowNextCycleDelaySeconds (persisted)
             public GameObject NextDelayLabel;
             public string NextDelayShown;
+            public Slider QteCountSlider;         // snowQteSuccessCount 0-20 (persisted)
+            public GameObject QteCountLabel;
+            public string QteCountShown;
 
             public GameObject StatusBox;          // conditional plain box (autoSnowEnabled)
             public GameObject RoundLine;          // "Round: {n}/20  (total {m})" (0.5s tick)
@@ -394,8 +399,9 @@ namespace HeartopiaMod
 
         private string BuildUguiFeaturesSnowRoundText()
         {
-            // Gui.cs:1045 — note the TWO spaces before "(total".
-            return $"Round: {this.snowApiRoundCount}/20  (total {this.snowClickCount})";
+            // Gui.cs:1045 shape — TWO spaces before "(total"; the /20 literal became the
+            // QTE-successes round target (2026-07-25).
+            return $"Round: {this.snowApiRoundCount}/{this.SnowApiRoundTarget}  (total {this.snowClickCount})";
         }
 
         private string BuildUguiFeaturesSnowApiText()
@@ -418,6 +424,11 @@ namespace HeartopiaMod
         private string BuildUguiFeaturesSnowNextDelayText()
         {
             return "Next-cycle delay: " + this.snowNextCycleDelaySeconds.ToString("F2") + "s";
+        }
+
+        private string BuildUguiFeaturesSnowQteCountText()
+        {
+            return "QTE successes: " + this.snowQteSuccessCount;
         }
 
         private string BuildUguiFeaturesSnowBallsText()
@@ -529,11 +540,20 @@ namespace HeartopiaMod
                 false, new System.Action<float>(this.OnUguiFeaturesSnowNextDelayChanged));
             PlaceUguiTopLeft(handle.NextDelaySlider.gameObject, 216f, 171f, handle.PanelW - 216f, 20f);
 
+            handle.QteCountShown = this.BuildUguiFeaturesSnowQteCountText();
+            handle.QteCountLabel = this.CreateUguiLabel(scrollContent, "QteCountLabel",
+                handle.QteCountShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.QteCountLabel, 8f, 194f, 200f, 22f);
+            handle.QteCountSlider = this.CreateUguiSlider(scrollContent, "QteCountSlider",
+                SnowQteSuccessMin, SnowQteSuccessMax, this.snowQteSuccessCount,
+                true, new System.Action<float>(this.OnUguiFeaturesSnowQteCountChanged));
+            PlaceUguiTopLeft(handle.QteCountSlider.gameObject, 216f, 197f, handle.PanelW - 216f, 20f);
+
             // -------- Conditional plain status box (:1043 — DEFAULT GUI.skin.box; Sand
             // Sculpture's plain-box convention: ControlFill @ 0.55 + neutral gray ring). Now 3
-            // lines (Balls added 2026-07-25) -> 102 high; sits below the new controls at 194. ----
+            // lines (Balls added 2026-07-25) -> 102 high; sits below the new controls at 220. ----
             handle.StatusBox = this.CreateUguiGo("StatusBox", scrollContent);
-            PlaceUguiTopLeft(handle.StatusBox, 8f, 194f, handle.PanelW, 102f);
+            PlaceUguiTopLeft(handle.StatusBox, 8f, 220f, handle.PanelW, 102f);
             Color boxFill = this.UguiKitControlFill();
             this.AddUguiImage(handle.StatusBox, new Color(boxFill.r, boxFill.g, boxFill.b, 0.55f), true, 1f);
             this.AddUguiRingOverlay(handle.StatusBox, new Color(0.88f, 0.92f, 0.97f, 0.16f), 1f);
@@ -578,7 +598,7 @@ namespace HeartopiaMod
         // Positions everything from the CURRENT autoSnowEnabled / move-status state — the UGUI
         // analog of the IMGUI branch's num accumulation (Gui.cs:1031-1077), shifted by the
         // 2026-07-25 fixed rows: header 8 (+40) → toggle 48 (+40) → bag counter 88 (+24) →
-        // limit row 112 (+30) → delay sliders 142/168 (+26 each) → box slot 194 (+122 shown,
+        // limit row 112 (+30) → sliders 142/168/194 (+26 each) → box slot 220 (+122 shown,
         // 102-high 3-line box / +20 hidden) → button (+38) → optional status label (+40).
         // Reposition/SetActive only; nothing is rebuilt.
         private void RelayoutUguiShellFeaturesSnow(UguiShellFeaturesSnowHandle handle)
@@ -586,7 +606,7 @@ namespace HeartopiaMod
             bool autoOn = this.autoSnowEnabled;
             bool hasMoveStatus = !string.IsNullOrEmpty(this.snowMoveSnowballsStatus);
 
-            float yCur = 194f;
+            float yCur = 220f;
             SetUguiGoActive(handle.StatusBox, autoOn);
             if (autoOn)
             {
@@ -670,6 +690,13 @@ namespace HeartopiaMod
                     {
                         handle.NextDelaySlider.SetValueWithoutNotify(this.snowNextCycleDelaySeconds);
                     }
+                    this.SyncUguiSelfLabelText(handle.QteCountLabel, ref handle.QteCountShown,
+                        this.BuildUguiFeaturesSnowQteCountText());
+                    if (handle.QteCountSlider != null
+                        && Mathf.Abs(handle.QteCountSlider.value - this.snowQteSuccessCount) > 0.0005f)
+                    {
+                        handle.QteCountSlider.SetValueWithoutNotify(this.snowQteSuccessCount);
+                    }
                 }
 
                 // Conditional-layout signature (status box + move-status label).
@@ -740,6 +767,26 @@ namespace HeartopiaMod
             {
                 this.SyncUguiSelfLabelText(handle.NextDelayLabel, ref handle.NextDelayShown,
                     this.BuildUguiFeaturesSnowNextDelayText());
+            }
+        }
+
+        // QTE-successes slider (2026-07-25): whole numbers 0-20, equal-guard, persist. Fewer
+        // perfects = lower accumulated score = lower-tier sculpture (legit session = 20 QTEs,
+        // so 20 = the original always-max-quality behavior).
+        private void OnUguiFeaturesSnowQteCountChanged(float value)
+        {
+            int rounded = Mathf.Clamp(Mathf.RoundToInt(value), SnowQteSuccessMin, SnowQteSuccessMax);
+            if (rounded == this.snowQteSuccessCount)
+            {
+                return;
+            }
+            this.snowQteSuccessCount = rounded;
+            try { this.SaveKeybinds(false); } catch { }
+            UguiShellFeaturesSnowHandle handle = this.uguiShellFeaturesSnow;
+            if (handle != null)
+            {
+                this.SyncUguiSelfLabelText(handle.QteCountLabel, ref handle.QteCountShown,
+                    this.BuildUguiFeaturesSnowQteCountText());
             }
         }
 

@@ -1157,6 +1157,8 @@ namespace HeartopiaMod
             { "Take over after targets for: {0}s", "Take over after targets for: {0}s" },
             { "Repair stowed tools", "Repair stowed tools" },
             { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand." },
+            { "Max: unlimited", "Max: unlimited" },
+            { "Remaining: unlimited", "Remaining: unlimited" },
         };
 
         // Built-in Spanish fallback strings.
@@ -2296,6 +2298,8 @@ namespace HeartopiaMod
             { "Take over after targets for: {0}s", "Tomar el relevo tras ver objetivos: {0}s" },
             { "Repair stowed tools", "Reparar herramientas guardadas" },
             { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "Pausa todas las granjas y repara cada herramienta desgastada por turnos, sin moverse. Requiere Auto Reparar por durabilidad; el aura de reparación solo arregla la herramienta que llevas en la mano." },
+            { "Max: unlimited", "Máx.: ilimitado" },
+            { "Remaining: unlimited", "Restantes: ilimitado" },
         };
 
         // Built-in Simplified Chinese fallback strings.
@@ -3435,6 +3439,8 @@ namespace HeartopiaMod
             { "Take over after targets for: {0}s", "发现目标多久后接管：{0}秒" },
             { "Repair stowed tools", "修理收起的工具" },
             { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "暂停所有农场，站在原地依次修理每件磨损的工具。需要开启耐久度自动修理；修理光环只会修复手中的工具。" },
+            { "Max: unlimited", "上限：无限制" },
+            { "Remaining: unlimited", "剩余：无限制" },
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -4564,6 +4570,8 @@ namespace HeartopiaMod
             { "Take over after targets for: {0}s", "Assumir após alvos por: {0}s" },
             { "Repair stowed tools", "Reparar ferramentas guardadas" },
             { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "Pausa todas as fazendas e repara cada ferramenta desgastada por vez, parado no lugar. Requer Auto Reparo por durabilidade; a aura de reparo só conserta a ferramenta na mão." },
+            { "Max: unlimited", "Máx.: ilimitado" },
+            { "Remaining: unlimited", "Restantes: ilimitado" },
         };
 
         // Built-in Thai fallback strings.
@@ -5693,6 +5701,8 @@ namespace HeartopiaMod
             { "Take over after targets for: {0}s", "เข้ารับช่วงหลังพบเป้าหมายนาน: {0}วิ" },
             { "Repair stowed tools", "ซ่อมเครื่องมือที่เก็บอยู่" },
             { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "หยุดฟาร์มทั้งหมดชั่วคราวและซ่อมเครื่องมือที่สึกทีละชิ้นโดยยืนอยู่กับที่ ต้องเปิดซ่อมอัตโนมัติตามความทนทาน ออร่าซ่อมจะซ่อมเฉพาะเครื่องมือที่ถืออยู่เท่านั้น" },
+            { "Max: unlimited", "สูงสุด: ไม่จำกัด" },
+            { "Remaining: unlimited", "คงเหลือ: ไม่จำกัด" },
         };
 
         // Runtime localization state.

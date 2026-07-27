@@ -238,6 +238,7 @@ namespace HeartopiaMod
             data.snowStartDelaySeconds = this.snowStartDelaySeconds;
             data.snowNextCycleDelaySeconds = this.snowNextCycleDelaySeconds;
             data.snowballUseLimit = this.snowballUseLimit;
+            data.snowQteSuccessCount = this.snowQteSuccessCount;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
             data.bubbleBubblesPerMinute = this.bubbleBubblesPerMinute;
             data.bubbleSpawnAtPlayerEnabled = this.bubbleSpawnAtPlayerEnabled;
@@ -489,6 +490,7 @@ namespace HeartopiaMod
             this.snowStartDelaySeconds = Mathf.Clamp(data.snowStartDelaySeconds, SnowStartDelayMin, SnowStartDelayMax);
             this.snowNextCycleDelaySeconds = Mathf.Clamp(data.snowNextCycleDelaySeconds, SnowNextCycleDelayMin, SnowNextCycleDelayMax);
             this.snowballUseLimit = Mathf.Max(0, data.snowballUseLimit);
+            this.snowQteSuccessCount = Mathf.Clamp(data.snowQteSuccessCount, SnowQteSuccessMin, SnowQteSuccessMax);
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
             this.bubbleSpawnAtPlayerEnabled = data.bubbleSpawnAtPlayerEnabled;
@@ -772,6 +774,7 @@ namespace HeartopiaMod
                         else if (line.Contains("snowStartDelaySeconds")) this.snowStartDelaySeconds = Mathf.Clamp(GetJsonFloat(line, "\"snowStartDelaySeconds\":"), SnowStartDelayMin, SnowStartDelayMax);
                         else if (line.Contains("snowNextCycleDelaySeconds")) this.snowNextCycleDelaySeconds = Mathf.Clamp(GetJsonFloat(line, "\"snowNextCycleDelaySeconds\":"), SnowNextCycleDelayMin, SnowNextCycleDelayMax);
                         else if (line.Contains("snowballUseLimit")) this.snowballUseLimit = Mathf.Max(0, GetJsonInt(line, "\"snowballUseLimit\":"));
+                        else if (line.Contains("snowQteSuccessCount")) this.snowQteSuccessCount = Mathf.Clamp(GetJsonInt(line, "\"snowQteSuccessCount\":"), SnowQteSuccessMin, SnowQteSuccessMax);
                         else if (line.Contains("bubbleSpawnAtPlayerEnabled")) this.bubbleSpawnAtPlayerEnabled = GetJsonInt(line, "\"bubbleSpawnAtPlayerEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectEnabled")) this.autoBubbleCollectEnabled = GetJsonInt(line, "\"autoBubbleCollectEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = Mathf.Clamp(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"), 0f, 100f);
