@@ -69,6 +69,14 @@ namespace HeartopiaMod
         internal const float SnowNextCycleDelayMin = 0f;
         internal const float SnowNextCycleDelayMax = 1.5f;
 
+        // How many PERFECT QTE reports to send per sculpture (UGUI slider; persisted). The
+        // legit session is 20 QTEs (TableSnowParameter waves 1+2+2+15 over 20 s; rating id 1 =
+        // miss/0, id 2 = perfect/100), so the max (default) = SnowSculptureMaxRound perfects =
+        // max score = the original always-top-quality behavior; lower values trade quality for
+        // variety. 0 = start + immediate stop (zero-score sculpture).
+        internal const int SnowQteSuccessMin = 0;
+        internal const int SnowQteSuccessMax = SnowSculptureMaxRound;
+
         private bool autoSnowEnabled = false;
         private int snowClickCount = 0;
         private uint snowApiTargetNetId = 0;
@@ -94,6 +102,8 @@ namespace HeartopiaMod
         // Slider-tunable delays (bounds above; persisted via config).
         private float snowStartDelaySeconds = SnowApiStartBackoffSeconds;
         private float snowNextCycleDelaySeconds = SnowApiRetryBackoffSeconds;
+        // Perfect-QTE count per sculpture (bounds above; persisted via config).
+        private int snowQteSuccessCount = SnowQteSuccessMax;
         // Snowball session budget: auto-disable after this many sculptures (1 ball each);
         // 0 = no limit. Persisted; the used counter resets on every enable.
         private int snowballUseLimit = 0;
@@ -179,6 +189,13 @@ namespace HeartopiaMod
         private bool SnowSculptureIsResolved()
         {
             return this.SnowSculptureHasReportPath();
+        }
+
+        // Rounds to report this cycle: the QTE-successes slider, hard-capped by the legit
+        // session length (SnowSculptureMaxRound).
+        private int SnowApiRoundTarget
+        {
+            get { return Mathf.Clamp(this.snowQteSuccessCount, SnowQteSuccessMin, SnowSculptureMaxRound); }
         }
 
         private void ProcessSnowSculptureOnUpdate()
@@ -696,7 +713,7 @@ namespace HeartopiaMod
             // void cycle (20 dead reports + the finalize ceiling). A silent timeout proceeds
             // optimistically (missed-event escape hatch), and hook-not-installed runs skip the
             // gate entirely (legacy behavior).
-            if (this.snowApiRoundCount < SnowSculptureMaxRound && !this.snowStartConfirmed)
+            if (!this.snowStartConfirmed)
             {
                 if (this.snowApiTargetNetId != 0
                     && this.snowStartEventSeenNetId == this.snowApiTargetNetId)
@@ -743,21 +760,22 @@ namespace HeartopiaMod
             // Server already finalized the target mid-rounds (finish event seen — e.g. the session
             // hit its server-side cap early): skip the remaining reports and go straight to
             // finalize/take. Stop on an already-stopped base is rejected harmlessly.
-            if (this.snowApiRoundCount < SnowSculptureMaxRound
+            if (this.snowApiRoundCount < this.SnowApiRoundTarget
                 && this.snowApiTargetNetId != 0
                 && this.snowFinishEventSeenNetId == this.snowApiTargetNetId)
             {
                 this.SnowSculptureLogStatus("finish event during rounds (round " + this.snowApiRoundCount + ") -> finalize");
-                this.snowApiRoundCount = SnowSculptureMaxRound;
+                this.snowApiRoundCount = this.SnowApiRoundTarget;
             }
 
-            // Round 20 reached -> finalize: StopSculpting (server computes the sculpture from the
+            // Round target reached (QTE-successes slider; 0 = stop right after the confirmed
+            // start) -> finalize: StopSculpting (server computes the sculpture from the
             // accumulated score), then GatherSnowSculpture (the take). Gather timing is
             // event-driven while the finish hook is live (per-netId S2C_SnowSculptingFinishEvent,
             // typically well under a second after stop) with SnowApiFinalizeTimeoutSeconds as the
             // missed-event ceiling; the legacy blind SnowApiFinalizeDelaySeconds wait applies when
             // the hook isn't installed.
-            if (this.snowApiRoundCount >= SnowSculptureMaxRound)
+            if (this.snowApiRoundCount >= this.SnowApiRoundTarget)
             {
                 if (!this.snowApiStopSent)
                 {
@@ -830,8 +848,8 @@ namespace HeartopiaMod
                 this.snowApiRoundCount++;
                 this.snowClickCount++;
                 this.snowSculptureLastActionStatus =
-                    "round " + this.snowApiRoundCount + "/" + SnowSculptureMaxRound;
-                this.SnowSculptureLogStatus("round " + this.snowApiRoundCount + "/" + SnowSculptureMaxRound + " " + scoreStatus);
+                    "round " + this.snowApiRoundCount + "/" + this.SnowApiRoundTarget;
+                this.SnowSculptureLogStatus("round " + this.snowApiRoundCount + "/" + this.SnowApiRoundTarget + " " + scoreStatus);
             }
             else
             {

@@ -110,12 +110,13 @@ namespace HeartopiaMod
         internal static bool MasterLogBirdFarmCrashTrace = true;
         internal static bool MasterLogInsectFarm = false;
         internal static bool MasterLogAutoFish = false;
-        // Combined Farming phase 0: the coordinator's probe tick is INERT unless this is on, so it
-        // defaults ON for the verification phase (same reasoning as MasterLogQuestAssistant above).
-        // Flip to false once the census + per-tool durability reads are confirmed in a live session —
-        // while it is on, the probe pays a FindObjectsOfType bird scan every ~2s plus an insect
-        // GetComponents scan on the same cadence.
-        internal static bool MasterLogCombinedFarm = true;
+        // Combined Farming. OFF by default now that phases 0-4 are verified — this only controls
+        // LOGGING: the coordinator itself runs whenever two or more farms are enabled, flag or not
+        // (CombinedFarmFeature.Update gates on `wantCoordination || wantProbe`). Turning it on also
+        // makes the census+durability probe run while NO farms are coordinating, which costs a
+        // FindObjectsOfType bird scan every ~2s plus an insect GetComponents scan on the same
+        // cadence — that is the only reason it is not simply always on.
+        internal static bool MasterLogCombinedFarm = false;
         internal static bool MasterLogInstantCatch = true;
         internal static bool MasterLogAutoFarm = false;
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /

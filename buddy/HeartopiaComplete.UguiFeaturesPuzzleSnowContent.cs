@@ -413,29 +413,29 @@ namespace HeartopiaMod
         private string BuildUguiFeaturesSnowBagCountText()
         {
             int count = this.GetSnowballBagCountThrottled();
-            return "Snowballs in bag: " + (count < 0 ? "?" : count.ToString());
+            return this.LF("Snowballs in bag: {0}", count < 0 ? "?" : count.ToString());
         }
 
         private string BuildUguiFeaturesSnowStartDelayText()
         {
-            return "Start delay: " + this.snowStartDelaySeconds.ToString("F2") + "s";
+            return this.LF("Start delay: {0}s", this.snowStartDelaySeconds.ToString("F2"));
         }
 
         private string BuildUguiFeaturesSnowNextDelayText()
         {
-            return "Next-cycle delay: " + this.snowNextCycleDelaySeconds.ToString("F2") + "s";
+            return this.LF("Next-cycle delay: {0}s", this.snowNextCycleDelaySeconds.ToString("F2"));
         }
 
         private string BuildUguiFeaturesSnowQteCountText()
         {
-            return "QTE successes: " + this.snowQteSuccessCount;
+            return this.LF("QTE successes: {0}", this.snowQteSuccessCount);
         }
 
         private string BuildUguiFeaturesSnowBallsText()
         {
             return this.snowballUseLimit > 0
-                ? "Balls used: " + this.snowballsUsedThisRun + " / " + this.snowballUseLimit
-                : "Balls used: " + this.snowballsUsedThisRun + " (no limit)";
+                ? this.LF("Balls used: {0} / {1}", this.snowballsUsedThisRun, this.snowballUseLimit)
+                : this.LF("Balls used: {0} (no limit)", this.snowballsUsedThisRun);
         }
 
         private int ComputeUguiFeaturesSnowLayoutSignature()
