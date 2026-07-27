@@ -16,6 +16,13 @@ namespace HeartopiaMod
         // A level transition is in flight (GameWorld.isSwitching). Covers login->town, town->home,
         // home->town and every scene transfer, INCLUDING the ones that show no loading splash.
         Loading,
+        // The level's own LoadTask has FINISHED (state == Loaded) but the transition wrapper is
+        // still running its fade-out/close — so the world's modules are constructed while the
+        // loading splash is still covering the screen. Measured window: ~1-2 s, plus the 1.5 s grace
+        // before WorldReady. This is the rung for work that is safe once the world exists and is
+        // better done where the player cannot see it hitch. Playable levels only: the login level
+        // never gets here (see CurrentWorldStage).
+        LevelBuilt,
         // A PLAYABLE level finished loading and no transition is running, but it has not had its
         // settle grace yet. The login level never reaches this rung — it stays at MonoLive — so
         // `>= LevelLoaded` already means "a real world is loaded".
@@ -178,9 +185,15 @@ namespace HeartopiaMod
                     return this.IsWorldSettledNow ? WorldStage.WorldSettled : WorldStage.WorldReady;
                 }
 
+                // A transition is running. If the LEVEL itself has already finished loading, we are
+                // in the fade-out window: modules constructed, splash still covering the screen.
+                // That is LevelBuilt — the place to do work that would otherwise hitch in view.
+                // Login excluded here for the same reason it is excluded below.
                 if (this.worldProbeInTransition)
                 {
-                    return WorldStage.Loading;
+                    return this.worldProbeLevelLoaded && this.worldProbeLevelType > WorldLevelTypeLogin
+                        ? WorldStage.LevelBuilt
+                        : WorldStage.Loading;
                 }
 
                 // The login level sits at MonoLive, NOT LevelLoaded, even though it is genuinely
@@ -361,33 +374,54 @@ namespace HeartopiaMod
             this.RegisterWorldReadyCallback("BuiltInWarmups", this.OnWorldReadyRearmWarmups);
         }
 
-        // -999f is the codebase idiom for "attempt on the next tick".
+        // Re-arm every deferred warmup for the new world — STAGGERED, not all on one frame.
+        //
+        // This used to set all 18 timers to -999f ("attempt on the next tick"), so every feature did
+        // its Mono type resolution / method compilation / detour install in the SAME frame the gate
+        // opened. Individually each is smallish; eighteen at once is a visible micro-freeze, landing
+        // exactly when the loading splash clears and the player regains control — the worst possible
+        // moment for it. Nothing here is urgent to a tenth of a second, so they are spread instead.
+        //
+        // Order matters a little: the things a player can notice immediately (input bridge, UI
+        // timings, hotkey guards) go first; background resolvers that nobody is waiting on go last.
+        private const float WorldReadyWarmupStaggerSeconds = 0.12f;
+
+        private float WorldReadyWarmupSlot(int index)
+        {
+            // Slot 0 keeps the old "next tick" behaviour; later slots trail behind it.
+            return index <= 0 ? -999f : Time.unscaledTime + (index * WorldReadyWarmupStaggerSeconds);
+        }
+
         private bool OnWorldReadyRearmWarmups()
         {
-            // Event-hook detours: a fresh world can bring images whose event types were unresolvable
-            // before, so give the installer an immediate pass instead of waiting out its throttle.
-            this.gameEventHookNextInstallAttemptAt = -999f;
+            int slot = 0;
 
-            // A — unconditional warmups.
-            this.homelandFarmNextSceneLoadFinishedProbeAt = -999f;
-            this.homelandFarmNextRuntimeResolveAt = -999f;
-            this.instrumentHotkeyGuardNextResolveAt = -999f;
-            this.spawnVehicleNextHookAttemptAt = -999f;
+            // Event-hook detours first: a fresh world can bring images whose event types were
+            // unresolvable before, and everything else is happier once events are flowing.
+            this.gameEventHookNextInstallAttemptAt = this.WorldReadyWarmupSlot(slot++);
 
-            // B — warmups behind a persisted toggle.
-            this.chatForceTranslateNextResolveAt = -999f;
-            this.postcardNextMailIdResolveAt = -999f;
-            this.privacyBlockNextHookAttemptAt = -999f;
-            this.seaCleanBannerNextAttemptAt = -999f;
-            this.swimVerticalNextAttemptAt = -999f;
-            this.nextBubbleFeaturePatchAttemptAt = -999f;
-            this.bubbleSpawnNextInstallAttemptAt = -999f;
-            this.bubbleCreateNextInstallAttemptAt = -999f;
-            this.movementInputRetryAt = -999f;
-            this.gameUiTimingsNextApplyAt = -999f;
-            this.sanrioNextConfigWalkAt = -999f;
-            this.avatarPatchNextTryAt = -999f;
-            this.instantTeleportNextAttemptAt = -999f;
+            // Player-facing: a delay here would actually be felt.
+            this.movementInputRetryAt = this.WorldReadyWarmupSlot(slot++);
+            this.instrumentHotkeyGuardNextResolveAt = this.WorldReadyWarmupSlot(slot++);
+            this.gameUiTimingsNextApplyAt = this.WorldReadyWarmupSlot(slot++);
+            this.instantTeleportNextAttemptAt = this.WorldReadyWarmupSlot(slot++);
+
+            // Unconditional warmups.
+            this.homelandFarmNextSceneLoadFinishedProbeAt = this.WorldReadyWarmupSlot(slot++);
+            this.homelandFarmNextRuntimeResolveAt = this.WorldReadyWarmupSlot(slot++);
+            this.spawnVehicleNextHookAttemptAt = this.WorldReadyWarmupSlot(slot++);
+
+            // Behind a persisted toggle — nobody is watching these land.
+            this.privacyBlockNextHookAttemptAt = this.WorldReadyWarmupSlot(slot++);
+            this.seaCleanBannerNextAttemptAt = this.WorldReadyWarmupSlot(slot++);
+            this.swimVerticalNextAttemptAt = this.WorldReadyWarmupSlot(slot++);
+            this.chatForceTranslateNextResolveAt = this.WorldReadyWarmupSlot(slot++);
+            this.postcardNextMailIdResolveAt = this.WorldReadyWarmupSlot(slot++);
+            this.nextBubbleFeaturePatchAttemptAt = this.WorldReadyWarmupSlot(slot++);
+            this.bubbleSpawnNextInstallAttemptAt = this.WorldReadyWarmupSlot(slot++);
+            this.bubbleCreateNextInstallAttemptAt = this.WorldReadyWarmupSlot(slot++);
+            this.avatarPatchNextTryAt = this.WorldReadyWarmupSlot(slot++);
+            this.sanrioNextConfigWalkAt = this.WorldReadyWarmupSlot(slot++);
             return true;
         }
 

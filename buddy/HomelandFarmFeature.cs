@@ -1135,7 +1135,14 @@ namespace HeartopiaMod
             // against. The game's own probe is still the final word once a world exists; the gate
             // just stops us asking before then. The timers are re-armed on world-ready
             // (OnWorldReadyRearmWarmups), so the warmup starts the moment the splash clears.
-            if (!this.IsWorldReady || !this.IsHomelandFarmSceneLoadFinished())
+            // LevelBuilt, not WorldReady (2026-07-27): the level's own LoadTask has finished, so its
+            // modules exist and the invoke below is answerable — but the loading splash is still up,
+            // which buys ~2.5-3.5 s (measured) of cover for the warmup's heavy resolve steps. At
+            // WorldReady they landed exactly as the splash cleared, which is where the visible
+            // micro-freeze came from. The real safety condition is unchanged and is the GAME's own
+            // probe, IsHomelandFarmSceneLoadFinished (ClientHelperService.IsSceneLoadFinished,
+            // cached + throttled) — the stage check only decides when it is worth asking at all.
+            if (this.CurrentWorldStage < WorldStage.LevelBuilt || !this.IsHomelandFarmSceneLoadFinished())
             {
                 return;
             }

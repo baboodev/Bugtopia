@@ -194,7 +194,8 @@ The gate polls the game's own level state machine and turns it into a single sha
 | Grace | `WorldReadyGraceSeconds` = 1.5 s |
 | Fallback | `AuraMonoGameDataLive` + a local player present for 5 s — used only if `GameWorld` cannot be resolved at all |
 | Epoch | `WorldReadyEpoch` — +1 per world load; callbacks re-run once per epoch |
-| Stages | `WorldStage`: `None < MonoLive < Loading < LevelLoaded < WorldReady < WorldSettled` (compare with `>=`). The **login level stays at `MonoLive`** — `>= LevelLoaded` therefore means "a real world is loaded" |
+| Stages | `WorldStage`: `None < MonoLive < Loading < LevelBuilt < LevelLoaded < WorldReady < WorldSettled` (compare with `>=`). The **login level stays at `MonoLive`** — `>= LevelBuilt` therefore means "a real world is loaded" |
+| `LevelBuilt` | Level's LoadTask finished but the transition is still fading out — modules exist, splash still covers the screen (~1-2 s + grace). The rung for heavy work that would otherwise hitch in plain view |
 | `WorldSettled` | `WorldReady` + a local player present 8 s (45 s hard fallback). The rung for heavy, asset-loading work — Game LOD gates on it |
 | Level helpers | `CurrentLevelType` / `CurrentSceneId`, `IsInPlayableWorld`, `IsInLoginLevel`, `IsInTownLevel`, `IsInMicroHomeLevel` |
 
