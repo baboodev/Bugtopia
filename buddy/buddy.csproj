@@ -379,6 +379,7 @@
     <Compile Include="BubbleSpawnRewriteFeature.cs" />
     <Compile Include="AutoBubbleCollectFeature.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
+    <Compile Include="MelonSceneHookCleanup.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />
     <Compile Include="ModLoaderHost.cs" />

@@ -593,6 +593,12 @@ namespace HeartopiaMod
         public void OnUpdate()
         {
             Breadcrumbs.Tick("OnUpdate");
+            // One-shot (MelonSceneHookCleanup.cs): remove the two permanent inline hooks MelonLoader
+            // writes into GameAssembly.dll's .text for its scene callbacks. Runs here because under
+            // MelonLoader this very callback is driven by SM_Component, so reaching this line proves
+            // the pump the scene hook was needed to create already exists. Hard no-op under BepInEx
+            // (and one bool test per frame afterwards).
+            this.TryCleanupMelonSceneHooks();
             // World-epoch poll: invalidates AuraMono object caches after a scene/world change.
             this.UpdateAuraMonoWorldEpoch();
             // World-ready gate (HeartopiaComplete.WorldReady.cs): tracks the game's own
