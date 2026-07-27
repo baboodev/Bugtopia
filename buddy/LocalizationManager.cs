@@ -1141,6 +1141,22 @@ namespace HeartopiaMod
             { "Water + weed already running.", "Water + weed already running." },
             { "Wild gift claim already running", "Wild gift claim already running" },
             { "Wild trough feed already running", "Wild trough feed already running" },
+
+            // Combined Farming (CombinedFarmFeature) — coordinator tab, live status and settings.
+            { "Combined", "Combined" },
+            { "Combined Farm", "Combined Farm" },
+            { "Combined Farming", "Combined Farming" },
+            { "Runs automatically whenever two or more of Fishing / Insects / Birds are enabled: one farm holds the tool at a time, in priority order, until its targets run out.", "Runs automatically whenever two or more of Fishing / Insects / Birds are enabled: one farm holds the tool at a time, in priority order, until its targets run out." },
+            { "Now: {0}", "Now: {0}" },
+            { "Targets", "Targets" },
+            { "Tools", "Tools" },
+            { "Coordinate farms", "Coordinate farms" },
+            { "Off: every enabled farm equips its own tool again and they fight over it — nothing catches. Escape hatch only.", "Off: every enabled farm equips its own tool again and they fight over it — nothing catches. Escape hatch only." },
+            { "Priority order", "Priority order" },
+            { "Hand over after empty for: {0}s", "Hand over after empty for: {0}s" },
+            { "Take over after targets for: {0}s", "Take over after targets for: {0}s" },
+            { "Repair stowed tools", "Repair stowed tools" },
+            { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand." },
         };
 
         // Built-in Spanish fallback strings.
@@ -2264,6 +2280,22 @@ namespace HeartopiaMod
             { "Water + weed already running.", "Riego + deshierbe ya en marcha." },
             { "Wild gift claim already running", "Reclamo de regalos ya en marcha" },
             { "Wild trough feed already running", "Alimentación de comedero ya en marcha" },
+
+            // Combined Farming (CombinedFarmFeature) — coordinator tab, live status and settings.
+            { "Combined", "Combinado" },
+            { "Combined Farm", "Granja combinada" },
+            { "Combined Farming", "Granja combinada" },
+            { "Runs automatically whenever two or more of Fishing / Insects / Birds are enabled: one farm holds the tool at a time, in priority order, until its targets run out.", "Se activa automáticamente cuando dos o más de Pesca / Insectos / Aves están activadas: una granja sostiene la herramienta a la vez, por orden de prioridad, hasta que se queda sin objetivos." },
+            { "Now: {0}", "Ahora: {0}" },
+            { "Targets", "Objetivos" },
+            { "Tools", "Herramientas" },
+            { "Coordinate farms", "Coordinar granjas" },
+            { "Off: every enabled farm equips its own tool again and they fight over it — nothing catches. Escape hatch only.", "Desactivado: cada granja activa vuelve a equipar su herramienta y se pelean por ella; no se captura nada. Solo como salida de emergencia." },
+            { "Priority order", "Orden de prioridad" },
+            { "Hand over after empty for: {0}s", "Ceder tras estar vacío: {0}s" },
+            { "Take over after targets for: {0}s", "Tomar el relevo tras ver objetivos: {0}s" },
+            { "Repair stowed tools", "Reparar herramientas guardadas" },
+            { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "Pausa todas las granjas y repara cada herramienta desgastada por turnos, sin moverse. Requiere Auto Reparar por durabilidad; el aura de reparación solo arregla la herramienta que llevas en la mano." },
         };
 
         // Built-in Simplified Chinese fallback strings.
@@ -3387,6 +3419,22 @@ namespace HeartopiaMod
             { "Water + weed already running.", "浇水+除草已在运行。" },
             { "Wild gift claim already running", "野生礼物领取已在运行" },
             { "Wild trough feed already running", "野生食槽喂食已在运行" },
+
+            // Combined Farming (CombinedFarmFeature) — coordinator tab, live status and settings.
+            { "Combined", "组合" },
+            { "Combined Farm", "组合农场" },
+            { "Combined Farming", "组合农场" },
+            { "Runs automatically whenever two or more of Fishing / Insects / Birds are enabled: one farm holds the tool at a time, in priority order, until its targets run out.", "当同时启用钓鱼／昆虫／鸟类中的两项或以上时自动生效：按优先级顺序，一次只有一个农场持有工具，直到该类目标耗尽。" },
+            { "Now: {0}", "当前：{0}" },
+            { "Targets", "目标" },
+            { "Tools", "工具" },
+            { "Coordinate farms", "协调各农场" },
+            { "Off: every enabled farm equips its own tool again and they fight over it — nothing catches. Escape hatch only.", "关闭后：每个启用的农场都会各自装备自己的工具并互相争抢，结果什么都抓不到。仅作应急开关。" },
+            { "Priority order", "优先级顺序" },
+            { "Hand over after empty for: {0}s", "空置多久后交接：{0}秒" },
+            { "Take over after targets for: {0}s", "发现目标多久后接管：{0}秒" },
+            { "Repair stowed tools", "修理收起的工具" },
+            { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "暂停所有农场，站在原地依次修理每件磨损的工具。需要开启耐久度自动修理；修理光环只会修复手中的工具。" },
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -4500,6 +4548,22 @@ namespace HeartopiaMod
             { "Water + weed already running.", "Regar + capinar já em andamento." },
             { "Wild gift claim already running", "Coleta de presentes já em andamento" },
             { "Wild trough feed already running", "Alimentação no cocho já em andamento" },
+
+            // Combined Farming (CombinedFarmFeature) — coordinator tab, live status and settings.
+            { "Combined", "Combinado" },
+            { "Combined Farm", "Fazenda combinada" },
+            { "Combined Farming", "Fazenda combinada" },
+            { "Runs automatically whenever two or more of Fishing / Insects / Birds are enabled: one farm holds the tool at a time, in priority order, until its targets run out.", "Ativa automaticamente quando duas ou mais entre Pesca / Insetos / Pássaros estão ligadas: uma fazenda segura a ferramenta por vez, na ordem de prioridade, até seus alvos acabarem." },
+            { "Now: {0}", "Agora: {0}" },
+            { "Targets", "Alvos" },
+            { "Tools", "Ferramentas" },
+            { "Coordinate farms", "Coordenar fazendas" },
+            { "Off: every enabled farm equips its own tool again and they fight over it — nothing catches. Escape hatch only.", "Desligado: cada fazenda ativa volta a equipar a própria ferramenta e elas disputam entre si — nada é capturado. Apenas saída de emergência." },
+            { "Priority order", "Ordem de prioridade" },
+            { "Hand over after empty for: {0}s", "Passar a vez após vazio por: {0}s" },
+            { "Take over after targets for: {0}s", "Assumir após alvos por: {0}s" },
+            { "Repair stowed tools", "Reparar ferramentas guardadas" },
+            { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "Pausa todas as fazendas e repara cada ferramenta desgastada por vez, parado no lugar. Requer Auto Reparo por durabilidade; a aura de reparo só conserta a ferramenta na mão." },
         };
 
         // Built-in Thai fallback strings.
@@ -5613,6 +5677,22 @@ namespace HeartopiaMod
             { "Water + weed already running.", "รดน้ำ+ถอนวัชพืชกำลังทำอยู่แล้ว" },
             { "Wild gift claim already running", "กำลังรับของขวัญอยู่แล้ว" },
             { "Wild trough feed already running", "กำลังให้อาหารรางอยู่แล้ว" },
+
+            // Combined Farming (CombinedFarmFeature) — coordinator tab, live status and settings.
+            { "Combined", "รวม" },
+            { "Combined Farm", "ฟาร์มรวม" },
+            { "Combined Farming", "ฟาร์มรวม" },
+            { "Runs automatically whenever two or more of Fishing / Insects / Birds are enabled: one farm holds the tool at a time, in priority order, until its targets run out.", "ทำงานอัตโนมัติเมื่อเปิด ตกปลา / แมลง / นก ตั้งแต่สองอย่างขึ้นไป: ฟาร์มเดียวถือเครื่องมือในแต่ละครั้ง ตามลำดับความสำคัญ จนกว่าเป้าหมายจะหมด" },
+            { "Now: {0}", "ตอนนี้: {0}" },
+            { "Targets", "เป้าหมาย" },
+            { "Tools", "เครื่องมือ" },
+            { "Coordinate farms", "ประสานงานฟาร์ม" },
+            { "Off: every enabled farm equips its own tool again and they fight over it — nothing catches. Escape hatch only.", "ปิด: ฟาร์มที่เปิดอยู่ทุกอันจะสวมเครื่องมือของตัวเองและแย่งกัน — จับอะไรไม่ได้เลย ใช้เป็นทางออกฉุกเฉินเท่านั้น" },
+            { "Priority order", "ลำดับความสำคัญ" },
+            { "Hand over after empty for: {0}s", "ส่งต่อหลังว่างนาน: {0}วิ" },
+            { "Take over after targets for: {0}s", "เข้ารับช่วงหลังพบเป้าหมายนาน: {0}วิ" },
+            { "Repair stowed tools", "ซ่อมเครื่องมือที่เก็บอยู่" },
+            { "Pauses all farms and repairs each worn tool in turn, standing still. Needs Auto Repair on Durability; the repair aura only ever fixes the tool in hand.", "หยุดฟาร์มทั้งหมดชั่วคราวและซ่อมเครื่องมือที่สึกทีละชิ้นโดยยืนอยู่กับที่ ต้องเปิดซ่อมอัตโนมัติตามความทนทาน ออร่าซ่อมจะซ่อมเฉพาะเครื่องมือที่ถืออยู่เท่านั้น" },
         };
 
         // Runtime localization state.

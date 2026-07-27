@@ -46,6 +46,18 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Aura Farm", "Running"));
             }
 
+            // Listed BEFORE the three farms it drives: while it is coordinating, the farms' own
+            // entries read "Active" even for the two that are paused, and this line is what explains
+            // which one actually holds the tool.
+            if (CombinedFarmFeature.IsCoordinating)
+            {
+                entries.Add(this.CreateLiveFeatureEntry(
+                    "Combined Farm",
+                    CombinedFarmFeature.GetLiveSummary(),
+                    ("Targets", CombinedFarmFeature.GetLiveTargets()),
+                    ("Tools", CombinedFarmFeature.GetLiveToolDurabilities())));
+            }
+
             if (AutoFishingFarm.IsEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry(

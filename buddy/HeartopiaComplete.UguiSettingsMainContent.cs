@@ -145,6 +145,7 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogBirdFarmCrashTrace, v => MasterLogBirdFarmCrashTrace = v, "Bird Farm Crash Trace"),
                 new UguiLoggingToggleBinding(() => MasterLogInsectFarm, v => MasterLogInsectFarm = v, "Insect Farm"),
                 new UguiLoggingToggleBinding(() => MasterLogAutoFish, v => MasterLogAutoFish = v, "Auto Fish"),
+                new UguiLoggingToggleBinding(() => MasterLogCombinedFarm, v => MasterLogCombinedFarm = v, "Combined Farm"),
                 new UguiLoggingToggleBinding(() => MasterLogInstantCatch, v => MasterLogInstantCatch = v, "Instant Catch"),
                 new UguiLoggingToggleBinding(() => MasterLogAutoFarm, v => MasterLogAutoFarm = v, "Auto Farm"),
                 new UguiLoggingToggleBinding(() => MasterLogQuestAssistant, v => MasterLogQuestAssistant = v, "Quest Assistant"),

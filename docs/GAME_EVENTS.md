@@ -94,7 +94,7 @@ This is the chain behind the InstrumentHotkeyGuard feature, traced through the d
 
 Enums (for reading payloads / panel fields):
 - `InstrumentType` ([dump](../ilspy-dumps/EcsClient/XDT.Scene.Shared.Modules.Music/InstrumentType.cs)):
-  `None=0, Piano=1, Conga=2, KaHongDrum=3, BaYinTong=4, EtherealDrum=5, Lute=11 … Saxophone=21`.
+  `None=0, Piano=1, Conga=2, KaHongDrum=3, BaYinTong=4, EtherealDrum=5, Harp=6, Lute=11 … Saxophone=21, Conch=22`.
 - `MusicKeyOption` ([dump](../ilspy-dumps/EcsClient/XDT.Scene.Shared.Modules.Music/MusicKeyOption.cs)):
   `KeyMode8=0, KeyMode15a=1, KeyMode15b=2, KeyMode22=3`.
 

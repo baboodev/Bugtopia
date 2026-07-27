@@ -249,6 +249,8 @@
     <Compile Include="FishingRouteFeature.cs" />
     <Compile Include="BepInExPlugin.cs" />
     <Compile Include="BirdNetFarm.cs" />
+    <Compile Include="CombinedFarmFeature.cs" />
+    <Compile Include="FarmToolBroker.cs" />
     <Compile Include="CrashDumpHandler.cs" />
     <Compile Include="MovementInputFeature.cs" />
     <Compile Include="Breadcrumbs.cs" />
@@ -275,6 +277,7 @@
     <Compile Include="HeartopiaComplete.UguiForagingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiFishingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiInsectsContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiCombinedFarmContent.cs" />
     <Compile Include="HeartopiaComplete.UguiBirdsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiRadarContent.cs" />
     <Compile Include="HeartopiaComplete.UguiNewFeaturesContent.cs" />

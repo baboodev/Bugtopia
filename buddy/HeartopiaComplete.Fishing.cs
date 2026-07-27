@@ -114,7 +114,27 @@ namespace HeartopiaMod
 
                 if (playerObj == null)
                 {
-                    status = !string.IsNullOrEmpty(monoTentativeStatus) ? monoTentativeStatus : "Player Unavailable";
+                    // The Mono path already resolved the handhold and concluded it is NOT a rod.
+                    // That is a CONCLUSIVE answer ("a tool is equipped, just not this one"), so
+                    // report it as a successful read with rodEquipped=false.
+                    //
+                    // Returning false here instead was a real wedge (2026-07-28): the managed
+                    // self-player lookup is dead on this build, so any time another tool was in hand
+                    // this method answered "cannot determine", and AutoFishingFarm.Update — the only
+                    // one of the three farms that hard-gates on the return value — sat in its
+                    // "Tool check unavailable" retry forever and NEVER reached the equip call.
+                    // Standalone it hid, because enabling the farm with an empty hand takes the
+                    // "No Tool Equipped" early return above; combined farming always hands over with
+                    // the previous slice's tool still equipped, so the Fish slice could never start.
+                    if (!string.IsNullOrEmpty(monoTentativeStatus))
+                    {
+                        rodEquipped = false;
+                        status = monoTentativeStatus;
+                        this.AutoFishLog("Rod resolver: managed player unavailable, using mono verdict " + status);
+                        return true;
+                    }
+
+                    status = "Player Unavailable";
                     this.AutoFishLog("Rod resolver failed: " + status);
                     return false;
                 }

@@ -92,6 +92,11 @@ namespace HeartopiaMod
                 Breadcrumbs.Drop("bf.capturetool.ok");
             }
 
+            if (!value)
+            {
+                suspended = false; // a stopped farm must never stay paused — see ForceStop
+            }
+
             enabled = value;
             lastAttemptAt = -999f;
             enableWarmupUntil = enabled ? Time.unscaledTime + 0.75f : -999f;
@@ -149,6 +154,65 @@ namespace HeartopiaMod
         {
             SetEnabled(!enabled, host);
         }
+
+        // ── Combined Farming: suspend/resume (CombinedFarmFeature) ───────────────────────────────
+        // A PAUSE, not a stop — see the same block in AutoFishingFarm. Two farm-specific points:
+        //
+        // * Safe suspend point is HasPendingConfirms == false. Captures are only counted when the
+        //   server ACK arrives (up to 8 s later), so suspending with a batch in flight silently
+        //   loses those catches. The coordinator waits for the window to drain (bounded); when it
+        //   suspends anyway, the batch is dropped here rather than left to time out and blacklist
+        //   birds that were in fact captured.
+        // * Resume MUST clear the runtime state: _birdScannables is only maintained while the
+        //   scanner is actively ticking, so after a slice with the rod or the net in hand the list is
+        //   stale (the documented stale-scannables wedge). Resume therefore replays the equip path
+        //   from scratch — including the 1.25 s post-equip stabilize.
+        private static bool suspended;
+        public static bool IsSuspended => suspended;
+        public static bool HasPendingConfirms => _pendingConfirmNetIds.Count > 0;
+        public static void SetSuspended(bool value, HeartopiaComplete host = null)
+        {
+            if (suspended == value)
+            {
+                return;
+            }
+
+            suspended = value;
+            multiCatchBurstRemaining = 0;
+            multiCatchBurstTarget = 0;
+            _pendingConfirmNetIds.Clear();
+            _pendingTimeoutStrikes.Clear();
+            _pendingConfirmExpiresAt = -999f;
+
+            if (value)
+            {
+                lastStatus = "Paused (combined farming)";
+                TraceCrashBreadcrumb("Suspended by the combined-farm coordinator");
+                Log("Suspended by the combined-farm coordinator.");
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            lastAttemptAt = -999f;
+            enableWarmupUntil = now + 0.75f;
+            scannerReadyAt = -999f;
+            lastToolStatus = "Unknown";
+            lastKnownScannerToolStatusAt = -999f;
+            lastScannerEquipped = false;
+            nextScannerEquipAttemptAt = -999f;
+            consecutiveNoTargetTicks = 0;
+            consecutiveServerRejectTicks = 0;
+            nextRetryAt = -999f;
+            nextRuntimeRecycleAt = now + RuntimeRecycleSeconds;
+            stationarySinceAt = now;
+            stationaryThrottleActive = false;
+            lastMovementSamplePos = Vector3.zero;
+            try { host?.ClearBirdFarmRuntimeState(); } catch { }
+            lastStatus = "Resumed";
+            TraceCrashBreadcrumb("Resumed by the combined-farm coordinator");
+            Log("Resumed by the combined-farm coordinator.");
+        }
+
         public static bool IsDebugLoggingEnabled() => debugLoggingEnabled;
         public static bool IsStationaryThrottleActive() => stationaryThrottleActive;
         public static int GetConsecutiveNoTargetTicks() => consecutiveNoTargetTicks;
@@ -465,7 +529,7 @@ namespace HeartopiaMod
         {
             if (host == null) return;
 
-            if (enabled)
+            if (enabled && !suspended)
             {
                 Breadcrumbs.Tick("BirdFarm.update");
                 try { host.TryEnsureBirdFarmMaxPhotoEventHook(); } catch { }
@@ -478,7 +542,7 @@ namespace HeartopiaMod
                 try { host.SaveAllSettings(); } catch { }
             }
 
-            if (!enabled)
+            if (!enabled || suspended)
             {
                 return;
             }
@@ -963,7 +1027,10 @@ namespace HeartopiaMod
 
         private static void RestorePreviousTool(HeartopiaComplete host)
         {
-            if (host == null)
+            // FarmToolBroker.IsActive: while the coordinator owns the handhold it does the restore —
+            // see AutoFishingFarm.CapturePreviousTool. (This farm never captures anything anyway, so
+            // the guard only stops the "unequip the scanner" branch from firing mid-rotation.)
+            if (host == null || FarmToolBroker.IsActive)
             {
                 previousToolId = 0;
                 previousToolRestorePending = false;
@@ -992,6 +1059,10 @@ namespace HeartopiaMod
         public static void ForceStop(HeartopiaComplete host = null)
         {
             enabled = false;
+            // A stopped farm must never stay paused: if the coordinator were wedged (its circuit
+            // breaker tripped, say) a leftover suspend flag would silently kill this farm the next
+            // time the player switched it on.
+            suspended = false;
             lastAttemptAt = -999f;
             enableWarmupUntil = -999f;
             scannerReadyAt = -999f;

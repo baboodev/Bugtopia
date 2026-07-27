@@ -117,6 +117,11 @@ namespace HeartopiaMod
                 CapturePreviousTool(host);
             }
 
+            if (!value)
+            {
+                suspended = false; // a stopped farm must never stay paused — see ForceStop
+            }
+
             enabled = value;
             lastAttemptAt = -999f;
             lastStatus = enabled ? "Enabled" : "Disabled";
@@ -129,6 +134,7 @@ namespace HeartopiaMod
             if (!enabled)
             {
                 RestorePreviousTool(host);
+                ResetAckStats();
                 sessionCatchCount = 0;
                 recentCountedNetIds.Clear();
                 recentTargetedNetIds.Clear();
@@ -145,6 +151,45 @@ namespace HeartopiaMod
         public static void ToggleEnabled(HeartopiaComplete host = null)
         {
             SetEnabled(!enabled, host);
+        }
+
+        // ── Combined Farming: suspend/resume (CombinedFarmFeature) ───────────────────────────────
+        // A PAUSE, not a stop — see the same block in AutoFishingFarm. This farm has no long-running
+        // session, so any tick boundary is a safe suspend point; the only per-tick state that must go
+        // is the target lock (a netId reserved for a catch that will now not happen).
+        // Resume replays SetEnabled's tool-state reset (minus the counters and the tool capture) so
+        // the net is requested immediately and the 1 s equip-confirmation grace restarts honestly
+        // instead of trusting a "Net Equipped" reading from before another tool was held.
+        private static bool suspended;
+        public static bool IsSuspended => suspended;
+        public static void SetSuspended(bool value)
+        {
+            if (suspended == value)
+            {
+                return;
+            }
+
+            suspended = value;
+            pendingTargetNetId = 0U;
+            pendingTargetUntil = -999f;
+
+            if (value)
+            {
+                lastStatus = "Paused (combined farming)";
+                Log("Suspended by the combined-farm coordinator.");
+                return;
+            }
+
+            lastAttemptAt = -999f;
+            lastToolStatus = "Unknown";
+            lastKnownNetEquipped = false;
+            netEquipRequestActive = false;
+            nextNetEquipAttemptAt = -999f;
+            nextToolStatusRefreshAt = -999f;
+            lastNetConfirmedAt = -999f;
+            recentTargetedNetIds.Clear();
+            lastStatus = "Resumed";
+            Log("Resumed by the combined-farm coordinator.");
         }
         public static bool IsDebugLoggingEnabled() => debugLoggingEnabled;
         public static string GetLastStatus() => string.IsNullOrWhiteSpace(lastStatus) ? "Idle" : lastStatus;
@@ -195,8 +240,26 @@ namespace HeartopiaMod
             Log($"Auto-eat-triggered teleport pause armed for {eatTeleportPauseSeconds:F1}s.");
         }
 
-        private static bool IsTeleportTemporarilyPaused(out string reason, out float remainingSeconds)
+        // `host` is only consulted for the live repair state; the two legacy timers below stay as the
+        // user configured them.
+        private static bool IsTeleportTemporarilyPaused(HeartopiaComplete host, out string reason, out float remainingSeconds)
         {
+            // The restore aura is a circle on the GROUND: teleporting mid-repair walks the player out
+            // of it and the kit is wasted. The legacy pause is a fixed 18 s timer armed at trigger
+            // time and only when the user ticked its option — this is the real signal, always on and
+            // exact at both ends. (Same rule the fishing route already follows for its hops.)
+            if (host != null)
+            {
+                bool repairBusy = false;
+                try { repairBusy = host.IsAutoRepairBusy(); } catch { }
+                if (repairBusy)
+                {
+                    reason = "Repair aura";
+                    remainingSeconds = 0f;
+                    return true;
+                }
+            }
+
             float now = Time.unscaledTime;
             float repairRemaining = repairTeleportPauseUntil - now;
             float eatRemaining = eatTeleportPauseUntil - now;
@@ -229,10 +292,217 @@ namespace HeartopiaMod
             ModLogger.Msg("[InsectFarmNet] " + message);
         }
 
+        // ── Server ACK: NetCaughtInsectEvent ─────────────────────────────────────────────────────
+        // The catch is fire-and-forget — CatchingInsectCommand goes out with a list of netIds and the
+        // client learns nothing. The server does answer, though: CatchingInsectResult carries a
+        // per-insect `CatchingResult` bool, and InsectProtocolManager dispatches
+        // NetCaughtInsectEvent (keyed by the INSECT netId) for each success. A rejected insect
+        // produces no event at all, which is exactly why an out-of-range catch looked like nothing
+        // happening while sessionCatchCount kept climbing.
+        //
+        // So: remember where each sent insect was, then watch which netIds come back. That yields
+        //   * an honest confirmed-catch count next to the optimistic sent-count, and
+        //   * the empirical accept radius — the largest distance ever confirmed vs the smallest
+        //     distance ever rejected, which brackets the server's real limit.
+        //
+        // Not covered: bubble/combo catches, which the game reports through InsectBubbleBouncingEvent
+        // instead. Those show up here as "rejected" and are excluded from the radius bracket.
+        private const string NetCaughtInsectEventName = "XDTDataAndProtocol.Events.NetCaughtInsectEvent";
+        // {uint playerNetId@0; uint rewardNetId@4; bool IsFirstCatching@8; ShowOffReason reason@12;
+        //  int quality@16; bool isQualityUp@20; bool isSelected@21} = 24B aligned. Only the dispatch
+        // key (the insect netId) is actually read.
+        private const int NetCaughtInsectEventBytes = 24;
+        private const float SendAckTimeoutSeconds = 6f;
+
+        private struct PendingSend
+        {
+            public float Distance;
+            public float SentAt;
+        }
+
+        private static bool insectAckHookRegistered;
+        private static int sessionSentCount;
+        private static int sessionConfirmedCount;
+        private static int sessionUnconfirmedCount;
+        private static float maxConfirmedDistance = -1f;
+        private static float minUnconfirmedDistance = -1f;
+        private static readonly Dictionary<uint, PendingSend> pendingSends = new Dictionary<uint, PendingSend>();
+        private static readonly List<uint> expiredPendingSendBuffer = new List<uint>(16);
+        // Every netId the server has ever ACK'd this session. The farm re-sends a batch every tick,
+        // and an insect that was already caught is still in the scan list until it despawns — so
+        // without this the SAME insect is counted as "sent" again and then times out "unconfirmed",
+        // which is what put a 0.6 m entry in the rejection bracket. A resend of a caught insect is
+        // not a rejection, it is our own duplicate.
+        private static readonly HashSet<uint> confirmedNetIds = new HashSet<uint>();
+        private static bool ackStatsDirty;
+
+        public static int GetSessionConfirmedCatchCount() => sessionConfirmedCount;
+
+        private static bool AckLoggingEnabled =>
+            HeartopiaComplete.MasterLogInsectFarm || HeartopiaComplete.MasterLogCombinedFarm;
+
+        private static void AckLog(string message)
+        {
+            if (!AckLoggingEnabled)
+            {
+                return;
+            }
+
+            ModLogger.Msg("[InsectFarmAck] " + message);
+        }
+
+        // Registration is cheap and idempotent: it only records the request — the detour itself is
+        // installed by the world-ready gate (HeartopiaComplete.EventHook.cs), never from here.
+        private static void EnsureInsectAckHook(HeartopiaComplete host)
+        {
+            if (insectAckHookRegistered || host == null)
+            {
+                return;
+            }
+
+            insectAckHookRegistered = true;
+            host.RegisterGameEventHookByNetId(NetCaughtInsectEventName, NetCaughtInsectEventBytes, OnNetCaughtInsect);
+        }
+
+        // Main-thread drain — safe to allocate/log here.
+        private static void OnNetCaughtInsect(HeartopiaComplete.GameEventSnapshot e)
+        {
+            sessionConfirmedCount++;
+            ackStatsDirty = true;
+
+            uint insectNetId = e.NetId;
+            if (insectNetId != 0U)
+            {
+                confirmedNetIds.Add(insectNetId);
+            }
+
+            if (insectNetId == 0U || !pendingSends.TryGetValue(insectNetId, out PendingSend pending))
+            {
+                // Confirmed, but we never recorded the send (e.g. caught before this session's
+                // bookkeeping started). Counts toward the total, not toward the radius bracket.
+                return;
+            }
+
+            pendingSends.Remove(insectNetId);
+            if (pending.Distance > maxConfirmedDistance)
+            {
+                maxConfirmedDistance = pending.Distance;
+            }
+        }
+
+        private static void RecordSentInsects(HeartopiaComplete host, float now)
+        {
+            List<uint> sentIds = host.GetLastInsectFarmSentNetIds();
+            IReadOnlyList<Vector3> sentPositions = host.GetLastInsectFarmSentPositionsView();
+            if (sentIds == null || sentIds.Count == 0)
+            {
+                return;
+            }
+
+            GameObject player = host.GetPlayerObject();
+            Vector3 playerPos = player != null
+                ? player.transform.position
+                : (Camera.main != null ? Camera.main.transform.position : Vector3.zero);
+
+            for (int i = 0; i < sentIds.Count; i++)
+            {
+                uint netId = sentIds[i];
+                if (netId == 0U)
+                {
+                    continue;
+                }
+
+                // Count each insect ONCE. A netId already confirmed is a duplicate send of a caught
+                // insect (the server drops it, correctly); one already in flight must not restart its
+                // own ACK timer or it could never time out.
+                if (confirmedNetIds.Contains(netId) || pendingSends.ContainsKey(netId))
+                {
+                    continue;
+                }
+
+                float distance = -1f;
+                if (sentPositions != null && i < sentPositions.Count)
+                {
+                    Vector3 insectPos = sentPositions[i];
+                    distance = new Vector2(insectPos.x - playerPos.x, insectPos.z - playerPos.z).magnitude;
+                }
+
+                sessionSentCount++;
+                pendingSends[netId] = new PendingSend { Distance = distance, SentAt = now };
+            }
+
+            ackStatsDirty = true;
+        }
+
+        // Anything still pending past the timeout was rejected: the server answered
+        // CatchingResult=false (or dropped it), and no event will ever arrive.
+        private static void SweepPendingSends(float now)
+        {
+            if (pendingSends.Count == 0)
+            {
+                return;
+            }
+
+            expiredPendingSendBuffer.Clear();
+            foreach (KeyValuePair<uint, PendingSend> pair in pendingSends)
+            {
+                if (now - pair.Value.SentAt < SendAckTimeoutSeconds)
+                {
+                    continue;
+                }
+
+                expiredPendingSendBuffer.Add(pair.Key);
+            }
+
+            for (int i = 0; i < expiredPendingSendBuffer.Count; i++)
+            {
+                uint netId = expiredPendingSendBuffer[i];
+                if (!pendingSends.TryGetValue(netId, out PendingSend pending))
+                {
+                    continue;
+                }
+
+                pendingSends.Remove(netId);
+                sessionUnconfirmedCount++;
+                if (pending.Distance >= 0f && (minUnconfirmedDistance < 0f || pending.Distance < minUnconfirmedDistance))
+                {
+                    minUnconfirmedDistance = pending.Distance;
+                }
+
+                ackStatsDirty = true;
+            }
+        }
+
+        private static void LogAckStatsIfDirty()
+        {
+            if (!ackStatsDirty || !AckLoggingEnabled)
+            {
+                return;
+            }
+
+            ackStatsDirty = false;
+            AckLog("confirmed " + sessionConfirmedCount + "/" + sessionSentCount + " sent"
+                + " (" + sessionUnconfirmedCount + " unconfirmed, " + pendingSends.Count + " in flight)"
+                + " | max confirmed " + (maxConfirmedDistance >= 0f ? maxConfirmedDistance.ToString("F1") + "m" : "n/a")
+                + ", min unconfirmed " + (minUnconfirmedDistance >= 0f ? minUnconfirmedDistance.ToString("F1") + "m" : "n/a"));
+        }
+
+        private static void ResetAckStats()
+        {
+            sessionSentCount = 0;
+            sessionConfirmedCount = 0;
+            sessionUnconfirmedCount = 0;
+            maxConfirmedDistance = -1f;
+            minUnconfirmedDistance = -1f;
+            pendingSends.Clear();
+            confirmedNetIds.Clear();
+            ackStatsDirty = false;
+        }
+
 
         public static void Update(HeartopiaComplete host)
         {
-            if (!enabled)
+            if (!enabled || suspended)
             {
                 return;
             }
@@ -243,6 +513,10 @@ namespace HeartopiaMod
             }
 
             float now = Time.unscaledTime;
+
+            EnsureInsectAckHook(host);
+            SweepPendingSends(now);
+            LogAckStatsIfDirty();
 
             RefreshToolState(host, now);
 
@@ -281,7 +555,7 @@ namespace HeartopiaMod
                 status = "Idle";
 
                 bool hasPendingTarget = pendingTargetNetId != 0U && now < pendingTargetUntil;
-                bool teleportPaused = IsTeleportTemporarilyPaused(out string teleportPauseReason, out float teleportPauseRemaining);
+                bool teleportPaused = IsTeleportTemporarilyPaused(host, out string teleportPauseReason, out float teleportPauseRemaining);
                 if (teleportEnabled && !hasPendingTarget && !teleportPaused)
                 {
                     int scannedCount;
@@ -329,6 +603,25 @@ namespace HeartopiaMod
 
                             if (nearestDistance > teleportThreshold)
                             {
+                                // Combined farming bounds where a slice may take the player (see
+                                // CombinedFarmFeature.AllowsMoveTo). Standalone this is always true.
+                                if (!CombinedFarmFeature.AllowsMoveTo(chosenPos, out string moveBlockReason))
+                                {
+                                    pendingTargetNetId = 0U;
+                                    pendingTargetUntil = -999f;
+                                    // Park the refused target the same way a taken one is parked, so
+                                    // the next scan offers a DIFFERENT insect instead of re-picking
+                                    // the nearest unreachable one every tick.
+                                    if (chosenId != 0U)
+                                    {
+                                        recentTargetedNetIds[chosenId] = now + 4f;
+                                    }
+                                    lastAttemptAt = now;
+                                    lastStatus = "Hop blocked: " + moveBlockReason;
+                                    Log($"Insect hop to netId={chosenId} refused: {moveBlockReason}");
+                                    return;
+                                }
+
                                 host.TeleportDirectToLocation(chosenPos);
                                 if (chosenId != 0U)
                                 {
@@ -361,8 +654,20 @@ namespace HeartopiaMod
 
                             Vector3 patrolPos = patrolPositions[patrolIndex];
                             int patrolLabel = patrolIndex + 1;
+                            // The patrol is the move that most obviously abandons a fishing spot: its
+                            // points are fixed world coordinates, all far away. Refusing one must
+                            // still ADVANCE the index and arm the cooldown, or the farm would retest
+                            // the same unreachable point every 0.5 s forever.
                             patrolIndex = (patrolIndex + 1) % patrolPositions.Length;
                             lastPatrolTeleportAt = now;
+                            if (!CombinedFarmFeature.AllowsMoveTo(patrolPos, out string patrolBlockReason))
+                            {
+                                lastAttemptAt = now;
+                                lastStatus = "Patrol paused: " + patrolBlockReason;
+                                Log($"Patrol to {patrolLabel}/{patrolPositions.Length} refused: {patrolBlockReason}");
+                                return;
+                            }
+
                             host.TeleportDirectToLocation(patrolPos);
                             lastAttemptAt = now - catchCooldown;
                             lastStatus = $"Patrolling insect area ({patrolLabel}/{patrolPositions.Length})";
@@ -385,6 +690,7 @@ namespace HeartopiaMod
                 lastStatus = status;
                 if (result && sentCount > 0)
                 {
+                    RecordSentInsects(host, now);
                     foreach (uint netId in host.GetLastInsectFarmSentNetIds())
                     {
                         if (netId == 0U)
@@ -430,6 +736,11 @@ namespace HeartopiaMod
         public static void ForceStop()
         {
             enabled = false;
+            // A stopped farm must never stay paused: if the coordinator were wedged (its circuit
+            // breaker tripped, say) a leftover suspend flag would silently kill this farm the next
+            // time the player switched it on.
+            suspended = false;
+            ResetAckStats();
             lastAttemptAt = -999f;
             lastStatus = "Disabled";
             lastToolStatus = "Unknown";
@@ -561,6 +872,13 @@ namespace HeartopiaMod
             previousToolId = 0;
             previousToolRestorePending = false;
 
+            // See AutoFishingFarm.CapturePreviousTool: the coordinator is the single writer of the
+            // handhold while it is active, and it owns the capture/restore pair.
+            if (FarmToolBroker.IsActive)
+            {
+                return;
+            }
+
             if (host == null || !host.TryGetCurrentToolInfo(out int toolId, out _, out _))
             {
                 return;
@@ -576,7 +894,7 @@ namespace HeartopiaMod
 
         private static void RestorePreviousTool(HeartopiaComplete host)
         {
-            if (host == null)
+            if (host == null || FarmToolBroker.IsActive)
             {
                 previousToolId = 0;
                 previousToolRestorePending = false;

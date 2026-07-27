@@ -324,6 +324,17 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Combined farming: the route may only move the player while the Fish slice actually owns
+            // the tool. Hopping during an insect/bird slice (or a repair cycle) would drag the other
+            // farm somewhere else — and a hop mid-repair cancels the aura. FREEZE rather than stop:
+            // the no-fish clock keeps whatever value it had, and the route resumes on the next Fish
+            // slice at the same spot. Always true when the coordinator is off.
+            if (!CombinedFarmFeature.AllowsRouteHop)
+            {
+                lastStatus = "Paused (another farm is running)";
+                return;
+            }
+
             if (now < graceUntil)
             {
                 lastStatus = "Arriving at spot";

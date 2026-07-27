@@ -110,6 +110,12 @@ namespace HeartopiaMod
         internal static bool MasterLogBirdFarmCrashTrace = true;
         internal static bool MasterLogInsectFarm = false;
         internal static bool MasterLogAutoFish = false;
+        // Combined Farming phase 0: the coordinator's probe tick is INERT unless this is on, so it
+        // defaults ON for the verification phase (same reasoning as MasterLogQuestAssistant above).
+        // Flip to false once the census + per-tool durability reads are confirmed in a live session —
+        // while it is on, the probe pays a FindObjectsOfType bird scan every ~2s plus an insect
+        // GetComponents scan on the same cadence.
+        internal static bool MasterLogCombinedFarm = true;
         internal static bool MasterLogInstantCatch = true;
         internal static bool MasterLogAutoFarm = false;
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
@@ -393,6 +399,9 @@ namespace HeartopiaMod
         private float nextAuraMonoToolSystemResolveAttemptAt = -999f;
         private AuraMonoObjectCache cachedAuraMonoToolSystemObj;
         private IntPtr cachedAuraMonoToolSystemGetCurrentToolMethod = IntPtr.Zero;
+        // ToolSystem.GetTool(int toolId) — reads ANY tool's durability without equipping it
+        // (_toolsData holds every tool). Combined-farm census: see TryGetToolDurabilityById.
+        private IntPtr cachedAuraMonoToolSystemGetToolMethod = IntPtr.Zero;
         private float nextAutoRepairExpensiveDurabilityFallbackAt = -999f;
         private const float AutoRepairExpensiveFallbackRetrySeconds = 2f;
         private const float AutoRepairExpensiveFallbackMissBackoffSeconds = 8f;
@@ -1387,6 +1396,14 @@ namespace HeartopiaMod
             {
                 try { InsectNetFarm.Update(this); this.insectNetFarmBreaker.Success(); }
                 catch (Exception ex) { this.insectNetFarmBreaker.Failure("InsectNetFarm", ex, farmTickNow); }
+            }
+            // Combined Farming coordinator. Phase 0 = probes only: the tick returns on a bool compare
+            // unless the "Combined Farm" logging flag is on. Runs AFTER the three farms so its census
+            // reads the signals they published this frame (AutoFishingFarm.LastScanAt et al.).
+            if (this.combinedFarmBreaker.ShouldRun(farmTickNow))
+            {
+                try { CombinedFarmFeature.Update(this); this.combinedFarmBreaker.Success(); }
+                catch (Exception ex) { this.combinedFarmBreaker.Failure("CombinedFarm", ex, farmTickNow); }
             }
             if (this.puzzleNetBreaker.ShouldRun(farmTickNow))
             {
@@ -2390,6 +2407,7 @@ namespace HeartopiaMod
         private FeatureBreakerState puzzleNetBreaker;
         private FeatureBreakerState autoFishingFarmBreaker;
         private FeatureBreakerState fishingRouteBreaker;
+        private FeatureBreakerState combinedFarmBreaker;
 
 
 
@@ -5403,6 +5421,7 @@ namespace HeartopiaMod
         private IntPtr cachedBirdCamouflageCtorMethod = IntPtr.Zero;
         private IntPtr cachedBirdCamouflageNetIdField = IntPtr.Zero;
         private readonly List<uint> lastInsectFarmSentNetIds = new List<uint>();
+        private readonly List<Vector3> lastInsectFarmSentPositions = new List<Vector3>();
         private readonly List<uint> lastBirdFarmSentNetIds = new List<uint>();
         private readonly HashSet<uint> birdFarmBurstSentNetIds = new HashSet<uint>();
         private readonly Dictionary<uint, float> recentBirdFarmPhotoNetIds = new Dictionary<uint, float>();

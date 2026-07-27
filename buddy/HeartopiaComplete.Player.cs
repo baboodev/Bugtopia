@@ -219,7 +219,9 @@ namespace HeartopiaMod
             return !string.IsNullOrEmpty(name) && name.Contains("p_player_skeleton");
         }
 
-        private bool TryGetLocalPlayerPosition(out Vector3 playerPos)
+        // internal (was private): the combined-farm census needs the same player anchor the fish /
+        // bird scans use, so its per-class distance filters agree with the engines' own.
+        internal bool TryGetLocalPlayerPosition(out Vector3 playerPos)
         {
             playerPos = Vector3.zero;
             try

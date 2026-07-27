@@ -74,6 +74,7 @@ namespace HeartopiaMod
             sentCount = 0;
             status = "Idle";
             this.lastInsectFarmSentNetIds.Clear();
+            this.lastInsectFarmSentPositions.Clear();
 
             try
             {
@@ -611,6 +612,14 @@ namespace HeartopiaMod
         public List<uint> GetLastInsectFarmSentNetIds()
         {
             return new List<uint>(this.lastInsectFarmSentNetIds);
+        }
+
+        // Positions of the netIds in GetLastInsectFarmSentNetIds(), same order/count. The catch is
+        // fire-and-forget, so the only way to learn the server's real accept radius is to remember
+        // where each sent insect was and see which ones come back ACK'd (NetCaughtInsectEvent).
+        public IReadOnlyList<Vector3> GetLastInsectFarmSentPositionsView()
+        {
+            return this.lastInsectFarmSentPositions;
         }
 
         private bool TryResolveAuraMonoInsectEntityObject(IntPtr candidateObj, out IntPtr entityObj, int depth)
@@ -1614,6 +1623,8 @@ namespace HeartopiaMod
 
                 this.lastInsectFarmSentNetIds.Clear();
                 this.lastInsectFarmSentNetIds.AddRange(ids);
+                this.lastInsectFarmSentPositions.Clear();
+                this.lastInsectFarmSentPositions.AddRange(positions);
                 sentCount = ids.Count;
                 status = "Protocol sent";
                 return true;

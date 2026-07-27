@@ -282,6 +282,11 @@ namespace HeartopiaMod
             data.insectPauseTeleportOnEatEnabled = InsectNetFarm.GetPauseTeleportOnEatEnabled();
             data.insectRepairTeleportPauseSeconds = InsectNetFarm.GetRepairTeleportPauseSeconds();
             data.insectEatTeleportPauseSeconds = InsectNetFarm.GetEatTeleportPauseSeconds();
+            data.combinedFarmEnabled = CombinedFarmFeature.GetCoordinationEnabled();
+            data.combinedFarmRepairStowedTools = CombinedFarmFeature.GetRepairStowedToolsEnabled();
+            data.combinedFarmPriorityOrder = CombinedFarmFeature.GetPriorityOrderKey();
+            data.combinedFarmEmptySliceSeconds = CombinedFarmFeature.GetEmptySliceSeconds();
+            data.combinedFarmPreemptConfirmSeconds = CombinedFarmFeature.GetPreemptConfirmSeconds();
             data.notificationsEnabled = this.notificationsEnabled;
             data.notificationPosition = this.notificationPosition;
             data.blockGameUiWhenMenuOpen = this.blockGameUiWhenMenuOpen;
@@ -552,6 +557,17 @@ namespace HeartopiaMod
             {
                 InsectNetFarm.SetEatTeleportPauseSeconds(data.insectEatTeleportPauseSeconds);
             }
+            CombinedFarmFeature.SetCoordinationEnabled(data.combinedFarmEnabled);
+            CombinedFarmFeature.SetRepairStowedToolsEnabled(data.combinedFarmRepairStowedTools);
+            CombinedFarmFeature.SetPriorityOrderKey(data.combinedFarmPriorityOrder);
+            if (data.combinedFarmEmptySliceSeconds > 0f)
+            {
+                CombinedFarmFeature.SetEmptySliceSeconds(data.combinedFarmEmptySliceSeconds);
+            }
+            if (data.combinedFarmPreemptConfirmSeconds > 0f)
+            {
+                CombinedFarmFeature.SetPreemptConfirmSeconds(data.combinedFarmPreemptConfirmSeconds);
+            }
             this.notificationsEnabled = data.notificationsEnabled;
             this.notificationPosition = Mathf.Clamp(data.notificationPosition, 0, NotificationPositionOptions.Length - 1);
             this.blockGameUiWhenMenuOpen = data.blockGameUiWhenMenuOpen;
@@ -791,6 +807,10 @@ namespace HeartopiaMod
                         else if (line.Contains("insectPauseTeleportOnEatEnabled")) InsectNetFarm.SetPauseTeleportOnEatEnabled(GetJsonInt(line, "\"insectPauseTeleportOnEatEnabled\":") != 0);
                         else if (line.Contains("insectRepairTeleportPauseSeconds")) InsectNetFarm.SetRepairTeleportPauseSeconds(GetJsonFloat(line, "\"insectRepairTeleportPauseSeconds\":"));
                         else if (line.Contains("insectEatTeleportPauseSeconds")) InsectNetFarm.SetEatTeleportPauseSeconds(GetJsonFloat(line, "\"insectEatTeleportPauseSeconds\":"));
+                        else if (line.Contains("combinedFarmEnabled")) CombinedFarmFeature.SetCoordinationEnabled(GetJsonInt(line, "\"combinedFarmEnabled\":") != 0);
+                        else if (line.Contains("combinedFarmRepairStowedTools")) CombinedFarmFeature.SetRepairStowedToolsEnabled(GetJsonInt(line, "\"combinedFarmRepairStowedTools\":") != 0);
+                        else if (line.Contains("combinedFarmEmptySliceSeconds")) CombinedFarmFeature.SetEmptySliceSeconds(GetJsonFloat(line, "\"combinedFarmEmptySliceSeconds\":"));
+                        else if (line.Contains("combinedFarmPreemptConfirmSeconds")) CombinedFarmFeature.SetPreemptConfirmSeconds(GetJsonFloat(line, "\"combinedFarmPreemptConfirmSeconds\":"));
                         else if (line.Contains("insectTeleportCooldown")) InsectNetFarm.SetCatchCooldown(GetJsonFloat(line, "\"insectTeleportCooldown\":"));
                         else if (line.Contains("insectScanTimeout")) InsectNetFarm.SetScanRange(GetJsonFloat(line, "\"insectScanTimeout\":"));
                         else if (line.Contains("keyAutoEat")) this.keyAutoEat = (KeyCode)GetJsonInt(line, "\"keyAutoEat\":");

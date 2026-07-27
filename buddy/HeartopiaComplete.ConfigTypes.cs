@@ -262,6 +262,14 @@ namespace HeartopiaMod
             public bool insectPauseTeleportOnEatEnabled;
             public float insectRepairTeleportPauseSeconds;
             public float insectEatTeleportPauseSeconds;
+
+            // Combined Farming (CombinedFarmFeature). Negative/empty = "not in this file yet", so an
+            // older config loads the feature's own defaults instead of zeroing its windows.
+            public bool combinedFarmEnabled = true;
+            public bool combinedFarmRepairStowedTools = true;
+            public string combinedFarmPriorityOrder = string.Empty;
+            public float combinedFarmEmptySliceSeconds = -1f;
+            public float combinedFarmPreemptConfirmSeconds = -1f;
             public bool notificationsEnabled;
             public int notificationPosition = 5;
             public bool blockGameUiWhenMenuOpen;

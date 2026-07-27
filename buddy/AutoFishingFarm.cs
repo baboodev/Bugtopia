@@ -109,6 +109,10 @@ namespace HeartopiaMod
             fishBattleResultFishId = e.ReadInt32(4);
             fishBattleResultFailReason = e.ReadInt32(8); // 0=None 1=Distance 2=LineBreak 3=TimeOut
             instantCatchEventActiveUntil = -999f; // cycle ended
+            if (fishBattleResultSuccess)
+            {
+                SessionCatchCount++;
+            }
 
             // On a catch, mark the exact caught fish object (its instance id, captured at cast) so the
             // next scan skips only its lingering ghost — not the rest of a clustered school.
@@ -584,6 +588,63 @@ namespace HeartopiaMod
                 : distance + "m";
         }
 
+        // ── Combined Farming: suspend/resume (CombinedFarmFeature) ───────────────────────────────
+        // A PAUSE, not a stop: `enabled`, the session catch count and every setting survive, only
+        // Update() stops doing work. SetEnabled(false) must never be used for this — it resets the
+        // counters and re-equips the captured tool, i.e. it fights the coordinator for the handhold.
+        //
+        // Safe suspend point is `!IsInFishingSession` (the caller checks it); the reel press is
+        // released here regardless so a suspend forced mid-battle cannot leave the button held.
+        // Resume clears the equip retry timer + the action gate so the rod goes back out on the very
+        // next tick instead of waiting out a cooldown started before the pause.
+        private static bool suspended;
+        public static bool IsSuspended => suspended;
+        public static void SetSuspended(bool value, HeartopiaComplete host = null)
+        {
+            if (suspended == value)
+            {
+                return;
+            }
+
+            suspended = value;
+            if (value)
+            {
+                if (host != null)
+                {
+                    try { host.TrySetFishingPressed(false, out _); } catch { }
+                }
+
+                lastRequestedPressed = null;
+                instantCatchActiveCached = false;
+                IsInFishingSession = false;
+                wasInFishingSession = false;
+                lastStatus = "Paused (combined farming)";
+                Log("Suspended by the combined-farm coordinator.");
+                return;
+            }
+
+            nextActionAt = -999f;
+            nextRodEquipAttemptAt = -999f;
+            sessionStartedAt = -999f;
+            waitingSinceAt = -999f;
+            hookedSinceAt = -999f;
+            lastHookedStateAt = -999f;
+            lastBattleStateAt = -999f;
+            lastBattleLostBaitAt = -999f;
+            lastBattleBaitNetId = 0U;
+            lastCastSentAt = -999f;
+            consecutiveTargetMisses = 0;
+            lastRequestedPressed = null;
+            lastToolStatus = "Unknown";
+            lastStatus = "Resumed";
+            Log("Resumed by the combined-farm coordinator.");
+        }
+
+        // Server-confirmed catches this session — the coordinator uses the delta across a slice as
+        // the evidence that the slice was actually productive. Fed by the CmdFishBattleResult event
+        // (the same signal the per-cast diagnostics use), not by cast counts.
+        public static int SessionCatchCount { get; private set; }
+
         public static void SetEnabled(bool value, HeartopiaComplete host = null)
         {
             if (enabled == value)
@@ -594,6 +655,12 @@ namespace HeartopiaMod
             if (value && !enabled)
             {
                 CapturePreviousTool(host);
+            }
+
+            SessionCatchCount = 0;
+            if (!value)
+            {
+                suspended = false;
             }
 
             enabled = value;
@@ -655,7 +722,7 @@ namespace HeartopiaMod
 
         public static void Update(HeartopiaComplete host)
         {
-            if (!enabled || host == null)
+            if (!enabled || suspended || host == null)
             {
                 return;
             }
@@ -1452,6 +1519,11 @@ namespace HeartopiaMod
         public static void ForceStop(HeartopiaComplete host = null)
         {
             enabled = false;
+            // A stopped farm must never stay paused: if the coordinator were wedged (its circuit
+            // breaker tripped, say) a leftover suspend flag would silently kill this farm the next
+            // time the player switched it on.
+            suspended = false;
+            SessionCatchCount = 0;
             nextRodEquipAttemptAt = -999f;
             previousToolId = 0;
             previousToolRestorePending = false;
@@ -1520,6 +1592,15 @@ namespace HeartopiaMod
             previousToolId = 0;
             previousToolRestorePending = false;
 
+            // While the combined-farm coordinator owns the handhold it is the ONE writer: it captured
+            // the player's tool once and restores it when it releases. A per-farm capture here would
+            // snapshot whichever farm's tool happens to be out and re-equip it later, behind the
+            // coordinator's back (conflict #2 in the plan).
+            if (FarmToolBroker.IsActive)
+            {
+                return;
+            }
+
             if (host == null || !host.TryGetCurrentToolInfo(out int toolId, out _, out _))
             {
                 return;
@@ -1535,7 +1616,7 @@ namespace HeartopiaMod
 
         private static void RestorePreviousTool(HeartopiaComplete host)
         {
-            if (host == null)
+            if (host == null || FarmToolBroker.IsActive)
             {
                 previousToolId = 0;
                 previousToolRestorePending = false;

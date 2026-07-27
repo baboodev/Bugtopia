@@ -100,6 +100,9 @@ namespace HeartopiaMod
         private const int UguiShellFishingSubIndex = 1;              // "Fishing" within its subs
         private const int UguiShellInsectsSubIndex = 2;              // "Insects" within its subs
         private const int UguiShellBirdsSubIndex = 3;                // "Birds" within its subs
+        // "Combined" — added with CombinedFarmFeature (no IMGUI ancestor; the coordinator postdates
+        // the IMGUI menu). Sits after the three farms it arbitrates between.
+        private const int UguiShellCombinedSubIndex = 4;             // "Combined" within its subs
 
         // Radar (Phase 3 item 7, HeartopiaComplete.UguiRadarContent.cs): display position 4
         // carries internal id 4 (UguiShellInternalTabIds[4]) = IMGUI selectedTab 4 = DrawRadarTab

@@ -11,6 +11,7 @@ namespace HeartopiaMod
     {
         private const int InstrumentTypeBaYinTong = 4;
         private const int InstrumentTypePiano = 1;
+        private const int InstrumentTypeHarp = 6;
         private const int MusicKeyOptionMode8 = 0;
         private const int MusicKeyOptionMode15a = 1;
         private const int MusicKeyOptionMode15b = 2;
@@ -333,7 +334,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            bool pianoSemitone = instrumentType == InstrumentTypePiano
+            bool pianoSemitone = (instrumentType == InstrumentTypePiano || instrumentType == InstrumentTypeHarp)
                 && keyOption == MusicKeyOptionMode22
                 && this.TryGetGameSettingPianoSemitone(out bool semitone)
                 && semitone;
@@ -359,7 +360,7 @@ namespace HeartopiaMod
                     this.AddInputEventKeys(keys, InstrumentInputKeys15b);
                     break;
                 case MusicKeyOptionMode22:
-                    if (instrumentType == InstrumentTypePiano && pianoSemitone)
+                    if ((instrumentType == InstrumentTypePiano || instrumentType == InstrumentTypeHarp) && pianoSemitone)
                     {
                         this.AddInputEventKeys(keys, InstrumentInputKeys22PianoSemitone);
                         this.AddInputEventKeys(keys, InstrumentInputKeysPianoBlack);

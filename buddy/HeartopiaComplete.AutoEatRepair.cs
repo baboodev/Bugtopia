@@ -964,6 +964,160 @@ namespace HeartopiaMod
             }
         }
 
+        // Durability of an ARBITRARY tool — without equipping it.
+        //
+        // `ToolSystem` keeps `_toolsData` for every tool in `TableToolTypes` (populated in InitData and
+        // kept live by the durability sync event), and exposes `public Tool GetTool(int toolId)` —
+        // non-generic, one int arg, reference-type return, i.e. a safe `mono_runtime_invoke` target.
+        // The shipped auto-repair only ever reads `GetCurrentTool()`, so it is blind to the two tools
+        // that are not in hand; the combined-farm coordinator needs all three (rod 3 / scanner 4 /
+        // net 5) to decide whether a repair pause is even necessary.
+        //
+        // Safety envelope is copied from TryGetCurrentToolDurabilityViaAuraMonoToolSystem: shared
+        // module/method cache with the same throttle, and the returned `Tool` is PINNED across the
+        // field reads (bdwgc can move it between the invoke and the reads). Fails closed when pinning
+        // is unavailable — an unpinned walk here is exactly the stale-pointer AV class.
+        public unsafe bool TryGetToolDurabilityById(int toolId, out int durability, out int maxDurability, out string status)
+        {
+            durability = 0;
+            maxDurability = 0;
+            status = "AuraMono ToolSystem unavailable";
+
+            if (toolId <= 0)
+            {
+                status = "Tool id missing";
+                return false;
+            }
+
+            try
+            {
+                this.ResolveAuraFarmRuntimeMethods();
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+                {
+                    status = "AuraMono API unavailable";
+                    return false;
+                }
+
+                if (!AuraMonoPinningAvailable)
+                {
+                    status = "AuraMono pinning unavailable";
+                    return false;
+                }
+
+                float now = Time.unscaledTime;
+                // The module object is shared with the GetCurrentTool reader, so resolve it only when
+                // the shared cache is actually empty — and consume the shared resolve throttle only
+                // then. Resolving OUR method off an already-cached object costs nothing and must not
+                // burn the other path's retry budget.
+                this.cachedAuraMonoToolSystemObj.TryGet(out IntPtr toolSystemObj);
+                if (toolSystemObj == IntPtr.Zero)
+                {
+                    if (now < this.nextAuraMonoToolSystemResolveAttemptAt)
+                    {
+                        status = "AuraMono ToolSystem resolve throttled";
+                        return false;
+                    }
+                    this.nextAuraMonoToolSystemResolveAttemptAt = now + 8f;
+
+                    if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Tool.ToolSystem", out toolSystemObj) || toolSystemObj == IntPtr.Zero)
+                    {
+                        status = "AuraMono ToolSystem module unavailable";
+                        return false;
+                    }
+
+                    this.cachedAuraMonoToolSystemObj.Set(toolSystemObj);
+                    this.nextAuraMonoToolSystemResolveAttemptAt = -999f;
+                }
+
+                IntPtr getToolMethod = this.cachedAuraMonoToolSystemGetToolMethod;
+                if (getToolMethod == IntPtr.Zero)
+                {
+                    IntPtr toolSystemClass = auraMonoObjectGetClass(toolSystemObj);
+                    if (toolSystemClass == IntPtr.Zero)
+                    {
+                        status = "AuraMono ToolSystem class unavailable";
+                        return false;
+                    }
+
+                    getToolMethod = this.FindAuraMonoMethodOnHierarchy(toolSystemClass, "GetTool", 1);
+                    if (getToolMethod == IntPtr.Zero)
+                    {
+                        status = "AuraMono ToolSystem.GetTool unavailable";
+                        return false;
+                    }
+
+                    this.cachedAuraMonoToolSystemGetToolMethod = getToolMethod;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr toolObj;
+                int toolIdArg = toolId;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&toolIdArg);
+                toolObj = auraMonoRuntimeInvoke(getToolMethod, toolSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    // A raised exception means the cached module pointer is suspect — drop it so the
+                    // next call re-resolves (same reaction as the GetCurrentTool path).
+                    this.cachedAuraMonoToolSystemObj.Clear();
+                    this.cachedAuraMonoToolSystemGetToolMethod = IntPtr.Zero;
+                    status = "AuraMono GetTool raised";
+                    return false;
+                }
+
+                if (toolObj == IntPtr.Zero)
+                {
+                    // GetTool returns null for a toolId that is not in _toolsData. That is a valid
+                    // answer about the ARGUMENT, not evidence of a stale cache — keep the cache.
+                    status = "Tool " + toolId + " not in ToolSystem._toolsData";
+                    return false;
+                }
+
+                uint toolPin = AuraMonoPinNew(toolObj);
+                if (toolPin == 0)
+                {
+                    status = "AuraMono tool pin failed";
+                    return false;
+                }
+
+                try
+                {
+                    bool hasDurability = this.TryGetMonoIntMember(toolObj, "durability", out durability)
+                        || this.TryGetMonoIntMember(toolObj, "_durability", out durability)
+                        || this.TryGetMonoIntMember(toolObj, "Durability", out durability);
+                    bool hasMaxDurability = this.TryGetMonoIntMember(toolObj, "maxDurability", out maxDurability)
+                        || this.TryGetMonoIntMember(toolObj, "_maxDurability", out maxDurability)
+                        || this.TryGetMonoIntMember(toolObj, "MaxDurability", out maxDurability);
+                    if (!hasDurability || !hasMaxDurability)
+                    {
+                        status = "AuraMono Tool fields unreadable: " + this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(toolObj));
+                        return false;
+                    }
+
+                    // maxDurability stays 0 for a tool the player has not unlocked (InitData only
+                    // fills it from IToolService when the tool component exists) — report that as a
+                    // miss so callers never divide by zero or read it as "0 % durability".
+                    if (maxDurability <= 0)
+                    {
+                        status = "Tool " + toolId + " locked or max durability unknown";
+                        return false;
+                    }
+
+                    status = "OK";
+                    return true;
+                }
+                finally
+                {
+                    AuraMonoPinFree(toolPin);
+                }
+            }
+            catch (Exception ex)
+            {
+                status = "AuraMono GetTool exception: " + ex.Message;
+                return false;
+            }
+        }
+
         private bool TryGetCurrentToolDurabilityViaAuraMono(out int toolId, out int durability, out int maxDurability, out string status)
         {
             toolId = 0;
@@ -2207,6 +2361,14 @@ namespace HeartopiaMod
         public bool GetAutoRepairOnDurabilityEnabled()
         {
             return this.autoRepairOnToastEnabled;
+        }
+
+        // The durability ratio at/below which auto-repair fires (1-100 %, default 10). The combined
+        // farm's repair cycle uses the SAME number to decide which stowed tools are worth a pass, so
+        // the two can never disagree about what "low" means.
+        public int GetAutoRepairTriggerPercent()
+        {
+            return Mathf.Clamp(this.autoRepairTriggerPercent, 1, 100);
         }
 
         public void SetAutoRepairOnDurabilityEnabled(bool value)

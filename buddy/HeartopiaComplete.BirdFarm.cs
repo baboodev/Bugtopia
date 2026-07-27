@@ -6064,6 +6064,129 @@ namespace HeartopiaMod
                 && !lowerName.Contains("birdscanner");
         }
 
+        // ── Tool-independent bird PRESENCE proxy (combined-farm census) ───────────────────────────
+        // The farm's real target list comes from GamePhotoMode._birdScannables, which the game only
+        // maintains while the bird scanner is actively ticking — with the rod or the net in hand it
+        // goes stale, so it cannot answer "are there birds here?" for an arbitration decision. The
+        // loaded-entity fallback is hard-disabled (birdFarmDisableAuraEntityScan). What is always
+        // available is the prefab name: the same `p_bird_bird*(Clone)` filter the bird radar uses.
+        //
+        // Presence + position is all the arbiter needs; netId/staticId resolution stays inside the
+        // bird slice where the scanner is out. Deliberately NOT built on GetTrackedBirdObjects(),
+        // which walks markerToTarget and therefore only works while the radar is on.
+        //
+        // Object lifetime: the scan reduces to Vector3 (a value type) inside the same frame and
+        // NEVER stores the GameObject references — holding IL2CPP wrappers across frames AVs when
+        // Unity destroys the object (the rule stated at HeartopiaComplete.Radar.cs:2126). The
+        // positions cache is range-independent, so every caller can filter with its own radius.
+        private readonly List<Vector3> birdPresencePositions = new List<Vector3>(64);
+        private float nextBirdPresenceScanAt = -999f;
+        private float lastBirdPresenceScanAt = -999f;
+        private const float BirdPresenceScanInterval = 2f;
+        private const float BirdPresenceEmptyScanInterval = 3f;
+        private const int BirdPresenceMaxTracked = 256;
+
+        public bool TryScanBirdObjectsNearby(float scanRange, out int inRangeCount, out Vector3 nearestPos, out float nearestDistance, out string status)
+        {
+            inRangeCount = 0;
+            nearestPos = Vector3.zero;
+            nearestDistance = -1f;
+            status = "Bird presence scan unavailable";
+
+            try
+            {
+                float now = Time.unscaledTime;
+                if (now >= this.nextBirdPresenceScanAt)
+                {
+                    this.RefreshBirdPresencePositions(now);
+                }
+
+                if (this.lastBirdPresenceScanAt <= 0f)
+                {
+                    status = "Bird presence scan not run yet";
+                    return false;
+                }
+
+                if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+                {
+                    status = "Local player position unavailable";
+                    return false;
+                }
+
+                float best = float.MaxValue;
+                for (int i = 0; i < this.birdPresencePositions.Count; i++)
+                {
+                    Vector3 birdPos = this.birdPresencePositions[i];
+                    // Cylinder (XZ) distance, same reasoning as the fish-shadow scan: perched and
+                    // flying birds sit well above the player and the height gap must not shrink the
+                    // radius.
+                    float distance = new Vector2(birdPos.x - playerPos.x, birdPos.z - playerPos.z).magnitude;
+                    if (scanRange > 0f && distance > scanRange)
+                    {
+                        continue;
+                    }
+
+                    inRangeCount++;
+                    if (distance < best)
+                    {
+                        best = distance;
+                        nearestPos = birdPos;
+                    }
+                }
+
+                if (inRangeCount == 0)
+                {
+                    status = this.birdPresencePositions.Count > 0
+                        ? "No birds within " + scanRange.ToString("F0") + "m (" + this.birdPresencePositions.Count + " loaded)"
+                        : "No bird objects loaded";
+                    return false;
+                }
+
+                nearestDistance = best;
+                status = "Birds in range: " + inRangeCount + "/" + this.birdPresencePositions.Count;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "Bird presence scan error: " + ex.Message;
+                return false;
+            }
+        }
+
+        private void RefreshBirdPresencePositions(float now)
+        {
+            this.birdPresencePositions.Clear();
+
+            try
+            {
+                GameObject[] sourceObjects = UnityEngine.Object.FindObjectsOfType<GameObject>();
+                for (int i = 0; i < sourceObjects.Length && this.birdPresencePositions.Count < BirdPresenceMaxTracked; i++)
+                {
+                    GameObject obj = sourceObjects[i];
+                    if (obj == null || obj.name == null || !obj.activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    if (!this.ShouldTrackBirdObject(obj.name.ToLowerInvariant()))
+                    {
+                        continue;
+                    }
+
+                    this.birdPresencePositions.Add(obj.transform.position);
+                }
+            }
+            catch
+            {
+                // A destroyed native object mid-walk — keep whatever was collected.
+            }
+
+            this.lastBirdPresenceScanAt = now;
+            this.nextBirdPresenceScanAt = now + (this.birdPresencePositions.Count > 0
+                ? BirdPresenceScanInterval
+                : BirdPresenceEmptyScanInterval);
+        }
+
         // Token: 0x06000020 RID: 32 RVA: 0x000061FC File Offset: 0x000043FC
         private void VacuumBirds()
         {

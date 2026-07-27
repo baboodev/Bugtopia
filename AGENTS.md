@@ -33,6 +33,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | Patches, config, frame loops | [docs/TECHNICAL.md](docs/TECHNICAL.md) |
 | User-facing features / menu | [docs/FEATURES.md](docs/FEATURES.md) |
 | Inventory / `ItemNetPair` / bag pipelines | [docs/BACKPACK_AND_ITEMS.md](docs/BACKPACK_AND_ITEMS.md) |
+| Instrument WAV export (noteId ↔ Wwise subsong) | [docs/INSTRUMENT_SAMPLE_EXPORT.md](docs/INSTRUMENT_SAMPLE_EXPORT.md) |
 
 **Rule:** Do not guess type names from memory. Copy **full namespaces** from decompilations or interop DLLs for the target game build.
 
