@@ -45,6 +45,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(intro, pad, yCur, innerW, 40f);
             yCur += 44f;
 
+#if FEATURE_TELEGRAM
             // Bugtopia News link — a real button (not just text), directly under the intro so it
             // is visible without scrolling. Icon + label, same pairing as the sidebar footer, and
             // the same BugtopiaNewsUrl constant so the two can never drift apart.
@@ -65,6 +66,7 @@ namespace HeartopiaMod
                 "Bugtopia News", 12f, this.UguiKitTextColor(), false);
             StretchUguiFill(newsLabel, 34f, 0f, 8f, 0f);
             yCur += 38f;
+#endif
 
             GameObject h1 = this.CreateUguiHeaderLabel(block.transform, "WhatHeading", this.L("What it does"), 13f);
             PlaceUguiTopLeft(h1, pad, yCur, innerW, 20f);

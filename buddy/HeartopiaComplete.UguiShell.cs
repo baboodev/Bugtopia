@@ -345,6 +345,7 @@ namespace HeartopiaMod
         }
 
         // Close button + sidebar footer both route here (IMGUI: both set showMenu = false).
+#if FEATURE_TELEGRAM
         // The mod's Telegram channel. Single source of truth — the sidebar footer link and the
         // About tab both use this constant, so the URL can never drift between the two.
         private const string BugtopiaNewsUrl = "https://t.me/bugtopiamod";
@@ -375,6 +376,7 @@ namespace HeartopiaMod
         {
             this.OpenUguiExternalUrl(BugtopiaNewsUrl);
         }
+#endif
 
         private void OnUguiShellCloseClicked()
         {
@@ -507,20 +509,21 @@ namespace HeartopiaMod
 
                 // Sidebar footer — IMGUI parity (DrawWindow: "Baboodev", bold 12, primary text
                 // color, centered in the bottom 56px of the sidebar; clicking it hides the menu).
-                // Sidebar footer = the Bugtopia News link (was the "Baboodev" byline, which closed
-                // the menu on click — a footer that quietly closed the window was easy to hit by
-                // accident). Telegram glyph + label, centred as a pair; opens the channel in the
-                // default browser instead.
+                // Sidebar footer. With FEATURE_TELEGRAM it is the Bugtopia News link (glyph +
+                // label, opens the channel in the default browser); without it, the plain byline.
+                // Either way it no longer CLOSES the menu on click, which the original byline did —
+                // a footer that quietly shut the window was easy to hit by accident.
                 GameObject footer = this.CreateUguiGo("SidebarFooter", sidebar.transform);
                 PlaceUguiTopLeft(footer, 0f, UguiShellWindowH - 56f - 56f, UguiShellSidebarW, 56f);
+#if FEATURE_TELEGRAM
                 Image footerHit = this.AddUguiImage(footer, new Color(0f, 0f, 0f, 0f), false, 1f);
                 footerHit.raycastTarget = true;
                 Button footerBtn = footer.AddComponent<Button>();
                 footerBtn.targetGraphic = footerHit;
                 footerBtn.onClick.AddListener(new System.Action(this.OnUguiShellNewsClicked));
 
-                // Icon + text laid out as one centred group: the icon sits at a fixed 16px left
-                // inset and the label takes the rest, so the pair reads as a single link.
+                // Icon + text laid out as one group: the icon sits at a fixed 16px left inset and
+                // the label takes the rest, so the pair reads as a single link.
                 Image footerIcon = this.CreateUguiIcon(footer.transform, UguiTelegramIconIndex, 16f, this.UguiKitAccent());
                 if (footerIcon != null)
                 {
@@ -535,6 +538,12 @@ namespace HeartopiaMod
                     "Bugtopia News", 12f, this.UguiKitTextColor(), false);
                 this.TrySetUguiLabelBold(footerName);
                 StretchUguiFill(footerName, 38f, 0f, 8f, 0f);
+#else
+                GameObject footerName = this.CreateUguiLabel(footer.transform, "Name",
+                    "Baboodev", 12f, this.UguiKitTextColor(), true);
+                this.TrySetUguiLabelBold(footerName);
+                StretchUguiFill(footerName, 0f, 0f, 0f, 0f);
+#endif
 
                 // Per-tab: sidebar nav row + content container (+ its own sub-tab bar when the
                 // tab has sub-tabs). Each piece guarded so one broken tab can't kill the shell.

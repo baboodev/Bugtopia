@@ -100,6 +100,51 @@ jobs:
             }
           }
 
+      # Built FIRST and staged immediately: OutputPath is bin\<Loader>\<Configuration>\, so this
+      # shares a folder with the regular Universal build below and would otherwise be overwritten
+      # by it. Copying it out before that build runs is simpler and less fragile than fighting
+      # MSBuild over the output path.
+      - name: Build Universal without the Telegram link (Telegram=false)
+        shell: pwsh
+        run: |
+          $deps = "${{ github.workspace }}\ci\heartopia"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Write-Host "::group::Build Universal (no link)"
+          dotnet build buddy/buddy.csproj `
+            -c ReleaseShip `
+            -p:Loader=Universal `
+            -p:Telegram=false `
+            -p:HeartopiaDir="$deps" `
+            -p:ContinuousIntegrationBuild=true `
+            --nologo
+          if ($LASTEXITCODE -ne 0) { throw "Build failed for Universal (Telegram=false)" }
+          Write-Host "::endgroup::"
+          Copy-Item buddy/bin/Universal/ReleaseShip/bugtopia.dll dist/bugtopia-universal-nolink.dll
+          Copy-Item buddy/bin/Universal/ReleaseShip/bugtopia.pdb dist/bugtopia-universal-nolink.pdb
+
+      # Guards the guarantee. FEATURE_TELEGRAM strips the code AND its string literals, but only
+      # for code that is actually inside the #if — a future edit could reintroduce the URL outside
+      # it and nobody would notice. This fails the build instead.
+      # NOTE: .NET stores user string literals as UTF-16LE (metadata names are UTF-8), so an
+      # ASCII-only search reports a false clean. Both encodings are checked.
+      - name: Verify the no-link build has no Telegram traces
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bytes = [System.IO.File]::ReadAllBytes("dist/bugtopia-universal-nolink.dll")
+          $text8  = [System.Text.Encoding]::UTF8.GetString($bytes)
+          $text16 = [System.Text.Encoding]::Unicode.GetString($bytes)
+          $needles = @('t.me', 'bugtopiamod', 'Telegram', 'Bugtopia News', 'OpenURL')
+          $bad = @()
+          foreach ($n in $needles) {
+            if ($text8.Contains($n))  { $bad += "$n (utf-8)" }
+            if ($text16.Contains($n)) { $bad += "$n (utf-16)" }
+          }
+          if ($bad.Count -gt 0) {
+            throw "bugtopia-universal-nolink.dll still contains: $($bad -join ', '). Something referencing the link sits OUTSIDE #if FEATURE_TELEGRAM."
+          }
+          Write-Host "No Telegram traces found in the no-link build."
+
       - name: Build all flavors (MelonLoader, BepInEx, Universal)
         shell: pwsh
         run: |
@@ -115,6 +160,19 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Build failed for Loader=$loader" }
             Write-Host "::endgroup::"
           }
+
+      # Positive control for the check above: if the link ever silently stopped shipping in the
+      # normal builds, the "no traces" test would still pass and prove nothing.
+      - name: Verify the regular Universal build DOES contain the link
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bytes = [System.IO.File]::ReadAllBytes("buddy/bin/Universal/ReleaseShip/bugtopia.dll")
+          $text16 = [System.Text.Encoding]::Unicode.GetString($bytes)
+          if (-not $text16.Contains('bugtopiamod')) {
+            throw "The regular Universal build is missing the Bugtopia News link — Telegram=true is the default, so this should never happen."
+          }
+          Write-Host "Link present in the regular build, as expected."
 
       - name: Stage renamed release files
         shell: pwsh
@@ -142,10 +200,11 @@ jobs:
         run: |
           $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" `
             -f "tag_name=${{ github.ref_name }}" --jq .body
-          $notes = "Three builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n`n$generated"
+          $notes = "Four builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n- **bugtopia-universal-nolink.dll** — same as universal, built without the Bugtopia News link (no URL or channel reference anywhere in the binary).`n`n$generated"
           gh release create "${{ github.ref_name }}" `
             --title "${{ github.ref_name }}" `
             --notes $notes `
             "dist/bugtopia-bepinex.dll" `
             "dist/bugtopia-melonloader.dll" `
-            "dist/bugtopia-universal.dll"
+            "dist/bugtopia-universal.dll" `
+            "dist/bugtopia-universal-nolink.dll"

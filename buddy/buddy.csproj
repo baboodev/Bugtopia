@@ -5,6 +5,11 @@
     <!-- Loader: Universal (default) = one DLL for both loaders (CI/release). BepInEx / MelonLoader =
          single-loader DLL that only needs that loader installed to build. -->
     <Loader Condition="'$(Loader)' == ''">Universal</Loader>
+    <!-- Telegram: true (default) = the Bugtopia News link ships (sidebar footer + About button).
+         false = a build with NO trace of it. This MUST stay a compile-time switch, not a runtime
+         flag: #if strips the code AND its string literals from the assembly, whereas a bool would
+         leave "https://t.me/..." sitting in the DLL's string heap for anyone to grep. -->
+    <Telegram Condition="'$(Telegram)' == ''">true</Telegram>
     <HeartopiaDir Condition="'$(HeartopiaDir)' == ''">D:\SteamLibrary\steamapps\common\Heartopia</HeartopiaDir>
     <OutputType>Library</OutputType>
     <AssemblyName>bugtopia</AssemblyName>
@@ -52,6 +57,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Loader)' == 'BepInEx'">
     <DefineConstants>$(DefineConstants);LOADER_BEPINEX</DefineConstants>
+  </PropertyGroup>
+
+  <!-- FEATURE_TELEGRAM gates the Bugtopia News link: the URL constant, the OpenURL helper, the
+       sidebar-footer link, the About button, the paper-plane icon and the one localized error
+       string. Build without it: -p:Telegram=false -->
+  <PropertyGroup Condition="'$(Telegram)' == 'true'">
+    <DefineConstants>$(DefineConstants);FEATURE_TELEGRAM</DefineConstants>
   </PropertyGroup>
 
   <!-- BepInEx + shared deps + IL2CPP interop, from the BepInEx install. Used by the BepInEx build

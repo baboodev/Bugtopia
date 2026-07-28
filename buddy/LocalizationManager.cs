@@ -985,7 +985,9 @@ namespace HeartopiaMod
             { "Ready to submit: {0}", "Ready to submit: {0}" },
 
             // Backfill: indirect L() sinks — LIVE rail entries, sub-tab bar, notification positions, option lists, status words, fixed toasts (2026-07)
+#if FEATURE_TELEGRAM
             { "Could not open the link", "Could not open the link" },
+#endif
             { "Fishing Farm", "Fishing Farm" },
             { "Insect Farm", "Insect Farm" },
             { "Bird Farm", "Bird Farm" },
@@ -2132,7 +2134,9 @@ namespace HeartopiaMod
             { "Ready to submit: {0}", "Listas para entregar: {0}" },
 
             // Backfill: indirect L() sinks — LIVE rail entries, sub-tab bar, notification positions, option lists, status words, fixed toasts (2026-07)
+#if FEATURE_TELEGRAM
             { "Could not open the link", "No se pudo abrir el enlace" },
+#endif
             { "Fishing Farm", "Granja de pesca" },
             { "Insect Farm", "Granja de insectos" },
             { "Bird Farm", "Granja de aves" },
@@ -3279,7 +3283,9 @@ namespace HeartopiaMod
             { "Ready to submit: {0}", "可提交：{0}" },
 
             // Backfill: indirect L() sinks — LIVE rail entries, sub-tab bar, notification positions, option lists, status words, fixed toasts (2026-07)
+#if FEATURE_TELEGRAM
             { "Could not open the link", "无法打开链接" },
+#endif
             { "Fishing Farm", "钓鱼农场" },
             { "Insect Farm", "捕虫农场" },
             { "Bird Farm", "抓鸟农场" },
@@ -4416,7 +4422,9 @@ namespace HeartopiaMod
             { "Ready to submit: {0}", "Prontas para entregar: {0}" },
 
             // Backfill: indirect L() sinks — LIVE rail entries, sub-tab bar, notification positions, option lists, status words, fixed toasts (2026-07)
+#if FEATURE_TELEGRAM
             { "Could not open the link", "Não foi possível abrir o link" },
+#endif
             { "Fishing Farm", "Fazenda de pesca" },
             { "Insect Farm", "Fazenda de insetos" },
             { "Bird Farm", "Fazenda de pássaros" },
@@ -5553,7 +5561,9 @@ namespace HeartopiaMod
             { "Ready to submit: {0}", "พร้อมส่ง: {0}" },
 
             // Backfill: indirect L() sinks — LIVE rail entries, sub-tab bar, notification positions, option lists, status words, fixed toasts (2026-07)
+#if FEATURE_TELEGRAM
             { "Could not open the link", "เปิดลิงก์ไม่สำเร็จ" },
+#endif
             { "Fishing Farm", "ฟาร์มตกปลา" },
             { "Insect Farm", "ฟาร์มแมลง" },
             { "Bird Farm", "ฟาร์มนก" },
