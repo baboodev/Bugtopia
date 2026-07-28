@@ -1065,7 +1065,7 @@ namespace HeartopiaMod
                         }
 
                         resolved = true;
-                        yield return new WaitForSecondsRealtime(0.4f);
+                        yield return ModWait.Realtime(0.4f);
                         break; // next wanted item
                     }
 
@@ -2087,7 +2087,7 @@ namespace HeartopiaMod
                 // Streaming poll: netId appears once the entity spawns around the new position.
                 for (int attempt = 0; attempt < 16 && npcNetId == 0U; attempt++)
                 {
-                    yield return new WaitForSecondsRealtime(0.5f);
+                    yield return ModWait.Realtime(0.5f);
                     if (!this.QuestAssistantTryGetNpcNetIdAuraMono(npcStaticId, out npcNetId, out netIdStatus)
                         && !this.QuestAssistantTryGetNpcNetIdViaComponentScan(npcStaticId, out npcNetId, out netIdStatus))
                     {
@@ -2116,7 +2116,7 @@ namespace HeartopiaMod
                 yield break;
             }
 
-            yield return new WaitForSecondsRealtime(0.3f);
+            yield return ModWait.Realtime(0.3f);
 
             // EnterDialogNode (Gossip) quests are credited by the server processing the
             // EnterDialogNode{NodeId} command — the game itself fires it from DialogueNodeNormal as the

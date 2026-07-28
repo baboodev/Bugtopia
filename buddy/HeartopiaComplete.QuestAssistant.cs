@@ -263,11 +263,11 @@ namespace HeartopiaMod
                     this.QuestAssistantLog("Accept failed taskId=" + taskId + ": " + status);
                 }
 
-                yield return new WaitForSecondsRealtime(0.3f);
+                yield return ModWait.Realtime(0.3f);
             }
 
             this.questAssistantLastStatus = "Accepted " + accepted + "/" + targets.Count + " quest(s)";
-            yield return new WaitForSecondsRealtime(0.5f);
+            yield return ModWait.Realtime(0.5f);
             this.QuestAssistantResolveSnapshot(false);
             this.questAssistantAcceptAllCoroutine = null;
         }

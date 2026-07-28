@@ -6954,7 +6954,7 @@ namespace HeartopiaMod
                     }
                 }
 
-                yield return new WaitForSecondsRealtime(0.1f);
+                yield return ModWait.Realtime(0.1f);
             }
 
             this.HomelandFarmLog("Handhold equip wait timed out expectedNetId=" + expectedNetId + " staticId=" + expectedStaticId);
@@ -16019,7 +16019,7 @@ namespace HeartopiaMod
                     if (this.homelandFarmHotkeyCoroutine != null)
                     {
                         this.homelandFarmLastStatus = "Auto: paused for water+weed hotkey...";
-                        yield return new WaitForSecondsRealtime(0.5f);
+                        yield return ModWait.Realtime(0.5f);
                         continue;
                     }
 
@@ -16080,7 +16080,7 @@ namespace HeartopiaMod
                         {
                             discoveryDelay = false;
                             this.homelandFarmLastStatus = "Auto: scanning new crops...";
-                            yield return new WaitForSecondsRealtime(HomelandFarmAutoDiscoveryDelaySeconds);
+                            yield return ModWait.Realtime(HomelandFarmAutoDiscoveryDelaySeconds);
                         }
                         else
                         {
@@ -16383,7 +16383,7 @@ namespace HeartopiaMod
                                 + this.homelandFarmAutoPendingSowBoxNetIds.Count + waitingLabel);
                         }
 
-                        yield return new WaitForSecondsRealtime(inHomeland ? HomelandFarmAutoEmptyRetrySeconds : HomelandFarmAutoMaxIdleSleepSeconds);
+                        yield return ModWait.Realtime(inHomeland ? HomelandFarmAutoEmptyRetrySeconds : HomelandFarmAutoMaxIdleSleepSeconds);
                         needDiscovery = true;
                         continue;
                     }
@@ -16423,7 +16423,7 @@ namespace HeartopiaMod
                             + " crop(s) tracked)" + (inHomeland ? string.Empty : ", away") + ", sleeping " + sleep.ToString("F0") + "s.");
                     }
 
-                    yield return new WaitForSecondsRealtime(sleep);
+                    yield return ModWait.Realtime(sleep);
                 }
 
                 this.homelandFarmLastStatus = "Auto farm complete — sown " + totalSown + ", weeded " + totalWeeded
@@ -16603,7 +16603,7 @@ namespace HeartopiaMod
                         yield break;
                     }
 
-                    yield return new WaitForSecondsRealtime(HomelandFarmCommandDelaySeconds);
+                    yield return ModWait.Realtime(HomelandFarmCommandDelaySeconds);
                 }
             }
 
@@ -16750,7 +16750,7 @@ namespace HeartopiaMod
                     this.HomelandFarmLog("Fertilize AddManure failed: " + manureStatus);
                 }
 
-                yield return new WaitForSecondsRealtime(HomelandFarmCommandDelaySeconds);
+                yield return ModWait.Realtime(HomelandFarmCommandDelaySeconds);
 
                 int applied = this.CountHomelandFarmFertilizeApplied(
                     batch,
@@ -17042,7 +17042,7 @@ namespace HeartopiaMod
                 // that collect or runs another proximity pass (back-to-back Aura scans crash).
                 yield return null;
                 yield return null;
-                yield return new WaitForSecondsRealtime(0.35f);
+                yield return ModWait.Realtime(0.35f);
 
                 IEnumerator weed = this.HomelandFarmWeedAllRoutine(silent);
                 while (weed.MoveNext())
@@ -17277,7 +17277,7 @@ namespace HeartopiaMod
                             this.HomelandFarmLog("Water crop batch fail fieldOwner=" + ownerId + " player=" + playerNetId + " count=" + batch.Count + ": " + cropBatchStatus);
                         }
 
-                        yield return new WaitForSecondsRealtime(HomelandFarmWaterCommandDelaySeconds);
+                        yield return ModWait.Realtime(HomelandFarmWaterCommandDelaySeconds);
                     }
                 }
 
@@ -17309,7 +17309,7 @@ namespace HeartopiaMod
                             this.HomelandFarmLog("Water plant batch fail fieldOwner=" + ownerId + " count=" + batch.Count + ": " + plantBatchStatus);
                         }
 
-                        yield return new WaitForSecondsRealtime(HomelandFarmWaterCommandDelaySeconds);
+                        yield return ModWait.Realtime(HomelandFarmWaterCommandDelaySeconds);
                     }
                 }
 
@@ -17388,7 +17388,7 @@ namespace HeartopiaMod
 
                     if (HomelandFarmHarvestDelaySeconds > 0f)
                     {
-                        yield return new WaitForSecondsRealtime(HomelandFarmHarvestDelaySeconds);
+                        yield return ModWait.Realtime(HomelandFarmHarvestDelaySeconds);
                     }
                     else if ((i + 1) % HomelandFarmHarvestFramePaceBatch == 0)
                     {
@@ -17467,7 +17467,7 @@ namespace HeartopiaMod
 
                     if (HomelandFarmCollectSeedDelaySeconds > 0f)
                     {
-                        yield return new WaitForSecondsRealtime(HomelandFarmCollectSeedDelaySeconds);
+                        yield return ModWait.Realtime(HomelandFarmCollectSeedDelaySeconds);
                     }
                     else
                     {
@@ -17538,7 +17538,7 @@ namespace HeartopiaMod
 
                     if (HomelandFarmHarvestDelaySeconds > 0f)
                     {
-                        yield return new WaitForSecondsRealtime(HomelandFarmHarvestDelaySeconds);
+                        yield return ModWait.Realtime(HomelandFarmHarvestDelaySeconds);
                     }
                     else if ((i + 1) % HomelandFarmHarvestFramePaceBatch == 0)
                     {
@@ -17607,7 +17607,7 @@ namespace HeartopiaMod
 
                     if (HomelandFarmWeedDelaySeconds > 0f)
                     {
-                        yield return new WaitForSecondsRealtime(HomelandFarmWeedDelaySeconds);
+                        yield return ModWait.Realtime(HomelandFarmWeedDelaySeconds);
                     }
                     else if ((i + 1) % HomelandFarmHarvestFramePaceBatch == 0)
                     {
@@ -21879,7 +21879,7 @@ namespace HeartopiaMod
                             break;
                         }
 
-                        yield return new WaitForSecondsRealtime(HomelandFarmCommandDelaySeconds);
+                        yield return ModWait.Realtime(HomelandFarmCommandDelaySeconds);
                     }
 
                     // A single radius scan already returns every empty planter in range. Never

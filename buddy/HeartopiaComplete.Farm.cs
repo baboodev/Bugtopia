@@ -2738,14 +2738,14 @@ namespace HeartopiaMod
                 TeleportTo(patrolPoints[index]);
 
                 // 2. WAIT
-                yield return new WaitForSeconds(waitAtSpot);
+                yield return ModWait.Seconds(waitAtSpot);
 
                 // 3. WORK LOOP (Prioritize Cooking)
                 // Loop 15 times to ensure buttons are clicked.
                 for (int i = 0; i < 15; i++)
                 {
                     RunSpamClicker();
-                    yield return new WaitForSeconds(0.12f);
+                    yield return ModWait.Seconds(0.12f);
                 }
 
                 // 4. CLEANUP (Unstuck)

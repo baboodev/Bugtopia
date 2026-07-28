@@ -118,7 +118,7 @@ namespace HeartopiaMod
                 totalCards += batchCards;
                 this.birdPhotoSubmitLastStatus = "Sent " + batchCards + " card(s), waiting...";
                 this.BirdPhotoSubmitLog("batch " + batches + " cards=" + batchCards + " " + sendStatus);
-                yield return new WaitForSecondsRealtime(BirdPhotoSubmitDelaySeconds);
+                yield return ModWait.Realtime(BirdPhotoSubmitDelaySeconds);
 
                 if (!this.TryGetBirdPhotoExchangeLimitAura(out int limitAfter, out _))
                 {

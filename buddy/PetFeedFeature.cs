@@ -205,17 +205,17 @@ namespace HeartopiaMod
                     {
                         skipped++;
                         this.PetFeedLog("Feed prepare failed netId=" + target.NetId + ": " + status);
-                        yield return new WaitForSecondsRealtime(0.25f);
+                        yield return ModWait.Realtime(0.25f);
                         continue;
                     }
 
-                    yield return new WaitForSecondsRealtime(0.18f);
+                    yield return ModWait.Realtime(0.18f);
 
                     if (!this.TryInvokePetFeedBegin(target.NetId, foodNetIds, out status))
                     {
                         skipped++;
                         this.PetFeedLog("Feed begin failed netId=" + target.NetId + ": " + status);
-                        yield return new WaitForSecondsRealtime(0.25f);
+                        yield return ModWait.Realtime(0.25f);
                         continue;
                     }
 
@@ -234,7 +234,7 @@ namespace HeartopiaMod
                         + " fullness=" + target.CurrentFullness + "/" + target.MaxFullness
                         + this.FormatPetFeedTargetPreferenceStatus(target, usedFoods)
                         + " usedFoods=" + this.FormatPetFeedUsedFoods(usedFoods));
-                    yield return new WaitForSecondsRealtime(0.45f);
+                    yield return ModWait.Realtime(0.45f);
                 }
 
                 this.PetFeedLog("Feed all " + label + " complete: visible=" + visibleCount + " hungry=" + targets.Count + " fed=" + fed + " probed=" + probed + " skipped=" + skipped);

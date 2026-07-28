@@ -415,7 +415,7 @@ namespace HeartopiaMod
                     {
                         unavailable++;
                         this.NetCookLog("Cleanup status unavailable for stove " + target.CookerNetId + ": " + statusDetails);
-                        yield return new WaitForSeconds(0.05f);
+                        yield return ModWait.Seconds(0.05f);
                         continue;
                     }
 
@@ -435,7 +435,7 @@ namespace HeartopiaMod
                             target.SentCount++;
                             this.netCookSentCount++;
                             this.netCookTargets[i] = target;
-                            yield return new WaitForSeconds(0.1f);
+                            yield return ModWait.Seconds(0.1f);
                             continue;
                         }
 
@@ -451,7 +451,7 @@ namespace HeartopiaMod
                         unavailable++;
                     }
 
-                    yield return new WaitForSeconds(0.05f);
+                    yield return ModWait.Seconds(0.05f);
                 }
             }
             finally

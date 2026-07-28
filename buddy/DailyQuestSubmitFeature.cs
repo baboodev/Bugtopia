@@ -163,13 +163,13 @@ namespace HeartopiaMod
                     this.DailyQuestSubmitLog("accept failed taskId=" + acceptTaskId + ": " + acceptStatus);
                 }
 
-                yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds * 0.35f);
+                yield return ModWait.Realtime(DailyQuestSubmitDelaySeconds * 0.35f);
             }
 
             if (accepted > 0)
             {
                 this.DailyQuestSubmitLog("accepted " + accepted + " CanAccept order(s), waiting for server sync");
-                yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds);
+                yield return ModWait.Realtime(DailyQuestSubmitDelaySeconds);
             }
 
             int attempted = 0;
@@ -222,7 +222,7 @@ namespace HeartopiaMod
                     {
                         accepted++;
                         this.DailyQuestSubmitLog("accept ok taskId=" + taskId + " " + retryAcceptStatus);
-                        yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds);
+                        yield return ModWait.Realtime(DailyQuestSubmitDelaySeconds);
                         if (!this.TryGetGameTaskStateAura(taskId, out state, out stateStatus))
                         {
                             this.DailyQuestSubmitLog("skip taskId=" + taskId + " GetTaskState failed after accept: " + stateStatus);
@@ -278,7 +278,7 @@ namespace HeartopiaMod
                     info.SubmitType,
                     info.SubmitParam,
                     out submitStatus);
-                yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds);
+                yield return ModWait.Realtime(DailyQuestSubmitDelaySeconds);
 
                 if (sent && this.TryGetGameTaskStateAura(taskId, out int stateAfter, out _)
                     && stateAfter == DailyQuestSubmitStateCanSubmit)
@@ -297,7 +297,7 @@ namespace HeartopiaMod
                     this.DailyQuestSubmitLog("Submit failed taskId=" + taskId + ": " + submitStatus);
                 }
 
-                yield return new WaitForSecondsRealtime(DailyQuestSubmitDelaySeconds * 0.5f);
+                yield return ModWait.Realtime(DailyQuestSubmitDelaySeconds * 0.5f);
             }
 
             this.dailyQuestSubmitLastStatus = "Done: " + submitted + "/" + attempted

@@ -136,7 +136,7 @@ namespace HeartopiaMod
             this.dailyClaimsLastStatus = "Sign-in claim done: sent=" + claimed;
             this.DailyClaimsLog(this.dailyClaimsLastStatus);
             this.DailyClaimsLog(detail);
-            yield return new WaitForSecondsRealtime(DailyClaimsActionDelaySeconds);
+            yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }
 
         private IEnumerator DailyClaimsClaimMailRoutine()
@@ -145,7 +145,7 @@ namespace HeartopiaMod
             bool ok = this.TryClaimMailAll(out string status);
             this.dailyClaimsLastStatus = ok ? "Mail claim sent." : ("Mail claim failed: " + status);
             this.DailyClaimsLog(this.dailyClaimsLastStatus + " detail=" + status);
-            yield return new WaitForSecondsRealtime(DailyClaimsActionDelaySeconds);
+            yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }
 
         private IEnumerator DailyClaimsClaimMiniBpAllRoutine()
@@ -154,7 +154,7 @@ namespace HeartopiaMod
             bool ok = this.TryClaimMiniBpAll(out string status);
             this.dailyClaimsLastStatus = ok ? "Mini BP claim sent." : ("Mini BP claim failed: " + status);
             this.DailyClaimsLog(this.dailyClaimsLastStatus + " detail=" + status);
-            yield return new WaitForSecondsRealtime(DailyClaimsActionDelaySeconds);
+            yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }
 
         private IEnumerator DailyClaimsClaimBpLoopRoutine()
@@ -163,7 +163,7 @@ namespace HeartopiaMod
             bool ok = this.TryClaimBpLoop(out string status);
             this.dailyClaimsLastStatus = ok ? "BP loop claim sent." : ("BP loop claim failed: " + status);
             this.DailyClaimsLog(this.dailyClaimsLastStatus + " detail=" + status);
-            yield return new WaitForSecondsRealtime(DailyClaimsActionDelaySeconds);
+            yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }
 
         private IEnumerator DailyClaimsClaimTownGuideRoutine()
@@ -173,7 +173,7 @@ namespace HeartopiaMod
             this.dailyClaimsLastStatus = "Town guide claim done: sent=" + claimed;
             this.DailyClaimsLog(this.dailyClaimsLastStatus);
             this.DailyClaimsLog(detail);
-            yield return new WaitForSecondsRealtime(DailyClaimsActionDelaySeconds);
+            yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }
 
         private IEnumerator DailyClaimsClaimAllRoutine()

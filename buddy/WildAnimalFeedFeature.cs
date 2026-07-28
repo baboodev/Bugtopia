@@ -262,7 +262,7 @@ namespace HeartopiaMod
                     {
                         skipped++;
                         this.WildAnimalFeedLog("Feed failed group=" + plan.GroupId + " (" + plan.GroupName + "): " + status);
-                        yield return new WaitForSecondsRealtime(0.35f);
+                        yield return ModWait.Realtime(0.35f);
                         continue;
                     }
 
@@ -271,7 +271,7 @@ namespace HeartopiaMod
                         + " +" + plan.FoodNetIds.Count + " items"
                         + " fullness " + plan.CurrentFullness + "/" + plan.MaxFullness
                         + " need=" + plan.NeededFullness);
-                    yield return new WaitForSecondsRealtime(0.55f);
+                    yield return ModWait.Realtime(0.55f);
                 }
 
                 this.wildAnimalFeedLastStatus = "Fed " + fed + " trough(s), skipped " + skipped + ".";

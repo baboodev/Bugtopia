@@ -2065,7 +2065,7 @@ namespace HeartopiaMod
             if (this.puzzlePieces.Count <= 0)
             {
                 this.TryInvokePuzzleJoin();
-                yield return new WaitForSecondsRealtime(Mathf.Max(0.1f, PuzzleNetworkSettleSeconds));
+                yield return ModWait.Realtime(Mathf.Max(0.1f, PuzzleNetworkSettleSeconds));
             }
             else
             {
@@ -2110,7 +2110,7 @@ namespace HeartopiaMod
                     this.PuzzleLog(this.puzzleStatus + " index=" + piece.FirstIndex + " pos=(" + piece.TargetX + "," + piece.TargetY + ")");
 
                     this.TryInvokePuzzleLock(piece.PieceNetId);
-                    yield return new WaitForSecondsRealtime(Mathf.Max(0.03f, PuzzleNetworkSettleSeconds * 0.25f));
+                    yield return ModWait.Realtime(Mathf.Max(0.03f, PuzzleNetworkSettleSeconds * 0.25f));
 
                     if (piece.IsInBag || piece.MaskCount == 1)
                     {
@@ -2119,22 +2119,22 @@ namespace HeartopiaMod
                             this.puzzleSentCount++;
                         }
 
-                        yield return new WaitForSecondsRealtime(Mathf.Max(0.04f, PuzzleNetworkSettleSeconds * 0.35f));
+                        yield return ModWait.Realtime(Mathf.Max(0.04f, PuzzleNetworkSettleSeconds * 0.35f));
                         continue;
                     }
 
                     this.TryInvokePuzzleMove(piece.PieceNetId, piece.TargetX, piece.TargetY);
-                    yield return new WaitForSecondsRealtime(Mathf.Max(0.06f, PuzzleNetworkSettleSeconds * 0.5f));
+                    yield return ModWait.Realtime(Mathf.Max(0.06f, PuzzleNetworkSettleSeconds * 0.5f));
 
                     if (this.TryInvokePuzzleBingo(piece.PieceNetId))
                     {
                         this.puzzleSentCount++;
                     }
 
-                    yield return new WaitForSecondsRealtime(PuzzleNetworkSettleSeconds);
+                    yield return ModWait.Realtime(PuzzleNetworkSettleSeconds);
                 }
 
-                yield return new WaitForSecondsRealtime(Mathf.Max(0.25f, PuzzleNetworkSettleSeconds * 2f));
+                yield return ModWait.Realtime(Mathf.Max(0.25f, PuzzleNetworkSettleSeconds * 2f));
                 this.RefreshPuzzlePieces(false);
                 int remaining = this.puzzlePieces.Count;
                 this.PuzzleLog("Puzzle solve pass " + pass + " refresh: remaining=" + remaining + " previous=" + previousRemaining + ".");

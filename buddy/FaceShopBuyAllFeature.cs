@@ -1396,7 +1396,7 @@ namespace HeartopiaMod
                         ModLogger.Msg("[FaceShopBuyAll] buy exception " + candidate.Kind + " " + candidate.StyleId + ": " + ex.Message);
                     }
 
-                    yield return new WaitForSecondsRealtime(ShopBuyAllDelaySeconds);
+                    yield return ModWait.Realtime(ShopBuyAllDelaySeconds);
                 }
 
                 if (!boughtThisPass)

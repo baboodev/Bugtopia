@@ -13,6 +13,20 @@ namespace HeartopiaMod
         public const string PluginName = "Bugtopia";
         public const string PluginVersion = ModBuildVersion.Numeric;
 
+        // Injecting HeartopiaBehaviour is what makes this mod cause IL2CPP `.text` modification:
+        // AddComponent -> ClassInjector.RegisterTypeInIl2Cpp -> InjectorHelpers.Setup() -> five inline
+        // detours on IL2CPP VM internals. That cost is UNAVOIDABLE and the five are UNREMOVABLE — see
+        // the two post-mortems in `mono-side-per-frame-tick` / `melonloader-vs-bepinex-detection-delta`:
+        //   * the hooks are the injection mechanism itself (injected classes get NEGATIVE type indices
+        //     that only those hooks translate), so detaching them crashes within seconds; and
+        //   * the pump cannot come from the embedded-Mono side either — re-entering il2cpp from a
+        //     thread executing Mono code faults on the first Il2CppInterop call, and this mod is
+        //     Il2CppInterop end to end.
+        // An Il2CppInterop mod must be pumped from the il2cpp/Unity side. This is that pump.
+        //
+        // What the component is still needed for is ONLY the per-frame tick; the rest was rehomed:
+        //   * OnGUI      -> retired; ESP/crosshair are retained-mode UGUI (HeartopiaComplete.UguiOverlay.cs)
+        //   * coroutines -> fully managed scheduler (ModCoroutines.cs), no il2cpp enumerator bridge
         public override void Load()
         {
             ModLoaderInfo.IsMelonLoader = false;
@@ -38,7 +52,7 @@ namespace HeartopiaMod
                 ModCoroutines.SetHost(this);
                 _mod = new HeartopiaComplete();
                 _mod.OnInitializeMelon();
-                ModLogger.Msg("HeartopiaBehaviour Awake — Update/OnGUI active on BepInEx manager.");
+                ModLogger.Msg("HeartopiaBehaviour Awake — Update/LateUpdate active on the BepInEx manager.");
             }
             catch (Exception ex)
             {

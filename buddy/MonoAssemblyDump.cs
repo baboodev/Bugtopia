@@ -198,7 +198,7 @@ namespace HeartopiaMod
 
         private static IEnumerator DelayedRetryRoutine()
         {
-            yield return new UnityEngine.WaitForSeconds(RetryDelaySeconds);
+            yield return ModWait.Seconds(RetryDelaySeconds);
 
             if (!Directory.Exists(OutputDir))
             {

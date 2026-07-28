@@ -670,7 +670,7 @@ namespace HeartopiaMod
                     }
 
                     this.picturesLastStatus = "Draw upload: chunk " + (i + 1) + "/" + total + " sent (step " + (stepBase + i) + ")";
-                    yield return new UnityEngine.WaitForSeconds(delaySeconds);
+                    yield return ModWait.Seconds(delaySeconds);
                 }
 
                 // All chunks landed: update the live canvas ONCE so the game caches/previews our

@@ -108,7 +108,7 @@ namespace HeartopiaMod
                         this.WildAnimalGiftLog("TakeGift ok netId=" + netId);
                     }
 
-                    yield return new WaitForSecondsRealtime(WildAnimalGiftDelayBetweenTakesSeconds);
+                    yield return ModWait.Realtime(WildAnimalGiftDelayBetweenTakesSeconds);
                 }
 
                 this.wildAnimalGiftLastStatus = "Claimed " + claimed + "/" + netIds.Count

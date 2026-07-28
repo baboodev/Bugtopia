@@ -6,9 +6,8 @@ using UnityEngine.UI;
 namespace HeartopiaMod
 {
     // Retained-mode replacement for the last three IMGUI surfaces (ESP tags, debug ESP, mouse-look
-    // crosshair), so `OnGUI` — and with it the injected MonoBehaviour that is the SOLE reason the mod
-    // installs 5 ClassInjector inline hooks in GameAssembly `.text` — can eventually go away. See
-    // MonoTickFeature.cs for the tick that replaces the pump side of the same MonoBehaviour.
+    // crosshair). This retired `OnGUI` entirely; the injected MonoBehaviour still stays, because it
+    // remains the only source of a per-frame tick that Il2CppInterop calls are legal from.
     //
     // WHY POOLING: the old comment in HeartopiaComplete.Gui.cs argued UGUI would be "pure churn" for
     // per-frame ESP. That is only true if you instantiate/destroy per frame. We never do: elements are

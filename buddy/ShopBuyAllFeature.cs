@@ -1260,7 +1260,7 @@ namespace HeartopiaMod
                     skipped++;
                 }
 
-                yield return new WaitForSecondsRealtime(ShopBuyAllDelaySeconds);
+                yield return ModWait.Realtime(ShopBuyAllDelaySeconds);
             }
 
             this.shopBuyAllStatus = "Done (" + label + "): bought " + bought + ", skipped " + skipped + ".";

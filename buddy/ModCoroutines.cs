@@ -2,166 +2,265 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-#if LOADER_BEPINEX
-using BepInEx.Unity.IL2CPP.Utils.Collections;
-#endif
 
-// Loader-neutral coroutine front. The active entry point installs its backend; loader assemblies
-// are only referenced inside the adapter classes, which are compiled per-loader via LOADER_MELON /
-// LOADER_BEPINEX (Universal defines both). A single-loader build therefore never references the
-// absent loader's assembly at build or run time.
+// Fully managed coroutine scheduler — no il2cpp bridge, no Unity coroutine host.
+//
+// WHY IT WAS REPLACED: the old BepInEx backend ran every routine through `WrapToIl2Cpp()`, i.e.
+// `Il2CppManagedEnumerator`, and the MelonLoader backend through ML's `MonoEnumeratorWrapper`. Both
+// are managed types INJECTED into the il2cpp domain, so either one drags in
+// `ClassInjector.RegisterTypeInIl2Cpp` -> `InjectorHelpers.Setup()` -> five inline detours inside
+// GameAssembly.dll's `.text`. That injection is the entire remaining reason the mod touches the
+// module the anti-cheat integrity model hashes.
+//
+// It also deleted a whole class of crash: with the bridge, il2cpp held the only reference to the
+// wrapper while the coreclr GC could not see it, so a GC triggered mid-coroutine collected the
+// bridge and the next trampoline `MoveNext` dereferenced a dead target (coreclr.dll+0x1D1FDD). The
+// old code fought that with an explicit `_liveRoots` root set. Here the iterators are ordinary
+// managed objects held by an ordinary managed list, so the GC simply sees them — the hazard cannot
+// exist and the root-set bookkeeping is gone.
+//
+// SEMANTICS: routines are stepped once per frame from `ModCoroutines.Tick()` (HeartopiaComplete's
+// OnUpdate), matching Unity's "resume after Update" behaviour for `yield return null`. Supported
+// yields — the complete set this mod actually uses:
+//   * `null`                       -> resume next frame
+//   * `ModWait.Seconds(t)`         -> scaled time   (Unity's WaitForSeconds)
+//   * `ModWait.Realtime(t)`        -> unscaled time (Unity's WaitForSecondsRealtime)
+//   * a nested `IEnumerator`       -> pushed on this routine's stack and driven to completion first
+// Anything else is treated as a single-frame wait and logged ONCE — see ModWait for why yielding a
+// Unity YieldInstruction is no longer allowed.
 public static class ModCoroutines
 {
-    private static Func<IEnumerator, object> _start;
-    private static Action<object> _stop;
+    private sealed class Routine
+    {
+        public readonly Stack<IEnumerator> Stack = new Stack<IEnumerator>();
+        public float ResumeScaledAt = float.NegativeInfinity;
+        public float ResumeUnscaledAt = float.NegativeInfinity;
+        public bool Dead;
+    }
 
-#if LOADER_MELON
+    private static readonly List<Routine> _routines = new List<Routine>();
+    private static readonly List<Routine> _pending = new List<Routine>();
+    private static bool _ticking;
+    private static bool _warnedUnknownYield;
+
+    // Kept so the existing per-loader entry points compile and keep their call order; the scheduler
+    // itself is loader-agnostic, so these are now no-ops.
     public static void InitMelonLoader()
     {
-        _start = MelonCoroutineAdapter.Start;
-        _stop = MelonCoroutineAdapter.Stop;
     }
-#endif
 
-#if LOADER_BEPINEX
     public static void InitBepInEx()
     {
-        _start = BepInExCoroutineHost.Start;
-        _stop = BepInExCoroutineHost.Stop;
     }
 
-    public static void SetHost(MonoBehaviour host) => BepInExCoroutineHost.SetHost(host);
-#endif
+    public static void SetHost(MonoBehaviour host)
+    {
+    }
 
     public static object Start(IEnumerator routine)
     {
-        if (routine == null || _start == null)
+        if (routine == null)
         {
             return null;
         }
 
-        return _start(routine);
+        Routine r = new Routine();
+        r.Stack.Push(routine);
+
+        // Starting a coroutine from inside a coroutine is common; never mutate the list mid-tick.
+        if (_ticking)
+        {
+            _pending.Add(r);
+        }
+        else
+        {
+            _routines.Add(r);
+        }
+
+        return r;
     }
 
     public static void Stop(object coroutine)
     {
-        if (coroutine == null)
+        if (coroutine is Routine r)
+        {
+            r.Dead = true;
+        }
+    }
+
+    public static void StopAll()
+    {
+        for (int i = 0; i < _routines.Count; i++)
+        {
+            _routines[i].Dead = true;
+        }
+
+        _pending.Clear();
+    }
+
+    internal static int ActiveCount => _routines.Count;
+
+    // One step per routine per frame.
+    public static void Tick()
+    {
+        if (_routines.Count == 0 && _pending.Count == 0)
         {
             return;
         }
 
-        _stop?.Invoke(coroutine);
-    }
-}
+        float scaled = Time.time;
+        float unscaled = Time.unscaledTime;
 
-#if LOADER_MELON
-internal static class MelonCoroutineAdapter
-{
-    public static object Start(IEnumerator routine) => MelonLoader.MelonCoroutines.Start(routine);
-
-    public static void Stop(object token) => MelonLoader.MelonCoroutines.Stop(token);
-}
-#endif
-
-#if LOADER_BEPINEX
-internal static class BepInExCoroutineHost
-{
-    private static MonoBehaviour _host;
-
-    // GC roots for in-flight coroutines. WrapToIl2Cpp() bridges our managed IEnumerator into an
-    // Il2CppManagedEnumerator that Unity drives via a MoveNext trampoline every frame. il2cpp holds
-    // that bridge, but the coreclr GC cannot see il2cpp's reference — so once Start() returns,
-    // nothing on the managed side keeps the bridge (and the iterator it stores) alive. A GC
-    // triggered by our own AuraMono allocations mid-coroutine then collects it, and the next
-    // trampoline MoveNext dereferences a dead managed target → NULL read inside coreclr (recurring
-    // crash coreclr.dll+0x1D1FDD). Rooting the bridge here for the coroutine's lifetime fixes it;
-    // the bridge transitively keeps the wrapped iterator alive.
-    private static readonly HashSet<object> _liveRoots = new HashSet<object>();
-    private static readonly Dictionary<object, object> _wrapperByHandle = new Dictionary<object, object>();
-
-    public static void SetHost(MonoBehaviour host) => _host = host;
-
-    public static object Start(IEnumerator routine)
-    {
-        if (_host == null || routine == null)
-        {
-            return null;
-        }
-
-        // Outer iterator removes the roots in its finally when the coroutine ends on its own (most
-        // do — they null their handle without calling Stop), preventing a slow leak. holder[0] =
-        // the il2cpp bridge (rooted in _liveRoots), holder[1] = the Coroutine handle (added to
-        // _wrapperByHandle, whose value also roots the bridge, so both must be cleared).
-        object[] tokenHolder = new object[2];
-        IEnumerator tracked = TrackRoutine(routine, tokenHolder);
-        Il2CppSystem.Collections.IEnumerator wrapped = tracked.WrapToIl2Cpp();
-        tokenHolder[0] = wrapped;
-        _liveRoots.Add(wrapped);
-
-        Coroutine handle = _host.StartCoroutine(wrapped);
-        if (handle != null)
-        {
-            tokenHolder[1] = handle;
-            _wrapperByHandle[handle] = wrapped;
-        }
-        return handle;
-    }
-
-    private static IEnumerator TrackRoutine(IEnumerator inner, object[] tokenHolder)
-    {
+        _ticking = true;
         try
         {
-            while (true)
+            for (int i = 0; i < _routines.Count; i++)
             {
-                // MoveNext is the il2cpp → coreclr boundary; an exception escaping it can corrupt
-                // the trampoline, so swallow per-step faults instead of throwing across.
-                bool moved;
-                try
+                Routine r = _routines[i];
+                if (r.Dead)
                 {
-                    moved = inner.MoveNext();
-                }
-                catch (System.Exception ex)
-                {
-                    ModEntryGuard.Report("Coroutine", ex);
-                    yield break;
+                    continue;
                 }
 
-                if (!moved)
+                if (scaled < r.ResumeScaledAt || unscaled < r.ResumeUnscaledAt)
                 {
-                    yield break;
+                    continue;
                 }
 
-                yield return inner.Current;
+                StepRoutine(r, scaled, unscaled);
             }
         }
         finally
         {
-            if (tokenHolder != null)
+            _ticking = false;
+        }
+
+        if (_pending.Count > 0)
+        {
+            _routines.AddRange(_pending);
+            _pending.Clear();
+        }
+
+        // Compact only when there is something to drop, so the steady state costs one count check.
+        for (int i = _routines.Count - 1; i >= 0; i--)
+        {
+            if (_routines[i].Dead || _routines[i].Stack.Count == 0)
             {
-                if (tokenHolder[0] != null)
-                {
-                    _liveRoots.Remove(tokenHolder[0]);
-                }
-                if (tokenHolder[1] != null)
-                {
-                    _wrapperByHandle.Remove(tokenHolder[1]);
-                }
+                _routines.RemoveAt(i);
             }
         }
     }
 
-    public static void Stop(object coroutine)
+    private static void StepRoutine(Routine r, float scaled, float unscaled)
     {
-        if (coroutine is Coroutine unityCoroutine)
+        while (true)
         {
-            _host?.StopCoroutine(unityCoroutine);
-        }
+            if (r.Stack.Count == 0)
+            {
+                r.Dead = true;
+                return;
+            }
 
-        if (_wrapperByHandle.TryGetValue(coroutine, out object wrapper))
-        {
-            _liveRoots.Remove(wrapper);
-            _wrapperByHandle.Remove(coroutine);
+            IEnumerator current = r.Stack.Peek();
+            bool moved;
+            try
+            {
+                moved = current.MoveNext();
+            }
+            catch (Exception ex)
+            {
+                // One faulting routine must never take the scheduler (or the other routines) with it.
+                ModEntryGuard.Report("Coroutine", ex);
+                r.Dead = true;
+                return;
+            }
+
+            if (!moved)
+            {
+                r.Stack.Pop();
+                if (r.Stack.Count == 0)
+                {
+                    r.Dead = true;
+                    return;
+                }
+
+                // The parent resumes on the NEXT frame, matching Unity: finishing a nested routine
+                // does not give the parent a free extra step this frame.
+                return;
+            }
+
+            object yielded = null;
+            try
+            {
+                yielded = current.Current;
+            }
+            catch (Exception ex)
+            {
+                ModEntryGuard.Report("Coroutine.Current", ex);
+                r.Dead = true;
+                return;
+            }
+
+            if (yielded == null)
+            {
+                return; // next frame
+            }
+
+            if (yielded is ModWait wait)
+            {
+                if (wait.UseUnscaled)
+                {
+                    r.ResumeUnscaledAt = unscaled + wait.Duration;
+                }
+                else
+                {
+                    r.ResumeScaledAt = scaled + wait.Duration;
+                }
+
+                return;
+            }
+
+            if (yielded is IEnumerator nested)
+            {
+                // Drive the nested routine first; loop so it gets its own first step this frame,
+                // exactly like Unity.
+                r.Stack.Push(nested);
+                continue;
+            }
+
+            if (!_warnedUnknownYield)
+            {
+                _warnedUnknownYield = true;
+                ModLogger.Msg("[ModCoroutines] unsupported yield '" + yielded.GetType().Name
+                              + "' treated as one frame — use ModWait.Seconds/Realtime instead of a Unity YieldInstruction.");
+            }
+
+            return; // next frame
         }
     }
 }
-#endif
+
+// Wait tokens for the managed scheduler.
+//
+// These deliberately replace `new WaitForSeconds(t)` / `new WaitForSecondsRealtime(t)`. Those are
+// il2cpp objects: reading their duration back would mean reaching into game-side fields
+// (`m_Seconds`, `<waitTime>k__BackingField`) through interop, which couples the scheduler to the
+// game's type layout for no benefit. A plain managed token keeps the whole coroutine path inside
+// coreclr, which is the entire point of the rewrite.
+public sealed class ModWait
+{
+    public readonly float Duration;
+    public readonly bool UseUnscaled;
+
+    private ModWait(float seconds, bool useUnscaled)
+    {
+        this.Duration = seconds < 0f ? 0f : seconds;
+        this.UseUnscaled = useUnscaled;
+    }
+
+    /// Scaled time — the equivalent of Unity's WaitForSeconds (affected by Time.timeScale).
+    public static ModWait Seconds(float seconds) => new ModWait(seconds, false);
+
+    /// Unscaled time — the equivalent of Unity's WaitForSecondsRealtime.
+    public static ModWait Realtime(float seconds) => new ModWait(seconds, true);
+}

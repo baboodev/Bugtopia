@@ -199,7 +199,7 @@ namespace HeartopiaMod
                 }
 
                 this.IceSkatingSequenceLog("SkateStartNetworkCommand sent ok (" + startStatus + ")");
-                yield return new WaitForSecondsRealtime(IceSkatingSequencePhaseDelaySeconds);
+                yield return ModWait.Realtime(IceSkatingSequencePhaseDelaySeconds);
 
                 Dictionary<int, int> pendingBatch = new Dictionary<int, int>();
                 int[] actionCountSinceFlush = { 0 };
@@ -235,7 +235,7 @@ namespace HeartopiaMod
 
                 if (run + 1 < runCount)
                 {
-                    yield return new WaitForSecondsRealtime(IceSkatingSequencePhaseDelaySeconds);
+                    yield return ModWait.Realtime(IceSkatingSequencePhaseDelaySeconds);
                 }
             }
 
@@ -295,7 +295,7 @@ namespace HeartopiaMod
                         actionCountSinceFlushHolder[0] = 0;
                     }
 
-                    yield return new WaitForSecondsRealtime(IceSkatingSequenceStepDelaySeconds);
+                    yield return ModWait.Realtime(IceSkatingSequenceStepDelaySeconds);
                 }
             }
         }
@@ -339,7 +339,7 @@ namespace HeartopiaMod
                 }
 
                 this.IceSkatingSequenceLog("SkateStartNetworkCommand sent ok (" + startStatus + ")");
-                yield return new WaitForSecondsRealtime(IceSkatingSequencePhaseDelaySeconds);
+                yield return ModWait.Realtime(IceSkatingSequencePhaseDelaySeconds);
 
                 if (!this.TrySendIceSkatingChallengeStart(isHelp: false, out string challengeStartStatus))
                 {
@@ -349,7 +349,7 @@ namespace HeartopiaMod
 
                 this.IceSkatingSequenceLog("SkateChallengeStartNetworkCommand IsHelp=false ok (" + challengeStartStatus + ")");
                 this.IceSkatingSequenceLog("waiting countdown " + IceSkatingSequenceCountdownSeconds.ToString("0.0") + "s");
-                yield return new WaitForSecondsRealtime(IceSkatingSequenceCountdownSeconds);
+                yield return ModWait.Realtime(IceSkatingSequenceCountdownSeconds);
 
                 Dictionary<int, int> pendingBatch = new Dictionary<int, int>();
                 int[] actionCountSinceFlush = { 0 };
@@ -383,7 +383,7 @@ namespace HeartopiaMod
 
                 this.IceSkatingSequenceLog(
                     "SkateChallengeEndNetworkCommand Score=" + endScore + " (" + endStatus + ")");
-                yield return new WaitForSecondsRealtime(IceSkatingSequencePhaseDelaySeconds);
+                yield return ModWait.Realtime(IceSkatingSequencePhaseDelaySeconds);
 
                 if (!this.TrySendIceSkatingEnd(out string exitStatus))
                 {
@@ -395,7 +395,7 @@ namespace HeartopiaMod
 
                 if (run + 1 < runCount)
                 {
-                    yield return new WaitForSecondsRealtime(IceSkatingSequencePhaseDelaySeconds);
+                    yield return ModWait.Realtime(IceSkatingSequencePhaseDelaySeconds);
                 }
             }
 
