@@ -312,6 +312,21 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Tab-bar variant: wrapped and centred on BOTH axes, so a two-line label sits centred in
+        // the tab instead of hugging its top edge.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private bool UguiKitTmpTrySetWrappedCentered(GameObject label)
+        {
+            TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
+            if (tmp == null)
+            {
+                return false;
+            }
+            tmp.enableWordWrapping = true;
+            tmp.alignment = TextAlignmentOptions.Center;
+            return true;
+        }
+
         // Transfer-cell variant: wrapped but horizontally CENTERED (IMGUI itemStyle parity).
         [MethodImpl(MethodImplOptions.NoInlining)]
         private bool UguiKitTmpTrySetWrappedTop(GameObject label)

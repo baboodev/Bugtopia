@@ -601,91 +601,91 @@ namespace HeartopiaMod
                                 if (i == UguiShellSelfTabIndex && j == UguiShellSelfBuildingSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSelfBuildingContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSelfTabIndex && j == UguiShellSelfMainSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSelfMainContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSelfTabIndex && j == UguiShellSelfFunSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSelfFunContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSelfTabIndex && j == UguiShellSelfPrivacySubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSelfPrivacyContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSelfTabIndex && j == UguiShellSelfGameUiSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSelfGameUiContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSelfTabIndex && j == UguiShellSelfGameLodSubIndex)
                                 {
                                     // Self → Game LOD (GameLodFeature.cs world detail overrides;
                                     // HeartopiaComplete.UguiGameLodContent.cs). New page, no IMGUI twin.
                                     subContents[j] = this.BuildUguiShellSelfGameLodContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsAboutSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellAboutContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsMainSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSettingsMainContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsLoggingSubIndex)
                                 {
                                     subContents[j] = this.BuildUguiShellSettingsLoggingContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsKeybindsSubIndex)
                                 {
                                     // Phase 3 item 9: Settings→Keybinds
                                     // (HeartopiaComplete.UguiKeybindsContent.cs).
                                     subContents[j] = this.BuildUguiShellKeybindsContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsUiThemeSubIndex)
                                 {
                                     // Phase 3 item 10: Settings→UI Theme (the HSV picker;
                                     // HeartopiaComplete.UguiThemeContent.cs).
                                     subContents[j] = this.BuildUguiShellThemeContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellTeleportTabIndex)
                                 {
                                     // Round 3: all nine Teleport sub-tabs — dispatched by sub
                                     // display index inside HeartopiaComplete.UguiTeleportContent.cs.
                                     subContents[j] = this.BuildUguiShellTeleportSubContent(j,
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellResourceGatheringTabIndex && j == UguiShellForagingSubIndex)
                                 {
                                     // Phase 3 item 6, round 1 of 4: Foraging
                                     // (HeartopiaComplete.UguiForagingContent.cs).
                                     subContents[j] = this.BuildUguiShellForagingContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellResourceGatheringTabIndex && j == UguiShellFishingSubIndex)
                                 {
                                     // Phase 3 item 6, round 2 of 4: Fishing
                                     // (HeartopiaComplete.UguiFishingContent.cs).
                                     subContents[j] = this.BuildUguiShellFishingContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellResourceGatheringTabIndex && j == UguiShellInsectsSubIndex)
                                 {
                                     // Phase 3 item 6, round 3 of 4: Insects
                                     // (HeartopiaComplete.UguiInsectsContent.cs).
                                     subContents[j] = this.BuildUguiShellInsectsContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellResourceGatheringTabIndex && j == UguiShellBirdsSubIndex)
                                 {
@@ -694,28 +694,28 @@ namespace HeartopiaMod
                                     // Gathering's whole sub range (0-3) now has real content —
                                     // the else placeholder below only serves OTHER tabs' subs.
                                     subContents[j] = this.BuildUguiShellBirdsContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellResourceGatheringTabIndex && j == UguiShellCombinedSubIndex)
                                 {
                                     // Combined Farming coordinator settings + live state
                                     // (HeartopiaComplete.UguiCombinedFarmContent.cs).
                                     subContents[j] = this.BuildUguiShellCombinedFarmContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellRadarTabIndex && j == UguiShellRadarMainSubIndex)
                                 {
                                     // Phase 3 item 7: Radar main sub-tab
                                     // (HeartopiaComplete.UguiRadarContent.cs).
                                     subContents[j] = this.BuildUguiShellRadarMainContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellRadarTabIndex && j == UguiShellRadarSettingsSubIndex)
                                 {
                                     // Phase 3 item 7: Radar Settings sub-tab — with it, Radar's
                                     // whole sub range (0-1) has real content.
                                     subContents[j] = this.BuildUguiShellRadarSettingsContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellAnimalCareSubIndex)
                                 {
@@ -724,14 +724,14 @@ namespace HeartopiaMod
                                     // Features' remaining subs (1-5, 7) stay on the else
                                     // placeholder until their own rounds ship.
                                     subContents[j] = this.BuildUguiShellNewFeaturesAnimalCareContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellSandSculptureSubIndex)
                                 {
                                     // Phase 3 item 12, round 2 of 8: Sand Sculpture
                                     // (HeartopiaComplete.UguiSandSculptureContent.cs).
                                     subContents[j] = this.BuildUguiShellNewFeaturesSandSculptureContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellPicturesSubIndex)
                                 {
@@ -740,7 +740,7 @@ namespace HeartopiaMod
                                     // remaining subs (1, 2, 4, 5, 7) stay on the else
                                     // placeholder until their own rounds ship.
                                     subContents[j] = this.BuildUguiShellNewFeaturesPicturesContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellIceSkatingSubIndex)
                                 {
@@ -749,7 +749,7 @@ namespace HeartopiaMod
                                     // Features' remaining subs (1, 2, 5, 7) stay on the else
                                     // placeholder until their own rounds ship.
                                     subContents[j] = this.BuildUguiShellNewFeaturesIceSkatingContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellExtraSubIndex)
                                 {
@@ -758,7 +758,7 @@ namespace HeartopiaMod
                                     // remaining subs (1, 2, 7) stay on the else placeholder
                                     // until their own rounds ship.
                                     subContents[j] = this.BuildUguiShellNewFeaturesExtraContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellSeaCleanSubIndex)
                                 {
@@ -767,7 +767,7 @@ namespace HeartopiaMod
                                     // remaining subs (1, 2) stay on the else placeholder until
                                     // their own rounds ship.
                                     subContents[j] = this.BuildUguiShellNewFeaturesSeaCleanContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellHomelandFarmSubIndex)
                                 {
@@ -776,7 +776,7 @@ namespace HeartopiaMod
                                     // Features' remaining sub (1, Daily Quests) stays on the
                                     // else placeholder until its own round ships.
                                     subContents[j] = this.BuildUguiShellNewFeaturesHomelandFarmContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellDailyQuestsSubIndex)
                                 {
@@ -785,7 +785,7 @@ namespace HeartopiaMod
                                     // Features' whole sub range (0-7) now has real content —
                                     // the else placeholder below only serves OTHER tabs' subs.
                                     subContents[j] = this.BuildUguiShellNewFeaturesDailyQuestsContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesMainSubIndex)
                                 {
@@ -794,14 +794,14 @@ namespace HeartopiaMod
                                     // remaining subs (1, 3, 4, 5, 7) stay on the else
                                     // placeholder until their own rounds ship.
                                     subContents[j] = this.BuildUguiShellFeaturesMainContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesSnowSculptingSubIndex)
                                 {
                                     // Phase 3 item 11, rounds 2+3 of 8: Features → Snow
                                     // Sculpting (HeartopiaComplete.UguiFeaturesPuzzleSnowContent.cs).
                                     subContents[j] = this.BuildUguiShellFeaturesSnowSculptingContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesFoodRepairSubIndex)
                                 {
@@ -810,35 +810,35 @@ namespace HeartopiaMod
                                     // Features' remaining subs (5, 7) stay on the else
                                     // placeholder until their own rounds ship.
                                     subContents[j] = this.BuildUguiShellFeaturesFoodRepairContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesAutoBuySubIndex)
                                 {
                                     // Phase 3 item 11, round 4 of 8: Features → Auto Buy
                                     // (HeartopiaComplete.UguiFeaturesAutoBuyContent.cs).
                                     subContents[j] = this.BuildUguiShellFeaturesAutoBuyContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesAutoSellSubIndex)
                                 {
                                     // Phase 3 item 11, round 7 of 8: Features → Auto Sell
                                     // (HeartopiaComplete.UguiFeaturesAutoSellContent.cs).
                                     subContents[j] = this.BuildUguiShellFeaturesAutoSellContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesMassCookSubIndex)
                                 {
                                     // Phase 3 item 11, round 8 of 8: Features → Mass Cook
                                     // (HeartopiaComplete.UguiFeaturesMassCookContent.cs).
                                     subContents[j] = this.BuildUguiShellFeaturesMassCookContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesPuzzleSubIndex)
                                 {
                                     // Phase 3 item 11, rounds 2+3 of 8: Features → Puzzle
                                     // (HeartopiaComplete.UguiFeaturesPuzzleSnowContent.cs).
                                     subContents[j] = this.BuildUguiShellFeaturesPuzzleContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesPetCareSubIndex)
                                 {
@@ -846,7 +846,7 @@ namespace HeartopiaMod
                                     // (HeartopiaComplete.UguiFeaturesPetCareContent.cs) —
                                     // Features' last sub; the tab is fully migrated.
                                     subContents[j] = this.BuildUguiShellFeaturesPetCareContent(
-                                        container.transform, 0f, 36f, contentColW, contentH - 36f);
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 // Every sub cell has a real builder above (the migration is
                                 // complete); an unmatched cell would simply stay null, which the
@@ -855,9 +855,9 @@ namespace HeartopiaMod
                             // One flat kit tab bar per main tab; width per label like the IMGUI
                             // segmented control (Teleport's 9 labels can't fit uniformly).
                             UguiTabBarHandle subBar = this.CreateUguiTabBar(
-                                container.transform, 0f, 0f, 100f, 26f, 4f,
+                                container.transform, 0f, 0f, 100f, 34f, 4f,
                                 subs, null, subContents, 0, null,
-                                this.ComputeUguiShellSubTabWidths(subs), 11.5f);
+                                this.ComputeUguiShellSubTabWidths(subs, mainW, 4f), 11.5f);
                             shell.SubTabBars.Add(subBar);
                         }
                         else
@@ -905,7 +905,7 @@ namespace HeartopiaMod
                 // formula by hand. Guarded: a broken rail must not kill the shell.
                 try
                 {
-                    this.BuildUguiShellLiveRail(shell, panelT, mainX + 16f + contentColW + 14f, contentTop + 36f, 240f, contentH - 36f);
+                    this.BuildUguiShellLiveRail(shell, panelT, mainX + 16f + contentColW + 14f, contentTop + 44f, 240f, contentH - 44f);
                 }
                 catch (Exception ex)
                 {
@@ -1116,13 +1116,48 @@ namespace HeartopiaMod
 
         // IMGUI sizes sub-tab buttons by label length (clamp(26 + len*7, 64, 138)); same idea
         // scaled down for the shell's narrower main area.
-        private float[] ComputeUguiShellSubTabWidths(string[] labels)
+        // Per-tab widths sized from label length, then FITTED to the row.
+        //
+        // BUG FIX (2026-07-28): the natural widths were returned as-is, so a row could be wider
+        // than the panel and the last tabs simply ran off the right edge — reported in Portuguese,
+        // where Features' 8 labels ("Compra Automática", "Cozimento em massa", ...) each hit the
+        // 120px clamp: 8*120 + 7*4 spacing = 988px against mainW = 738px. English never showed it
+        // because its labels are short enough to stay under the budget. Any translation can trip
+        // this, so the fix belongs here rather than in the wording.
+        //
+        // Overflow is resolved by scaling every tab by one shared factor: relative sizes are kept
+        // (a short label stays narrower than a long one, so the row still reads as proportioned)
+        // and the total lands exactly on budget. Labels that end up too narrow ellipsize — the kit
+        // sets TextOverflowModes.Ellipsis — which is the graceful end state, unlike running off
+        // the panel where the tab is not even clickable.
+        private float[] ComputeUguiShellSubTabWidths(string[] labels, float availableWidth, float spacing)
         {
             float[] widths = new float[labels.Length];
+            float natural = 0f;
             for (int i = 0; i < labels.Length; i++)
             {
                 int len = string.IsNullOrEmpty(labels[i]) ? 0 : labels[i].Length;
                 widths[i] = Mathf.Clamp(22f + len * 6f, 56f, 120f);
+                natural += widths[i];
+            }
+
+            if (labels.Length == 0)
+            {
+                return widths;
+            }
+
+            // Budget excludes the gaps between tabs (n-1 of them).
+            float budget = availableWidth - (spacing * (labels.Length - 1));
+            if (budget <= 0f || natural <= budget)
+            {
+                return widths;
+            }
+
+            float scale = budget / natural;
+            for (int i = 0; i < widths.Length; i++)
+            {
+                // Floor keeps the running total from creeping past the budget through rounding.
+                widths[i] = Mathf.Max(28f, Mathf.Floor(widths[i] * scale));
             }
             return widths;
         }

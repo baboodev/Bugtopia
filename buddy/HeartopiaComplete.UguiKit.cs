@@ -792,6 +792,31 @@ namespace HeartopiaMod
         // Kit labels default to single-line MidlineLeft; About bodies and the Research status/
         // footer lines need multi-line wrapping inside a fixed-width rect (the IMGUI drawers use
         // wordWrap styles for the same strings). Top-left alignment matches IMGUI's UpperLeft.
+        // Wrapped + centred on both axes (tab-bar labels). Legacy Text has no vertical-centre wrap
+        // mode that matches, so it falls back to MiddleCenter, which is close enough for one or
+        // two short lines.
+        private void TrySetUguiLabelWrappedCentered(GameObject label)
+        {
+            if (label == null)
+            {
+                return;
+            }
+            if (UguiTmpTypesLoadable())
+            {
+                try { if (this.UguiKitTmpTrySetWrappedCentered(label)) return; } catch { }
+            }
+            try
+            {
+                Text txt = label.GetComponent<Text>();
+                if (txt != null)
+                {
+                    txt.horizontalOverflow = HorizontalWrapMode.Wrap;
+                    txt.alignment = TextAnchor.MiddleCenter;
+                }
+            }
+            catch { }
+        }
+
         private void TrySetUguiLabelWrapped(GameObject label)
         {
             if (label == null)
@@ -2315,6 +2340,14 @@ namespace HeartopiaMod
                 // true center. Symmetric insets for the centered case; icon tabs stay asymmetric on
                 // purpose (they are MidlineLeft, and labelLeft is deliberately clearing the icon).
                 StretchUguiFill(label, (icon == null) ? 4f : labelLeft, 2f, 4f, 2f);
+                if (icon == null)
+                {
+                    // Wrap rather than ellipsize. A narrow tab used to render "Cozimento em…",
+                    // which tells the user nothing; two short lines stay readable. Only the
+                    // icon-less (sub-tab) flavor wraps — icon tabs are a single centred row next to
+                    // their glyph and have no vertical room for a second line.
+                    this.TrySetUguiLabelWrappedCentered(label);
+                }
 
                 // Active-tab underline: 2px, pinned to the tab's bottom edge, inset 6 per side so it
                 // underlines the label rather than the whole hit box. FLAT (sliced:false) on
