@@ -79,11 +79,21 @@ namespace HeartopiaMod
         // and to avoid claiming the feature is active while the hook is still pending.
         internal bool OutOfBoundsGuardHookInstalled => oobBackToShipTrampoline != null;
 
+        // True while anything wants the OOB rescue suppressed: the Self-tab toggle, or a running
+        // Stealth Foraging session (StealthForagingFeature.cs — it parks the player under the
+        // terrain, which trips the detect box's FLOOR, e.g. StarTown y>=9). Stealth borrows the
+        // hooks instead of writing disableOobTeleportEnabled: that flag is persisted, so a
+        // temporary write could leak into Config.xml through any unrelated save during the run.
+        private bool IsOutOfBoundsGuardRequested()
+        {
+            return this.disableOobTeleportEnabled || this.StealthForagingActive;
+        }
+
         // Called every frame from OnUpdate. Mirrors the toggle into the static flag the hook bodies
         // read, and installs the hooks lazily while the feature is enabled.
         private void ProcessOutOfBoundsGuardOnUpdate()
         {
-            if (!this.disableOobTeleportEnabled)
+            if (!this.IsOutOfBoundsGuardRequested())
             {
                 oobGuardActive = false; // installed hooks (if any) forward -> vanilla OOB rescue
                 return;

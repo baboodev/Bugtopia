@@ -932,9 +932,10 @@ namespace HeartopiaMod
             return true;
         }
 
-        // Cleansing corals sit on the sea floor — arrive SeaCleanTeleportYOffset (5m) above the
+        // Cleansing corals sit on the sea floor — arrive SeaCleanTeleportYOffset (7m) above the
         // polygon centroid instead of inside the coral geometry; underwater = swimming, and the
         // candidate ordering / re-teleport checks are XZ-based so the lift changes nothing else.
+        // A world-load checkpoint, not a resource hop: Stealth Foraging never dives this one.
         private void CorruptionCleanseTeleportTo(Vector3 center)
         {
             center.y += SeaCleanTeleportYOffset;

@@ -322,6 +322,31 @@ Classic **radar-driven teleport farm**:
 
 Status strings: `IDLE`, `TELEPORTING...`, `GATHERING...`, etc.
 
+#### Stealth Foraging
+
+Optional companion toggle in **Foraging → SETTINGS** (persisted, default off, `StealthForagingFeature.cs`).
+It only does anything **while the farm is actually running** — configuring it on an idle farm changes nothing.
+
+While engaged:
+
+- **Noclip is force-enabled** so the player holds position under the terrain instead of falling out of
+  it (the hover drives the game's own `PlayerMoveComponent` every frame). The runtime flag only —
+  noclip is not persisted, and a noclip the user already had on is left alone on stop.
+- **The client-side OOB rescue is suppressed** for the duration of the run (it borrows the
+  `OutOfBoundsGuardFeature` hooks through `IsOutOfBoundsGuardRequested()`; the persisted
+  *Disable OOB Teleport* toggle in Self → Main is never written). The scene detect box has a floor
+  as well as a ceiling (e.g. Star Town `y >= 9`), so under-terrain hops would otherwise be rescued
+  mid-collect.
+- **Resource hops land below the node:** contamination **−5 m**, every other resource **−1.5 m**
+  (`ApplyForagingNodeTeleportOffset`). **World-load checkpoints keep their exact Y** — farm-location
+  waypoints, priority-area anchors and the cleansing-coral hop are area arrivals that must stream the
+  world in normally.
+
+The offset applies to the **teleport argument only**: `lastNodePosition` and every marker / cooldown /
+dwell check keep the true node position, so radar matching and the collect confirmation are unchanged.
+With the mode off, contamination keeps its vanilla sea-floor **lift** (`SeaCleanTeleportYOffset`, +7 m,
+shared with the cleansing-coral hop).
+
 ### Aura Farm
 
 Server-command style farming **without teleporting** to each node:

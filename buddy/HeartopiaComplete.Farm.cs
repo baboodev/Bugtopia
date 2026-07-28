@@ -536,7 +536,8 @@ namespace HeartopiaMod
                                     this.autoFarmStatus = $"Sweeping active priority node ({distance:F0}m)...";
                                     this.AutoFarmLog("Active priority sweep -> node " + activeAreaPriorityNode.Value
                                         + " area=" + this.currentPriorityLocation.Value + " distance=" + distance.ToString("F1"));
-                                    this.FarmTeleportTo(activeAreaPriorityNode.Value);
+                                    // Priority nodes are plants (never contamination) — pass no label.
+                                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(activeAreaPriorityNode.Value, null));
                                     this.lastNodePosition = activeAreaPriorityNode.Value;
                                     this.lastTeleportWasPriorityLocation = true;
                                     this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
@@ -559,7 +560,8 @@ namespace HeartopiaMod
                             this.AutoFarmLog("Visible priority node -> " + priorityNode.Value
                                 + " mappedArea=" + (this.lastFoundPriorityNodeLocation.HasValue ? this.lastFoundPriorityNodeLocation.Value.ToString() : "none")
                                 + " distance=" + distance.ToString("F1"));
-                            this.FarmTeleportTo(priorityNode.Value);
+                            // Priority nodes are plants (never contamination) — pass no label.
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(priorityNode.Value, null));
                             this.lastNodePosition = priorityNode.Value;
                             if (this.lastFoundPriorityNodeLocation.HasValue)
                             {
@@ -598,7 +600,7 @@ namespace HeartopiaMod
                             float value = Vector3.Distance(Camera.main.transform.position, vector.Value);
                             this.autoFarmStatus = $"Teleporting to node ({value:F0}m)...";
                             this.AutoFarmLog("Normal node target -> " + vector.Value + " label=" + scanNodeLabel + " distance=" + value.ToString("F1"));
-                            this.FarmTeleportTo(this.ApplyContaminationTeleportOffset(vector.Value, scanNodeLabel));
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector.Value, scanNodeLabel));
                             this.lastNodePosition = vector.Value;
                             this.lastTeleportWasPriorityLocation = false;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
@@ -907,7 +909,7 @@ namespace HeartopiaMod
                         {
                             float value2 = Vector3.Distance(Camera.main.transform.position, vector2.Value);
                             this.autoFarmStatus = $"Node found! Teleporting ({value2:F0}m)...";
-                            this.FarmTeleportTo(this.ApplyContaminationTeleportOffset(vector2.Value, waitingNodeLabel));
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector2.Value, waitingNodeLabel));
                             this.lastNodePosition = vector2.Value;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                             this.autoFarmTimer = 0f;
@@ -1023,14 +1025,27 @@ namespace HeartopiaMod
         }
 
         // Sea-clean teleport lift: contamination nodes and cleansing corals sit on the sea floor —
-        // teleporting straight onto the point lands inside the geometry. Arrive 5m above instead
+        // teleporting straight onto the point lands inside the geometry. Arrive 7m above instead
         // (underwater = swimming, so the height is free). Applied ONLY to the teleport argument —
         // lastNodePosition keeps the true node position for marker matching and dwell checks.
-        private const float SeaCleanTeleportYOffset = 5f;
+        private const float SeaCleanTeleportYOffset = 7f;
 
-        private Vector3 ApplyContaminationTeleportOffset(Vector3 position, string nodeLabel)
+        // Y adjustment for a RESOURCE-NODE hop. Deliberately NOT applied to world-load
+        // checkpoints (farm-location waypoints, priority-area anchors, cleansing corals) — those
+        // are area arrivals that must land where the world streams in normally.
+        //   * Stealth Foraging engaged -> dive BELOW the node (StealthForagingFeature.cs):
+        //     contamination -5m, every other resource -1.5m.
+        //   * Otherwise -> the vanilla sea-clean lift for contamination, nothing for the rest.
+        private Vector3 ApplyForagingNodeTeleportOffset(Vector3 position, string nodeLabel)
         {
-            if (string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal))
+            bool contamination = string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal);
+            if (this.StealthForagingActive)
+            {
+                position.y -= contamination ? StealthForagingContaminationDepth : StealthForagingNodeDepth;
+                return position;
+            }
+
+            if (contamination)
             {
                 position.y += SeaCleanTeleportYOffset;
             }
@@ -1043,6 +1058,9 @@ namespace HeartopiaMod
         {
             this.lastFarmTeleportAt = Time.unscaledTime;
             this.TeleportToLocation(position);
+            // Stealth Foraging: hold the hover exactly where the hop aimed (the warp clears the
+            // noclip hold, which would otherwise re-seed from a surface-snapped arrival).
+            this.PinStealthForagingNoclipHold(position);
         }
 
         // True while the configured teleport delay hasn't elapsed since the last farm teleport.

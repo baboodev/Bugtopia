@@ -162,6 +162,10 @@ namespace HeartopiaMod
             public float auraCollectWaitTimeout;
             // Foraging: min real-time seconds between Aura Farm teleports (0-10, 0 = off).
             public float foragingTeleportDelaySeconds;
+            // "Stealth Foraging" — while the farm runs: force noclip, suppress the OOB rescue and
+            // land resource hops BELOW the node (contamination -5m, everything else -1.5m).
+            // Default false = vanilla hops.
+            public bool stealthForagingEnabled;
             public float resourceAutoRepairPauseSeconds;
             public float gameSpeed;
             public bool fpsBypassEnabled;

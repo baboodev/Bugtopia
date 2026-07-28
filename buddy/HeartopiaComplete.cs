@@ -727,6 +727,9 @@ namespace HeartopiaMod
             this.ProcessPersistentHudOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
             this.ProcessSeaCleanBannerHideOnUpdate();
+            // Stealth Foraging owns the noclip force/restore edge — must run before both the OOB
+            // guard (which reads StealthForagingActive) and ProcessNoclipMovementOnUpdate below.
+            this.ProcessStealthForagingOnUpdate();
             this.ProcessOutOfBoundsGuardOnUpdate();
             this.ProcessLittleWhaleFinderOnUpdate();
             this.ProcessResearchMonitorOnUpdate();

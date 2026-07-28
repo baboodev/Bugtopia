@@ -183,6 +183,7 @@ namespace HeartopiaMod
             data.areaLoadDelay = this.areaLoadDelay;
             data.auraCollectWaitTimeout = this.auraCollectWaitTimeout;
             data.foragingTeleportDelaySeconds = this.foragingTeleportDelaySeconds;
+            data.stealthForagingEnabled = this.stealthForagingEnabled;
             data.resourceAutoRepairPauseSeconds = this.resourceAutoRepairPauseSeconds;
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
@@ -420,6 +421,7 @@ namespace HeartopiaMod
                 4f,
                 30f);
             this.foragingTeleportDelaySeconds = Mathf.Clamp(data.foragingTeleportDelaySeconds, 0f, 10f);
+            this.stealthForagingEnabled = data.stealthForagingEnabled;
             this.resourceAutoRepairPauseSeconds = data.resourceAutoRepairPauseSeconds;
             this.gameSpeed = data.gameSpeed;
             this.fpsBypassEnabled = data.fpsBypassEnabled;

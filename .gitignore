@@ -24,3 +24,18 @@ docs/plans
 ilspy-dumps*
 gameassembly-dumps*
 scratch
+
+# Local research tooling and notes — kept out of the repo on purpose, not published.
+# (Game-data decryption/unpacking pipelines, dump readers, generated indexes, session notes.)
+tools/HeartopiaTables
+tools/XdUnpack
+tools/maps
+tools/.pitch_cache_*
+tools/*.json
+tools/*.ps1
+tools/requirements*.txt
+.research-record
+memory
+
+# Local MCP server config (machine-specific).
+.mcp.json

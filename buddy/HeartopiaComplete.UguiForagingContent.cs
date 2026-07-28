@@ -97,6 +97,8 @@ namespace HeartopiaMod
             public GameObject TeleportDelayLabel; // aura-only row
             public string TeleportDelayShown;
             public Slider TeleportDelaySlider;
+            public Toggle StealthToggle;          // Stealth Foraging (always visible)
+            public GameObject StealthHintLabel;
             public Toggle AutoStopToggle;
             public GameObject TimerCaption;       // timer row (auto-stop-only)
             public GameObject TimerColon1;
@@ -444,8 +446,21 @@ namespace HeartopiaMod
                 new System.Action<float>(this.OnUguiForagingTeleportDelayChanged));
             PlaceUguiTopLeft(handle.TeleportDelaySlider.gameObject, 192f, 145f, panelW - 220f, 20f);
 
+            // Stealth Foraging (StealthForagingFeature.cs) — always visible; the relayout owns its
+            // row because the aura block above it moves. Hint label mirrors the Resolver row shape
+            // (wrapped, muted, right of the checkbox).
+            handle.StealthToggle = this.CreateUguiCheckbox(settings.transform, "StealthToggle",
+                this.L("Stealth Foraging"), this.stealthForagingEnabled,
+                new System.Action<bool>(this.OnUguiForagingStealthToggled));
+            Color stealthMuted = this.UguiKitMutedColor();
+            handle.StealthHintLabel = this.CreateUguiLabel(settings.transform, "StealthHint",
+                this.L("Dives under nodes; noclip + no OOB rescue"), 11f,
+                new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
+            this.TrySetUguiLabelWrapped(handle.StealthHintLabel);
+
             // Auto Stop Timer toggle + timer row (positions owned by the relayout — the toggle
-            // rides at 110 or 178 depending on the aura block).
+            // rides below the Stealth row, which itself rides at 110 or 178 depending on the aura
+            // block).
             handle.AutoStopToggle = this.CreateUguiCheckbox(settings.transform, "AutoStopToggle",
                 this.L("Auto Stop Timer"), this.autoFarmAutoStopEnabled,
                 new System.Action<bool>(this.OnUguiForagingAutoStopToggled));
@@ -530,6 +545,16 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.TeleportDelaySlider != null ? handle.TeleportDelaySlider.gameObject : null, aura);
 
             float rowY = aura ? 178f : 110f; // after 42 (area load) + 76 (aura toggle) [+ 110/144]
+            if (handle.StealthToggle != null)
+            {
+                PlaceUguiTopLeft(handle.StealthToggle.gameObject, 14f, rowY, 250f, 24f);
+            }
+            if (handle.StealthHintLabel != null)
+            {
+                PlaceUguiTopLeft(handle.StealthHintLabel, 270f, rowY, panelW - 282f, 28f);
+            }
+
+            rowY += 34f;
             if (handle.AutoStopToggle != null)
             {
                 PlaceUguiTopLeft(handle.AutoStopToggle.gameObject, 14f, rowY, 250f, 24f);
@@ -621,6 +646,7 @@ namespace HeartopiaMod
 
                 // Settings re-syncs (external IMGUI edits) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.AuraFarmToggle, this.auraFarmEnabled);
+                this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
                 this.SyncUguiToggleFromField(handle.AutoStopToggle, this.autoFarmAutoStopEnabled);
                 if (handle.AreaLoadSlider != null && Mathf.Abs(handle.AreaLoadSlider.value - this.areaLoadDelay) > 0.0005f)
                 {
@@ -754,6 +780,20 @@ namespace HeartopiaMod
                 return;
             }
             this.foragingTeleportDelaySeconds = rounded;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Stealth Foraging (StealthForagingFeature.cs) — persisted flag only. Every side effect
+        // (noclip force/restore, OOB-rescue suppression, the under-node dive) is keyed off
+        // StealthForagingActive = this flag AND a running farm, so flipping it here while idle
+        // changes nothing until the next Start Foraging.
+        private void OnUguiForagingStealthToggled(bool value)
+        {
+            if (value == this.stealthForagingEnabled)
+            {
+                return;
+            }
+            this.stealthForagingEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 
