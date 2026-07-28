@@ -1,47 +1,27 @@
-using System;
-using UnityEngine;
-
 namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
         // ========================================================================================
-        // Phase 5 (IMGUI retirement): the IMGUI mod menu, Building Move Panel, Quest Assistant
-        // window, Status Overlay and toast renderer are all UGUI now (HeartopiaComplete.Ugui*.cs).
-        // OnGUI survives ONLY for the three overlays that were never UGUI candidates:
-        //  - DrawResourceVisualEspOverlay / DrawVisualDebugEspOverlay (world-space ESP tags;
-        //    per-frame camera projection of hundreds of short-lived rects — retained-mode UGUI
-        //    would be pure churn here), both inside the Repaint guard exactly as before, and
-        //  - DrawMouseLookCrosshair (HeartopiaComplete.CameraInput.cs).
-        // The theme dirty/save tick that used to piggyback on EnsureThemeStyles at the top of
-        // OnGUI now runs from OnUpdate (ProcessUiThemePersistenceOnUpdate,
-        // HeartopiaComplete.UiKit.cs) — the UGUI theme tab must not depend on the IMGUI paint
-        // loop.
+        // IMGUI IS FULLY RETIRED.
+        //
+        // Phase 5 moved the mod menu, Building Move Panel, Quest Assistant window, Status Overlay and
+        // toast renderer to UGUI. This final step moved the last three surfaces — the resource ESP,
+        // the debug ESP and the mouse-look crosshair — into the retained-mode overlay in
+        // HeartopiaComplete.UguiOverlay.cs, which draws from OnLateUpdate off a pooled canvas.
+        //
+        // `OnGUI` is therefore gone. That matters beyond tidiness: OnGUI is a Unity message that only
+        // reaches a real injected MonoBehaviour, and injecting that MonoBehaviour is the SOLE reason
+        // the mod caused Il2CppInterop's ClassInjector to install 5 inline detours inside
+        // GameAssembly.dll's `.text` (InjectorHelpers.Setup() is lazy, and BepInEx injects nothing on
+        // its own). With the last OnGUI consumer gone, that surface can now be dropped — see
+        // MonoTickFeature.cs for the per-frame tick that replaces the pump half of the same component.
+        //
+        // The entry points in HeartopiaComplete/BepInExPlugin/MelonLoaderPlugin still forward OnGUI so
+        // the loader contract stays intact; they now hand it to a method that does nothing.
         // ========================================================================================
         public void OnGUI()
         {
-            Breadcrumbs.Tick("OnGUI");
-            GUI.color = Color.white;
-            GUI.backgroundColor = Color.white;
-            GUI.contentColor = Color.white;
-
-            // Deliberate remnant of EnsureThemeStyles: the ESP overlays build their label styles
-            // from GUI.skin.label, whose FONT was the one skin property the old style bake set
-            // that they actually inherited (Segoe UI via EnsureUiThemeFont). Keep applying it so
-            // their text renders exactly as it did before the IMGUI menu retired.
-            Font themeFont = this.EnsureUiThemeFont();
-            if (themeFont != null && GUI.skin != null && GUI.skin.font != themeFont)
-            {
-                GUI.skin.font = themeFont;
-            }
-
-            if (Event.current == null || Event.current.type == EventType.Repaint)
-            {
-                this.DrawResourceVisualEspOverlay();
-                this.DrawVisualDebugEspOverlay();
-            }
-
-            this.DrawMouseLookCrosshair();
         }
     }
 }

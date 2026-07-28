@@ -245,7 +245,6 @@ namespace HeartopiaMod
                 return;
             }
 
-            Color previousGuiColor = GUI.color;
             foreach (VisualDebugEspEntry entry in this.visualDebugEspEntries.Values)
             {
                 if (entry == null)
@@ -271,28 +270,29 @@ namespace HeartopiaMod
                 this.DrawVisualDebugEspBox(boxRect, entry.Color);
 
                 string label = this.GetVisualDebugEspDisplayText(entry, cam.transform.position);
-                GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
-                labelStyle.alignment = TextAnchor.MiddleCenter;
-                labelStyle.fontSize = 12;
-                labelStyle.fontStyle = FontStyle.Bold;
-                labelStyle.normal.textColor = entry.Color;
 
-                string[] labelLines = label.Split('\n');
-                float maxLabelWidth = boxRect.width;
-                for (int lineIndex = 0; lineIndex < labelLines.Length; lineIndex++)
+                // The IMGUI version measured every line with GUIStyle.CalcSize to widen the rect.
+                // That API needs an IMGUI context we no longer have, and it is unnecessary here: the
+                // pooled Text is MiddleCenter with horizontalOverflow = Overflow, so it centres on the
+                // rect and spills symmetrically — only the CENTRE matters, not the width. Height still
+                // follows the line count so the label keeps sitting just above the box.
+                int lineCount = 1;
+                for (int c = 0; c < label.Length; c++)
                 {
-                    Vector2 lineSize = labelStyle.CalcSize(new GUIContent(labelLines[lineIndex]));
-                    maxLabelWidth = Mathf.Max(maxLabelWidth, lineSize.x + 10f);
+                    if (label[c] == '\n')
+                    {
+                        lineCount++;
+                    }
                 }
-                float labelHeight = Mathf.Max(18f, 16f * labelLines.Length);
+
+                float labelHeight = Mathf.Max(18f, 16f * lineCount);
                 Rect labelRect = new Rect(
-                    boxRect.center.x - maxLabelWidth * 0.5f,
+                    boxRect.center.x - boxRect.width * 0.5f,
                     boxRect.yMin - labelHeight - 2f,
-                    maxLabelWidth,
+                    boxRect.width,
                     labelHeight);
-                GUI.Label(labelRect, label, labelStyle);
+                this.UguiOverlayDrawLabel(labelRect, label, entry.Color, 12, TextAnchor.MiddleCenter, bold: true);
             }
-            GUI.color = previousGuiColor;
         }
 
         private string GetVisualDebugEspDisplayText(VisualDebugEspEntry entry, Vector3 cameraPosition)
@@ -359,16 +359,12 @@ namespace HeartopiaMod
 
         private void DrawVisualDebugEspBox(Rect rect, Color color)
         {
-            Color previous = GUI.color;
-            GUI.color = color;
-
-            float thickness = 1f;
-            GUI.DrawTexture(new Rect(rect.xMin, rect.yMin, rect.width, thickness), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(rect.xMin, rect.yMax - thickness, rect.width, thickness), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(rect.xMin, rect.yMin, thickness, rect.height), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(rect.xMax - thickness, rect.yMin, thickness, rect.height), Texture2D.whiteTexture);
-
-            GUI.color = previous;
+            const float thickness = 1f;
+            Texture white = Texture2D.whiteTexture;
+            this.UguiOverlayDrawTexture(new Rect(rect.xMin, rect.yMin, rect.width, thickness), white, color);
+            this.UguiOverlayDrawTexture(new Rect(rect.xMin, rect.yMax - thickness, rect.width, thickness), white, color);
+            this.UguiOverlayDrawTexture(new Rect(rect.xMin, rect.yMin, thickness, rect.height), white, color);
+            this.UguiOverlayDrawTexture(new Rect(rect.xMax - thickness, rect.yMin, thickness, rect.height), white, color);
         }
     }
 }

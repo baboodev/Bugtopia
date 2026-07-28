@@ -99,8 +99,6 @@ namespace HeartopiaMod
                 this.resourceVisualEspItems.RemoveRange(effectiveMarkerLimit, this.resourceVisualEspItems.Count - effectiveMarkerLimit);
             }
 
-            Color previousColor = GUI.color;
-            Matrix4x4 previousMatrix = GUI.matrix;
             this.resourceVisualEspPlacedRects.Clear();
 
             for (int i = 0; i < this.resourceVisualEspItems.Count; i++)
@@ -151,9 +149,6 @@ namespace HeartopiaMod
 
                 this.resourceVisualEspPlacedRects.Add(tagRect);
             }
-
-            GUI.matrix = previousMatrix;
-            GUI.color = previousColor;
         }
 
         private void UpdateRadarGroundRings()
@@ -681,41 +676,36 @@ namespace HeartopiaMod
             Color shadow = new Color(0f, 0f, 0f, 0.22f * alpha);
             Color accent = new Color(item.Accent.r, item.Accent.g, item.Accent.b, alpha);
 
-            GUI.color = shadow;
-            GUI.DrawTexture(new Rect(rect.x + 2f, rect.y + 3f, rect.width, rect.height), Texture2D.whiteTexture);
-            GUI.color = bg;
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = accent;
-            GUI.DrawTexture(new Rect(rect.x, rect.y, 4f * this.resourceVisualEspScale, rect.height), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(rect.x + 9f * this.resourceVisualEspScale, rect.y + 7f * this.resourceVisualEspScale, 32f * this.resourceVisualEspScale, 28f * this.resourceVisualEspScale), Texture2D.whiteTexture);
+            Texture white = Texture2D.whiteTexture;
+            this.UguiOverlayDrawTexture(new Rect(rect.x + 2f, rect.y + 3f, rect.width, rect.height), white, shadow);
+            this.UguiOverlayDrawTexture(rect, white, bg);
+            this.UguiOverlayDrawTexture(new Rect(rect.x, rect.y, 4f * this.resourceVisualEspScale, rect.height), white, accent);
+            this.UguiOverlayDrawTexture(new Rect(rect.x + 9f * this.resourceVisualEspScale, rect.y + 7f * this.resourceVisualEspScale, 32f * this.resourceVisualEspScale, 28f * this.resourceVisualEspScale), white, accent);
             Rect iconRect = new Rect(rect.x + 10f * this.resourceVisualEspScale, rect.y + 8f * this.resourceVisualEspScale, 30f * this.resourceVisualEspScale, 26f * this.resourceVisualEspScale);
             Texture2D iconTexture = this.GetResourceVisualEspBeaconIconTexture(item);
             if (iconTexture != null)
             {
-                GUI.color = new Color(1f, 1f, 1f, alpha);
-                GUI.DrawTexture(iconRect, iconTexture, ScaleMode.ScaleToFit, true);
+                this.UguiOverlayDrawTextureFit(iconRect, iconTexture, new Color(1f, 1f, 1f, alpha));
             }
             else
             {
-                GUIStyle badgeStyle = new GUIStyle(GUI.skin.label);
-                badgeStyle.alignment = TextAnchor.MiddleCenter;
-                badgeStyle.fontSize = Mathf.RoundToInt(11f * this.resourceVisualEspScale);
-                badgeStyle.fontStyle = FontStyle.Bold;
-                badgeStyle.normal.textColor = new Color(0.04f, 0.06f, 0.08f, alpha);
-                GUI.Label(new Rect(rect.x + 9f * this.resourceVisualEspScale, rect.y + 7f * this.resourceVisualEspScale, 32f * this.resourceVisualEspScale, 28f * this.resourceVisualEspScale), item.Badge, badgeStyle);
+                this.UguiOverlayDrawLabel(
+                    new Rect(rect.x + 9f * this.resourceVisualEspScale, rect.y + 7f * this.resourceVisualEspScale, 32f * this.resourceVisualEspScale, 28f * this.resourceVisualEspScale),
+                    item.Badge,
+                    new Color(0.04f, 0.06f, 0.08f, alpha),
+                    Mathf.RoundToInt(11f * this.resourceVisualEspScale),
+                    TextAnchor.MiddleCenter,
+                    bold: true);
             }
 
-            GUIStyle titleStyle = new GUIStyle(GUI.skin.label);
-            titleStyle.alignment = TextAnchor.UpperLeft;
-            titleStyle.fontSize = Mathf.RoundToInt(12f * this.resourceVisualEspScale);
-            titleStyle.fontStyle = FontStyle.Bold;
-            titleStyle.normal.textColor = new Color(0.95f, 0.98f, 1f, alpha);
-            GUI.Label(new Rect(rect.x + 50f * this.resourceVisualEspScale, rect.y + 7f * this.resourceVisualEspScale, rect.width - 56f * this.resourceVisualEspScale, 18f * this.resourceVisualEspScale), item.Label, titleStyle);
+            this.UguiOverlayDrawLabel(
+                new Rect(rect.x + 50f * this.resourceVisualEspScale, rect.y + 7f * this.resourceVisualEspScale, rect.width - 56f * this.resourceVisualEspScale, 18f * this.resourceVisualEspScale),
+                item.Label,
+                new Color(0.95f, 0.98f, 1f, alpha),
+                Mathf.RoundToInt(12f * this.resourceVisualEspScale),
+                TextAnchor.UpperLeft,
+                bold: true);
 
-            GUIStyle subStyle = new GUIStyle(GUI.skin.label);
-            subStyle.alignment = TextAnchor.UpperLeft;
-            subStyle.fontSize = Mathf.RoundToInt(10f * this.resourceVisualEspScale);
-            subStyle.normal.textColor = new Color(0.76f, 0.84f, 0.92f, alpha * 0.95f);
             string subLine = item.IsCooldown ? "cooldown" : string.Empty;
             if (this.resourceVisualEspShowDistance)
             {
@@ -723,7 +713,13 @@ namespace HeartopiaMod
                     ? item.Distance.ToString("F0") + "m"
                     : subLine + "  " + item.Distance.ToString("F0") + "m";
             }
-            GUI.Label(new Rect(rect.x + 50f * this.resourceVisualEspScale, rect.y + 22f * this.resourceVisualEspScale, rect.width - 56f * this.resourceVisualEspScale, 16f * this.resourceVisualEspScale), subLine, subStyle);
+
+            this.UguiOverlayDrawLabel(
+                new Rect(rect.x + 50f * this.resourceVisualEspScale, rect.y + 22f * this.resourceVisualEspScale, rect.width - 56f * this.resourceVisualEspScale, 16f * this.resourceVisualEspScale),
+                subLine,
+                new Color(0.76f, 0.84f, 0.92f, alpha * 0.95f),
+                Mathf.RoundToInt(10f * this.resourceVisualEspScale),
+                TextAnchor.UpperLeft);
         }
 
         // ---- ESP player-avatar texture (beacon) ------------------------------------------------
@@ -919,30 +915,15 @@ namespace HeartopiaMod
             Color fill = new Color(0.02f, 0.028f, 0.04f, alpha);
             float scale = Mathf.Clamp(this.resourceVisualEspScale, 0.8f, 1.5f);
 
-            GUI.color = new Color(0f, 0f, 0f, 0.34f * alpha);
-            GUI.DrawTexture(new Rect(rect.x + 2f, rect.y + 3f, rect.width, rect.height), Texture2D.whiteTexture);
-            GUI.color = new Color(outline.r, outline.g, outline.b, 0.24f * alpha);
-            GUI.DrawTexture(new Rect(rect.x - 1f, rect.y - 1f, rect.width + 2f, rect.height + 2f), Texture2D.whiteTexture);
-            GUI.color = fill;
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = new Color(outline.r, outline.g, outline.b, 0.82f);
-            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, 1f), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(rect.x, rect.yMax - 1f, rect.width, 1f), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(rect.x, rect.y, 1f, rect.height), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(rect.xMax - 1f, rect.y, 1f, rect.height), Texture2D.whiteTexture);
-
-            GUIStyle titleStyle = new GUIStyle(GUI.skin.label);
-            titleStyle.alignment = TextAnchor.MiddleLeft;
-            titleStyle.fontSize = Mathf.RoundToInt(10.5f * scale);
-            titleStyle.fontStyle = FontStyle.Bold;
-            titleStyle.normal.textColor = new Color(0.98f, 0.99f, 1f, alpha);
-            titleStyle.richText = false;
-
-            GUIStyle metaStyle = new GUIStyle(GUI.skin.label);
-            metaStyle.alignment = TextAnchor.MiddleRight;
-            metaStyle.fontSize = Mathf.RoundToInt(9.5f * scale);
-            metaStyle.fontStyle = FontStyle.Bold;
-            metaStyle.normal.textColor = new Color(0.92f, 0.95f, 0.99f, alpha);
+            Texture white = Texture2D.whiteTexture;
+            this.UguiOverlayDrawTexture(new Rect(rect.x + 2f, rect.y + 3f, rect.width, rect.height), white, new Color(0f, 0f, 0f, 0.34f * alpha));
+            this.UguiOverlayDrawTexture(new Rect(rect.x - 1f, rect.y - 1f, rect.width + 2f, rect.height + 2f), white, new Color(outline.r, outline.g, outline.b, 0.24f * alpha));
+            this.UguiOverlayDrawTexture(rect, white, fill);
+            Color edge = new Color(outline.r, outline.g, outline.b, 0.82f);
+            this.UguiOverlayDrawTexture(new Rect(rect.x, rect.y, rect.width, 1f), white, edge);
+            this.UguiOverlayDrawTexture(new Rect(rect.x, rect.yMax - 1f, rect.width, 1f), white, edge);
+            this.UguiOverlayDrawTexture(new Rect(rect.x, rect.y, 1f, rect.height), white, edge);
+            this.UguiOverlayDrawTexture(new Rect(rect.xMax - 1f, rect.y, 1f, rect.height), white, edge);
 
             float contentX = rect.x + 10f * scale;
             float contentY = rect.y + 3f * scale;
@@ -959,10 +940,22 @@ namespace HeartopiaMod
 
             float metaWidth = this.resourceVisualEspShowDistance || item.IsCooldown ? 42f * scale : 0f;
             float gap = metaWidth > 0f ? 8f * scale : 0f;
-            GUI.Label(new Rect(contentX, contentY, Mathf.Max(30f * scale, contentWidth - metaWidth - gap), contentHeight), item.Label, titleStyle);
+            this.UguiOverlayDrawLabel(
+                new Rect(contentX, contentY, Mathf.Max(30f * scale, contentWidth - metaWidth - gap), contentHeight),
+                item.Label,
+                new Color(0.98f, 0.99f, 1f, alpha),
+                Mathf.RoundToInt(10.5f * scale),
+                TextAnchor.MiddleLeft,
+                bold: true);
             if (metaWidth > 0f)
             {
-                GUI.Label(new Rect(rect.xMax - 10f * scale - metaWidth, contentY, metaWidth, contentHeight), meta, metaStyle);
+                this.UguiOverlayDrawLabel(
+                    new Rect(rect.xMax - 10f * scale - metaWidth, contentY, metaWidth, contentHeight),
+                    meta,
+                    new Color(0.92f, 0.95f, 0.99f, alpha),
+                    Mathf.RoundToInt(9.5f * scale),
+                    TextAnchor.MiddleRight,
+                    bold: true);
             }
         }
 
@@ -970,22 +963,23 @@ namespace HeartopiaMod
         {
             float alpha = this.resourceVisualEspOpacity * (item.IsCooldown ? 0.45f : 1f);
             Color accent = new Color(item.Accent.r, item.Accent.g, item.Accent.b, alpha);
-            GUI.color = new Color(0.04f, 0.06f, 0.08f, 0.68f * alpha);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = accent;
-            GUI.DrawTexture(new Rect(rect.x, rect.yMax - 2f, rect.width, 2f), Texture2D.whiteTexture);
+            Texture white = Texture2D.whiteTexture;
+            this.UguiOverlayDrawTexture(rect, white, new Color(0.04f, 0.06f, 0.08f, 0.68f * alpha));
+            this.UguiOverlayDrawTexture(new Rect(rect.x, rect.yMax - 2f, rect.width, 2f), white, accent);
 
-            GUIStyle style = new GUIStyle(GUI.skin.label);
-            style.alignment = TextAnchor.MiddleCenter;
-            style.fontSize = Mathf.RoundToInt(10f * this.resourceVisualEspScale);
-            style.fontStyle = FontStyle.Bold;
-            style.normal.textColor = new Color(0.95f, 0.98f, 1f, alpha);
             string text = item.Badge;
             if (this.resourceVisualEspShowDistance)
             {
                 text += "  " + item.Distance.ToString("F0") + "m";
             }
-            GUI.Label(rect, text, style);
+
+            this.UguiOverlayDrawLabel(
+                rect,
+                text,
+                new Color(0.95f, 0.98f, 1f, alpha),
+                Mathf.RoundToInt(10f * this.resourceVisualEspScale),
+                TextAnchor.MiddleCenter,
+                bold: true);
         }
 
         private void DrawResourceVisualEspEdgeChip(ResourceVisualEspItem item)
@@ -995,48 +989,36 @@ namespace HeartopiaMod
             float height = 22f * scale;
             Rect rect = new Rect(item.OffscreenAnchor.x - width * 0.5f, item.OffscreenAnchor.y - height * 0.5f, width, height);
             float alpha = this.resourceVisualEspOpacity * (item.IsCooldown ? 0.42f : 0.9f);
-            GUI.color = new Color(0.05f, 0.07f, 0.1f, 0.75f * alpha);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = new Color(item.Accent.r, item.Accent.g, item.Accent.b, alpha);
-            GUI.DrawTexture(new Rect(rect.x, rect.y, 3f * scale, rect.height), Texture2D.whiteTexture);
+            Texture white = Texture2D.whiteTexture;
+            this.UguiOverlayDrawTexture(rect, white, new Color(0.05f, 0.07f, 0.1f, 0.75f * alpha));
+            this.UguiOverlayDrawTexture(new Rect(rect.x, rect.y, 3f * scale, rect.height), white, new Color(item.Accent.r, item.Accent.g, item.Accent.b, alpha));
 
-            GUIStyle style = new GUIStyle(GUI.skin.label);
-            style.alignment = TextAnchor.MiddleCenter;
-            style.fontSize = Mathf.RoundToInt(9f * this.resourceVisualEspScale);
-            style.fontStyle = FontStyle.Bold;
-            style.normal.textColor = new Color(0.95f, 0.98f, 1f, alpha);
             string text = item.Label;
             if (this.resourceVisualEspShowDistance)
             {
                 text += " " + item.Distance.ToString("F0") + "m";
             }
-            GUI.Label(rect, text, style);
+
+            this.UguiOverlayDrawLabel(
+                rect,
+                text,
+                new Color(0.95f, 0.98f, 1f, alpha),
+                Mathf.RoundToInt(9f * this.resourceVisualEspScale),
+                TextAnchor.MiddleCenter,
+                bold: true);
         }
 
         private void DrawResourceVisualEspDot(Vector2 center, float size, Color color, float alpha)
         {
-            Color previous = GUI.color;
-            GUI.color = new Color(color.r, color.g, color.b, alpha * this.resourceVisualEspOpacity);
-            GUI.DrawTexture(new Rect(center.x - size * 0.5f, center.y - size * 0.5f, size, size), Texture2D.whiteTexture);
-            GUI.color = previous;
+            this.UguiOverlayDrawTexture(
+                new Rect(center.x - size * 0.5f, center.y - size * 0.5f, size, size),
+                Texture2D.whiteTexture,
+                new Color(color.r, color.g, color.b, alpha * this.resourceVisualEspOpacity));
         }
 
         private void DrawResourceVisualEspLine(Vector2 from, Vector2 to, Color color, float thickness)
         {
-            Matrix4x4 previous = GUI.matrix;
-            Color previousColor = GUI.color;
-            float angle = Vector3.Angle(to - from, Vector2.right);
-            if (from.y > to.y)
-            {
-                angle = -angle;
-            }
-
-            float length = (to - from).magnitude;
-            GUI.color = color;
-            GUIUtility.RotateAroundPivot(angle, from);
-            GUI.DrawTexture(new Rect(from.x, from.y - thickness * 0.5f, length, thickness), Texture2D.whiteTexture);
-            GUI.matrix = previous;
-            GUI.color = previousColor;
+            this.UguiOverlayDrawLine(from, to, color, thickness);
         }
     }
 }

@@ -703,77 +703,11 @@ namespace HeartopiaMod
             return texture != null;
         }
 
-        private void DrawRadarIconEspOverlay()
-        {
-            if (!this.isRadarActive || this.radarMarkerStyle != 2 || this.radarContainer == null)
-            {
-                return;
-            }
-
-            Camera cam = Camera.main;
-            if (cam == null)
-            {
-                return;
-            }
-
-            Vector3 cameraPos = cam.transform.position;
-            float maxDistance = Mathf.Max(25f, this.radarMaxDistance);
-            float iconSize = 55f;
-            Color previousColor = GUI.color;
-
-            for (int i = 0; i < this.radarContainer.transform.childCount; i++)
-            {
-                Transform child = this.radarContainer.transform.GetChild(i);
-                if (child == null || child.gameObject == null)
-                {
-                    continue;
-                }
-
-                RadarMarkerMetadata metadata = this.GetMarkerMetadata(child.gameObject);
-                if (metadata == null || string.IsNullOrWhiteSpace(metadata.CanonicalLabel))
-                {
-                    continue;
-                }
-
-                float distance = Vector3.Distance(cameraPos, child.position);
-                float itemMaxDistance = string.Equals(metadata.CanonicalLabel, "Bubble", StringComparison.Ordinal)
-                    ? Mathf.Max(BubbleRadarMaxDistance, maxDistance)
-                    : maxDistance;
-                if (distance > itemMaxDistance)
-                {
-                    continue;
-                }
-
-                if (!this.TryGetRadarIconTexture(metadata.CanonicalLabel, metadata.SpecificIconKey, out Texture2D texture) || texture == null)
-                {
-                    continue;
-                }
-
-                Vector3 screen = cam.WorldToScreenPoint(child.position + new Vector3(0f, 1.35f, 0f));
-                if (screen.z <= 0.05f)
-                {
-                    continue;
-                }
-
-                float screenX = screen.x - (iconSize * 0.5f);
-                float screenY = Screen.height - screen.y - iconSize;
-                if (screenX < -iconSize || screenX > Screen.width || screenY < -iconSize || screenY > Screen.height)
-                {
-                    continue;
-                }
-
-                Rect shadowRect = new Rect(screenX + 1f, screenY + 2f, iconSize, iconSize);
-                Rect iconRect = new Rect(screenX, screenY, iconSize, iconSize);
-                float alpha = metadata.IsCooldown ? 0.38f : 0.96f;
-
-                GUI.color = new Color(0f, 0f, 0f, alpha * 0.45f);
-                GUI.DrawTexture(shadowRect, texture, ScaleMode.ScaleToFit, true);
-                GUI.color = new Color(1f, 1f, 1f, alpha);
-                GUI.DrawTexture(iconRect, texture, ScaleMode.ScaleToFit, true);
-            }
-
-            GUI.color = previousColor;
-        }
+        // NOTE: an IMGUI `DrawRadarIconEspOverlay` used to live here — a second, screen-space
+        // implementation of the icon marker style. It had no callers: `radarMarkerStyle == 2` is
+        // served by the world-space path (see below in this file), which superseded it. Deleted with
+        // the IMGUI retirement; `TryGetRadarIconTexture` survives because the ESP beacon tags and the
+        // world-space markers both still use it.
 
         private RadarMarkerMetadata GetMarkerMetadata(GameObject marker)
         {

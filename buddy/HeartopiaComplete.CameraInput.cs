@@ -31,7 +31,12 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private void DrawMouseLookCrosshair()
+        // UGUI port of the old IMGUI crosshair (HeartopiaComplete.UguiOverlay.cs owns the canvas and
+        // the pools). Geometry and colours are unchanged — the same 5 shadow quads then 5 foreground
+        // quads, in the same order, so the visual result is identical. Called from the overlay frame
+        // driver instead of OnGUI; leasing nothing when hidden is what makes it disappear, because
+        // EndUguiOverlayFrame parks every element that was not leased.
+        private void DrawMouseLookCrosshairUgui()
         {
             if (!this.mouseLookCaptureActive || !this.showMouseLookCrosshair)
             {
@@ -53,23 +58,21 @@ namespace HeartopiaMod
             Rect left = new Rect(centerX - gap - armLength, centerY - armThickness * 0.5f, armLength, armThickness);
             Rect right = new Rect(centerX + gap, centerY - armThickness * 0.5f, armLength, armThickness);
 
-            Color previous = GUI.color;
+            Color shadow = new Color(0f, 0f, 0f, 0.4f);
+            Texture white = Texture2D.whiteTexture;
 
-            GUI.color = new Color(0f, 0f, 0f, 0.4f);
-            GUI.DrawTexture(new Rect(dot.x - 1f, dot.y - 1f, dot.width + 2f, dot.height + 2f), this.uiCircleTexture);
-            GUI.DrawTexture(new Rect(top.x - 1f, top.y - 1f, top.width + 2f, top.height + 2f), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(bottom.x - 1f, bottom.y - 1f, bottom.width + 2f, bottom.height + 2f), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(left.x - 1f, left.y - 1f, left.width + 2f, left.height + 2f), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(right.x - 1f, right.y - 1f, right.width + 2f, right.height + 2f), Texture2D.whiteTexture);
+            this.UguiOverlayDrawTexture(new Rect(dot.x - 1f, dot.y - 1f, dot.width + 2f, dot.height + 2f), this.uiCircleTexture, shadow);
+            this.UguiOverlayDrawTexture(new Rect(top.x - 1f, top.y - 1f, top.width + 2f, top.height + 2f), white, shadow);
+            this.UguiOverlayDrawTexture(new Rect(bottom.x - 1f, bottom.y - 1f, bottom.width + 2f, bottom.height + 2f), white, shadow);
+            this.UguiOverlayDrawTexture(new Rect(left.x - 1f, left.y - 1f, left.width + 2f, left.height + 2f), white, shadow);
+            this.UguiOverlayDrawTexture(new Rect(right.x - 1f, right.y - 1f, right.width + 2f, right.height + 2f), white, shadow);
 
-            GUI.color = new Color(1f, 1f, 1f, 0.95f);
-            GUI.DrawTexture(dot, this.uiCircleTexture);
-            GUI.DrawTexture(top, Texture2D.whiteTexture);
-            GUI.DrawTexture(bottom, Texture2D.whiteTexture);
-            GUI.DrawTexture(left, Texture2D.whiteTexture);
-            GUI.DrawTexture(right, Texture2D.whiteTexture);
-
-            GUI.color = previous;
+            Color fill = new Color(1f, 1f, 1f, 0.95f);
+            this.UguiOverlayDrawTexture(dot, this.uiCircleTexture, fill);
+            this.UguiOverlayDrawTexture(top, white, fill);
+            this.UguiOverlayDrawTexture(bottom, white, fill);
+            this.UguiOverlayDrawTexture(left, white, fill);
+            this.UguiOverlayDrawTexture(right, white, fill);
         }
 
         // ----------------------------------------------------------------------------------------

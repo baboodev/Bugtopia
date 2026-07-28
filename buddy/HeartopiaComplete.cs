@@ -550,6 +550,11 @@ namespace HeartopiaMod
             // and the camera-toggle interact clicks the interact button directly — all embedded-Mono
             // via AuraMono, nothing Themis-hashable.
             ModLogger.Msg("=== No IL2CPP hot-path patches installed ===");
+            // Mono-side per-frame tick (MonoTickFeature.cs). Verification phase: nothing is driven
+            // from it yet — it only proves that GameWorld.Update(float) ticks 1:1 with Unity frames,
+            // which is the prerequisite for dropping the injected MonoBehaviour (and with it the 5
+            // ClassInjector hooks in GameAssembly .text). Installs on the world-ready gate.
+            this.RegisterMonoTickWorldReady();
 
             ModLogger.Msg("AutoFish subsystem disabled.");
 
@@ -575,6 +580,11 @@ namespace HeartopiaMod
         {
             this.ProcessNoclipVehicleOnLateUpdate();
             this.ProcessVehicleTeleportOnLateUpdate();
+            // Retained-mode UGUI overlay (HeartopiaComplete.UguiOverlay.cs) — replaces the IMGUI
+            // OnGUI surfaces. Runs in LateUpdate because the ESP projects world positions through
+            // Camera.main and must sample after the camera has moved this frame; under IMGUI that
+            // ordering was implicit. Currently draws the crosshair; the ESP overlays follow.
+            this.ProcessUguiOverlayFrame();
 
             bool flag = this.monitorPosition;
             if (flag)
@@ -609,6 +619,10 @@ namespace HeartopiaMod
             // the pump the scene hook was needed to create already exists. Hard no-op under BepInEx
             // (and one bool test per frame afterwards).
             this.TryCleanupMelonSceneHooks();
+            // Mono-tick verification (MonoTickFeature.cs): compares the Mono main-loop hit count
+            // against Unity's frame count every 5 s. Driven from THIS pump on purpose — comparing the
+            // two is the whole point. No-op (two float compares) once the interval check fails.
+            this.ProcessMonoTickVerify();
             // World-epoch poll: invalidates AuraMono object caches after a scene/world change.
             this.UpdateAuraMonoWorldEpoch();
             // World-ready gate (HeartopiaComplete.WorldReady.cs): tracks the game's own
