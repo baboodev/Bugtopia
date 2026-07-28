@@ -254,7 +254,7 @@ namespace HeartopiaMod
 
             if (this.chatForceTranslateEnabled)
             {
-                string summary = this.chatTranslatePostcardBypass ? "Postcard test" : "Active";
+                string summary = "Active";
                 if (this.chatForceTranslateSentCount > 0)
                 {
                     summary = "Sent " + this.chatForceTranslateSentCount + " / ok " + this.chatForceTranslateSucceededCount;

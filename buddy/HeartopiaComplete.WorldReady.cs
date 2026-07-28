@@ -416,7 +416,6 @@ namespace HeartopiaMod
             this.seaCleanBannerNextAttemptAt = this.WorldReadyWarmupSlot(slot++);
             this.swimVerticalNextAttemptAt = this.WorldReadyWarmupSlot(slot++);
             this.chatForceTranslateNextResolveAt = this.WorldReadyWarmupSlot(slot++);
-            this.postcardNextMailIdResolveAt = this.WorldReadyWarmupSlot(slot++);
             this.nextBubbleFeaturePatchAttemptAt = this.WorldReadyWarmupSlot(slot++);
             this.bubbleSpawnNextInstallAttemptAt = this.WorldReadyWarmupSlot(slot++);
             this.bubbleCreateNextInstallAttemptAt = this.WorldReadyWarmupSlot(slot++);

@@ -65,14 +65,26 @@ namespace HeartopiaMod
         {
             private readonly byte[] _data;
             private readonly int _len;
+            private readonly byte[] _strBytes;
+            private readonly int _strLen;
 
-            public GameEventSnapshot(string eventName, uint netId, byte[] data, int len)
+            public GameEventSnapshot(string eventName, uint netId, byte[] data, int len, byte[] strBytes = null, int strLen = 0)
             {
                 this.EventName = eventName;
                 this.NetId = netId;
                 this._data = data;
                 this._len = len;
+                this._strBytes = strBytes;
+                this._strLen = strLen;
             }
+
+            // Content of the event's captured string field (opt in via RegisterGameEventHook's
+            // stringFieldOffset). Empty unless the slot declared one. The bytes were memcpy'd out
+            // of the mono string DURING dispatch (see PushEventToRing) — the mono pointer itself is
+            // never kept, so this is safe to touch on the main thread.
+            public string StringValue => (this._strBytes != null && this._strLen > 0)
+                ? System.Text.Encoding.Unicode.GetString(this._strBytes, 0, this._strLen)
+                : string.Empty;
 
             public string EventName { get; }
 
@@ -92,6 +104,7 @@ namespace HeartopiaMod
         {
             public string EventFullName;
             public int PayloadBytes;
+            public int StringFieldOffset = -1; // -1 = capture no string field
             public bool ByNetId; // true => hook the 2-arg DispatchEvent<T>(uint netId, in T) overload
             public bool SuppressForward; // when true, detour swallows dispatch (no trampoline call)
             public float NextResolveLogAt;
@@ -111,6 +124,8 @@ namespace HeartopiaMod
 
         // Per-slot routing consumed by the static native bodies (no instance state, no closures).
         private static readonly int[] eventSlotPayloadLen = new int[MaxEventHookSlots];
+        // Per-slot offset of a `string` field inside the event struct to capture BY VALUE, or -1.
+        private static readonly int[] eventSlotStringOffset = CreateEventStringOffsets();
         private static readonly bool[] eventSlotSuppressForward = new bool[MaxEventHookSlots];
         private static readonly int[] eventSlotHandlerCount = new int[MaxEventHookSlots];
         private static readonly DispatchEventHookDelegate[] eventSlotTrampoline = new DispatchEventHookDelegate[MaxEventHookSlots];
@@ -125,6 +140,11 @@ namespace HeartopiaMod
         private static readonly int[] eventRingLen = new int[EventRingSize];
         private static readonly uint[] eventRingNetId = new uint[EventRingSize];
         private static readonly byte[][] eventRingData = CreateEventRing();
+        // Parallel ring for captured string CONTENT (UTF-16 bytes), preallocated like the payload
+        // ring so the native-boundary body never allocates.
+        private const int EventStringCap = 512; // 256 chars — chat/mail strings are short
+        private static readonly byte[][] eventRingStringData = CreateEventStringRing();
+        private static readonly int[] eventRingStringLen = new int[EventRingSize];
         private static int eventRingWrite;
         private static int eventRingRead;
 
@@ -136,6 +156,26 @@ namespace HeartopiaMod
                 ring[i] = new byte[EventPayloadCap];
             }
             return ring;
+        }
+
+        private static byte[][] CreateEventStringRing()
+        {
+            byte[][] ring = new byte[EventRingSize][];
+            for (int i = 0; i < EventRingSize; i++)
+            {
+                ring[i] = new byte[EventStringCap];
+            }
+            return ring;
+        }
+
+        private static int[] CreateEventStringOffsets()
+        {
+            int[] offsets = new int[MaxEventHookSlots];
+            for (int i = 0; i < MaxEventHookSlots; i++)
+            {
+                offsets[i] = -1;
+            }
+            return offsets;
         }
 
         // Register a handler for a GLOBAL game event (dispatched via DispatchEvent<T>(in T)).
@@ -160,6 +200,26 @@ namespace HeartopiaMod
         internal bool RegisterGameEventSuppressHook(string eventFullName, int payloadBytes, bool byNetId = false)
         {
             return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, byNetId, null, true);
+        }
+
+        // Capture the CONTENT of a `string` field inside this event's struct (byte offset from the
+        // struct start, resolved from mono metadata by the caller) so handlers can read it as
+        // GameEventSnapshot.StringValue. The bytes are memcpy'd during dispatch — the mono string
+        // pointer is never retained, which is what makes this safe (a deferred deref would be a
+        // stale/unrooted object). Pass -1 to stop capturing.
+        internal void SetGameEventHookStringField(string eventFullName, int stringFieldOffset)
+        {
+            if (string.IsNullOrEmpty(eventFullName)
+                || !this.gameEventHooksByName.TryGetValue(eventFullName, out GameEventHookEntry entry))
+            {
+                return;
+            }
+
+            entry.StringFieldOffset = stringFieldOffset;
+            if (entry.Installed)
+            {
+                eventSlotStringOffset[entry.Slot] = stringFieldOffset;
+            }
         }
 
         internal void SetGameEventHookSuppressForward(string eventFullName, bool suppress)
@@ -508,6 +568,7 @@ namespace HeartopiaMod
 
                 eventSlotPayloadLen[entry.Slot] = entry.PayloadBytes;
                 eventSlotSuppressForward[entry.Slot] = entry.SuppressForward;
+                eventSlotStringOffset[entry.Slot] = entry.StringFieldOffset;
                 this.SyncGameEventHookSlotHandlerCount(entry);
                 entry.Installed = true;
                 ModLogger.Msg("[EventHook] hooked " + entry.EventFullName + " @0x" + nativePtr.ToInt64().ToString("X")
@@ -776,6 +837,33 @@ namespace HeartopiaMod
                 {
                     eventRingLen[idx] = 0; // empty-payload event (e.g. *CloseEvent) — record dispatch
                 }
+
+                // Optional string-field capture. PURE MEMORY READS ONLY — no mono calls, no
+                // allocation: a detour body that calls into Mono (mono_string_to_utf8) while Mono
+                // holds its runtime locks deadlocks the main thread — that mistake froze the game
+                // once and is why the string is copied out by value here instead.
+                // Mono string layout on x64: [MonoObject vtable+sync = 16][int32 length][UTF-16 chars].
+                int strOffset = eventSlotStringOffset[slot];
+                int strBytes = 0;
+                if (strOffset >= 0 && eventPtr != IntPtr.Zero)
+                {
+                    IntPtr strObj = Marshal.ReadIntPtr(eventPtr, strOffset);
+                    if (strObj != IntPtr.Zero)
+                    {
+                        int chars = Marshal.ReadInt32(strObj, 2 * IntPtr.Size);
+                        if (chars > 0)
+                        {
+                            strBytes = chars * 2;
+                            if (strBytes > EventStringCap)
+                            {
+                                strBytes = EventStringCap;
+                            }
+                            Marshal.Copy(strObj + (2 * IntPtr.Size) + 4, eventRingStringData[idx], 0, strBytes);
+                        }
+                    }
+                }
+                eventRingStringLen[idx] = strBytes;
+
                 eventRingSlot[idx] = (byte)slot;
                 eventRingNetId[idx] = netId;
                 eventRingWrite = w + 1;
@@ -795,6 +883,8 @@ namespace HeartopiaMod
                 int len = eventRingLen[idx];
                 uint netId = eventRingNetId[idx];
                 byte[] buf = eventRingData[idx];
+                byte[] strBuf = eventRingStringData[idx];
+                int strLen = eventRingStringLen[idx];
                 eventRingRead++;
 
                 if (slot < 0 || slot >= this.gameEventHookSlotCount)
@@ -808,7 +898,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                GameEventSnapshot snap = new GameEventSnapshot(entry.EventFullName, netId, buf, len);
+                GameEventSnapshot snap = new GameEventSnapshot(entry.EventFullName, netId, buf, len, strBuf, strLen);
 
                 if (MasterLogGameEvents)
                 {

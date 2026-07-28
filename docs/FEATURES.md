@@ -219,15 +219,16 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   `ConnectScene_CS`), not the language of the text — so a player typing e.g. Russian on an
   English UI produces messages an English-UI receiver gets no Translate button for.
 - Hooks the `ReceiveChatMessage` EventCenter event (scalar fields only) and for non-self
-  messages whose langKey **equals** ours sends
-  `ChatProtocolManager.RequestTranslateStream(msgId, "")` directly (AuraMono static invoke),
-  skipping the client-side langKey gate. Foreign-langKey messages stay with the game's own
-  translate pipeline (its in-panel Translate toggle) — never double-requested, because duplicate
-  stream chunks would corrupt the game's append-only translation cache.
+  messages whose langKey **equals** ours sends `ChatProtocolManager.RequestTranslateStream(msgId,
+  originalText)` directly (AuraMono static invoke), skipping the client-side langKey gate. The
+  text is resolved by msgId from `ChatSystem.record` — the stream endpoint rejects an empty
+  `OriginalMessage` with 4207. Foreign-langKey messages stay with the game's own translate
+  pipeline (its in-panel Translate toggle) — never double-requested, because duplicate stream
+  chunks would corrupt the game's append-only translation cache.
+- The langKey gate is **client-side only**: the server translates by detecting the language of the
+  supplied text, so these messages do get translated once the request goes out (verified live).
 - Results ride the game's own stream pipeline (`RequestTranslateStreamResultEvent` →
   `ChatSystem` cache → `TranslateResultUIEvent`), so bubbles/HUD/history update natively.
-  If the server itself decides the text is already in our language it answers
-  `NoNeedToTranslate` (4209) — logged, nothing visible changes.
 - Requires the overseas game build (translation service); server weekly char limits still apply.
   Toggle persisted in config (`chatForceTranslateEnabled`). Implementation:
   `ChatForceTranslateFeature.cs`.
@@ -237,13 +238,8 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
     On completion logs the finished translation (`orig -> translated`), not just errors.
   - **Force ALL Languages** (`chatTranslateForceAllLangs`) — also request foreign-langKey messages,
     but only when the in-game Translate toggle is off (never double-request the game's own path).
-  - **Postcard Bypass (test)** (`chatTranslatePostcardBypass`) — experimental route around the
-    server's langCode gate. Blocked chat messages are translated via the **postcard** endpoint
-    (`MailProtocolManager.RequestTranslatePostCard`, no source-langCode gate — it detects language
-    from the supplied text), serialized one at a time. Needs ≥1 postcard in the mailbox to borrow a
-    MailId; the translated text is read synchronously via a dedicated detour on
-    `DispatchEvent<PostCardTranslateResultEvent>` and logged. Consumes the shared weekly translate
-    quota. Implementation: `ChatForceTranslateFeature.Postcard.cs`.
+  Note: the Debug Log toggle is **session-only** — it is never saved to config, so it always starts
+  off (it prints a line per chat message).
 
 ### Game UI — Custom UI Timings (Self → Game UI sub-tab)
 

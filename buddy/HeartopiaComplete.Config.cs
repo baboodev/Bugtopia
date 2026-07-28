@@ -225,9 +225,9 @@ namespace HeartopiaMod
             data.warehouseBypassEnabled = this.warehouseBypassEnabled;
             data.strangerChatBypassEnabled = this.strangerChatBypassEnabled;
             data.chatForceTranslateEnabled = this.chatForceTranslateEnabled;
-            data.chatTranslateVerboseLog = this.chatTranslateVerboseLog;
             data.chatTranslateForceAllLangs = this.chatTranslateForceAllLangs;
-            data.chatTranslatePostcardBypass = this.chatTranslatePostcardBypass;
+            // chatTranslateVerboseLog is deliberately NOT persisted — it is a diagnostic that
+            // floods the log, so it always starts OFF and must be re-armed per session.
             data.autoIceSkatingEnabled = this.autoIceSkatingEnabled;
             data.autoIceSkatingMinUltimateScore = this.autoIceSkatingMinUltimateScore;
             data.autoIceSkatingOnlyX2Ultimate = this.autoIceSkatingOnlyX2Ultimate;
@@ -470,9 +470,8 @@ namespace HeartopiaMod
             this.warehouseBypassEnabled = data.warehouseBypassEnabled;
             this.strangerChatBypassEnabled = data.strangerChatBypassEnabled;
             this.chatForceTranslateEnabled = data.chatForceTranslateEnabled;
-            this.chatTranslateVerboseLog = data.chatTranslateVerboseLog;
             this.chatTranslateForceAllLangs = data.chatTranslateForceAllLangs;
-            this.chatTranslatePostcardBypass = data.chatTranslatePostcardBypass;
+            this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
             this.autoIceSkatingMinUltimateScore = Mathf.Clamp(data.autoIceSkatingMinUltimateScore, 0, AutoIceSkatingMinUltimateScoreSliderMax);
             this.autoIceSkatingOnlyX2Ultimate = data.autoIceSkatingOnlyX2Ultimate;

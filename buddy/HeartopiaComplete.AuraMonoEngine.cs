@@ -83,8 +83,18 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoObjectUnboxDelegate(IntPtr obj);
 
+        // Managed-side shape used by every caller. NOT bound to the native export directly — it is
+        // bound to the NewAuraMonoStringUtf8 wrapper below, so no P/Invoke marshalling happens on
+        // this signature (same pattern as auraMonoRuntimeInvoke -> InvokeAuraMonoChecked).
+        private delegate IntPtr MonoStringNewDelegate(IntPtr domain, string text);
+
+        // The real export: mono_string_new(MonoDomain*, const char *utf8). ⚠️ It takes UTF-8.
+        // Marshalling a managed string here as LPStr (the P/Invoke default) encodes with the ANSI
+        // code page, which silently turns every non-Latin character into '?' — that shipped once
+        // and made the server translate literal "????????" (see chat-translate-mod-feature).
+        // Always hand it explicit UTF-8 bytes.
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoStringNewDelegate(IntPtr domain, [MarshalAs(UnmanagedType.LPStr)] string text);
+        private delegate IntPtr MonoStringNewRawDelegate(IntPtr domain, byte[] utf8TextZ);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoStringToUtf8Delegate(IntPtr monoString);
@@ -238,6 +248,8 @@ namespace HeartopiaMod
         private static MonoObjectUnboxDelegate auraMonoObjectUnbox;
 
         private static MonoStringNewDelegate auraMonoStringNew;
+
+        private static MonoStringNewRawDelegate auraMonoStringNewRaw;
 
         private static MonoStringToUtf8Delegate auraMonoStringToUtf8;
 
@@ -425,6 +437,27 @@ namespace HeartopiaMod
                 ModLogger.Msg("[AuraMono] Game not loaded yet — static-field reads refused (would AV). Game-data features stay idle until a module resolves.");
             }
             return false;
+        }
+
+        // mono_string_new takes UTF-8; encode explicitly so non-Latin text (Thai, Cyrillic, CJK)
+        // survives. The ANSI default of string marshalling replaces every such character with '?'.
+        private static IntPtr NewAuraMonoStringUtf8(IntPtr domain, string text)
+        {
+            MonoStringNewRawDelegate raw = auraMonoStringNewRaw;
+            if (raw == null)
+            {
+                return IntPtr.Zero;
+            }
+
+            string value = text ?? string.Empty;
+            int byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
+            byte[] utf8 = new byte[byteCount + 1]; // NUL-terminated for const char*
+            if (byteCount > 0)
+            {
+                System.Text.Encoding.UTF8.GetBytes(value, 0, value.Length, utf8, 0);
+            }
+
+            return raw(domain, utf8);
         }
 
         internal static uint AuraMonoPinNew(IntPtr obj)
@@ -900,7 +933,8 @@ namespace HeartopiaMod
             auraMonoRuntimeInvokeRaw = this.GetAuraMonoExport<MonoRuntimeInvokeDelegate>(monoModule, "mono_runtime_invoke");
             auraMonoRuntimeInvoke = auraMonoRuntimeInvokeRaw != null ? new MonoRuntimeInvokeDelegate(InvokeAuraMonoChecked) : null;
             auraMonoObjectUnbox = this.GetAuraMonoExport<MonoObjectUnboxDelegate>(monoModule, "mono_object_unbox");
-            auraMonoStringNew = this.GetAuraMonoExport<MonoStringNewDelegate>(monoModule, "mono_string_new");
+            auraMonoStringNewRaw = this.GetAuraMonoExport<MonoStringNewRawDelegate>(monoModule, "mono_string_new");
+            auraMonoStringNew = auraMonoStringNewRaw != null ? new MonoStringNewDelegate(NewAuraMonoStringUtf8) : null;
             auraMonoStringToUtf8 = this.GetAuraMonoExport<MonoStringToUtf8Delegate>(monoModule, "mono_string_to_utf8");
             auraMonoFree = this.GetAuraMonoExport<MonoFreeDelegate>(monoModule, "mono_free");
             auraMonoObjectGetClass = this.GetAuraMonoExport<MonoObjectGetClassDelegate>(monoModule, "mono_object_get_class");

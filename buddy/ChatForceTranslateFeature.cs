@@ -118,7 +118,6 @@ namespace HeartopiaMod
                 this.chatForceTranslateNextResolveAt = -999f;
                 this.chatTranslateGameStateLogged = false;
                 this.chatTranslateGameToggleValidUntil = -999f;
-                this.ResetChatTranslatePostcardWorldState();
             }
 
             float now = Time.unscaledTime;
@@ -146,9 +145,6 @@ namespace HeartopiaMod
                 this.MaybeLogChatTranslateGameState();
             }
 
-            // Postcard-endpoint bypass (opt-in): install the result detour, drain captured results,
-            // and pump the serialized send queue.
-            this.UpdateChatTranslatePostcardBypass(now);
         }
 
         // One-shot per world (verbose only): the two game-side gates that decide whether the
@@ -340,30 +336,6 @@ namespace HeartopiaMod
                 if (messageText == null)
                 {
                     this.TryGetChatTranslateMessageText(msgId, out messageText);
-                }
-
-                // Postcard-endpoint bypass: route through the postcard translator (no source-langKey
-                // gate) instead of the chat endpoint. Needs the text (postcard content can't be empty).
-                // Once the route disarmed (no postcard to borrow a MailId from) stop queueing —
-                // the backlog would never drain.
-                if (this.chatTranslatePostcardBypass && this.postcardRouteDisarmed)
-                {
-                    this.chatForceTranslateRequested.Remove(msgId);
-                    this.ChatTranslateVerbose("  -> skip: postcard route disabled (see the DISABLED line above).");
-                    return;
-                }
-
-                if (this.chatTranslatePostcardBypass)
-                {
-                    if (string.IsNullOrEmpty(messageText))
-                    {
-                        this.chatForceTranslateRequested.Remove(msgId);
-                        this.ChatTranslateVerbose("  -> skip postcard route: message text unavailable in ChatSystem.record.");
-                        return;
-                    }
-
-                    this.EnqueueChatTranslatePostcard(msgId, messageText, reason);
-                    return;
                 }
 
                 // The stream endpoint validates OriginalMessage — an empty one comes back as
