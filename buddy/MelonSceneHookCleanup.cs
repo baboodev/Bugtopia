@@ -56,8 +56,13 @@ namespace HeartopiaMod
         // Diagnostics (surfaced in the log).
         internal static int melonSceneHooksDetached;
         internal static string melonSceneHookStatus = "not run";
+        internal static string melonRunFinalizerStatus = "not run";
 
         private bool melonSceneHookCleanupDone;
+
+        // Kill switch for the SECOND, riskier removal (see TryDetachMelonRunFinalizerHook).
+        // Flip to false to keep only the scene-hook cleanup, which is independent of this.
+        private const bool MelonDetachRunFinalizerHook = true;
 
         private static readonly string[] MelonSceneHookMethods = { "Internal_SceneLoaded", "Internal_SceneUnloaded" };
 
@@ -124,6 +129,14 @@ namespace HeartopiaMod
                 melonSceneHookStatus = "detached " + removed + "/" + MelonSceneHookMethods.Length;
                 ModLogger.Msg("[MelonSceneHook] " + melonSceneHookStatus
                               + " (GameAssembly .text scene hooks removed; SM_Component pump unaffected)");
+
+                // Second, independent removal: ML's Il2CppInterop build applies ONE ClassInjector VM
+                // hook that BepInEx's does not (GarbageCollector::RunFinalizer). Removing it brings
+                // the .text patch count down to BepInEx parity (5).
+                if (MelonDetachRunFinalizerHook)
+                {
+                    this.TryDetachMelonRunFinalizerHook(detach);
+                }
             }
             catch (Exception ex)
             {
@@ -192,6 +205,154 @@ namespace HeartopiaMod
                     try { Marshal.FreeHGlobal(slot); } catch { }
                 }
             }
+        }
+
+        // Removes the ONE extra ClassInjector VM hook that MelonLoader's Il2CppInterop build applies
+        // and BepInEx's does not: `GarbageCollector::RunFinalizer`, installed by
+        // Il2CppInterop.Runtime.Injection.Hooks.GarbageCollector_RunFinalizer_Patch via
+        // InjectorHelpers.Setup(). Removing it takes the GameAssembly .text patch count from 6 to 5,
+        // i.e. exact parity with BepInEx (which ships a build without this hook at all and works).
+        //
+        // ⚠️ RISK, stated once: unlike the scene hooks — which were provably only needed to create
+        // SM_Component, already alive by the time we run — this one is live infrastructure for
+        // injected-type finalization. ML added it as a GC-crash fix. BepInEx runs fine without it,
+        // which is the argument that removal is survivable, but a finalizer-time crash on injected
+        // objects is the failure mode to watch for. Set MelonDetachRunFinalizerHook=false to disable
+        // this step alone; the scene-hook cleanup above is unaffected.
+        //
+        // Addresses come from the Hook<T> base's own fields, NOT from a re-scan: FindTargetMethod()
+        // locates the function by a PROLOGUE byte-signature, and after patching that prologue is a
+        // JMP — so re-scanning post-patch would fail or match the wrong site.
+        //   _method  = Marshal.GetDelegateForFunctionPointer<T>(targetAddr) -> round-trips back to targetAddr
+        //   _detour  = the managed detour delegate                          -> its function pointer
+        private bool TryDetachMelonRunFinalizerHook(MethodInfo detach)
+        {
+            IntPtr slot = IntPtr.Zero;
+            try
+            {
+                Assembly interop = FindLoadedAssemblyByName("Il2CppInterop.Runtime");
+                if (interop == null)
+                {
+                    melonRunFinalizerStatus = "Il2CppInterop.Runtime not loaded";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                Type helpers = interop.GetType("Il2CppInterop.Runtime.Injection.InjectorHelpers", throwOnError: false)
+                               ?? FindTypeByShortName(interop, "InjectorHelpers");
+                if (helpers == null)
+                {
+                    melonRunFinalizerStatus = "InjectorHelpers type not found";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                FieldInfo patchField = helpers.GetField("RunFinalizerPatch", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+                if (patchField == null)
+                {
+                    // BepInEx-style Il2CppInterop build: the hook does not exist. Nothing to do, and
+                    // that is the expected outcome there — already at parity.
+                    melonRunFinalizerStatus = "hook absent in this Il2CppInterop build (already parity)";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                object hook = patchField.GetValue(null);
+                if (hook == null)
+                {
+                    melonRunFinalizerStatus = "hook instance null";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                // _isApplied / _method / _detour live on the generic Hook<T> base — walk up for them.
+                FieldInfo fApplied = FindFieldOnHierarchy(hook.GetType(), "_isApplied");
+                FieldInfo fMethod = FindFieldOnHierarchy(hook.GetType(), "_method");
+                FieldInfo fDetour = FindFieldOnHierarchy(hook.GetType(), "_detour");
+                if (fApplied == null || fMethod == null || fDetour == null)
+                {
+                    melonRunFinalizerStatus = "Hook<T> fields not found";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                if (!(fApplied.GetValue(hook) is bool applied) || !applied)
+                {
+                    melonRunFinalizerStatus = "hook not applied — nothing to remove";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                Delegate methodDel = fMethod.GetValue(hook) as Delegate;
+                Delegate detourDel = fDetour.GetValue(hook) as Delegate;
+                if (methodDel == null || detourDel == null)
+                {
+                    melonRunFinalizerStatus = "target/detour delegate null";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                IntPtr target = Marshal.GetFunctionPointerForDelegate(methodDel);
+                IntPtr detourPtr = Marshal.GetFunctionPointerForDelegate(detourDel);
+                if (target == IntPtr.Zero || detourPtr == IntPtr.Zero)
+                {
+                    melonRunFinalizerStatus = "null function pointer";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
+                    return false;
+                }
+
+                string before = ReadPrologueHex(target, 12);
+
+                slot = Marshal.AllocHGlobal(IntPtr.Size);
+                Marshal.WriteIntPtr(slot, target);
+                detach.Invoke(null, new object[] { slot, detourPtr });
+
+                string after = ReadPrologueHex(target, 12);
+                bool changed = !string.Equals(before, after, StringComparison.Ordinal);
+
+                melonRunFinalizerStatus = changed ? "detached OK" : "NO-CHANGE";
+                ModLogger.Msg("[MelonSceneHook] RunFinalizer (GarbageCollector::RunFinalizer) @0x"
+                              + target.ToInt64().ToString("X") + " detour 0x" + detourPtr.ToInt64().ToString("X")
+                              + " -> " + melonRunFinalizerStatus + " [" + before + " => " + after + "]");
+
+                if (changed)
+                {
+                    // Keep Il2CppInterop's own bookkeeping honest so nothing later tries to re-Dispose
+                    // a hook we already removed behind its back.
+                    try { fApplied.SetValue(hook, false); } catch { }
+                }
+
+                return changed;
+            }
+            catch (Exception ex)
+            {
+                melonRunFinalizerStatus = "failed: " + ex.Message;
+                ModLogger.Msg("[MelonSceneHook] RunFinalizer detach failed: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (slot != IntPtr.Zero)
+                {
+                    try { Marshal.FreeHGlobal(slot); } catch { }
+                }
+            }
+        }
+
+        private static FieldInfo FindFieldOnHierarchy(Type t, string name)
+        {
+            while (t != null && t != typeof(object))
+            {
+                FieldInfo f = t.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (f != null)
+                {
+                    return f;
+                }
+
+                t = t.BaseType;
+            }
+
+            return null;
         }
 
         // ---- resolution helpers (string-based: no MelonLoader type referenced at compile time) ----
