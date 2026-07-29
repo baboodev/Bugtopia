@@ -371,32 +371,9 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.NoclipToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
-            if (handle.DisableOobToggle != null)
-            {
-                PlaceUguiTopLeft(handle.DisableOobToggle.gameObject, rowX, yCur, rowW, 24f);
-            }
-            yCur += 30f;
-            if (handle.InstantTeleportToggle != null)
-            {
-                PlaceUguiTopLeft(handle.InstantTeleportToggle.gameObject, rowX, yCur, rowW, 24f);
-            }
-            yCur += 30f;
-            if (handle.InstantTeleportWaitFieldToggle != null)
-            {
-                PlaceUguiTopLeft(handle.InstantTeleportWaitFieldToggle.gameObject, rowX, yCur, rowW, 24f);
-            }
-            yCur += 30f;
-            if (handle.VehicleBypassToggle != null)
-            {
-                PlaceUguiTopLeft(handle.VehicleBypassToggle.gameObject, rowX, yCur, rowW, 24f);
-            }
-            yCur += 30f;
-            if (handle.VehicleBypassServerToggle != null)
-            {
-                PlaceUguiTopLeft(handle.VehicleBypassServerToggle.gameObject, rowX, yCur, rowW, 24f);
-            }
-            yCur += 30f;
-
+            // The two noclip sliders belong DIRECTLY under their toggle — they used to be
+            // emitted after the vehicle-bypass rows, so enabling noclip made them appear five
+            // rows away from the checkbox that controls them.
             SetUguiGoActive(handle.NoclipSpeedLabel, noclip);
             SetUguiGoActive(handle.NoclipSpeedSlider != null ? handle.NoclipSpeedSlider.gameObject : null, noclip);
             SetUguiGoActive(handle.NoclipBoostLabel, noclip);
@@ -422,6 +399,32 @@ namespace HeartopiaMod
                 }
                 yCur += 28f;
             }
+
+            if (handle.DisableOobToggle != null)
+            {
+                PlaceUguiTopLeft(handle.DisableOobToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.InstantTeleportToggle != null)
+            {
+                PlaceUguiTopLeft(handle.InstantTeleportToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.InstantTeleportWaitFieldToggle != null)
+            {
+                PlaceUguiTopLeft(handle.InstantTeleportWaitFieldToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.VehicleBypassToggle != null)
+            {
+                PlaceUguiTopLeft(handle.VehicleBypassToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.VehicleBypassServerToggle != null)
+            {
+                PlaceUguiTopLeft(handle.VehicleBypassServerToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
 
             if (handle.AntiAfkToggle != null)
             {

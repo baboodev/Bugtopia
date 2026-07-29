@@ -1235,10 +1235,13 @@ namespace HeartopiaMod
         // Vertical cursor replays DrawRadarSettingsTab exactly (base y=8): 8 header +52 → 60
         // Range card(112) +128 → 188 Resource Display +64 → 252 [Game-Map rows +36 ×3 → 360]
         // Visual card(332) +348. The source's 520px panel adapts to the cell (cards at x=8,
-        // width = content-16; the source's own proportions: 16px insets, sliders at x=190 with a
-        // 16px right inset — Foraging's width-adaptation precedent). All controls including the
-        // conditional rows are built ONCE; RelayoutUguiShellRadarSettings owns visibility + the
-        // Visual card position + content height. Handle assigned LAST (Research idiom).
+        // width = content-16, 16px insets — Foraging's width-adaptation precedent). The source's
+        // slider-row split (sliders at x=190 under 220-240px labels) is deliberately NOT kept:
+        // it overlapped label and slider (2026-07-29 fix) — label+slider rows now use the
+        // Self-tab column shape (label ends 8px before the slider; slider keeps its right
+        // inset). All controls including the conditional rows are built ONCE;
+        // RelayoutUguiShellRadarSettings owns visibility + the Visual card position + content
+        // height. Handle assigned LAST (Research idiom).
         private GameObject BuildUguiShellRadarSettingsContent(Transform parent, float x, float y, float w, float h)
         {
             this.uguiShellRadarSettings = null;
@@ -1329,14 +1332,18 @@ namespace HeartopiaMod
 
             // ---- Game-Map-only rows (Radar.cs:1011-1039) — fixed positions at 252/288/324;
             // relayout flips their visibility only (Foraging aura-row idiom).
+            // 2026-07-29: was label 240 wide at x=24 with the slider at x=198 — a 66px overlap
+            // the es/pt strings actually reached. Label now ends 8px before the slider; the
+            // slider keeps its old RIGHT edge (cardW-8, this row's inset) and absorbs the shrink
+            // (146px at the 960px shell).
             handle.TrackLimitShown = this.LF("Map Markers (nearest): {0}", this.radarGameTrackLimit.ToString());
             handle.TrackLimitLabel = this.CreateUguiLabel(scrollContent, "TrackLimitLabel",
                 handle.TrackLimitShown, 11f, subColor, false);
-            PlaceUguiTopLeft(handle.TrackLimitLabel, 24f, 252f, 240f, 20f);
+            PlaceUguiTopLeft(handle.TrackLimitLabel, 24f, 252f, 260f, 20f);
             handle.TrackLimitSlider = this.CreateUguiSlider(scrollContent, "TrackLimitSlider",
                 1f, 30f, this.radarGameTrackLimit, true,
                 new System.Action<float>(this.OnUguiRadarTrackLimitChanged));
-            PlaceUguiTopLeft(handle.TrackLimitSlider.gameObject, 198f, 253f, cardW - 206f, 20f);
+            PlaceUguiTopLeft(handle.TrackLimitSlider.gameObject, 292f, 253f, cardW - 300f, 20f);
 
             handle.BigMapCaption = this.CreateUguiLabel(scrollContent, "BigMapCaption",
                 this.L("Show on big map"), 11f, subColor, false);
@@ -1411,29 +1418,38 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.ShowGroundRingToggle.gameObject, 24f + toggleWidth, 166f, toggleWidth, 24f);
 
             // Three sliders (Radar.cs:1092-1117) — rounding differs per row (see handlers).
+            // 2026-07-29: the IMGUI-parity split (labels 220/240 wide at x=16, sliders at x=190,
+            // i.e. sliderW = cardW-206) had the label rects running 46-66px UNDER the sliders;
+            // es/pt strings ("Límite de marcadores de superposición: …") visibly rendered beneath
+            // the slider track. Re-split with the Self-tab column shape: label ends 8px before
+            // the slider, slider keeps its old RIGHT edge (cardW-16) and absorbs the shrink —
+            // 126px wide at the 960px shell, still comfortably draggable.
+            const float espLabelW = 280f;               // fits the longest es/pt value strings
+            const float espSliderX = 16f + espLabelW + 8f;
+            float espSliderW = cardW - 16f - espSliderX; // right edge unchanged at cardW-16
             handle.ScaleShown = this.LF("Overlay Scale: {0}", this.resourceVisualEspScale.ToString("F2"));
             handle.ScaleLabel = this.CreateUguiBodyLabel(visualCard.transform, "ScaleLabel", handle.ScaleShown, 13f);
-            PlaceUguiTopLeft(handle.ScaleLabel, 16f, 208f, 220f, 20f);
+            PlaceUguiTopLeft(handle.ScaleLabel, 16f, 208f, espLabelW, 20f);
             handle.ScaleSlider = this.CreateUguiSlider(visualCard.transform, "ScaleSlider",
                 0.8f, 1.5f, this.resourceVisualEspScale, false,
                 new System.Action<float>(this.OnUguiRadarEspScaleChanged));
-            PlaceUguiTopLeft(handle.ScaleSlider.gameObject, 190f, 209f, cardW - 206f, 20f);
+            PlaceUguiTopLeft(handle.ScaleSlider.gameObject, espSliderX, 209f, espSliderW, 20f);
 
             handle.OpacityShown = this.LF("Overlay Opacity: {0}", this.resourceVisualEspOpacity.ToString("F2"));
             handle.OpacityLabel = this.CreateUguiBodyLabel(visualCard.transform, "OpacityLabel", handle.OpacityShown, 13f);
-            PlaceUguiTopLeft(handle.OpacityLabel, 16f, 250f, 220f, 20f);
+            PlaceUguiTopLeft(handle.OpacityLabel, 16f, 250f, espLabelW, 20f);
             handle.OpacitySlider = this.CreateUguiSlider(visualCard.transform, "OpacitySlider",
                 0.35f, 1f, this.resourceVisualEspOpacity, false,
                 new System.Action<float>(this.OnUguiRadarEspOpacityChanged));
-            PlaceUguiTopLeft(handle.OpacitySlider.gameObject, 190f, 251f, cardW - 206f, 20f);
+            PlaceUguiTopLeft(handle.OpacitySlider.gameObject, espSliderX, 251f, espSliderW, 20f);
 
             handle.MarkerLimitShown = this.LF("Overlay Marker Limit: {0}", this.resourceVisualEspMaxMarkers.ToString());
             handle.MarkerLimitLabel = this.CreateUguiBodyLabel(visualCard.transform, "MarkerLimitLabel", handle.MarkerLimitShown, 13f);
-            PlaceUguiTopLeft(handle.MarkerLimitLabel, 16f, 292f, 240f, 20f);
+            PlaceUguiTopLeft(handle.MarkerLimitLabel, 16f, 292f, espLabelW, 20f);
             handle.MarkerLimitSlider = this.CreateUguiSlider(visualCard.transform, "MarkerLimitSlider",
                 20f, 200f, this.resourceVisualEspMaxMarkers, true,
                 new System.Action<float>(this.OnUguiRadarEspMarkerLimitChanged));
-            PlaceUguiTopLeft(handle.MarkerLimitSlider.gameObject, 190f, 293f, cardW - 206f, 20f);
+            PlaceUguiTopLeft(handle.MarkerLimitSlider.gameObject, espSliderX, 293f, espSliderW, 20f);
 
             handle.LayoutSignature = this.radarDisplayMode;
             this.RelayoutUguiShellRadarSettings(handle);

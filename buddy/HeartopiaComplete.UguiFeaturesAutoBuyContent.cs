@@ -25,16 +25,18 @@ namespace HeartopiaMod
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //
     // Source nuances verified against the branch, replayed exactly:
-    //  - ONE DrawExentriSectionPanel card holds everything (:1108-1110), 580x762 at the source's
-    //    uniform column left — full-width role → panelW (Puzzle precedent), via the shared
-    //    CreateUguiSettingsMainPanel chrome (identical fill/line formula: uiContent @
+    //  - ONE DrawExentriSectionPanel card holds everything (:1108-1110), 580 wide at the
+    //    source's uniform column left — full-width role → panelW (Puzzle precedent), via the
+    //    shared CreateUguiSettingsMainPanel chrome (identical fill/line formula: uiContent @
     //    clamp(panelAlpha*0.82, .14, .92) + accent @ 0.24 ring; its 11pt header vs the source's
     //    12pt sectionStyle is the accepted sibling-tab look — Theme-round precedent). The
-    //    source's height is 762 + a dropdown-OPEN growth term (:1108); the growth is an
+    //    source's height was 762 + a dropdown-OPEN growth term (:1108); the growth is an
     //    inline-reflow artifact of drawing the option list in the flow — the kit's stock
-    //    UnityEngine.UI.Dropdown shows its list as its own popup overlay (Birds precedent), so
-    //    the card is a FIXED 762 here. Content ends at 576 (conditional shown) — the remaining
-    //    ~186px of card is genuine source slack (IMGUI renders the same empty card bottom).
+    //    UnityEngine.UI.Dropdown shows its list as its own popup overlay (Birds precedent).
+    //    2026-07-29: the 762 itself was IMGUI slack (~198px of empty card below the content,
+    //    which ends at 564 with the reason row shown / 544 hidden) and went with the IMGUI
+    //    twin — the card height is now COMPUTED in the relayout (content bottom + 16 pad =
+    //    580/560) because the conditional reason row moves the bottom.
     //  - Shop dropdown: IMGUI's hand-rolled box+buttons (:1119-1170) → kit CreateUguiDropdown,
     //    wired like Birds' Capture Mode (out-bool listenerWired + per-frame poll fallback).
     //    Option strings are drawn RAW in the source (:1127/:1155 — plain labels, no L), so they
@@ -115,6 +117,8 @@ namespace HeartopiaMod
         {
             public GameObject Root;
             public float ForceWidth;              // panel inner width (panelW - 28, source forceWidth)
+            public GameObject Card;               // section card — HEIGHT owned by the relayout
+            public Transform ScrollContent;       // scroll extent follows the card height
 
             public Dropdown ShopDropdown;
             public bool ShopDropdownListenerWired;
@@ -174,11 +178,12 @@ namespace HeartopiaMod
         // Builder
         // ----------------------------------------------------------------------------------------
 
-        // UGUI mirror of the automationSubTab == 3 branch: one fixed 762px section card holding a
-        // dropdown, 6 input fields, 5 buttons and 4 status labels. All controls — including the
+        // UGUI mirror of the automationSubTab == 3 branch: one section card holding a dropdown,
+        // 6 input fields, 5 buttons and 4 status labels. All controls — including the
         // conditionally-visible reason label — are built ONCE here in IMGUI source order;
         // RelayoutUguiShellFeaturesAutoBuy owns the positions from the BUY ALL row down (the
-        // y-cursor accumulation analog). Handle assigned LAST (Research idiom).
+        // y-cursor accumulation analog) PLUS the card height and scroll extent (computed —
+        // the reason row moves the card bottom). Handle assigned LAST (Research idiom).
         private GameObject BuildUguiShellFeaturesAutoBuyContent(Transform parent, float x, float y, float w, float h)
         {
             this.uguiShellFeaturesAutoBuy = null;
@@ -221,9 +226,13 @@ namespace HeartopiaMod
             Color mutedColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
 
             // -------- Section card (:1108-1111 — DrawExentriSectionPanel + L("Auto Buy") header;
-            // FIXED 762, dropdown-open growth dropped — file header) --------
+            // dropdown-open growth dropped — file header). NOT placed here: the reason row is
+            // conditional, so RelayoutUguiShellFeaturesAutoBuy owns the card's rect (computed
+            // from its own y-cursor + 16 bottom pad — the Radar VisualCard shape). The source's
+            // fixed 762 (~198px of empty card below the content) went with the IMGUI twin. ----
             GameObject card = this.CreateUguiSettingsMainPanel(scrollContent, "AutoBuyPanel", this.L("Auto Buy"));
-            PlaceUguiTopLeft(card, 8f, 8f, panelW, 762f);
+            handle.Card = card;
+            handle.ScrollContent = scrollContent;
 
             // -------- Select Shop Panel label + dropdown (:1116-1129, panel-local 48/74) --------
             GameObject selectLabel = this.CreateUguiLabel(card.transform, "SelectShopLabel",
@@ -331,13 +340,9 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(handle.ForceOpenStatusLabel);
 
             handle.LayoutSignature = this.ComputeUguiFeaturesAutoBuyLayoutSignature();
+            // Places the card (height computed from the conditional chain) AND sets the scroll
+            // extent — both live in the relayout since the reason row moves the card bottom.
             this.RelayoutUguiShellFeaturesAutoBuy(handle);
-
-            // Card top 8 + fixed 762 + 16 comfort margin (round-1 convention). The card is the
-            // honest extent: the source RETURNS its bare inner cursor (:1278, 556/576), which
-            // stops ~186px above the card bottom it drew — sizing to the card keeps the whole
-            // ring scrollable. Never conditional (the reason row moves content INSIDE the card).
-            this.SetUguiScrollContentHeight(scrollContent, 8f + 762f + 16f);
 
             handle.Root = block;
             this.uguiShellFeaturesAutoBuy = handle;
@@ -348,8 +353,11 @@ namespace HeartopiaMod
         // analog of the IMGUI branch's num accumulation (Gui.cs:1210-1276): buy-all cursor 222 →
         // [reason at 222 rect h=32, +20 shown / +0 hidden — the source's overlap quirk, file
         // header] → status +22 → caption +22 → fields +34 → button +36 → status +40 → id caption
-        // +24 → id row +38 → name caption +24 → name row +42 → final status. Everything above
-        // BUY ALL is fixed at build time. Reposition/SetActive only; nothing is rebuilt.
+        // +24 → id row +38 → name caption +24 → name row +42 → final status (h=40 → bottom 564
+        // shown / 544 hidden). Everything above BUY ALL is fixed at build time. The relayout
+        // then OWNS the card height (final-status bottom + 16 pad = 580/560 — replaces the
+        // source's fixed 762 and its ~198px slack) and the scroll extent (8 + card + 16).
+        // Reposition/SetActive only; nothing is rebuilt.
         private void RelayoutUguiShellFeaturesAutoBuy(UguiShellFeaturesAutoBuyHandle handle)
         {
             bool supported = this.IsForceShopBuyAllSupported(this.forceOpenShopSelectedIndex,
@@ -439,6 +447,15 @@ namespace HeartopiaMod
             {
                 PlaceUguiTopLeft(handle.ForceOpenStatusLabel, 14f, yCur, forceWidth, 40f);
             }
+
+            // Card height = the chain's real extent (final status bottom) + 16 bottom pad; the
+            // scroll extent tracks it (top 8 + card + 16 comfort margin, round-1 convention).
+            float cardH = yCur + 40f + 16f;
+            if (handle.Card != null)
+            {
+                PlaceUguiTopLeft(handle.Card, 8f, 8f, forceWidth + 28f, cardH);
+            }
+            this.SetUguiScrollContentHeight(handle.ScrollContent, 8f + cardH + 16f);
         }
 
         // ----------------------------------------------------------------------------------------

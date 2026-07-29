@@ -86,19 +86,24 @@ namespace HeartopiaMod
     //    (source: fixed 230px cols inside a fixed 520px card), and the slider's 0.55/0.45 label
     //    split is kept as a ratio.
     //
-    // Layout replays the source y-cursor chain verbatim (content top margin 8 standing in for
-    // startY, the Foraging convention):
+    // Layout replays the source y-cursor chain (content top margin 8 standing in for startY,
+    // the Foraging convention), with the two documented height deviations noted below:
     //   auto card      y=8    h=176  (capture 38, status 43, hint 74, checkbox 98, start/stop 126)
     //   y += 188   →   radius card  y=196 h=88  (labels 34, slider 54)
     //   y += 100   →   crops card   y=296 h=160 (storage lbl 36, picker 58, refresh 90, sel 122)
     //   y += 172   →   fert card    y=468 h=160 (same rows; refresh 140w, count lbl at 166)
-    //   y += 172   →   ops card     y=640 h=272 (rows 40/78/116/154 two-col + 192 full-width)
-    //   y += 284   →   event diag   y=924 (h28); y += 34 → event-driven y=958 (h28)
-    //   y += 38    →   status card  y=996 h=52  (label 16,10, wrapped 11pt @ .82)
-    //   y += 62    →   stop button  y=1058 (160x30); + 40 → content height 1098.
+    //   y += 172   →   ops card     y=640 h=236 (rows 40/78/116/154 two-col + 192 full-width)
+    //   y += 248   →   event diag   y=888 (h28); y += 34 → event-driven y=922 (h28)
+    //   y += 38    →   status card  y=960 h=52  (label 16,10, wrapped 11pt @ .82)
+    //   y += 62    →   stop button  y=1022 (160x30); + 40 → content height 1062.
     // NOTE (2026-07-22): the radius card is 88, not the source's 70 — its slider runs y=54..74 and
     // was overflowing the card. Everything from the crops card down is therefore +18 off the IMGUI
     // y-cursor; the 12px inter-card gap is unchanged. Don't "restore" these to source parity.
+    // NOTE (2026-07-29): the ops card is 236, not the source's 272 — the source height carried
+    // ~50px of empty card under the diagnostics row (which ends at 222; +14 pad = 236, the same
+    // breathing room the radius/crops/fert cards carry). Everything from the event-diag toggle
+    // down is therefore -36 vs the 07-22 chain (net -18 vs the raw IMGUI cursor); the 12px gap
+    // after the ops card and every later step are unchanged. Don't "restore" this either.
     //
     // Per-gated-frame cadence (shell visible + New Features tab + Homeland Farm sub, matching
     // the source running these on every IMGUI repaint of the tab):
@@ -614,14 +619,17 @@ namespace HeartopiaMod
                 () => this.homelandFarmSelectedFertilizerIndex,
                 v => this.homelandFarmSelectedFertilizerIndex = v);
 
-            // -------- 5. OPERATIONS card (y=622, h=272 — :22414-22478) --------
+            // -------- 5. OPERATIONS card (source y=622 h=272 — :22414-22478) --------
             // Column/order mapping verified against source: rows alternate col1/col2 —
             // (Water In Radius | Harvest All), (Weed All | Collect Plant Seeds),
             // (Collect Dormant | Sow), (Collect Flowers | Fertilize), then the full-width
             // diagnostics row. Two equal columns split the inner width (file header deviation).
+            // 2026-07-29: h was the source's 272 — ~50px of empty card under the diagnostics
+            // row. Now the real extent: last row ends 192+30 = 222, +14 bottom pad (the same
+            // breathing room the radius/crops/fert cards carry) = 236. Everything below is -36.
             GameObject opsCard = this.CreateUguiSettingsMainPanel(scrollContent, "OpsPanel",
                 this.L("homeland_farm.operations_section"));
-            PlaceUguiTopLeft(opsCard, 8f, 640f, panelW, 272f);
+            PlaceUguiTopLeft(opsCard, 8f, 640f, panelW, 236f);
 
             float colW = (rowW - 12f) / 2f;
             float col1 = 16f;
@@ -660,24 +668,24 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.OpsButtons[8], 16f, 192f, rowW, 30f);
             this.TrySetUguiButtonLabelSize(handle.OpsButtons[8], 12f);
 
-            // -------- 6+7. The two trailing toggles (y=906 / y=940 — :22480-22499) --------
+            // -------- 6+7. The two trailing toggles (source y=906 / y=940 — :22480-22499) ------
             // Event Diagnostics' handler keeps the source change guard; Event-driven is a bare
             // flag assignment.
             handle.EventDiagToggle = this.CreateUguiCheckbox(scrollContent, "EventDiagToggle",
                 this.L("Event Diagnostics (log)"), this.homelandFarmEventDiagEnabled,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDiagToggled));
-            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 924f, panelW, 28f);
+            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 888f, panelW, 28f);
 
             handle.EventDrivenToggle = this.CreateUguiCheckbox(scrollContent, "EventDrivenToggle",
                 this.L("Event-driven auto-farm (no rescan)"), this.homelandFarmAutoEventDriven,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDrivenToggled));
-            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 958f, panelW, 28f);
+            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 922f, panelW, 28f);
 
-            // -------- 8. Status card (y=978, h=52 — :22501-22508) --------
+            // -------- 8. Status card (source y=978, h=52 — :22501-22508) --------
             // Headerless panel (the source box carries no label — Animal Care's "" precedent).
             GameObject statusCard = this.CreateUguiSettingsMainPanel(scrollContent, "StatusPanel",
                 string.Empty);
-            PlaceUguiTopLeft(statusCard, 8f, 996f, panelW, 52f);
+            PlaceUguiTopLeft(statusCard, 8f, 960f, panelW, 52f);
 
             // statusStyle: 11pt, wordWrap, uiText @ 0.82 (:22227-22228). Text painted by the
             // sync pass (key-then-localize — file header).
@@ -688,14 +696,14 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(handle.StatusLabel);
             PlaceUguiTopLeft(handle.StatusLabel, 16f, 10f, rowW, 36f);
 
-            // -------- 9. Stop button (y=1040 — :22510-22515) --------
+            // -------- 9. Stop button (source y=1040 — :22510-22515) --------
             handle.StopButton = this.CreateUguiPrimaryButton(scrollContent, "StopButton",
                 this.L("homeland_farm.stop"),
                 new System.Action(this.OnUguiHomelandFarmStopClicked));
-            PlaceUguiTopLeft(handle.StopButton, 8f, 1058f, 160f, 30f);
+            PlaceUguiTopLeft(handle.StopButton, 8f, 1022f, 160f, 30f);
 
-            // Full cursor replay: the source returns y + 40 → 1080 (file header chain).
-            this.SetUguiScrollContentHeight(scrollContent, 1098f);
+            // Cursor chain end (file header): stop button 1022 + the source's trailing 40 = 1062.
+            this.SetUguiScrollContentHeight(scrollContent, 1062f);
 
             // Seed every dynamic state once (texts, interactables, segment styles, selector
             // rows, Start/Stop swap) via the same pass the processor runs. The warmup kick,

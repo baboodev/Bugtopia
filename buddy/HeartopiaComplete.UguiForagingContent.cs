@@ -440,7 +440,9 @@ namespace HeartopiaMod
 
             handle.TeleportDelayShown = this.LF("Teleport Delay: {0}s", (int)this.foragingTeleportDelaySeconds);
             handle.TeleportDelayLabel = this.CreateUguiBodyLabel(settings.transform, "TeleportDelayLabel", handle.TeleportDelayShown, 13f);
-            PlaceUguiTopLeft(handle.TeleportDelayLabel, 14f, 144f, 180f, 20f);
+            // 2026-07-29: was 180 wide — its right edge (194) crossed 2px into the slider (192).
+            // 170 matches the Collect Wait row's label exactly: ends 184, 8px clear of the slider.
+            PlaceUguiTopLeft(handle.TeleportDelayLabel, 14f, 144f, 170f, 20f);
             handle.TeleportDelaySlider = this.CreateUguiSlider(settings.transform, "TeleportDelaySlider",
                 0f, 10f, this.foragingTeleportDelaySeconds, true,
                 new System.Action<float>(this.OnUguiForagingTeleportDelayChanged));
@@ -485,7 +487,11 @@ namespace HeartopiaMod
                 handle.TimerStatusShown, 11f,
                 new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f), false);
 
-            // ---------------- LOOT PRIORITIES panel (fixed 318px — IMGUI priorityPanel) --------
+            // ---------------- LOOT PRIORITIES panel (fixed 242px) --------
+            // 2026-07-29: was the IMGUI priorityPanel's 318 with the footer parked at y=284 —
+            // ~90px of dead band between the last toggle row (194) and the footer. Height is now
+            // the real extent: header row 42 + up to 5 toggle rows (68 + 4*26 + 22 = 194) + 12 →
+            // footer at 206, +20 label +16 bottom pad (the SETTINGS panel's own pad) = 242.
             GameObject loot = this.CreateUguiSettingsMainPanel(scrollContent, "LootPanel", this.L("LOOT PRIORITIES"));
             handle.LootPanel = loot;
 
@@ -518,7 +524,7 @@ namespace HeartopiaMod
             handle.PriorityLocationShown = this.BuildUguiForagingPriorityLocationText();
             handle.PriorityLocationLabel = this.CreateUguiBodyLabel(loot.transform, "PriorityLocation",
                 handle.PriorityLocationShown, 13f);
-            PlaceUguiTopLeft(handle.PriorityLocationLabel, 18f, 284f, panelW - 36f, 20f);
+            PlaceUguiTopLeft(handle.PriorityLocationLabel, 18f, 206f, panelW - 36f, 20f);
 
             handle.LayoutSignature = this.ComputeUguiForagingLayoutSignature();
             this.RelayoutUguiShellForaging(handle);
@@ -599,10 +605,11 @@ namespace HeartopiaMod
             float lootY = settingsY + settingsH + 14f;
             if (handle.LootPanel != null)
             {
-                PlaceUguiTopLeft(handle.LootPanel, 8f, lootY, panelW, 318f);
+                // 242 = footer 206 + 20 + 16 bottom pad (see the builder's panel comment).
+                PlaceUguiTopLeft(handle.LootPanel, 8f, lootY, panelW, 242f);
             }
 
-            this.SetUguiScrollContentHeight(handle.ScrollContent, lootY + 318f + 16f);
+            this.SetUguiScrollContentHeight(handle.ScrollContent, lootY + 242f + 16f);
         }
 
         // ----------------------------------------------------------------------------------------

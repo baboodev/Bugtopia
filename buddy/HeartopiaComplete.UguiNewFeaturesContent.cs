@@ -53,15 +53,18 @@ namespace HeartopiaMod
     // headers "WILD ANIMAL TROUGHS" / "WILD ANIMAL GIFTS" and the toggle/button labels all
     // go through L().
     //
-    // Positions replay the source's cursor math verbatim (content top margin 8 standing in for
-    // startY, the Foraging convention):
-    //   troughs card   y=8    h=198  (toggles at +40/+82/+124, rows 300/300/280 x 28)
-    //   num += 210  →  action card y=218 h=74 (button at +16,+22, 200x32)
-    //   num += 84   →  feed status y=302 (520x36 in source → panelW x 36)
-    //   num += 44   →  gifts card  y=346 h=74 (header +12, button at +16,+34, 220x32)
-    //   num += 84   →  gift status y=430
-    //   num += 44   →  474; DrawAnimalCareTab returns +40 → content height 514.
-    // 514 < the ~520px visible cell, so the scroll view (kept for consistency with every other
+    // Positions replay the source's cursor math (content top margin 8 standing in for startY,
+    // the Foraging convention), EXCEPT the troughs card height — the source's 198 left ~46px of
+    // empty card under the last checkbox, trimmed 2026-07-29 to the real extent (last checkbox
+    // ends 124+28 = 152, +16 bottom pad = 168), so everything below sits 30 higher than the
+    // source cursor:
+    //   troughs card   y=8    h=168  (toggles at +40/+82/+124, rows 300/300/280 x 28)
+    //   +180 (168+12) → action card y=188 h=74 (button at +16,+22, 200x32)
+    //   += 84  →  feed status y=272 (520x36 in source → panelW x 36)
+    //   += 44  →  gifts card  y=316 h=74 (header +12, button at +16,+34, 220x32)
+    //   += 84  →  gift status y=400
+    //   += 44  →  444; + the source's trailing 40 → content height 484.
+    // 484 < the ~520px visible cell, so the scroll view (kept for consistency with every other
     // tab's content file) effectively never scrolls at the default shell size.
     //
     // Cross-surface sync cadence (Insects/Birds shape — no 0.5s tier, nothing here allocates):
@@ -191,10 +194,12 @@ namespace HeartopiaMod
             // (feed :3853-3854, gift :798-799 — identical construction in both drawers).
             Color statusColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.82f);
 
-            // -------- WILD ANIMAL TROUGHS card (fixed 198px, feed :3814-3838) --------
-            // The kit panel chrome carries the header.
+            // -------- WILD ANIMAL TROUGHS card (feed :3814-3838) --------
+            // The kit panel chrome carries the header. 2026-07-29: was the source's fixed 198 —
+            // ~46px of empty card under the last checkbox. Now the real extent: last checkbox
+            // ends at 124+28 = 152, +16 bottom pad = 168. Everything below rose by the same 30.
             GameObject troughs = this.CreateUguiSettingsMainPanel(scrollContent, "TroughsPanel", this.L("WILD ANIMAL TROUGHS"));
-            PlaceUguiTopLeft(troughs, 8f, 8f, panelW, 198f);
+            PlaceUguiTopLeft(troughs, 8f, 8f, panelW, 168f);
 
             // Rows replay the source rowY chain: +40, then += 42 twice; widths 300/300/280.
             handle.PreferFavoritesToggle = this.CreateUguiCheckbox(troughs.transform, "PreferFavorites",
@@ -212,9 +217,10 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiAnimalCareSkipEggToggled));
             PlaceUguiTopLeft(handle.SkipEggToggle.gameObject, 16f, 124f, 280f, 28f);
 
-            // -------- Unlabeled feed action card (num += 210 → y=218, h=74, :3841-3851) --------
+            // -------- Unlabeled feed action card (h=74, :3841-3851; source cursor y=218, now
+            // 188 = troughs bottom 176 + the chain's 12px gap after the troughs trim) --------
             GameObject feedAction = this.CreateUguiSettingsMainPanel(scrollContent, "FeedActionPanel", string.Empty);
-            PlaceUguiTopLeft(feedAction, 8f, 218f, panelW, 74f);
+            PlaceUguiTopLeft(feedAction, 8f, 188f, panelW, 74f);
 
             handle.FeedButton = this.CreateUguiPrimaryButton(feedAction.transform, "FeedAllButton",
                 this.L("Feed All Troughs"), new System.Action(this.OnUguiAnimalCareFeedAllClicked));
@@ -227,11 +233,12 @@ namespace HeartopiaMod
             handle.FeedStatusLabel = this.CreateUguiLabel(scrollContent, "FeedStatus",
                 handle.FeedStatusShown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.FeedStatusLabel);
-            PlaceUguiTopLeft(handle.FeedStatusLabel, 8f, 302f, panelW, 36f);
+            PlaceUguiTopLeft(handle.FeedStatusLabel, 8f, 272f, panelW, 36f);
 
-            // -------- WILD ANIMAL GIFTS card (feed returns 346; h=74, gift :784-796) --------
+            // -------- WILD ANIMAL GIFTS card (feed's source cursor returned 346, now 316 after
+            // the troughs trim; h=74, gift :784-796) --------
             GameObject gifts = this.CreateUguiSettingsMainPanel(scrollContent, "GiftsPanel", this.L("WILD ANIMAL GIFTS"));
-            PlaceUguiTopLeft(gifts, 8f, 346f, panelW, 74f);
+            PlaceUguiTopLeft(gifts, 8f, 316f, panelW, 74f);
 
             handle.GiftButton = this.CreateUguiPrimaryButton(gifts.transform, "ClaimGiftsButton",
                 this.L("Claim All Wild Gifts"), new System.Action(this.OnUguiAnimalCareClaimGiftsClicked));
@@ -243,10 +250,12 @@ namespace HeartopiaMod
             handle.GiftStatusLabel = this.CreateUguiLabel(scrollContent, "GiftStatus",
                 handle.GiftStatusShown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.GiftStatusLabel);
-            PlaceUguiTopLeft(handle.GiftStatusLabel, 8f, 430f, panelW, 36f);
+            PlaceUguiTopLeft(handle.GiftStatusLabel, 8f, 400f, panelW, 36f);
 
-            // Full cursor replay: 8 + 466 (gift section end) + 40 (DrawAnimalCareTab's own pad).
-            this.SetUguiScrollContentHeight(scrollContent, 514f);
+            // Extent after the troughs trim: 436 (gift status end, content-space) + 48 (the
+            // source DrawAnimalCareTab's own trailing pad, kept as scroll breathing room) = 484
+            // — the same +48 tail the pre-trim 514 carried past its 466 end.
+            this.SetUguiScrollContentHeight(scrollContent, 484f);
 
             handle.Root = block;
             this.uguiShellNewFeaturesAnimalCare = handle;
