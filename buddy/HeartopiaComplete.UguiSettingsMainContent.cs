@@ -231,13 +231,20 @@ namespace HeartopiaMod
             if (UnityLogMirrorSetting.IsAvailable)
             {
                 const float mirrorTogH = 24f;
-                const float mirrorNoteH = 78f;   // ~5 wrapped lines at 12pt in this column
                 const float mirrorGap = 6f;
+                float noteW = w - pad * 2f;
 
-                GameObject mirrorNote = this.CreateUguiMutedLabel(block.transform, "MirrorNote",
-                    this.L("Off: BepInEx stops installing its Unity log listener, removing 2 of the 5 IL2CPP code patches it writes into the game. Unity's messages are no longer mirrored here — they still go to the game's own Player.log (without timestamps). The mod's log is unaffected. Takes effect after a restart."),
-                    12f);
+                string mirrorNoteText = this.L("Off: BepInEx stops installing its Unity log listener, removing 2 of the 5 IL2CPP code patches it writes into the game. Unity's messages are no longer mirrored here — they still go to the game's own Player.log (without timestamps). The mod's log is unaffected. Takes effect after a restart.");
+                GameObject mirrorNote = this.CreateUguiMutedLabel(block.transform, "MirrorNote", mirrorNoteText, 12f);
                 this.TrySetUguiLabelWrapped(mirrorNote);
+
+                // Measured, not guessed: this paragraph is ~330 characters and wraps to a different
+                // number of lines in each of the five languages, so a constant here would clip the
+                // text in some of them. MeasureUguiPicturesWrappedHeight is the kit's proven
+                // GetPreferredValues path and is fail-closed — if the label has never Awoken (the
+                // tab can be built while not visible) it reports ok=false and we keep the fallback,
+                // which is the old five-line estimate.
+                float mirrorNoteH = this.MeasureUguiPicturesWrappedHeight(mirrorNote, mirrorNoteText, noteW, 78f, out _);
 
                 Toggle mirrorTog = this.CreateUguiCheckbox(block.transform, "UnityLogMirror",
                     this.L("Mirror Unity logs into the BepInEx log"),
@@ -249,9 +256,9 @@ namespace HeartopiaMod
                             ? this.L("Saved to BepInEx.cfg — restart the game to apply.")
                             : this.L("Could not write BepInEx.cfg: ") + UnityLogMirrorSetting.Status);
                     });
-                PlaceUguiTopLeft(mirrorTog.gameObject, pad, rowY, w - pad * 2f, mirrorTogH);
+                PlaceUguiTopLeft(mirrorTog.gameObject, pad, rowY, noteW, mirrorTogH);
                 rowY += mirrorTogH + 2f;
-                PlaceUguiTopLeft(mirrorNote, pad, rowY, w - pad * 2f, mirrorNoteH);
+                PlaceUguiTopLeft(mirrorNote, pad, rowY, noteW, mirrorNoteH);
                 rowY += mirrorNoteH + mirrorGap;
             }
 
