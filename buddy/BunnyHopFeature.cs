@@ -14,6 +14,13 @@ namespace HeartopiaMod
         private float bunnyHopLastPlayerY = float.NaN;
         private float bunnyHopLastJumpAt;
 
+        // When the CURRENT Space hold began (NaN while released). The stall pulse below is not
+        // allowed to fire until this much of the hold has elapsed, which is what keeps a short tap
+        // from producing a second hop — see the comment on the pulse itself.
+        private float bunnyHopHoldStartedAt = float.NaN;
+
+        private const float BunnyHopFirstPulseDelaySeconds = 0.4f;
+
         private IntPtr bunnyHopMonoSetJumpInputMethod;
         private IntPtr bunnyHopMonoOnJumpButtonMethod;
         private bool bunnyHopMonoJumpMethodsResolved;
@@ -77,7 +84,13 @@ namespace HeartopiaMod
                 this.bunnyHopWasAirborne = false;
                 this.bunnyHopFallSeen = false;
                 this.bunnyHopLastPlayerY = float.NaN;
+                this.bunnyHopHoldStartedAt = float.NaN;
                 return;
+            }
+
+            if (float.IsNaN(this.bunnyHopHoldStartedAt))
+            {
+                this.bunnyHopHoldStartedAt = Time.unscaledTime;
             }
 
             bool landing;
@@ -106,9 +119,23 @@ namespace HeartopiaMod
                 // manual Space re-press does: an unconditional fresh input edge on a hoppable surface.
                 // Free fall stays pulse-free: a mid-air SetJumpInput(false) would zero _jumpStartTime
                 // and cut hold-jump gravity.
+                //
+                // ⚠️ THE PULSE MUST NOT FIRE ON THE FIRST INSTANT OF A HOLD. Its condition is "on a
+                // hoppable surface and we have not jumped recently", which is trivially true the
+                // moment Space goes down while standing — so it fired a mod jump in the very same
+                // frame the game was already jumping from the keypress, and a short tap came out as
+                // two hops. That was invisible until the pump moved: the injected MonoBehaviour ran
+                // interleaved with the game's own components, where the extra input coalesced into
+                // the jump already in flight, while the PlayerLoop node runs AFTER all of them, so
+                // the second input lands in the next slot and becomes a real second hop. Requiring
+                // the hold to be BunnyHopFirstPulseDelaySeconds old makes the mod's first pulse
+                // strictly later than the player's own jump, which is the whole point — the mod is
+                // meant to CONTINUE a chain, never to start one. The airborne->surface branch needs
+                // no such guard: it already requires a completed hop.
                 landing = onHoppableSurface
                     && (this.bunnyHopWasAirborne
-                        || Time.unscaledTime - this.bunnyHopLastJumpAt >= 0.6f);
+                        || (Time.unscaledTime - this.bunnyHopLastJumpAt >= 0.6f
+                            && Time.unscaledTime - this.bunnyHopHoldStartedAt >= BunnyHopFirstPulseDelaySeconds));
                 this.bunnyHopLastPlayerY = float.NaN;
             }
             else
@@ -232,6 +259,7 @@ namespace HeartopiaMod
             this.bunnyHopWasAirborne = false;
             this.bunnyHopFallSeen = false;
             this.bunnyHopLastPlayerY = float.NaN;
+            this.bunnyHopHoldStartedAt = float.NaN;
             this.bunnyHopMonoJumpMethodsResolved = false;
             this.bunnyHopMonoIsGroundedMethod = IntPtr.Zero;
             this.bunnyHopMonoIsSlidingMethod = IntPtr.Zero;
