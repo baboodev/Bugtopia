@@ -50,12 +50,23 @@ namespace HeartopiaMod
         // Taken right after the UGUI shell is BUILT (its first open) because that is the mod's
         // BIGGEST batch of managed→il2cpp delegate conversions — `onClick.AddListener` →
         // `DelegateSupport` → `RegisterTypeInIl2Cpp<Il2CppToMonoDelegateReference>` →
-        // `InjectorHelpers.Setup()`. ⚠️ Not the only one: `HeartopiaComplete.Farm.cs` also adds
-        // click listeners from gameplay code, so a session that farms without ever opening the menu
-        // can cross the same threshold. Those transitions are still SEEN — just attributed to the
-        // next world-load sample rather than to the moment — so treat the `when` string as a hint,
-        // not proof of cause. Forced rather than change-gated: the point is to read the hook states
-        // on both sides of this particular moment.
+        // `InjectorHelpers.Setup()`.
+        //
+        // ⚠️ NOT the only site — the full census of managed→il2cpp delegate conversions in this mod:
+        //   * the UGUI kit (`TryWireUguiEvent`, `onClick`) — every control in the shell, this batch;
+        //   * `HeartopiaComplete.Farm.cs:176,256` — click listeners on the game's own collect
+        //     buttons, added from gameplay code;
+        //   * `HeartopiaComplete.GameIcons.cs:395-407` — an explicit `ConvertDelegate` (by
+        //     reflection, so it does not show up in an `AddListener` grep) for the async
+        //     sprite-load callback.
+        // The last two run without the menu ever being opened, so a session can cross the same
+        // threshold elsewhere. Such transitions are still SEEN, just attributed to the next
+        // world-load sample instead of to the moment — treat the `when` string as a hint, not proof
+        // of cause. Nothing in the ESP/radar overlay converts a delegate (retained-mode UGUI, no
+        // callbacks), which is why the overlays cost no hooks.
+        //
+        // Forced rather than change-gated: the point is to read the hook states on both sides of
+        // this particular moment.
         internal static void SampleAfterShellBuilt()
         {
             Sample("ugui-shell-built", true);
