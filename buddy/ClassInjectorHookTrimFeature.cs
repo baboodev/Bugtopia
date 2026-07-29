@@ -205,19 +205,30 @@ namespace HeartopiaMod
         [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true, ExactSpelling = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
 
-        // Exports the LOADERS are known to detour. These are invisible to the Il2CppInterop hook
-        // enumeration above — they belong to the loader's own fixes, not to ClassInjector — so
-        // without this the reported patch count is silently too low.
-        //
-        // Reading the prologue of an EXPORT is the cleanest possible measurement: the address comes
-        // from the export table (never patched) and the bytes come from `.text` (the thing that
-        // matters), so it needs no knowledge of who installed the detour or how.
-        //   * `il2cpp_resolve_icall` — MelonLoader's `Il2CppICallInjector` attaches a MonoMod
-        //     NativeHook here in `Core.Initialize()`, unconditionally, before any mod loads, and
-        //     only detaches at `Core.Quit()`. BepInEx has no equivalent.
+        // Exports a loader might detour. These are invisible to the Il2CppInterop hook enumeration
+        // above — they belong to the loader's own fixes, not to ClassInjector — so without this the
+        // reported patch count is silently too low.
+        //   * `il2cpp_resolve_icall` — MelonLoader's `Il2CppICallInjector` overwrites this one in
+        //     `Core.Initialize()`, unconditionally, before any mod loads, detaching only at
+        //     `Core.Quit()`. BepInEx has no equivalent.
         //   * `il2cpp_runtime_invoke` — BepInEx detours this during startup and DISPOSES it once the
-        //     first scene is active, so at steady state it should read clean. A patched reading here
-        //     means that disposal did not happen.
+        //     first scene is active, so at steady state it must read clean. A detour here would mean
+        //     that disposal did not happen.
+        //
+        // ⚠️⚠️ A JUMP IN A PROLOGUE IS NOT A DETOUR. The first version of this check classified any
+        // `E9`/`FF25` prologue as patched, and reported `il2cpp_resolve_icall` as hooked under BOTH
+        // loaders — a FALSE POSITIVE that briefly made it into project memory. **180 of this
+        // binary's 246 named exports ship starting with `E9`**: a one-line forwarder like
+        // `il2cpp_resolve_icall(name) { return vm::…::Resolve(name); }` compiles to a tail-call
+        // thunk, with the trailing `CC` being alignment padding. Verified by comparing the live
+        // bytes against GameAssembly.dll ON DISK — identical, and the jump lands at RVA 0x2789F0,
+        // inside `.text`, on a normal MSVC prologue.
+        //
+        // So the test is WHERE THE JUMP GOES, not what it looks like: a detour's trampoline is
+        // VirtualAlloc'd and therefore always OUTSIDE the module image, while a shipped thunk
+        // targets the module's own code. For `FF25` the same logic applies to the pointer SLOT —
+        // an import thunk's slot lives in the image, a detour's does not (ML's computed to
+        // 0x7FFA27780000, a fresh 64 KB-aligned arena).
         private static readonly string[] WatchedExports = { "il2cpp_resolve_icall", "il2cpp_runtime_invoke" };
 
         private static void VerifyExports()
@@ -231,6 +242,15 @@ namespace HeartopiaMod
                     return;
                 }
 
+                if (!TryGetImageSize(game, out long imageSize))
+                {
+                    ModLogger.Msg("[HookTrim] verify: GameAssembly.dll image size unreadable — export check skipped");
+                    return;
+                }
+
+                long lo = game.ToInt64();
+                long hi = lo + imageSize;
+
                 for (int i = 0; i < WatchedExports.Length; i++)
                 {
                     IntPtr fn = GetProcAddress(game, WatchedExports[i]);
@@ -240,18 +260,72 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    string prologue = PrologueHex(fn, 6);
-                    // Dobby/MonoMod write either a rip-relative jump (FF 25) or a rel32 jump (E9).
-                    bool patched = prologue.StartsWith("FF25", StringComparison.Ordinal)
-                                   || prologue.StartsWith("E9", StringComparison.Ordinal);
                     ModLogger.Msg("[HookTrim] verify: export " + WatchedExports[i] + " = "
-                                  + (patched ? "PATCHED" : "clean") + " @0x" + fn.ToString("X")
-                                  + " [" + prologue + "]");
+                                  + ClassifyExport(fn, lo, hi) + " @0x" + fn.ToString("X")
+                                  + " [" + PrologueHex(fn, 6) + "]");
                 }
             }
             catch (Exception ex)
             {
                 ModLogger.Msg("[HookTrim] verify: export check failed: " + ex.Message);
+            }
+        }
+
+        private static string ClassifyExport(IntPtr fn, long lo, long hi)
+        {
+            try
+            {
+                byte b0 = Marshal.ReadByte(fn, 0);
+
+                if (b0 == 0xE9)
+                {
+                    long target = fn.ToInt64() + 5 + Marshal.ReadInt32(fn, 1);
+                    bool inImage = target >= lo && target < hi;
+                    return (inImage ? "clean (shipped tail-call thunk -> 0x" : "DETOURED (-> 0x")
+                           + target.ToString("X") + ")";
+                }
+
+                if (b0 == 0xFF && Marshal.ReadByte(fn, 1) == 0x25)
+                {
+                    long slot = fn.ToInt64() + 6 + Marshal.ReadInt32(fn, 2);
+                    bool inImage = slot >= lo && slot < hi;
+                    return (inImage ? "clean (import thunk, slot 0x" : "DETOURED (slot 0x")
+                           + slot.ToString("X") + ")";
+                }
+
+                return "clean";
+            }
+            catch (Exception ex)
+            {
+                return "unreadable: " + ex.Message;
+            }
+        }
+
+        // SizeOfImage out of the module's own in-memory PE headers: e_lfanew at +0x3C, then the
+        // optional header starts 0x18 into the NT headers and carries SizeOfImage at +0x38.
+        private static bool TryGetImageSize(IntPtr moduleBase, out long size)
+        {
+            size = 0;
+            try
+            {
+                int lfanew = Marshal.ReadInt32(moduleBase, 0x3C);
+                if (lfanew <= 0 || lfanew > 0x1000)
+                {
+                    return false;
+                }
+
+                uint imageSize = (uint)Marshal.ReadInt32(moduleBase, lfanew + 0x18 + 0x38);
+                if (imageSize == 0)
+                {
+                    return false;
+                }
+
+                size = imageSize;
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
