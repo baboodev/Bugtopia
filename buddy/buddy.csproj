@@ -252,6 +252,7 @@
     <Compile Include="GlobalUsings.cs" />
     <Compile Include="InjectionGateCanary.cs" />
     <Compile Include="UnityLogMirrorSetting.cs" />
+    <Compile Include="HookFreeDelegate.cs" />
     <Compile Include="HookFreeDelegateProbe.cs" />
     <Compile Include="AnimalCareFeature.cs" />
     <Compile Include="CarpetStampFeature.cs" />

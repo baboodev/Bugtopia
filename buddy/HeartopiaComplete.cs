@@ -5703,6 +5703,11 @@ namespace HeartopiaMod
         // Token: 0x0400003B RID: 59
         private Button lastBlueberryButton = null;
         private System.Action blueberryCollectListener = null;
+
+        // The hook-free il2cpp delegate built from the listener above. Cached because
+        // this button is re-wired every scan and RemoveListener matches by delegate
+        // OBJECT — a freshly built one would never match, so listeners would pile up.
+        private UnityEngine.Events.UnityAction blueberryCollectAction = null;
         private const float ManualBerryListenerCheckInterval = 0.5f;
         private float nextManualBerryListenerCheckAt = -999f;
 
@@ -5727,6 +5732,11 @@ namespace HeartopiaMod
         // Token: 0x04000042 RID: 66
         private Button lastRaspberryButton = null;
         private System.Action raspberryCollectListener = null;
+
+        // The hook-free il2cpp delegate built from the listener above. Cached because
+        // this button is re-wired every scan and RemoveListener matches by delegate
+        // OBJECT — a freshly built one would never match, so listeners would pile up.
+        private UnityEngine.Events.UnityAction raspberryCollectAction = null;
 
         // Token: 0x04000043 RID: 67
         private bool autoFarmActive = false;

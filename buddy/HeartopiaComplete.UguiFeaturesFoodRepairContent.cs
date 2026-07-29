@@ -623,7 +623,7 @@ namespace HeartopiaMod
             // BoundSprite, so pool rebinds can never race a click (Research staticIdCopy idiom,
             // pooled variant).
             UguiFoodRepairFoodRowHandle captured = row;
-            btn.onClick.AddListener(new System.Action(
+            this.WireUguiClick(btn.onClick, new System.Action(
                 () => this.OnUguiFeaturesFoodRepairFoodRowClicked(captured)));
 
             // Selection box behind the content, ±2px oversized like the source's :920 rect

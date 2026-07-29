@@ -254,7 +254,7 @@ namespace HeartopiaMod
             btn.targetGraphic = seg.Bg;
             if (onClick != null)
             {
-                btn.onClick.AddListener(onClick);
+                this.WireUguiClick(btn.onClick, onClick);
             }
 
             GameObject lbl = this.CreateUguiLabel(go.transform, "Label", label, 12f,

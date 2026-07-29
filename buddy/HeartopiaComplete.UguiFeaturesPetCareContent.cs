@@ -449,7 +449,7 @@ namespace HeartopiaMod
             foodHeaderBg.raycastTarget = true;
             Button foodHeaderBtn = handle.FoodHeader.AddComponent<Button>();
             foodHeaderBtn.targetGraphic = foodHeaderBg;
-            foodHeaderBtn.onClick.AddListener(new System.Action(this.OnUguiFeaturesPetCareFoodHeaderClicked));
+            this.WireUguiClick(foodHeaderBtn.onClick, new System.Action(this.OnUguiFeaturesPetCareFoodHeaderClicked));
 
             handle.FoodHeaderIconGo = this.CreateUguiGo("Icon", handle.FoodHeader.transform);
             PlaceUguiTopLeft(handle.FoodHeaderIconGo, 7f, 4f, 20f, 20f); // :435
@@ -818,7 +818,7 @@ namespace HeartopiaMod
             Button btn = root.AddComponent<Button>();
             btn.targetGraphic = row.Fill;
             UguiPetCareFoodRowHandle captured = row;
-            btn.onClick.AddListener(new System.Action(
+            this.WireUguiClick(btn.onClick, new System.Action(
                 () => this.OnUguiFeaturesPetCareFoodRowClicked(captured)));
 
             GameObject iconGo = this.CreateUguiGo("Icon", root.transform);

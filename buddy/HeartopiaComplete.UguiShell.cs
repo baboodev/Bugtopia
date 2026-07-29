@@ -162,6 +162,7 @@ namespace HeartopiaMod
                     // that the PlayerLoop pump replaced the injected MonoBehaviour. Measure it here
                     // (InjectionGateCanary.cs) rather than reasoning about it — and note the shell is
                     // not the only such site, so see that file for what this reading does not prove.
+                    HookFreeDelegate.LogSummary("shell built");
                     InjectionGateCanary.SampleAfterShellBuilt();
                     return;
                 }
@@ -527,7 +528,7 @@ namespace HeartopiaMod
                 footerHit.raycastTarget = true;
                 Button footerBtn = footer.AddComponent<Button>();
                 footerBtn.targetGraphic = footerHit;
-                footerBtn.onClick.AddListener(new System.Action(this.OnUguiShellNewsClicked));
+                this.WireUguiClick(footerBtn.onClick, new System.Action(this.OnUguiShellNewsClicked));
 
                 // Icon + text laid out as one group: the icon sits at a fixed 16px left inset and
                 // the label takes the rest, so the pair reads as a single link.
@@ -580,7 +581,7 @@ namespace HeartopiaMod
                         }
                         GameObject rowLabel = this.CreateUguiLabel(row.transform, "Label", tabLabels[i], 13f, this.UguiKitMutedColor(), false);
                         StretchUguiFill(rowLabel, labelLeft, 2f, 4f, 2f);
-                        rowBtn.onClick.AddListener(new System.Action(() => this.SelectUguiShellTab(this.uguiShell, tabIndex)));
+                        this.WireUguiClick(rowBtn.onClick, new System.Action(() => this.SelectUguiShellTab(this.uguiShell, tabIndex)));
 
                         shell.NavRowBgs.Add(rowBg);
                         shell.NavRowLabels.Add(rowLabel);

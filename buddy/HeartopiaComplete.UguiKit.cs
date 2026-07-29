@@ -885,10 +885,55 @@ namespace HeartopiaMod
         // Event wiring (generic UnityEvent<T> — value-typed generics may lack AOT instances)
         // ----------------------------------------------------------------------------------------
 
+        // Every `onClick` in the mod goes through here rather than calling AddListener directly, so
+        // there is ONE place that decides whether a click costs class injection. Takes the event
+        // rather than the Button so the call sites are a pure prefix rewrite of what they used to be.
+        //
+        // ⚠️ Returns nothing and cannot be un-wired: the hook-free delegate is a fresh object each
+        // time, so `RemoveListener(managedHandler)` would not match it. Nothing in the UI removes
+        // click listeners (verified); the one place that does — HeartopiaComplete.Farm.cs, on the
+        // game's own buttons — caches its built action instead.
+        private void WireUguiClick(UnityEngine.Events.UnityEvent evt, System.Action handler)
+        {
+            if (evt == null || handler == null)
+            {
+                return;
+            }
+
+            try
+            {
+                UnityEngine.Events.UnityAction hookFree = HookFreeDelegate.ForVoid(handler);
+                if (hookFree != null)
+                {
+                    evt.AddListener(hookFree);
+                    return;
+                }
+
+                HookFreeDelegate.NoteFallback();
+                evt.AddListener(handler);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiKit] click wiring failed: " + ex.Message);
+            }
+        }
+
         private bool TryWireUguiEvent(UnityEngine.Events.UnityEvent<bool> evt, System.Action<bool> handler, string what)
         {
             try
             {
+                // Preferred: a delegate built without injecting a class, so this wire costs no
+                // inline detours in GameAssembly .text (HookFreeDelegate.cs). Null = unavailable,
+                // and the ordinary path below is the fail-closed fallback — it works, it just pays
+                // the injection cost.
+                UnityEngine.Events.UnityAction<bool> hookFree = HookFreeDelegate.ForBool(handler);
+                if (hookFree != null)
+                {
+                    evt.AddListener(hookFree);
+                    return true;
+                }
+
+                HookFreeDelegate.NoteFallback();
                 evt.AddListener(handler);
                 return true;
             }
@@ -903,6 +948,18 @@ namespace HeartopiaMod
         {
             try
             {
+                // Preferred: a delegate built without injecting a class, so this wire costs no
+                // inline detours in GameAssembly .text (HookFreeDelegate.cs). Null = unavailable,
+                // and the ordinary path below is the fail-closed fallback — it works, it just pays
+                // the injection cost.
+                UnityEngine.Events.UnityAction<float> hookFree = HookFreeDelegate.ForFloat(handler);
+                if (hookFree != null)
+                {
+                    evt.AddListener(hookFree);
+                    return true;
+                }
+
+                HookFreeDelegate.NoteFallback();
                 evt.AddListener(handler);
                 return true;
             }
@@ -917,6 +974,18 @@ namespace HeartopiaMod
         {
             try
             {
+                // Preferred: a delegate built without injecting a class, so this wire costs no
+                // inline detours in GameAssembly .text (HookFreeDelegate.cs). Null = unavailable,
+                // and the ordinary path below is the fail-closed fallback — it works, it just pays
+                // the injection cost.
+                UnityEngine.Events.UnityAction<int> hookFree = HookFreeDelegate.ForInt(handler);
+                if (hookFree != null)
+                {
+                    evt.AddListener(hookFree);
+                    return true;
+                }
+
+                HookFreeDelegate.NoteFallback();
                 evt.AddListener(handler);
                 return true;
             }
@@ -934,6 +1003,18 @@ namespace HeartopiaMod
         {
             try
             {
+                // Preferred: a delegate built without injecting a class, so this wire costs no
+                // inline detours in GameAssembly .text (HookFreeDelegate.cs). Null = unavailable,
+                // and the ordinary path below is the fail-closed fallback — it works, it just pays
+                // the injection cost.
+                UnityEngine.Events.UnityAction<string> hookFree = HookFreeDelegate.ForString(handler);
+                if (hookFree != null)
+                {
+                    evt.AddListener(hookFree);
+                    return true;
+                }
+
+                HookFreeDelegate.NoteFallback();
                 evt.AddListener(handler);
                 return true;
             }
@@ -1359,7 +1440,7 @@ namespace HeartopiaMod
             if (onClick != null)
             {
                 // Non-generic UnityEvent: System.Action converts implicitly (codebase-proven).
-                btn.onClick.AddListener(onClick);
+                this.WireUguiClick(btn.onClick, onClick);
             }
             return go;
         }
@@ -2367,7 +2448,7 @@ namespace HeartopiaMod
                 bar.ButtonLabels.Add(label);
                 bar.ButtonIcons.Add(icon);
                 bar.ButtonUnderlines.Add(underline);
-                btn.onClick.AddListener(new System.Action(() => this.SelectUguiTab(bar, tabIndex)));
+                this.WireUguiClick(btn.onClick, new System.Action(() => this.SelectUguiTab(bar, tabIndex)));
             }
 
             this.SelectUguiTab(bar, initialIndex);

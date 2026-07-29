@@ -693,7 +693,7 @@ namespace HeartopiaMod
             // Capture the row HANDLE (not an index/id copy): rebinds update row.TaskId, and the
             // handler reads it at click time — a recycled slot always reports its current quest.
             System.Action onClick = () => this.OnUguiQuestAssistantRowClicked(row);
-            btn.onClick.AddListener(onClick);
+            this.WireUguiClick(btn.onClick, onClick);
 
             // :267 — fontSize 11, MiddleLeft (kit labels are left-aligned by default).
             GameObject label = this.CreateUguiLabel(root.transform, "Label",

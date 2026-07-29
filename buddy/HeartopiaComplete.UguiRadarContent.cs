@@ -242,7 +242,7 @@ namespace HeartopiaMod
             btn.targetGraphic = seg.Bg;
             if (onClick != null)
             {
-                btn.onClick.AddListener(onClick);
+                this.WireUguiClick(btn.onClick, onClick);
             }
 
             GameObject lbl = this.CreateUguiLabel(go.transform, "Label", "", 12f,
@@ -358,7 +358,7 @@ namespace HeartopiaMod
                 Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f)), 1.5f);
             Button btn = box.AddComponent<Button>();
             btn.targetGraphic = boxBg;
-            btn.onClick.AddListener(new System.Action(() => this.OnUguiRadarGroupHeaderClicked(spec)));
+            this.WireUguiClick(btn.onClick, new System.Action(() => this.OnUguiRadarGroupHeaderClicked(spec)));
             group.HeaderBox = box;
 
             group.SummaryShown = (spec.Summary != null) ? spec.Summary() : string.Empty;

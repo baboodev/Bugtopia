@@ -171,9 +171,19 @@ namespace HeartopiaMod
                         if (this.blueberryCollectListener == null)
                         {
                             this.blueberryCollectListener = new System.Action(this.MarkNearestBlueberryCollected);
+                            this.blueberryCollectAction = HookFreeDelegate.ForVoid(this.blueberryCollectListener);
+                            if (this.blueberryCollectAction == null) { HookFreeDelegate.NoteFallback(); }
                         }
-                        component2.onClick.RemoveListener(this.blueberryCollectListener);
-                        component2.onClick.AddListener(this.blueberryCollectListener);
+                        if (this.blueberryCollectAction != null)
+                        {
+                            component2.onClick.RemoveListener(this.blueberryCollectAction);
+                            component2.onClick.AddListener(this.blueberryCollectAction);
+                        }
+                        else
+                        {
+                            component2.onClick.RemoveListener(this.blueberryCollectListener);
+                            component2.onClick.AddListener(this.blueberryCollectListener);
+                        }
                         this.lastBlueberryButton = component2;
                     }
                 }
@@ -251,9 +261,19 @@ namespace HeartopiaMod
                             if (this.raspberryCollectListener == null)
                             {
                                 this.raspberryCollectListener = new System.Action(this.MarkNearestRaspberryCollected);
+                            this.raspberryCollectAction = HookFreeDelegate.ForVoid(this.raspberryCollectListener);
+                            if (this.raspberryCollectAction == null) { HookFreeDelegate.NoteFallback(); }
                             }
-                            component2.onClick.RemoveListener(this.raspberryCollectListener);
-                            component2.onClick.AddListener(this.raspberryCollectListener);
+                            if (this.raspberryCollectAction != null)
+                            {
+                                component2.onClick.RemoveListener(this.raspberryCollectAction);
+                                component2.onClick.AddListener(this.raspberryCollectAction);
+                            }
+                            else
+                            {
+                                component2.onClick.RemoveListener(this.raspberryCollectListener);
+                                component2.onClick.AddListener(this.raspberryCollectListener);
+                            }
                             this.lastRaspberryButton = component2;
                         }
                     }

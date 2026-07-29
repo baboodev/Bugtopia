@@ -565,7 +565,7 @@ namespace HeartopiaMod
             // GUIStyle.none button has no hover/press visuals either).
             w.CellButton.transition = Selectable.Transition.None;
             int slotCopy = slotIndex; // capture a copy for the click closure
-            w.CellButton.onClick.AddListener(new System.Action(() => this.OnUguiFeaturesAutoSellCellClicked(slotCopy)));
+            this.WireUguiClick(w.CellButton.onClick, new System.Action(() => this.OnUguiFeaturesAutoSellCellClicked(slotCopy)));
 
             this.AddUguiRingOverlay(root, handle.RingNormal, 1.5f);
             Transform ringT = root.transform.Find("Ring");

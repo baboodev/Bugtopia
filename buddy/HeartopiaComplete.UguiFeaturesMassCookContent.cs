@@ -388,7 +388,7 @@ namespace HeartopiaMod
             recipeHeaderBg.raycastTarget = true;
             Button recipeHeaderBtn = handle.RecipeHeader.AddComponent<Button>();
             recipeHeaderBtn.targetGraphic = recipeHeaderBg;
-            recipeHeaderBtn.onClick.AddListener(new System.Action(this.OnUguiFeaturesMassCookRecipeHeaderClicked));
+            this.WireUguiClick(recipeHeaderBtn.onClick, new System.Action(this.OnUguiFeaturesMassCookRecipeHeaderClicked));
             handle.RecipeHeaderShown = this.GetNetCookSelectedRecipeLabel();
             handle.RecipeHeaderValue = this.CreateUguiLabel(handle.RecipeHeader.transform, "Value",
                 handle.RecipeHeaderShown, 12f, Color.white, false);
@@ -732,7 +732,7 @@ namespace HeartopiaMod
             // Closure over the ROW HANDLE, not an index or list entry — the visible list is a
             // reused per-call buffer (file header; Food & Repair pooled-row idiom).
             UguiMassCookRecipeRowHandle captured = row;
-            btn.onClick.AddListener(new System.Action(
+            this.WireUguiClick(btn.onClick, new System.Action(
                 () => this.OnUguiFeaturesMassCookRecipeRowClicked(captured)));
 
             row.Label = this.CreateUguiLabel(root.transform, "Name", "", 11f, this.UguiKitTextColor(), false);

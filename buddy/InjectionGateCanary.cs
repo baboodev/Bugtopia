@@ -52,18 +52,17 @@ namespace HeartopiaMod
         // `DelegateSupport` → `RegisterTypeInIl2Cpp<Il2CppToMonoDelegateReference>` →
         // `InjectorHelpers.Setup()`.
         //
-        // ⚠️ NOT the only site — the full census of managed→il2cpp delegate conversions in this mod:
-        //   * the UGUI kit (`TryWireUguiEvent`, `onClick`) — every control in the shell, this batch;
-        //   * `HeartopiaComplete.Farm.cs:176,256` — click listeners on the game's own collect
-        //     buttons, added from gameplay code;
-        //   * `HeartopiaComplete.GameIcons.cs:395-407` — an explicit `ConvertDelegate` (by
-        //     reflection, so it does not show up in an `AddListener` grep) for the async
-        //     sprite-load callback.
-        // The last two run without the menu ever being opened, so a session can cross the same
-        // threshold elsewhere. Such transitions are still SEEN, just attributed to the next
-        // world-load sample instead of to the moment — treat the `when` string as a hint, not proof
-        // of cause. Nothing in the ESP/radar overlay converts a delegate (retained-mode UGUI, no
-        // callbacks), which is why the overlays cost no hooks.
+        // ⚠️ Not the only site, and no longer the whole story. Every managed→il2cpp delegate in this
+        // mod now goes through `HookFreeDelegate.cs`, which builds the il2cpp delegate WITHOUT an
+        // injected class — the UGUI kit (`TryWireUguiEvent` + `WireUguiClick`), the click listeners
+        // `HeartopiaComplete.Farm.cs` puts on the game's own collect buttons, and the async
+        // sprite-load callback in `HeartopiaComplete.GameIcons.cs`. Each keeps its original
+        // `AddListener`/`ConvertDelegate` call as a fail-closed FALLBACK, so a reading of
+        // `injectedClasses > 0` here means some wire fell back — check `[HookFreeDelegate]`'s
+        // "fell back" count, which names it. The last two sites fire without the menu ever being
+        // opened, so they are why a session could cross the threshold with nothing on screen.
+        // Nothing in the ESP/radar overlay converts a delegate at all (retained-mode UGUI, no
+        // callbacks), which is why the overlays were always free.
         //
         // Forced rather than change-gated: the point is to read the hook states on both sides of
         // this particular moment.

@@ -393,18 +393,32 @@ namespace HeartopiaMod
                 try
                 {
                     Action<Sprite> managed = sprite => this.OnGameIconSpriteLoaded(pending, sprite);
-                    MethodInfo convert = null;
-                    foreach (MethodInfo candidate in typeof(DelegateSupport).GetMethods(BindingFlags.Public | BindingFlags.Static))
+
+                    // Preferred: build the il2cpp delegate ourselves, which injects no class and so
+                    // costs no `.text` patches (HookFreeDelegate.cs). This site matters more than it
+                    // looks — icons load from the radar and the bag panels, i.e. WITHOUT the menu
+                    // ever being opened, so leaving it on ConvertDelegate would trigger injection in
+                    // an ordinary session no matter what the UI does.
+                    callbackArg = HookFreeDelegate.ForSpriteAction(this.gameIconSpriteActionType, managed);
+
+                    if (callbackArg == null)
                     {
-                        if (string.Equals(candidate.Name, "ConvertDelegate", StringComparison.Ordinal)
-                            && candidate.IsGenericMethodDefinition
-                            && candidate.GetParameters().Length == 1)
+                        // Fail-closed: the original path. Works, but pays the injection cost.
+                        HookFreeDelegate.NoteFallback();
+                        MethodInfo convert = null;
+                        foreach (MethodInfo candidate in typeof(DelegateSupport).GetMethods(BindingFlags.Public | BindingFlags.Static))
                         {
-                            convert = candidate.MakeGenericMethod(this.gameIconSpriteActionType);
-                            break;
+                            if (string.Equals(candidate.Name, "ConvertDelegate", StringComparison.Ordinal)
+                                && candidate.IsGenericMethodDefinition
+                                && candidate.GetParameters().Length == 1)
+                            {
+                                convert = candidate.MakeGenericMethod(this.gameIconSpriteActionType);
+                                break;
+                            }
                         }
+                        callbackArg = convert?.Invoke(null, new object[] { managed });
                     }
-                    callbackArg = convert?.Invoke(null, new object[] { managed });
+
                     if (callbackArg != null)
                     {
                         pending.ManagedCallback = managed;

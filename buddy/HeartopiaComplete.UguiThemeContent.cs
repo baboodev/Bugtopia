@@ -284,7 +284,7 @@ namespace HeartopiaMod
                 this.AddUguiRingOverlay(row, UguiKitSecondaryRing, 1.5f);
                 Button rowBtn = row.AddComponent<Button>();
                 rowBtn.targetGraphic = rowBg;
-                rowBtn.onClick.AddListener(new System.Action(() => this.OnUguiThemeColorRowClicked(targetCopy)));
+                this.WireUguiClick(rowBtn.onClick, new System.Action(() => this.OnUguiThemeColorRowClicked(targetCopy)));
 
                 GameObject rowLabel = this.CreateUguiBodyLabel(row.transform, "Label", this.L(UguiThemeColorTargetNames[i]), 12f);
                 PlaceUguiTopLeft(rowLabel, 12f, 4f, 220f, 22f);
