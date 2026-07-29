@@ -218,6 +218,43 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(intro);
             PlaceUguiTopLeft(intro, pad, 42f, w - pad * 2f, 36f);
 
+            // BepInEx-only row, above the session toggles because it is a different KIND of setting:
+            // it belongs to the loader, persists to BepInEx.cfg, and only takes effect on the next
+            // launch. Gated on UnityLogMirrorSetting.IsAvailable, which is self-validating — it is
+            // true exactly when the config entry resolved, so under MelonLoader (including the
+            // Universal build launched there, where the check must be at RUNTIME, not #if) the row
+            // simply does not exist and the toggle list starts where it always did.
+            // Running cursor rather than absolute Y literals: the note is a long wrapped string that
+            // grows in other locales, so a hardcoded scroll top would silently be encoding
+            // "82 + toggle + note + gap" and break the moment any of those changed.
+            float rowY = 84f;
+            if (UnityLogMirrorSetting.IsAvailable)
+            {
+                const float mirrorTogH = 24f;
+                const float mirrorNoteH = 78f;   // ~5 wrapped lines at 12pt in this column
+                const float mirrorGap = 6f;
+
+                GameObject mirrorNote = this.CreateUguiMutedLabel(block.transform, "MirrorNote",
+                    this.L("Off: BepInEx stops installing its Unity log listener, removing 2 of the 5 IL2CPP code patches it writes into the game. Unity's messages are no longer mirrored here — they still go to the game's own Player.log (without timestamps). The mod's log is unaffected. Takes effect after a restart."),
+                    12f);
+                this.TrySetUguiLabelWrapped(mirrorNote);
+
+                Toggle mirrorTog = this.CreateUguiCheckbox(block.transform, "UnityLogMirror",
+                    this.L("Mirror Unity logs into the BepInEx log"),
+                    UnityLogMirrorSetting.Enabled,
+                    v =>
+                    {
+                        bool ok = UnityLogMirrorSetting.TrySet(v);
+                        this.SetUguiLabelText(mirrorNote, ok
+                            ? this.L("Saved to BepInEx.cfg — restart the game to apply.")
+                            : this.L("Could not write BepInEx.cfg: ") + UnityLogMirrorSetting.Status);
+                    });
+                PlaceUguiTopLeft(mirrorTog.gameObject, pad, rowY, w - pad * 2f, mirrorTogH);
+                rowY += mirrorTogH + 2f;
+                PlaceUguiTopLeft(mirrorNote, pad, rowY, w - pad * 2f, mirrorNoteH);
+                rowY += mirrorNoteH + mirrorGap;
+            }
+
             handle.Bindings = BuildUguiLoggingToggleBindings();
             if (handle.Bindings.Length != LoggingTabRowCount)
             {
@@ -228,11 +265,10 @@ namespace HeartopiaMod
             }
 
             const float rowStep = 28f;
-            const float scrollTop = 84f;
             Transform rowsContent;
             GameObject scroll = this.CreateUguiScrollView(block.transform, "Rows",
                 handle.Bindings.Length * rowStep + 16f, out rowsContent);
-            PlaceUguiTopLeft(scroll, 8f, scrollTop, w - 16f, h - scrollTop - 8f);
+            PlaceUguiTopLeft(scroll, 8f, rowY, w - 16f, h - rowY - 8f);
             // Flat look over the block's ContentBg (LIVE rail idiom) — alpha-0 images still raycast,
             // so wheel/drag scrolling keeps working.
             try

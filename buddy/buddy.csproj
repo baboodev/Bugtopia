@@ -250,6 +250,8 @@
 
   <ItemGroup>
     <Compile Include="GlobalUsings.cs" />
+    <Compile Include="InjectionGateCanary.cs" />
+    <Compile Include="UnityLogMirrorSetting.cs" />
     <Compile Include="AnimalCareFeature.cs" />
     <Compile Include="CarpetStampFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
@@ -396,6 +398,7 @@
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="MelonSceneHookCleanup.cs" />
     <Compile Include="ClassInjectorHookTrimFeature.cs" />
+    <Compile Include="PlayerLoopProbeFeature.cs" />
     <Compile Include="HeartopiaComplete.UguiOverlay.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />

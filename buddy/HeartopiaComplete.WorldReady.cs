@@ -372,6 +372,14 @@ namespace HeartopiaMod
 
             this.worldReadyBuiltInWarmupsRegistered = true;
             this.RegisterWorldReadyCallback("BuiltInWarmups", this.OnWorldReadyRearmWarmups);
+
+            // Diagnostic only: reports whether the two ClassInjector hooks that look like dead code
+            // really are (InjectionGateCanary.cs). Counts only ever grow, so one sample per world
+            // load covers a session. It reflects and allocates a little on each sample, which is
+            // fine HERE and only here — do not move this call onto a per-frame path.
+            this.RegisterWorldReadyCallback(InjectionGateCanary.WorldReadyCallbackName, InjectionGateCanary.SampleOnWorldReady);
+            // The hook-state report is emitted by the canary itself, alongside every reading it
+            // logs — no separate callback, so the two can never drift apart in the log.
         }
 
         // Re-arm every deferred warmup for the new world — STAGGERED, not all on one frame.

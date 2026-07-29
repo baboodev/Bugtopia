@@ -5966,6 +5966,9 @@ namespace HeartopiaMod
 
         public void OnDeinitializeMelon()
         {
+            // Final word on the injection gates before the process goes away (InjectionGateCanary.cs).
+            InjectionGateCanary.SampleOnShutdown();
+
             if (this.eventSystemBlockedByMenu)
             {
                 EventSystem restoreTarget = this.blockedEventSystem != null ? this.blockedEventSystem : EventSystem.current;

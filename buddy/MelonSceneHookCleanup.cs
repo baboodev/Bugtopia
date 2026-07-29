@@ -62,7 +62,17 @@ namespace HeartopiaMod
 
         // Kill switch for the SECOND, riskier removal (see TryDetachMelonRunFinalizerHook).
         // Flip to false to keep only the scene-hook cleanup, which is independent of this.
-        private const bool MelonDetachRunFinalizerHook = true;
+        //
+        // ⛔ OFF since 2026-07-29 — the predicted failure mode happened. Under MelonLoader the game
+        // died during world load, at random points (once mid scene-change before the world-ready
+        // gate, once at the tail of the deferred hook burst), with NO crash dump and no managed
+        // exception; entering the world later, when the load is quieter, survived. That signature —
+        // load-dependent, non-deterministic site, native, dumpless — is a fault inside il2cpp
+        // finalization, i.e. exactly the "finalizer-time crash on injected objects" this switch was
+        // created for. BepInEx is unaffected because none of this file runs there.
+        // The win it bought was cosmetic (6 -> 5 .text patches, parity with BepInEx); the scene-hook
+        // cleanup above keeps the bulk of that and has been stable across many sessions.
+        private const bool MelonDetachRunFinalizerHook = false;
 
         private static readonly string[] MelonSceneHookMethods = { "Internal_SceneLoaded", "Internal_SceneUnloaded" };
 
@@ -131,11 +141,18 @@ namespace HeartopiaMod
                               + " (GameAssembly .text scene hooks removed; SM_Component pump unaffected)");
 
                 // Second, independent removal: ML's Il2CppInterop build applies ONE ClassInjector VM
-                // hook that BepInEx's does not (GarbageCollector::RunFinalizer). Removing it brings
-                // the .text patch count down to BepInEx parity (5).
+                // hook that BepInEx's does not (GarbageCollector::RunFinalizer). Removing it brought
+                // the .text patch count down to BepInEx parity (5) — and randomly killed the game
+                // during world load, so it is off. Log the skip explicitly: "the line is absent" is a
+                // terrible way to identify which build is running.
                 if (MelonDetachRunFinalizerHook)
                 {
                     this.TryDetachMelonRunFinalizerHook(detach);
+                }
+                else
+                {
+                    melonRunFinalizerStatus = "kept (kill switch off — caused world-load crashes)";
+                    ModLogger.Msg("[MelonSceneHook] RunFinalizer: " + melonRunFinalizerStatus);
                 }
             }
             catch (Exception ex)
@@ -623,26 +640,8 @@ namespace HeartopiaMod
             }
         }
 
-        private static string ReadPrologueHex(IntPtr addr, int count)
-        {
-            try
-            {
-                char[] hex = new char[count * 2];
-                for (int i = 0; i < count; i++)
-                {
-                    byte b = Marshal.ReadByte(addr, i);
-                    hex[i * 2] = GetHexNibble(b >> 4);
-                    hex[i * 2 + 1] = GetHexNibble(b & 0xF);
-                }
-
-                return new string(hex);
-            }
-            catch
-            {
-                return "<unreadable>";
-            }
-        }
-
-        private static char GetHexNibble(int v) => (char)(v < 10 ? ('0' + v) : ('A' + (v - 10)));
+        // Byte formatting lives in ClassInjectorHookTrim — both subsystems read prologues to prove a
+        // detour is present or gone, and two copies drifted apart on their unreadable-sentinel.
+        private static string ReadPrologueHex(IntPtr addr, int count) => ClassInjectorHookTrim.PrologueHex(addr, count);
     }
 }

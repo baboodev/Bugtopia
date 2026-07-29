@@ -156,6 +156,13 @@ namespace HeartopiaMod
                         () => this.uguiShell != null && this.IsUguiWindowVisible(this.uguiShell.Window),
                         null);
                     ModLogger.Msg("[UguiShell] shell built and shown (menu hotkey toggles)");
+
+                    // The shell's buttons/toggles are the mod's biggest batch of managed→il2cpp
+                    // delegate conversions, and those are what can still trigger class injection now
+                    // that the PlayerLoop pump replaced the injected MonoBehaviour. Measure it here
+                    // (InjectionGateCanary.cs) rather than reasoning about it — and note the shell is
+                    // not the only such site, so see that file for what this reading does not prove.
+                    InjectionGateCanary.SampleAfterShellBuilt();
                     return;
                 }
 
