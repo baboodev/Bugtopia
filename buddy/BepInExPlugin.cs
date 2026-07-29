@@ -32,6 +32,13 @@ namespace HeartopiaMod
             ModLoaderInfo.IsMelonLoader = false;
             BepInExLogAdapter.Install(Log);
             ModCoroutines.InitBepInEx();
+
+            // Trim the ClassInjector hooks that injection would otherwise install but that provably
+            // cannot fire for this mod (ClassInjectorHookTrimFeature.cs). MUST precede AddComponent:
+            // InjectorHelpers.Setup() installs them lazily on the first RegisterTypeInIl2Cpp, and
+            // once installed they cannot be removed (proven the hard way — see that file's header).
+            ClassInjectorHookTrim.Apply();
+
             AddComponent<HeartopiaBehaviour>();
         }
     }
