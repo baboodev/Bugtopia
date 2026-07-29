@@ -69,7 +69,14 @@ namespace HeartopiaMod
         // this particular moment.
         internal static void SampleAfterShellBuilt()
         {
-            Sample("ugui-shell-built", true);
+            SampleForced("ugui-shell-built");
+        }
+
+        // Unconditional reading with an arbitrary label — for bracketing an experiment that might
+        // itself cause injection (HookFreeDelegateProbe.cs samples on both sides of its probe).
+        internal static void SampleForced(string when)
+        {
+            Sample(when, true);
         }
 
         private static void Sample(string when, bool force)

@@ -380,6 +380,15 @@ namespace HeartopiaMod
             this.RegisterWorldReadyCallback(InjectionGateCanary.WorldReadyCallbackName, InjectionGateCanary.SampleOnWorldReady);
             // The hook-state report is emitted by the canary itself, alongside every reading it
             // logs — no separate callback, so the two can never drift apart in the log.
+
+            // One-shot experiment: can il2cpp call back into managed code without injecting a class?
+            // Registered right after the canary so its own before/after readings sit next to the
+            // baseline one (HookFreeDelegateProbe.cs).
+            if (HookFreeDelegateProbe.Stage1Enabled)
+            {
+                this.RegisterWorldReadyCallback(HookFreeDelegateProbe.WorldReadyCallbackName,
+                    HookFreeDelegateProbe.RunOnWorldReady);
+            }
         }
 
         // Re-arm every deferred warmup for the new world — STAGGERED, not all on one frame.
