@@ -190,10 +190,68 @@ namespace HeartopiaMod
                 {
                     ModLogger.Msg("[HookTrim] verify: " + all[i] + " = " + DescribeHook(helpers, all[i]));
                 }
+
+                VerifyExports();
             }
             catch (Exception ex)
             {
                 ModLogger.Msg("[HookTrim] verify failed: " + ex.Message);
+            }
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+        private static extern IntPtr GetModuleHandleA(string lpModuleName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true, ExactSpelling = true)]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+
+        // Exports the LOADERS are known to detour. These are invisible to the Il2CppInterop hook
+        // enumeration above — they belong to the loader's own fixes, not to ClassInjector — so
+        // without this the reported patch count is silently too low.
+        //
+        // Reading the prologue of an EXPORT is the cleanest possible measurement: the address comes
+        // from the export table (never patched) and the bytes come from `.text` (the thing that
+        // matters), so it needs no knowledge of who installed the detour or how.
+        //   * `il2cpp_resolve_icall` — MelonLoader's `Il2CppICallInjector` attaches a MonoMod
+        //     NativeHook here in `Core.Initialize()`, unconditionally, before any mod loads, and
+        //     only detaches at `Core.Quit()`. BepInEx has no equivalent.
+        //   * `il2cpp_runtime_invoke` — BepInEx detours this during startup and DISPOSES it once the
+        //     first scene is active, so at steady state it should read clean. A patched reading here
+        //     means that disposal did not happen.
+        private static readonly string[] WatchedExports = { "il2cpp_resolve_icall", "il2cpp_runtime_invoke" };
+
+        private static void VerifyExports()
+        {
+            try
+            {
+                IntPtr game = GetModuleHandleA("GameAssembly.dll");
+                if (game == IntPtr.Zero)
+                {
+                    ModLogger.Msg("[HookTrim] verify: GameAssembly.dll not resolvable — export check skipped");
+                    return;
+                }
+
+                for (int i = 0; i < WatchedExports.Length; i++)
+                {
+                    IntPtr fn = GetProcAddress(game, WatchedExports[i]);
+                    if (fn == IntPtr.Zero)
+                    {
+                        ModLogger.Msg("[HookTrim] verify: export " + WatchedExports[i] + " = not found");
+                        continue;
+                    }
+
+                    string prologue = PrologueHex(fn, 6);
+                    // Dobby/MonoMod write either a rip-relative jump (FF 25) or a rel32 jump (E9).
+                    bool patched = prologue.StartsWith("FF25", StringComparison.Ordinal)
+                                   || prologue.StartsWith("E9", StringComparison.Ordinal);
+                    ModLogger.Msg("[HookTrim] verify: export " + WatchedExports[i] + " = "
+                                  + (patched ? "PATCHED" : "clean") + " @0x" + fn.ToString("X")
+                                  + " [" + prologue + "]");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[HookTrim] verify: export check failed: " + ex.Message);
             }
         }
 
