@@ -164,6 +164,8 @@ namespace HeartopiaMod
         // early reading shows all five NOT INSTALLED (measured: zero `.text` patches). The hooks
         // then appear the moment anything converts a managed delegate to il2cpp. Catching that
         // 0 → 3 transition needs a reading on BOTH sides of it, which a one-shot flag would hide.
+        private static string lastReport;
+
         internal static void Verify()
         {
             try
@@ -186,12 +188,29 @@ namespace HeartopiaMod
                     "RunFinalizerPatch",          // ML only; reported as absent under BepInEx
                 };
 
+                // Collect the whole report first, then print it ONLY if it differs from last time.
+                // The state is fixed after startup unless something injects, so printing it at every
+                // sample point produced page after page of identical lines — and a wall of noise is
+                // how a real change goes unnoticed.
+                System.Collections.Generic.List<string> lines = new System.Collections.Generic.List<string>();
                 for (int i = 0; i < all.Length; i++)
                 {
-                    ModLogger.Msg("[HookTrim] verify: " + all[i] + " = " + DescribeHook(helpers, all[i]));
+                    lines.Add("[HookTrim] verify: " + all[i] + " = " + DescribeHook(helpers, all[i]));
                 }
 
-                VerifyExports();
+                AppendExportReport(lines);
+
+                string report = string.Join(" | ", lines);
+                if (string.Equals(report, lastReport, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                lastReport = report;
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    ModLogger.Msg(lines[i]);
+                }
             }
             catch (Exception ex)
             {
@@ -231,20 +250,20 @@ namespace HeartopiaMod
         // 0x7FFA27780000, a fresh 64 KB-aligned arena).
         private static readonly string[] WatchedExports = { "il2cpp_resolve_icall", "il2cpp_runtime_invoke" };
 
-        private static void VerifyExports()
+        private static void AppendExportReport(System.Collections.Generic.List<string> lines)
         {
             try
             {
                 IntPtr game = GetModuleHandleA("GameAssembly.dll");
                 if (game == IntPtr.Zero)
                 {
-                    ModLogger.Msg("[HookTrim] verify: GameAssembly.dll not resolvable — export check skipped");
+                    lines.Add("[HookTrim] verify: GameAssembly.dll not resolvable — export check skipped");
                     return;
                 }
 
                 if (!TryGetImageSize(game, out long imageSize))
                 {
-                    ModLogger.Msg("[HookTrim] verify: GameAssembly.dll image size unreadable — export check skipped");
+                    lines.Add("[HookTrim] verify: GameAssembly.dll image size unreadable — export check skipped");
                     return;
                 }
 
@@ -256,18 +275,18 @@ namespace HeartopiaMod
                     IntPtr fn = GetProcAddress(game, WatchedExports[i]);
                     if (fn == IntPtr.Zero)
                     {
-                        ModLogger.Msg("[HookTrim] verify: export " + WatchedExports[i] + " = not found");
+                        lines.Add("[HookTrim] verify: export " + WatchedExports[i] + " = not found");
                         continue;
                     }
 
-                    ModLogger.Msg("[HookTrim] verify: export " + WatchedExports[i] + " = "
-                                  + ClassifyExport(fn, lo, hi) + " @0x" + fn.ToString("X")
-                                  + " [" + PrologueHex(fn, 6) + "]");
+                    lines.Add("[HookTrim] verify: export " + WatchedExports[i] + " = "
+                              + ClassifyExport(fn, lo, hi) + " @0x" + fn.ToString("X")
+                              + " [" + PrologueHex(fn, 6) + "]");
                 }
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[HookTrim] verify: export check failed: " + ex.Message);
+                lines.Add("[HookTrim] verify: export check failed: " + ex.Message);
             }
         }
 

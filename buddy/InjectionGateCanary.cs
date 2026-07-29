@@ -35,16 +35,20 @@ namespace HeartopiaMod
         private static int lastInjectedClasses = -1;
         private static bool warned;
 
+        // Latest reading, for callers that want to carry it on their own summary line rather than
+        // trigger another block of output.
+        internal static string Counts = "not sampled";
+
         // World-ready callback contract: true = done for this world epoch, re-run on the next one.
         internal static bool SampleOnWorldReady()
         {
-            Sample("world-ready", false);
+            Sample("world-ready");
             return true;
         }
 
         internal static void SampleOnShutdown()
         {
-            Sample("shutdown", true);
+            Sample("shutdown");
         }
 
         // Taken right after the UGUI shell is BUILT (its first open) because that is the mod's
@@ -63,22 +67,15 @@ namespace HeartopiaMod
         // opened, so they are why a session could cross the threshold with nothing on screen.
         // Nothing in the ESP/radar overlay converts a delegate at all (retained-mode UGUI, no
         // callbacks), which is why the overlays were always free.
-        //
-        // Forced rather than change-gated: the point is to read the hook states on both sides of
-        // this particular moment.
         internal static void SampleAfterShellBuilt()
         {
-            SampleForced("ugui-shell-built");
+            Sample("ugui-shell-built");
         }
 
-        // Unconditional reading with an arbitrary label — for bracketing an experiment that might
-        // itself cause injection (HookFreeDelegateProbe.cs samples on both sides of its probe).
-        internal static void SampleForced(string when)
-        {
-            Sample(when, true);
-        }
-
-        private static void Sample(string when, bool force)
+        // Silent unless something MOVED. All three sample points fire on a healthy session and the
+        // numbers never change, so logging every reading buried the log in identical blocks. The
+        // positive confirmation lives on one line in `[HookFreeDelegate] shell built: …` instead.
+        private static void Sample(string when)
         {
             try
             {
@@ -100,12 +97,13 @@ namespace HeartopiaMod
                 lastEnumOverrides = enums;
                 lastInjectedClasses = injected;
 
-                if (changed || force)
+                Counts = "inflatedGenerics=" + Describe(inflated)
+                         + " enumOverrides=" + Describe(enums)
+                         + " injectedClasses=" + Describe(injected);
+
+                if (changed)
                 {
-                    ModLogger.Msg("[InjectionGate] inflatedGenerics=" + Describe(inflated)
-                                  + " enumOverrides=" + Describe(enums)
-                                  + " injectedClasses=" + Describe(injected)
-                                  + " (" + when + ")");
+                    ModLogger.Msg("[InjectionGate] " + Counts + " (" + when + ")");
 
                     // Pair every reading with the hook states, so the log always shows the two
                     // together and a 0 → 3 transition cannot be misattributed to something else.

@@ -66,9 +66,13 @@ namespace HeartopiaMod
 
         internal static void LogSummary(string when)
         {
+            // Carries the gate counts on the same line so a healthy session has ONE line of positive
+            // confirmation instead of a repeated block — InjectionGateCanary and the hook verifier
+            // both stay silent unless something actually changes, and silence is a poor signal.
             ModLogger.Msg("[HookFreeDelegate] " + when + ": " + Wired + " hook-free wire(s), "
                           + FellBack + " fell back to the injecting path"
-                          + (FellBack > 0 ? " — injection has happened, see [InjectionGate]" : ""));
+                          + (FellBack > 0 ? " — injection has happened, see [InjectionGate]" : "")
+                          + " | " + InjectionGateCanary.Counts);
         }
 
         // ---- factories ---------------------------------------------------------------------------
