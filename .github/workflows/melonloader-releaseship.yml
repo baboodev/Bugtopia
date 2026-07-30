@@ -54,23 +54,47 @@ jobs:
         env:
           DEPS_URL_SECRET: ${{ secrets.MELONLOADER_CI_DEPS_URL }}
           DEPS_URL_INPUT: ${{ github.event.inputs.deps_url }}
+          # Read by `gh` below. The deps download used to be an anonymous API call, which is 60
+          # requests/hour per IP — and runner IPs are shared, so it failed on someone else's
+          # traffic. contents:write above already grants the read this needs.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
           $depsRoot = Join-Path $env:GITHUB_WORKSPACE "ci\heartopia"
           $zipPath = Join-Path $env:RUNNER_TEMP "unified-ci-deps.zip"
           $depsUrl = if ($env:DEPS_URL_INPUT) { $env:DEPS_URL_INPUT } else { $env:DEPS_URL_SECRET }
 
-          if (-not $depsUrl) {
-            $release = Invoke-RestMethod `
-              -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/deps" `
-              -Headers @{ "User-Agent" = "Bugtopia-CI" }
-            $asset = $release.assets | Where-Object { $_.name -eq "unified-ci-deps.zip" } | Select-Object -First 1
-            if ($asset) {
-              $depsUrl = $asset.browser_download_url
+          $haveZip = $false
+
+          if ($depsUrl) {
+            Write-Host "Downloading build dependencies from the configured URL..."
+            Invoke-WebRequest -Uri $depsUrl -OutFile $zipPath
+            $haveZip = $true
+          }
+          else {
+            # gh is preinstalled on GitHub-hosted runners and picks up GH_TOKEN by itself, so this
+            # one command replaces an anonymous API lookup plus a signed-URL download. It also
+            # fetches the asset THROUGH the API, which keeps working if the repo ever goes private
+            # (browser_download_url does not).
+            Write-Host "Downloading build dependencies from the 'deps' release..."
+            try {
+              gh release download deps `
+                --repo $env:GITHUB_REPOSITORY `
+                --pattern "unified-ci-deps.zip" `
+                --output $zipPath `
+                --clobber
+              $haveZip = ($LASTEXITCODE -eq 0)
+            }
+            catch {
+              # Depending on the pwsh version a failing native command either sets $LASTEXITCODE or
+              # throws ($PSNativeCommandUseErrorActionPreference), so both are handled — otherwise
+              # a missing release would surface as a stack trace instead of the guidance below.
+              Write-Host "gh release download failed: $($_.Exception.Message)"
+              $haveZip = $false
             }
           }
 
-          if (-not $depsUrl) {
+          if (-not $haveZip) {
             throw @"
           Unified CI dependencies are not configured.
           1. Run: pwsh ci/prepare-ci-deps.ps1 -HeartopiaDir '<Game>'   (needs an install with BOTH loaders)
@@ -79,8 +103,6 @@ jobs:
           "@
           }
 
-          Write-Host "Downloading build dependencies..."
-          Invoke-WebRequest -Uri $depsUrl -OutFile $zipPath
           Expand-Archive -Path $zipPath -DestinationPath $depsRoot -Force
 
           $required = @(
