@@ -122,6 +122,12 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // A live camera-mode interaction key belongs to the GAME (CameraModeHotkeyGuard.cs).
+            if (this.IsCameraInteractionHotkeyConflict(key))
+            {
+                return false;
+            }
+
             // While a game text field is focused, swallow every hotkey except the menu toggle so
             // typed characters don't fire features. The menu key stays live so the user can still
             // open/close the mod menu.
@@ -148,6 +154,12 @@ namespace HeartopiaMod
             }
 
             if (this.IsInstrumentHotkeyConflict(key))
+            {
+                return false;
+            }
+
+            // A live camera-mode interaction key belongs to the GAME (CameraModeHotkeyGuard.cs).
+            if (this.IsCameraInteractionHotkeyConflict(key))
             {
                 return false;
             }

@@ -116,6 +116,11 @@ namespace HeartopiaMod
             // empty sections plus a "Show" button whose panel had never been created — which is
             // exactly what a parse regression looked like from the outside: no rows, and a button
             // that silently did nothing.
+            // The full-layout dump belongs to an explicit visit to this page. It used to run from
+            // whatever first built the rows, which now includes the hotkey guard — and that would
+            // put a 134 KB file write plus ~160 log lines into every session for everyone.
+            this.LogInputActionMapDumpOnce();
+
             List<GameKeyRow> rows = this.TryGetGameKeyRows();
             if (rows == null || rows.Count == 0)
             {

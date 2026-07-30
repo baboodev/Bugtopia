@@ -263,6 +263,7 @@
     <Compile Include="HookFreeDelegate.cs" />
     <Compile Include="InputRebindFeature.cs" />
     <Compile Include="GameKeyBindings.cs" />
+    <Compile Include="CameraModeHotkeyGuard.cs" />
     <Compile Include="HeartopiaComplete.UguiGameKeysContent.cs" />
     <Compile Include="AnimalCareFeature.cs" />
     <Compile Include="CarpetStampFeature.cs" />

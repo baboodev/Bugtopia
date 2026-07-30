@@ -158,6 +158,10 @@ namespace HeartopiaMod
         internal void MarkKeyIconSwapsDirty()
         {
             this.keyIconSwapsDirty = true;
+
+            // A rebind moves which physical key owns a camera slot, so the guard's map is stale too
+            // (CameraModeHotkeyGuard.cs). This is the single "the layout changed" signal.
+            this.InvalidateCameraSlotMap();
             this.keyIconNextCheckAt = 0f;
             this.keyIconNextScanAt = 0f;
 
@@ -654,25 +658,23 @@ namespace HeartopiaMod
                 return null;
             }
 
-            InputActionAsset best = null;
             for (int i = 0; i < all.Length; i++)
             {
                 InputActionAsset candidate = all[i];
-                if (candidate == null)
-                {
-                    continue;
-                }
 
-                // Prefer the one that actually carries the game's actions.
-                if (candidate.FindAction("touchLook", false) != null)
+                // ONLY the one that carries the game's own actions. There used to be a "otherwise
+                // take the first asset found" fallback, and it was a trap: called before the game's
+                // asset loads it happily returned a FOREIGN InputActionAsset (maps named Player/UI,
+                // 22 bindings), whose rows were then cached for the whole session — an empty Game
+                // Keys page and every saved override reported as no-longer-matching. Fail closed
+                // and let the caller retry.
+                if (candidate != null && candidate.FindAction("touchLook", false) != null)
                 {
                     return candidate;
                 }
-
-                best ??= candidate;
             }
 
-            return best;
+            return null;
         }
 
         // ---- tiny JSON scanner ------------------------------------------------------------------

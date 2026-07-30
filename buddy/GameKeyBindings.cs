@@ -68,6 +68,7 @@ namespace HeartopiaMod
         };
 
         private List<GameKeyRow> gameKeyRows;
+        private bool gameKeyAssetMismatchLogged;
 
         // Key = "<map>/<index>", value = override path. This is both the live state and, later, the
         // persisted form — a binding is addressed by map+index, which survives across sessions
@@ -108,6 +109,31 @@ namespace HeartopiaMod
                     return null;
                 }
 
+                // Second, independent identity check — the first one (FindAction("touchLook")) is a
+                // single interop call, and caching rows from the wrong asset poisons the session.
+                // The direct map is the game asset's fingerprint: 110 self-named actions, one per
+                // physical key. Nothing else in this process looks like that.
+                int directRows = 0;
+                for (int i = 0; i < parsed.Count; i++)
+                {
+                    if (string.Equals(parsed[i].Map, GameKeyDirectMapName, StringComparison.Ordinal))
+                    {
+                        directRows++;
+                    }
+                }
+
+                if (directRows < 50)
+                {
+                    if (!this.gameKeyAssetMismatchLogged)
+                    {
+                        this.gameKeyAssetMismatchLogged = true;
+                        ModLogger.Msg("[InputMap] ignoring an InputActionAsset without " + GameKeyDirectMapName
+                                      + " (" + parsed.Count + " bindings) — not the game's; will retry.");
+                    }
+
+                    return null;
+                }
+
                 AnnotateGameKeyRows(parsed);
                 this.gameKeyRows = parsed;
 
@@ -135,9 +161,6 @@ namespace HeartopiaMod
 
                 ModLogger.Msg("[InputMap] " + parsed.Count + " rebindable key binding(s): " + sb.ToString());
 
-                // The full dump used to be triggered from the Camera Toggle edge; it belongs here,
-                // where the asset is known good and the rows are known parsed.
-                this.LogInputActionMapDumpOnce();
                 this.MarkKeyIconSwapsDirty();
                 return this.gameKeyRows;
             }
@@ -154,11 +177,12 @@ namespace HeartopiaMod
         //
         // The MAP NAME is latched off that field order: when the `"actions": [` line arrives, the
         // last `"name"` seen is necessarily that map's, because a map's own name precedes its
-        // actions and bindings arrays and nothing else can appear in between. This replaces an
-        // earlier attempt that resolved the map through `asset.FindAction(name).actionMap`, which
-        // lost 135 of 157 rows on this build for reasons that were never explained — the latch
-        // needs no interop at all and was verified against a real JSON parse of the live asset:
-        // identical per-map counts, zero index mismatches.
+        // actions and bindings arrays and nothing else can appear in between. It replaces resolving
+        // the map through `asset.FindAction(name).actionMap` — not because that was broken (the
+        // "22 bindings" that motivated the change turned out to be the WRONG ASSET, not a failed
+        // lookup) but because 157 interop calls to learn something the JSON already states is waste.
+        // Verified against a real JSON parse of the live asset: identical per-map counts, zero
+        // index mismatches.
         private static List<GameKeyRow> ParseGameKeyRows(string json)
         {
             List<GameKeyRow> rows = new List<GameKeyRow>();
@@ -538,6 +562,17 @@ namespace HeartopiaMod
                 {
                     applied++;
                 }
+            }
+
+            // ⚠️ Applying NOTHING is not "done" — it is the signature of having looked at the wrong
+            // asset. Clearing `pending` here is how a whole saved layout got thrown away: the next
+            // config write exports the (empty) live overrides over the user's file. Keep it and let
+            // the gate try again; only a run that actually landed something may consume it.
+            if (applied == 0 && skipped > 0)
+            {
+                ModLogger.Msg("[InputMap] none of the " + skipped
+                              + " saved override(s) match the loaded asset — keeping them and retrying.");
+                return false;
             }
 
             this.pendingGameKeyOverrides = null;
