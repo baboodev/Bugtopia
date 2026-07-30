@@ -153,18 +153,26 @@ jobs:
       # it and nobody would notice. This fails the build instead.
       # NOTE: .NET stores user string literals as UTF-16LE (metadata names are UTF-8), so an
       # ASCII-only search reports a false clean. Both encodings are checked.
+      #
+      # ⚠️ And UTF-16 must be decoded at BOTH byte alignments. Entries in the #US heap are only
+      # byte-aligned, so a literal can start at an odd offset — and Encoding.Unicode.GetString
+      # walks from byte 0 in 2-byte units, which makes every odd-aligned string invisible to it.
+      # Adding unrelated code shifts the heap and silently flips a string's parity, so this is not
+      # a rare case: it is a coin toss per build. Here that would be a FALSE CLEAN on the exact
+      # guarantee this step exists to make.
       - name: Verify the no-link build has no Telegram traces
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $bytes = [System.IO.File]::ReadAllBytes("dist/bugtopia-universal-nolink.dll")
-          $text8  = [System.Text.Encoding]::UTF8.GetString($bytes)
-          $text16 = [System.Text.Encoding]::Unicode.GetString($bytes)
+          $text8   = [System.Text.Encoding]::UTF8.GetString($bytes)
+          $text16a = [System.Text.Encoding]::Unicode.GetString($bytes)
+          $text16b = [System.Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1)
           $needles = @('t.me', 'bugtopiamod', 'Telegram', 'Bugtopia News', 'OpenURL')
           $bad = @()
           foreach ($n in $needles) {
-            if ($text8.Contains($n))  { $bad += "$n (utf-8)" }
-            if ($text16.Contains($n)) { $bad += "$n (utf-16)" }
+            if ($text8.Contains($n))   { $bad += "$n (utf-8)" }
+            if ($text16a.Contains($n) -or $text16b.Contains($n)) { $bad += "$n (utf-16)" }
           }
           if ($bad.Count -gt 0) {
             throw "bugtopia-universal-nolink.dll still contains: $($bad -join ', '). Something referencing the link sits OUTSIDE #if FEATURE_TELEGRAM."
@@ -194,8 +202,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $bytes = [System.IO.File]::ReadAllBytes("buddy/bin/Universal/ReleaseShip/bugtopia.dll")
-          $text16 = [System.Text.Encoding]::Unicode.GetString($bytes)
-          if (-not $text16.Contains('bugtopiamod')) {
+          # Both alignments — see the note on the step above. This check failed for exactly that
+          # reason: the URL was present all along, at an odd offset.
+          $text16a = [System.Text.Encoding]::Unicode.GetString($bytes)
+          $text16b = [System.Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1)
+          if (-not ($text16a.Contains('bugtopiamod') -or $text16b.Contains('bugtopiamod'))) {
             throw "The regular Universal build is missing the Bugtopia News link — Telegram=true is the default, so this should never happen."
           }
           Write-Host "Link present in the regular build, as expected."
