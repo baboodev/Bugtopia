@@ -5559,6 +5559,11 @@ namespace HeartopiaMod
         // Show the real avatar photo on map player markers for EVERY player, not just friends. Off by
         // default: opt-in because it installs two NativeDetours on the friend-gate getters (see MapSpots).
         private bool radarPlayerAvatarsAll = false;
+        // Show the real NAME of non-friends (over-head nameplate, map spot label, chat) instead of the
+        // Title the game shows strangers. Independent of the avatar toggle since both were split out of
+        // one flag: different detour set (GetPlayerName / GetUserProfile Title-mirror / IsAcquaintance),
+        // no force-friend anywhere. Both toggles live on Features -> Main.
+        private bool radarPlayerNamesAll = false;
 
         // Token: 0x0400002A RID: 42
         private bool showMushroomRadar = false;

@@ -39,6 +39,8 @@ namespace HeartopiaMod
             data.radarGameTrackLimit = this.radarGameTrackLimit;
             data.radarBigMapSpots = this.radarBigMapSpots;
             data.radarPlayerAvatarsAll = this.radarPlayerAvatarsAll;
+            // Written as an explicit 0/1 from here on — only a pre-split file can still carry -1.
+            data.radarPlayerNamesAll = this.radarPlayerNamesAll ? 1 : 0;
             data.resourceVisualEspEnabled = this.resourceVisualEspEnabled;
             data.resourceVisualEspStyle = this.resourceVisualEspStyle;
             data.resourceVisualEspShowDistance = this.resourceVisualEspShowDistance;
@@ -63,6 +65,11 @@ namespace HeartopiaMod
             this.radarGameTrackLimit = Mathf.Clamp(data.radarGameTrackLimit <= 0 ? 5 : data.radarGameTrackLimit, 1, 30);
             this.radarBigMapSpots = data.radarBigMapSpots;
             this.radarPlayerAvatarsAll = data.radarPlayerAvatarsAll;
+            // Pre-split configs have no names key (-1): the one old flag drove BOTH the avatar and the
+            // name detours, so inherit it rather than silently dropping real names on upgrade.
+            this.radarPlayerNamesAll = (data.radarPlayerNamesAll < 0)
+                ? data.radarPlayerAvatarsAll
+                : (data.radarPlayerNamesAll != 0);
             this.resourceVisualEspEnabled = data.resourceVisualEspEnabled;
             bool showGroundRing = data.resourceVisualEspShowGroundRing;
             int visualEspStyle = data.resourceVisualEspStyle;
@@ -861,7 +868,9 @@ namespace HeartopiaMod
             this.radarDisplayMode = 0;
             this.radarGameTrackLimit = 5;
             this.radarBigMapSpots = false;
-            this.radarPlayerAvatarsAll = false;
+            // radarPlayerAvatarsAll / radarPlayerNamesAll are deliberately NOT reset here: their controls
+            // moved to Features -> Main, and a reset button should only clear the page it lives on. They
+            // still ride in RadarConfigData purely for persistence.
             this.resourceVisualEspEnabled = true;
             this.resourceVisualEspStyle = 0;
             this.resourceVisualEspShowDistance = true;

@@ -1204,8 +1204,8 @@ namespace HeartopiaMod
             public Slider TrackLimitSlider;
             public GameObject BigMapCaption;
             public UguiRadarSegmentHandle BigMapSegment;
-            public GameObject AvatarsCaption;
-            public UguiRadarSegmentHandle AvatarsSegment;
+            // The "Player Avatars (all)" segment used to sit here at y=324. It moved to Features -> Main
+            // (and was split into separate avatar/name checkboxes there), so this group is two rows again.
 
             // Visual ESP card (repositioned by the relayout)
             public GameObject VisualCard;
@@ -1354,15 +1354,6 @@ namespace HeartopiaMod
             this.ApplyUguiRadarSegmentState(handle.BigMapSegment,
                 this.radarBigMapSpots ? this.L("On") : this.L("Off"), this.radarBigMapSpots);
 
-            handle.AvatarsCaption = this.CreateUguiLabel(scrollContent, "AvatarsCaption",
-                this.L("Player Avatars (all)"), 11f, subColor, false);
-            PlaceUguiTopLeft(handle.AvatarsCaption, 24f, 330f, 170f, 20f);
-            handle.AvatarsSegment = this.CreateUguiRadarSegmentButton(scrollContent, "AvatarsSegment",
-                new System.Action(this.OnUguiRadarPlayerAvatarsSegmentClicked));
-            PlaceUguiTopLeft(handle.AvatarsSegment.Root, 198f, 324f, cardW - 206f, 30f);
-            this.ApplyUguiRadarSegmentState(handle.AvatarsSegment,
-                this.radarPlayerAvatarsAll ? this.L("On") : this.L("Off"), this.radarPlayerAvatarsAll);
-
             // ---- Visual ESP card (Radar.cs:1041-1117) — y owned by the relayout.
             GameObject visualCard = this.CreateUguiGo("VisualCard", scrollContent);
             this.AddUguiImage(visualCard, this.UguiKitPanelBg(), true, 1f);
@@ -1474,10 +1465,9 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.TrackLimitSlider != null ? handle.TrackLimitSlider.gameObject : null, gameMap);
             SetUguiGoActive(handle.BigMapCaption, gameMap);
             SetUguiGoActive(handle.BigMapSegment != null ? handle.BigMapSegment.Root : null, gameMap);
-            SetUguiGoActive(handle.AvatarsCaption, gameMap);
-            SetUguiGoActive(handle.AvatarsSegment != null ? handle.AvatarsSegment.Root : null, gameMap);
 
-            float visualY = gameMap ? 360f : 252f;
+            // 324 (was 360) — the avatars row that used to occupy 324..354 moved to Features -> Main.
+            float visualY = gameMap ? 324f : 252f;
             if (handle.VisualCard != null)
             {
                 PlaceUguiTopLeft(handle.VisualCard, 8f, visualY, handle.CardWidth, 332f);
@@ -1556,8 +1546,6 @@ namespace HeartopiaMod
                 this.ApplyUguiRadarSegmentState(handle.StyleMinimalSegment, this.L("Minimal"), this.resourceVisualEspStyle == 2);
                 this.ApplyUguiRadarSegmentState(handle.BigMapSegment,
                     this.radarBigMapSpots ? this.L("On") : this.L("Off"), this.radarBigMapSpots);
-                this.ApplyUguiRadarSegmentState(handle.AvatarsSegment,
-                    this.radarPlayerAvatarsAll ? this.L("On") : this.L("Off"), this.radarPlayerAvatarsAll);
 
                 // Conditional-layout signature (the 3 Game-Map rows + the Visual card position).
                 if (this.radarDisplayMode != handle.LayoutSignature)
@@ -1647,12 +1635,8 @@ namespace HeartopiaMod
             this.QueueRadarSettingsSave();
         }
 
-        // Radar.cs:1032-1037.
-        private void OnUguiRadarPlayerAvatarsSegmentClicked()
-        {
-            this.radarPlayerAvatarsAll = !this.radarPlayerAvatarsAll;
-            this.QueueRadarSettingsSave();
-        }
+        // The player-avatars handler moved to Features -> Main
+        // (OnUguiFeaturesMainPlayerAvatarsToggled / OnUguiFeaturesMainPlayerNamesToggled).
 
         // Radar.cs:1052-1075 — same guard shape as the display-mode segments.
         private void OnUguiRadarVisualEspStyleSegmentClicked(int style)

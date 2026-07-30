@@ -455,6 +455,8 @@ Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
 |---------|-------------|
 | Hide UI + Player | Client-side visibility hiding |
 | Bird Vacuum | Client-side bird collection assist |
+| Player Avatars (all) | Real avatar photos on map player markers + the in-world pointer for every player, not just friends (default **off**; opt-in detours — see [RADAR_GAME_MAP.md](RADAR_GAME_MAP.md)) |
+| Player Names (all) | Real names for non-friends instead of the Title the game shows strangers — over-head nameplate, map label, chat (default **off**; opt-in detours, no force-friend) |
 | Custom Camera FOV | Overrides main camera FOV while enabled |
 | FPS bypass | Raises target FPS cap |
 | Bypass UI | Skips certain UI blocking |
@@ -728,7 +730,10 @@ Native in-game markers instead of (or alongside) the ESP overlay — see [RADAR_
 | ESP Overlay / Game Map | Route selected resources to the screen overlay or to the native map |
 | Map Markers (nearest) | Cap on how many nearest resources are tracked (1–30, default 5) |
 | Show on big map | Also place markers on the big map (default **off**; on adds the game's tracked rectangle frame) |
-| Player Avatars (all) | Real avatar photos on map player markers for every player, not just friends (default **off**; opt-in detours) |
+
+The former **Player Avatars (all)** row moved to Features → Main on 2026-07-30 and was split there into
+independent **Player Avatars (all)** and **Player Names (all)** toggles. Radar → Settings' **Reset Defaults**
+no longer touches either.
 
 - Per-resource native icons (timber/stone/bamboo/fruit/mushroom), rare tiers (e.g. Rare Timber), players' native pin, Bird/Fish/Insect category icons.
 - Shows on the minimap + in-world tracking pointers; big map is opt-in.

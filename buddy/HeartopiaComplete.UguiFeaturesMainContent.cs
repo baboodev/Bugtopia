@@ -92,6 +92,12 @@ namespace HeartopiaMod
             public string CollectRadiusShown;
             public Slider CollectRadiusSlider;
 
+            // Moved here from Radar -> Settings, where ONE segmented "Player Avatars (all)" row drove both
+            // detour groups; split into two independent checkboxes. Backing fields still live in
+            // RadarConfigData, so they save through QueueRadarSettingsSave, not SaveKeybinds.
+            public Toggle PlayerAvatarsToggle;
+            public Toggle PlayerNamesToggle;
+
             public GameObject DisableAllButton;
 
             public int LayoutSignature = -1;      // packed fastBubbleGen/autoBubbleCollect
@@ -237,6 +243,13 @@ namespace HeartopiaMod
                 0f, 100f, this.autoBubbleCollectRadius, false,
                 new System.Action<float>(this.OnUguiFeaturesMainCollectRadiusChanged));
 
+            handle.PlayerAvatarsToggle = this.CreateUguiCheckbox(scrollContent, "PlayerAvatarsToggle",
+                this.L("Player Avatars (all)"), this.radarPlayerAvatarsAll,
+                new System.Action<bool>(this.OnUguiFeaturesMainPlayerAvatarsToggled));
+            handle.PlayerNamesToggle = this.CreateUguiCheckbox(scrollContent, "PlayerNamesToggle",
+                this.L("Player Names (all)"), this.radarPlayerNamesAll,
+                new System.Action<bool>(this.OnUguiFeaturesMainPlayerNamesToggled));
+
             handle.DisableAllButton = this.CreateUguiDangerButton(scrollContent, "DisableAllButton",
                 this.L("DISABLE ALL"),
                 new System.Action(this.OnUguiFeaturesMainDisableAllClicked));
@@ -336,6 +349,19 @@ namespace HeartopiaMod
                 yCur += 28f;
             }
 
+            // Unconditional rows (moved in from Radar -> Settings), stacked after the last conditional
+            // block so the bubble rows keep their existing positions.
+            if (handle.PlayerAvatarsToggle != null)
+            {
+                PlaceUguiTopLeft(handle.PlayerAvatarsToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.PlayerNamesToggle != null)
+            {
+                PlaceUguiTopLeft(handle.PlayerNamesToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             // IMGUI: 260x35 danger button (Gui.cs:554), then num += 45.
             if (handle.DisableAllButton != null)
             {
@@ -371,6 +397,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.FastBubbleGenToggle, this.fastBubbleGenEnabled);
                 this.SyncUguiToggleFromField(handle.BubbleSpawnAtPlayerToggle, this.bubbleSpawnAtPlayerEnabled);
                 this.SyncUguiToggleFromField(handle.AutoBubbleCollectToggle, this.autoBubbleCollectEnabled);
+                this.SyncUguiToggleFromField(handle.PlayerAvatarsToggle, this.radarPlayerAvatarsAll);
+                this.SyncUguiToggleFromField(handle.PlayerNamesToggle, this.radarPlayerNamesAll);
 
                 if (handle.BubbleRateSlider != null
                     && Mathf.Abs(handle.BubbleRateSlider.value - this.bubbleBubblesPerMinute) > 0.0005f)
@@ -530,6 +558,33 @@ namespace HeartopiaMod
             }
             this.autoBubbleCollectRadius = Mathf.Clamp(value, 0f, 100f);
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Real avatar photos on player markers for everyone, not just friends. Flag only: the 2 s
+        // ManagePlayerAvatarPatches pass installs/undoes the detour group (get_IsFriend pair, track-widget
+        // brackets, scoped friend-gate) on its own — nothing to do inline, and doing it here would run a
+        // detour teardown from a UI callback. Persists via the radar config (debounced), not SaveKeybinds.
+        private void OnUguiFeaturesMainPlayerAvatarsToggled(bool value)
+        {
+            if (value == this.radarPlayerAvatarsAll)
+            {
+                return;
+            }
+            this.radarPlayerAvatarsAll = value;
+            this.QueueRadarSettingsSave();
+        }
+
+        // Real names for non-friends (over-head nameplate / map label / chat). Independent of the avatar
+        // toggle since the split — different detours (GetPlayerName, GetUserProfile Title-mirror,
+        // IsAcquaintance), same 2 s install/undo pass, same debounced radar-config save.
+        private void OnUguiFeaturesMainPlayerNamesToggled(bool value)
+        {
+            if (value == this.radarPlayerNamesAll)
+            {
+                return;
+            }
+            this.radarPlayerNamesAll = value;
+            this.QueueRadarSettingsSave();
         }
 
         // Gui.cs:554-579 — the EXACT cross-feature reset sequence, verbatim and in source order

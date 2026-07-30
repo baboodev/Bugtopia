@@ -377,6 +377,11 @@ namespace HeartopiaMod
             public int radarGameTrackLimit = 5; // Game mode: max nearest resources tracked on the map
             public bool radarBigMapSpots = false; // Game mode: also show markers on the big map
             public bool radarPlayerAvatarsAll = false; // real avatar photos on map markers for ALL players (detour)
+            // Real names for non-friends (nameplate / map label / chat). Split out of radarPlayerAvatarsAll,
+            // which used to drive BOTH detour groups. TRI-STATE so the split is a silent no-op for existing
+            // configs: -1 = key absent (pre-split file) -> inherit radarPlayerAvatarsAll on load, 0/1 = an
+            // explicit choice the user has made since. Same legacy-mapping idiom as resourceVisualEspStyle == 3.
+            public int radarPlayerNamesAll = -1;
             public bool resourceVisualEspEnabled = true;
             public int resourceVisualEspStyle = 0;
             public bool resourceVisualEspShowDistance = true;

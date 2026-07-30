@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -546,6 +546,7 @@ namespace HeartopiaMod
             { "Overlay Style", "Overlay Style" },
             { "Override active: bias {0:0.##}, max level {1}", "Override active: bias {0:0.##}, max level {1}" },
             { "Player Avatars (all)", "Player Avatars (all)" },
+            { "Player Names (all)", "Player Names (all)" },
             { "Position", "Position" },
             { "Prefer Favorite Food", "Prefer Favorite Food" },
             { "Queued", "Queued" },
@@ -1697,6 +1698,7 @@ namespace HeartopiaMod
             { "Overlay Style", "Estilo de superposición" },
             { "Override active: bias {0:0.##}, max level {1}", "Anulación activa: sesgo {0:0.##}, nivel máx. {1}" },
             { "Player Avatars (all)", "Avatares de jugadores (todos)" },
+            { "Player Names (all)", "Nombres de jugadores (todos)" },
             { "Position", "Posición" },
             { "Prefer Favorite Food", "Priorizar comida favorita" },
             { "Queued", "En cola" },
@@ -2848,6 +2850,7 @@ namespace HeartopiaMod
             { "Overlay Style", "覆盖层样式" },
             { "Override active: bias {0:0.##}, max level {1}", "覆盖已生效：偏移 {0:0.##}，最大级别 {1}" },
             { "Player Avatars (all)", "玩家头像（全部）" },
+            { "Player Names (all)", "玩家名称（全部）" },
             { "Position", "位置" },
             { "Prefer Favorite Food", "优先最爱食物" },
             { "Queued", "已排队" },
@@ -3989,6 +3992,7 @@ namespace HeartopiaMod
             { "Overlay Style", "Estilo da sobreposição" },
             { "Override active: bias {0:0.##}, max level {1}", "Substituição ativa: bias {0:0.##}, nível máx. {1}" },
             { "Player Avatars (all)", "Avatares de jogadores (todos)" },
+            { "Player Names (all)", "Nomes de jogadores (todos)" },
             { "Position", "Posição" },
             { "Prefer Favorite Food", "Priorizar comida favorita" },
             { "Queued", "Na fila" },
@@ -5130,6 +5134,7 @@ namespace HeartopiaMod
             { "Overlay Style", "สไตล์โอเวอร์เลย์" },
             { "Override active: bias {0:0.##}, max level {1}", "บังคับใช้อยู่: ไบแอส {0:0.##}, ระดับสูงสุด {1}" },
             { "Player Avatars (all)", "อวตารผู้เล่น (ทั้งหมด)" },
+            { "Player Names (all)", "ชื่อผู้เล่น (ทั้งหมด)" },
             { "Position", "ตำแหน่ง" },
             { "Prefer Favorite Food", "เน้นอาหารโปรด" },
             { "Queued", "อยู่ในคิว" },

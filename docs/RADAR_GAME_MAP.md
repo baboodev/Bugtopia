@@ -12,12 +12,25 @@ Radar panel → Game mode:
 - **ESP Overlay / Game Map** selector (`radarDisplayMode`, 0/1).
 - **Map Markers (nearest): N** slider (`radarGameTrackLimit`, 1–30) — caps how many nearest resources are tracked.
 - **Show on big map** toggle (`radarBigMapSpots`, **default OFF**). Off = minimap + in-world only.
-- **Player Avatars (all)** toggle (`radarPlayerAvatarsAll`, **default OFF**) — real avatar photos on map
-  player markers for every player, not only friends (installs two opt-in NativeDetours; see below).
+
+Features → Main (both **default OFF**, both opt-in detour groups — see below). They live there rather than on
+the radar page because neither is radar-mode-specific: the avatar group also upgrades the VANILLA player pins,
+and the name group drives the over-head nameplate and chat. Radar → Settings' **Reset Defaults** deliberately
+does **not** clear them (a reset button only clears its own page); they still ride in `RadarConfigData` for
+persistence and save through `QueueRadarSettingsSave`.
+- **Player Avatars (all)** toggle (`radarPlayerAvatarsAll`) — real avatar photos on map player markers and the
+  in-world pointer for every player, not only friends.
+- **Player Names (all)** toggle (`radarPlayerNamesAll`) — real names for non-friends instead of the Title the
+  game shows strangers (over-head nameplate, map spot label, chat).
+
+Until 2026-07-30 these were ONE segmented row on Radar → Settings (`radarPlayerAvatarsAll`) that drove both
+detour groups. Pre-split config files have no `radarPlayerNamesAll` key; it is a tri-state `int` (`-1` =
+absent) so those files inherit the old flag's value on load instead of silently losing names. Every later save
+writes an explicit 0/1.
 
 Cooldown/depleted resources are hidden. Per-resource icons match the game's native icons. Players show the
-native player pin — or their real avatar photo (friends always, everyone with the toggle). Birds/Fish/Insects
-show their category icons.
+native player pin — or their real avatar photo (friends always, everyone with the avatar toggle).
+Birds/Fish/Insects show their category icons.
 
 ---
 
@@ -190,8 +203,9 @@ still resolves via `GetAtlasSpriteID`/`GetTrackData`, which is independent of `I
 category with usageId ∈ `mapAvatarWorldNetIds` → false. Both lose the square and regain normal untracked
 sort/LOD. This detour is managed independently of the avatar toggle — installed when `radarBigMapSpots ||
 radarPlayerAvatarsAll` (via `EnsureIsTrackedPatch`, offsets from `TryEnsureMapSpotOffsets`), so resource
-frames go away with just "Show on big map" on. The `bg_img` friend background stays (normal styling that real
-friends get too).
+frames go away with just "Show on big map" on. `radarPlayerNamesAll` is deliberately **absent** from that
+gate: the name group injects no world tracks, so it can never produce a spot needing the square suppressed.
+The `bg_img` friend background stays (normal styling that real friends get too).
 
 **Gotchas found:** `FriendClientService`'s C# namespace is `ClientSystem.Social.Friend` (the `EcsSystem`
 prefix is only the ilspy folder = image name); and the managed `TryGetSelfPlayerNetId` returns 0 on this
@@ -201,7 +215,7 @@ build → use `TryResolveSelfPlayerNetIdMono` (AuraMono `PlayerDataCenter.GetSel
 `FindAuraMonoClassInAllLoadedImages(className, nameSpace)` fallback (args reversed) and always log which class
 failed, or you get a stuck no-op with no install/error line (that was the "blank/placeholder avatar" bug).
 
-## Real player names for non-friends (`radarPlayerAvatarsAll`)
+## Real player names for non-friends (`radarPlayerNamesAll`)
 
 The game shows strangers a **Title**, not their name. There is **no single lever** — different surfaces read the
 name from different functions:
@@ -242,8 +256,15 @@ force-friend). TWO detours cover the surfaces:
   for players in the name cache, else original. `IsAcquaintance`'s ONLY external caller is this nameplate (no
   social/action gating — safe, unlike the reverted force-friend). Now the name shows without opening the card.
 - Overrides friends too (real name instead of nickname — low risk, informative; friends' over-head still uses
-  NickName); self excluded (RemotePlayerComponent is remote-only). Managed by the `radarPlayerAvatarsAll` toggle
+  NickName); self excluded (RemotePlayerComponent is remote-only). Managed by the `radarPlayerNamesAll` toggle
   (`mapNameActive` gates all hooks); GetUserProfile + IsAcquaintance detours undone in `Cleanup`.
+- **Shared with the avatar group: the scan, nothing else.** `RefreshRemotePlayerScan` builds BOTH the
+  `shortId → name` cache used here AND `mapAvatarUrlByNetId`, which is where the ESP overlay reads a player
+  marker's avatar URL from (`HeartopiaResourceVisualEsp.TryGetPlayerAvatarTexture`). So
+  `ManagePlayerAvatarPatches` runs it under `avatars || names`, **before** either group's branch — hanging it
+  off the names branch alone blanks ESP avatars for anyone running avatars-on/names-off. It self-throttles on
+  `mapPlayerNextScanAt` (1 s), so this caller and the track-sync one cost a single scan per interval. No
+  detour is shared between the groups, and this group force-friends nothing.
 Diag: `[MapSpots] name read: … Title.str@40 …` and `name patch: GetUserProfile Title-mirror detour installed on
 N overload(s)`.
 

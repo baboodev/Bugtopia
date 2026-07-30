@@ -1112,7 +1112,8 @@ namespace HeartopiaMod
                     + " addOk=" + addOk + " addFail=" + addFail + " removed=" + removed + " removeFail=" + removeFail
                     // Avatar-path diagnostic: avatarsAll=toggle, playerCand=Player spots seen,
                     // forceFriend=players matched to a real netId (the non-friend avatar set).
-                    + " | avatarsAll=" + this.radarPlayerAvatarsAll + " playerCand=" + playerCandidates
+                    + " | avatarsAll=" + this.radarPlayerAvatarsAll + " namesAll=" + this.radarPlayerNamesAll
+                    + " playerCand=" + playerCandidates
                     + " forceFriend=" + this.mapAvatarWorldNetIdsNext.Count);
             }
 
@@ -2404,17 +2405,29 @@ namespace HeartopiaMod
             }
             this.avatarPatchNextTryAt = now + 2f;
 
-            // World-ready gate (LoadingClosedEvent). radarPlayerAvatarsAll / radarBigMapSpots are
-            // persisted, so with either of them on this used to resolve + install six Mono detours
-            // (GetPlayerName, GetUserProfile, IsAcquaintance, IsTracked, avatar, friend-gate) every
-            // 2 s from the first frame — none of those classes exist before a world.
-            // Only the INSTALL side waits: when both toggles are off we fall through to the Undo
+            // World-ready gate (LoadingClosedEvent). radarPlayerAvatarsAll / radarPlayerNamesAll /
+            // radarBigMapSpots are persisted, so with any of them on this used to resolve + install six
+            // Mono detours (GetPlayerName, GetUserProfile, IsAcquaintance, IsTracked, avatar, friend-gate)
+            // every 2 s from the first frame — none of those classes exist before a world.
+            // Only the INSTALL side waits: when all toggles are off we fall through to the Undo
             // branches as before, so turning a toggle off still reverts immediately. Returning
             // early (rather than letting the install branch fail) also keeps us from running the
             // detour teardown during a world load.
-            if ((this.radarPlayerAvatarsAll || this.radarBigMapSpots) && !this.IsWorldReady)
+            if ((this.radarPlayerAvatarsAll || this.radarPlayerNamesAll || this.radarBigMapSpots)
+                && !this.IsWorldReady)
             {
                 return;
+            }
+
+            // Shared by BOTH groups, so it runs before either: the scan builds the shortId -> real-name
+            // cache (names) AND mapAvatarUrlByNetId, which is where the ESP overlay reads a player marker's
+            // avatar URL from (HeartopiaResourceVisualEsp.TryGetPlayerAvatarTexture). Hanging it off the
+            // names branch alone would blank ESP avatars for anyone running avatars-on/names-off. It
+            // self-throttles on mapPlayerNextScanAt (1 s), so this and the track-sync caller at :856
+            // together still cost one scan per interval.
+            if (this.radarPlayerAvatarsAll || this.radarPlayerNamesAll)
+            {
+                this.RefreshRemotePlayerScan();
             }
 
             avatarForceFriendActive = this.radarPlayerAvatarsAll;
@@ -2445,12 +2458,13 @@ namespace HeartopiaMod
                 this.UndoFriendGatePatch();
             }
 
-            // Real names for non-friends (map spot / dialog title): scan + get_name detour. Managed by the
-            // same avatar toggle. No force-friend -> no dialog regression.
-            mapNameActive = this.radarPlayerAvatarsAll;
-            if (this.radarPlayerAvatarsAll)
+            // Real names for non-friends (over-head nameplate / map spot label / chat): three detours on
+            // their OWN toggle since the split. Disjoint from the avatar group above — no shared detour and
+            // no force-friend anywhere, so this group can never cause the dialog regression the avatar
+            // group's scoped force-friend guards against. The scan it needs already ran above.
+            mapNameActive = this.radarPlayerNamesAll;
+            if (this.radarPlayerNamesAll)
             {
-                this.RefreshRemotePlayerScan(); // also (re)builds the netId -> real-name cache
                 this.EnsureGetNamePatch();          // map spot / chat surfaces (GetPlayerName)
                 this.EnsureGetProfilePatch();       // over-head nameplate + profile card (GetUserProfile.Title)
                 this.EnsureIsAcquaintancePatch();   // let the nameplate show strangers without opening the card
@@ -2463,7 +2477,9 @@ namespace HeartopiaMod
             }
 
             // The tracked-square suppression (MapSpot.get_IsTracked) is needed by BOTH big-map resource spots
-            // and world-player spots, so it's managed independently of the avatar toggle.
+            // and world-player spots, so it's managed independently of the avatar toggle. The NAMES toggle is
+            // deliberately absent from this gate: it injects no world tracks (:784 gates Player tracks on the
+            // avatar flag alone), so it can never produce a spot that needs the square suppressed.
             if (this.radarBigMapSpots || this.radarPlayerAvatarsAll)
             {
                 this.EnsureIsTrackedPatch();
