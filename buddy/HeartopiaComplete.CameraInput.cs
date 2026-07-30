@@ -350,81 +350,14 @@ namespace HeartopiaMod
             }
 
             this.nextCameraToggleInteractAt = Time.unscaledTime + 0.15f;
+
             this.DirectClickInteractButton();
         }
 
-        private void ResetMouseLookOrbitState()
-        {
-            this.mouseLookOrbitInitialized = false;
-        }
-
-        // Mouse-look free-cam: drives the game camera controller's yaw/pitch axis (see
-        // HeartopiaComplete.CameraRig.cs) instead of writing Camera.main.transform. Runs from
-        // OnUpdate so the axis values land before the game's XDTCameraManager.LateUpdate, which
-        // then poses Camera.main from them itself — no Transform setter patches, no direct
-        // camera writes, no pin frames.
-        private void UpdateDirectMouseLookCamera(bool shouldCapture)
-        {
-            if (!shouldCapture)
-            {
-                this.ResetMouseLookOrbitState();
-                return;
-            }
-
-            if (!this.TryResolveCameraControllerAxis(
-                    out IntPtr controllerObj,
-                    out IntPtr getAxisX,
-                    out IntPtr getAxisY,
-                    out IntPtr setAxisX,
-                    out IntPtr setAxisY))
-            {
-                // Current camera state is not axis-capable (fixed/cutscene/transition camera) —
-                // mouse-look correctly does not apply; re-seed once an axis controller returns.
-                this.mouseLookOrbitInitialized = false;
-                return;
-            }
-
-            // Seed the accumulators from the live axis on the capture edge (and after any camera
-            // state that took the axis away) so the first mouse move continues from the current
-            // camera pose instead of snapping.
-            if (!this.mouseLookOrbitInitialized)
-            {
-                if (!this.TryReadCameraAxisValue(controllerObj, getAxisX, out float seedYaw)
-                    || !this.TryReadCameraAxisValue(controllerObj, getAxisY, out float seedPitch))
-                {
-                    return;
-                }
-
-                this.mouseLookOrbitYaw = seedYaw;
-                this.mouseLookOrbitPitch = seedPitch;
-                this.mouseLookOrbitInitialized = true;
-            }
-
-            // axisX = camera yaw (tracks euler Y 1:1). axisY runs opposite to camera euler X
-            // (pitch = 90 - axisValue), so mouse-up ADDS to the axis to keep the old
-            // "mouse up looks up" feel. SetAxis*value Warp-clamps to the axis min/max.
-            this.mouseLookOrbitYaw += Input.GetAxis("Mouse X") * 3f;
-            this.mouseLookOrbitPitch += Input.GetAxis("Mouse Y") * 2.2f;
-            if (!this.TryWriteCameraAxisValue(controllerObj, setAxisX, this.mouseLookOrbitYaw)
-                || !this.TryWriteCameraAxisValue(controllerObj, setAxisY, this.mouseLookOrbitPitch))
-            {
-                this.mouseLookOrbitInitialized = false;
-                return;
-            }
-
-            // Re-sync the accumulators to the Warp-clamped axis values so the pitch accumulator
-            // can't wind up past the clamp (which would take miles of reverse mouse travel to
-            // unwind while the on-screen camera sits pinned at the limit).
-            if (this.TryReadCameraAxisValue(controllerObj, getAxisX, out float warpedYaw))
-            {
-                this.mouseLookOrbitYaw = warpedYaw;
-            }
-
-            if (this.TryReadCameraAxisValue(controllerObj, getAxisY, out float warpedPitch))
-            {
-                this.mouseLookOrbitPitch = warpedPitch;
-            }
-        }
+        // How far the axis must have moved behind our back before we treat it as the game's doing
+        // rather than smoothing noise. Comfortably above a fast mouse frame's own contribution
+        // (which is already folded into the accumulator, so it never shows up here) and well below
+        // an auto-align, which swings the heading by tens of degrees.
 
         private void UpdateMouseLookState()
         {
@@ -437,23 +370,27 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (shouldCapture && !this.mouseLookWasCaptureActive)
+            // Drive the GAME'S own free-look instead of steering the camera ourselves
+            // (TrySetGameMouseControlMode in HeartopiaComplete.CameraRig.cs). Only on the edges:
+            // the setter persists to PlayerPrefs, so poking it every frame would be wasteful and
+            // would fight the player's own settings screen.
+            if (shouldCapture != this.mouseLookWasCaptureActive)
             {
-                this.mouseLookOrbitInitialized = false;
+                if (shouldCapture)
+                {
+                    this.TrySetGameMouseControlMode(GameMouseControlModeMoveRotate);
+                }
+                else
+                {
+                    this.RestoreGameMouseControlMode();
+                }
             }
 
-            if (shouldCapture)
-            {
-                Cursor.visible = false;
-                Cursor.lockState = CursorLockMode.Locked;
-            }
-            else
-            {
-                Cursor.visible = true;
-                Cursor.lockState = CursorLockMode.None;
-            }
-
-            this.mouseLookCaptureActive = shouldCapture;
+            // Deliberately NOT touching Cursor.visible / lockState any more: MouseControl owns the
+            // cursor in this mode, together with the UI gating, the allowed player states and the
+            // Alt-to-release bracket. Two owners would fight, and the game's rules are the correct
+            // ones. The crosshair follows the game's actual state instead of our intent.
+            this.mouseLookCaptureActive = shouldCapture && !Cursor.visible;
             this.mouseLookWasCaptureActive = shouldCapture;
         }
 

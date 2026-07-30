@@ -5,27 +5,29 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        // --- Camera rig: drive the game's OWN camera controller axis (embedded Mono) ---
+        // --- Camera rig: two small, unrelated jobs ---
         //
-        // XDTCameraManager (image XDTLevelAndEntity, Mono-only — invisible to the IL2CPP .text
-        // surface) implements ILateUpdate: every frame it reads
-        // CurrentController.GetAxisXvalue()/GetAxisYvalue() (axisX = camera yaw, axisY = camera
-        // pitch), recomputes the camera pose from them and writes Camera.main via
-        // Transform.SetPositionAndRotation. Any direct write to Camera.main.transform is
-        // therefore overwritten in the same frame's LateUpdate — the old mouse-look kept
-        // Transform.position/rotation setter PREFIX patches (module .text, Themis-hashable,
-        // anti-cheat surface #4) just to win that fight. Driving the controller axis instead
-        // lets the game position its own camera: zero .text patches. Axis writes happen in
-        // OnUpdate, which runs before the game's LateUpdate in the same frame.
+        // 1. A ONE-SHOT YAW NUDGE for auto-farm (`RotateCameraAroundPlayer`, three call sites in
+        //    HeartopiaComplete.Farm.cs): add N degrees to the game camera controller's yaw axis and
+        //    let XDTCameraManager's own LateUpdate swing Camera.main around the player. It replaced
+        //    manual orbit math plus Transform-setter patches plus a 60-frame pin, so it costs zero
+        //    `.text` patches. No-op when the live controller is not axis-capable (fixed/cutscene/
+        //    transition cameras) — the flip is a convenience, not a requirement.
         //
-        // The current controller is state-dependent: the FollowCameraController hierarchy
-        // (on-foot / swim / vehicle) exposes the axis methods, fixed/cutscene controllers do
-        // not. Resolve the four methods on the LIVE controller class on every call
-        // (FindAuraMonoMethodOnHierarchy is dictionary-cached, so this is cheap) and no-op when
-        // any is absent — mouse-look then correctly does not apply during those camera states.
+        // 2. THE CAMERA TOGGLE, which flips the GAME'S own free-look setting
+        //    (`GameSettingSystem.MouseControlMode`). See the block on TrySetGameMouseControlMode for
+        //    why the mod no longer implements mouse-look itself, and for the nine attempts that
+        //    proved it should not.
         //
-        // Set*value routes through AxisValue.Warp, which clamps/wraps to the axis min/max — no
-        // manual clamping needed. Camera pose is client-local; nothing is sent to the server.
+        // ⚠️ This file used to drive the camera axis EVERY FRAME as the mouse-look implementation.
+        // All of that is gone: nothing here steers the camera continuously any more, and nothing
+        // here should. If a future feature wants the camera, drive the game's own input or setting,
+        // not the axis — the axis only survives here because a single instantaneous nudge is
+        // immune to the blend/transition problem that killed the continuous version.
+        //
+        // XDTCameraManager lives in image XDTLevelAndEntity and is Mono-only, so everything below is
+        // AuraMono reflection and invisible to the IL2CPP `.text` surface. Controller pointers are
+        // NEVER cached across frames — the manager creates and drops these instances constantly.
 
         private AuraMonoObjectCache cameraRigManagerCache;
         private float cameraRigManagerRetryAt;
@@ -114,6 +116,7 @@ namespace HeartopiaMod
             getAxisY = this.FindAuraMonoMethodOnHierarchy(ctrlClass, "GetAxisYvalue", 0);
             setAxisX = this.FindAuraMonoMethodOnHierarchy(ctrlClass, "SetAxisXvalue", 1);
             setAxisY = this.FindAuraMonoMethodOnHierarchy(ctrlClass, "SetAxisYvalue", 1);
+
             if (getAxisX == IntPtr.Zero || getAxisY == IntPtr.Zero || setAxisX == IntPtr.Zero || setAxisY == IntPtr.Zero)
             {
                 // Not an axis-capable controller (fixed/cutscene camera) — callers must no-op.
@@ -156,6 +159,217 @@ namespace HeartopiaMod
 
             value = *(float*)raw;
             return true;
+        }
+
+        // ⭐⭐⭐⭐ WHAT CAMERA TOGGLE ACTUALLY DOES NOW: it flips the GAME'S OWN free-look setting.
+        //
+        // The game ships a PC free-look mode — `GameSettingSystem.MouseControlMode = MoveRotate`,
+        // driven by `XDTGUI.Core.ResourceLife.MouseControl`. Verified by the user: in that mode the
+        // camera is NEVER lost, including above the jump height where every version of the mod's own
+        // mouse-look died. Nine attempts to reproduce it from outside all failed, for reasons that
+        // are now understood and recorded below — so stop reproducing it and just turn it on.
+        //
+        // What the game's mode does that no external driver could: `MouseControl` owns the cursor,
+        // the UI gating (`hasViewOpen`), the allowed player states, the Alt-to-release bracket AND
+        // the `SendValueToControl(ScreenTouch, Perform/Cancel)` pair that suspends the camera
+        // target's auto-yaw remediation. Every one of those is a separate thing the mod would have
+        // had to re-derive correctly, and each was a way to be subtly wrong.
+        //
+        // ⛔ THE NINE DEAD ENDS, so nobody walks them again. The symptom: jumping above a "Player 3C"
+        // trigger volume's `heightAbove` pops that area's camera shot, landing re-pushes it, and the
+        // second `XDTCameraManager.Switch` interrupts the first — nested `BlendCameraController`s,
+        // up to a second of overlapping blends, during which the mod's steering did nothing.
+        //   1-4, 6, 8: wrote the axis (or `mouseMove`) on `CurrentController` — during a storm a
+        //     `BlendCameraController`, which has neither an axis nor a `mouseMove` field — and on
+        //     `TargetController`, whose blend weight is ~0 early. The "from" side, which dominates
+        //     the picture, was never reached. #8 additionally re-seeded from the wrapper's LERPED
+        //     axis and zeroed the integrator speeds, feeding lerp(leaves) back onto the leaves:
+        //     nine nested blends, 10-21° lurches on a 0.05 mouse delta, axis decoupled from camera.
+        //   5: cancelling `isOpenInterpolationValue` — irrelevant, its only caller is
+        //     `ApplyInteractConfig`.
+        //   7, 9: the right pipe (`SendTouchLookValueToControl`) in the wrong dialect, then the
+        //     right dialect (`delta * 20`, every frame, zeros included, as `MouseControl` does).
+        //     Even correct, it did not fix it — the multicast reaches every live follow camera, but
+        //     evidently that alone is not the whole of what the native mode gets right.
+        // The lesson worth keeping: when the game already implements the feature, drive ITS switch.
+        private const int GameMouseControlModeMoveRotate = 0;
+        private const int GameMouseControlModeDragRotate = 1;
+
+        private bool gameMouseControlModeLogged;
+
+        // Returns true when the mode was applied (or already correct). Fail-closed: on any
+        // resolution failure it returns false and nothing is touched.
+        private bool TrySetGameMouseControlMode(int mode)
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady()
+                    || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                // `GameSettingSystem.Instance` is `M<IGameSetting>.Inst as GameSettingSystem` — a
+                // static property routed through a generic manager lookup. The project's proven way
+                // to reach a manager is the service dictionary (reach-manager-via-servicedic); the
+                // static getter is only the fallback.
+                IntPtr settings = IntPtr.Zero;
+                if (!this.TryGetAuraMonoManagerFromServiceDic("GameSettingSystem", out settings) || settings == IntPtr.Zero)
+                {
+                    IntPtr klass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        "XDTGameSystem.GameplaySystem.GameSetting", "GameSettingSystem");
+                    IntPtr getInstance = klass != IntPtr.Zero
+                        ? this.FindAuraMonoMethodOnHierarchy(klass, "get_Instance", 0)
+                        : IntPtr.Zero;
+                    if (getInstance != IntPtr.Zero)
+                    {
+                        IntPtr instExc = IntPtr.Zero;
+                        settings = auraMonoRuntimeInvoke(getInstance, IntPtr.Zero, IntPtr.Zero, ref instExc);
+                        if (instExc != IntPtr.Zero)
+                        {
+                            settings = IntPtr.Zero;
+                        }
+                    }
+                }
+
+                if (settings == IntPtr.Zero)
+                {
+                    this.LogGameMouseControlModeFailureOnce("GameSettingSystem instance not resolvable "
+                                                            + "(service dictionary and static Instance both failed)");
+                    return false;
+                }
+
+                IntPtr settingsClass = auraMonoObjectGetClass(settings);
+                if (settingsClass == IntPtr.Zero)
+                {
+                    this.LogGameMouseControlModeFailureOnce("GameSettingSystem class unreadable");
+                    return false;
+                }
+
+                IntPtr getMode = this.FindAuraMonoMethodOnHierarchy(settingsClass, "get_MouseControlMode", 0);
+                IntPtr setMode = this.FindAuraMonoMethodOnHierarchy(settingsClass, "set_MouseControlMode", 1);
+                if (setMode == IntPtr.Zero)
+                {
+                    this.LogGameMouseControlModeFailureOnce("set_MouseControlMode not found on "
+                                                            + this.GetAuraMonoClassDisplayName(settingsClass));
+                    return false;
+                }
+
+                IntPtr exc;
+
+                if (!this.TryInvokeGameMouseControlModeSetter(setMode, settings, mode))
+                {
+                    this.LogGameMouseControlModeFailureOnce("set_MouseControlMode threw");
+                    return false;
+                }
+
+                // The setter persists to PlayerPrefs and fires PCShortCutShowEvent, but MouseControl
+                // only re-evaluates in Refresh() (or on a player-state change), so poke it directly
+                // or the switch does not take effect until the player happens to change state.
+                this.TryRefreshGameMouseControl();
+
+                if (!this.gameMouseControlModeLogged)
+                {
+                    this.gameMouseControlModeLogged = true;
+                    ModLogger.Msg("[CameraRig] Camera Toggle drives the game's own free-look "
+                                  + "(GameSettingSystem.MouseControlMode: 0 = MoveRotate, 1 = DragRotate).");
+                }
+
+                // Read it straight back: this separates "we never set it" from "we set it and
+                // something put it back", which look identical from the player's side.
+                if (getMode != IntPtr.Zero && auraMonoObjectUnbox != null)
+                {
+                    exc = IntPtr.Zero;
+                    IntPtr check = auraMonoRuntimeInvoke(getMode, settings, IntPtr.Zero, ref exc);
+                    if (exc == IntPtr.Zero && check != IntPtr.Zero)
+                    {
+                        IntPtr raw = auraMonoObjectUnbox(check);
+                        if (raw != IntPtr.Zero)
+                        {
+                            int now = System.Runtime.InteropServices.Marshal.ReadInt32(raw);
+                            ModLogger.Msg("[CameraRig] MouseControlMode -> requested " + mode
+                                          + ", reads back " + now
+                                          + (now == mode ? " (applied)" : " (NOT applied)"));
+                        }
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void LogGameMouseControlModeFailureOnce(string reason)
+        {
+            if (this.gameMouseControlModeLogged)
+            {
+                return;
+            }
+
+            this.gameMouseControlModeLogged = true;
+            ModLogger.Msg("[CameraRig] Camera Toggle could not switch the game's free-look: " + reason
+                          + ". The toggle will do nothing until this resolves.");
+        }
+
+        private unsafe bool TryInvokeGameMouseControlModeSetter(IntPtr setter, IntPtr settings, int mode)
+        {
+            IntPtr exc = IntPtr.Zero;
+            int value = mode;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&value);
+            auraMonoRuntimeInvoke(setter, settings, (IntPtr)args, ref exc);
+            return exc == IntPtr.Zero;
+        }
+
+        // UIManager.mouseControl.Refresh() — the field is public, Refresh() is public.
+        private void TryRefreshGameMouseControl()
+        {
+            try
+            {
+                if (!this.ModTryResolveAuraMonoUIManager(out IntPtr uiManagerObj, out _)
+                    || uiManagerObj == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                if (!this.TryGetMonoObjectMember(uiManagerObj, "mouseControl", out IntPtr mouseControl)
+                    || mouseControl == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                IntPtr mcClass = auraMonoObjectGetClass(mouseControl);
+                IntPtr refresh = mcClass != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(mcClass, "Refresh", 0)
+                    : IntPtr.Zero;
+                if (refresh == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(refresh, mouseControl, IntPtr.Zero, ref exc);
+            }
+            catch
+            {
+            }
+        }
+
+        // Off means off: put the game back on DragRotate.
+        //
+        // ⚠️ This deliberately does NOT restore "whatever the player had before". That was the first
+        // design and it behaved wrongly for the obvious case: if the player already had MoveRotate
+        // selected, the mod saved 0 as the value to restore and switching the toggle off put it back
+        // to 0 — the log read `requested 0` on both edges and the feature looked stuck on. A toggle
+        // that cannot turn its own thing off is worse than one that overrides a preference, and the
+        // preference is one click away in the game's own settings.
+        internal void RestoreGameMouseControlMode()
+        {
+            this.TrySetGameMouseControlMode(GameMouseControlModeDragRotate);
         }
 
         private unsafe bool TryWriteCameraAxisValue(IntPtr controllerObj, IntPtr setMethod, float value)

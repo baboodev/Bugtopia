@@ -209,9 +209,6 @@ namespace HeartopiaMod
         // Mouse-look accumulators, in the game camera controller's AXIS units (axisX = yaw,
         // axisY = pitch; see HeartopiaComplete.CameraRig.cs). Seeded from GetAxis*value on the
         // capture edge, re-synced to the Warp-clamped values after each write.
-        private bool mouseLookOrbitInitialized = false;
-        private float mouseLookOrbitYaw = 0f;
-        private float mouseLookOrbitPitch = 12f;
         private bool mouseLookWasCaptureActive = false;
         private float nextCameraToggleInteractAt = 0f;
         private float antiAfkInterval = 9f;
@@ -670,11 +667,9 @@ namespace HeartopiaMod
             this.UpdatePetPlayAutomation();
             this.UpdateGameUiClickBlockState();
             Breadcrumbs.Drop("ou.uiblock");
+            // Camera Toggle now just flips the game's own free-look setting on its edges
+            // (HeartopiaComplete.CameraRig.cs) — there is no per-frame camera steering any more.
             this.UpdateMouseLookState();
-            // Drive the game camera controller's axis from Update: the game's
-            // XDTCameraManager.LateUpdate reads the axis LATER this same frame and poses
-            // Camera.main from it (see HeartopiaComplete.CameraRig.cs).
-            this.UpdateDirectMouseLookCamera(this.mouseLookCaptureActive);
             this.UpdateCameraToggleInteractClick();
             float instantFps = (Time.unscaledDeltaTime > 0.0001f) ? (1f / Time.unscaledDeltaTime) : this.fpsBypassObservedFps;
             if (this.fpsBypassEnabled)
@@ -5983,6 +5978,10 @@ namespace HeartopiaMod
         {
             // Final word on the injection gates before the process goes away (InjectionGateCanary.cs).
             InjectionGateCanary.SampleOnShutdown();
+
+            // Camera Toggle flips the GAME's own MouseControlMode, which persists to PlayerPrefs —
+            // put it back, or turning the mod off would leave the player's setting changed for good.
+            this.RestoreGameMouseControlMode();
 
             if (this.eventSystemBlockedByMenu)
             {
