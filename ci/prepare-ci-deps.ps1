@@ -54,7 +54,8 @@ $interopDlls = @(
     "UnityEngine.TextRenderingModule.dll",
     "UnityEngine.UI.dll",
     "UnityEngine.UIModule.dll",
-    "Unity.TextMeshPro.dll"
+    "Unity.TextMeshPro.dll",
+    "Unity.InputSystem.dll"
 )
 
 $staging = Join-Path $env:TEMP ("heartopia-ci-deps-" + [guid]::NewGuid().ToString("N"))

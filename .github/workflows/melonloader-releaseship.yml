@@ -113,7 +113,11 @@ jobs:
             "BepInEx\core\BepInEx.Unity.IL2CPP.dll",
             "BepInEx\core\MonoMod.RuntimeDetour.dll",
             "BepInEx\core\0Harmony.dll",
-            "BepInEx\interop\Il2Cppmscorlib.dll"
+            "BepInEx\interop\Il2Cppmscorlib.dll",
+            # Added with Settings->Game Keys. Listed here so a STALE archive fails at this step with
+            # the regenerate instructions, instead of as a puzzling CS0234 three steps later.
+            "BepInEx\interop\Unity.InputSystem.dll",
+            "MelonLoader\Il2CppAssemblies\Unity.InputSystem.dll"
           )
           foreach ($rel in $required) {
             $path = Join-Path $depsRoot $rel

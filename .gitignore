@@ -1,5 +1,6 @@
 Directory.Build.Props
 ci/melonloader-ci-deps.zip
+ci/unified-ci-deps.zip
 ci/heartopia/
 buddy/bin
 buddy/obj
