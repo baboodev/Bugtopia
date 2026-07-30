@@ -154,6 +154,10 @@
       <HintPath>$(HeartopiaDir)\BepInEx\interop\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(HeartopiaDir)\BepInEx\interop\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- Universal only: add MelonLoader.dll (shared deps + interop come from the BepInEx group above). -->
@@ -242,6 +246,10 @@
       <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Unity.TextMeshPro">
       <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
@@ -253,6 +261,9 @@
     <Compile Include="InjectionGateCanary.cs" />
     <Compile Include="UnityLogMirrorSetting.cs" />
     <Compile Include="HookFreeDelegate.cs" />
+    <Compile Include="InputRebindFeature.cs" />
+    <Compile Include="GameKeyBindings.cs" />
+    <Compile Include="HeartopiaComplete.UguiGameKeysContent.cs" />
     <Compile Include="AnimalCareFeature.cs" />
     <Compile Include="CarpetStampFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />

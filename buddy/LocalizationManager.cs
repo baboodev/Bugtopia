@@ -21,6 +21,23 @@ namespace HeartopiaMod
         // Built-in English fallback strings. These are also used as stable translation keys.
         private static readonly Dictionary<string, string> EnglishDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
+            { "Game Keys", "Game Keys" },
+            { "Camera mode", "Camera mode" },
+            { "Rebinding moves every action sharing that key — the game draws one hint per key.", "Rebinding moves every action sharing that key — the game draws one hint per key." },
+            { "GAME KEY BINDINGS", "GAME KEY BINDINGS" },
+            { "These are the GAME's own keys, not the mod's. Changes apply immediately and are not saved by the game.", "These are the GAME's own keys, not the mod's. Changes apply immediately and are not saved by the game." },
+            { "Key bindings are not loaded yet — enter the world and reopen this page.", "Key bindings are not loaded yet — enter the world and reopen this page." },
+            { "RESET ALL TO DEFAULTS", "Reset All to Defaults" },
+            { "Show all direct keys", "Show all direct keys" },
+            { "Hide direct keys", "Hide direct keys" },
+            { "Game keys restored to defaults", "Game keys restored to defaults" },
+            { "No game key overrides to reset", "No game key overrides to reset" },
+            { "That key cannot be bound", "That key cannot be bound" },
+            { "GameActionMap", "Gameplay" },
+            { "VehicleActionMap", "Vehicle" },
+            { "UIActionMap", "Interface" },
+            { "AllKeyboardKeysMap", "Direct keys" },
             // Main navigation / tabs
             { "Self", "Self" },
             { "Game UI", "Game UI" },
@@ -1175,6 +1192,23 @@ namespace HeartopiaMod
         // Built-in Spanish fallback strings.
         private static readonly Dictionary<string, string> SpanishDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
+            { "Game Keys", "Teclas del juego" },
+            { "Camera mode", "Modo cámara" },
+            { "Rebinding moves every action sharing that key — the game draws one hint per key.", "Reasignar mueve todas las acciones de esa tecla: el juego dibuja una sola pista por tecla." },
+            { "GAME KEY BINDINGS", "TECLAS DEL JUEGO" },
+            { "These are the GAME's own keys, not the mod's. Changes apply immediately and are not saved by the game.", "Estas son las teclas del JUEGO, no las del mod. Los cambios se aplican al instante y el juego no los guarda." },
+            { "Key bindings are not loaded yet — enter the world and reopen this page.", "Las teclas aún no están cargadas: entra al mundo y vuelve a abrir esta página." },
+            { "RESET ALL TO DEFAULTS", "Restaurar todo" },
+            { "Show all direct keys", "Mostrar todas las teclas directas" },
+            { "Hide direct keys", "Ocultar teclas directas" },
+            { "Game keys restored to defaults", "Teclas del juego restauradas" },
+            { "No game key overrides to reset", "No hay teclas del juego que restaurar" },
+            { "That key cannot be bound", "Esa tecla no se puede asignar" },
+            { "GameActionMap", "Juego" },
+            { "VehicleActionMap", "Vehículo" },
+            { "UIActionMap", "Interfaz" },
+            { "AllKeyboardKeysMap", "Teclas directas" },
             // Main navigation / tabs
             { "Self", "Personal" },
             { "Game UI", "Interfaz del juego" },
@@ -2327,6 +2361,23 @@ namespace HeartopiaMod
         // Built-in Simplified Chinese fallback strings.
         private static readonly Dictionary<string, string> ChineseSimplifiedDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
+            { "Game Keys", "游戏按键" },
+            { "Camera mode", "镜头模式" },
+            { "Rebinding moves every action sharing that key — the game draws one hint per key.", "重新绑定会移动该按键上的所有操作 — 游戏每个按键只画一个提示。" },
+            { "GAME KEY BINDINGS", "游戏按键设置" },
+            { "These are the GAME's own keys, not the mod's. Changes apply immediately and are not saved by the game.", "这些是游戏本身的按键，不是模组的。修改立即生效，游戏不会保存。" },
+            { "Key bindings are not loaded yet — enter the world and reopen this page.", "按键尚未加载 — 进入世界后重新打开此页面。" },
+            { "RESET ALL TO DEFAULTS", "全部恢复默认" },
+            { "Show all direct keys", "显示全部直接按键" },
+            { "Hide direct keys", "隐藏直接按键" },
+            { "Game keys restored to defaults", "游戏按键已恢复默认" },
+            { "No game key overrides to reset", "没有需要恢复的游戏按键" },
+            { "That key cannot be bound", "该按键无法绑定" },
+            { "GameActionMap", "游戏操作" },
+            { "VehicleActionMap", "载具" },
+            { "UIActionMap", "界面" },
+            { "AllKeyboardKeysMap", "直接按键" },
             { "ENABLE AUTO FORAGING", "启用自动采集" },
             { "DISABLE AUTO FORAGING", "关闭自动采集" },
             { "Aura Farm", "光环农场" },
@@ -3477,6 +3528,23 @@ namespace HeartopiaMod
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
+            { "Game Keys", "Teclas do jogo" },
+            { "Camera mode", "Modo câmera" },
+            { "Rebinding moves every action sharing that key — the game draws one hint per key.", "Revincular move todas as ações dessa tecla — o jogo desenha uma dica por tecla." },
+            { "GAME KEY BINDINGS", "TECLAS DO JOGO" },
+            { "These are the GAME's own keys, not the mod's. Changes apply immediately and are not saved by the game.", "Estas são as teclas do JOGO, não as do mod. As mudanças valem na hora e o jogo não as salva." },
+            { "Key bindings are not loaded yet — enter the world and reopen this page.", "As teclas ainda não foram carregadas — entre no mundo e reabra esta página." },
+            { "RESET ALL TO DEFAULTS", "Restaurar tudo" },
+            { "Show all direct keys", "Mostrar todas as teclas diretas" },
+            { "Hide direct keys", "Ocultar teclas diretas" },
+            { "Game keys restored to defaults", "Teclas do jogo restauradas" },
+            { "No game key overrides to reset", "Nenhuma tecla do jogo para restaurar" },
+            { "That key cannot be bound", "Essa tecla não pode ser vinculada" },
+            { "GameActionMap", "Jogo" },
+            { "VehicleActionMap", "Veículo" },
+            { "UIActionMap", "Interface" },
+            { "AllKeyboardKeysMap", "Teclas diretas" },
             { "Self", "Eu" },
             { "Game UI", "Interface do jogo" },
             { "Resource Gathering", "Coleta de Recursos" },
@@ -4621,6 +4689,23 @@ namespace HeartopiaMod
         // Built-in Thai fallback strings.
         private static readonly Dictionary<string, string> ThaiDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
+            { "Game Keys", "ปุ่มของเกม" },
+            { "Camera mode", "โหมดกล้อง" },
+            { "Rebinding moves every action sharing that key — the game draws one hint per key.", "การผูกใหม่จะย้ายทุกการกระทำที่ใช้ปุ่มนั้น — เกมแสดงคำใบ้เดียวต่อปุ่ม" },
+            { "GAME KEY BINDINGS", "การตั้งค่าปุ่มของเกม" },
+            { "These are the GAME's own keys, not the mod's. Changes apply immediately and are not saved by the game.", "นี่คือปุ่มของตัวเกมเอง ไม่ใช่ของม็อด การเปลี่ยนแปลงมีผลทันทีและเกมจะไม่บันทึกไว้" },
+            { "Key bindings are not loaded yet — enter the world and reopen this page.", "ยังโหลดปุ่มไม่เสร็จ — เข้าสู่โลกแล้วเปิดหน้านี้ใหม่" },
+            { "RESET ALL TO DEFAULTS", "รีเซ็ตทั้งหมด" },
+            { "Show all direct keys", "แสดงปุ่มโดยตรงทั้งหมด" },
+            { "Hide direct keys", "ซ่อนปุ่มโดยตรง" },
+            { "Game keys restored to defaults", "รีเซ็ตปุ่มของเกมแล้ว" },
+            { "No game key overrides to reset", "ไม่มีปุ่มของเกมให้รีเซ็ต" },
+            { "That key cannot be bound", "ปุ่มนี้ผูกไม่ได้" },
+            { "GameActionMap", "การเล่น" },
+            { "VehicleActionMap", "ยานพาหนะ" },
+            { "UIActionMap", "อินเทอร์เฟซ" },
+            { "AllKeyboardKeysMap", "ปุ่มโดยตรง" },
             { "Self", "ตัวเอง" },
             { "Game UI", "UI เกม" },
             { "Resource Gathering", "เก็บทรัพยากร" },

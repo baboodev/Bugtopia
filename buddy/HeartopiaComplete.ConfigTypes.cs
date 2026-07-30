@@ -408,9 +408,23 @@ namespace HeartopiaMod
             public int multiCatchLimit = 1;
         }
 
+        // One user-chosen game-key override. Addressed by action MAP + binding INDEX rather than by
+        // action name, because that is exactly what ApplyBindingOverride takes and because a map
+        // can hold several bindings for the same action (composite parts, alternates). Stable
+        // across sessions since the asset ships with the game; a game update that reorders bindings
+        // would invalidate these, which is why applying one that no longer matches is a no-op
+        // rather than an error (see GameKeyBindings.cs).
+        [Serializable]
+        public class GameKeyOverrideEntry
+        {
+            public string Binding = "";   // "<map>/<index>", e.g. "AllKeyboardKeysMap/40"
+            public string Path = "";      // control path, e.g. "<Keyboard>/e"
+        }
+
         [Serializable]
         public class UnifiedConfigData
         {
+            public List<GameKeyOverrideEntry> GameKeyOverrides = new List<GameKeyOverrideEntry>();
             public KeybindConfigData Keybinds = new KeybindConfigData();
             public UiThemeConfigData UiTheme = new UiThemeConfigData();
             public RadarConfigData Radar = new RadarConfigData();

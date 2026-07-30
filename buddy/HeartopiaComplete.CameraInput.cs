@@ -385,6 +385,8 @@ namespace HeartopiaMod
                     this.RestoreGameMouseControlMode();
                 }
             }
+            // Do NOT re-add a key remap here: rebinding lives in Settings→Game Keys, and a second
+            // writer on the same binding would silently overwrite the player's own choice.
 
             // Deliberately NOT touching Cursor.visible / lockState any more: MouseControl owns the
             // cursor in this mode, together with the UI gating, the allowed player states and the

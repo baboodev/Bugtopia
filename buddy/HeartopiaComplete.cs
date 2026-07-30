@@ -671,6 +671,9 @@ namespace HeartopiaMod
             // (HeartopiaComplete.CameraRig.cs) — there is no per-frame camera steering any more.
             this.UpdateMouseLookState();
             this.UpdateCameraToggleInteractClick();
+            // Keeps the game's on-screen key hints agreeing with whatever Settings→Game Keys has
+            // rebound (InputRebindFeature.cs) — self-throttled, and a no-op with no overrides set.
+            this.ProcessGameKeyIconsOnUpdate();
             float instantFps = (Time.unscaledDeltaTime > 0.0001f) ? (1f / Time.unscaledDeltaTime) : this.fpsBypassObservedFps;
             if (this.fpsBypassEnabled)
             {
@@ -5982,6 +5985,11 @@ namespace HeartopiaMod
             // Camera Toggle flips the GAME's own MouseControlMode, which persists to PlayerPrefs —
             // put it back, or turning the mod off would leave the player's setting changed for good.
             this.RestoreGameMouseControlMode();
+
+            // Put back any key hint we relabelled (InputRebindFeature.cs). The BINDINGS themselves
+            // are deliberately left as the player set them — they are the player's choice, saved in
+            // the mod config; only our sprite writes are ours to undo.
+            this.RestoreKeyIcons();
 
             if (this.eventSystemBlockedByMenu)
             {

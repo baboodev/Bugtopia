@@ -66,6 +66,7 @@ namespace HeartopiaMod
                 if (string.IsNullOrWhiteSpace(data.Language)) data.Language = "en";
                 if (data.CustomTeleports == null) data.CustomTeleports = new List<CustomTeleportEntry>();
                 if (data.FishingRouteSpots == null) data.FishingRouteSpots = new List<CustomTeleportEntry>();
+                if (data.GameKeyOverrides == null) data.GameKeyOverrides = new List<GameKeyOverrideEntry>();
                 return data;
             }
             catch (Exception ex)
@@ -655,6 +656,7 @@ namespace HeartopiaMod
             }
 
             data.FishingRouteSpots = FishingRouteFeature.ExportCustomSpots();
+            data.GameKeyOverrides = this.ExportGameKeyOverrides();
         }
 
         private void SaveKeybinds(bool showNotification = true)
@@ -703,6 +705,9 @@ namespace HeartopiaMod
                 if (config != null)
                 {
                     this.ApplyKeybindConfig(config.Keybinds);
+                    // Game-key overrides can't be applied here — the InputActionAsset does not
+                    // exist until a world does, so this only parks them on the world-ready gate.
+                    this.ImportGameKeyOverrides(config.GameKeyOverrides);
                     ModLogger.Msg("Keybinds Loaded.");
                     this.AddMenuNotification("Keybinds loaded", new Color(0.55f, 0.88f, 1f));
                     return;

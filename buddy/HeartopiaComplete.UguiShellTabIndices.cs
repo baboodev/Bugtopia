@@ -40,6 +40,12 @@ namespace HeartopiaMod
         private const int UguiShellSettingsAboutSubIndex = 3;   // "About" within Settings' subs
         private const int UguiShellSettingsLoggingSubIndex = 4; // "Logging" within Settings' subs (round 2)
 
+        // Settings → Game Keys (HeartopiaComplete.UguiGameKeysContent.cs). Rebinds the GAME's keys,
+        // not the mod's — a separate page from Keybinds on purpose (different storage model, see
+        // that file's header). No IMGUI ancestor, so it is APPENDED at the end of Settings' sub
+        // array and every index above keeps its value.
+        private const int UguiShellSettingsGameKeysSubIndex = 5; // "Game Keys" within Settings' subs
+
         // Self→Building + Building Move Panel (round 4, HeartopiaComplete.UguiBuildingContent.cs):
         // display position 0 carries internal id 0 (UguiShellInternalTabIds[0]) = IMGUI
         // selectedTab 0 = Self, whose sub array {"Main","Building","Fun","Privacy","Game UI"}

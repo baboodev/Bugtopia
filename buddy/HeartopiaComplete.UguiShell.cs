@@ -192,6 +192,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellSettingsMainOnUpdate();
             this.ProcessUguiShellSettingsLoggingOnUpdate();
             this.ProcessUguiShellSettingsKeybindsOnUpdate();
+            this.ProcessUguiShellGameKeysOnUpdate();
             this.ProcessUguiShellThemeOnUpdate();
             this.ProcessUguiShellTeleportContentOnUpdate();
             this.ProcessUguiShellSelfBuildingOnUpdate();
@@ -438,7 +439,7 @@ namespace HeartopiaMod
                     new string[] { this.L("Home"), this.L("Animal Care"), this.L("NPCs"), this.L("Locations"), this.L("Events"), this.L("House"), this.L("Custom"), this.L("XYZ"), this.L("Spawn Vehicle") },
                     new string[0], // Bag / Warehouse — no sub-tabs
                     new string[0], // Research — no sub-tabs
-                    new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging") }
+                    new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging"), this.L("Game Keys") }
                 };
 
                 shell = new UguiShellHandle();
@@ -658,6 +659,13 @@ namespace HeartopiaMod
                                     // Phase 3 item 9: Settings→Keybinds
                                     // (HeartopiaComplete.UguiKeybindsContent.cs).
                                     subContents[j] = this.BuildUguiShellKeybindsContent(
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
+                                }
+                                else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsGameKeysSubIndex)
+                                {
+                                    // Settings→Game Keys — rebinds the GAME's InputActionAsset
+                                    // (HeartopiaComplete.UguiGameKeysContent.cs + GameKeyBindings.cs).
+                                    subContents[j] = this.BuildUguiShellGameKeysContent(
                                         container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsUiThemeSubIndex)
