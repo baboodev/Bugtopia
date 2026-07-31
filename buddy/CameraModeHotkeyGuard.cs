@@ -235,6 +235,18 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                // Must be the HINT image, not the cell's decoration. `RefreshCellShortcutVisible`
+                // toggles only the hint widget — the cell itself stays active — so probing any
+                // Image under cells@list would lose the ShowKeyboardTip half of the condition and
+                // block mod hotkeys with keyboard tips turned off. A key-letter sprite is the
+                // signature of the hint. (It is also why the probe count read 73 for four slots.)
+                Sprite sprite = image.sprite;
+                bool chip;
+                if (sprite == null || KeymappingIconKey(sprite.name, out chip) == null)
+                {
+                    continue;
+                }
+
                 int slot = CameraHintSlotForImage(image);
                 if (slot == int.MinValue)
                 {

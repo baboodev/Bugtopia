@@ -101,6 +101,10 @@ namespace HeartopiaMod
         private readonly List<Sprite> keyIconApplied = new List<Sprite>();
         private readonly List<int> keyIconTargetIds = new List<int>();
 
+        // Containers the hints live under (the interaction bar's cell list, each HUD chip node).
+        // Discovered by the full scan, then swept cheaply every tick — see SweepKeyIconRoots.
+        private readonly List<Transform> keyIconRoots = new List<Transform>();
+
         private bool keyIconSwapsDirty = true;
         private bool keyIconSpritesIndexed;
         private float keyIconIndexNextTryAt;
@@ -197,7 +201,10 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.keyIconNextCheckAt = Time.unscaledTime + 0.5f;
+            // 0.25 s rather than 0.5: the window that matters is between a hint widget appearing
+            // and the player reading it, and once the containers are known a tick is only a walk
+            // over a handful of small subtrees.
+            this.keyIconNextCheckAt = Time.unscaledTime + 0.25f;
 
             try
             {
@@ -220,9 +227,12 @@ namespace HeartopiaMod
                 // Hint widgets are created on demand (one per interaction cell of whatever is being
                 // looked at), so new stale hints keep appearing — but far too rarely to justify a
                 // scan every tick.
+                // Cheap first, every tick: catches hint widgets the game just created.
+                this.SweepKeyIconRoots();
+
                 if (Time.unscaledTime >= this.keyIconNextScanAt)
                 {
-                    this.keyIconNextScanAt = Time.unscaledTime + 3f;
+                    this.keyIconNextScanAt = Time.unscaledTime + (this.keyIconRoots.Count > 0 ? 10f : 3f);
                     this.ScanForKeyIconTargets();
                 }
 
@@ -389,6 +399,9 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Full sweep of every loaded Image. Expensive, so it runs rarely and its real job is to
+        // discover the few CONTAINERS the hints live under; the per-tick sweep below works off
+        // those. Kept as a periodic safety net for containers that appear later.
         private void ScanForKeyIconTargets()
         {
             if (this.keyIconSwaps.Count == 0 && this.gameKeyOverrides.Count == 0)
@@ -405,37 +418,124 @@ namespace HeartopiaMod
             for (int i = 0; i < images.Length; i++)
             {
                 Image image = images[i];
-                if (image == null)
+                if (image != null)
+                {
+                    this.TryAdoptKeyIconTarget(image);
+                }
+            }
+        }
+
+        // Cheap sweep of the known containers, every tick. The full scan alone was too slow to be
+        // correct: the game GROWS `_shortCutCell` when a target offers more interactions than the
+        // last one did, so walking up to a flower with three actions creates brand-new hint widgets
+        // that kept the default label until the next full scan up to three seconds later — which is
+        // exactly the window in which the player reads the hint and presses the key.
+        private void SweepKeyIconRoots()
+        {
+            for (int i = this.keyIconRoots.Count - 1; i >= 0; i--)
+            {
+                Transform root = this.keyIconRoots[i];
+                if (root == null)
+                {
+                    this.keyIconRoots.RemoveAt(i);
+                    continue;
+                }
+
+                Il2CppArrayBase<Image> images = root.GetComponentsInChildren<Image>(true);
+                if (images == null)
                 {
                     continue;
                 }
 
-                Sprite sprite = image.sprite;
-                if (sprite == null)
+                for (int j = 0; j < images.Length; j++)
                 {
-                    continue;
+                    Image image = images[j];
+                    if (image != null)
+                    {
+                        this.TryAdoptKeyIconTarget(image);
+                    }
+                }
+            }
+        }
+
+        private void TryAdoptKeyIconTarget(Image image)
+        {
+            int id = image.GetInstanceID();
+            if (this.keyIconTargetIds.Contains(id))
+            {
+                return;
+            }
+
+            Sprite sprite = image.sprite;
+            if (sprite == null)
+            {
+                return;
+            }
+
+            // Harvest the instance the GAME itself put on a live widget. Several distinct Sprite
+            // objects share one name, and only some of them render — picking the wrong one is how
+            // a chip went blank. An instance seen in use is proof it works, so it wins over
+            // whatever the bulk index happened to grab first. Safe here because a target we have
+            // already written to was filtered out above, so this is never our own replacement.
+            bool harvestChip;
+            string harvestKey = KeymappingIconKey(sprite.name, out harvestChip);
+            if (harvestKey != null)
+            {
+                if (harvestChip)
+                {
+                    this.keyChipIconSprites[harvestKey] = sprite;
+                }
+                else
+                {
+                    this.keyIconSprites[harvestKey] = sprite;
+                }
+            }
+
+            // Two kinds of target. The generated hints name their sprite after the key, so the key
+            // IS the lookup. The baked HUD hints do not — their sprite is prefab art with no
+            // relationship to the binding, so they are identified by the widget node they hang
+            // under and resolved through that node's action instead.
+            Sprite replacement = this.ResolveKeyIconReplacement(image, sprite);
+            if (replacement == null)
+            {
+                return;
+            }
+
+            this.keyIconTargets.Add(image);
+            this.keyIconOriginals.Add(sprite);
+            this.keyIconApplied.Add(replacement);
+            this.keyIconTargetIds.Add(id);
+            this.RememberKeyIconRoot(image.transform);
+        }
+
+        // The container a hint hangs under — the cell list for the interaction bar, the widget node
+        // for a HUD chip. Remembering the LIST (not the cell) is the point: new cells are added to
+        // it, and that is what the per-tick sweep has to see.
+        private void RememberKeyIconRoot(Transform hint)
+        {
+            Transform current = hint;
+            for (int depth = 0; depth < 6 && current != null; depth++)
+            {
+                string name = current.name;
+                bool isRoot = name.IndexOf("cells@list", StringComparison.OrdinalIgnoreCase) >= 0
+                              || name.IndexOf("shortcut@go", StringComparison.OrdinalIgnoreCase) >= 0
+                              || name.IndexOf("switchBar@shortcut", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (isRoot)
+                {
+                    for (int i = 0; i < this.keyIconRoots.Count; i++)
+                    {
+                        if (this.keyIconRoots[i] != null
+                            && this.keyIconRoots[i].GetInstanceID() == current.GetInstanceID())
+                        {
+                            return;
+                        }
+                    }
+
+                    this.keyIconRoots.Add(current);
+                    return;
                 }
 
-                // Two kinds of target. The generated hints name their sprite after the key, so the
-                // key IS the lookup. The baked HUD hints do not — their sprite is prefab art with
-                // no relationship to the binding, so they are identified by the widget node they
-                // hang under and resolved through that node's action instead.
-                Sprite replacement = this.ResolveKeyIconReplacement(image, sprite);
-                if (replacement == null)
-                {
-                    continue;
-                }
-
-                int id = image.GetInstanceID();
-                if (this.keyIconTargetIds.Contains(id))
-                {
-                    continue;
-                }
-
-                this.keyIconTargets.Add(image);
-                this.keyIconOriginals.Add(sprite);
-                this.keyIconApplied.Add(replacement);
-                this.keyIconTargetIds.Add(id);
+                current = current.parent;
             }
         }
 
@@ -488,8 +588,17 @@ namespace HeartopiaMod
                     return null;
                 }
 
+                // Compare KEYS, not sprite instances. The same letter exists as several distinct
+                // Sprite objects sharing one name, so an instance check called them different and
+                // "replaced" an untouched hint with a foreign instance of its own letter — which
+                // renders blank. A hint already showing the right key must be left strictly alone.
+                if (string.Equals(from, iconKey, StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
                 Sprite want = this.FindHintSprite(iconKey, chip);
-                if (want == null || want.GetInstanceID() == sprite.GetInstanceID())
+                if (want == null)
                 {
                     return null;
                 }
@@ -551,6 +660,8 @@ namespace HeartopiaMod
             this.keyIconOriginals.Clear();
             this.keyIconApplied.Clear();
             this.keyIconTargetIds.Clear();
+            // Roots are NOT cleared: they are scene containers, not our writes, and keeping them
+            // means a changed layout re-applies on the next tick instead of after a full scan.
         }
 
         // Sprites pulled out of an atlas come back named "<name>(Clone)", so compare on the stem.
