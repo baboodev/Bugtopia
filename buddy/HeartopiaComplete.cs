@@ -1311,6 +1311,9 @@ namespace HeartopiaMod
             this.ProcessSnowSculptureOnUpdate();
             this.ProcessSandSculptureOnUpdate();
             this.ProcessSeaCleanQteOnUpdate();
+            // Boss-QTE timing assist (SeaCleanBossQteFeature.cs) — per FRAME on purpose:
+            // the multi-round QTE shares one time budget that the game drains in real time.
+            this.TickSeaCleanBossQte();
             this.ProcessCorruptionCleanseOnUpdate();
             if (this.autoBuyEnabled && Time.unscaledTime >= this.nextAutoBuyLogicTime)
             {

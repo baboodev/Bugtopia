@@ -167,6 +167,13 @@ namespace HeartopiaMod
             public GameObject StatusLabel;          // level 2: enabled AND non-empty status
             public string StatusRawSeen;            // raw seaCleanAutoLastStatus ref last composed
 
+            // Boss-QTE assist (SeaCleanBossQteFeature.cs) — appended LAST on purpose: the
+            // relayout is a sequential yCur accumulator, so a tail block cannot shift anything
+            // above it, and the file's layout-signature contract stays intact.
+            public GameObject BossToggle;
+            public GameObject BossStatusLabel;      // shown only while the assist is on
+            public string BossStatusShown;
+
             // Layout signature — the exact values the last relayout used
             public int LayoutPacked = -1;
             public float LayoutHintH = -1f;
@@ -344,6 +351,16 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(handle.StatusLabel);
             handle.StatusLabel.SetActive(false);
 
+            // -------- Boss QTE assist --------
+            handle.BossToggle = this.CreateUguiCheckbox(scrollContent, "BossQteAssist",
+                this.L("Auto Boss QTE"), this.seaCleanBossQteEnabled,
+                new System.Action<bool>(this.OnUguiSeaCleanBossQteToggled)).gameObject;
+            handle.BossStatusShown = string.Empty;
+            handle.BossStatusLabel = this.CreateUguiLabel(scrollContent, "BossQteStatus",
+                string.Empty, 12f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.BossStatusLabel);
+            handle.BossStatusLabel.SetActive(false);
+
             // First measurements (may run while this sub-tab is inactive; a rejected measure
             // keeps the source-rect fallback and the slow tick retries once actually visible —
             // the Pictures spike caveat).
@@ -446,6 +463,18 @@ namespace HeartopiaMod
                 }
             }
 
+            // Boss QTE assist, tail block.
+            PlaceUguiTopLeft(handle.BossToggle, 8f, yCur, 360f, 30f);
+            yCur += 34f;
+            bool bossOn = this.seaCleanBossQteEnabled;
+            bool haveBossStatus = bossOn && !string.IsNullOrEmpty(this.SeaCleanBossQteStatus);
+            SetUguiGoActive(handle.BossStatusLabel, haveBossStatus);
+            if (haveBossStatus)
+            {
+                PlaceUguiTopLeft(handle.BossStatusLabel, 8f, yCur, panelW, 40f);
+                yCur += 44f;
+            }
+
             // The REAL height (:1039 return y + 20) — never the hardcoded 640 (file header).
             this.SetUguiScrollContentHeight(handle.ScrollContent, yCur + 20f);
 
@@ -469,6 +498,14 @@ namespace HeartopiaMod
             if (this.seaCleanQteEnabled && !string.IsNullOrEmpty(this.seaCleanAutoLastStatus))
             {
                 packed |= 16;
+            }
+            if (this.seaCleanBossQteEnabled)
+            {
+                packed |= 32;
+                if (!string.IsNullOrEmpty(this.SeaCleanBossQteStatus))
+                {
+                    packed |= 64;
+                }
             }
             return packed;
         }
@@ -599,6 +636,18 @@ namespace HeartopiaMod
                     }
                 }
 
+                // Boss assist status — compared by VALUE, not reference: it is rebuilt from
+                // literals each frame, so a reference check would rewrite the label forever.
+                if (this.seaCleanBossQteEnabled)
+                {
+                    string bossStatus = this.SeaCleanBossQteStatus;
+                    if (!string.Equals(bossStatus, handle.BossStatusShown, StringComparison.Ordinal))
+                    {
+                        handle.BossStatusShown = bossStatus;
+                        this.SetUguiLabelText(handle.BossStatusLabel, this.L("Status: ") + bossStatus);
+                    }
+                }
+
                 // 0.5s tick — wrapped-paragraph measure retries (both labels always active on
                 // this tab, so retrying whenever the sub-tab is visible is meaningful).
                 if (Time.unscaledTime >= handle.NextSlowSyncAt)
@@ -646,6 +695,23 @@ namespace HeartopiaMod
         // toast string is an unlocalized interpolation, the palette the source literals. Then
         // an immediate refresh of the block this toggle gates (Extra's Sanrio-toggle idiom) so
         // the counter/status region reacts this same frame.
+        // Not persisted — same as the Auto Sea Clean toggle beside it (that asymmetry is
+        // deliberate, see the file header). Turning it OFF mid-QTE is safe: the assist simply
+        // stops pressing, and the QTE resolves the way it would for a player who let go.
+        private void OnUguiSeaCleanBossQteToggled(bool value)
+        {
+            if (value == this.seaCleanBossQteEnabled)
+            {
+                return;
+            }
+
+            this.seaCleanBossQteEnabled = value;
+            this.SeaCleanBossQteStatus = string.Empty;
+            this.AddMenuNotification(
+                $"Auto Boss QTE {(value ? "Enabled" : "Disabled")}",
+                value ? UguiSeaCleanOnColor : UguiSeaCleanOffColor);
+        }
+
         private void OnUguiSeaCleanQteToggled(bool value)
         {
             if (value == this.seaCleanQteEnabled)
