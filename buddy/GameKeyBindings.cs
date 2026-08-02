@@ -717,7 +717,13 @@ namespace HeartopiaMod
                 return row.Caption;
             }
 
-            string label = string.IsNullOrEmpty(row.Part) ? row.Action : row.Action + "  (" + row.Part + ")";
+            // A single-character direct action IS a key ("g"), so show it as one — lowercase reads
+            // as a variable name and is the harder thing to spot when hunting for the G the game
+            // just displayed.
+            string label = row.Action.Length == 1 && string.Equals(row.Map, GameKeyDirectMapName, StringComparison.Ordinal)
+                ? row.Action.ToUpperInvariant()
+                : (string.IsNullOrEmpty(row.Part) ? row.Action : row.Action + "  (" + row.Part + ")");
+
             return string.IsNullOrEmpty(row.Shares) ? label : label + "  —  " + row.Shares;
         }
     }

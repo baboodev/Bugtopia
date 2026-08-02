@@ -259,6 +259,22 @@ namespace HeartopiaMod
 
         private const string GameKeyDirectMapName = "AllKeyboardKeysMap";
 
+        // Sort key for a direct-map row: the control name, with single characters padded so "g"
+        // lands among the letters instead of ahead of every multi-character name.
+        private static string DirectKeySortName(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return "￿";
+            }
+
+            int slash = path.LastIndexOf('/');
+            string control = slash >= 0 ? path.Substring(slash + 1) : path;
+
+            // Letters and digits first (that is what anyone is hunting for), named keys after.
+            return control.Length == 1 ? "0" + control : "1" + control;
+        }
+
         // Builds one map's panel and appends its rows to the handle. Returns the new yCur.
         // The featured camera-mode rows are hoisted into their own panel above, so they are skipped
         // here — a binding must not get two rows, or two writers would fight over one override.
@@ -282,6 +298,17 @@ namespace HeartopiaMod
                 }
 
                 mapRows.Add(allRows[i]);
+            }
+
+            // The direct map is 105 anonymous rows in asset order (space, enter, tab, backquote…),
+            // which makes "where is the G the game just showed me" unanswerable. Sort by the key.
+            // By the DEFAULT key, not the effective one, so rebinding does not shuffle the list
+            // out from under the player mid-edit.
+            if (isDirect)
+            {
+                mapRows.Sort((a, b) => string.Compare(
+                    DirectKeySortName(a.DefaultPath), DirectKeySortName(b.DefaultPath),
+                    StringComparison.OrdinalIgnoreCase));
             }
 
             return this.BuildUguiGameKeysPanel(handle, scrollContent, mapRows, this.L(mapName),

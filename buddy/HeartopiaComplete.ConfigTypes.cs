@@ -202,6 +202,8 @@ namespace HeartopiaMod
             public bool bunnyHopEnabled;
             public bool analogMoveBridgeEnabled;
             public bool skipShowOffAnimations;
+            public bool skipCraftDyeAnimations;
+            public bool craftDirectSendEnabled;
             public bool persistentHudEnabled;
             // Self-tab bypass toggles. These were session-only until now even though their UI
             // handlers already called SaveKeybinds — the fields simply had no home in the config.

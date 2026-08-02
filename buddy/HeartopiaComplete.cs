@@ -731,6 +731,8 @@ namespace HeartopiaMod
             this.ProcessBubbleSpawnAtPlayerOnUpdate();
             this.ProcessAutoBubbleCollectOnUpdate();
             this.ProcessShowOffBypassOnUpdate();
+            this.ProcessCraftAnimationSkipOnUpdate();
+            this.ProcessCraftDirectSendOnUpdate();
             this.ProcessPersistentHudOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
             this.ProcessSeaCleanBannerHideOnUpdate();

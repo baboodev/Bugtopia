@@ -232,6 +232,16 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Skip Show Off", "Active"));
             }
 
+            if (this.skipCraftDyeAnimations)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Skip Craft/Dye Anim", this.craftAnimSkipStatus));
+            }
+
+            if (this.craftDirectSendEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Direct Craft Send", this.craftDirectSendStatus));
+            }
+
             if (this.persistentHudEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Persistent HUD", this.persistentHudLastStatus));

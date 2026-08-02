@@ -201,6 +201,88 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   like every other mod teleport).
 - Persisted; default off. Source: `buddy/InstantTeleportFeature.cs`.
 
+### Skip Craft / Dye Animations
+
+- Cuts the character animation that plays after the server confirms a craft or a dye, so the
+  workbench loop stops costing several seconds per item.
+- Crafting and dyeing are **one path**: `CraftCompositeDetailPanel` (craft), `DyeColorPanel` (dye)
+  and `DrawSewingPanel` (artwork overlay) all dispatch `MakeItemEvent` → `MakeItemCommand`, which
+  hides the scene UI, sends the command and waits on `RPCRespTask<MakeItemResultEvent>`; on the
+  response it casts `PlayerCraftsmanArg` → `PlayerCraftsmanAction` (animator trigger `Craftsman`,
+  or `Dye` when `staticId == 0`, in the `interactivecraftsman` controller, 10 s `timeOut`).
+- Lever: **`ActorActionGraph.EndCasting()`** — the exact call the game itself makes when a cast
+  finishes naturally (`AbilityCaster.TickGraph` calls it the moment the sequence track reports
+  done) and when one action interrupts another. It runs `_sequenceTrack.Finish()` →
+  `ClipWrapper.SetState(Done)` → `clip.Finish()` → `OnBehaveFinish`, i.e. the identical termination
+  the natural path takes. Deliberately **not** `ActorActionGraph.Stop()`, which also tears down the
+  motion graph — that shape broke fishing once.
+- Everything that matters survives the cut because it lives in
+  `PlayerCraftsmanAction.OnBehaveFinish`: `CancelOccupyCommand()` (releases the bench), the
+  `SceneUIVisibilityRequestedEvent{visible=true}` that restores the HUD, and the reward toast /
+  flaunt. The item itself is granted server-side before the animation, so nothing is lost.
+- Safety gate: it fires **only** once `animationComponent.IsAnimState(Craftsman | Dye)` is true —
+  the very condition `PlayerCraftsmanAction.OnBehaveTick` waits on. Those triggers are set in
+  `OnBehaveStart`, so seeing the state proves the clip reached its Action phase (the only phase in
+  which `ActorBehaveClip.OnDestroy` runs `OnBehaveFinish`) and that the walk-to-bench before-action
+  is over. Cutting earlier would strand the player occupying the bench with a hidden HUD.
+- Second belt on that one destructive call: `ActorActionGraph.actionContext` must be the
+  `PlayerCraftsmanArg` (`AbilityCaster._context` is set once per cast), so `EndCasting()` is
+  provably scoped to the craft/dye cast.
+- Trigger is event-first: `MakeItemResultEvent` (payload snapshotted for logging only) opens a 6 s
+  poll window at 20 Hz; until that detour installs a 3.3 Hz fallback poll keeps the feature working
+  (`IsGameEventHookInstalled` pattern). All game access is public API over AuraMono — no native
+  detour, no IL2CPP `.text` patch. Local player only; other players' craft animations are untouched.
+- **The walk to the bench is left alone.** `PlayerCraftsmanArg` implements `IMoveStrideWhenStart`,
+  so `PlayerActionGraph.GetBeforeActions` expands the cast into `Generic_MoveStride` →
+  `Generic_FaceDirectionAction` → `PlayerCraftsmanAction`, and the trip cannot be cancelled anyway:
+  `Generic_MoveStride.OnBehaveFinish` does `WorldPlaceTo(_destination)` unconditionally, so the
+  player lands at the bench however the clip ends. For plain crafting, Direct Craft Send below
+  removes the whole sequence — walk included. Dye still walks; that is vanilla.
+- Persisted; default off. Source: `buddy/CraftAnimationSkipFeature.cs`.
+
+### Direct Craft Send
+
+- The alternative to the above for plain crafting: the Craft button sends the network command and
+  that is all — no occupancy, no walk, no animation, because `PlayerCraftsmanArg` is only ever cast
+  from `MakeItemCommand`'s RPC callback, which never runs.
+- Nothing has to close the UI: `CraftCompositeDetailPanel._Make()` already does
+  `CloseView(this)` + `CloseView<CraftCompositeMainPanel>()` **before** it submits.
+- Same lever as **Instant Teleport**: a Mono `NativeDetour` on `MakeItemCommand.IsExecutable`
+  returning `-1` (`InteractErrorCode.Invalid`). `ButtonCommand<T>.ExecuteAsync` then skips
+  `OnExecuteAsync` through the game's own path, and `PlayerInteraction.ToastInteractError` ignores
+  `Invalid`, so the refusal is silent. The payload is read from the `in MakeItemEvent` pointer the
+  detour receives — the one place all three producers funnel through — with offsets **resolved at
+  runtime from the struct's metadata** (`mono_field_get_offset` minus the 2-pointer boxed header)
+  and sanity-checked. That matters here: `MakeItemEvent` mixes scalars with a `List<>` reference, so
+  its layout is not safely guessable.
+- The send is `WebRequestUtility.SendCommand<MakeItemNetworkCommand>` on the next main-thread tick
+  (the detour body stays callback-free: scalar reads, static writes, constant return or trampoline).
+  Built directly rather than via `CraftProtocolManager.MakeItem`, whose `int? themeId` would mean a
+  `Nullable<>` argument over `mono_runtime_invoke`.
+- **Plain crafts only.** Dye and artwork overlay forward to the original — their payload lives in
+  the `List<(int, Color32)> colors` reference field, which cannot be reconstructed from a native
+  callback without holding a mono object pointer across frames. They keep the vanilla sequence and
+  are covered by Skip Craft / Dye Animations instead.
+- **Occupy release (required, not optional).** The vanilla craft always ends with
+  `CharacterProtocolManager.CancelOccupyCommand()` — from `PlayerCraftsmanAction.OnBehaveFinish` on
+  success and from the `RPCRespTask` timeout callback on failure. Refusing the command skips both,
+  and the bench stays flagged occupied; `LocalPlayerComponent.EnabledInteraction` bails early on
+  `levelObject.isOccupied`, so the bench's interact icon never comes back (the bug this feature
+  shipped with on 2026-08-03). The mod therefore owes the server that release and sends
+  `ItemReleaseNetworkCommand { ReleaseItemNetId = 0, CharacterPartMask = Body }` itself — byte-for-
+  byte what `CancelOccupyCommand()` sends with its defaults — on the `MakeItemResultEvent`, or after
+  a 1.5 s fallback if no result arrives (just past vanilla's 1 s `RPCRespTask` timeout, so both
+  vanilla branches are covered). A pending release is flushed even if the toggle is switched off in
+  the meantime.
+- Vanilla checks not replicated (they need game-Mono calls, forbidden inside the callback): missing
+  focus object, bench owner in build mode, and player not in free locomotion. So crafting works
+  while seated, where vanilla refuses with tip 92001. The server still validates recipe/materials.
+  No reward toast either — that comes from `OnBehaveFinish`, which never runs; the item still
+  arrives and the bag refresh fires.
+- ⚠ A **new** native detour, the project's highest-risk category. Opt-in, default off, and the
+  detour is `Undo()`n the moment the toggle goes off, so leaving it alone adds no surface.
+- Persisted; default off. Source: `buddy/CraftDirectSendFeature.cs`.
+
 ### Anti-AFK
 
 - Periodically simulates mouse input to reduce idle kick.

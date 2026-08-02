@@ -267,6 +267,8 @@
     <Compile Include="HeartopiaComplete.UguiGameKeysContent.cs" />
     <Compile Include="AnimalCareFeature.cs" />
     <Compile Include="CarpetStampFeature.cs" />
+    <Compile Include="CraftAnimationSkipFeature.cs" />
+    <Compile Include="CraftDirectSendFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
     <Compile Include="DailyClaimsFeature.cs" />
     <Compile Include="BirdPhotoSubmitFeature.cs" />

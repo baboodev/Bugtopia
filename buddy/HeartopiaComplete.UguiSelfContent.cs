@@ -100,6 +100,8 @@ namespace HeartopiaMod
             public Toggle AnalogMoveToggle;
             public GameObject AnalogMoveHint;
             public Toggle SkipShowOffToggle;
+            public Toggle SkipCraftDyeToggle;
+            public Toggle CraftDirectSendToggle;
             public GameObject NoclipHelpLabel;  // trailing, only visible while Noclip is on
 
             public int LayoutSignature = -1;    // packed conditional-visibility state
@@ -309,6 +311,13 @@ namespace HeartopiaMod
             handle.SkipShowOffToggle = this.CreateUguiCheckbox(scrollContent, "SkipShowOffToggle",
                 this.L("Skip Show Off animations"), this.skipShowOffAnimations,
                 new System.Action<bool>(this.OnUguiSelfSkipShowOffToggled));
+
+            handle.SkipCraftDyeToggle = this.CreateUguiCheckbox(scrollContent, "SkipCraftDyeToggle",
+                this.L("Skip Craft / Dye animations"), this.skipCraftDyeAnimations,
+                new System.Action<bool>(this.OnUguiSelfSkipCraftDyeToggled));
+            handle.CraftDirectSendToggle = this.CreateUguiCheckbox(scrollContent, "CraftDirectSendToggle",
+                this.L("Direct Craft Send (no walk, no animation)"), this.craftDirectSendEnabled,
+                new System.Action<bool>(this.OnUguiSelfCraftDirectSendToggled));
 
             // Trailing conditional help label — localized in the IMGUI drawer, kept verbatim.
             handle.NoclipHelpLabel = this.CreateUguiLabel(scrollContent, "NoclipHelp",
@@ -525,6 +534,18 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.SkipCraftDyeToggle != null)
+            {
+                PlaceUguiTopLeft(handle.SkipCraftDyeToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
+            if (handle.CraftDirectSendToggle != null)
+            {
+                PlaceUguiTopLeft(handle.CraftDirectSendToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             SetUguiGoActive(handle.NoclipHelpLabel, noclip);
             if (noclip)
             {
@@ -568,6 +589,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CustomFovToggle, this.customCameraFOVEnabled);
                 this.SyncUguiToggleFromField(handle.AnalogMoveToggle, this.analogMoveBridgeEnabled);
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
+                this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
+                this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
 
                 if (handle.NoclipSpeedSlider != null && Mathf.Abs(handle.NoclipSpeedSlider.value - this.noclipSpeed) > 0.0005f)
                 {
@@ -981,6 +1004,27 @@ namespace HeartopiaMod
                 return;
             }
             this.skipShowOffAnimations = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Save only, no notification — same shape as the Show Off toggle above.
+        private void OnUguiSelfSkipCraftDyeToggled(bool value)
+        {
+            if (value == this.skipCraftDyeAnimations)
+            {
+                return;
+            }
+            this.skipCraftDyeAnimations = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfCraftDirectSendToggled(bool value)
+        {
+            if (value == this.craftDirectSendEnabled)
+            {
+                return;
+            }
+            this.craftDirectSendEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

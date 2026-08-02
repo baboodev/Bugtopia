@@ -220,6 +220,8 @@ namespace HeartopiaMod
             data.bunnyHopEnabled = this.bunnyHopEnabled;
             data.analogMoveBridgeEnabled = this.analogMoveBridgeEnabled;
             data.skipShowOffAnimations = this.skipShowOffAnimations;
+            data.skipCraftDyeAnimations = this.skipCraftDyeAnimations;
+            data.craftDirectSendEnabled = this.craftDirectSendEnabled;
             data.persistentHudEnabled = this.persistentHudEnabled;
             data.vehicleBypassEnabled = this.vehicleBypassEnabled;
             data.vehicleBypassServerEventsEnabled = this.vehicleBypassServerEventsEnabled;
@@ -461,6 +463,8 @@ namespace HeartopiaMod
             this.bunnyHopEnabled = data.bunnyHopEnabled;
             this.analogMoveBridgeEnabled = data.analogMoveBridgeEnabled;
             this.skipShowOffAnimations = data.skipShowOffAnimations;
+            this.skipCraftDyeAnimations = data.skipCraftDyeAnimations;
+            this.craftDirectSendEnabled = data.craftDirectSendEnabled;
             this.persistentHudEnabled = data.persistentHudEnabled;
             // Plain assignment is enough: ApplyKeybindConfig only ever runs once, from LoadKeybinds
             // at startup (HeartopiaComplete.cs:533), so every retry/latch field is still at its
@@ -766,6 +770,8 @@ namespace HeartopiaMod
                         else if (line.Contains("bunnyHopEnabled")) this.bunnyHopEnabled = GetJsonInt(line, "\"bunnyHopEnabled\":") != 0;
                         else if (line.Contains("analogMoveBridgeEnabled")) this.analogMoveBridgeEnabled = GetJsonInt(line, "\"analogMoveBridgeEnabled\":") != 0;
                         else if (line.Contains("skipShowOffAnimations")) this.skipShowOffAnimations = GetJsonInt(line, "\"skipShowOffAnimations\":") != 0;
+                        else if (line.Contains("skipCraftDyeAnimations")) this.skipCraftDyeAnimations = GetJsonInt(line, "\"skipCraftDyeAnimations\":") != 0;
+                        else if (line.Contains("craftDirectSendEnabled")) this.craftDirectSendEnabled = GetJsonInt(line, "\"craftDirectSendEnabled\":") != 0;
                         else if (line.Contains("persistentHudEnabled")) this.persistentHudEnabled = GetJsonInt(line, "\"persistentHudEnabled\":") != 0;
                         else if (line.Contains("autoIceSkatingMinUltimateScore")) this.autoIceSkatingMinUltimateScore = Mathf.Clamp(GetJsonInt(line, "\"autoIceSkatingMinUltimateScore\":"), 0, AutoIceSkatingMinUltimateScoreSliderMax);
                         else if (line.Contains("autoIceSkatingOnlyX2Ultimate")) this.autoIceSkatingOnlyX2Ultimate = GetJsonInt(line, "\"autoIceSkatingOnlyX2Ultimate\":") != 0;
