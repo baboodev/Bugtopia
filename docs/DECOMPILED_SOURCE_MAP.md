@@ -1041,6 +1041,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | NPC teleport | TableData.TableNpcs | HC | A + R + N |
 | Noclip / TP | Unity CharacterController, Transform | *Patch.cs | I + H |
 | Bunny hop | Player move/state components | BunnyHopFeature.cs | A |
+| Custom jump (arc) | LevelScriptableConfig (**static `<Instance>k__BackingField` declared on the INFLATED GENERIC base `ConfigurableSingleton<LevelScriptableConfig>` — must go through `TryGetAuraMonoStaticObjectField`; `get_Instance` is an inflated-generic static invoke = crash trap**) → `playerMotion` → MotionConfig floats JumpingInitSpeed/JumpingHighest/Gravity/FallingSpeedLimit. Consumers: StandLocomotion:758 (launch = direct Velocity.y write) and :406-443 (hold gravity solved so the apex lands on JumpingHighest — which is why JumpingInitSpeed alone does NOT raise a held jump); same statics also feed SkateLocomotion / HoldingHandLocomotion / PlayerObserverLocomotion. Height↔speed conversion is JumpBedComponent._GetInitSpeedByHeight's `v=sqrt(2·g·h)` | JumpTuningFeature.cs | A |
 | Analog move (gamepad) | MonoInputManager.SendMoveValueToControl, LocalPlayerComponent.OnLeftJoystickPerformed, PlayerMoveComponent.SetMoveJoystick, CameraComponent.ToCameraSpaceJoystick | MovementInputFeature.cs | A + W (XInput) |
 | Auto repair / eat | ToolSystem, BackPackSystem, EcsService | HC | R + A |
 | Warehouse bypass | BagPanel UI hierarchy | WarehouseBypassFeature.cs | W + A |

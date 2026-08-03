@@ -153,6 +153,11 @@ namespace HeartopiaMod
             data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
             data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
             data.swimSprintVerticalGuardEnabled = this.swimSprintVerticalGuardEnabled;
+            data.jumpTuningEnabled = this.jumpTuningEnabled;
+            data.jumpTuningHoldHeight = this.jumpTuningHoldHeight;
+            data.jumpTuningTapHeight = this.jumpTuningTapHeight;
+            data.jumpTuningGravity = this.jumpTuningGravity;
+            data.jumpTuningFallSpeedLimit = this.jumpTuningFallSpeedLimit;
             this.SaveGameUiTimingsToConfig(data);
             data.keyGameSpeed1x = (int)this.keyGameSpeed1x;
             data.keyGameSpeed2x = (int)this.keyGameSpeed2x;
@@ -390,6 +395,21 @@ namespace HeartopiaMod
                 : Mathf.Clamp(data.swimSprintDurationSeconds, SwimSprintDurationMin, SwimSprintDurationMax);
             this.swimSprintCooldownSeconds = Mathf.Clamp(data.swimSprintCooldownSeconds, SwimSprintCooldownMin, SwimSprintCooldownMax);
             this.swimSprintVerticalGuardEnabled = data.swimSprintVerticalGuardEnabled;
+            // 0/absent (pre-feature configs) falls back to the game default rather than clamping up
+            // to the minimum — a stored 0 means "never edited", not "0.2 m jump".
+            this.jumpTuningEnabled = data.jumpTuningEnabled;
+            this.jumpTuningHoldHeight = data.jumpTuningHoldHeight <= 0f
+                ? JumpTuningHoldHeightDefault
+                : Mathf.Clamp(data.jumpTuningHoldHeight, JumpTuningHeightMin, JumpTuningHeightMax);
+            this.jumpTuningTapHeight = data.jumpTuningTapHeight <= 0f
+                ? JumpTuningTapHeightDefault
+                : Mathf.Clamp(data.jumpTuningTapHeight, JumpTuningHeightMin, JumpTuningHeightMax);
+            this.jumpTuningGravity = data.jumpTuningGravity <= 0f
+                ? JumpTuningGravityDefault
+                : Mathf.Clamp(data.jumpTuningGravity, JumpTuningGravityMin, JumpTuningGravityMax);
+            this.jumpTuningFallSpeedLimit = data.jumpTuningFallSpeedLimit <= 0f
+                ? JumpTuningFallLimitDefault
+                : Mathf.Clamp(data.jumpTuningFallSpeedLimit, JumpTuningFallLimitMin, JumpTuningFallLimitMax);
             this.LoadGameUiTimingsFromConfig(data);
             this.keyGameSpeed1x = (KeyCode)data.keyGameSpeed1x;
             this.keyGameSpeed2x = (KeyCode)data.keyGameSpeed2x;

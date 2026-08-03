@@ -127,6 +127,15 @@ namespace HeartopiaMod
             public float swimSprintCooldownSeconds;
             // Space/Ctrl (ascend/descend) no longer cancel the underwater dash (detour guard).
             public bool swimSprintVerticalGuardEnabled;
+            // Custom Jump (MotionConfig jump-arc override, JumpTuningFeature.cs). Heights are the
+            // two APEXES in metres (hold = JumpingHighest verbatim, tap = converted to
+            // JumpingInitSpeed); gravity/fall limit are stored POSITIVE and negated on write.
+            // 0/absent on any of the four = "use the game default".
+            public bool jumpTuningEnabled;
+            public float jumpTuningHoldHeight;
+            public float jumpTuningTapHeight;
+            public float jumpTuningGravity;
+            public float jumpTuningFallSpeedLimit;
             // Game UI tip/toast display-time overrides (TipShowTimeConfig), seconds, ordered as
             // GameUiTimingFieldNames (GameUiTimingsFeature.cs). Null/short/0 entries = game defaults.
             public bool gameUiTimingsEnabled;

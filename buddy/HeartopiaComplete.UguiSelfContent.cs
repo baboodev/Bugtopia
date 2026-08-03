@@ -125,7 +125,21 @@ namespace HeartopiaMod
             public GameObject SprintStatusLabel;       // live (swimSprintTweakStatus suffix)
             public string SprintStatusShown;
             public Toggle VerticalGuardToggle;
-            public float NextSlowSyncAt;               // 0.5s tick for the two live status lines
+            public Toggle JumpTuningToggle;
+            // Custom Jump: four numeric InputFields (JumpTuningFeature.cs). "Seen" mirrors the
+            // Auto-Buy idiom — external edits are pushed in on the 0.5s tick, our own writeback
+            // updates it in the handler so the tick does not fight the caret.
+            public InputField JumpHoldHeightField;
+            public string JumpHoldHeightSeen;
+            public InputField JumpTapHeightField;
+            public string JumpTapHeightSeen;
+            public InputField JumpGravityField;
+            public string JumpGravitySeen;
+            public InputField JumpFallLimitField;
+            public string JumpFallLimitSeen;
+            public GameObject JumpStatusLabel;         // live (jumpTuningStatus suffix)
+            public string JumpStatusShown;
+            public float NextSlowSyncAt;               // 0.5s tick for the live status lines
             public int ErrorCount;
         }
 
@@ -1054,6 +1068,31 @@ namespace HeartopiaMod
                 + (this.swimSprintTweakEnabled ? " Status: " + this.swimSprintTweakStatus : string.Empty);
         }
 
+        // Numeric InputField text is INVARIANT on both sides: a comma-decimal UI culture would
+        // otherwise render "1,30" and then fail to parse it back (the parser below accepts a typed
+        // comma anyway, so either habit works).
+        private static string JumpTuningFormatValue(float value)
+        {
+            return value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryParseJumpTuningValue(string text, out float value)
+        {
+            return float.TryParse(
+                (text ?? string.Empty).Trim().Replace(',', '.'),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out value);
+        }
+
+        private string BuildUguiSelfFunJumpStatusText()
+        {
+            // Spells out the one non-obvious rule: with Space held the game solves gravity for
+            // JumpingHighest, so "hold" is the number that actually raises a held jump.
+            return "Hold Space = 'hold' height, tap = 'tap' height. Client-only, nothing is sent."
+                + (this.jumpTuningEnabled ? " Status: " + this.jumpTuningStatus : string.Empty);
+        }
+
         private GameObject BuildUguiShellSelfFunContent(Transform parent, float x, float y, float w, float h)
         {
             this.uguiShellSelfFun = null;
@@ -1128,6 +1167,63 @@ namespace HeartopiaMod
                 this.L("Sprint Ignores Space/Ctrl"), this.swimSprintVerticalGuardEnabled,
                 new System.Action<bool>(this.OnUguiSelfVerticalGuardToggled));
             PlaceUguiTopLeft(handle.VerticalGuardToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 32f;
+
+            // -------- Custom Jump (JumpTuningFeature.cs) --------------------------------------
+            handle.JumpTuningToggle = this.CreateUguiCheckbox(block.transform, "JumpTuningToggle",
+                this.L("Custom Jump"), this.jumpTuningEnabled,
+                new System.Action<bool>(this.OnUguiSelfJumpTuningToggled));
+            // Narrower than the other rows on purpose: CreateUguiCheckbox lays a full-width
+            // transparent raycast strip over its row, so a rowW-wide toggle would sit under the
+            // reset button and catch every near-miss click.
+            PlaceUguiTopLeft(handle.JumpTuningToggle.gameObject, pad, yCur, labelW, 24f);
+            GameObject jumpResetButton = this.CreateUguiSecondaryButton(block.transform, "JumpResetButton",
+                this.L("Reset to Defaults"), new System.Action(this.OnUguiSelfJumpResetClicked));
+            PlaceUguiTopLeft(jumpResetButton, sliderX, yCur + 1f, 150f, 22f);
+            yCur += 30f;
+
+            const float jumpFieldW = 90f;
+            handle.JumpHoldHeightSeen = JumpTuningFormatValue(this.jumpTuningHoldHeight);
+            GameObject holdLabel = this.CreateUguiBodyLabel(block.transform, "JumpHoldHeightLabel",
+                this.L("Jump Height, hold (m)"), 13f);
+            PlaceUguiTopLeft(holdLabel, pad, yCur + 2f, labelW, 20f);
+            handle.JumpHoldHeightField = this.CreateUguiInputField(block.transform, "JumpHoldHeightField",
+                handle.JumpHoldHeightSeen, 6, new System.Action<string>(this.OnUguiSelfJumpHoldHeightEdited));
+            PlaceUguiTopLeft(handle.JumpHoldHeightField.gameObject, sliderX, yCur, jumpFieldW, 22f);
+            yCur += 26f;
+
+            handle.JumpTapHeightSeen = JumpTuningFormatValue(this.jumpTuningTapHeight);
+            GameObject tapLabel = this.CreateUguiBodyLabel(block.transform, "JumpTapHeightLabel",
+                this.L("Jump Height, tap (m)"), 13f);
+            PlaceUguiTopLeft(tapLabel, pad, yCur + 2f, labelW, 20f);
+            handle.JumpTapHeightField = this.CreateUguiInputField(block.transform, "JumpTapHeightField",
+                handle.JumpTapHeightSeen, 6, new System.Action<string>(this.OnUguiSelfJumpTapHeightEdited));
+            PlaceUguiTopLeft(handle.JumpTapHeightField.gameObject, sliderX, yCur, jumpFieldW, 22f);
+            yCur += 26f;
+
+            handle.JumpGravitySeen = JumpTuningFormatValue(this.jumpTuningGravity);
+            GameObject gravityLabel = this.CreateUguiBodyLabel(block.transform, "JumpGravityLabel",
+                this.L("Gravity (m/s²)"), 13f);
+            PlaceUguiTopLeft(gravityLabel, pad, yCur + 2f, labelW, 20f);
+            handle.JumpGravityField = this.CreateUguiInputField(block.transform, "JumpGravityField",
+                handle.JumpGravitySeen, 6, new System.Action<string>(this.OnUguiSelfJumpGravityEdited));
+            PlaceUguiTopLeft(handle.JumpGravityField.gameObject, sliderX, yCur, jumpFieldW, 22f);
+            yCur += 26f;
+
+            handle.JumpFallLimitSeen = JumpTuningFormatValue(this.jumpTuningFallSpeedLimit);
+            GameObject fallLabel = this.CreateUguiBodyLabel(block.transform, "JumpFallLimitLabel",
+                this.L("Fall Speed Limit (m/s)"), 13f);
+            PlaceUguiTopLeft(fallLabel, pad, yCur + 2f, labelW, 20f);
+            handle.JumpFallLimitField = this.CreateUguiInputField(block.transform, "JumpFallLimitField",
+                handle.JumpFallLimitSeen, 6, new System.Action<string>(this.OnUguiSelfJumpFallLimitEdited));
+            PlaceUguiTopLeft(handle.JumpFallLimitField.gameObject, sliderX, yCur, jumpFieldW, 22f);
+            yCur += 28f;
+
+            handle.JumpStatusShown = this.BuildUguiSelfFunJumpStatusText();
+            handle.JumpStatusLabel = this.CreateUguiLabel(block.transform, "JumpStatus",
+                handle.JumpStatusShown, 11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(handle.JumpStatusLabel);
+            PlaceUguiTopLeft(handle.JumpStatusLabel, pad, yCur, rowW, 32f);
 
             handle.Root = block;
             this.uguiShellSelfFun = handle;
@@ -1149,6 +1245,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.ForceSwimToggle, this.forceSwimEnabled);
                 this.SyncUguiToggleFromField(handle.SwimSprintToggle, this.swimSprintTweakEnabled);
                 this.SyncUguiToggleFromField(handle.VerticalGuardToggle, this.swimSprintVerticalGuardEnabled);
+                this.SyncUguiToggleFromField(handle.JumpTuningToggle, this.jumpTuningEnabled);
 
                 if (handle.SprintDurationSlider != null
                     && Mathf.Abs(handle.SprintDurationSlider.value - this.swimSprintDurationSeconds) > 0.0005f)
@@ -1174,6 +1271,20 @@ namespace HeartopiaMod
                         this.BuildUguiSelfFunLocomotionStatusText());
                     this.SyncUguiSelfLabelText(handle.SprintStatusLabel, ref handle.SprintStatusShown,
                         this.BuildUguiSelfFunSprintStatusText());
+                    this.SyncUguiSelfLabelText(handle.JumpStatusLabel, ref handle.JumpStatusShown,
+                        this.BuildUguiSelfFunJumpStatusText());
+
+                    // Jump fields ride the SLOW tick (Auto-Buy idiom) AND only while unfocused —
+                    // this is the pass that normalises "0.50"/an out-of-range entry back to the
+                    // stored value, so it must never run under the caret.
+                    SyncUguiJumpFieldWhenIdle(handle.JumpHoldHeightField,
+                        ref handle.JumpHoldHeightSeen, JumpTuningFormatValue(this.jumpTuningHoldHeight));
+                    SyncUguiJumpFieldWhenIdle(handle.JumpTapHeightField,
+                        ref handle.JumpTapHeightSeen, JumpTuningFormatValue(this.jumpTuningTapHeight));
+                    SyncUguiJumpFieldWhenIdle(handle.JumpGravityField,
+                        ref handle.JumpGravitySeen, JumpTuningFormatValue(this.jumpTuningGravity));
+                    SyncUguiJumpFieldWhenIdle(handle.JumpFallLimitField,
+                        ref handle.JumpFallLimitSeen, JumpTuningFormatValue(this.jumpTuningFallSpeedLimit));
                 }
             }
             catch (Exception ex)
@@ -1262,6 +1373,137 @@ namespace HeartopiaMod
                 this.swimSprintVerticalGuardEnabled ? "Sprint ignores Space/Ctrl: on" : "Sprint ignores Space/Ctrl: off",
                 new Color(0.45f, 0.85f, 1f));
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // --- Custom Jump handlers (JumpTuningFeature.cs) ----------------------------------------
+        //
+        // Shared shape: unparseable text is IGNORED (the user is mid-entry — "0.", "-", ""), a parsed
+        // value is clamped into the feature's range and stored, and the field text is left exactly as
+        // typed. `Seen` is set to the formatted STORED value, i.e. to whatever the idle sync would
+        // push, so the 0.5s tick stays quiet until focus leaves and then normalises the display.
+        private static void SyncUguiJumpFieldWhenIdle(InputField field, ref string lastSeen, string liveValue)
+        {
+            if (field == null || field.isFocused)
+            {
+                return;
+            }
+            SyncUguiInputFieldFromBackingField(field, ref lastSeen, liveValue);
+        }
+
+        private void OnUguiSelfJumpTuningToggled(bool value)
+        {
+            if (value == this.jumpTuningEnabled)
+            {
+                return;
+            }
+            this.jumpTuningEnabled = value;
+            // Apply (or start the restore) on the next tick instead of waiting out the throttle.
+            this.jumpTuningNextApplyAt = 0f;
+            this.AddMenuNotification(this.jumpTuningEnabled ? "Custom Jump on" : "Custom Jump off",
+                new Color(0.45f, 0.85f, 1f));
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void CommitJumpTuningEdit(string text, float min, float max, ref float target, ref string seen)
+        {
+            if (!TryParseJumpTuningValue(text, out float parsed))
+            {
+                return; // mid-entry ("", "0.", "-") — leave both the value and the text alone
+            }
+
+            float clamped = Mathf.Clamp(parsed, min, max);
+            // Track what the idle sync would push, even when the value is unchanged, so a clamped
+            // or trailing-zero entry never makes the tick fight the field.
+            seen = JumpTuningFormatValue(clamped);
+            if (Mathf.Abs(clamped - target) <= 0.0001f)
+            {
+                return;
+            }
+
+            target = clamped;
+            this.jumpTuningNextApplyAt = 0f; // apply on the next tick, not after the throttle
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Explicit user action, so the text is pushed NOW regardless of focus — the idle sync would
+        // otherwise leave a focused field showing the old number until it loses focus.
+        private static void ForceUguiJumpFieldText(InputField field, ref string lastSeen, string value)
+        {
+            lastSeen = value ?? string.Empty;
+            if (field == null)
+            {
+                return;
+            }
+            try
+            {
+                field.SetTextWithoutNotify(lastSeen);
+            }
+            catch { }
+        }
+
+        private void OnUguiSelfJumpResetClicked()
+        {
+            this.ResetJumpTuningToGameDefaults();
+
+            UguiShellSelfFunHandle handle = this.uguiShellSelfFun;
+            if (handle != null)
+            {
+                ForceUguiJumpFieldText(handle.JumpHoldHeightField, ref handle.JumpHoldHeightSeen,
+                    JumpTuningFormatValue(this.jumpTuningHoldHeight));
+                ForceUguiJumpFieldText(handle.JumpTapHeightField, ref handle.JumpTapHeightSeen,
+                    JumpTuningFormatValue(this.jumpTuningTapHeight));
+                ForceUguiJumpFieldText(handle.JumpGravityField, ref handle.JumpGravitySeen,
+                    JumpTuningFormatValue(this.jumpTuningGravity));
+                ForceUguiJumpFieldText(handle.JumpFallLimitField, ref handle.JumpFallLimitSeen,
+                    JumpTuningFormatValue(this.jumpTuningFallSpeedLimit));
+            }
+
+            this.AddMenuNotification("Jump values reset to defaults", new Color(0.45f, 0.85f, 1f));
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfJumpHoldHeightEdited(string text)
+        {
+            UguiShellSelfFunHandle handle = this.uguiShellSelfFun;
+            if (handle == null)
+            {
+                return;
+            }
+            this.CommitJumpTuningEdit(text, JumpTuningHeightMin, JumpTuningHeightMax,
+                ref this.jumpTuningHoldHeight, ref handle.JumpHoldHeightSeen);
+        }
+
+        private void OnUguiSelfJumpTapHeightEdited(string text)
+        {
+            UguiShellSelfFunHandle handle = this.uguiShellSelfFun;
+            if (handle == null)
+            {
+                return;
+            }
+            this.CommitJumpTuningEdit(text, JumpTuningHeightMin, JumpTuningHeightMax,
+                ref this.jumpTuningTapHeight, ref handle.JumpTapHeightSeen);
+        }
+
+        private void OnUguiSelfJumpGravityEdited(string text)
+        {
+            UguiShellSelfFunHandle handle = this.uguiShellSelfFun;
+            if (handle == null)
+            {
+                return;
+            }
+            this.CommitJumpTuningEdit(text, JumpTuningGravityMin, JumpTuningGravityMax,
+                ref this.jumpTuningGravity, ref handle.JumpGravitySeen);
+        }
+
+        private void OnUguiSelfJumpFallLimitEdited(string text)
+        {
+            UguiShellSelfFunHandle handle = this.uguiShellSelfFun;
+            if (handle == null)
+            {
+                return;
+            }
+            this.CommitJumpTuningEdit(text, JumpTuningFallLimitMin, JumpTuningFallLimitMax,
+                ref this.jumpTuningFallSpeedLimit, ref handle.JumpFallLimitSeen);
         }
 
         // ----------------------------------------------------------------------------------------

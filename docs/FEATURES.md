@@ -323,6 +323,38 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   Note: the Debug Log toggle is **session-only** — it is never saved to config, so it always starts
   off (it prints a line per chat message).
 
+### Custom Jump (Self → Fun sub-tab)
+
+- Four numeric input fields that retune the player's jump arc by writing the game's live
+  `MotionConfig` (`LevelScriptableConfig.Instance.playerMotion`) — the object every jump/gravity
+  constant is read through, every frame, with no caching:
+  - **Jump Height, hold (m)** → `JumpingHighest` (default 1.3)
+  - **Jump Height, tap (m)** → converted to `JumpingInitSpeed` via `v = √(2·|G|·h)` (default 0.72 m
+    = the stock 4.8 m/s launch)
+  - **Gravity (m/s²)** → `Gravity`, stored positive and negated on write (default 16)
+  - **Fall Speed Limit (m/s)** → `FallingSpeedLimit`, likewise (default 13)
+- **The two heights are separate on purpose.** While Space is held the game solves a dynamic
+  gravity so the apex lands exactly on `JumpingHighest` (`StandLocomotion.cs:406-443`), which means
+  raising the launch speed alone does nothing for a held jump — "hold" is the number that raises it.
+  A tap never reaches the solver, so it is governed by launch speed vs gravity instead.
+- **Reset to Defaults** button restores the values the *live game* had (captured off the config
+  object before the first write), falling back to the stock constants if the feature has not applied
+  yet this session. It rewrites the four inputs only — the toggle is left as-is, since Custom Jump
+  on + default values is the same arc as off.
+- **Fully client-side**: no signal, no packet, no dirty-mask status. (The trampoline's
+  `moveComponent.SetMoveSpeed` route would have gone out over `SendSyncStatus`; this one does not.)
+- Heights clamp to 0.2–8 m, gravity to 2–60, fall limit to 3–80. The upper bounds are a
+  fall-through guard, not taste: `XDCharacterController` sweeps once per frame, so a much faster
+  launch starts tunnelling through floors and stair colliders.
+- Originals are captured from the live object before the first write and restored when the toggle
+  goes off; values re-apply on a 0.5 s throttle so a config reload cannot silently revert them, and
+  nothing is attempted outside a loaded world (`IsGameDataQueryable`).
+- Caveat: the constants are **global**, so remote players' jumps look altered on your client too,
+  and skating / holding-hands locomotion read the same values. Cosmetic only.
+- Toggle + the four values persist in config (`jumpTuningEnabled`, `jumpTuningHoldHeight`,
+  `jumpTuningTapHeight`, `jumpTuningGravity`, `jumpTuningFallSpeedLimit`). Implementation:
+  `JumpTuningFeature.cs`.
+
 ### Game UI — Custom UI Timings (Self → Game UI sub-tab)
 
 - Editable display durations for the game's tip/toast popups: item-obtained bubbles
