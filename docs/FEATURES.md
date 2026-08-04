@@ -814,6 +814,14 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
 
 - Scans world for configured resource prefabs / markers.
 - Categories: mushrooms (incl. truffle), berries, stones, ores, trees (apple, mandarin, rare), fish shadows, meteors, misc event resources.
+- **Daily** group — **Oak-Oak** and **Flawless Fluorite**, the two daily-roaming advanced
+  collectables (their own group: single objects that move every game day at 06:00, not a resource
+  family). The server picks the spot and the client has no data that predicts it, so they are found
+  by scanning the live advanced-collectable view components as soon as the object streams in; a
+  marker that reads as on-cooldown means today's harvest is already done. Once found, the position
+  is remembered for the session and its marker ignores the Max-distance slider, so walking away
+  does not hide it. One "located" toast per world session. Range cannot be extended — see
+  [DECOMPILED_SOURCE_MAP.md](DECOMPILED_SOURCE_MAP.md).
 - Toggle per category; select all / clear all.
 - Max distance slider (25–1000 m, default 75 m).
 - Marker styles: **Default** (icon markers) or **Simple Text**.

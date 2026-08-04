@@ -40,9 +40,6 @@ namespace HeartopiaMod
     // ============================================================================================
     public partial class HeartopiaComplete
     {
-        // PlayerState.SeaClean — XDTLevelAndEntity...Player.PlayerState.
-        private const int SeaCleanBossPlayerStateSeaClean = 59;
-
         // SeaCleanExecutionState.
         private const int SeaCleanBossQteStateReady = 1;
         private const int SeaCleanBossQteStateAwaitingRelease = 3;
@@ -52,7 +49,6 @@ namespace HeartopiaMod
         private IntPtr seaCleanBossLocalPlayerClass = IntPtr.Zero;
         private IntPtr seaCleanBossGetCurrentStateMethod = IntPtr.Zero;
         private IntPtr seaCleanBossStateClass = IntPtr.Zero;
-        private IntPtr seaCleanBossGetPlayerStateMethod = IntPtr.Zero;
         private IntPtr seaCleanBossGetCurrentTargetMethod = IntPtr.Zero;
         private IntPtr seaCleanBossOnMainInteractionMethod = IntPtr.Zero;
         private IntPtr seaCleanBossGetQteStateMethod = IntPtr.Zero;
@@ -66,6 +62,9 @@ namespace HeartopiaMod
         private string seaCleanBossLastDiagnosis = string.Empty;
         private float seaCleanBossNextDiagAt;
         private float seaCleanBossNextNoTargetLogAt;
+        private float seaCleanBossNextRejectLogAt;
+        private float seaCleanBossNextIdleLogAt;
+        private string seaCleanBossLastIdleLogged = string.Empty;
 
         internal string SeaCleanBossQteStatus { get; private set; } = string.Empty;
 
@@ -80,6 +79,22 @@ namespace HeartopiaMod
 
             try
             {
+                // ⚠️ Fail-closed on pinning. Without gchandle exports every AuraMonoPinNew below is
+                // a silent no-op, and SGen is free to move an object across ANY allocation — and a
+                // boxing invoke IS an allocation. Reading a moved object hands back whatever now
+                // occupies that address, which is exactly what "qteState=1434087536" was. Not
+                // gating on this is a documented hard rule I broke.
+                if (!AuraMonoPinningAvailable)
+                {
+                    this.SeaCleanBossResetRun("AuraMono pinning unavailable — assist disabled.");
+                    return;
+                }
+
+                // Shares the auto-clean feature's hook (idempotent) purely for visibility: the
+                // poll below can only ever see a QTE that is ALREADY running, so without the event
+                // there is no way to tell "no QTE fired" from "we missed it".
+                this.EnsureSeaCleanQteEventHooks();
+
                 if (!this.EnsureSeaCleanBossQteResolved())
                 {
                     return;
@@ -88,7 +103,14 @@ namespace HeartopiaMod
                 List<uint> pins = new List<uint>();
                 try
                 {
-                    IntPtr state = this.TryGetSeaCleanBossPlayerState(pins);
+                    IntPtr state = this.TryGetSeaCleanBossPlayerState(pins, out bool lookupFailed);
+                    if (lookupFailed)
+                    {
+                        // Could not look at all — hold the previous status and the run latch rather
+                        // than reporting a state change that was never observed.
+                        return;
+                    }
+
                     if (state == IntPtr.Zero)
                     {
                         // Not cleaning: the game is not ticking any QTE, and driving one from here
@@ -101,6 +123,18 @@ namespace HeartopiaMod
                     if (monster == IntPtr.Zero)
                     {
                         this.SeaCleanBossResetRun("No target — aim at the public pollutant.");
+                        return;
+                    }
+
+                    // Identity check BEFORE any invoke. `CurrentTarget.monsterComponent` can hand
+                    // back something that is not a live pollutant component, and calling a getter
+                    // on the wrong class is how this project has crashed before — the junk values
+                    // in the log were the harmless version of that.
+                    if (!this.SeaCleanBossIsMonsterComponent(monster, out string actualClass))
+                    {
+                        this.SeaCleanBossLogThrottled("target 0x" + monster.ToInt64().ToString("X")
+                            + " is not a SeaCleanMonsterComponent (class=" + actualClass + ") — ignored.");
+                        this.SeaCleanBossResetRun("Target is not a pollutant component.");
                         return;
                     }
 
@@ -222,7 +256,17 @@ namespace HeartopiaMod
             this.seaCleanBossRoundsThisQte = 0;
             if (!string.Equals(status, this.SeaCleanBossQteStatus, StringComparison.Ordinal))
             {
-                this.SeaCleanBossLog("idle: " + status);
+                // Rate-limited: "log every transition" is only quiet while transitions are rare.
+                // Two statuses alternating per frame printed six pairs a second and drowned the
+                // events worth reading. One line per 2 s, and never the same text twice in a row.
+                float now = Time.unscaledTime;
+                if (now >= this.seaCleanBossNextIdleLogAt
+                    && !string.Equals(status, this.seaCleanBossLastIdleLogged, StringComparison.Ordinal))
+                {
+                    this.seaCleanBossNextIdleLogAt = now + 2f;
+                    this.seaCleanBossLastIdleLogged = status;
+                    this.SeaCleanBossLog("idle: " + status);
+                }
             }
 
             this.SeaCleanBossQteStatus = status;
@@ -231,11 +275,19 @@ namespace HeartopiaMod
         // The FSM's CURRENT state, which is a non-generic accessor — `GetState<T>()` is generic and
         // inflated-generic invokes are a known crash class here. Returns Zero unless the player is
         // actually in PlayerState.SeaClean, which doubles as the "the game is driving" gate.
-        private IntPtr TryGetSeaCleanBossPlayerState(List<uint> pins)
+        // `lookupFailed` separates "the component enumeration itself did not work this frame" from
+        // "the player is not cleaning". They are NOT the same, and collapsing them is what made the
+        // status flap between two lines many times a second: a transient enumeration miss read as
+        // "left the sea-clean state". Same family of bug as treating a failed getter invoke as a
+        // `false` value — a failure is not an answer.
+        private IntPtr TryGetSeaCleanBossPlayerState(List<uint> pins, out bool lookupFailed)
         {
+            lookupFailed = false;
+
             if (!this.TryAuraMonoGetComponentObjects(this.seaCleanBossLocalPlayerClass, out List<IntPtr> players, pins)
                 || players == null || players.Count == 0)
             {
+                lookupFailed = true;
                 return IntPtr.Zero;
             }
 
@@ -259,8 +311,7 @@ namespace HeartopiaMod
                     pins.Add(pin);
                 }
 
-                if (this.SeaCleanBossInvokeIntGetter(state, this.seaCleanBossGetPlayerStateMethod, out int playerState)
-                    && playerState == SeaCleanBossPlayerStateSeaClean)
+                if (this.SeaCleanBossIsInstanceOf(state, this.seaCleanBossStateClass, out string _))
                 {
                     return state;
                 }
@@ -349,7 +400,6 @@ namespace HeartopiaMod
         {
             if (this.seaCleanBossLocalPlayerClass != IntPtr.Zero
                 && this.seaCleanBossGetCurrentStateMethod != IntPtr.Zero
-                && this.seaCleanBossGetPlayerStateMethod != IntPtr.Zero
                 && this.seaCleanBossGetCurrentTargetMethod != IntPtr.Zero
                 && this.seaCleanBossOnMainInteractionMethod != IntPtr.Zero
                 && this.seaCleanBossGetQteStateMethod != IntPtr.Zero)
@@ -412,11 +462,9 @@ namespace HeartopiaMod
 
             if (this.seaCleanBossStateClass != IntPtr.Zero)
             {
-                // get_State lives on PlayerStateBase — hierarchy lookup, not the leaf class.
-                if (this.seaCleanBossGetPlayerStateMethod == IntPtr.Zero)
-                {
-                    this.seaCleanBossGetPlayerStateMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanBossStateClass, "get_State", 0);
-                }
+                // NOTE: get_State is deliberately NOT resolved. It is an override per state
+                // class, so a non-virtual invoke of PlayerStateSeaClean's copy answers "SeaClean"
+                // for every object — see SeaCleanBossIsInstanceOf.
                 if (this.seaCleanBossGetCurrentTargetMethod == IntPtr.Zero)
                 {
                     this.seaCleanBossGetCurrentTargetMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanBossStateClass, "get_CurrentTarget", 0);
@@ -429,14 +477,12 @@ namespace HeartopiaMod
 
             bool ready = this.seaCleanBossLocalPlayerClass != IntPtr.Zero
                 && this.seaCleanBossGetCurrentStateMethod != IntPtr.Zero
-                && this.seaCleanBossGetPlayerStateMethod != IntPtr.Zero
                 && this.seaCleanBossGetCurrentTargetMethod != IntPtr.Zero
                 && this.seaCleanBossOnMainInteractionMethod != IntPtr.Zero
                 && this.seaCleanBossGetQteStateMethod != IntPtr.Zero;
 
             this.SeaCleanBossLog("resolve: localPlayer=0x" + this.seaCleanBossLocalPlayerClass.ToInt64().ToString("X")
                 + " getCurrentState=0x" + this.seaCleanBossGetCurrentStateMethod.ToInt64().ToString("X")
-                + " getState=0x" + this.seaCleanBossGetPlayerStateMethod.ToInt64().ToString("X")
                 + " currentTarget=0x" + this.seaCleanBossGetCurrentTargetMethod.ToInt64().ToString("X")
                 + " onMainInteraction=0x" + this.seaCleanBossOnMainInteractionMethod.ToInt64().ToString("X")
                 + " qteState=0x" + this.seaCleanBossGetQteStateMethod.ToInt64().ToString("X"));
@@ -505,6 +551,68 @@ namespace HeartopiaMod
             this.seaCleanBossLastDiagnosis = line;
             this.seaCleanBossNextDiagAt = now + 5f;
             this.SeaCleanBossLog(line);
+        }
+
+        private bool SeaCleanBossIsMonsterComponent(IntPtr obj, out string actualClass)
+        {
+            return this.SeaCleanBossIsInstanceOf(obj, this.seaCleanQteMonsterClass, out actualClass);
+        }
+
+        // True only when the object really is (or derives from) `expected`.
+        //
+        // ⚠️ This is the ONLY sound way to identify a game object here, and the reason is worth
+        // keeping: `PlayerStateBase.State` is OVERRIDDEN by every state class, each returning its
+        // own constant. Resolving `get_State` off PlayerStateSeaClean and invoking it through
+        // mono_runtime_invoke calls THAT implementation — which returns SeaClean unconditionally,
+        // whatever object it is handed. The check "is the player in the sea-clean state?" built on
+        // it therefore passed always, and PlayerStateSeaClean's own property getters were then run
+        // against unrelated states, reading fields at the wrong offsets (the log's
+        // `class=PlayerTeaseCatMotionArg`). A non-virtual invoke can never answer "what is this" —
+        // only the class can.
+        private bool SeaCleanBossIsInstanceOf(IntPtr obj, IntPtr expected, out string actualClass)
+        {
+            actualClass = "?";
+            if (obj == IntPtr.Zero || auraMonoObjectGetClass == null || expected == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr klass = auraMonoObjectGetClass(obj);
+            if (klass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (auraMonoClassGetName != null)
+            {
+                actualClass = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(auraMonoClassGetName(klass)) ?? "?";
+            }
+
+            // Walk the hierarchy: the live object may be a subclass.
+            IntPtr cursor = klass;
+            for (int depth = 0; depth < 8 && cursor != IntPtr.Zero; depth++)
+            {
+                if (cursor == expected)
+                {
+                    return true;
+                }
+
+                cursor = auraMonoClassGetParent != null ? auraMonoClassGetParent(cursor) : IntPtr.Zero;
+            }
+
+            return false;
+        }
+
+        private void SeaCleanBossLogThrottled(string message)
+        {
+            float now = Time.unscaledTime;
+            if (now < this.seaCleanBossNextRejectLogAt)
+            {
+                return;
+            }
+
+            this.seaCleanBossNextRejectLogAt = now + 10f;
+            this.SeaCleanBossLog(message);
         }
 
         private void SeaCleanBossLog(string message)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -44,7 +44,7 @@ namespace HeartopiaMod
     //    header box (live selection summary + accent chevron, DrawRadarDropdownHeader,
     //    Radar.cs:1271) + the option rows (optional master row first — Mushrooms only). Open
     //    state IS the shared radar*DropdownOpen field (both surfaces one accordion), and the
-    //    open-click handler calls the REAL this.CloseAllRadarDropdowns() — whose 6-field list is
+    //    open-click handler calls the REAL this.CloseAllRadarDropdowns() — whose 7-field list is
     //    MISSING radarUnderwaterDropdownOpen (Radar.cs:1380-1388, confirmed by reading it). That
     //    pre-existing quirk (opening any other group does NOT close an open Underwater group) is
     //    deliberately REPLICATED, not fixed, by inheriting the method instead of re-listing
@@ -56,8 +56,8 @@ namespace HeartopiaMod
     //    the 2-way display mode, the 3-way visual style, and the two on/off rows (Big Map Spots
     //    / Player Avatars) that the source styles as one full-row segment with live On/Off text.
     //
-    // The 7 groups are DATA-DRIVEN (one spec array, BuildUguiRadarGroupSpecs) rather than seven
-    // hand-built blocks: 28 rows share identical build/position/sync code, and every real
+    // The 8 groups are DATA-DRIVEN (one spec array, BuildUguiRadarGroupSpecs) rather than eight
+    // hand-built blocks: 30 rows share identical build/position/sync code, and every real
     // difference fits a delegate slot — the Mushrooms master toggle (force-sets all 5, and the
     // group tail re-derives the master via AreAllMushroomRadarsEnabled after ANY change,
     // Radar.cs:1443-1451), the Misc rows' per-item marker-cleanup / RunRadar side effects
@@ -81,13 +81,13 @@ namespace HeartopiaMod
     //
     // Cross-surface sync cadence (established split):
     //  - Every gated frame (shell visible + Radar tab + own sub display index): the primary
-    //    button label (ENABLE/DISABLE RADAR), all 28 option-row re-syncs (cheap bool compares;
+    //    button label (ENABLE/DISABLE RADAR), all 30 option-row re-syncs (cheap bool compares;
     //    SetIsOnWithoutNotify + ApplyVisual), the main tab's open-state layout signature, and on
     //    Settings: 5 slider re-syncs + value labels (cached-string diffs), 4 switch-toggle
     //    re-syncs, 7 segment states (cached label+selected diffs), the radarDisplayMode layout
     //    signature. WithoutNotify everywhere — an external re-sync must never replay side
     //    effects.
-    //  - 0.5s tick (NextSlowSyncAt idiom): the 7 group summaries (list-building allocations,
+    //  - 0.5s tick (NextSlowSyncAt idiom): the 8 group summaries (list-building allocations,
     //    the GetActivePriorityLocation-footer precedent); forced to run immediately after any
     //    of our own changes or a layout change so a click never shows a stale summary.
     //
@@ -536,6 +536,17 @@ namespace HeartopiaMod
             return this.GetRadarSelectionSummary(selected);
         }
 
+        // Daily roamers (RoamingCollectableFinderFeature.cs) — their own group because they behave
+        // unlike every other radar category: one instance each, a new spot every game day at 06:00,
+        // and a marker that is remembered for the session once found.
+        private string BuildUguiRadarDailySummary()
+        {
+            List<string> selected = new List<string>();
+            if (this.showOakOakRadar) selected.Add("Oak-Oak");
+            if (this.showFluoriteRadar) selected.Add("Flawless Fluorite");
+            return this.GetRadarSelectionSummary(selected);
+        }
+
         // Radar.cs:1642-1649 — Other Players summarizes as "Players" (row label differs; kept).
         private string BuildUguiRadarMiscSummary()
         {
@@ -550,7 +561,8 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // The 7 group specs — display order = DrawRadarTab's call order (Radar.cs:1253-1259)
+        // The 8 group specs — display order = DrawRadarTab's call order (Radar.cs:1253-1259),
+        // plus "Daily", this round's own group with no IMGUI ancestor
         // ----------------------------------------------------------------------------------------
 
         private UguiRadarGroupSpec[] BuildUguiRadarGroupSpecs()
@@ -663,6 +675,23 @@ namespace HeartopiaMod
                         new UguiRadarOptionBinding { Label = "Rare Trees", Get = () => this.showRareTreeRadar, Set = v => this.showRareTreeRadar = v },
                         new UguiRadarOptionBinding { Label = "Apple Trees", Get = () => this.showAppleTreeRadar, Set = v => this.showAppleTreeRadar = v },
                         new UguiRadarOptionBinding { Label = "Mandarin Trees", Get = () => this.showOrangeTreeRadar, Set = v => this.showOrangeTreeRadar = v },
+                    },
+                    AfterChanged = this.ApplyUguiRadarStandardGroupTail
+                },
+                // Daily roamers — this round's own group, with no IMGUI ancestor: Oak-Oak and the
+                // Flawless Fluorite mine are single daily-relocating objects
+                // (RoamingCollectableFinderFeature.cs), not a resource family, and mixing them into
+                // Trees/Resources made the two summaries lie about what those groups cover.
+                new UguiRadarGroupSpec
+                {
+                    Title = "Daily",
+                    Summary = this.BuildUguiRadarDailySummary,
+                    GetOpen = () => this.radarDailyDropdownOpen,
+                    SetOpen = v => this.radarDailyDropdownOpen = v,
+                    Items = new UguiRadarOptionBinding[]
+                    {
+                        new UguiRadarOptionBinding { Label = "Oak-Oak", Get = () => this.showOakOakRadar, Set = v => this.showOakOakRadar = v },
+                        new UguiRadarOptionBinding { Label = "Flawless Fluorite", Get = () => this.showFluoriteRadar, Set = v => this.showFluoriteRadar = v },
                     },
                     AfterChanged = this.ApplyUguiRadarStandardGroupTail
                 },
@@ -823,7 +852,7 @@ namespace HeartopiaMod
         private UguiShellRadarMainHandle uguiShellRadarMain;
 
         // Positions replay DrawRadarTab's own cursor (base y=8): 8 primary(40) +50 → 58
-        // select/clear(30) +45 → 103 the seven groups (variable) → force refresh +40 → credits
+        // select/clear(30) +45 → 103 the eight groups (variable) → force refresh +40 → credits
         // (120, source returns num+130). The source's literal 260px column is kept (see file
         // header). Handle assigned LAST (Research idiom).
         private GameObject BuildUguiShellRadarMainContent(Transform parent, float x, float y, float w, float h)
@@ -876,7 +905,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(clearAll, 155f, 58f, 125f, 30f);
             this.TrySetUguiButtonLabelSize(clearAll, 12f);
 
-            // The seven groups (order = DrawRadarTab's call order, Radar.cs:1253-1259).
+            // The eight groups (order = DrawRadarTab's call order, Radar.cs:1253-1259, + Daily).
             UguiRadarGroupSpec[] specs = this.BuildUguiRadarGroupSpecs();
             handle.Groups = new UguiRadarGroupHandle[specs.Length];
             for (int i = 0; i < specs.Length; i++)
@@ -910,10 +939,11 @@ namespace HeartopiaMod
                  | (this.radarUnderwaterDropdownOpen ? 8 : 0)
                  | (this.radarResourcesDropdownOpen ? 16 : 0)
                  | (this.radarTreesDropdownOpen ? 32 : 0)
+                 | (this.radarDailyDropdownOpen ? 128 : 0)
                  | (this.radarMiscDropdownOpen ? 64 : 0);
         }
 
-        // The UGUI analog of the IMGUI drawers' y-cursor accumulation across all seven groups
+        // The UGUI analog of the IMGUI drawers' y-cursor accumulation across all eight groups
         // (header: title +24, box +34; open: rows at x=28 pitch 30; +8 group gap — Radar.cs:1271-
         // 1306 + each DrawRadar*Dropdown), then Force Refresh (+40) and the credits label
         // (source: return num + 130). Reposition/SetActive/resize only; nothing is rebuilt.
@@ -1008,7 +1038,7 @@ namespace HeartopiaMod
                     this.SetUguiButtonLabel(handle.ToggleButton, toggleText);
                 }
 
-                // All 28 option rows (cheap bool compares; WithoutNotify + explicit visual).
+                // All 30 option rows (cheap bool compares; WithoutNotify + explicit visual).
                 // Covers IMGUI-twin edits, Select/Clear All, and the mushroom master cascade.
                 if (handle.Groups != null)
                 {
@@ -1081,7 +1111,8 @@ namespace HeartopiaMod
             this.ToggleRadar();
         }
 
-        // Radar.cs:1185-1217 — 28 flags true (source order), CheckRadarAutoToggle, then RunRadar
+        // Radar.cs:1185-1217 — 30 flags true (source order + the two roaming collectables),
+        // CheckRadarAutoToggle, then RunRadar
         // ONLY while the radar is active.
         private void OnUguiRadarSelectAllLootsClicked()
         {
@@ -1107,6 +1138,8 @@ namespace HeartopiaMod
             this.showRareTreeRadar = true;
             this.showAppleTreeRadar = true;
             this.showOrangeTreeRadar = true;
+            this.showOakOakRadar = true;
+            this.showFluoriteRadar = true;
             this.showBubbleRadar = true;
             this.showBirdRadar = true;
             this.showInsectRadar = true;
@@ -1126,7 +1159,7 @@ namespace HeartopiaMod
             }
         }
 
-        // Radar.cs:1218-1250 — same 28 flags false, CheckRadarAutoToggle, then Cleanup()
+        // Radar.cs:1218-1250 — same 30 flags false, CheckRadarAutoToggle, then Cleanup()
         // UNCONDITIONALLY (not the Select-All shape — deliberate asymmetry in source).
         private void OnUguiRadarClearAllLootsClicked()
         {
@@ -1152,6 +1185,8 @@ namespace HeartopiaMod
             this.showRareTreeRadar = false;
             this.showAppleTreeRadar = false;
             this.showOrangeTreeRadar = false;
+            this.showOakOakRadar = false;
+            this.showFluoriteRadar = false;
             this.showBubbleRadar = false;
             this.showBirdRadar = false;
             this.showInsectRadar = false;

@@ -20,6 +20,24 @@ namespace HeartopiaMod
     // docs/plans/2026-06-22-radar-game-mapspots.md.
     public partial class HeartopiaComplete
     {
+        // MapSpots was the ONE feature logging straight to ModLogger with no gate — 64 sites, no
+        // toggle, nothing the user could turn off. `track sync` alone produced ~2 lines/second
+        // forever (27k of 36k MapSpots lines in one log), because its "only when something
+        // happened" guard tests `addOk > 0 || removed > 0` and markers are added and removed on
+        // essentially every sync as entities stream around the player. Now it behaves like every
+        // sibling feature: off by default, switchable under Settings -> Logging.
+        internal static bool MasterLogMapSpots = false;
+
+        private void MapSpotsLog(string message)
+        {
+            if (!MasterLogMapSpots)
+            {
+                return;
+            }
+
+            ModLogger.Msg("[MapSpots] " + message);
+        }
+
         // TrackType / TrackReason for this build (both byte enums; verified in ilspy-dumps).
         // The icon a tracking item shows is fixed by its TrackType (TrackingItem.GetAtlasSpriteId):
         //   Bird->theme_107, Fish->theme_104, Insect->theme_108 (real category icons, no id needed);
@@ -67,6 +85,11 @@ namespace HeartopiaMod
                 case "Raspberry": return 40502;
                 case "Stone": return 40021;
                 case "Ore": return 40022;
+                // Daily-roaming advanced collectables: both drop items ARE in the collectable
+                // atlas, so pinning keeps them off the position-match (a 3 m neighbour tree/stone
+                // would otherwise poison the label cache with the wrong icon).
+                case "Oak-Oak": return 40006;           // Roaming Oak Timber
+                case "Flawless Fluorite": return 40026;
                 default: return 0;
             }
         }
@@ -604,7 +627,7 @@ namespace HeartopiaMod
                 if (!this.mapTrackBreakerLogged)
                 {
                     this.mapTrackBreakerLogged = true;
-                    ModLogger.Msg("[MapSpots] tracking sync error (cooling down): " + ex.Message);
+                    this.MapSpotsLog("tracking sync error (cooling down): " + ex.Message);
                 }
             }
         }
@@ -650,7 +673,7 @@ namespace HeartopiaMod
 
             if (openDispatch == IntPtr.Zero || startTrackClass == IntPtr.Zero || stopTrackClass == IntPtr.Zero || trackDataClass == IntPtr.Zero)
             {
-                ModLogger.Msg("[MapSpots] track resolve failed: dispatch=" + (openDispatch != IntPtr.Zero)
+                this.MapSpotsLog("track resolve failed: dispatch=" + (openDispatch != IntPtr.Zero)
                     + " StartTrack=" + (startTrackClass != IntPtr.Zero) + " StopTrack=" + (stopTrackClass != IntPtr.Zero)
                     + " TrackData=" + (trackDataClass != IntPtr.Zero));
                 return false;
@@ -660,7 +683,7 @@ namespace HeartopiaMod
             this.mapTrackDispatchStopMethod = this.InflateGenericDispatch(openDispatch, stopTrackClass);
             if (this.mapTrackDispatchStartMethod == IntPtr.Zero || this.mapTrackDispatchStopMethod == IntPtr.Zero)
             {
-                ModLogger.Msg("[MapSpots] track inflate failed: start=" + (this.mapTrackDispatchStartMethod != IntPtr.Zero)
+                this.MapSpotsLog("track inflate failed: start=" + (this.mapTrackDispatchStartMethod != IntPtr.Zero)
                     + " stop=" + (this.mapTrackDispatchStopMethod != IntPtr.Zero));
                 return false;
             }
@@ -675,7 +698,7 @@ namespace HeartopiaMod
                 & this.TryGetTrackFieldRawOffset(stopTrackClass, "Token", out this.offStToken);
             if (!offsetsOk)
             {
-                ModLogger.Msg("[MapSpots] track field offset resolve failed");
+                this.MapSpotsLog("track field offset resolve failed");
                 return false;
             }
 
@@ -686,7 +709,7 @@ namespace HeartopiaMod
             if (!this.mapTrackResolveLogged)
             {
                 this.mapTrackResolveLogged = true;
-                ModLogger.Msg("[MapSpots] tracking resolved: DispatchEvent<StartTrack/StopTrack> + TrackData offsets OK");
+                this.MapSpotsLog("tracking resolved: DispatchEvent<StartTrack/StopTrack> + TrackData offsets OK");
             }
             return true;
         }
@@ -929,7 +952,7 @@ namespace HeartopiaMod
                         matched++;
                         if (!string.IsNullOrEmpty(cand.Label) && this.mapTrackResolveDiag.Add(cand.Label + "|pinned"))
                         {
-                            ModLogger.Msg("[MapSpots] resolve '" + cand.Label + "' via=pinned itemId=" + pinnedIconId
+                            this.MapSpotsLog("resolve '" + cand.Label + "' via=pinned itemId=" + pinnedIconId
                                 + " type=" + (type == MapTrackTypeMapResource ? "MapResource" : "Furniture"));
                         }
                     }
@@ -979,14 +1002,14 @@ namespace HeartopiaMod
                             }
                             if (!string.IsNullOrEmpty(cand.Label) && this.mapTrackResolveDiag.Add(cand.Label + "|" + how))
                             {
-                                ModLogger.Msg("[MapSpots] resolve '" + cand.Label + "' produceId=" + resProduceId
+                                this.MapSpotsLog("resolve '" + cand.Label + "' produceId=" + resProduceId
                                     + " via=" + how + " itemId=" + iconItemId
                                     + " entityStaticId=" + resStaticId + " type=" + (type == MapTrackTypeMapResource ? "MapResource" : "Furniture"));
                             }
                         }
                         else if (!string.IsNullOrEmpty(cand.Label) && this.mapTrackResolveDiag.Add(cand.Label))
                         {
-                            ModLogger.Msg("[MapSpots] resolve '" + cand.Label + "' produceId=" + resProduceId
+                            this.MapSpotsLog("resolve '" + cand.Label + "' produceId=" + resProduceId
                                 + " fromProduce=" + fromProduce + " itemId=0 entityStaticId=" + resStaticId + " -> NO ICON (flag)");
                         }
                     }
@@ -1004,7 +1027,7 @@ namespace HeartopiaMod
                         // Diagnose unmatched resource markers with no cached icon yet.
                         this.mapTrackMatchDiagCount++;
                         float nearSqr = this.GetNearestCollectableInfo(cand.Position, out int nearProduceId, out int nearStaticId);
-                        ModLogger.Msg("[MapSpots] unmatched '" + cand.Label + "' nearestDist="
+                        this.MapSpotsLog("unmatched '" + cand.Label + "' nearestDist="
                             + (nearSqr >= float.MaxValue ? -1f : Mathf.Sqrt(nearSqr)).ToString("F2")
                             + " nearProduceId=" + nearProduceId + " nearStaticId=" + nearStaticId
                             + " (collectables=" + this.mapResEntities.Count + ")");
@@ -1128,7 +1151,7 @@ namespace HeartopiaMod
             if (this.mapTrackDiagSyncs < 5 || addOk > 0 || removed > 0 || removeFail > 0 || addFail > 0 || playerCandidates > 0)
             {
                 this.mapTrackDiagSyncs++;
-                ModLogger.Msg("[MapSpots] track sync: candidates=" + this.mapTrackCandidates.Count
+                this.MapSpotsLog("track sync: candidates=" + this.mapTrackCandidates.Count
                     + " desired=" + this.mapTrackDesired.Count + " injected=" + this.mapTrackInjected.Count
                     + " collectables=" + this.mapResEntities.Count + " matched=" + matched
                     + " addOk=" + addOk + " addFail=" + addFail + " removed=" + removed + " removeFail=" + removeFail
@@ -1173,7 +1196,7 @@ namespace HeartopiaMod
                     if (!this.mapResClassResolveTried)
                     {
                         this.mapResClassResolveTried = true;
-                        ModLogger.Msg("[MapSpots] collectable scan: CollectableObjectComponent class NOT resolved (retrying)");
+                        this.MapSpotsLog("collectable scan: CollectableObjectComponent class NOT resolved (retrying)");
                     }
                     return;
                 }
@@ -1195,14 +1218,14 @@ namespace HeartopiaMod
                 if (!this.mapResDiagLogged)
                 {
                     this.mapResDiagLogged = true;
-                    ModLogger.Msg("[MapSpots] collectable scan: GetComponents returned null/false (class ok)");
+                    this.MapSpotsLog("collectable scan: GetComponents returned null/false (class ok)");
                 }
                 return;
             }
             if (components.Count == 0 && !this.mapResDiagLogged)
             {
                 this.mapResDiagLogged = true;
-                ModLogger.Msg("[MapSpots] collectable scan: GetComponents returned 0 entities (class ok)");
+                this.MapSpotsLog("collectable scan: GetComponents returned 0 entities (class ok)");
             }
 
             // Scalarize each component (position + resource static id) immediately; never hold the IntPtrs.
@@ -1293,7 +1316,7 @@ namespace HeartopiaMod
             if (!this.mapResDiagLogged && rawCount > 0)
             {
                 this.mapResDiagLogged = true;
-                ModLogger.Msg("[MapSpots] collectable scan raw=" + rawCount + " withEntity=" + withEntity
+                this.MapSpotsLog("collectable scan raw=" + rawCount + " withEntity=" + withEntity
                     + " withPos=" + withPos + " usable=" + this.mapResEntities.Count
                     + " | sample netId=" + sampleNetId + " resIdMethods=" + sampleResId
                     + " itemTypeId=" + sampleItemTypeId + " staticId=" + sampleStaticId);
@@ -1322,7 +1345,7 @@ namespace HeartopiaMod
                     if (!this.mapPlayerClassResolveTried)
                     {
                         this.mapPlayerClassResolveTried = true;
-                        ModLogger.Msg("[MapSpots] player scan: RemotePlayerComponent class NOT resolved (retrying)");
+                        this.MapSpotsLog("player scan: RemotePlayerComponent class NOT resolved (retrying)");
                     }
                     return;
                 }
@@ -1414,7 +1437,7 @@ namespace HeartopiaMod
             if (!this.mapPlayerDiagLogged && this.mapPlayerEntities.Count > 0)
             {
                 this.mapPlayerDiagLogged = true;
-                ModLogger.Msg("[MapSpots] player scan: remotePlayers=" + this.mapPlayerEntities.Count
+                this.MapSpotsLog("player scan: remotePlayers=" + this.mapPlayerEntities.Count
                     + " named=" + mapNameByShortId.Count + " sample netId=" + this.mapPlayerEntities[0].NetId);
             }
 
@@ -1497,7 +1520,7 @@ namespace HeartopiaMod
                     return IntPtr.Zero; // not fully resolved yet — retry (don't lock)
                 }
                 this.mapNameMethodsTried = true;
-                ModLogger.Msg("[MapSpots] name read: GetUserProfile overloads=" + this.mapNameGetProfileMethods.Count
+                this.MapSpotsLog("name read: GetUserProfile overloads=" + this.mapNameGetProfileMethods.Count
                     + " Name@" + this.mapNameProfileNameOffset + " Id@" + this.mapNameProfileIdOffset
                     + " Title.str@" + this.mapNameTitleStringOffset
                     + " decode=" + (this.mapNameDecodeShortIdMethod != IntPtr.Zero));
@@ -1577,7 +1600,7 @@ namespace HeartopiaMod
                     if (!this.mapNameDiagLogged)
                     {
                         this.mapNameDiagLogged = true;
-                        ModLogger.Msg("[MapSpots] name read: netId=" + netId + " shortId=" + shortId + " name='" + s + "'");
+                        this.MapSpotsLog("name read: netId=" + netId + " shortId=" + shortId + " name='" + s + "'");
                     }
                     return true;
                 }
@@ -1668,7 +1691,7 @@ namespace HeartopiaMod
                     this.mapResGetResIdMethods.Add(m);
                 }
             }
-            ModLogger.Msg("[MapSpots] EntityUtil.GetEntityResId 1-arg methods=" + this.mapResGetResIdMethods.Count);
+            this.MapSpotsLog("EntityUtil.GetEntityResId 1-arg methods=" + this.mapResGetResIdMethods.Count);
         }
 
         // Invoke EntityUtil.GetEntityResId with the entity object. Safe for both 1-param overloads:
@@ -1783,7 +1806,7 @@ namespace HeartopiaMod
             {
                 this.mapResGetProduceMethod = this.FindAuraMonoMethodOnHierarchy(cls, "GetMapResourceProduce", 1);
             }
-            ModLogger.Msg("[MapSpots] TableData.GetMapResourceProduce resolved=" + (this.mapResGetProduceMethod != IntPtr.Zero));
+            this.MapSpotsLog("TableData.GetMapResourceProduce resolved=" + (this.mapResGetProduceMethod != IntPtr.Zero));
 
             // RewardUtility.GetDropGroup(string) resolves a dropGroup key -> the drop item id.
             IntPtr rewardCls = this.FindAuraMonoClassByFullName("XDTGameSystem.Utilities.RewardUtility");
@@ -1800,7 +1823,7 @@ namespace HeartopiaMod
             // Safe dropGroup table: static property getter on TableData (returns the by-dropGroup dict).
             this.mapResDropDictGetter = this.FindAuraMonoMethodOnHierarchy(cls,
                 "get_TableRandomDropsAndLowerUpperLimitsByDropGroup", 0);
-            ModLogger.Msg("[MapSpots] RewardUtility.GetDropGroup resolved=" + (this.mapResDropGroupMethod != IntPtr.Zero)
+            this.MapSpotsLog("RewardUtility.GetDropGroup resolved=" + (this.mapResDropGroupMethod != IntPtr.Zero)
                 + " GetQuality=" + (this.mapResGetQualityMethod != IntPtr.Zero)
                 + " dropDictGetter=" + (this.mapResDropDictGetter != IntPtr.Zero));
         }
@@ -1882,7 +1905,7 @@ namespace HeartopiaMod
                     {
                         this.mapResGroupVerboseCount++;
                         this.TryReadMonoString(sObj, out string key);
-                        ModLogger.Msg("[MapSpots]   group[" + oi + "][" + ji + "]='" + key + "' -> ok=" + ok
+                        this.MapSpotsLog("  group[" + oi + "][" + ji + "]='" + key + "' -> ok=" + ok
                             + " id=" + gid + " q=" + gq);
                     }
                 }
@@ -1890,7 +1913,7 @@ namespace HeartopiaMod
 
             if (diag)
             {
-                ModLogger.Msg("[MapSpots] produce " + produceId + " hitProduce[0][0]='" + (firstRaw ?? "")
+                this.MapSpotsLog("produce " + produceId + " hitProduce[0][0]='" + (firstRaw ?? "")
                     + "' groups=" + groupCount + " primaryId=" + primaryId + " bestItemId=" + bestId);
             }
 
@@ -2125,7 +2148,7 @@ namespace HeartopiaMod
             this.mapSpotMethodsTried = true;
             this.mapSpotAddMethod = this.FindAuraMonoMethodOnHierarchy(cls, "AddSpot", 5);
             this.mapSpotRemoveMethod = this.FindAuraMonoMethodOnHierarchy(cls, "RemoveSpot", 4);
-            ModLogger.Msg("[MapSpots] MapSpotProtocolManager AddSpot=" + (this.mapSpotAddMethod != IntPtr.Zero)
+            this.MapSpotsLog("MapSpotProtocolManager AddSpot=" + (this.mapSpotAddMethod != IntPtr.Zero)
                 + " RemoveSpot=" + (this.mapSpotRemoveMethod != IntPtr.Zero));
         }
 
@@ -2207,7 +2230,7 @@ namespace HeartopiaMod
             }
             if (this.mapTrackDiagSyncs < 6 && (added > 0 || removed > 0))
             {
-                ModLogger.Msg("[MapSpots] big-map spots: desired=" + this.mapBigSpotDesired.Count
+                this.MapSpotsLog("big-map spots: desired=" + this.mapBigSpotDesired.Count
                     + " injected=" + this.mapBigSpotInjected.Count + " added=" + added + " removed=" + removed);
             }
 
@@ -2582,19 +2605,19 @@ namespace HeartopiaMod
                 if (nameNative == IntPtr.Zero)
                 {
                     this.getNamePatchTried = true;
-                    ModLogger.Msg("[MapSpots] name patch: PlayerServiceSystem.GetPlayerName(2) not resolved");
+                    this.MapSpotsLog("name patch: PlayerServiceSystem.GetPlayerName(2) not resolved");
                     return;
                 }
                 getPlayerNameHook = GetPlayerNameNative;
                 getPlayerNameDetour = new MonoMod.RuntimeDetour.NativeDetour(nameNative, getPlayerNameHook);
                 getPlayerNameTrampoline = getPlayerNameDetour.GenerateTrampoline<GetPlayerNameDelegate>();
                 this.getNamePatchTried = true;
-                ModLogger.Msg("[MapSpots] name patch: real-name detour installed on PlayerServiceSystem.GetPlayerName");
+                this.MapSpotsLog("name patch: real-name detour installed on PlayerServiceSystem.GetPlayerName");
             }
             catch (Exception ex)
             {
                 this.getNamePatchTried = true;
-                ModLogger.Msg("[MapSpots] name patch: GetPlayerName detour failed: " + ex.Message);
+                this.MapSpotsLog("name patch: GetPlayerName detour failed: " + ex.Message);
             }
         }
 
@@ -2609,7 +2632,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] name patch: GetPlayerName undo failed: " + ex.Message);
+                this.MapSpotsLog("name patch: GetPlayerName undo failed: " + ex.Message);
             }
         }
 
@@ -2700,13 +2723,13 @@ namespace HeartopiaMod
                     installed++;
                 }
                 this.getProfilePatchTried = true;
-                ModLogger.Msg("[MapSpots] name patch: GetUserProfile Title-mirror detour installed on "
+                this.MapSpotsLog("name patch: GetUserProfile Title-mirror detour installed on "
                     + installed + " overload(s), Name@" + gpNameOffset + " Title.str@" + gpTitleStringOffset);
             }
             catch (Exception ex)
             {
                 this.getProfilePatchTried = true;
-                ModLogger.Msg("[MapSpots] name patch: GetUserProfile detour failed: " + ex.Message);
+                this.MapSpotsLog("name patch: GetUserProfile detour failed: " + ex.Message);
             }
         }
 
@@ -2724,7 +2747,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] name patch: GetUserProfile undo failed: " + ex.Message);
+                this.MapSpotsLog("name patch: GetUserProfile undo failed: " + ex.Message);
             }
         }
 
@@ -2762,7 +2785,7 @@ namespace HeartopiaMod
                 if (acqNative == IntPtr.Zero)
                 {
                     this.acqPatchTried = true;
-                    ModLogger.Msg("[MapSpots] name patch: FriendSystem.IsAcquaintance(1) not resolved");
+                    this.MapSpotsLog("name patch: FriendSystem.IsAcquaintance(1) not resolved");
                     return;
                 }
                 isAcquaintanceHook = IsAcquaintanceNative;
@@ -2779,12 +2802,12 @@ namespace HeartopiaMod
                 }
                 isAcquaintanceDetour = d;
                 this.acqPatchTried = true;
-                ModLogger.Msg("[MapSpots] name patch: IsAcquaintance detour installed (nameplate shows scanned strangers)");
+                this.MapSpotsLog("name patch: IsAcquaintance detour installed (nameplate shows scanned strangers)");
             }
             catch (Exception ex)
             {
                 this.acqPatchTried = true;
-                ModLogger.Msg("[MapSpots] name patch: IsAcquaintance detour failed: " + ex.Message);
+                this.MapSpotsLog("name patch: IsAcquaintance detour failed: " + ex.Message);
             }
         }
 
@@ -2799,7 +2822,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] name patch: IsAcquaintance undo failed: " + ex.Message);
+                this.MapSpotsLog("name patch: IsAcquaintance undo failed: " + ex.Message);
             }
         }
 
@@ -2925,19 +2948,19 @@ namespace HeartopiaMod
                 if (trackedNative == IntPtr.Zero)
                 {
                     this.isTrackedPatchTried = true;
-                    ModLogger.Msg("[MapSpots] avatar patch: MapSpot.get_IsTracked not resolved");
+                    this.MapSpotsLog("avatar patch: MapSpot.get_IsTracked not resolved");
                     return;
                 }
                 mapSpotIsTrackedHook = MapSpotIsTrackedNative;
                 mapSpotIsTrackedDetour = new MonoMod.RuntimeDetour.NativeDetour(trackedNative, mapSpotIsTrackedHook);
                 mapSpotIsTrackedTrampoline = mapSpotIsTrackedDetour.GenerateTrampoline<IsFriendGetterDelegate>();
                 this.isTrackedPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: tracked-frame suppression installed on MapSpot.get_IsTracked");
+                this.MapSpotsLog("avatar patch: tracked-frame suppression installed on MapSpot.get_IsTracked");
             }
             catch (Exception ex)
             {
                 this.isTrackedPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: get_IsTracked detour failed: " + ex.Message);
+                this.MapSpotsLog("avatar patch: get_IsTracked detour failed: " + ex.Message);
             }
         }
 
@@ -2952,7 +2975,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] avatar patch: get_IsTracked undo failed: " + ex.Message);
+                this.MapSpotsLog("avatar patch: get_IsTracked undo failed: " + ex.Message);
             }
         }
 
@@ -2997,7 +3020,7 @@ namespace HeartopiaMod
                 if (native == IntPtr.Zero)
                 {
                     this.isSameTypePatchTried = true;
-                    ModLogger.Msg("[MapSpots] big-map patch: TrackingSystem.IsSameType(2) not resolved");
+                    this.MapSpotsLog("big-map patch: TrackingSystem.IsSameType(2) not resolved");
                     return;
                 }
                 isSameTypeHook = IsSameTypeNative;
@@ -3014,13 +3037,13 @@ namespace HeartopiaMod
                 }
                 isSameTypeDetour = d;
                 this.isSameTypePatchTried = true;
-                ModLogger.Msg("[MapSpots] big-map patch: Furniture->Collectable match installed on TrackingSystem.IsSameType"
+                this.MapSpotsLog("big-map patch: Furniture->Collectable match installed on TrackingSystem.IsSameType"
                     + " (TrackType@" + mapTrackTypeRawOffset + ")");
             }
             catch (Exception ex)
             {
                 this.isSameTypePatchTried = true;
-                ModLogger.Msg("[MapSpots] big-map patch: IsSameType detour failed: " + ex.Message);
+                this.MapSpotsLog("big-map patch: IsSameType detour failed: " + ex.Message);
             }
         }
 
@@ -3035,7 +3058,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] big-map patch: IsSameType undo failed: " + ex.Message);
+                this.MapSpotsLog("big-map patch: IsSameType undo failed: " + ex.Message);
             }
             mapFurnitureSpotActive = false;
         }
@@ -3077,7 +3100,7 @@ namespace HeartopiaMod
                     || !this.TryGetTrackFieldRawOffset(miniCls, "usageId", out int offUse))
                 {
                     this.avatarPatchTried = true;
-                    ModLogger.Msg("[MapSpots] avatar patch: MiniMapSpot field offsets not resolved");
+                    this.MapSpotsLog("avatar patch: MiniMapSpot field offsets not resolved");
                     return;
                 }
                 IntPtr catField = auraMonoClassGetFieldFromName(spotCls, "category");
@@ -3085,7 +3108,7 @@ namespace HeartopiaMod
                 if (catField == IntPtr.Zero || useField == IntPtr.Zero)
                 {
                     this.avatarPatchTried = true;
-                    ModLogger.Msg("[MapSpots] avatar patch: MapSpot fields not resolved");
+                    this.MapSpotsLog("avatar patch: MapSpot fields not resolved");
                     return;
                 }
 
@@ -3095,7 +3118,7 @@ namespace HeartopiaMod
                 if (miniNative == IntPtr.Zero || spotNative == IntPtr.Zero)
                 {
                     this.avatarPatchTried = true;
-                    ModLogger.Msg("[MapSpots] avatar patch: get_IsFriend compile failed (mini="
+                    this.MapSpotsLog("avatar patch: get_IsFriend compile failed (mini="
                         + (miniNative != IntPtr.Zero) + " spot=" + (spotNative != IntPtr.Zero) + ")");
                     return;
                 }
@@ -3111,13 +3134,13 @@ namespace HeartopiaMod
                 mapSpotIsFriendDetour = new MonoMod.RuntimeDetour.NativeDetour(spotNative, mapSpotIsFriendHook);
 
                 this.avatarPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: detours installed on MiniMapSpot/MapSpot.get_IsFriend"
+                this.MapSpotsLog("avatar patch: detours installed on MiniMapSpot/MapSpot.get_IsFriend"
                     + " (self=" + mapAvatarSelfNetId + ")");
             }
             catch (Exception ex)
             {
                 this.avatarPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch failed: " + ex.Message);
+                this.MapSpotsLog("avatar patch failed: " + ex.Message);
             }
         }
 
@@ -3137,7 +3160,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] avatar patch undo failed: " + ex.Message);
+                this.MapSpotsLog("avatar patch undo failed: " + ex.Message);
             }
             this.UndoFriendGatePatch();
         }
@@ -3154,7 +3177,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] friend-gate undo failed: " + ex.Message);
+                this.MapSpotsLog("friend-gate undo failed: " + ex.Message);
             }
         }
 
@@ -3196,7 +3219,7 @@ namespace HeartopiaMod
                     if (!this.mapTrackClassMissLogged)
                     {
                         this.mapTrackClassMissLogged = true;
-                        ModLogger.Msg("[MapSpots] avatar patch: TrackingItem class NOT resolved yet — retrying");
+                        this.MapSpotsLog("avatar patch: TrackingItem class NOT resolved yet — retrying");
                     }
                     return; // image not loaded yet — retry later
                 }
@@ -3204,7 +3227,7 @@ namespace HeartopiaMod
                 if (atlasNative == IntPtr.Zero)
                 {
                     this.mapTrackSetDataPatchTried = true;
-                    ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId not resolved");
+                    this.MapSpotsLog("avatar patch: GetAtlasSpriteId not resolved");
                     return;
                 }
                 getAtlasSpriteIdHook = GetAtlasSpriteIdNative;
@@ -3240,29 +3263,29 @@ namespace HeartopiaMod
                     {
                         mapTrackSetDataTrampoline = wd.GenerateTrampoline<MapTrackSetDataDelegate>();
                         mapTrackSetDataDetour = wd;
-                        ModLogger.Msg("[MapSpots] avatar patch: MapTrackWidget.SetData bracket installed (second friend-gate anchor)");
+                        this.MapSpotsLog("avatar patch: MapTrackWidget.SetData bracket installed (second friend-gate anchor)");
                     }
                     catch (Exception exWidget)
                     {
                         try { wd.Undo(); } catch { }
                         mapTrackSetDataTrampoline = null;
                         mapTrackSetDataDetour = null;
-                        ModLogger.Msg("[MapSpots] avatar patch: MapTrackWidget.SetData bracket failed: " + exWidget.Message);
+                        this.MapSpotsLog("avatar patch: MapTrackWidget.SetData bracket failed: " + exWidget.Message);
                     }
                 }
                 else
                 {
-                    ModLogger.Msg("[MapSpots] avatar patch: MapTrackWidget.SetData NOT resolved (widgetCls="
+                    this.MapSpotsLog("avatar patch: MapTrackWidget.SetData NOT resolved (widgetCls="
                         + (widgetCls != IntPtr.Zero) + ") — GetAtlasSpriteId-only");
                 }
 
                 this.mapTrackSetDataPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId detour installed (scoped world-pointer avatars)");
+                this.MapSpotsLog("avatar patch: GetAtlasSpriteId detour installed (scoped world-pointer avatars)");
             }
             catch (Exception ex)
             {
                 this.mapTrackSetDataPatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId detour failed: " + ex.Message);
+                this.MapSpotsLog("avatar patch: GetAtlasSpriteId detour failed: " + ex.Message);
             }
         }
 
@@ -3319,7 +3342,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[MapSpots] avatar patch: GetAtlasSpriteId undo failed: " + ex.Message);
+                this.MapSpotsLog("avatar patch: GetAtlasSpriteId undo failed: " + ex.Message);
             }
             mapTrackWidgetRendering = false;
         }
@@ -3409,7 +3432,7 @@ namespace HeartopiaMod
                     if (!this.friendGateClassMissLogged)
                     {
                         this.friendGateClassMissLogged = true;
-                        ModLogger.Msg("[MapSpots] avatar patch: FriendClientService class NOT resolved yet (retrying)");
+                        this.MapSpotsLog("avatar patch: FriendClientService class NOT resolved yet (retrying)");
                     }
                     return; // image not loaded yet — retry later
                 }
@@ -3417,19 +3440,19 @@ namespace HeartopiaMod
                 if (native == IntPtr.Zero)
                 {
                     this.friendGatePatchTried = true;
-                    ModLogger.Msg("[MapSpots] avatar patch: FriendClientService.TryGetFriendByNetId(2) not resolved");
+                    this.MapSpotsLog("avatar patch: FriendClientService.TryGetFriendByNetId(2) not resolved");
                     return;
                 }
                 friendGateHook = FriendGateNative;
                 friendGateDetour = new MonoMod.RuntimeDetour.NativeDetour(native, friendGateHook);
                 friendGateTrampoline = friendGateDetour.GenerateTrampoline<TryGetFriendByNetIdDelegate>();
                 this.friendGatePatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: friend-gate detour installed on FriendClientService.TryGetFriendByNetId");
+                this.MapSpotsLog("avatar patch: friend-gate detour installed on FriendClientService.TryGetFriendByNetId");
             }
             catch (Exception ex)
             {
                 this.friendGatePatchTried = true;
-                ModLogger.Msg("[MapSpots] avatar patch: friend-gate detour failed: " + ex.Message);
+                this.MapSpotsLog("avatar patch: friend-gate detour failed: " + ex.Message);
             }
         }
 
@@ -3592,7 +3615,7 @@ namespace HeartopiaMod
             this.mapTrackInjectedStaticId.Clear();
             this.mapTrackInjectedTargetNet.Clear();
             // Keep mapTrackLabelIcon warm so re-enabling the radar shows resolved icons immediately.
-            ModLogger.Msg("[MapSpots] clear tracks: total=" + total + " removed=" + removed + " removeFail=" + removeFail);
+            this.MapSpotsLog("clear tracks: total=" + total + " removed=" + removed + " removeFail=" + removeFail);
         }
     }
 }

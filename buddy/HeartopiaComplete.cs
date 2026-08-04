@@ -5583,6 +5583,7 @@ namespace HeartopiaMod
         private bool radarUnderwaterDropdownOpen = false;
         private bool radarResourcesDropdownOpen = false;
         private bool radarTreesDropdownOpen = false;
+        private bool radarDailyDropdownOpen = false;
         private bool radarMiscDropdownOpen = false;
         private bool showFiddleheadRadar = false;
         private bool showTallMustardRadar = false;

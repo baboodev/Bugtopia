@@ -213,6 +213,7 @@ namespace HeartopiaMod
                 case "Rare Tree":
                 case "Apple Tree":
                 case "Mandarin Tree":
+                case "Oak-Oak":
                     return 0.725f;
                 case "Meteor":
                     return 0.8f;
@@ -459,6 +460,12 @@ namespace HeartopiaMod
                 case "Insect":
                 case "Meteor":
                 case "Fish Shadow":
+                // Daily-roaming advanced collectables (RoamingCollectableFinderFeature.cs). This
+                // whitelist gates BOTH the ESP overlay and the game-map track sync
+                // (HeartopiaComplete.MapSpots.cs), so a label missing here is created by
+                // CreateMarker and then silently dropped by both surfaces.
+                case "Oak-Oak":
+                case "Flawless Fluorite":
                     return true;
             }
 
@@ -473,6 +480,7 @@ namespace HeartopiaMod
                 case "Rare Tree":
                 case "Apple Tree":
                 case "Mandarin Tree":
+                case "Oak-Oak":
                     return 2.8f;
                 case "Bird":
                     return 1.9f;
@@ -484,6 +492,7 @@ namespace HeartopiaMod
                     return 1.75f;
                 case "Stone":
                 case "Ore":
+                case "Flawless Fluorite":
                     return 1.5f;
                 default:
                     return 1.15f;
@@ -522,6 +531,8 @@ namespace HeartopiaMod
                 case "Insect": return "IN";
                 case "Meteor": return "MT";
                 case "Fish Shadow": return "FS";
+                case "Oak-Oak": return "OO";
+                case "Flawless Fluorite": return "FL";
                 default: return "RS";
             }
         }
@@ -558,6 +569,8 @@ namespace HeartopiaMod
                 case "Insect": return new Color(1f, 0.78f, 0.42f);
                 case "Meteor": return new Color(1f, 0.62f, 0.32f);
                 case "Fish Shadow": return new Color(0.42f, 0.78f, 1f);
+                case "Oak-Oak": return new Color(0.92f, 0.76f, 0.35f);
+                case "Flawless Fluorite": return new Color(0.74f, 0.56f, 1f);
                 default: return new Color(0.82f, 0.9f, 1f);
             }
         }

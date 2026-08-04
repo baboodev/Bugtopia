@@ -563,6 +563,12 @@ namespace HeartopiaMod
                     return "p_material_stone1";
                 case "Ore":
                     return "p_material_stone2";
+                // Material.normalPrefabId of the two roaming drops: 40006 Roaming Oak Timber and
+                // 40026 Flawless Fluorite — same ui_item_normal_* family as the stones above.
+                case "Oak-Oak":
+                    return "p_material_wood3";
+                case "Flawless Fluorite":
+                    return "p_material_stone3";
                 case "Tree":
                     return "tree";
                 case "Rare Tree":
@@ -899,6 +905,7 @@ namespace HeartopiaMod
             this.radarEventsDropdownOpen = false;
             this.radarResourcesDropdownOpen = false;
             this.radarTreesDropdownOpen = false;
+            this.radarDailyDropdownOpen = false;
             this.radarMiscDropdownOpen = false;
         }
 
@@ -1710,6 +1717,7 @@ namespace HeartopiaMod
                 || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar || this.showContaminatedRadar
                 || this.showBlueberryRadar || this.showRaspberryRadar || this.showStoneRadar || this.showOreRadar
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
+                || this.showOakOakRadar || this.showFluoriteRadar
                 || this.showBubbleRadar || this.showBirdRadar || this.showInsectRadar || this.showFishShadowRadar || this.showMeteorRadar
                 || this.showOtherPlayersRadar;
         }
@@ -2351,6 +2359,10 @@ namespace HeartopiaMod
             // Underwater gatherables (Glasswort/Sea Grape/Wakame) — see ScanUnderwaterGatherables.
             this.ScanUnderwaterGatherables(position, material, material2, radarDistanceLimit);
 
+            // Daily-roaming advanced collectables (Oak-Oak / Flawless Fluorite) — same shared
+            // collectable snapshot, see RoamingCollectableFinderFeature.cs.
+            this.ScanRoamingCollectables(position, material, material2);
+
             // Contaminated places (sea-clean pollutants) — live SeaCleanMonsterComponent scan.
             this.ScanContaminatedRadar(position, material, material2, radarDistanceLimit);
         }
@@ -2523,6 +2535,20 @@ namespace HeartopiaMod
                                     icon = "[w]";
                                     endColor = new Color(1f, 0.65f, 0.85f);
                                     bgColor = new Color(0.42f, 0.12f, 0.3f, 0.9f);
+                                }
+                                else if (meshName == "oakoak" || meshName == "oakoak_cooldown")
+                                {
+                                    text2 = "Oak-Oak";
+                                    icon = "[Oa]";
+                                    endColor = new Color(0.92f, 0.76f, 0.35f);
+                                    bgColor = new Color(0.34f, 0.24f, 0.05f, 0.9f);
+                                }
+                                else if (meshName == "fluorite" || meshName == "fluorite_cooldown")
+                                {
+                                    text2 = "Flawless Fluorite";
+                                    icon = "[Fl]";
+                                    endColor = new Color(0.74f, 0.56f, 1f);
+                                    bgColor = new Color(0.26f, 0.13f, 0.46f, 0.9f);
                                 }
                                 else if (meshName == "otherplayermorph")
                                 {

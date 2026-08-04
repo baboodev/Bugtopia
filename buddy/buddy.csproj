@@ -406,6 +406,7 @@
     <Compile Include="StealthForagingFeature.cs" />
     <Compile Include="LittleWhaleFinderFeature.cs" />
     <Compile Include="SanrioGachaFinderFeature.cs" />
+    <Compile Include="RoamingCollectableFinderFeature.cs" />
     <Compile Include="SwimSprintVerticalGuardFeature.cs" />
     <Compile Include="ChatForceTranslateFeature.cs" />
     <Compile Include="CorruptionCleanseFeature.cs" />
