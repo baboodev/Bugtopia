@@ -69,14 +69,19 @@ Invoke via AuraMono (`Vector3` by pointer; enums as ints). Enum ints: `SpotEnum.
 Icons live in two atlases:
 - **NormalItem** (`ui_item_normal_{prefab}`, ~6205 sprites incl. `p_gather_*` mushrooms, `p_material_*`,
   `p_fruit_*`). Used by `TrackType.Furniture` → `RewardUtility.GetIconName(StaticId)`.
-- **Collectable** packed `SpriteAtlas` "collectable_13" (**32 sprites**, keyed by ITEM id). Used by
-  `TrackType.MapResource` AND big-map `Collectable` spots → `ui_dynamic_collectable_{id}`. The 32 ids:
-  - **40xxx** materials/fruits: 40001 Branch, 40002 Timber, 40003 Quality Timber, 40004 Rare Timber,
+- **Collectable** packed `SpriteAtlas` "collectable_13" (**35 sprites**, keyed by ITEM id). Used by
+  `TrackType.MapResource` AND big-map `Collectable` spots → `ui_dynamic_collectable_{id}`. The 35 ids
+  (ground truth = the shipped `672355733d89_collectable_13.ab`, dumped offline with `heartopia_ab.py`;
+  it is the ONLY atlas whose name matches "collectable" in `icon_index.tsv`, so the runtime dump is
+  complete, not a first-of-many):
+  - **40xxx** materials/fruits (17): 40001 Branch, 40002 Timber, 40003 Quality Timber, 40004 Rare Timber,
     40006 Roaming Oak Timber, 40021 Stone, 40022 Ore, 40026 Flawless Fluorite, 40033 Bamboo, 40101 Apple,
-    40201 Mandarin, 40301 Coconut, 40501 Blueberry, 40502 Raspberry.
-  - **48xxx** mushrooms: 48001 Oyster Mushroom, 48002 Shiitake, 48003 Button Mushroom, 48004 Penny Bun,
+    40201 Mandarin, 40301 Coconut, 40501 Blueberry, 40502 Raspberry, 40601 Glasswort, 40602 Sea Grape,
+    40603 Wakame.
+  - **48xxx** mushrooms (6): 48001 Oyster Mushroom, 48002 Shiitake, 48003 Button Mushroom, 48004 Penny Bun,
     48005 Black Truffle, 48006 Matsutake.
-  - **49xxx** "Bizarre" mushroom variants.
+  - **49xxx** "Bizarre" mushroom variants (12): 49001-49012.
+  Notably **absent**: Starfall Shard 40034/40035/40036 (the meteor drop) — see the big-map section.
   (The `.ab` file list only shows 4 string-named fruit sprites; the numeric ones are PACKED inside the
   atlas — enumerate at runtime via `Resources.FindObjectsOfTypeAll<SpriteAtlas>()` + `SpriteAtlas.GetSprites`,
   names suffixed `(Clone)`. The atlas only loads once a collectable icon is actually rendered.)
@@ -109,7 +114,7 @@ cache (never cleared), poisoned EVERY bubble marker with that random icon. Bubbl
    unambiguous 2-param `GetEntity`, NOT `RewardUtility.GetName` which has two 3-param overloads incl. a Guid one).
 3. **produce drop-item id NOT in the atlas** (meteor → Starfall Shard) — `Furniture` track with that item id:
    the item's NormalItem icon (`ui_item_normal_*`) exists for inventory items even when the collectable sprite
-   doesn't. Minimap only (`via=produceItem`).
+   doesn't (`via=produceItem`). Reaches the big map too, but only through the `IsSameType` widening below.
 4. **entity static id fallback** — `EntityUtil.GetEntityResId(entity)` (managed EntityUtil absent → AuraMono;
    enumerate both 1-arg overloads, invoke with the entity object). Works only for mushroom-type gathers via
    NormalItem; trees/stones expose an object prefab (`p_tree_*` absent → blank).
@@ -117,7 +122,8 @@ cache (never cleared), poisoned EVERY bubble marker with that random icon. Bubbl
 ### Track type chosen from the resolution
 - (1) or (2) succeeded → **`MapResource`** track (icon in collectable atlas → shows on minimap **and** drives
   a big-map spot).
-- (3) or (4) → **`Furniture`** track (NormalItem icon, **minimap only** — no collectable sprite for the big map).
+- (3) or (4) → **`Furniture`** track (NormalItem icon). Minimap by default; a big-map spot only for the labels
+  in `IsBigMapFurnitureLabel` (currently just **Meteor**), which need the `IsSameType` detour below.
 - Birds/Fish/Insect → `Bird`/`Fish`/`Insect` (theme_107/104/108). Players/morphs → `Player` (native pin).
 
 Resolved icon id is cached per radar label (`mapTrackLabelIcon` + `mapTrackLabelProduce`), so distant /
@@ -138,9 +144,37 @@ Therefore (pick two of three): many / real-icons / no-frame.
 - **One-per-type, no frame**: bare spot with `usageId = itemId` (its own sprite, no track) — but spots merge.
 - Frameless + per-position ⇒ blank icons (unique id has no sprite).
 
-So **"Show on big map" is OFF by default** (no frames). Item-icon track types (`Furniture` etc.) are absent
-from `IsSameType`, so they can NEVER drive a big-map spot — only `MapResource` can. Mushrooms therefore only
-reach the big map via the atlas-name path (→ `MapResource`/48xxx).
+So **"Show on big map" is OFF by default** (no frames). Mushrooms reach the big map via the atlas-name path
+(→ `MapResource`/48xxx).
+
+### Meteors on the big map — the `IsSameType` widening
+
+Item-icon track types (`Furniture` etc.) are absent from `TrackingSystem.IsSameType`, whose switch maps
+`SpotEnum.Collectable` to `TrackType.MapResource` **only** — so out of the box a `Furniture` track can never
+be found by `GetTrackData`, and its spot falls back to `ui_dynamic_collectable_{usageId}` (blank for a unique
+per-position id). Meteors are stuck on `Furniture` because their produce (601-603 → dropGroup
+`ROCK6010/6020/6030` → Starfall Shard **40034/40035/40036**) has **no collectable sprite**, so they were
+minimap-only.
+
+Fix (**live-confirmed 2026-08-04**): a trampoline `NativeDetour` on **`TrackingSystem.IsSameType(TrackData, SpotEnum)`**
+(`EnsureFurnitureSpotPatch` / `IsSameTypeNative`) that additionally returns true for
+`Furniture` ↔ `Collectable`; everything else calls the original. The spot then matches our track
+(`IsSameTrackPoint`: `usageId == TargetNetId`, which the sync sets for every big-map-eligible marker) and
+`MapSpot.GetAtlasSpriteID` returns `trackingItems[0].GetAtlasSpriteId()` = `AtlasEnum.NormalItem` /
+`RewardUtility.GetIconName(40034)` → `ui_item_normal_p_material_mfragment_6` — the same icon the minimap
+already shows. Notes:
+- **Safe to widen globally**: no vanilla call site creates a `Collectable` spot (`SpotEnum.Collectable`
+  appears only in reads), so the extra match can only ever reach our own markers.
+- **ABI**: `TrackData` is a ~48-byte struct → Win64 passes it BY REFERENCE. `RCX=this`, `RDX=TrackData*`,
+  `R8=SpotEnum`; read `TrackType` at the **raw** offset (`offTdTrackType`, header-subtracted). Mono managed
+  methods carry no trailing `MethodInfo*` (that is IL2CPP).
+- Installed on the `radarBigMapSpots` gate alone (inert without a `Collectable` spot), only once
+  `EnsureMapTrackReady` has published the offset, and undone on toggle-off + `Cleanup()`. Hot path
+  (per track × spot on every map refresh) → allocation-free, no logging.
+- Which labels take this route is `IsBigMapFurnitureLabel` — deliberately just `"Meteor"`. Bird/Insect
+  species pictures and `Contaminated` also ride `Furniture` and would work the same way if ever added.
+- The tracked square is already suppressed for every `Collectable` spot by `MapSpotIsTrackedNative`.
+Diag: `[MapSpots] big-map patch: Furniture->Collectable match installed on TrackingSystem.IsSameType`.
 
 ---
 

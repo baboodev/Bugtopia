@@ -3283,6 +3283,7 @@ namespace HeartopiaMod
             this.ClearInjectedGameMapSpots();
             this.UndoPlayerAvatarPatches();
             this.UndoIsTrackedPatch();
+            this.UndoFurnitureSpotPatch();
             this.UndoGetNamePatch();
             this.UndoGetProfilePatch();
             this.UndoIsAcquaintancePatch();

@@ -524,6 +524,16 @@ namespace HeartopiaMod
             }
         }
 
+        // Labels allowed onto the BIG map while riding a Furniture (NormalItem) track instead of MapResource.
+        // Their drop item has no ui_dynamic_collectable_* sprite, so the MapResource route would render blank
+        // — they reach the big map only through the IsSameType widening (EnsureFurnitureSpotPatch). Keep this
+        // list tight: every label here costs a Collectable spot that borrows its icon from our own track.
+        //   Meteor -> Starfall Shard 40034-40036, absent from the 35-sprite collectable atlas.
+        private static bool IsBigMapFurnitureLabel(string label)
+        {
+            return string.Equals(label, "Meteor", StringComparison.Ordinal);
+        }
+
         // Only small "gather" collectables have a valid NormalItem icon (p_gather_*/p_fruit_*). Tree/Stone/
         // Ore entities expose an object prefab that has no item icon -> white circle, so they keep the flag.
         private static bool IsForageableLabel(string label)
@@ -668,6 +678,9 @@ namespace HeartopiaMod
                 ModLogger.Msg("[MapSpots] track field offset resolve failed");
                 return false;
             }
+
+            // Publish the TrackType raw offset for the IsSameType hook (allocation-free field read).
+            mapTrackTypeRawOffset = this.offTdTrackType;
 
             this.mapTrackResolved = true;
             if (!this.mapTrackResolveLogged)
@@ -999,14 +1012,23 @@ namespace HeartopiaMod
                 }
                 // TargetNetId per track: Player -> the real player netId (position-matched against the
                 // RemotePlayerComponent scan) so the game's native friend-avatar path and vanilla-spot dedup
-                // work; MapResource -> the big-map spot usageId (low token bits); else 0.
+                // work; big-map-eligible resource -> the big-map spot usageId (low token bits); else 0.
+                //
+                // Big-map eligibility: a MapResource track always qualifies (its collectable sprite exists),
+                // and a Furniture track only for the labels that CAN'T take the MapResource route because
+                // their item has no collectable sprite (Meteor). The latter is matched to its spot only via
+                // the IsSameType widening (EnsureFurnitureSpotPatch), installed on the same radarBigMapSpots
+                // gate — without it such a spot would find no track and render blank.
+                bool bigMapEligible = type == MapTrackTypeMapResource
+                    || (type == MapTrackTypeFurniture && IsBigMapFurnitureLabel(cand.Label));
+
                 uint desiredTargetNet = 0u;
                 if (type == MapTrackTypePlayer && this.TryMatchRemotePlayer(cand.Position, out uint playerNetId))
                 {
                     desiredTargetNet = playerNetId;
                     this.mapAvatarWorldNetIdsNext.Add(playerNetId); // force-friend this one for the world pointer
                 }
-                else if (type == MapTrackTypeMapResource)
+                else if (bigMapEligible)
                 {
                     desiredTargetNet = unchecked((uint)(cand.Token & 0xFFFFFFFFUL));
                 }
@@ -1016,11 +1038,11 @@ namespace HeartopiaMod
                 this.mapTrackDesiredStaticId[cand.Token] = staticId;
                 this.mapTrackDesiredTargetNet[cand.Token] = desiredTargetNet;
 
-                // Big map: a MapResource marker (drop-item icon) gets a per-position Collectable map-spot,
-                // keyed by a UNIQUE usageId (low bits of the token). The spot borrows its icon from the
-                // matching MapResource track (StaticId=itemId, TargetNetId=usageId), so it shows the real
-                // item icon per location instead of one-per-type.
-                if (this.radarBigMapSpots && type == MapTrackTypeMapResource && staticId > 0)
+                // Big map: an eligible marker gets a per-position Collectable map-spot, keyed by a UNIQUE
+                // usageId (low bits of the token). The spot borrows its icon from the matching track
+                // (StaticId=itemId, TargetNetId=usageId -> IsSameTrackPoint), so it shows the real item icon
+                // per location instead of one-per-type.
+                if (this.radarBigMapSpots && bigMapEligible && staticId > 0)
                 {
                     int spotUsageId = unchecked((int)(uint)(cand.Token & 0xFFFFFFFFUL));
                     this.mapBigSpotDesired[spotUsageId] = cand.Position;
@@ -2336,6 +2358,28 @@ namespace HeartopiaMod
         private static IsFriendGetterDelegate mapSpotIsTrackedHook;        // anti-GC
         private static IsFriendGetterDelegate mapSpotIsTrackedTrampoline;  // original
         private static MonoMod.RuntimeDetour.NativeDetour mapSpotIsTrackedDetour;
+
+        // Furniture-icon markers on the BIG map (Meteor). A Collectable map-spot only borrows its icon from
+        // a track that TrackingSystem.IsSameType accepts, and that switch maps SpotEnum.Collectable to
+        // TrackType.MapResource ONLY — so a Furniture track (AtlasEnum.NormalItem = the real item icon) can
+        // never drive a big-map spot. Meteors are exactly that case: their produce (601-603) resolves to
+        // Starfall Shard 40034-40036, which has NO ui_dynamic_collectable_* sprite (verified against the
+        // shipped collectable_13.ab: 35 sprites, 400xx/48xxx/49xxx only), so they ride a Furniture track and
+        // were minimap-only. This detour widens IsSameType so a Furniture track ALSO matches a Collectable
+        // spot; MapSpot.GetAtlasSpriteID then returns trackingItems[0].GetAtlasSpriteId() = the NormalItem
+        // item icon. Safe to widen globally: NO vanilla call site creates a Collectable spot (grep
+        // SpotEnum.Collectable — only reads), so the extra match can only ever hit one of OUR spots.
+        // ABI: TrackData is a ~48-byte struct -> Win64 passes it BY REFERENCE. RCX=this, RDX=TrackData*,
+        // R8=SpotEnum (int). Mono managed methods take no trailing MethodInfo* (that's an IL2CPP thing).
+        private delegate byte IsSameTypeDelegate(IntPtr self, IntPtr trackData, int spotEnum);
+        private static IsSameTypeDelegate isSameTypeHook;        // anti-GC
+        private static IsSameTypeDelegate isSameTypeTrampoline;  // original
+        private static MonoMod.RuntimeDetour.NativeDetour isSameTypeDetour;
+        private static volatile bool mapFurnitureSpotActive;
+        // TrackData.TrackType RAW offset (header-subtracted, = offTdTrackType) for the hook to read.
+        private static int mapTrackTypeRawOffset = -1;
+        private bool isSameTypePatchTried;
+
         private bool avatarPatchTried;
         private float avatarPatchNextTryAt;
         // MiniMapSpot is a STRUCT: `this` = pointer to the raw struct data -> header-subtracted offsets.
@@ -2487,6 +2531,20 @@ namespace HeartopiaMod
             else
             {
                 this.UndoIsTrackedPatch();
+            }
+
+            // Let Furniture (NormalItem) tracks drive a big-map Collectable spot — the only way markers whose
+            // item has no ui_dynamic_collectable_* sprite (Meteor) can show there with their real icon. Rides
+            // the big-map toggle alone: it is inert unless we also create a Collectable spot, and the names/
+            // avatar groups create none.
+            mapFurnitureSpotActive = this.radarBigMapSpots;
+            if (this.radarBigMapSpots)
+            {
+                this.EnsureFurnitureSpotPatch();
+            }
+            else
+            {
+                this.UndoFurnitureSpotPatch();
             }
         }
 
@@ -2898,6 +2956,90 @@ namespace HeartopiaMod
             }
         }
 
+        // Widen TrackingSystem.IsSameType so a Furniture track also matches a Collectable spot (see the
+        // field-block comment). Needs the TrackData.TrackType raw offset, so it resolves the tracking layer
+        // first — until that succeeds the detour is not installed at all (an inert hook would just add a
+        // trampoline hop to a hot map path for nothing).
+        private void EnsureFurnitureSpotPatch()
+        {
+            try
+            {
+                if (isSameTypeDetour != null)
+                {
+                    if (!isSameTypeDetour.IsApplied)
+                    {
+                        isSameTypeDetour.Apply();
+                    }
+                    return;
+                }
+                if (this.isSameTypePatchTried)
+                {
+                    return;
+                }
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return;
+                }
+                if (!this.EnsureMapTrackReady() || mapTrackTypeRawOffset < 0)
+                {
+                    return; // TrackData offsets not up yet — retry later (EnsureMapTrackReady self-throttles)
+                }
+                IntPtr cls = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.Navigation.TrackingSystem");
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassInAllLoadedImages("TrackingSystem", "XDTGameSystem.GameplaySystem.Navigation");
+                }
+                if (cls == IntPtr.Zero)
+                {
+                    return; // image not loaded yet — retry later
+                }
+                IntPtr native = this.ResolveBuildingMonoNative(cls, "IsSameType", 2);
+                if (native == IntPtr.Zero)
+                {
+                    this.isSameTypePatchTried = true;
+                    ModLogger.Msg("[MapSpots] big-map patch: TrackingSystem.IsSameType(2) not resolved");
+                    return;
+                }
+                isSameTypeHook = IsSameTypeNative;
+                MonoMod.RuntimeDetour.NativeDetour d = new MonoMod.RuntimeDetour.NativeDetour(native, isSameTypeHook);
+                try
+                {
+                    isSameTypeTrampoline = d.GenerateTrampoline<IsSameTypeDelegate>();
+                }
+                catch
+                {
+                    try { d.Undo(); } catch { }
+                    isSameTypeTrampoline = null;
+                    throw;
+                }
+                isSameTypeDetour = d;
+                this.isSameTypePatchTried = true;
+                ModLogger.Msg("[MapSpots] big-map patch: Furniture->Collectable match installed on TrackingSystem.IsSameType"
+                    + " (TrackType@" + mapTrackTypeRawOffset + ")");
+            }
+            catch (Exception ex)
+            {
+                this.isSameTypePatchTried = true;
+                ModLogger.Msg("[MapSpots] big-map patch: IsSameType detour failed: " + ex.Message);
+            }
+        }
+
+        private void UndoFurnitureSpotPatch()
+        {
+            try
+            {
+                if (isSameTypeDetour != null && isSameTypeDetour.IsApplied)
+                {
+                    isSameTypeDetour.Undo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[MapSpots] big-map patch: IsSameType undo failed: " + ex.Message);
+            }
+            mapFurnitureSpotActive = false;
+        }
+
         private void EnsurePlayerAvatarPatches()
         {
             try
@@ -3209,6 +3351,24 @@ namespace HeartopiaMod
                 }
             }
             return 1;
+        }
+
+        // TrackingSystem.IsSameType(TrackData, SpotEnum) replacement: additionally accept a Furniture track
+        // for a Collectable spot, so our NormalItem-icon markers (Meteor) can be matched by their big-map
+        // spot and lend it the real item icon. Everything else falls through to the original — and since no
+        // vanilla code creates Collectable spots, the widening can only reach our own markers.
+        // Hot path (runs per track x spot on every map refresh): allocation-free, no logging.
+        private static unsafe byte IsSameTypeNative(IntPtr self, IntPtr trackData, int spotEnum)
+        {
+            if (mapFurnitureSpotActive
+                && spotEnum == SpotEnumCollectable
+                && trackData != IntPtr.Zero
+                && mapTrackTypeRawOffset >= 0
+                && *((byte*)trackData + mapTrackTypeRawOffset) == MapTrackTypeFurniture)
+            {
+                return 1;
+            }
+            return isSameTypeTrampoline != null ? isSameTypeTrampoline(self, trackData, spotEnum) : (byte)0;
         }
 
         // Install (once) the FriendClientService.TryGetFriendByNetId trampoline detour that force-friends the

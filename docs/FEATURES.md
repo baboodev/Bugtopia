@@ -851,6 +851,9 @@ no longer touches either.
 
 - Per-resource native icons (timber/stone/bamboo/fruit/mushroom), rare tiers (e.g. Rare Timber), players' native pin, Bird/Fish/Insect category icons.
 - Shows on the minimap + in-world tracking pointers; big map is opt-in.
+- **Meteors** reach the big map too (with their Starfall Shard icon). They have no collectable-atlas sprite,
+  so this needs a detour that lets their item-icon track drive a map spot — see
+  [RADAR_GAME_MAP.md](RADAR_GAME_MAP.md#meteors-on-the-big-map--the-issametype-widening).
 - Cooldown/depleted resources are hidden (authoritative via `CollectableObjectComponent.inCold`).
 
 ### Priority locations

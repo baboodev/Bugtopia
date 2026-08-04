@@ -62,6 +62,10 @@ namespace HeartopiaMod
         private int seaCleanBossLastDrivenState = -1;
         private int seaCleanBossRoundsThisQte;
         private int seaCleanBossPassCount;
+        private IntPtr seaCleanBossGetMonsterTypeMethod = IntPtr.Zero;
+        private string seaCleanBossLastDiagnosis = string.Empty;
+        private float seaCleanBossNextDiagAt;
+        private float seaCleanBossNextNoTargetLogAt;
 
         internal string SeaCleanBossQteStatus { get; private set; } = string.Empty;
 
@@ -104,33 +108,66 @@ namespace HeartopiaMod
                     // boss mid-QTE (someone else finished it), which flips IsInQTE off but leaves
                     // the component's own _qteState stranded. Driving on _qteState alone would keep
                     // pressing — and EndHold would still "complete" and claim a pass on a corpse.
-                    if (!this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsPublicMethod, out bool isPublic) || !isPublic)
+                    // Everything is read FIRST, then judged. Each getter reports ok/value
+                    // separately: the earlier version collapsed "the invoke failed" into "false",
+                    // so an unresolved method looked exactly like a wrong target and the status
+                    // line blamed the player for the mod's own resolve gap.
+                    bool okPublic = this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsPublicMethod, out bool isPublic);
+                    bool okCleaned = this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsCleanedMethod, out bool cleaned);
+                    bool okInQte = this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsInQteMethod, out bool inQte);
+                    bool okShield = this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsQteShieldMethod, out bool shield);
+                    bool okType = this.SeaCleanBossInvokeIntGetter(monster, this.seaCleanBossGetMonsterTypeMethod, out int monsterType);
+                    bool okQte = this.SeaCleanBossInvokeIntGetter(monster, this.seaCleanBossGetQteStateMethod, out int qteState);
+
+                    uint targetNetId = 0U;
+                    if (this.TryGetMonoObjectMember(monster, "entity", out IntPtr entityObj) && entityObj != IntPtr.Zero)
                     {
-                        this.SeaCleanBossResetRun("Target is not the public pollutant.");
+                        uint entityPin = AuraMonoPinNew(entityObj);
+                        if (entityPin != 0U)
+                        {
+                            pins.Add(entityPin);
+                        }
+                        this.TryGetMonoUInt32Member(entityObj, "netId", out targetNetId);
+                    }
+
+                    this.SeaCleanBossDiagnose(targetNetId, okType, monsterType, okPublic, isPublic,
+                        okCleaned, cleaned, okInQte, inQte, okShield, shield, okQte, qteState);
+
+                    if (!okPublic)
+                    {
+                        this.SeaCleanBossResetRun("Cannot read the target's type — see the log.");
                         return;
                     }
 
-                    if (this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsCleanedMethod, out bool cleaned) && cleaned)
+                    if (!isPublic)
+                    {
+                        this.SeaCleanBossResetRun("Aiming at a private pollutant ("
+                            + (okType ? SeaCleanBossDescribeMonsterType(monsterType) : "type ?")
+                            + ") — this assist only drives the public boss.");
+                        return;
+                    }
+
+                    if (okCleaned && cleaned)
                     {
                         this.SeaCleanBossResetRun("Pollutant already cleaned.");
                         return;
                     }
 
-                    if (!this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsInQteMethod, out bool inQte) || !inQte)
+                    if (!okInQte || !inQte)
                     {
                         this.SeaCleanBossResetRun("Cleaning — waiting for the next QTE.");
                         return;
                     }
 
-                    if (this.SeaCleanQteInvokeBoolGetter(monster, this.seaCleanQteGetIsQteShieldMethod, out bool shield) && shield)
+                    if (okShield && shield)
                     {
                         this.SeaCleanBossResetRun("Shield QTE — left to the player.");
                         return;
                     }
 
-                    if (!this.SeaCleanBossInvokeIntGetter(monster, this.seaCleanBossGetQteStateMethod, out int qteState))
+                    if (!okQte)
                     {
-                        this.SeaCleanBossQteStatus = "QTE state unreadable.";
+                        this.SeaCleanBossQteStatus = "QTE state unreadable — see the log.";
                         return;
                     }
 
@@ -177,10 +214,17 @@ namespace HeartopiaMod
             }
         }
 
+        // Also logs the TRANSITION. Statuses are set every frame, so logging the text only when it
+        // actually changes turns the log into a readable trace of why the assist is idle.
         private void SeaCleanBossResetRun(string status)
         {
             this.seaCleanBossLastDrivenState = -1;
             this.seaCleanBossRoundsThisQte = 0;
+            if (!string.Equals(status, this.SeaCleanBossQteStatus, StringComparison.Ordinal))
+            {
+                this.SeaCleanBossLog("idle: " + status);
+            }
+
             this.SeaCleanBossQteStatus = status;
         }
 
@@ -245,6 +289,16 @@ namespace HeartopiaMod
 
             if (!this.TryGetMonoObjectMember(boxed, "monsterComponent", out IntPtr monster) || monster == IntPtr.Zero)
             {
+                // Empty is normal (nothing aimed at); a read FAILURE is not, and the two are
+                // indistinguishable from the caller, so say which one happened here. Throttled:
+                // this runs every frame the player stands in the state without aiming.
+                float now = Time.unscaledTime;
+                if (now >= this.seaCleanBossNextNoTargetLogAt)
+                {
+                    this.seaCleanBossNextNoTargetLogAt = now + 10f;
+                    this.SeaCleanBossLog("CurrentTarget.monsterComponent is null — nothing aimed at, or the field moved.");
+                }
+
                 return IntPtr.Zero;
             }
 
@@ -324,6 +378,13 @@ namespace HeartopiaMod
                 this.seaCleanBossGetQteStateMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_QTEState", 0);
             }
 
+            if (this.seaCleanQteMonsterClass != IntPtr.Zero && this.seaCleanBossGetMonsterTypeMethod == IntPtr.Zero)
+            {
+                // Diagnostics only — it names WHICH kind of pollutant is being aimed at,
+                // which is the difference between "wrong target" and "broken resolve".
+                this.seaCleanBossGetMonsterTypeMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_MonsterType", 0);
+            }
+
             if (this.seaCleanBossLocalPlayerClass == IntPtr.Zero)
             {
                 this.seaCleanBossLocalPlayerClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent");
@@ -381,6 +442,69 @@ namespace HeartopiaMod
                 + " qteState=0x" + this.seaCleanBossGetQteStateMethod.ToInt64().ToString("X"));
 
             return ready;
+        }
+
+        // EPollutantBehaviorType — the enum behind MonsterType.
+        private static string SeaCleanBossDescribeMonsterType(int value)
+        {
+            switch (value)
+            {
+                case 0: return "Normal";
+                case 1: return "Split";
+                case 2: return "Shield";
+                case 3: return "MultiQte";
+                case 4: return "Composite";
+                case 5: return "PublicPollutant";
+                default: return "type " + value;
+            }
+        }
+
+        // SeaCleanExecutionState.
+        private static string SeaCleanBossDescribeQteState(int value)
+        {
+            switch (value)
+            {
+                case 0: return "Idle";
+                case 1: return "Ready";
+                case 2: return "Holding";
+                case 3: return "AwaitingRelease";
+                case 4: return "Completed";
+                case 5: return "Failed";
+                default: return "state " + value;
+            }
+        }
+
+        private static string SeaCleanBossFlag(string name, bool ok, bool value)
+        {
+            // "?" is NOT the same as "false" — an unreadable getter is a mod problem, a false one
+            // is a game fact, and the whole point of this line is telling them apart.
+            return name + "=" + (ok ? (value ? "1" : "0") : "?");
+        }
+
+        // Logged when the picture CHANGES, and otherwise at most once every 5 s — a per-frame dump
+        // would bury the very transition it exists to show.
+        private void SeaCleanBossDiagnose(uint netId, bool okType, int monsterType,
+            bool okPublic, bool isPublic, bool okCleaned, bool cleaned,
+            bool okInQte, bool inQte, bool okShield, bool shield, bool okQte, int qteState)
+        {
+            string line = "target netId=" + netId
+                + " monsterType=" + (okType ? SeaCleanBossDescribeMonsterType(monsterType) : "?")
+                + " " + SeaCleanBossFlag("public", okPublic, isPublic)
+                + " " + SeaCleanBossFlag("cleaned", okCleaned, cleaned)
+                + " " + SeaCleanBossFlag("inQte", okInQte, inQte)
+                + " " + SeaCleanBossFlag("shieldQte", okShield, shield)
+                + " qteState=" + (okQte ? SeaCleanBossDescribeQteState(qteState) : "?");
+
+            float now = Time.unscaledTime;
+            if (string.Equals(line, this.seaCleanBossLastDiagnosis, StringComparison.Ordinal)
+                && now < this.seaCleanBossNextDiagAt)
+            {
+                return;
+            }
+
+            this.seaCleanBossLastDiagnosis = line;
+            this.seaCleanBossNextDiagAt = now + 5f;
+            this.SeaCleanBossLog(line);
         }
 
         private void SeaCleanBossLog(string message)
