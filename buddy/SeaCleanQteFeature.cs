@@ -510,9 +510,7 @@ namespace HeartopiaMod
         // Public boss appeared / phase change — remember its netId for the public-pollutant fallback.
         private void OnCleanupEventPublicPollutantSpawnedEvent(GameEventSnapshot e)
         {
-            // Either toggle keeps the hook meaningful: the boss assist needs the same visibility,
-            // and it captures the same netId. Only the ACTION below stays auto-clean's.
-            if (!this.seaCleanQteEnabled && !this.seaCleanBossQteEnabled)
+            if (!this.seaCleanQteEnabled)
             {
                 return;
             }
@@ -528,7 +526,7 @@ namespace HeartopiaMod
         // A QTE changed state. Auto-pass when it just became active (Ready) and it is NOT a shield QTE.
         private void OnSeaCleanExecutionStateEvent(GameEventSnapshot e)
         {
-            if (!this.seaCleanQteEnabled && !this.seaCleanBossQteEnabled)
+            if (!this.seaCleanQteEnabled)
             {
                 return;
             }
@@ -541,27 +539,9 @@ namespace HeartopiaMod
             this.SeaCleanQteLog("QTE event state=" + state + " shield=" + isShield
                 + " targetEntityId=" + targetEntityId + " world=" + targetWorld);
 
-            // The line above is gated behind MasterLogSeaCleanQte (off by default), so borrowing
-            // this hook for the boss assist gave zero visibility. Mirror it through the boss
-            // logger, which is ungated — this event is the ONLY way to tell "no QTE ever fired"
-            // from "the poll missed it".
-            if (this.seaCleanBossQteEnabled)
-            {
-                this.SeaCleanBossLog("QTE event state=" + state + " shield=" + isShield
-                    + " targetEntityId=" + targetEntityId + " world=" + targetWorld);
-            }
-
             // Only act when the QTE opens (Ready). Acting here short-circuits the hold entirely:
             // ExecuteKill (exclusive) instantly kills; ReqStartCleanPublicPollutant(true) reports a
             // pass (public boss). Shield QTEs are left alone (per design).
-            // The event-driven auto-pass short-circuits the hold entirely — that is the very
-            // sequence the boss assist rejects (a pass from a player who never held anything).
-            // It stays bound to its own toggle; the boss toggle only borrows the visibility.
-            if (!this.seaCleanQteEnabled)
-            {
-                return;
-            }
-
             if (state != SeaCleanExecStateReady || isShield)
             {
                 return;
