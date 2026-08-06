@@ -1468,6 +1468,25 @@ namespace HeartopiaMod
             catch { }
         }
 
+        // Greys out a dependent toggle (Selectable fades its own targetGraphic) without touching the
+        // backing field — the value stays whatever the user last chose, it simply has no effect
+        // while the parent option is off.
+        private void SetUguiToggleInteractable(Toggle toggle, bool interactable)
+        {
+            if (toggle == null)
+            {
+                return;
+            }
+            try
+            {
+                if (toggle.interactable != interactable)
+                {
+                    toggle.interactable = interactable;
+                }
+            }
+            catch { }
+        }
+
         // ----------------------------------------------------------------------------------------
         // Toggles
         // ----------------------------------------------------------------------------------------

@@ -588,6 +588,46 @@ Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
 - Opens bag UI programmatically, finds repair kit (standard or crafty), clicks Use, closes bag.
 - Trigger modes: manual hotkey, toast notification, **durability percentage threshold** (default 10%).
 - Optional teleport backward before repair (configurable distance).
+- **The primary path is the trimmed game throw** (since 2026-08-06). Configs written before that
+  are migrated once on load (`repairThrowPathTrimMigrated`), otherwise the switch would be invisible
+  to existing installs; a later manual change sticks.
+- **Instant Direct Throw** (default **off**) — sends `PutRecoverToolCommand` straight through
+  `ToolRestorerProtocolManager.NotifyThrowToolRestorer`, skipping the CanPut round-trip, the
+  `PlayerState.Free` gate and the whole throw clip, so a kit can go down mid-fishing/mid-farm. The
+  cost is placement: it has to pick the spot geometrically (see below). Turn it on when a repair
+  must land without an idle window; leave it off to let the game resolve the spot.
+- **Drop Repair Kit At Feet** (default off, only meaningful while the above is on) — places the kit
+  at the player's own position instead of 3 m ahead. Since the player is standing on the ground this
+  is ground level by construction, so it is the mode to use on slopes, ledges, jetties and mid-jump;
+  it also leaves the whole 5 m aura as margin. Off = 3 m ahead at the player's height, matching the
+  game whenever the ground ahead is level (the normal case) and hanging in the air when it is not.
+  Both apply the game's 0.3 m `toolRestoreSinkHeight`.
+- **Trim Repair Throw Animation** (default **on**; applies only while *Instant Direct Throw* is
+  OFF, i.e. on the default path) — keeps the game's own throw, and therefore its own correct placement (`TryFindThrowPoint`
+  raycasts the real ground **and** resolves `parentNetId`, so on a ship the device rides the ship),
+  while cutting almost all of the ~2 s animation. Source: `buddy/RepairThrowAnimationTrimFeature.cs`.
+  The send is driven *by* the animation — the clip's "throw" signal calls `ThrowSomething()`, and
+  only then does the Shoot tick reach `NoticeThrowSomething` — so the wind-up cannot be cancelled,
+  only short-circuited. Three cuts, all public API + private-field reads over AuraMono, no native
+  detour: invoke `ThrowSomething()` as soon as `_state == Start`; re-invoke
+  `StartShoot(pos, 0.01f)` so the cosmetic 0.65 s hop finishes on the next tick (the command sends
+  `_arg.targetPos`, never the hop's end point); `EndCasting()` once `_state == SendCommand` to drop
+  the remaining ~1.2 s + idle wait. Gated throughout on `actionGraph.actionContext` being the
+  tool-restorer arg. The CanPut round-trip and the `PlayerState.Free` gate remain — they run before
+  any animation exists, which is why the direct send stays the right choice mid-fishing.
+- **The direct throw cannot ground-snap, and this is not fixable with Unity APIs.** `XDT.Physics` is
+  a self-contained physics engine — its `XDRaycastHit` carries an `int xdCollider` resolved through
+  `XDCollider.GetColliderFromIndex`, not a Unity `Collider` — so there are no Unity colliders in the
+  scene and `Physics.Raycast`/`Linecast`/`RaycastAll` from the mod hit nothing at all (measured
+  2026-08-06: every distance, straight down under a standing player, 40 m reach, mask `~(1<<2)`).
+  Real ground queries would have to AuraMono-invoke `MonoGame.ScriptFramework.PhysicsExtension`,
+  whose `out XDRaycastHit` overloads are struct-outs (stack corruption via raw `mono_runtime_invoke`)
+  — leaving the bool-only `Raycast(Vector3,Vector3,float,int)` plus a bisection on `maxDistance`.
+  Not built. **Note this also means the ESP ground-ring raycasts have always silently fallen back to
+  their anchor position.**
+- The **Repair Status** row appends the placement the last direct throw resolved to
+  (`Ready · forward 3m`, `Ready · at feet`), and every throw logs one `[AutoRepair] throw target`
+  line with the resolved position, player position and facing.
 
 **Auto Eat**
 

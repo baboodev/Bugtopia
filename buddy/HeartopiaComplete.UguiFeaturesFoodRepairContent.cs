@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -6,15 +6,15 @@ using UnityEngine.UI;
 namespace HeartopiaMod
 {
     // ============================================================================================
-    // UGUI SHELL — Phase 3 tab CONTENT, Features round 6 of 8 (migration plan item 11): the
-    // FOOD & REPAIR sub-tab — the inline automationSubTab == 1 branch (HeartopiaComplete.Gui.cs:
+    // UGUI SHELL â€” Phase 3 tab CONTENT, Features round 6 of 8 (migration plan item 11): the
+    // FOOD & REPAIR sub-tab â€” the inline automationSubTab == 1 branch (HeartopiaComplete.Gui.cs:
     // 584-1027), display sub-index 1 (the tabs list {"Main","Food & Repair","Snow Sculpting",
     // "Auto Buy","Auto Sell","Mass Cook","Puzzle","Pet Care"} maps display indices to
     // automationSubTab 0-7 exactly). The remaining three subs (Auto Sell 4, Mass Cook 5,
     // Pet Care 7) are separate future rounds and keep the shell placeholder.
     //
     // Ground rules (same as every prior round):
-    //  - The IMGUI drawer and every backend method it calls stay fully functional and untouched —
+    //  - The IMGUI drawer and every backend method it calls stay fully functional and untouched â€”
     //    this file only READS the same fields and CALLS the same methods (all this.-accessible
     //    partial-class state, incl. the private instance IsBagOpen()/OpenInventory()/
     //    CloseInventory(); ZERO backend interop additions). Two independent rendering paths over
@@ -27,113 +27,113 @@ namespace HeartopiaMod
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //
     // Source nuances verified against the branch, replayed exactly:
-    //  - Status card (:607-625): a PLAIN themePanelStyle GUI.Box (not DrawExentriSectionPanel) →
+    //  - Status card (:607-625): a PLAIN themePanelStyle GUI.Box (not DrawExentriSectionPanel) â†’
     //    a bare UguiKitPanelBg sliced fill, 320x126, no ring/header. All FOUR stats are LIVE and
     //    re-read every gated frame through the cached-string compare: GetRepairStatusDisplay() /
     //    GetAutoEatStatusDisplay() / GetCurrentToolDurabilityStatusDisplay() are method calls;
-    //    "Current Energy" is the RAW cachedFoodRepairEnergyStatusDisplay FIELD (:588 — drawn via
+    //    "Current Energy" is the RAW cachedFoodRepairEnergyStatusDisplay FIELD (:588 â€” drawn via
     //    DrawFoodRepairStatusRow, which is just 2 GUI.Labels, AutoEatRepair.cs:3615). That cache
     //    is only rewritten by RefreshFoodRepairUiStatusSnapshot, whose IMGUI-side callers are
     //    gated on showMenu && selectedTab==3 && automationSubTab==1 (HeartopiaComplete.cs:
-    //    1216-1219, 1Hz self-throttle) + a force refresh on sub-tab ENTRY (Gui.cs:410-415) — so
+    //    1216-1219, 1Hz self-throttle) + a force refresh on sub-tab ENTRY (Gui.cs:410-415) â€” so
     //    the processor replays BOTH for this surface: the throttled call every gated frame and
     //    the (true) force call on the sub-tab-activation rising edge (handle.WasActive), or the
     //    energy stat would freeze whenever only the UGUI shell is open.
-    //  - BUSY-GATE buttons (:628-654) — deliberately NOT a disabled-button pattern: GUI.enabled
+    //  - BUSY-GATE buttons (:628-654) â€” deliberately NOT a disabled-button pattern: GUI.enabled
     //    is never touched in the source; both buttons stay fully clickable at all times and each
-    //    click handler branches on !isRepairing && !isAutoEating itself. Free → start + green
-    //    (0.45,1,0.55) success toast; busy → a CONFLICT toast instead, with DIFFERENT text AND
-    //    color per button: Auto Repair → L("Bag automation already running") amber (1,0.85,0.35);
-    //    Eat Selected Food → L("Auto Eat already running") red (1,0.55,0.55). Reproduced with
+    //    click handler branches on !isRepairing && !isAutoEating itself. Free â†’ start + green
+    //    (0.45,1,0.55) success toast; busy â†’ a CONFLICT toast instead, with DIFFERENT text AND
+    //    color per button: Auto Repair â†’ L("Bag automation already running") amber (1,0.85,0.35);
+    //    Eat Selected Food â†’ L("Auto Eat already running") red (1,0.55,0.55). Reproduced with
     //    always-interactable kit buttons + the same branch in each handler (the user is told WHY
     //    nothing happened, never shown a greyed-out button). SetUguiButtonInteractable is never
     //    called on these two. The :632 AutoEatRepairLog call is debug-only and skipped. The Eat
     //    success toast interpolates GetAutoEatFoodOptionLabel(autoEatFoodType) AFTER
     //    StartAutoEat(false), source order (:646-647).
     //  - DrawPrimary/SecondaryActionButton and DrawSwitchToggle localize internally
-    //    (UiKitPrimitives.cs:731/:746/:750) — so button/toggle labels here get ONE this.L each.
-    //    The hint line (:655) and the three slider labels (:691/:700/:709) are L/LF'd in source →
+    //    (UiKitPrimitives.cs:731/:746/:750) â€” so button/toggle labels here get ONE this.L each.
+    //    The hint line (:655) and the three slider labels (:691/:700/:709) are L/LF'd in source â†’
     //    same here. The 4 toggles are flag + SaveKeybinds(false), no notifications (:658-689).
-    //  - Sliders: int-backed fields with per-frame Clamp(RoundToInt(...)) in IMGUI (:691-716) —
+    //  - Sliders: int-backed fields with per-frame Clamp(RoundToInt(...)) in IMGUI (:691-716) â€”
     //    the cross-surface contract is the INT, so the kit sliders are wholeNumbers = TRUE
     //    (Pictures Budget / Foraging AreaLoad precedent; a fractional handle would fight the
     //    external int re-sync). Handlers replay RoundToInt + Clamp([1,100]/[1,100]/[1,3]) +
-    //    save-on-change; external re-syncs diff via RoundToInt (Settings→Main FpsSlider shape).
+    //    save-on-change; external re-syncs diff via RoundToInt (Settingsâ†’Main FpsSlider shape).
     //    Value labels re-sync per frame (Main-round slider-label precedent), side-by-side row
     //    layout per the Main round's established conversion of this tab's stacked IMGUI rows.
-    //  - Dropdowns (:760-861): hand-rolled box+buttons → kit CreateUguiDropdown (out-bool
+    //  - Dropdowns (:760-861): hand-rolled box+buttons â†’ kit CreateUguiDropdown (out-bool
     //    listenerWired + per-frame poll fallback, Birds shape). Option strings are drawn via
-    //    GetAutoRepairOptionLabel/GetAutoEatFoodOptionLabel in source (localized internally) —
+    //    GetAutoRepairOptionLabel/GetAutoEatFoodOptionLabel in source (localized internally) â€”
     //    passed through the same getters at build. The source's dropdown-open panel-growth
-    //    reflow (:767-771) is an IMGUI artifact — the stock Dropdown popup overlays (Birds/
+    //    reflow (:767-771) is an IMGUI artifact â€” the stock Dropdown popup overlays (Birds/
     //    Auto-Buy precedent), so rows sit at fixed y (repair 425, food 461; food control 160x40
     //    tall like the source's wrap-capable field). autoRepairDropdownOpen /
     //    autoEatFoodDropdownOpen / customFoodScrollPos are IMGUI-only visual state and are NEVER
     //    written from here (forceOpenShopDropdownOpen precedent).
-    //  - MUTUAL-EXCLUSION (:781-788 vs :794-801 — each header click that OPENS one dropdown
+    //  - MUTUAL-EXCLUSION (:781-788 vs :794-801 â€” each header click that OPENS one dropdown
     //    explicitly closes the sibling): the stock Dropdown exposes no open event, so the
     //    processor detects open-state EDGES itself: while expanded, Dropdown.Show() parents the
     //    instantiated list as a "Dropdown List" child directly under the control (template's
-    //    parent), destroyed ~0.15s after close — so transform.Find("Dropdown List") != null is a
+    //    parent), destroyed ~0.15s after close â€” so transform.Find("Dropdown List") != null is a
     //    stripping-proof expanded probe (Dropdown.IsExpanded has no internal uGUI callers and was
     //    not risked; get_options/Hide/RefreshShownValue were RVA-verified live in this build's
     //    dump: 0x1438DD0/0x14369D0/0x1436FC0). A newly-expanded dropdown whose sibling is open
-    //    (and not itself newly open — guards the impossible both-new frame and the 0.15s fade
+    //    (and not itself newly open â€” guards the impossible both-new frame and the 0.15s fade
     //    ghost) calls sibling.Hide(). In practice Unity's own full-screen blocker already
     //    prevents two open lists (any outside click closes the open one first), so this edge
     //    logic is the explicit IMGUI-parity mechanism plus belt-and-braces for a failed blocker.
     //  - Repair pick (:817-822): autoRepairType = i + SaveKeybinds(false), verbatim. Food pick
     //    (:838-858): autoEatFoodType = i FIRST, then the LAST-OPTION CASCADE exactly when
     //    i == autoEatFoodOptions.Length-1: customFoodPickMode = true; lastClickedBagFood = "";
-    //    OpenInventory() (REAL game-UI call — opens the player's bag); the amber (1,0.8,0.4)
+    //    OpenInventory() (REAL game-UI call â€” opens the player's bag); the amber (1,0.8,0.4)
     //    L("Custom Food: Scanning your bag...") toast; scannedBagFoods = null;
     //    customFoodScanRetryTime = Time.time + 0.5f. ANY other pick sets customFoodPickMode =
     //    false instead. Both paths end with SaveKeybinds(false). Stock-Dropdown nuance
     //    (accepted, Birds/Auto-Buy precedent): re-picking the ALREADY-selected option fires no
-    //    event — so re-entering pick mode with Custom Food already selected needs a hop through
+    //    event â€” so re-entering pick mode with Custom Food already selected needs a hop through
     //    another option (or the IMGUI twin, which re-fires on any option click).
     //  - DYNAMIC last-option label: GetAutoEatFoodOptionLabel(last) becomes "Custom: X" once a
-    //    custom food is saved (AutoEatRepair.cs:52-55) — IMGUI redraws it every frame, a stock
+    //    custom food is saved (AutoEatRepair.cs:52-55) â€” IMGUI redraws it every frame, a stock
     //    Dropdown bakes option text. The processor recomputes it per gated frame (IMGUI-parity
     //    alloc budget) and on change writes options[last].text + RefreshShownValue() (both
     //    RVA-verified) so caption AND list stay correct across UGUI picks and IMGUI-twin edits.
     //  - CUSTOM FOOD PICKER (:863-1011), visible only while customFoodPickMode &&
     //    autoEatFoodType == last: built ONCE, shown via relayout-on-signature. The signature
     //    packs picker visibility + the list's null/empty/count state + the current-selection
-    //    label's visibility — all three drive real layout. The per-frame GAME-STATE POLLING
+    //    label's visibility â€” all three drive real layout. The per-frame GAME-STATE POLLING
     //    (IsBagOpen is a GameObject.Find) runs ONLY inside the same pickerVisible condition the
-    //    source block uses (:864) — zero bag polling while the picker is closed. Scan logic
-    //    replayed verbatim incl. the else-if shape (:870-886): bag-open + null list → scan +
+    //    source block uses (:864) â€” zero bag polling while the picker is closed. Scan logic
+    //    replayed verbatim incl. the else-if shape (:870-886): bag-open + null list â†’ scan +
     //    "Found {N}" green toast only when N > 0; else a scheduled retry once
-    //    customFoodScanRetryTime elapses (retry scan shows NO toast — source asymmetry). Both
+    //    customFoodScanRetryTime elapses (retry scan shows NO toast â€” source asymmetry). Both
     //    surfaces polling concurrently stays idempotent (null-gate + one-shot retry zeroing).
     //  - The scanned list (:889-954): pooled rows (grow-on-demand, rebind-by-diff, deactivate-
-    //    not-destroy — the Pictures nested-list idiom; NOT the Bag/Warehouse virtualized grid,
+    //    not-destroy â€” the Pictures nested-list idiom; NOT the Bag/Warehouse virtualized grid,
     //    bag food counts are small), index-stable at (0, i*36), inside a kit scroll view with
     //    both bgs cleared (source draws no box behind the list, Pictures precedent). Height =
-    //    Min(count*36, 214) (:898). Row visuals: 28x28 icon at (4,+3) — a RawImage bound from
+    //    Min(count*36, 214) (:898). Row visuals: 28x28 icon at (4,+3) â€” a RawImage bound from
     //    scannedBagFoodTextures (Theme-round RawImage precedent), hidden when no texture (source
-    //    skips DrawTexture); name at (38,+4) 12pt — GetFoodDisplayName with the source's exact
+    //    skips DrawTexture); name at (38,+4) 12pt â€” GetFoodDisplayName with the source's exact
     //    "Food " prefix strip (:908-911, culture-default StartsWith replayed as written);
-    //    selection highlight = a ±2px oversized box behind the row (:917-921's GUI.color
-    //    (0.3,0.7,0.4)-tinted GUI.Box → sliced fill (0.3,0.7,0.4,0.55), the mapped analog).
-    //    Rebinds fire on sprite change or wholesale array replacement (reference-compared —
+    //    selection highlight = a Â±2px oversized box behind the row (:917-921's GUI.color
+    //    (0.3,0.7,0.4)-tinted GUI.Box â†’ sliced fill (0.3,0.7,0.4,0.55), the mapped analog).
+    //    Rebinds fire on sprite change or wholesale array replacement (reference-compared â€”
     //    Rescan re-copies textures under the same keys); the selection highlight diffs per
     //    frame (covers IMGUI-twin picks). Name/texture cannot go stale between binds: the scan
     //    fills both caches BEFORE scannedBagFoods is assigned.
     //  - Row click (:937-948), verbatim order: display name resolved BEFORE the caches clear;
     //    autoEatCustomFoodName = sprite; SaveKeybinds(false); green LF("Custom food set to:
     //    {0}") toast; customFoodPickMode = false; scannedBagFoods = null; both dicts cleared;
-    //    retry timer zeroed; if (IsBagOpen()) CloseInventory() — really closes the game bag.
+    //    retry timer zeroed; if (IsBagOpen()) CloseInventory() â€” really closes the game bag.
     //  - Empty/scanning states (:955-968): "No food items found. Open your bag and try again."
     //    red (1,0.55,0.55) when the array is empty; "Open your bag to scan for food items..."
     //    amber (1,0.85,0.4) while it is still null. "Select Food:" header (:894) amber bold.
     //    These four picker literals + "Rescan"/"Done"/"Cancel" + "Selected: " are RAW
-    //    UNLOCALIZED in source (plain GUI.Label/GUI.Button, no L) — kept raw; the picker's
+    //    UNLOCALIZED in source (plain GUI.Label/GUI.Button, no L) â€” kept raw; the picker's
     //    NOTIFICATIONS are L/LF'd in source and stay localized.
-    //  - Rescan (:983-989): clears the three scan states + re-arms a 0.25s retry — does NOT
+    //  - Rescan (:983-989): clears the three scan states + re-arms a 0.25s retry â€” does NOT
     //    touch customFoodPickMode, does NOT close the bag, no toast. DONE vs CANCEL (:991-999
-    //    vs :1001-1009): VERIFIED LINE-FOR-LINE IDENTICAL bodies — customFoodPickMode = false,
+    //    vs :1001-1009): VERIFIED LINE-FOR-LINE IDENTICAL bodies â€” customFoodPickMode = false,
     //    scan state cleared, timer zeroed, close-bag-if-open; they differ ONLY in button style
     //    (primary vs danger). Implemented as one shared close method called by both handlers.
     //  - Current-selection label (:971-979): visible only while autoEatCustomFoodName is
@@ -141,8 +141,8 @@ namespace HeartopiaMod
     //    text re-synced per frame while the picker is visible (it changes on either surface's
     //    pick), visibility by the layout signature.
     //
-    // Cross-surface sync cadence: every gated frame — dropdown poll fallbacks FIRST (a user pick
-    // lands before the external re-sync could clobber it — Birds order), the sibling-close edge
+    // Cross-surface sync cadence: every gated frame â€” dropdown poll fallbacks FIRST (a user pick
+    // lands before the external re-sync could clobber it â€” Birds order), the sibling-close edge
     // detection, dropdown external re-syncs (SetValueWithoutNotify + LastValue), the dynamic
     // last-option label, the snapshot refresh + 4 status labels, toggle re-syncs
     // (SetIsOnWithoutNotify), slider re-syncs + value labels, then the picker block (scan poll +
@@ -153,14 +153,14 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         // ----------------------------------------------------------------------------------------
-        // Handles (per-instance state — assigned LAST in the builder, Research idiom)
+        // Handles (per-instance state â€” assigned LAST in the builder, Research idiom)
         // ----------------------------------------------------------------------------------------
 
         private sealed class UguiFoodRepairFoodRowHandle
         {
             public GameObject Root;        // whole-row Button (transparent hit surface)
-            public GameObject Highlight;   // ±2px oversized selection box behind the content
-            public GameObject IconGo;      // RawImage carrier — hidden when no texture cached
+            public GameObject Highlight;   // Â±2px oversized selection box behind the content
+            public GameObject IconGo;      // RawImage carrier â€” hidden when no texture cached
             public RawImage Icon;
             public GameObject Label;
             public string BoundSprite = "";
@@ -184,6 +184,9 @@ namespace HeartopiaMod
 
             public Toggle RepairTeleportToggle;
             public Toggle RepairOnToastToggle;
+            public Toggle RepairNoAnimationToggle;
+            public Toggle RepairAtFeetToggle;      // dependent â€” greyed while RepairNoAnimation is off
+            public Toggle RepairTrimAnimToggle;    // applies to the GAME path â€” greyed while RepairNoAnimation is ON
             public Toggle EatAutoTriggerToggle;
             public Toggle EatNoAnimationToggle;
 
@@ -208,7 +211,7 @@ namespace HeartopiaMod
             public string FoodLastOptionShown;     // dynamic "Custom: X" option text cache
 
             public GameObject PickerRoot;          // the whole conditional block (file header)
-            public GameObject PickerHeader;        // "Select Food:" — only with a non-empty list
+            public GameObject PickerHeader;        // "Select Food:" â€” only with a non-empty list
             public GameObject FoodListScroll;      // nested kit scroll, bgs cleared
             public Transform FoodListContent;
             public readonly List<UguiFoodRepairFoodRowHandle> FoodRows = new List<UguiFoodRepairFoodRowHandle>();
@@ -221,7 +224,7 @@ namespace HeartopiaMod
             public GameObject DoneButton;
             public GameObject CancelButton;
 
-            public bool WasActive;                 // sub-tab-entry edge → force snapshot refresh
+            public bool WasActive;                 // sub-tab-entry edge â†’ force snapshot refresh
             public int LayoutSignature = -1;
             public int ErrorCount;                 // per-frame sync disabled at 3 (LIVE rail idiom)
         }
@@ -229,16 +232,17 @@ namespace HeartopiaMod
         private UguiShellFeaturesFoodRepairHandle uguiShellFeaturesFoodRepair;
 
         // Fixed content-local geometry (see the builder's cursor replay). The picker starts at
-        // the repair-dropdown row + 80 — the source's own num += 80 spacing (:867), which covers
+        // the repair-dropdown row + 80 â€” the source's own num += 80 spacing (:867), which covers
         // both dropdown rows (36 + 40) + a 4px gap in the closed-dropdown flow it was written for.
-        private const float UguiFoodRepairDropdownRowY = 425f;
-        private const float UguiFoodRepairDropdownsBottomY = 501f; // food row 461 + field h 40
+        private const float UguiFoodRepairDropdownRowY = 515f;      // 425 + the 90 the three added repair-throw toggles cost
+        private const float UguiFoodRepairFoodDropdownRowY = 551f;  // was 461
+        private const float UguiFoodRepairDropdownsBottomY = 591f;  // food row 551 + field h 40
         private const float UguiFoodRepairPickerTopY = UguiFoodRepairDropdownRowY + 80f;
         private const float UguiFoodRepairListWidth = 300f;        // :899 scrollViewRect width
-        private const float UguiFoodRepairListInnerWidth = UguiFoodRepairListWidth - 22f; // kit viewport insets ≈ the :900 280px content
+        private const float UguiFoodRepairListInnerWidth = UguiFoodRepairListWidth - 22f; // kit viewport insets â‰ˆ the :900 280px content
 
         // ----------------------------------------------------------------------------------------
-        // Live layout signature — picker visibility, list null/empty/count, selection-label
+        // Live layout signature â€” picker visibility, list null/empty/count, selection-label
         // visibility (all three drive real layout). Same expression relayout consumes.
         // ----------------------------------------------------------------------------------------
 
@@ -257,7 +261,7 @@ namespace HeartopiaMod
             return 1 | (listState << 1) | (selectionVisible ? 8 : 0) | (count << 4);
         }
 
-        // Expanded probe — see file header (the "Dropdown List" child exists exactly while the
+        // Expanded probe â€” see file header (the "Dropdown List" child exists exactly while the
         // stock popup is alive, incl. its ~0.15s close fade; the edge logic tolerates the ghost).
         private static bool IsUguiFoodRepairDropdownExpanded(Dropdown dd)
         {
@@ -281,7 +285,7 @@ namespace HeartopiaMod
 
         // UGUI mirror of the automationSubTab == 1 branch: status card, 2 busy-gated action
         // buttons, hint, 4 toggles, 3 sliders, 2 cross-closing dropdowns, and the conditional
-        // Custom Food picker. Everything — including the whole picker block — is built ONCE here
+        // Custom Food picker. Everything â€” including the whole picker block â€” is built ONCE here
         // in IMGUI source order at FIXED positions (nothing above the picker is conditional);
         // RelayoutUguiShellFeaturesFoodRepair owns the picker-internal cursor + total scroll
         // height. Handle assigned LAST (Research idiom).
@@ -297,7 +301,7 @@ namespace HeartopiaMod
             Transform scrollContent;
             GameObject scroll = this.CreateUguiScrollView(block.transform, "Scroll", 10f, out scrollContent);
             PlaceUguiTopLeft(scroll, 0f, 0f, w, h);
-            // Flat look over the block's ContentBg (Logging idiom) — alpha-0 images still
+            // Flat look over the block's ContentBg (Logging idiom) â€” alpha-0 images still
             // raycast, so wheel/drag scrolling keeps working.
             try
             {
@@ -323,10 +327,10 @@ namespace HeartopiaMod
             float rowW = handle.ContentWidth - 16f;
             Color textColor = this.UguiKitTextColor();
             // Source stat styles (:591-605): labels 11 bold uiText; values 12 bold uiText @ 0.92
-            // (durability value 11 — compactValueStyle).
+            // (durability value 11 â€” compactValueStyle).
             Color statValueColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.92f);
 
-            // -------- Status card (:607-625 — plain themePanelStyle box 320x126; file header).
+            // -------- Status card (:607-625 â€” plain themePanelStyle box 320x126; file header).
             // Card-local positions replay the source's cardX/topY math shifted by the card
             // origin: labels row 12, values row 30, energy row 54, durability row 78. --------
             GameObject card = this.CreateUguiGo("StatusCard", scrollContent);
@@ -373,7 +377,7 @@ namespace HeartopiaMod
             this.TrySetUguiLabelBold(handle.DurabilityValue);
             PlaceUguiTopLeft(handle.DurabilityValue, 124f, 78f, 176f, 18f);
 
-            // -------- Action buttons (:628-654 — ALWAYS clickable, busy-gate in the handlers;
+            // -------- Action buttons (:628-654 â€” ALWAYS clickable, busy-gate in the handlers;
             // file header). Primary 120x35 + secondary 125x35 at the source's 20/160 offsets. --
             GameObject repairButton = this.CreateUguiPrimaryButton(scrollContent, "AutoRepairButton",
                 this.L("Auto Repair"),
@@ -389,7 +393,8 @@ namespace HeartopiaMod
                 this.L("Auto Eat will continue until energy is full."), 13f);
             PlaceUguiTopLeft(hint, rowX, 191f, rowW, 20f);
 
-            // -------- 4 toggles (:658-689 — flag + save, no toasts) --------
+            // -------- 6 toggles (:658-689 â€” flag + save, no toasts; the two repair-throw rows are
+            // additions, kept next to the other repair options, so the eat rows shift down 60) -----
             handle.RepairTeleportToggle = this.CreateUguiCheckbox(scrollContent, "RepairTeleportToggle",
                 this.L("Repair Teleport Backward"), this.repairTeleportBackEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairRepairTeleportToggled));
@@ -398,49 +403,65 @@ namespace HeartopiaMod
                 this.L("Auto Repair on Durability"), this.autoRepairOnToastEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairRepairOnToastToggled));
             PlaceUguiTopLeft(handle.RepairOnToastToggle.gameObject, rowX, 251f, rowW, 24f);
+            // Primary path first: the trimmed game throw. The direct send and its at-feet
+            // sub-option follow, as the opt-out for when the PlayerState.Free gate is in the way.
+            handle.RepairTrimAnimToggle = this.CreateUguiCheckbox(scrollContent, "RepairTrimAnimToggle",
+                this.L("Trim Repair Throw Animation"), this.trimRepairThrowAnimation,
+                new System.Action<bool>(this.OnUguiFeaturesFoodRepairRepairTrimAnimToggled));
+            PlaceUguiTopLeft(handle.RepairTrimAnimToggle.gameObject, rowX, 281f, rowW, 24f);
+            this.SetUguiToggleInteractable(handle.RepairTrimAnimToggle, !this.autoRepairNoAnimationEnabled);
+            handle.RepairNoAnimationToggle = this.CreateUguiCheckbox(scrollContent, "RepairNoAnimationToggle",
+                this.L("Instant Direct Throw"), this.autoRepairNoAnimationEnabled,
+                new System.Action<bool>(this.OnUguiFeaturesFoodRepairRepairNoAnimationToggled));
+            PlaceUguiTopLeft(handle.RepairNoAnimationToggle.gameObject, rowX, 311f, rowW, 24f);
+            handle.RepairAtFeetToggle = this.CreateUguiCheckbox(scrollContent, "RepairAtFeetToggle",
+                this.L("Drop Repair Kit At Feet"), this.autoRepairThrowAtFeetEnabled,
+                new System.Action<bool>(this.OnUguiFeaturesFoodRepairRepairAtFeetToggled));
+            PlaceUguiTopLeft(handle.RepairAtFeetToggle.gameObject, rowX, 341f, rowW, 24f);
+            this.SetUguiToggleInteractable(handle.RepairAtFeetToggle, this.autoRepairNoAnimationEnabled);
             handle.EatAutoTriggerToggle = this.CreateUguiCheckbox(scrollContent, "EatAutoTriggerToggle",
                 this.L("Auto Eat Energy Panel"), this.autoEatAutoTriggerEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairEatAutoTriggerToggled));
-            PlaceUguiTopLeft(handle.EatAutoTriggerToggle.gameObject, rowX, 281f, rowW, 24f);
+            PlaceUguiTopLeft(handle.EatAutoTriggerToggle.gameObject, rowX, 371f, rowW, 24f);
             handle.EatNoAnimationToggle = this.CreateUguiCheckbox(scrollContent, "EatNoAnimationToggle",
                 this.L("Eat Without Animation"), this.autoEatNoAnimationEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairEatNoAnimationToggled));
-            PlaceUguiTopLeft(handle.EatNoAnimationToggle.gameObject, rowX, 311f, rowW, 24f);
+            PlaceUguiTopLeft(handle.EatNoAnimationToggle.gameObject, rowX, 401f, rowW, 24f);
 
-            // -------- 3 sliders (:691-716 — side-by-side rows per the Main-round conversion;
-            // wholeNumbers = TRUE, int contract — file header) --------
+            // -------- 3 sliders (:691-716 â€” side-by-side rows per the Main-round conversion;
+            // wholeNumbers = TRUE, int contract â€” file header) --------
             float sliderX = rowX + 230f + 10f;
             float sliderW = handle.ContentWidth - sliderX - 8f;
 
             handle.EatTriggerShown = this.LF("Auto Eat Trigger: {0}% or lower", this.autoEatTriggerPercent);
             handle.EatTriggerLabel = this.CreateUguiBodyLabel(scrollContent, "EatTriggerLabel",
                 handle.EatTriggerShown, 13f);
-            PlaceUguiTopLeft(handle.EatTriggerLabel, rowX, 341f + 2f, 230f, 20f);
+            PlaceUguiTopLeft(handle.EatTriggerLabel, rowX, 431f + 2f, 230f, 20f);
             handle.EatTriggerSlider = this.CreateUguiSlider(scrollContent, "EatTriggerSlider",
                 1f, 100f, this.autoEatTriggerPercent, true,
                 new System.Action<float>(this.OnUguiFeaturesFoodRepairEatTriggerChanged));
-            PlaceUguiTopLeft(handle.EatTriggerSlider.gameObject, sliderX, 341f + 3f, sliderW, 20f);
+            PlaceUguiTopLeft(handle.EatTriggerSlider.gameObject, sliderX, 431f + 3f, sliderW, 20f);
 
             handle.RepairTriggerShown = this.LF("Auto Repair Trigger: {0}% or lower", this.autoRepairTriggerPercent);
             handle.RepairTriggerLabel = this.CreateUguiBodyLabel(scrollContent, "RepairTriggerLabel",
                 handle.RepairTriggerShown, 13f);
-            PlaceUguiTopLeft(handle.RepairTriggerLabel, rowX, 369f + 2f, 230f, 20f);
+            PlaceUguiTopLeft(handle.RepairTriggerLabel, rowX, 459f + 2f, 230f, 20f);
             handle.RepairTriggerSlider = this.CreateUguiSlider(scrollContent, "RepairTriggerSlider",
                 1f, 100f, this.autoRepairTriggerPercent, true,
                 new System.Action<float>(this.OnUguiFeaturesFoodRepairRepairTriggerChanged));
-            PlaceUguiTopLeft(handle.RepairTriggerSlider.gameObject, sliderX, 369f + 3f, sliderW, 20f);
+            PlaceUguiTopLeft(handle.RepairTriggerSlider.gameObject, sliderX, 459f + 3f, sliderW, 20f);
 
             handle.RepairUsesShown = this.LF("Repair Kit Uses: {0}", this.autoRepairUseTarget);
             handle.RepairUsesLabel = this.CreateUguiBodyLabel(scrollContent, "RepairUsesLabel",
                 handle.RepairUsesShown, 13f);
-            PlaceUguiTopLeft(handle.RepairUsesLabel, rowX, 397f + 2f, 230f, 20f);
+            PlaceUguiTopLeft(handle.RepairUsesLabel, rowX, 487f + 2f, 230f, 20f);
             handle.RepairUsesSlider = this.CreateUguiSlider(scrollContent, "RepairUsesSlider",
                 1f, 3f, this.autoRepairUseTarget, true,
                 new System.Action<float>(this.OnUguiFeaturesFoodRepairRepairUsesChanged));
-            PlaceUguiTopLeft(handle.RepairUsesSlider.gameObject, sliderX, 397f + 3f, sliderW, 20f);
+            PlaceUguiTopLeft(handle.RepairUsesSlider.gameObject, sliderX, 487f + 3f, sliderW, 20f);
 
-            // -------- Dropdown rows (:760-803 — labels 13 bold at the source's 78px column,
-            // fields at +90; repair 160x28, food 160x40; fixed y — popups overlay) --------
+            // -------- Dropdown rows (:760-803 â€” labels 13 bold at the source's 78px column,
+            // fields at +90; repair 160x28, food 160x40; fixed y â€” popups overlay) --------
             GameObject repairKitLabel = this.CreateUguiBodyLabel(scrollContent, "RepairKitLabel",
                 this.L("Repair Kit"), 13f);
             this.TrySetUguiLabelBold(repairKitLabel);
@@ -462,7 +483,7 @@ namespace HeartopiaMod
             GameObject foodTypeLabel = this.CreateUguiBodyLabel(scrollContent, "FoodTypeLabel",
                 this.L("Food Type"), 13f);
             this.TrySetUguiLabelBold(foodTypeLabel);
-            PlaceUguiTopLeft(foodTypeLabel, rowX, 461f + 3f, 90f, 22f);
+            PlaceUguiTopLeft(foodTypeLabel, rowX, UguiFoodRepairFoodDropdownRowY + 3f, 90f, 22f);
             string[] foodOptions = new string[this.autoEatFoodOptions.Length];
             for (int i = 0; i < foodOptions.Length; i++)
             {
@@ -476,9 +497,9 @@ namespace HeartopiaMod
                 foodOptions, foodInitial,
                 new System.Action<int>(this.OnUguiFeaturesFoodRepairFoodTypePicked), out foodWired);
             handle.FoodDropdownListenerWired = foodWired;
-            PlaceUguiTopLeft(handle.FoodDropdown.gameObject, rowX + 90f, 461f, 160f, 40f);
+            PlaceUguiTopLeft(handle.FoodDropdown.gameObject, rowX + 90f, UguiFoodRepairFoodDropdownRowY, 160f, 40f);
 
-            // -------- Custom Food picker (:863-1011 — the conditional block; positions inside
+            // -------- Custom Food picker (:863-1011 â€” the conditional block; positions inside
             // are owned by the relayout, everything is created here once) --------
             float pickerW = handle.ContentWidth - 16f;
             GameObject picker = this.CreateUguiGo("CustomFoodPicker", scrollContent);
@@ -540,9 +561,9 @@ namespace HeartopiaMod
         }
 
         // Positions the picker's children for the CURRENT state and sets the total scroll height
-        // — the UGUI analog of the branch's picker-section num accumulation (Gui.cs:863-1010):
-        // [count>0: header 24 (+28) → list Min(count*36,214) (+10)] / [empty or null: one state
-        // line (+30)] → [selection non-empty: label (+26)] → buttons 26 at 0/110/220 (+35).
+        // â€” the UGUI analog of the branch's picker-section num accumulation (Gui.cs:863-1010):
+        // [count>0: header 24 (+28) â†’ list Min(count*36,214) (+10)] / [empty or null: one state
+        // line (+30)] â†’ [selection non-empty: label (+26)] â†’ buttons 26 at 0/110/220 (+35).
         // Everything above the picker is fixed at build time. Reposition/SetActive only.
         private void RelayoutUguiShellFeaturesFoodRepair(UguiShellFeaturesFoodRepairHandle handle)
         {
@@ -571,7 +592,7 @@ namespace HeartopiaMod
             {
                 PlaceUguiTopLeft(handle.PickerHeader, 0f, py, pickerW, 24f);
                 py += 28f;
-                float listH = Mathf.Min(count * 36f, 214f); // :898 — buttons stay visible, list scrolls
+                float listH = Mathf.Min(count * 36f, 214f); // :898 â€” buttons stay visible, list scrolls
                 PlaceUguiTopLeft(handle.FoodListScroll, 0f, py, UguiFoodRepairListWidth, listH);
                 py += listH + 10f;
             }
@@ -604,7 +625,7 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Pooled scanned-food rows (grow-on-demand, rebind-by-diff, deactivate-not-destroy —
+        // Pooled scanned-food rows (grow-on-demand, rebind-by-diff, deactivate-not-destroy â€”
         // Pictures nested-list idiom; file header)
         // ----------------------------------------------------------------------------------------
 
@@ -626,7 +647,7 @@ namespace HeartopiaMod
             this.WireUguiClick(btn.onClick, new System.Action(
                 () => this.OnUguiFeaturesFoodRepairFoodRowClicked(captured)));
 
-            // Selection box behind the content, ±2px oversized like the source's :920 rect
+            // Selection box behind the content, Â±2px oversized like the source's :920 rect
             // (clipped by the list viewport the same way IMGUI's scroll view clipped its box).
             GameObject highlight = this.CreateUguiGo("Highlight", root.transform);
             StretchUguiFill(highlight, -2f, -2f, -2f, -2f);
@@ -676,7 +697,7 @@ namespace HeartopiaMod
                 if (forceRebind || !string.Equals(row.BoundSprite, sprite, StringComparison.Ordinal))
                 {
                     row.BoundSprite = sprite;
-                    // :906-911 — display name with the source's exact "Food " prefix strip.
+                    // :906-911 â€” display name with the source's exact "Food " prefix strip.
                     string foodName = this.GetFoodDisplayName(sprite);
                     if (foodName.StartsWith("Food "))
                     {
@@ -693,10 +714,10 @@ namespace HeartopiaMod
                     {
                         try { row.Icon.texture = tex; } catch { }
                     }
-                    SetUguiGoActive(row.IconGo, tex != null); // :926 — no texture, no icon
+                    SetUguiGoActive(row.IconGo, tex != null); // :926 â€” no texture, no icon
                 }
 
-                // Selection highlight diffs per frame — an IMGUI-twin pick moves it too (:912).
+                // Selection highlight diffs per frame â€” an IMGUI-twin pick moves it too (:912).
                 bool selected = this.autoEatCustomFoodName == sprite;
                 if (selected != row.SelectedShown)
                 {
@@ -723,7 +744,7 @@ namespace HeartopiaMod
 
         private string BuildUguiFeaturesFoodRepairSelectedText()
         {
-            // Gui.cs:975-977 — "Selected: " + the "Food "-stripped display name (raw literal).
+            // Gui.cs:975-977 â€” "Selected: " + the "Food "-stripped display name (raw literal).
             string selectedName = this.GetFoodDisplayName(this.autoEatCustomFoodName);
             if (selectedName.StartsWith("Food "))
             {
@@ -751,7 +772,7 @@ namespace HeartopiaMod
 
             try
             {
-                // Sub-tab-entry edge — the UGUI half of the IMGUI force refresh on switching
+                // Sub-tab-entry edge â€” the UGUI half of the IMGUI force refresh on switching
                 // onto this sub (Gui.cs:410-415); the per-frame call below then matches the
                 // showMenu-gated 1Hz-throttled hook (HeartopiaComplete.cs:1216-1219).
                 if (!handle.WasActive)
@@ -761,7 +782,7 @@ namespace HeartopiaMod
                 }
                 this.RefreshFoodRepairUiStatusSnapshot();
 
-                // Dropdown poll fallbacks — only when UnityEvent<int> wiring reported failure
+                // Dropdown poll fallbacks â€” only when UnityEvent<int> wiring reported failure
                 // (Birds precedent). BEFORE the external re-syncs so a user pick lands first.
                 if (!handle.RepairDropdownListenerWired && handle.RepairDropdown != null)
                 {
@@ -780,7 +801,7 @@ namespace HeartopiaMod
                     }
                 }
 
-                // Sibling-close edge detection (:781-788/:794-801 parity — file header): a
+                // Sibling-close edge detection (:781-788/:794-801 parity â€” file header): a
                 // dropdown that JUST became expanded closes an already-open sibling. The
                 // !siblingNewly guards keep the impossible both-new frame and the 0.15s close
                 // fade ghost from killing the freshly-opened one.
@@ -799,7 +820,7 @@ namespace HeartopiaMod
                 handle.RepairDropdownWasExpanded = repairOpen;
                 handle.FoodDropdownWasExpanded = foodOpen;
 
-                // Dropdown external re-syncs (the IMGUI twin moved the fields) — WithoutNotify +
+                // Dropdown external re-syncs (the IMGUI twin moved the fields) â€” WithoutNotify +
                 // LastValue update (Birds shape).
                 if (handle.RepairDropdown != null)
                 {
@@ -820,7 +841,7 @@ namespace HeartopiaMod
                     }
                 }
 
-                // Dynamic last-option label — "Custom Food" becomes "Custom: X" once a custom
+                // Dynamic last-option label â€” "Custom Food" becomes "Custom: X" once a custom
                 // food is saved (file header). Recomputed per frame (IMGUI drew it per frame),
                 // options[last].text + RefreshShownValue only on change.
                 string wantLast = this.GetAutoEatFoodOptionLabel(this.autoEatFoodOptions.Length - 1);
@@ -841,7 +862,7 @@ namespace HeartopiaMod
                     catch { }
                 }
 
-                // The 4 LIVE stats — read fresh every gated frame, cached-string compare only
+                // The 4 LIVE stats â€” read fresh every gated frame, cached-string compare only
                 // (file header). "Current Energy" is the RAW field, not a method call (:588).
                 this.SyncUguiSelfLabelText(handle.RepairStatusValue, ref handle.RepairStatusShown,
                     this.GetRepairStatusDisplay());
@@ -852,13 +873,22 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.DurabilityValue, ref handle.DurabilityShown,
                     this.GetCurrentToolDurabilityStatusDisplay());
 
-                // Toggle re-syncs (external IMGUI edits) — WithoutNotify only.
+                // Toggle re-syncs (external IMGUI edits) â€” WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.RepairTeleportToggle, this.repairTeleportBackEnabled);
                 this.SyncUguiToggleFromField(handle.RepairOnToastToggle, this.autoRepairOnToastEnabled);
+                this.SyncUguiToggleFromField(handle.RepairNoAnimationToggle, this.autoRepairNoAnimationEnabled);
+                this.SyncUguiToggleFromField(handle.RepairAtFeetToggle, this.autoRepairThrowAtFeetEnabled);
+                // At-feet only means anything on the direct throw â€” the animated path lets the game
+                // pick the spot itself. Grey it out rather than hide it (no relayout, value kept).
+                this.SetUguiToggleInteractable(handle.RepairAtFeetToggle, this.autoRepairNoAnimationEnabled);
+                this.SyncUguiToggleFromField(handle.RepairTrimAnimToggle, this.trimRepairThrowAnimation);
+                // The mirror image: trimming only applies to the game's animated throw, so it greys
+                // out exactly when the direct send is the one running.
+                this.SetUguiToggleInteractable(handle.RepairTrimAnimToggle, !this.autoRepairNoAnimationEnabled);
                 this.SyncUguiToggleFromField(handle.EatAutoTriggerToggle, this.autoEatAutoTriggerEnabled);
                 this.SyncUguiToggleFromField(handle.EatNoAnimationToggle, this.autoEatNoAnimationEnabled);
 
-                // Slider re-syncs — RoundToInt compare against the int fields (Settings→Main
+                // Slider re-syncs â€” RoundToInt compare against the int fields (Settingsâ†’Main
                 // FpsSlider shape) + per-frame value labels (Main-round precedent).
                 if (handle.EatTriggerSlider != null
                     && Mathf.RoundToInt(handle.EatTriggerSlider.value) != this.autoEatTriggerPercent)
@@ -882,7 +912,7 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.RepairUsesLabel, ref handle.RepairUsesShown,
                     this.LF("Repair Kit Uses: {0}", this.autoRepairUseTarget));
 
-                // Custom Food picker — ALL live-game polling stays inside the SAME condition the
+                // Custom Food picker â€” ALL live-game polling stays inside the SAME condition the
                 // source block uses (:864), so IsBagOpen (a GameObject.Find) never runs while
                 // the picker is closed (file header).
                 bool pickerVisible = this.customFoodPickMode
@@ -890,7 +920,7 @@ namespace HeartopiaMod
                 if (pickerVisible)
                 {
                     // :870-886 verbatim, incl. the else-if shape and the retry branch's missing
-                    // "Found {N}" toast (source asymmetry — file header).
+                    // "Found {N}" toast (source asymmetry â€” file header).
                     if (this.IsBagOpen() && this.scannedBagFoods == null)
                     {
                         this.scannedBagFoods = this.ScanBagForFoodItems();
@@ -932,11 +962,11 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Change handlers — each mirrors its IMGUI block EXACTLY (same side effects, same order).
+        // Change handlers â€” each mirrors its IMGUI block EXACTLY (same side effects, same order).
         // ----------------------------------------------------------------------------------------
 
-        // Gui.cs:628-640 — the busy-gate branch IN the handler; the button itself is never
-        // disabled (file header). Free → StartRepair() + green toast; busy → the AMBER
+        // Gui.cs:628-640 â€” the busy-gate branch IN the handler; the button itself is never
+        // disabled (file header). Free â†’ StartRepair() + green toast; busy â†’ the AMBER
         // "Bag automation already running" conflict toast. The :632 debug log is skipped.
         private void OnUguiFeaturesFoodRepairAutoRepairClicked()
         {
@@ -951,7 +981,7 @@ namespace HeartopiaMod
             }
         }
 
-        // Gui.cs:642-653 — same shape, DIFFERENT conflict text AND color (RED "Auto Eat already
+        // Gui.cs:642-653 â€” same shape, DIFFERENT conflict text AND color (RED "Auto Eat already
         // running"). Success toast interpolates the CURRENT food-option label, built after
         // StartAutoEat(false) like the source.
         private void OnUguiFeaturesFoodRepairEatFoodClicked()
@@ -969,7 +999,7 @@ namespace HeartopiaMod
             }
         }
 
-        // Gui.cs:658-663 — flag + save. The equal-guard is the UGUI analog of IMGUI's
+        // Gui.cs:658-663 â€” flag + save. The equal-guard is the UGUI analog of IMGUI's
         // prev-vs-new change check (Main-round idiom), same for the three below.
         private void OnUguiFeaturesFoodRepairRepairTeleportToggled(bool value)
         {
@@ -989,6 +1019,41 @@ namespace HeartopiaMod
                 return;
             }
             this.autoRepairOnToastEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Repair throw path: direct PutRecoverToolCommand vs the game's animated BagModule use.
+        private void OnUguiFeaturesFoodRepairRepairNoAnimationToggled(bool value)
+        {
+            if (value == this.autoRepairNoAnimationEnabled)
+            {
+                return;
+            }
+            this.autoRepairNoAnimationEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Direct-throw placement: under the player vs the game's forward cascade. Inert (and greyed)
+        // while the animated path is selected.
+        private void OnUguiFeaturesFoodRepairRepairAtFeetToggled(bool value)
+        {
+            if (value == this.autoRepairThrowAtFeetEnabled)
+            {
+                return;
+            }
+            this.autoRepairThrowAtFeetEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Cuts the game throw's wind-up/flight/tail while keeping its own ground resolution. Inert
+        // (and greyed) while the direct send is selected.
+        private void OnUguiFeaturesFoodRepairRepairTrimAnimToggled(bool value)
+        {
+            if (value == this.trimRepairThrowAnimation)
+            {
+                return;
+            }
+            this.trimRepairThrowAnimation = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 
@@ -1014,7 +1079,7 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        // Gui.cs:692-697 — Clamp(RoundToInt) into the int field, save only on a real change.
+        // Gui.cs:692-697 â€” Clamp(RoundToInt) into the int field, save only on a real change.
         private void OnUguiFeaturesFoodRepairEatTriggerChanged(float value)
         {
             int newValue = Mathf.Clamp(Mathf.RoundToInt(value), 1, 100);
@@ -1038,7 +1103,7 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        // Gui.cs:710-715 — [1,3].
+        // Gui.cs:710-715 â€” [1,3].
         private void OnUguiFeaturesFoodRepairRepairUsesChanged(float value)
         {
             int newValue = Mathf.Clamp(Mathf.RoundToInt(value), 1, 3);
@@ -1050,7 +1115,7 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        // Gui.cs:817-822 — index + save, verbatim. The :820 autoRepairDropdownOpen = false write
+        // Gui.cs:817-822 â€” index + save, verbatim. The :820 autoRepairDropdownOpen = false write
         // is IMGUI-only visual state, deliberately NOT reproduced (file header). No equal-guard:
         // the source ran this on ANY option click and both writes are idempotent.
         private void OnUguiFeaturesFoodRepairRepairKitPicked(int index)
@@ -1064,7 +1129,7 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        // Gui.cs:838-858 — index FIRST, then the last-option cascade / customFoodPickMode reset,
+        // Gui.cs:838-858 â€” index FIRST, then the last-option cascade / customFoodPickMode reset,
         // SaveKeybinds LAST, all in source order. The cascade fires EXACTLY on the last option
         // ("Custom Food"): pick mode + lastClickedBagFood reset + OpenInventory() (the REAL game
         // bag) + the amber scanning toast + scan-state reset + the 0.5s retry arm. Every other
@@ -1096,8 +1161,8 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        // Gui.cs:937-948 — verbatim order; the display name is resolved BEFORE the caches clear
-        // (the source resolved it during draw, pre-click — same values by construction).
+        // Gui.cs:937-948 â€” verbatim order; the display name is resolved BEFORE the caches clear
+        // (the source resolved it during draw, pre-click â€” same values by construction).
         private void OnUguiFeaturesFoodRepairFoodRowClicked(UguiFoodRepairFoodRowHandle row)
         {
             if (row == null || string.IsNullOrEmpty(row.BoundSprite))
@@ -1125,7 +1190,7 @@ namespace HeartopiaMod
             }
         }
 
-        // Gui.cs:983-989 — clears the scan state and re-arms a 0.25s retry. Does NOT touch
+        // Gui.cs:983-989 â€” clears the scan state and re-arms a 0.25s retry. Does NOT touch
         // customFoodPickMode and does NOT close the bag (unlike Done/Cancel).
         private void OnUguiFeaturesFoodRepairRescanClicked()
         {
@@ -1135,7 +1200,7 @@ namespace HeartopiaMod
             this.customFoodScanRetryTime = Time.time + 0.25f;
         }
 
-        // Gui.cs:991-999 (Done) and :1001-1009 (Cancel) have LINE-FOR-LINE IDENTICAL bodies —
+        // Gui.cs:991-999 (Done) and :1001-1009 (Cancel) have LINE-FOR-LINE IDENTICAL bodies â€”
         // verified against the source; they differ only in button style. One shared close
         // routine keeps that fact explicit.
         private void OnUguiFeaturesFoodRepairDoneClicked()

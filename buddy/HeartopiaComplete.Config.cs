@@ -321,6 +321,10 @@ namespace HeartopiaMod
             data.autoEatCustomFoodName = this.autoEatCustomFoodName ?? "";
             data.repairTeleportBackEnabled = this.repairTeleportBackEnabled;
             data.autoRepairOnToastEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoRepair : this.autoRepairOnToastEnabled;
+            data.autoRepairNoAnimationEnabled = this.autoRepairNoAnimationEnabled;
+            data.autoRepairThrowAtFeetEnabled = this.autoRepairThrowAtFeetEnabled;
+            data.trimRepairThrowAnimation = this.trimRepairThrowAnimation;
+            data.repairThrowPathTrimMigrated = true;
             data.autoEatOnToastEnabled = this.autoEatOnToastEnabled;
             data.autoEatAutoTriggerEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoEatPanel : this.autoEatAutoTriggerEnabled;
             data.autoEatNoAnimationEnabled = this.autoEatNoAnimationEnabled;
@@ -620,6 +624,18 @@ namespace HeartopiaMod
             this.autoEatCustomFoodName = data.autoEatCustomFoodName ?? "";
             this.repairTeleportBackEnabled = data.repairTeleportBackEnabled;
             this.autoRepairOnToastEnabled = data.autoRepairOnToastEnabled;
+            this.autoRepairNoAnimationEnabled = data.autoRepairNoAnimationEnabled;
+            this.autoRepairThrowAtFeetEnabled = data.autoRepairThrowAtFeetEnabled;
+            this.trimRepairThrowAnimation = data.trimRepairThrowAnimation;
+            if (!data.repairThrowPathTrimMigrated)
+            {
+                // Pre-2026-08-06 config: the direct send used to be the primary path. The trimmed
+                // game throw supersedes it — same speed in practice, but the game resolves the
+                // landing spot itself (real ground raycast + parentNetId). Applied once; the flag
+                // is written back on the next save, so a later manual switch back sticks.
+                this.autoRepairNoAnimationEnabled = false;
+                this.trimRepairThrowAnimation = true;
+            }
             this.autoEatOnToastEnabled = data.autoEatOnToastEnabled;
             this.autoRepairTriggerPercent = Mathf.Clamp(data.autoRepairTriggerPercent > 0 ? data.autoRepairTriggerPercent : 10, 1, 100);
             bool hasAutoEatTriggerConfig = data.autoEatTriggerPercent > 0;

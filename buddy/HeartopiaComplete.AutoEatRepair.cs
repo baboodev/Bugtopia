@@ -2524,9 +2524,14 @@ namespace HeartopiaMod
                     rotation = playerRoot.transform.rotation;
                 }
 
-                // Match the game's own aim distance (LevelScriptableConfig.toolRestorerLength = 3m; the
-                // game also adds +2m height then sphere-snaps to ground — we place flat, which works).
-                Vector3 targetPos = playerPos + forward * ToolRestorerThrowDistance;
+                string targetHow;
+                Vector3 targetPos = this.ComputeToolRestorerThrowTarget(playerPos, forward, out targetHow);
+                this.lastToolRestorerThrowPlacement = targetHow;
+                // Unconditional, a few lines per session (not a per-frame trace): where the kit went
+                // is invisible in-world once it lands, and AutoEatRepairLog is compiled out in ship
+                // builds — this is the only record of what the placement resolved to.
+                ModLogger.Msg("[AutoRepair] throw target -> " + targetHow + " @ " + FormatToolRestorerVec(targetPos)
+                    + " player=" + FormatToolRestorerVec(playerPos) + " fwd=" + FormatToolRestorerVec(forward));
 
                 uint netIdArg = itemNetId;
                 Vector3 posArg = targetPos;
@@ -2555,7 +2560,7 @@ namespace HeartopiaMod
                 this.repairAuraWindowStartedAt = windowNow;
                 this.repairAuraWindowUntil = windowNow + RepairAuraWindowSeconds;
 
-                status = "PutRecoverToolCommand sent (direct) target=" + targetPos;
+                status = "PutRecoverToolCommand sent (direct) target=" + targetPos + " [" + targetHow + "]";
                 return true;
             }
             catch (Exception ex)
@@ -2565,10 +2570,24 @@ namespace HeartopiaMod
             }
         }
 
-        // Direct throw first (instant, no animation); legacy bag-function path (func 113: CanPut
-        // round-trip + Free-state gate + throw animation) only as a fallback if the Mono send fails.
+        // Throw-path switch. OFF (the default since 2026-08-06) = the game throw: BagModule func
+        // 113 -> CanPut -> BackpackToolRestorer (10104) -> the throw clip, with the game resolving
+        // the landing spot itself (real ground raycast + parentNetId) and RepairThrowAnimationTrim
+        // cutting nearly all of the animation. "Instant Direct Throw" ON = the direct Mono send,
+        // which skips the CanPut round-trip, the PlayerState.Free gate and the clip entirely — the
+        // choice when a repair has to land mid-fishing — but has to place the kit geometrically.
+        // The bag function stays the fallback if that direct send fails.
         private bool TryUseRepairKitByNetId(uint netId)
         {
+            if (!this.autoRepairNoAnimationEnabled)
+            {
+                this.AutoEatRepairLog("[AutoRepair] Animated throw selected; using the game's BagModule func 113 path.");
+                // Opens the trim feature's fast poll window (no-op while its toggle is off), so the
+                // common case costs no polling at all — see RepairThrowAnimationTrimFeature.
+                this.NotifyRepairThrowAnimationStarted();
+                return this.TryExecuteDirectBackpackItemFunc(113, netId);
+            }
+
             if (this.TryThrowToolRestorerDirectMono(netId, out string directStatus))
             {
                 this.AutoEatRepairLog("[AutoRepair] Direct restorer throw: " + directStatus);
@@ -2809,6 +2828,61 @@ namespace HeartopiaMod
         // 3m matches the game's standard: FishGear searches 3–5m (FishGearMinLength=3), toolRestorerLength=3.
         private const float BaitThrowDistance = 4f;         // bait / attractor forward throw distance
         private const float ToolRestorerThrowDistance = 3f; // repair-kit forward throw distance
+
+        // ----------------------------------------------------------------------------------------
+        // Repair-kit placement
+        //
+        // The restorer device is spawned at EXACTLY the position carried by PutRecoverToolCommand —
+        // no gravity, no settling (ToolRestorerProtocolManager.CmdAddToolRestorer writes
+        // TransformComponentData.position verbatim). The game does not send a raw aim point either:
+        // BackpackToolRestorer builds aim = pos + forward*toolRestorerLength(3) + up*toolRestorerHeight(2),
+        // hands it to PlayerSphereChecker.TryFindThrowPoint (line-of-sight test -> downward ground
+        // raycast within toolRestorerHeightLimit(3)) and sinks the hit by toolRestoreSinkHeight(0.3).
+        //
+        // WE CANNOT REPLAY THAT GROUND SNAP. Measured live 2026-08-06: every UnityEngine.Physics
+        // cast from the mod returns nothing — every distance, straight down under a standing player,
+        // 40m reach, layer mask ~(1<<2). The reason is in the game's own binding layer: its
+        // XDRaycastHit carries `int xdCollider` resolved through XDCollider.GetColliderFromIndex,
+        // i.e. XDT.Physics is a SELF-CONTAINED physics engine with its own collider registry, not
+        // Unity PhysX. There are no Unity colliders in the scene to hit, so Physics.Raycast /
+        // Linecast / RaycastAll are permanently blind here (this also means the ESP ground-ring
+        // casts have always silently fallen back to their anchor position). Reaching the real
+        // colliders would mean AuraMono-invoking MonoGame.ScriptFramework.PhysicsExtension — its
+        // out-XDRaycastHit overloads are struct-outs (stack corruption through raw
+        // mono_runtime_invoke) so it would have to go through the bool-only
+        // Raycast(Vector3,Vector3,float,int) overload plus a bisection on maxDistance, with
+        // overload disambiguation by parameter type. Not built.
+        //
+        // So placement is purely geometric, and the two modes differ in what they trade away:
+        //   at feet  — playerPos: the player is standing on the ground, so this is exactly ground
+        //              level by construction, and 0m offset leaves the whole 5m aura as margin.
+        //   forward  — playerPos + forward*3, at the PLAYER'S height. Matches the game whenever the
+        //              ground 3m ahead is level with the player, which is the normal case; over a
+        //              ledge, a slope, water or mid-jump it will hang in the air. That is the cost
+        //              of the mode, and the reason the at-feet toggle exists.
+        // Both apply the game's 0.3m sink so the device sits in the ground rather than on top of it.
+        private const float ToolRestorerSinkHeight = 0.3f;  // LevelScriptableConfig.toolRestoreSinkHeight
+
+        // Last resolved placement, surfaced in the Repair Status row and the throw log line.
+        private string lastToolRestorerThrowPlacement = "";
+
+        private static string FormatToolRestorerVec(Vector3 v)
+        {
+            return "(" + v.x.ToString("0.0") + "," + v.y.ToString("0.0") + "," + v.z.ToString("0.0") + ")";
+        }
+
+        private Vector3 ComputeToolRestorerThrowTarget(Vector3 playerPos, Vector3 forward, out string how)
+        {
+            Vector3 sink = new Vector3(0f, ToolRestorerSinkHeight, 0f);
+            if (this.autoRepairThrowAtFeetEnabled)
+            {
+                how = "at feet";
+                return playerPos - sink;
+            }
+
+            how = "forward " + ToolRestorerThrowDistance.ToString("0.#") + "m";
+            return playerPos + forward * ToolRestorerThrowDistance - sink;
+        }
 
         private bool TryComputeBaitThrowTarget(out Vector3 targetPos)
         {
@@ -3696,6 +3770,13 @@ namespace HeartopiaMod
             if (this.pendingAutoRepairRequest)
             {
                 return this.L("Queued");
+            }
+
+            // Where the last direct throw actually put the kit — the tiers degrade silently, so this
+            // is the only way to tell "ground 3m" from "at feet" without a debug build.
+            if (!string.IsNullOrEmpty(this.lastToolRestorerThrowPlacement))
+            {
+                return this.L("Ready") + " · " + this.lastToolRestorerThrowPlacement;
             }
 
             return this.L("Ready");

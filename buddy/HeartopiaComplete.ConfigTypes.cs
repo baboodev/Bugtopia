@@ -308,6 +308,14 @@ namespace HeartopiaMod
             public string autoEatCustomFoodName;
             public bool repairTeleportBackEnabled;
             public bool autoRepairOnToastEnabled;
+            public bool autoRepairNoAnimationEnabled;
+            public bool autoRepairThrowAtFeetEnabled;
+            public bool trimRepairThrowAnimation = true;
+            // One-shot marker for the 2026-08-06 switch of the primary repair-throw path from the
+            // direct send to the trimmed game throw. Absent in every config written before that, so
+            // a false here means "this config predates the switch" and the load forces the new
+            // primary once. Without it the change would be invisible to existing installs.
+            public bool repairThrowPathTrimMigrated;
             public bool autoEatOnToastEnabled;
             public bool autoEatAutoTriggerEnabled;
             public bool autoEatNoAnimationEnabled = true;

@@ -221,6 +221,15 @@ namespace HeartopiaMod
         private readonly string[] autoRepairKeys = { "toolrestorer_toolrestorer_1", "toolrestorer_toolrestorer_2" };
         private bool repairTeleportBackEnabled = false;
         private bool autoRepairOnToastEnabled = false; // Toggle for auto repair via live durability detection
+        // Repair kit throw path. OFF (the default) = the game's own BagModule func 113 use, which
+        // resolves the landing spot properly (real ground raycast + parentNetId, so the device rides
+        // a ship) and gets its animation trimmed by trimRepairThrowAnimation. ON = the direct
+        // PutRecoverToolCommand: instant and free of the PlayerState.Free gate, so it still fires
+        // mid-fishing, but it has to invent the placement geometrically.
+        private bool autoRepairNoAnimationEnabled = false;
+        // Only consulted while autoRepairNoAnimationEnabled: ON = drop the kit on the ground under
+        // the player; OFF = 3m ahead at the player's height.
+        private bool autoRepairThrowAtFeetEnabled = false;
         private bool autoEatOnToastEnabled = false; // Toggle for auto eat via toast notification
         private static bool AutoEatRepairLogsEnabled => MasterLogAutoEatRepair;
         private bool autoEatAutoTriggerEnabled = true;
@@ -733,6 +742,7 @@ namespace HeartopiaMod
             this.ProcessAutoBubbleCollectOnUpdate();
             this.ProcessShowOffBypassOnUpdate();
             this.ProcessCraftAnimationSkipOnUpdate();
+            this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
             this.ProcessPersistentHudOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
