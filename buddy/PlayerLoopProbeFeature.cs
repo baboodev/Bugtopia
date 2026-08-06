@@ -453,16 +453,11 @@ namespace HeartopiaMod
     {
         private const string FileName = "playerloop_pump_dead.flag";
 
-        private static string Path_
-        {
-            get
-            {
-                string dir = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    "AppData", "LocalLow", "Bugtopia");
-                return System.IO.Path.Combine(dir, FileName);
-            }
-        }
+        // Same location as before, but resolved through HelperPaths instead of string-building
+        // %USERPROFILE%\AppData\LocalLow\Bugtopia by hand: that hardcoded copy of the root would
+        // miss a redirected LocalLow (HelperPaths asks SHGetKnownFolderPath) and silently drift the
+        // day the root moves. Reached from BepInExPlugin.Load, so the folder work is safe here.
+        private static string Path_ => HelperPaths.GetFile(FileName, "Logs");
 
         internal static bool Exists()
         {

@@ -35,7 +35,8 @@ internal static class MelonLogAdapter
 }
 #endif
 
-// BepInEx-backed sink; also mirrors to UserData/bugtopia.log. Only compiled under LOADER_BEPINEX.
+// BepInEx-backed sink; also mirrors to Logs/bugtopia.log under the mod's LocalLow root.
+// Only compiled under LOADER_BEPINEX.
 #if LOADER_BEPINEX
 internal static class BepInExLogAdapter
 {
@@ -47,15 +48,17 @@ internal static class BepInExLogAdapter
         _log = log;
         try
         {
-            string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "UserData");
-            Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, "bugtopia.log");
+            // Was BaseDirectory\UserData — the GAME folder. That was always a write into a
+            // Steam-managed directory, and it is doubly wrong now that the loader lives outside the
+            // game folder: the log ended up nowhere near BepInEx's own. HelperPaths puts it beside
+            // Config.xml and the crash breadcrumbs, and creates the folder itself.
+            string path = Path.Combine(HeartopiaMod.HelperPaths.GetDirectory("Logs"), "bugtopia.log");
             _fileLog = new StreamWriter(path, append: true) { AutoFlush = true };
             _fileLog.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] === session start ===");
         }
         catch (Exception ex)
         {
-            _log?.LogWarning("Could not open UserData/bugtopia.log: " + ex.Message);
+            _log?.LogWarning("Could not open Logs/bugtopia.log: " + ex.Message);
         }
 
         ModLogger.SetSinks(Msg, Warning);

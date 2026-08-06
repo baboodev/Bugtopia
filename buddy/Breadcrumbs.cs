@@ -49,7 +49,7 @@ namespace HeartopiaMod
         {
             try
             {
-                string path = Path.Combine(HelperPaths.GetDirectory("CrashDumps"), "breadcrumbs.log");
+                string path = Path.Combine(HelperPaths.GetDirectory("Logs"), "breadcrumbs.log");
                 // Share ReadWrite so the file can be tailed while the game runs.
                 _stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
                 Drop("Init", "breadcrumb trail started");

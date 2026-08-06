@@ -127,7 +127,7 @@ see [TYPE_RESOLUTION.md §Integration strategies](./TYPE_RESOLUTION.md#integrati
 | Loader | Output |
 |--------|--------|
 | MelonLoader | `MelonLogger.Msg` / `Warning` |
-| BepInEx | BepInEx log + append `{Game}/UserData/bugtopia.log` |
+| BepInEx | BepInEx log + append `%LocalLow%/Bugtopia/Logs/bugtopia.log` |
 
 All mod code uses `ModLogger.Msg(...)` — never call loader APIs directly.
 

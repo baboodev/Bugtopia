@@ -52,7 +52,10 @@ namespace HeartopiaMod
 
             try
             {
-                _dumpDir = HelperPaths.GetDirectory("CrashDumps");
+                // Shares "Logs" with breadcrumbs.log and the crash traces — a dump is useless without
+                // them, so keeping one folder is what makes a crash report copy-pasteable. Safe to
+                // co-locate: PruneOldDumps only ever touches "xdt_crash_*.dmp".
+                _dumpDir = HelperPaths.GetDirectory("Logs");
                 PruneOldDumps();
 
                 _uefDelegate = OnUnhandledException;

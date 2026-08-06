@@ -142,13 +142,14 @@ No installer in-repo — manual copy only.
 1. Remove the old `helper.dll` from `Mods/` or `BepInEx/plugins/` (do not run both).
 2. Deploy `bugtopia.dll`.
 3. Settings in `%LocalLow%/HelperSettings/` are copied to `%LocalLow%/Bugtopia/` automatically on first run.
-4. BepInEx backup log is now `UserData/bugtopia.log` (was `helper.log`).
+4. BepInEx backup log is now `%LocalLow%/Bugtopia/Logs/bugtopia.log` (was `helper.log`).
 
 ### BepInEx logging (optional)
 
 Merge settings from `buddy/BepInEx.logging.cfg.snippet` into `BepInEx/config/BepInEx.cfg` for console + disk logs.
 
-Mod backup log (BepInEx only): `<HeartopiaDir>/UserData/bugtopia.log`
+Mod backup log (BepInEx only): `%LocalLow%/Bugtopia/Logs/bugtopia.log`. Every other diagnostic the
+mod writes — `breadcrumbs.log`, `birdfarm-crashtrace.log`, `xdt_crash_*.dmp` — shares that folder.
 
 ---
 
@@ -237,9 +238,9 @@ Orphan `.cs` files in `buddy/` (legacy fish, ECS dump, etc.) are **not** in the 
 | Harmony `[ERR]` lines | Game update broke patches — rebuild against new interop |
 | Feature says type `unavailable` / `Null` | See [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md); enter world, check probe logs, verify names in ILSpy |
 | Auto fishing inactive | Use **Resource Gathering → Fishing** (`AutoFishingFarm`); legacy `AutoFishLogic` is not compiled |
-| BepInEx: no UI | Check `LogOutput.log` and `UserData/bugtopia.log` |
+| BepInEx: no UI | Check `LogOutput.log` and `%LocalLow%/Bugtopia/Logs/bugtopia.log` |
 
-**BepInEx log (Steam default):** `<Game>/BepInEx/LogOutput.log` — e.g. `C:\Program Files (x86)\Steam\steamapps\common\Heartopia\BepInEx\LogOutput.log`
+**BepInEx log (Steam default):** `<Game>/BepInEx/LogOutput.log` — e.g. `C:\Program Files (x86)\Steam\steamapps\common\Heartopia\BepInEx\LogOutput.log`. This one belongs to BepInEx, not to the mod, so it follows the BepInEx install: if Doorstop's `target_assembly` points outside the game folder, look for it there instead.
 
 ---
 

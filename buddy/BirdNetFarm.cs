@@ -458,11 +458,12 @@ namespace HeartopiaMod
                 return crashTracePath;
             }
 
-            string logsDir = ModLoaderInfo.IsMelonLoader
-                ? Path.Combine(Directory.GetCurrentDirectory(), "MelonLoader", "Logs")
-                : Path.Combine(Directory.GetCurrentDirectory(), "BepInEx");
-            Directory.CreateDirectory(logsDir);
-            crashTracePath = Path.Combine(logsDir, "birdfarm-crashtrace.log");
+            // Was CWD\BepInEx (or CWD\MelonLoader\Logs). CWD is the game folder, so once BepInEx
+            // moved out of it this stopped writing next to the loader log and instead FABRICATED a
+            // decoy "BepInEx" folder inside the Steam install — CreateDirectory does not care that
+            // nothing else lives there. Park it in the shared Logs folder instead; that also drops
+            // the loader branch, since the destination no longer depends on the loader.
+            crashTracePath = Path.Combine(HelperPaths.GetDirectory("Logs"), "birdfarm-crashtrace.log");
             return crashTracePath;
         }
 

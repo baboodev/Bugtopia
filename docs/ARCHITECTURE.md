@@ -515,7 +515,7 @@ Flow: set transform + override flag → `CharacterControllerPatch` steers `Move`
 | `%LocalLow%/Bugtopia/Config.xml` | Unified XML config (keybinds, theme, radar, patrols, bird farm) |
 | `%LocalLow%/Bugtopia/Cache/` | Radar species icon index |
 | `%LocalLow%/Bugtopia/DecryptedAssemblies/` | Primary Mono PE dumps for ILSpy / `ilspy-dumps/` (dev only) |
-| `{Game}/UserData/bugtopia.log` | BepInEx mod log append |
+| `%LocalLow%/Bugtopia/Logs/` | Every diagnostic the mod writes: `bugtopia.log` (BepInEx mod log append), `breadcrumbs.log`, `birdfarm-crashtrace.log`, `xdt_crash_*.dmp`, `playerloop_pump_dead.flag` |
 
 Legacy JSON files migrated once via `HelperPaths.TryMigrateLegacyUserData`.
 

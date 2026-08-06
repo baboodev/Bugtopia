@@ -140,11 +140,9 @@ namespace HeartopiaMod
                     return;
                 }
 
-                string dir = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    "AppData", "LocalLow", "Bugtopia");
-                System.IO.Directory.CreateDirectory(dir);
-                string path = System.IO.Path.Combine(dir, "inputmap.json");
+                // Unchanged destination — HelperPaths resolves the same LocalLow root, minus the
+                // hand-built path (see PlayerLoopPumpMarker for why that copy was a liability).
+                string path = HelperPaths.GetFile("inputmap.json");
                 System.IO.File.WriteAllText(path, json);
                 ModLogger.Msg("[InputMap] full asset written to " + path + " (" + json.Length + " chars).");
 
