@@ -11,6 +11,14 @@
          leave "https://t.me/..." sitting in the DLL's string heap for anyone to grep. -->
     <Telegram Condition="'$(Telegram)' == ''">true</Telegram>
     <HeartopiaDir Condition="'$(HeartopiaDir)' == ''">D:\SteamLibrary\steamapps\common\Heartopia</HeartopiaDir>
+    <!-- BepInEx root. Defaults to the install-next-to-the-game layout (and CI, where the deps zip
+         extracts to BepInEx\core + MelonLoader\net6 side by side under HeartopiaDir), but Doorstop's
+         target_assembly can point anywhere, so this is a separate knob: reference assemblies AND the
+         plugins deploy folder both hang off it, not off the game dir. -->
+    <BepInExDir Condition="'$(BepInExDir)' == ''">$(HeartopiaDir)\BepInEx</BepInExDir>
+    <!-- Same for MelonLoader. CI keeps the default: the workflow extracts unified-ci-deps.zip to
+         ci\heartopia and passes that as HeartopiaDir, so both loaders sit under it side by side. -->
+    <MelonLoaderDir Condition="'$(MelonLoaderDir)' == ''">$(HeartopiaDir)\MelonLoader</MelonLoaderDir>
     <OutputType>Library</OutputType>
     <AssemblyName>bugtopia</AssemblyName>
     <RootNamespace>buddy</RootNamespace>
@@ -71,91 +79,91 @@
        all game access is string-based via AuraMono / il2cpp_* by name. -->
   <ItemGroup Condition="'$(Loader)' == 'BepInEx' Or '$(Loader)' == 'Universal'">
     <Reference Include="0Harmony">
-      <HintPath>$(HeartopiaDir)\BepInEx\core\0Harmony.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="MonoMod.RuntimeDetour">
-      <HintPath>$(HeartopiaDir)\BepInEx\core\MonoMod.RuntimeDetour.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\MonoMod.RuntimeDetour.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="MonoMod.Utils">
-      <HintPath>$(HeartopiaDir)\BepInEx\core\MonoMod.Utils.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\MonoMod.Utils.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Il2CppInterop.Common">
-      <HintPath>$(HeartopiaDir)\BepInEx\core\Il2CppInterop.Common.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\Il2CppInterop.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Il2CppInterop.Runtime">
-      <HintPath>$(HeartopiaDir)\BepInEx\core\Il2CppInterop.Runtime.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\Il2CppInterop.Runtime.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="BepInEx.Core">
-      <HintPath>$(HeartopiaDir)\BepInEx\core\BepInEx.Core.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\BepInEx.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="BepInEx.Unity.IL2CPP">
-      <HintPath>$(HeartopiaDir)\BepInEx\core\BepInEx.Unity.IL2CPP.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\BepInEx.Unity.IL2CPP.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Il2Cppmscorlib">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\Il2Cppmscorlib.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\Il2Cppmscorlib.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AnimationModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.AnimationModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.AnimationModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AssetBundleModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.AssetBundleModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.ImageConversionModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.ImageConversionModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.IMGUIModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.InputLegacyModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.PhysicsModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.SharedInternalsModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.SharedInternalsModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.SharedInternalsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.TextRenderingModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.UI">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.UI.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.UIModule">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\UnityEngine.UIModule.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.TextMeshPro">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\Unity.TextMeshPro.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.InputSystem">
-      <HintPath>$(HeartopiaDir)\BepInEx\interop\Unity.InputSystem.dll</HintPath>
+      <HintPath>$(BepInExDir)\interop\Unity.InputSystem.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
@@ -163,7 +171,7 @@
   <!-- Universal only: add MelonLoader.dll (shared deps + interop come from the BepInEx group above). -->
   <ItemGroup Condition="'$(Loader)' == 'Universal'">
     <Reference Include="MelonLoader">
-      <HintPath>$(HeartopiaDir)\MelonLoader\net6\MelonLoader.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\net6\MelonLoader.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
@@ -171,87 +179,87 @@
   <!-- MelonLoader-only: everything from the MelonLoader install, so the build needs no BepInEx. -->
   <ItemGroup Condition="'$(Loader)' == 'MelonLoader'">
     <Reference Include="0Harmony">
-      <HintPath>$(HeartopiaDir)\MelonLoader\net6\0Harmony.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\net6\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="MonoMod.RuntimeDetour">
-      <HintPath>$(HeartopiaDir)\MelonLoader\net6\MonoMod.RuntimeDetour.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\net6\MonoMod.RuntimeDetour.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="MonoMod.Utils">
-      <HintPath>$(HeartopiaDir)\MelonLoader\net6\MonoMod.Utils.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\net6\MonoMod.Utils.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Il2CppInterop.Common">
-      <HintPath>$(HeartopiaDir)\MelonLoader\net6\Il2CppInterop.Common.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\net6\Il2CppInterop.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Il2CppInterop.Runtime">
-      <HintPath>$(HeartopiaDir)\MelonLoader\net6\Il2CppInterop.Runtime.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\net6\Il2CppInterop.Runtime.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="MelonLoader">
-      <HintPath>$(HeartopiaDir)\MelonLoader\net6\MelonLoader.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\net6\MelonLoader.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Il2Cppmscorlib">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Il2Cppmscorlib.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\Il2Cppmscorlib.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AnimationModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.AnimationModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.AnimationModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AssetBundleModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.AssetBundleModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.ImageConversionModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.ImageConversionModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.IMGUIModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.InputLegacyModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.PhysicsModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.SharedInternalsModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.SharedInternalsModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.SharedInternalsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.TextRenderingModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.UI">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.UI.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.UIModule">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\UnityEngine.UIModule.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.InputSystem">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Unity.InputSystem.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\Unity.InputSystem.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.TextMeshPro">
-      <HintPath>$(HeartopiaDir)\MelonLoader\Il2CppAssemblies\Unity.TextMeshPro.dll</HintPath>
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
@@ -464,8 +472,8 @@
     <ItemGroup>
       <UnifiedDeployDir Include="$(HeartopiaDir)\Mods"
         Condition="Exists('$(HeartopiaDir)\Mods') And ('$(Loader)' == 'Universal' Or '$(Loader)' == 'MelonLoader')" />
-      <UnifiedDeployDir Include="$(HeartopiaDir)\BepInEx\plugins"
-        Condition="Exists('$(HeartopiaDir)\BepInEx\plugins') And ('$(Loader)' == 'Universal' Or '$(Loader)' == 'BepInEx')" />
+      <UnifiedDeployDir Include="$(BepInExDir)\plugins"
+        Condition="Exists('$(BepInExDir)\plugins') And ('$(Loader)' == 'Universal' Or '$(Loader)' == 'BepInEx')" />
     </ItemGroup>
     <Copy SourceFiles="$(OutputPath)bugtopia.dll"
           DestinationFolder="%(UnifiedDeployDir.Identity)"
@@ -487,7 +495,7 @@
              Condition="'@(DeployedDll)' != ''" />
     <Warning Text="bugtopia.dll was NOT deployed (destination locked — is the game running?). The game folder still has the PREVIOUS build."
              Condition="'@(UnifiedDeployDir)' != '' and '@(DeployedDll)' == ''" />
-    <Warning Text="No loader folder found under $(HeartopiaDir) to deploy bugtopia.dll into (Loader=$(Loader))."
+    <Warning Text="No loader folder found to deploy bugtopia.dll into (Loader=$(Loader)). Looked for $(HeartopiaDir)\Mods and $(BepInExDir)\plugins."
              Condition="'@(UnifiedDeployDir)' == ''" />
   </Target>
 </Project>
