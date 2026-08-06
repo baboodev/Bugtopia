@@ -50,6 +50,8 @@ namespace HeartopiaMod
         //   TrackingPanel.RegisterPcControl  — Key1..Key4 -> TrackingBar_ClickInteractChild(0..3)
         //   TrackingPanel.OnInputTypeChange  — KeyQ       -> TrackingBar_SwitchInteractBar
         //   IconsBarWidget.RefreshShortcut   — the Q chip only appears in MouseControlMode.MoveRotate
+        //                                      (and, since 2026-08-06, only on the bar that is the
+        //                                      current interact target — see CameraModeHotkeyGuard)
         // These are exactly the keys the camera-mode interaction bar uses, and the ones whose hint
         // sprites sit above the tracked object.
         private static readonly string[][] GameKeyFeaturedDirectActions =

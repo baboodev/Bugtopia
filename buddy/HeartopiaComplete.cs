@@ -154,8 +154,6 @@ namespace HeartopiaMod
         [DllImport("user32.dll", SetLastError = true)]
         static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll", SetLastError = true)]
-        static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-        [DllImport("user32.dll", SetLastError = true)]
         static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", SetLastError = true)]
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
@@ -182,7 +180,6 @@ namespace HeartopiaMod
         const int MK_LBUTTON = 0x0001;
         const int VK_ESCAPE = 0x1B;
 
-        // --- PATROL SYSTEM VARIABLES ---
 
 
 
@@ -197,10 +194,6 @@ namespace HeartopiaMod
 
 
 
-        private List<Vector3> patrolPoints = new List<Vector3>();
-        private bool isPatrolActive = false;
-        private float waitAtSpot = 0.3f;
-        private object patrolCoroutine;
 
         private bool antiAfkEnabled = false;
         private bool mouseLookEnabled = false;
@@ -210,7 +203,6 @@ namespace HeartopiaMod
         // axisY = pitch; see HeartopiaComplete.CameraRig.cs). Seeded from GetAxis*value on the
         // capture edge, re-synced to the Warp-clamped values after each write.
         private bool mouseLookWasCaptureActive = false;
-        private float nextCameraToggleInteractAt = 0f;
         private float antiAfkInterval = 9f;
         private float lastAntiAfkPulseAt = -999f;
 
@@ -462,14 +454,6 @@ namespace HeartopiaMod
 
         // The only sanctioned way to drop the snapshot list — releases the per-item GC pins.
 
-        // --- TARGET PATHS FOR PATROL ACTIONS ---
-        private readonly string[] workPaths = new string[]
-        {
-            "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_cook_danger@list/CommonIconForCookDanger(Clone)/root_visible@go/icon@img@btn",
-            "GameApp/startup_root(Clone)/XDUIRoot/Full/CookPanel(Clone)/AniRoot@queueanimation/detail@t/btnBar@go/confirm@swapbtn",
-            "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
-            "GameApp/startup_root(Clone)/XDUIRoot/Scene/DialoguePanel(Clone)/AniRoot@go@ani/exit@btn@go"
-        };
 
         // Settings/Keybinds Persistence
 
@@ -548,7 +532,6 @@ namespace HeartopiaMod
             this.LoadCustomTeleports();
             this.LoadKeybinds();
             this.LoadUiTheme();
-            this.LoadPatrolPoints();
             this.LoadRadarSettings();
             this.LoadBirdFarmSettings();
             // NOTE: the mod installs NO IL2CPP-.text Harmony patches anymore. Noclip/teleport drive
@@ -637,8 +620,8 @@ namespace HeartopiaMod
             // NOTE: the mod installs NO IL2CPP-.text Harmony patches anymore. Surfaces #2 (NetCook)
             // and #3 (Physics) were deleted; #4 (Transform.position/rotation setters) was migrated —
             // noclip/teleport drive the game's own PlayerMoveComponent and mouse-look drives the
-            // camera controller's axis; #1 (Input.GetKey* F-sim) is gone — the camera-toggle interact
-            // now drives the interact button directly (DirectClickInteractButton).
+            // camera controller's axis; #1 (Input.GetKey* F-sim) is gone — and so is the
+            // camera-toggle interact click that replaced it (deleted 2026-08-07, unwanted).
             // Menu input-block: stop player movement while the menu is open. Routed through the
             // game's MonoInputManager (the player isn't driven by Unity's CharacterController.Move),
             // so no hot-path Harmony patch is installed for this.
@@ -679,7 +662,6 @@ namespace HeartopiaMod
             // Camera Toggle now just flips the game's own free-look setting on its edges
             // (HeartopiaComplete.CameraRig.cs) — there is no per-frame camera steering any more.
             this.UpdateMouseLookState();
-            this.UpdateCameraToggleInteractClick();
             // Keeps the game's on-screen key hints agreeing with whatever Settings→Game Keys has
             // rebound (InputRebindFeature.cs) — self-throttled, and a no-op with no overrides set.
             this.ProcessGameKeyIconsOnUpdate();
@@ -797,7 +779,6 @@ namespace HeartopiaMod
             {
                 try { this.CheckToastPanel(); } catch { }
             }
-            try { this.UpdateBottomDialogAutoClicker(); } catch { }
 
             // Post-teleport facing settle: plain transform writes for a few frames (not a patch).
             if (this.playerRotationFramesRemaining > 0)
@@ -950,7 +931,6 @@ namespace HeartopiaMod
                     this.SetAuraFarmEnabled(false);
                     this.bypassEnabled = false;
                     this.antiAfkEnabled = false;
-                    this.StopAutoCookInternal("Disabled");
                     this.isAutoEating = false;
                     this.mouseLookEnabled = false;
                     this.noclipEnabled = false;
@@ -1288,35 +1268,6 @@ namespace HeartopiaMod
             // Camera FOV will be applied in OnLateUpdate to avoid competing with game camera updates
 
             this.ApplyGameSpeed();
-            bool flag6 = this.autoCookEnabled;
-            if (flag6)
-            {
-                // Player alert: throttled to every 3s to avoid per-frame FindObjectsOfType crash
-                if (this.enablePlayerDetection && !this.cookingCleanupMode
-                    && Time.unscaledTime - this.lastPlayerDetectionCheckAt >= 3f)
-                {
-                    this.lastPlayerDetectionCheckAt = Time.unscaledTime;
-                    float nearestPlayer = this.GetNearestPlayerDistance();
-                    if (nearestPlayer < cookingPlayerAlertRadius)
-                    {
-                        this.cookingCleanupMode = true;
-                        ModLogger.Msg($"[Cooking] PLAYER DETECTED ({nearestPlayer:F0}m) - Starting cleanup!");
-                    }
-                }
-
-                // Run the original cook logic on a timer (teleport patrol runs independently as a coroutine)
-                if (Time.unscaledTime >= this.nextCookTime)
-                {
-                    this.RunAutoCookLogic();
-                    this.nextCookTime = Time.unscaledTime + 0.2f;
-                }
-                // Auto-stop timer for Auto Cook
-                if (this.autoCookEnabled && this.autoCookAutoStopEnabled && this.autoCookAutoStopAt > 0f && Time.unscaledTime >= this.autoCookAutoStopAt)
-                {
-                    this.StopAutoCookInternal("auto-stopped (timer)");
-                    this.AddMenuNotification("Auto Cook auto-stopped (timer)", new Color(1f, 0.75f, 0.45f));
-                }
-            }
             if (this.netCookEnabled)
             {
                 this.ProcessNetCookLoop();
@@ -1325,26 +1276,6 @@ namespace HeartopiaMod
             this.ProcessSandSculptureOnUpdate();
             this.ProcessSeaCleanQteOnUpdate();
             this.ProcessCorruptionCleanseOnUpdate();
-            if (this.autoBuyEnabled && Time.unscaledTime >= this.nextAutoBuyLogicTime)
-            {
-                this.nextAutoBuyLogicTime = Time.unscaledTime + 0.05f;
-                this.RunAutoBuyLogic();
-            }
-            if (this.autoBuyBirdEnabled && Time.unscaledTime >= this.nextAutoBuyBirdLogicTime)
-            {
-                this.nextAutoBuyBirdLogicTime = Time.unscaledTime + 0.05f;
-                this.RunAutoBuyBirdLogic();
-            }
-            if (this.autoBuyGardenEnabled && Time.unscaledTime >= this.nextAutoBuyGardenLogicTime)
-            {
-                this.nextAutoBuyGardenLogicTime = Time.unscaledTime + 0.05f;
-                this.RunAutoBuyGardenLogic();
-            }
-            if (this.autoBuyFishingEnabled && Time.unscaledTime >= this.nextAutoBuyFishingLogicTime)
-            {
-                this.nextAutoBuyFishingLogicTime = Time.unscaledTime + 0.05f;
-                this.RunAutoBuyFishingLogic();
-            }
             if (this.autoFishingFarmBreaker.ShouldRun(Time.unscaledTime))
             {
                 try { AutoFishingFarm.Update(this); this.autoFishingFarmBreaker.Success(); }
@@ -2140,7 +2071,6 @@ namespace HeartopiaMod
 
 
 
-        // Expose DirectClickInteractButton for external modules
 
         // Resource repair pause helpers for external modules
 
@@ -3416,7 +3346,6 @@ namespace HeartopiaMod
 
 
 
-        // --- PATROL SYSTEM METHODS ---
 
 
 
@@ -3473,9 +3402,7 @@ namespace HeartopiaMod
 
 
 
-        // Garden Store version - uses autoBuyGardenShopScrollStep instead of autoBuyShopScrollStep
 
-        // Fishing Store version - uses autoBuyFishingShopScrollStep instead of autoBuyShopScrollStep
 
         // SalePanel helpers
 
@@ -3495,19 +3422,10 @@ namespace HeartopiaMod
 
 
 
-        // --- PATROL SAVE/LOAD ---
 
 
 
-        private string ExtractJsonVal(string src, string key)
-        {
-            int start = src.IndexOf(key) + key.Length;
-            int end = src.IndexOf(",", start);
-            if (end == -1) end = src.IndexOf("}", start);
-            return src.Substring(start, end - start).Trim();
-        }
 
-        // --- COOKING PATROL SAVE/LOAD ---
 
 
 
@@ -4767,7 +4685,6 @@ namespace HeartopiaMod
         private string autoHomeStatus = "Auto home: resolving...";
 
         // Token: 0x0400001A RID: 26
-        private bool autoCookEnabled;
 
         // Token: 0x0400001B RID: 27
         private bool bypassEnabled;
@@ -4798,20 +4715,6 @@ namespace HeartopiaMod
         private float bubbleBubblesPerMinute = 15f;
 
         // Advanced Cooking Bot Variables
-        private bool cookingCleanupMode = false;
-        private const float cookingPlayerAlertRadius = 25f;
-        private float lastPlayerDetectionCheckAt = -999f;
-        private float cookingAutoSpeed = 7f;
-        private bool cookingPanelClosed = false;
-        private float cookingPanelClosedTime = 0f;
-        private float lastConfirmClickTime = -999f;
-        private float lastCookingTimerSeenAt = -999f;
-        private float cookingTakeoutSafetyDelay = 0.55f;
-        private float lastCookRefreshClickAt = -999f;
-        private float lastCookConfirmClickAt = -999f;
-        private readonly List<Image> cookImageScanBuffer = new List<Image>(256);
-        private float nextCookingCleanupScanAt = 0f;
-        private bool lastCookingCleanupResult = false;
 
         private const int NetCookMaxActionsPerTick = 8;
         private const float NetCookMinTargetStaggerSeconds = 0.08f;
@@ -4963,13 +4866,6 @@ namespace HeartopiaMod
         private object netCookReliableChannelValue = null;
         private bool netCookTypeDiagnosticsLogged = false;
         // Auto-cook diagnostics
-        private string lastAutoCookException = null;
-        // Legacy Auto Cook auto-stop timer fields kept for old routine reuse.
-        private bool autoCookAutoStopEnabled = false;
-        private int autoCookAutoStopHours = 0;
-        private int autoCookAutoStopMinutes = 0;
-        private int autoCookAutoStopSeconds = 0;
-        private float autoCookAutoStopAt = -1f;
         // (autoFarmSubTab / automationSubTab / selfSubTab are gone — the UGUI shell's per-tab
         // bars own sub-tab selection now; gates use the IsUguiShell*SubTabActive helpers.)
         private Type cachedFishingGameplayApiType = null;
@@ -4981,24 +4877,10 @@ namespace HeartopiaMod
         private GameObject cachedPlayerObject = null;
         private float cachedNearestPlayerDistance = 999f;
         private float nextNearestPlayerDistanceRefreshAt = 0f;
-        private bool enablePlayerDetection = false;
 
         // Auto Buy fields
-        private bool autoBuyEnabled = false;
         private bool autoBuyLogsEnabled => MasterLogAutoBuy;
         private bool forceOpenShopLogsEnabled => MasterLogForceOpenShop;
-        private int autoBuySubState = 0; // 0=idle,1=teleporting,2=waiting_dialogue,3=selecting_store,4=buying,5=returning
-        private Vector3 autoBuySavedPosition = Vector3.zero;
-        private int autoBuyCurrentIngredientIndex = 0;
-        private int autoBuyPurchasedCount = 0;
-        private int autoBuyMaxPerIngredient = 50;
-        private float autoBuyStepTimer = 0f;
-        private float autoBuyPopupCloseRetryAt = 0f;
-        private float autoBuyPopupSlowScanAt = 0f;
-        private float nextAutoBuyLogicTime = 0f;
-        private float nextAutoBuyBirdLogicTime = 0f;
-        private float nextAutoBuyGardenLogicTime = 0f;
-        private float nextAutoBuyFishingLogicTime = 0f;
         // Cached reflection for TryCloseAlertRewardPopupViaTipManager (avoids repeated GetMethods/FindLoadedType per call)
         private bool tipManagerReflectionInitialized = false;
         private Type cachedTipManagerType = null;
@@ -5009,35 +4891,8 @@ namespace HeartopiaMod
         private MethodInfo cachedCloseTipGenericMethod = null;
         private MethodInfo cachedAlertPanelClearMethod = null;
         private FieldInfo cachedTipPanelField = null;
-        private float autoBuyShopWaitStartedAt = 0f;
-        private int autoBuyStoreSelectRetryCount = 0;
-        private float autoBuyPreviousGameSpeed = 1f;
-        private bool autoBuyForcedGameSpeed = false;
-        private int autoBuyShopScrollStep = -1;
-        private readonly Vector3 autoBuyTargetPos = new Vector3(-12.574f, 31.572f, 43.554f);
-        private readonly Vector3 autoBuyNearbyPos = new Vector3(-12.692f, 31.599f, 39.133f);
-        private readonly string[] autoBuyIngredientsMatch = new string[] {
-
-            "Springday Brown Sugar",
-            "Salsa Sauce",
-            "Pasteurized Egg",
-            "Meat",
-            "Red Bean",
-            "Egg",
-            "Milk",
-            "Rice Flour",
-            "Tea Leaves",
-            "Cooking Oil",
-            "Matcha Powder",
-            "Cheese",
-            "Butter",
-            "Coffee Beans",
-            "Universal Ingredient",
-            "Amazing Seasoning"
-        };
 
         // Auto Buy Store Selection (0=None, 1=Cooking, 2=Birdwatching, 3=Garden, 4=Fishing)
-        private readonly string[] autoBuyStoreOptions = new string[] { "None", "Cooking Store", "Birdwatching Store", "Garden Store", "Fishing Store" };
 
         // Auto Sell fields - direct quick-sell protocol, no sell-panel clicks.
         private bool autoSellEnabled = false;
@@ -5078,70 +4933,10 @@ namespace HeartopiaMod
         private static bool BubbleRadarDebugLoggingEnabled => MasterLogBubbleRadar;
 
         // Auto Buy Birdwatching Store fields
-        private bool autoBuyBirdEnabled = false;
-        private int autoBuyBirdSubState = 0;
-        private Vector3 autoBuyBirdSavedPosition = Vector3.zero;
-        private int autoBuyBirdCurrentItemIndex = 0;
-        private int autoBuyBirdPurchasedCount = 0;
-        private int autoBuyBirdMaxPerItem = 10;
-        private float autoBuyBirdStepTimer = 0f;
-        private float autoBuyBirdShopWaitStartedAt = 0f;
-        private int autoBuyBirdStoreSelectRetryCount = 0;
-        private int autoBuyBirdShopScrollStep = -1;
-        private float autoBuyBirdPreviousGameSpeed = 1f;
-        private bool autoBuyBirdForcedGameSpeed = false;
-        private readonly Vector3 autoBuyBirdTargetPos = new Vector3(11.210f, 37.141f, 5.951f);
-        private readonly Vector3 autoBuyBirdNearbyPos = new Vector3(6.170f, 37.141f, 8.974f);
-        private readonly string[] autoBuyBirdItemsMatch = new string[] {
-            "Auto Bird Whistle",
-            "Camouflage Bush"
-        };
 
         // Auto Buy Garden Store fields
-        private bool autoBuyGardenEnabled = false;
-        private int autoBuyGardenSubState = 0;
-        private Vector3 autoBuyGardenSavedPosition = Vector3.zero;
-        private int autoBuyGardenCurrentItemIndex = 0;
-        private int autoBuyGardenPurchasedCount = 0;
-        private int autoBuyGardenMaxPerItem = 10;
-        private float autoBuyGardenStepTimer = 0f;
-        private float autoBuyGardenShopWaitStartedAt = 0f;
-        private int autoBuyGardenStoreSelectRetryCount = 0;
-        private int autoBuyGardenShopScrollStep = -1;
-        private float autoBuyGardenPreviousGameSpeed = 1f;
-        private bool autoBuyGardenForcedGameSpeed = false;
-        private readonly Vector3 autoBuyGardenTargetPos = new Vector3(33.817f, 30.713f, -18.786f);
-        private readonly Vector3 autoBuyGardenNearbyPos = new Vector3(35.627f, 30.656f, -14.268f);
-        private readonly string[] autoBuyGardenItemsMatch = new string[] {
-            "Fertilizer",
-            "Growth Booster",
-            "Rainbow Breeding Powder",
-            "Quality Fertilizer",
-            "Quality Growth Booster",
-            "Top Fertilizer",
-            "Top Growth Booster"
-        };
 
         // Auto Buy Fishing Store fields
-        private bool autoBuyFishingEnabled = false;
-        private int autoBuyFishingSubState = 0;
-        private Vector3 autoBuyFishingSavedPosition = Vector3.zero;
-        private int autoBuyFishingCurrentItemIndex = 0;
-        private int autoBuyFishingPurchasedCount = 0;
-        private int autoBuyFishingMaxPerItem = 10;
-        private float autoBuyFishingStepTimer = 0f;
-        private float autoBuyFishingShopWaitStartedAt = 0f;
-        private int autoBuyFishingStoreSelectRetryCount = 0;
-        private int autoBuyFishingShopScrollStep = -1;
-        private float autoBuyFishingPreviousGameSpeed = 1f;
-        private bool autoBuyFishingForcedGameSpeed = false;
-        private readonly Vector3 autoBuyFishingTargetPos = new Vector3(-241.214f, 10.622f, -100.257f);
-        private readonly Vector3 autoBuyFishingNearbyPos = new Vector3(-237.951f, 10.777f, -104.959f);
-        private readonly string[] autoBuyFishingItemsMatch = new string[] {
-            "Bait",
-            "Mermaid Fish Attractor",
-            "Mermaid Perfume"
-        };
         private int forceOpenShopSelectedIndex = 0;
         private string forceOpenShopManualStoreIdInput = string.Empty;
         private string forceOpenShopManualStoreNameInput = string.Empty;
@@ -5368,9 +5163,6 @@ namespace HeartopiaMod
         private float nextLiveResourceCooldownSyncAt = 0f;
         private float liveResourceCooldownSyncInterval = 1f;
 
-        private float bottomDialogClickTimer = 0f;
-        private GameObject cachedBottomDialogObject = null;
-        private float nextBottomDialogLookupAt = 0f;
         
         // Noclip/Flying Variables
         private bool noclipEnabled = false;
@@ -5521,8 +5313,6 @@ namespace HeartopiaMod
         private uint lastBirdFarmRecentPhotoNetId = 0U;
         private float lastBirdFarmRecentPhotoNetIdAt = -999f;
         private readonly Queue<uint> pendingBirdFarmAttemptedNetIds = new Queue<uint>();
-        private const string BOTTOM_DIALOG_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Popup/BottomDialogPanel(Clone)";
-        private const float BOTTOM_DIALOG_CLICK_INTERVAL = 0.3f;
 
         // True while we have an outstanding DisableInput(Move) on the game's MonoInputManager
         // because the mod menu is open with "block game input" on. Must be balanced 1:1 with EnableInput.
@@ -5545,7 +5335,6 @@ namespace HeartopiaMod
         private string lobbyAutoJoinStatus = "Idle";
 
         // Token: 0x0400001F RID: 31
-        private float nextCookTime;
 
         // Token: 0x04000022 RID: 34
         private GameObject cacheStatusAnim;
@@ -5719,7 +5508,6 @@ namespace HeartopiaMod
         private const float blueberryCollectDelay = 4f;
 
         // Token: 0x0400003B RID: 59
-        private Button lastBlueberryButton = null;
         private System.Action blueberryCollectListener = null;
 
         // The hook-free il2cpp delegate built from the listener above. Cached because
@@ -5748,7 +5536,6 @@ namespace HeartopiaMod
         private const float raspberryCollectDelay = 4f;
 
         // Token: 0x04000042 RID: 66
-        private Button lastRaspberryButton = null;
         private System.Action raspberryCollectListener = null;
 
         // The hook-free il2cpp delegate built from the listener above. Cached because
@@ -6017,12 +5804,6 @@ namespace HeartopiaMod
                 this.blockedEventSystem = null;
             }
 
-            if (patrolCoroutine != null)
-            {
-                ModCoroutines.Stop(patrolCoroutine);
-                patrolCoroutine = null;
-            }
-            isPatrolActive = false;
             this.RevertLodOverride();
 
             // Destroy the pooled theme textures AND null the sprite fields that point into the

@@ -227,8 +227,9 @@ namespace HeartopiaMod
             // replaces the old EventSystem.enabled toggle, which caused a stale click to fire at the
             // current cursor when the EventSystem was re-enabled on menu close.
             //
-            // autoBuy needs real game-UI clicks, so it stays excluded.
-            bool shouldBlock = (this.ShouldBlockGameUiClicks() || Time.unscaledTime < this.blockInputReleaseUntil) && !this.autoBuyEnabled;
+            // (The auto-buy exclusion that used to sit on the end of this condition went with the
+            // auto-buy state machines on 2026-08-07; nothing else needs real game-UI clicks here.)
+            bool shouldBlock = this.ShouldBlockGameUiClicks() || Time.unscaledTime < this.blockInputReleaseUntil;
             if (this.IsAnyFloatingInputSurfacePointerOver())
             {
                 this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
@@ -329,29 +330,6 @@ namespace HeartopiaMod
         public static bool ShouldForceMouseLookButtonUp(int button)
         {
             return false;
-        }
-
-        private void UpdateCameraToggleInteractClick()
-        {
-            // "Menu open" = any MODAL registry surface (the UGUI shell) — showMenu is retired.
-            if (!this.mouseLookCaptureActive || this.IsAnyModalInputSurfaceOpen())
-            {
-                return;
-            }
-
-            if (Time.unscaledTime < this.nextCameraToggleInteractAt)
-            {
-                return;
-            }
-
-            if (!Input.GetMouseButton(0))
-            {
-                return;
-            }
-
-            this.nextCameraToggleInteractAt = Time.unscaledTime + 0.15f;
-
-            this.DirectClickInteractButton();
         }
 
         // How far the axis must have moved behind our back before we treat it as the game's doing

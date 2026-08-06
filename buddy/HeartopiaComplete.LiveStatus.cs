@@ -144,11 +144,6 @@ namespace HeartopiaMod
                 entries.Add(petCare);
             }
 
-            if (this.autoCookEnabled)
-            {
-                entries.Add(this.CreateLiveFeatureEntry("Auto Cook", "Enabled"));
-            }
-
             if (this.autoIceSkatingEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry(

@@ -31,8 +31,6 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        public class PatrolData { public List<SerializableVector3> Points = new List<SerializableVector3>(); }
-
         [Serializable]
         public class SerializableVector3
         {
@@ -239,7 +237,6 @@ namespace HeartopiaMod
             public bool bubbleSpawnAtPlayerEnabled;
             public bool autoBubbleCollectEnabled;
             public float autoBubbleCollectRadius = 10f; // 0 = unlimited, default 10m
-            public float cookingAutoSpeed;
             public float netCookInterval;
             public float netCookScanRadiusMeters;
             public bool netCookMiniGameOnly;
@@ -448,7 +445,6 @@ namespace HeartopiaMod
             public UiThemeConfigData UiTheme = new UiThemeConfigData();
             public RadarConfigData Radar = new RadarConfigData();
             public BirdFarmConfigData BirdFarm = new BirdFarmConfigData();
-            public PatrolData Patrol = new PatrolData();
             public List<CustomTeleportEntry> CustomTeleports = new List<CustomTeleportEntry>();
             public List<CustomTeleportEntry> FishingRouteSpots = new List<CustomTeleportEntry>();
             public string Language = "en";

@@ -11,16 +11,25 @@ namespace HeartopiaMod
     // right now, the game wins and the mod stays quiet.
     //
     // The condition is not recomputed here, because the game already computes it and publishes the
-    // answer in the scene graph. `IconsBarWidget.RefreshCellShortcutVisible` does:
+    // answer in the scene graph. `IconsBarWidget.RefreshCellShortcutVisible(bool isShow)` does:
     //
-    //     bool flag = ShowKeyboardTip && MouseControlMode == MoveRotate;
+    //     bool flag = ShowKeyboardTip && isShow;
     //     _shortCutCell[i]?.SetViewActive(flag && i < nodes.cells_list.ChildrenCount);
     //
     // and `UIWidget.SetViewActive(v)` is `ui?.gameObject.SetActive(v)`. So "the hint widget for
-    // slot i is active in the hierarchy" IS, exactly, "camera mode is on AND slot i currently has
-    // something to do" — `ChildrenCount` being the number of interactions the targeted object
-    // offers. Reading `activeInHierarchy` therefore needs no hook, no AuraMono and no polling of
-    // game state; it is one bool off an object we already know how to find.
+    // slot i is active in the hierarchy" IS, exactly, "this key does something right now" —
+    // `ChildrenCount` being the number of interactions the targeted object offers. Reading
+    // `activeInHierarchy` therefore needs no hook, no AuraMono and no polling of game state; it is
+    // one bool off an object we already know how to find.
+    //
+    // 2026-08-06 moved WHERE `isShow` comes from without weakening that. It used to be computed
+    // inside the widget as `MouseControlMode == MoveRotate`; now the widget takes it as an argument
+    // and the owners supply it — `IconsBarWidget.SetBarData` seeds it with that same mode check,
+    // and `CommonTrackingBar.TrackingBar_{Switch,Refresh}InteractBar` then force it false on every
+    // bar except `_currentInteractIndex`. That makes the flag STRICTER than before: hints are now
+    // live only on the bar the number keys actually drive, since `TrackingBar_ClickInteractChild`
+    // only ever dispatches to `GetChild(_currentInteractIndex)`. The guard reads the same bool it
+    // always did and gets a more precise answer, so nothing here had to change.
     //
     // Scope is deliberately the camera-mode bar only (cells 1-4 plus the Q bar-switch). The HUD
     // chips (bag / map / camera …) collide the same way, but they are visible whenever keyboard
@@ -30,10 +39,14 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         // Scene-graph anchors, from IconsBarWidget_Auto's binder:
-        //   cells_list        = "root_visible@go/cells@t/cells@list"
-        //   switchBar_shortcut = "root_visible@go/switchBar@shortcut"
+        //   cells_list         = "root_visible@go@group/cells@t/cells@list"
+        //   switchBar_shortcut = "root_visible@go@group/switchBar@shortcut"
         // A cell is a DIRECT child of cells@list, so its sibling index is the slot number — exact,
         // and independent of whatever the hint sprite happens to be showing.
+        //
+        // Only the LEAF names are matched, never the full path — which is why the 2026-08-06 rename
+        // of that root node (`root_visible@go` -> `root_visible@go@group`, it gained a CanvasGroup)
+        // broke 16 hardcoded GameObject.Find paths elsewhere in the mod but left this file working.
         private const string CameraCellsListNode = "cells@list";
         private const string CameraSwitchBarNode = "switchBar@shortcut";
 

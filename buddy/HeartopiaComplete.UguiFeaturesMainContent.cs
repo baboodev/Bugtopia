@@ -601,11 +601,9 @@ namespace HeartopiaMod
             this.ReleaseMovementBridgeIfInjecting();
             this.birdVacuumEnabled = false;
             this.antiAfkEnabled = false;
-            this.StopAutoCookInternal("Disabled");
             this.isAutoEating = false;
             this.autoSellEnabled = false;
             this.SetAuraFarmEnabled(false);
-            this.cookingCleanupMode = false;
             this.SetGameSpeed(1f);
             this.customCameraFOVEnabled = false;
             this.cameraFOV = 60f;

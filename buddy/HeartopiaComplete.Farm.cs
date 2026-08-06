@@ -148,13 +148,6 @@ namespace HeartopiaMod
             }
         }
 
-        // Token: 0x0600000C RID: 12 RVA: 0x0000379C File Offset: 0x0000199C
-        private void CheckManualBlueberryCollection()
-        {
-            GameObject gameObject = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
-            this.CheckManualBlueberryCollection(gameObject);
-        }
-
         private void CheckManualBlueberryCollection(GameObject gameObject)
         {
             bool flag = gameObject != null && gameObject.activeInHierarchy;
@@ -184,13 +177,8 @@ namespace HeartopiaMod
                             component2.onClick.RemoveListener(this.blueberryCollectListener);
                             component2.onClick.AddListener(this.blueberryCollectListener);
                         }
-                        this.lastBlueberryButton = component2;
                     }
                 }
-            }
-            else
-            {
-                this.lastBlueberryButton = null;
             }
         }
 
@@ -234,13 +222,6 @@ namespace HeartopiaMod
             }
         }
 
-        // Token: 0x0600000E RID: 14 RVA: 0x000039C0 File Offset: 0x00001BC0
-        private void CheckManualRaspberryCollection()
-        {
-            GameObject gameObject = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
-            this.CheckManualRaspberryCollection(gameObject);
-        }
-
         private void CheckManualRaspberryCollection(GameObject gameObject)
         {
             bool flag = gameObject != null && gameObject.activeInHierarchy;
@@ -274,14 +255,9 @@ namespace HeartopiaMod
                                 component2.onClick.RemoveListener(this.raspberryCollectListener);
                                 component2.onClick.AddListener(this.raspberryCollectListener);
                             }
-                            this.lastRaspberryButton = component2;
                         }
                     }
                 }
-            }
-            else
-            {
-                this.lastRaspberryButton = null;
             }
         }
 
@@ -299,7 +275,7 @@ namespace HeartopiaMod
             }
 
             this.nextManualBerryListenerCheckAt = now + ManualBerryListenerCheckInterval;
-            GameObject interactButton = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
+            GameObject interactButton = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go@group/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
             this.CheckManualBlueberryCollection(interactButton);
             this.CheckManualRaspberryCollection(interactButton);
         }
@@ -2738,103 +2714,6 @@ namespace HeartopiaMod
             return Math.Max(0, this.autoFarmAutoStopHours) * 3600
                 + Math.Max(0, this.autoFarmAutoStopMinutes) * 60
                 + Math.Max(0, this.autoFarmAutoStopSeconds);
-        }
-
-        private void StartPatrol()
-        {
-            if (patrolPoints.Count == 0) return;
-            isPatrolActive = true;
-            patrolCoroutine = ModCoroutines.Start(PatrolRoutine());
-        }
-
-        private System.Collections.IEnumerator PatrolRoutine()
-        {
-            int index = 0;
-            while (isPatrolActive)
-            {
-                if (patrolPoints.Count == 0) break;
-
-                // 1. TELEPORT
-                TeleportTo(patrolPoints[index]);
-
-                // 2. WAIT
-                yield return ModWait.Seconds(waitAtSpot);
-
-                // 3. WORK LOOP (Prioritize Cooking)
-                // Loop 15 times to ensure buttons are clicked.
-                for (int i = 0; i < 15; i++)
-                {
-                    RunSpamClicker();
-                    yield return ModWait.Seconds(0.12f);
-                }
-
-                // 4. CLEANUP (Unstuck)
-                // If menu is still open, close it now.
-                ForceCloseMenuIfOpen();
-
-                // 5. NEXT POINT
-                index++;
-                if (index >= patrolPoints.Count) index = 0;
-            }
-            isPatrolActive = false;
-        }
-
-        private string GetPatrolPath()
-        {
-            return HelperPaths.GetFile("patrol_points.json");
-        }
-
-        private void SavePatrolPoints()
-        {
-            try
-            {
-                UnifiedConfigData config = this.LoadOrCreateUnifiedConfig();
-                this.PopulateAllConfigSections(config);
-                this.SaveUnifiedConfig(config);
-                ModLogger.Msg("Patrol points saved!");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("Error saving patrol points: " + ex.Message);
-            }
-        }
-
-        private void LoadPatrolPoints()
-        {
-            try
-            {
-                UnifiedConfigData config = this.LoadUnifiedConfig();
-                if (config != null)
-                {
-                    patrolPoints.Clear();
-                    foreach (SerializableVector3 point in config.Patrol.Points)
-                    {
-                        if (point != null) patrolPoints.Add(point.ToVector3());
-                    }
-                    ModLogger.Msg($"Loaded {patrolPoints.Count} patrol points.");
-                    return;
-                }
-                string path = this.GetPatrolPath();
-                if (!File.Exists(path)) return;
-                string json = File.ReadAllText(path);
-                patrolPoints.Clear();
-                string[] lines = json.Split('{');
-                foreach (string line in lines)
-                {
-                    if (line.Contains("\"x\":"))
-                    {
-                        float x = float.Parse(ExtractJsonVal(line, "\"x\":"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture);
-                        float y = float.Parse(ExtractJsonVal(line, "\"y\":"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture);
-                        float z = float.Parse(ExtractJsonVal(line, "\"z\":"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture);
-                        patrolPoints.Add(new Vector3(x, y, z));
-                    }
-                }
-                ModLogger.Msg($"Loaded {patrolPoints.Count} patrol points.");
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("Error loading patrol points: " + ex.Message);
-            }
         }
 
         private bool AreHeavyFarmAutomationsActive()

@@ -61,8 +61,6 @@ namespace HeartopiaMod
                 if (data.UiTheme == null) data.UiTheme = new UiThemeConfigData();
                 if (data.Radar == null) data.Radar = new RadarConfigData();
                 if (data.BirdFarm == null) data.BirdFarm = new BirdFarmConfigData();
-                if (data.Patrol == null) data.Patrol = new PatrolData();
-                if (data.Patrol.Points == null) data.Patrol.Points = new List<SerializableVector3>();
                 if (string.IsNullOrWhiteSpace(data.Language)) data.Language = "en";
                 if (data.CustomTeleports == null) data.CustomTeleports = new List<CustomTeleportEntry>();
                 if (data.FishingRouteSpots == null) data.FishingRouteSpots = new List<CustomTeleportEntry>();
@@ -253,7 +251,6 @@ namespace HeartopiaMod
             data.bubbleSpawnAtPlayerEnabled = this.bubbleSpawnAtPlayerEnabled;
             data.autoBubbleCollectEnabled = this.autoBubbleCollectEnabled;
             data.autoBubbleCollectRadius = this.autoBubbleCollectRadius;
-            data.cookingAutoSpeed = this.cookingAutoSpeed;
             data.netCookInterval = this.netCookInterval;
             data.netCookScanRadiusMeters = this.netCookScanRadiusMeters;
             data.netCookMiniGameOnly = this.netCookMiniGameOnly;
@@ -526,7 +523,6 @@ namespace HeartopiaMod
             this.bubbleSpawnAtPlayerEnabled = data.bubbleSpawnAtPlayerEnabled;
             this.autoBubbleCollectEnabled = data.autoBubbleCollectEnabled;
             this.autoBubbleCollectRadius = Mathf.Clamp(data.autoBubbleCollectRadius, 0f, 100f);
-            this.cookingAutoSpeed = data.cookingAutoSpeed;
             this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
             this.netCookScanRadiusMeters = Mathf.Clamp(data.netCookScanRadiusMeters > 0f ? data.netCookScanRadiusMeters : NetCookDefaultScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
             this.netCookMiniGameOnly = data.netCookMiniGameOnly;
@@ -678,12 +674,6 @@ namespace HeartopiaMod
             BirdNetFarm.PopulateBirdFarmConfig(data.BirdFarm);
             data.Language = string.IsNullOrWhiteSpace(this.selectedLanguage) ? "en" : this.selectedLanguage;
 
-            data.Patrol = new PatrolData();
-            foreach (Vector3 p in patrolPoints)
-            {
-                data.Patrol.Points.Add(new SerializableVector3(p));
-            }
-
             data.CustomTeleports = new List<CustomTeleportEntry>();
             foreach (CustomTeleportEntry entry in this.customTeleportList)
             {
@@ -826,7 +816,6 @@ namespace HeartopiaMod
                         else if (line.Contains("bubbleSpawnAtPlayerEnabled")) this.bubbleSpawnAtPlayerEnabled = GetJsonInt(line, "\"bubbleSpawnAtPlayerEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectEnabled")) this.autoBubbleCollectEnabled = GetJsonInt(line, "\"autoBubbleCollectEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = Mathf.Clamp(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"), 0f, 100f);
-            else if (line.Contains("cookingAutoSpeed")) this.cookingAutoSpeed = GetJsonFloat(line, "\"cookingAutoSpeed\":");
             else if (line.Contains("netCookInterval")) this.netCookInterval = GetJsonFloat(line, "\"netCookInterval\":");
             else if (line.Contains("netCookScanRadiusMeters")) this.netCookScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"netCookScanRadiusMeters\":"), NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
             else if (line.Contains("netCookMiniGameOnly")) this.netCookMiniGameOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMiniGameOnly\":") != 0;

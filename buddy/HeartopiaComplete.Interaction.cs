@@ -445,10 +445,10 @@ namespace HeartopiaMod
         {
             string[] paths = new string[]
             {
-                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_chop@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
-                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_mine@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
-                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
-                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_harvest@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn"
+                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_chop@list/IconsBarWidget(Clone)/root_visible@go@group/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
+                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_mine@list/IconsBarWidget(Clone)/root_visible@go@group/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
+                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go@group/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
+                "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_harvest@list/IconsBarWidget(Clone)/root_visible@go@group/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn"
             };
 
             for (int i = 0; i < paths.Length; i++)
@@ -487,24 +487,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool IsAddButtonVisible()
-        {
-            GameObject gameObject = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Full/CookPanel(Clone)/AniRoot@queueanimation/detail@t/material@list");
-            if (gameObject == null)
-            {
-                return false;
-            }
-            for (int i = 0; i < gameObject.transform.childCount; i++)
-            {
-                Transform transform = gameObject.transform.GetChild(i).Find("Root/cornerButton@frame/add@btn");
-                if (transform != null && transform.gameObject.activeInHierarchy)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         // Token: 0x06000012 RID: 18 RVA: 0x00003DE0 File Offset: 0x00001FE0
         private void ClickButtonIfExists(string path)
         {
@@ -521,7 +503,6 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 ModLogger.Msg($"[ClickButtonIfExists] Error clicking path '{path}': {ex.Message}");
-                this.lastAutoCookException = ex.Message;
             }
         }
 
@@ -661,16 +642,6 @@ namespace HeartopiaMod
             this.autoFarmTimer = 0f;
         }
 
-        private void RunSpamClicker()
-        {
-            // Click buttons by path
-            foreach (string path in workPaths)
-            {
-                ClickButtonIfExists(path);
-            }
-            ClickCookingCleanupThrottled(0.45f);
-        }
-
         private void ForceCloseMenuIfOpen()
         {
             try
@@ -712,114 +683,6 @@ namespace HeartopiaMod
                 }
             }
             catch { }
-        }
-
-        private void UpdateBottomDialogAutoClicker()
-        {
-            bool automationWantsDialogClick =
-                this.autoBuyEnabled ||
-                this.autoBuyBirdEnabled ||
-                this.autoBuyGardenEnabled ||
-                this.autoBuyFishingEnabled ||
-                this.autoCookEnabled;
-            GameObject bottomDialog = this.cachedBottomDialogObject;
-            if (bottomDialog == null && !automationWantsDialogClick)
-            {
-                this.bottomDialogClickTimer = 0f;
-                return;
-            }
-
-            if (bottomDialog == null && Time.unscaledTime >= this.nextBottomDialogLookupAt)
-            {
-                this.nextBottomDialogLookupAt = Time.unscaledTime + 0.5f;
-                bottomDialog = GameObject.Find(BOTTOM_DIALOG_PATH);
-                this.cachedBottomDialogObject = bottomDialog;
-            }
-
-            if (bottomDialog == null || !bottomDialog.activeInHierarchy)
-            {
-                if (bottomDialog != null && !bottomDialog.activeInHierarchy)
-                {
-                    this.cachedBottomDialogObject = null;
-                }
-                this.bottomDialogClickTimer = 0f;
-                return;
-            }
-
-            this.bottomDialogClickTimer += Time.unscaledDeltaTime;
-            if (this.bottomDialogClickTimer < BOTTOM_DIALOG_CLICK_INTERVAL)
-            {
-                return;
-            }
-
-            this.bottomDialogClickTimer = 0f;
-            this.TryExecuteUiPointerClick(new Vector2((float)Screen.width / 2f, (float)Screen.height * 0.92f));
-        }
-
-        private bool TryExecuteUiPointerClick(Vector2 screenPosition)
-        {
-            EventSystem eventSystem = EventSystem.current;
-            if (eventSystem == null || !eventSystem.enabled)
-            {
-                return false;
-            }
-
-            PointerEventData pointerData = new PointerEventData(eventSystem);
-            pointerData.button = PointerEventData.InputButton.Left;
-            pointerData.position = screenPosition;
-
-            Il2CppSystem.Collections.Generic.List<RaycastResult> hits = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
-            eventSystem.RaycastAll(pointerData, hits);
-            if (hits.Count <= 0)
-            {
-                return false;
-            }
-
-            ExecuteEvents.Execute<IPointerClickHandler>(hits[0].gameObject, pointerData, ExecuteEvents.pointerClickHandler);
-            return true;
-        }
-
-        private void DirectClickInteractButton()
-        {
-            try
-            {
-                try
-                {
-                    IntPtr hwnd = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
-                    if (hwnd == IntPtr.Zero)
-                    {
-                        hwnd = FindWindow("UnityWndClass", null);
-                    }
-                    if (hwnd != IntPtr.Zero)
-                    {
-                        IntPtr lParamDown = new IntPtr(2162689);
-                        IntPtr lParamUp = new IntPtr(-1071579135);
-                        PostMessage(hwnd, 256U, new IntPtr(70), lParamDown);
-                        PostMessage(hwnd, 257U, new IntPtr(70), lParamUp);
-                    }
-                }
-                catch {}
-
-                string[] paths = new string[] {
-                    "GameApp/startup_root(Clone)/XDUIRoot/Status/StatusPanel(Clone)/AniRoot@ani@queueanimation/right_layout@ani/middle_right_layout@go/skill_bar@w@go/skill_bar@go/main_joy@go@w/Joy@ani",
-                    "GameApp/startup_root(Clone)/XDUIRoot/Status/StatusPanel(Clone)/AniRoot@ani@queueanimation/right_layout@ani/middle_right_layout@go/skill_bar@w@go/skill_bar@go/main_joy@go@w/Joy@ani/stick@frame/normal",
-                    "GameApp/startup_root(Clone)/XDUIRoot/Status/StatusPanel(Clone)/AniRoot@ani@queueanimation/right_layout@ani/middle_right_layout@go/skill_bar@w@go/skill_bar@go/main_joy@go@w",
-                    "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_chop@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
-                    "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_mine@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
-                    "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn",
-                    "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/quick_action@btn",
-                    "GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_harvest@list/IconsBarWidget(Clone)/root_visible@go/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn"
-                };
-                foreach (string p in paths)
-                {
-                    GameObject btn = GameObject.Find(p);
-                    if (btn != null && btn.activeInHierarchy)
-                    {
-                        DirectClickGameButton(btn);
-                    }
-                }
-            }
-            catch {}
         }
 
         private void DirectClickGameButton(GameObject buttonObj)
