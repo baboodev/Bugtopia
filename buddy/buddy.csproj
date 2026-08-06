@@ -277,7 +277,6 @@
     <Compile Include="CarpetStampFeature.cs" />
     <Compile Include="CraftAnimationSkipFeature.cs" />
     <Compile Include="RepairThrowAnimationTrimFeature.cs" />
-    <Compile Include="LoginExportFeature.cs" />
     <Compile Include="CraftDirectSendFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
     <Compile Include="DailyClaimsFeature.cs" />

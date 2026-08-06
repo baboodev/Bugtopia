@@ -110,23 +110,6 @@ namespace HeartopiaMod
             GameObject version = this.CreateUguiMutedLabel(block.transform, "Version",
                 $"Version {ModBuildVersion.Display} · bugtopia.dll", 12f);
             PlaceUguiTopLeft(version, pad, yCur, innerW, 20f);
-            yCur += 26f;
-
-            // Account-transfer helper (LoginExportFeature.cs). Dumps THIS machine's
-            // deviceUniqueIdentifier (to the clipboard) + the decrypted user_v2 / access_token_v2
-            // into heartopia_login_bundle.json, for tools/xd_login_transfer.py to re-encrypt on the
-            // target PC. Everything stays local (two files + clipboard); nothing is sent.
-            GameObject exportStatus = this.CreateUguiMutedLabel(block.transform, "ExportLoginStatus",
-                string.Empty, 11f);
-            this.TrySetUguiLabelWrapped(exportStatus);
-            PlaceUguiTopLeft(exportStatus, pad + 220f, yCur, innerW - 220f, 44f);
-            GameObject exportBtn = this.CreateUguiSecondaryButton(block.transform, "ExportLoginButton",
-                "Export login", new System.Action(() =>
-                {
-                    string msg = LoginExportFeature.Export();
-                    this.SetUguiLabelText(exportStatus, msg);
-                }));
-            PlaceUguiTopLeft(exportBtn, pad, yCur, 210f, 26f);
 
             return block;
         }
