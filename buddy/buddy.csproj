@@ -289,7 +289,6 @@
     <Compile Include="BirdNetFarm.cs" />
     <Compile Include="CombinedFarmFeature.cs" />
     <Compile Include="FarmToolBroker.cs" />
-    <Compile Include="CrashDumpHandler.cs" />
     <Compile Include="MovementInputFeature.cs" />
     <Compile Include="Breadcrumbs.cs" />
     <Compile Include="MonoAssemblyDump.cs" />

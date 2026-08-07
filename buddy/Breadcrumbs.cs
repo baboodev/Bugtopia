@@ -8,7 +8,7 @@ namespace HeartopiaMod
 {
     // Crash breadcrumb trail. Some process deaths leave no dump and no crashlog: a stack overflow
     // skips every user-mode handler, a hard TerminateProcess / IL2CPP-mono abort raises no SEH that
-    // WER, Unity's UnityCrashHandler, or our CrashDumpHandler can catch, and all logs just truncate
+    // WER or Unity's UnityCrashHandler can catch, and all logs just truncate
     // at their last flush (see docs/CRASH_DUMP_ANALYSIS.md). This writes the last N operations to a
     // tiny ring file and flushes after each entry, so even an instant kill leaves a trail pointing at
     // the feature/operation that was running.

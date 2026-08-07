@@ -515,9 +515,6 @@ namespace HeartopiaMod
 
         public void OnInitializeMelon()
         {
-            // Install the native crash-dump handler first so a fatal AV during any later init step
-            // is still captured (the game's own crash handler otherwise eats it before WER runs).
-            CrashDumpHandler.Install();
             // Breadcrumb trail: pinpoints the running operation when a crash leaves no dump/log.
             Breadcrumbs.Init();
             this.ApplyMasterConsoleVisibility();
