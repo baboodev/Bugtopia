@@ -642,49 +642,6 @@ namespace HeartopiaMod
             this.autoFarmTimer = 0f;
         }
 
-        private void ForceCloseMenuIfOpen()
-        {
-            try
-            {
-                GameObject cookPanel = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Full/CookPanel(Clone)");
-
-                if (cookPanel != null && cookPanel.activeInHierarchy)
-                {
-                    // Method 1: Find UI Button
-                    bool buttonFound = false;
-                    Button[] buttons = cookPanel.GetComponentsInChildren<Button>(true);
-                    if (buttons != null)
-                    {
-                        foreach (Button btn in buttons)
-                        {
-                            if (btn == null) continue;
-                            try
-                            {
-                                string n = btn.name.ToLower();
-                                if (n.Contains("close") || n.Contains("back") || n.Contains("exit") || n.Contains("return"))
-                                {
-                                    if (btn.interactable)
-                                    {
-                                        btn.onClick.Invoke();
-                                        buttonFound = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            catch { }
-                        }
-                    }
-
-                    // Method 2: Send ESC if button fail
-                    if (!buttonFound)
-                    {
-                        SendEscMessage();
-                    }
-                }
-            }
-            catch { }
-        }
-
         private void DirectClickGameButton(GameObject buttonObj)
         {
             try

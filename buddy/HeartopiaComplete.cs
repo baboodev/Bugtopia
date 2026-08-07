@@ -150,11 +150,6 @@ namespace HeartopiaMod
 
 
         
-        // --- WINDOWS API FOR ESC KEY ---
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern IntPtr GetForegroundWindow();
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -167,9 +162,6 @@ namespace HeartopiaMod
 
 
 
-        const uint WM_KEYDOWN = 0x0100;
-        const uint WM_KEYUP = 0x0101;
-        const int VK_ESCAPE = 0x1B;
 
 
 
