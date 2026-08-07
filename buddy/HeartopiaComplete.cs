@@ -156,10 +156,6 @@ namespace HeartopiaMod
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", SetLastError = true)]
-        static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
-        [DllImport("user32.dll", SetLastError = true)]
         static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr GetConsoleWindow();
@@ -173,11 +169,6 @@ namespace HeartopiaMod
 
         const uint WM_KEYDOWN = 0x0100;
         const uint WM_KEYUP = 0x0101;
-        const uint WM_LBUTTONDOWN = 0x0201;
-        const uint WM_LBUTTONUP = 0x0202;
-        const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-        const uint MOUSEEVENTF_LEFTUP = 0x0004;
-        const int MK_LBUTTON = 0x0001;
         const int VK_ESCAPE = 0x1B;
 
 

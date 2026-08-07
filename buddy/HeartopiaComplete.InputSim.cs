@@ -45,46 +45,5 @@ namespace HeartopiaMod
             catch { }
         }
 
-        private void SendEnterMessage()
-        {
-            try
-            {
-                IntPtr hWnd = GetForegroundWindow();
-                if (hWnd != IntPtr.Zero)
-                {
-                    PostMessage(hWnd, WM_KEYDOWN, (IntPtr)0x0D, IntPtr.Zero);
-                    PostMessage(hWnd, WM_KEYUP, (IntPtr)0x0D, IntPtr.Zero);
-                }
-            }
-            catch { }
-        }
-
-        private void SendLeftClickMessage()
-        {
-            try
-            {
-                IntPtr hWnd = GetForegroundWindow();
-                if (hWnd != IntPtr.Zero)
-                {
-                    PostMessage(hWnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, IntPtr.Zero);
-                    PostMessage(hWnd, WM_LBUTTONUP, IntPtr.Zero, IntPtr.Zero);
-                }
-            }
-            catch { }
-        }
-
-        private void SendLeftClickInputTap()
-        {
-            try
-            {
-                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
-            }
-            catch
-            {
-                this.SendLeftClickMessage();
-            }
-        }
-
     }
 }
