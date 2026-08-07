@@ -509,7 +509,7 @@ module/memory scanning + integrity hashing** — *not* a loader name blocklist (
 | Size / arch | 16.7 MB, x86-64 PE, on-disk ImageBase `0x180000000` |
 | Vendor | TapTap / XD **Themis** anti-cheat SDK |
 | Exports | 25 named (map 1:1 to `ThemisSDKManager` icalls, §9) |
-| Config | `<Game>/themis.res` (read via export `ReadCfgFile`) |
+| Config | export `ReadCfgFile` exists but **no `themis.res` ships** (recursive `themis*` sweep of the game folder finds only the DLL → config from appid / embedded defaults) |
 | Aux SDK | `taptap_api.dll` (156 KB — not the AC core) |
 
 **Exports** → managed API: `init_themis`/`init_themis_by_appid`/`tminit`/`tminit_windows`/`tmcr` (bring-up), `get_themis_heartbeat` (integrity challenge), `get_oneid`/`get_oneid_data` (device fingerprint), `input_data` (native input feed), `add_custom_field` (context tags), `report_exception`/`report_custom_exception`/`report_custom_exception_ex`/`report_hang_info` (reporting; `isQuitApp` force-closes), `set_exception_callback`/`set_native_callback`/`set_themis_callback`/`set_extra_callback_ex`/`set_use_extend_callback` (native→managed callback reg), `OutOfProcessException{,DebuggerLaunch,Signature}EventCallback`, `ReadCfgFile`, `event_tracking`, `enable_debug_mode`.
@@ -542,6 +542,8 @@ module/memory scanning + integrity hashing** — *not* a loader name blocklist (
 
 Anti-analysis instructions (~170 sites, **all in `.TH2`**): heavy **RDTSC** (timing anti-debug), **CPUID** (VM/hypervisor detect), **INT3 / INT1 (ICEBP) / INT 0x2D** (debugger-interrupt tricks).
 
+> **Obfuscator identified (2026-08-07): VMProtect** — `VMProtectSDK64.dll` is referenced ×10 in the unpacked image. The shredding / CFF-junk-opaque-predicate / empty-on-disk-packing rows above are VMProtect's virtualization + mutation + packer, not a bespoke scheme. This is why `.TH0` and export bodies do not decompile: an `init_themis` `.TH0` body still decompiles to `halt_baddata()` / opaque-predicate junk on the current build. Cracking the remaining walls (heartbeat regions, `oneid` field order) means beating VMProtect, not a home-grown layer.
+
 ### 10.3 String / API-name cipher — RECOVERED
 
 All strings use a **data-independent keystream** keyed by `0x75A007BE`:
@@ -572,7 +574,7 @@ The concrete "what Themis looks at", by category:
 
 Modules touched: `ntdll`, `kernel32`/`KERNELBASE`, `user32`, `advapi32`, `ole32`/`oleaut32` (WMI fingerprint), `ws2_32`, `shell32`, `shlwapi`, `winmm`, `version`, `dbghelp`/`dbgcore`, `hid`, **`sbiedll`**.
 
-> **Key finding for modders:** there are **no** `BepInEx` / `doorstop` / `winhttp` / `version.dll` / `hook` / `inject` name strings. Themis does **generic module/memory scanning + integrity hashing** — it detects *the fact of* an injected module / patched code, **not** a blocklist of known loaders. Renaming the loader does not help.
+> **Key finding for modders (updated 2026-08-07):** there is **no *loader*-name blocklist** — no `BepInEx` / `doorstop` / `winhttp` / `version.dll` / `hook` / `inject` strings — so renaming the loader does not help; the generic module/memory scan + integrity hash detect *the fact of* an injected module / patched code regardless. **BUT Themis DOES carry a *process-name* blocklist** for automation/macro tools + Cheat Engine + multi-boxing, stored as plaintext UTF-16 in `.data` (invisible to a cipher-only sweep). See **§10.13**. Both mechanisms run together.
 
 ### 10.5 Integrity heartbeat model
 
@@ -651,10 +653,12 @@ WMI path = `CoInitializeSecurity` → `CoCreateInstance` (WbemLocator) → `CoSe
 `IWbemServices::ExecQuery` (error string `WMI ExecQuery Error: 0x%08X-%lld`). `root\CIMV2` is
 runtime-built (not verbatim), but the COM triad is the textbook CIMV2 fingerprint sequence.
 
-**Notably NOT used:** `MachineGuid`, `ProductId`, `DigitalProductId`, `InstallDate`, `HardwareID` —
-none appear in any decoded set (plaintext, narrow-keystream, or wide). So the classic
-`HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` is **not** an evidenced input; the strong IDs are
-hardware/firmware-anchored (volume + disk-IOCTL serial + MAC + SMBIOS UUID). `RegQueryValueExW` /
+**Not in the decoded *strings*** (⚠️ but live capture shows they ARE read — see §10.10.1):
+`MachineGuid`, `ProductId`, `DigitalProductId`, `InstallDate`, `HardwareID` appear in no decoded set
+(plaintext, narrow-keystream, or wide) because their key paths are CFF-hidden in the binary. The earlier
+inference that `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` is *not* an input was **refuted by
+ProcMon** — MachineGuid and ProductId are both read live. The hardware/firmware IDs (volume serial + MAC
++ SMBIOS UUID) remain the strong anchors. `RegQueryValueExW` /
 `RegQueryInfoKeyW` are present but their fingerprint key paths are CFF-hidden. CPUID/RDTSC here feed
 primarily VM/sandbox detection (`VBoxVBoxVBox`, `VMwareVMware`, `Can't run in virtual machine
 environment!`, `Kaspersky Lab\Sandbox`), not the id directly.
@@ -674,10 +678,12 @@ exports are anti-disasm stubs (`0x180081220`/`0x180081230` → `.TH0` return-thu
 dispatch): `get_oneid_data` → the full `FingerPrint` container, `get_oneid` → `ConnectScene_CS.Device`
 (the short `oneid`). *(Exact field-cipher constants kept out of this doc — see project memory.)*
 
-**Persistence:** the `oneid` is computed **once at first run and cached** (in the registry,
-per-install-stable, with a first-run timestamp seed folded in) — **not** recomputed from live hardware
-each launch. So the exact ordered hardware inputs to the MD5 ran once inside the CFF collector and only
-the cached token survives; an exhaustive offline MD5 search over the known identifiers did not
+**Persistence:** the device `oneid` **token** is computed once at first run and cached (registry,
+per-install-stable, first-run timestamp seed folded in). ⚠️ **Correction (§10.10.1): a live hardware
+gather nonetheless runs every launch** — even with the cache present, Themis re-reads MachineGuid, GPU,
+CPU, MAC, SMBIOS, ProductId (feeding the per-login `FingerPrint` blob / revalidation). So the cached
+*token* is stable long-term, but hardware IS re-enumerated each run; the exact ordered inputs to the MD5
+stay CFF-walled and only the cached token survives; an exhaustive offline MD5 search over the known identifiers did not
 reproduce it, consistent with the seeded/cached model. The MD5 style is confirmed **byte-exact** on a
 sibling hash (`MD5(machineId ‖ login-JWT sub)`, raw-ASCII, no separator). A co-resident **TapTap TDS**
 analytics fingerprint (SHA-1 `device_id` + `mac_list` + a persisted uuid) is a *separate* subsystem —
@@ -693,16 +699,164 @@ WMI-Activity) — shows the exact WQL + namespace — plus **Process Monitor** (
 `RegQueryValue`; `DeviceIoControl` where Path contains `HarddiskVolume` / `PhysicalDrive`; `\Device\`
 `CreateFile`; Process is `xdt.exe` + `wmiprvse.exe`). Confirms every source with no debugger attach.
 
+### 10.10.1 Live confirmation (ProcMon, 2026-08-07) — and two corrections
+
+The passive method above was run on a live launch (284 MB / 1.3 M events, `xdt.exe`). It resolved the
+field **set** with zero account risk and **corrected two static inferences**:
+
+- **⚠️ The fingerprint HW gather runs live EVERY launch** — not just at first run. Even with the cache
+  present, Themis reads `HKCU\Software\Themis\PrivousRosemaryV1` + `uuid_info\{uuid, create_time,
+  checksum}` **and** re-enumerates hardware. The cached device *token* is still per-install-stable, but a
+  live gather (feeding the per-login `FingerPrint` blob for `LoginRiskCheck`, and revalidating) does run
+  each launch. Corrects the "not recomputed from live hardware each launch" wording above.
+- **⚠️ `MachineGuid` and Windows `ProductId` ARE read** (MachineGuid 32×, ProductId 4×) — refuting the
+  "Notably NOT used" inference above, which was a *static-string* artifact (their key paths are
+  CFF-hidden, so they never decoded).
+- **Confirmed live sources** (registry / WMI): `Cryptography\MachineGuid`; `ProductId`; SMBIOS
+  `SystemManufacturer` / `SystemProductName` / `BaseBoard`; CPU `ProcessorNameString` / `~MHz`;
+  GPU/display via `HARDWARE\DEVICEMAP\VIDEO` + `Class\{4d36e968-…}` + `Enum\PCI\VEN_…` (= `displaycard_list`);
+  MAC via `Tcpip\Parameters\Interfaces`; **volume** serial via `GetVolumeInformation` (**no
+  `\\.\PhysicalDrive` IOCTL this run** → volume, not physical-disk, serial). The signature-verification
+  path (`Cryptography\OID\CryptSIPDll*`, Wintrust — §10.14) runs concurrently.
+- **Order:** first-touch was GPU → MachineGuid → CPU → ProductId → MAC → cache/folder → SMBIOS, but the
+  reads are **interleaved / repeated** across ~30 s, so this is approximate — **not** the byte-exact
+  concat order (which only matters for *reproducing* the blob and is deliberately not pursued). Full log +
+  extractors: `.research-record/THEMIS_DEVIRT_PLAN.md`, `scratchpad/themis_research/pm_fp*.py`.
+
 ### 10.11 Key source paths (native)
 
 | Topic | Location |
 |-------|----------|
 | Native AC binary | `<Game>/xdt_Data/Plugins/x86_64/themis_x64.dll` |
-| Native config | `<Game>/themis.res` |
+| Native config | none ships (`ReadCfgFile` export present, no `themis.res` on disk) |
 | Managed binding / game wrapper | `ilspy-dumps/EngineWrapper/ThemisSDKManager.cs`, `ilspy-dumps/XDTBaseService/ThemisManager.cs` |
 | Login fingerprint / device id | `ilspy-dumps/XDTGameSystem/XDTGameSystem/ClientSession.cs` (`LoginRiskCheckRequest.FingerPrint`), `.../LoginProtocolManager.cs` (`CheckDeviceIsForbidden`), `ilspy-dumps/EcsClient/Sazabi.Login.Shared/LoginRiskCheckResponse.cs`, `ilspy-dumps/EcsSystem/Network/SceneTcpConnectionHandler.cs` (`ConnectScene_CS.Device`) |
 | Ghidra project | `themis` (Ghidra-MCP `ghidra-mcp-http`); on-disk program at base `0x180000000`, unpacked image at ASLR base |
+| Current-build extraction | `.research-record/THEMIS_CURRENT_BUILD_2026-08-07.md`, `.research-record/THEMIS_PROBE_SURFACE_2026-08-07.md`; extractors `scratchpad/themis_research/{thlib,themis_dump,probe_surface}.py` |
+
+## 10.12 Current-build re-verification (2026-08-07)
+
+Re-opened on the shipping binary (**MD5 `6E8A3398FE80285304A389DE130B0B31`, mtime 2026-08-05**) via a live Ghidra-MCP REST bridge + a fresh unpacked image.
+
+- **Detection layer unchanged** vs the earlier RE: the `0x75A007BE` cipher, the full encrypted-string surface, the deobfuscation cluster (`FUN_1824e2e5e` decrypt-name→resolver, `FUN_1824e28b6` decrypt-compare, `FUN_1824e2a63`), and the 170 anti-analysis INT sites are all byte-stable. `get_themis_heartbeat` (export RVA `0x81340`) = 3×`CALL` into `.TH0` + `INT3`, first target RVA `0x107a815` — byte-identical. **The Aug-5 file touch did not change Themis's logic.**
+- **Manual `GetProcAddress` confirmed** — `FUN_1824e2a63` parses the PE export directory by hand (MZ/PE checks + binary-search of the name table) so Themis resolves APIs *without* the real `GetProcAddress`, defeating IAT/GetProcAddress hooks.
+- Unpacked via **direct `ReadProcessMemory` of the module range** (lighter than a full minidump — no thread suspend): base `0x7ffabb010000`, 100% capture, imported raw + rebased.
+
+## 10.13 Named-tool blocklist & user-facing verdicts (NEW)
+
+Stored as **plaintext UTF-16 in `.data`** (cluster @ VA `0x7ffabb1d4e60`+) — a **process-name blocklist** matched against Themis's own process enumeration, targeting **input-automation / macro / auto-clicker tools + Cheat Engine + multi-boxing**:
+
+`AUTOHOTKEY.EXE` · `AHK2EXE.EXE` · `cheatengine` · `MouseClick.exe` · `tinytask.exe` · `KeymouseGo` · `MacroRecorder.exe` · `MacroCreator.exe` · `multi-client`
+
+Recovered verdict strings (verbatim):
+
+| Trigger | Message |
+|---|---|
+| Automation tool | *"We have detected that your device is running an unauthorized third-party program (including AutoHotKey, multi-client manager etc.). Please stop using it immediately, otherwise your account might be suspended."* |
+| Modified / injected plugin | *"The game's plugin might be corrupted. Please try using repair game and restart!"* |
+| Environment anomaly | *"An abnormality in the game environment has been detected. Please check and restart the game!"* |
+| Virtual machine | *"Can't run in virtual machine environment!"* |
+
+The generic module/memory scan + integrity hash (§10.4–10.5) run **in addition** to this list.
+
+## 10.14 Watchdog threads & extended capability surface
+
+From the now-readable `.data`/`.rdata` (empty on disk, present in the unpacked image). Labels: **[full]** = clean/proven string; **[frag]** = ~16-byte-truncated device-info record entry (identity high-confidence, per-call attribution VMProtect-walled).
+
+- **Four native watchdog threads** — `System Error: Create {Check, Running, Check Exist Crash, TL Running} Thread Failed!` (spawned via `ZwCreateThreadEx`). Diagnostics: `THEMIS Inited`, `THEMIS cost:0x%x-0x%x`, `THEMIS Find Abort`, `THEMIS Error 1000-1/2`, `uparse_themis_key failed`.
+- **Authenticode / catalog signature verification** [frag] — `CryptCATAdminAcquireContext`, `CryptCATAdminCalcHashFromFileHandle`, `CryptCATAdminEnumCatalogFromHash`, `CryptCATCatalogInfoFromContext`, `WTHelperGetProvCertFromChain` / `…SignerFromChain`, `CertGetNameString` → hashes files and checks catalog signatures / signer chains (an **unsigned injected module fails**). New vs prior RE.
+- **Input-source integrity** [frag] — `GetCurrentInputMessageSource` (real vs injected input), `GetLastInputInfo` (idle); module refs `xinput1_1..1_4.dll`, `Hid.dll`.
+- **Page-write tamper detection** [full] — `Zw{Get,Reset}WriteWatch`.
+- **Windows-genuine** [full] — `SLIsGenuineLocal` (PROVEN code-referenced by `FUN_7ffabc7735b3` @ RVA `0x17635b3`, inside the fingerprint region).
+- **Session / RDP** [frag] — `WTSQuerySessionInformation`, `WTSEnumerateSessions`, `ProcessIdToSessionId`; **services/drivers** — `EnumServicesStatus`; **job objects** — `Nt{Create,Open}JobObject`, `NtAssignProcessToJobObject`.
+- **Sandbox** — `Kaspersky Lab\Sandbox`, `\KLSB` (extends the wine/sbie set of §10.4).
+- **Registry** — only one plaintext key recovered: `SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired\`; HW/fingerprint key paths stay VMProtect-hidden. **WMI** — exactly two queries (`SELECT LastBootUpTime FROM Win32_OperatingSystem`, `SELECT * FROM Win32_VideoController`). Own crypto/TLS = **BoringSSL**.
+- **Not present** — an embedded Lua VM (the `THEMIS_ERR{SYNTAX,RUN,MEM,ERR}` codes resemble Lua's, but there are zero `lua_`/`luaL_` symbols).
+
+## 10.15 Ghidra-MCP working recipe
+
+REST bridge at `http://127.0.0.1:8089` (the `.mcp.json` `8081` is dead; tools are not in the assistant's tool registry — drive via `curl`). Endpoints: `open_program?path=`, `open_project` (POST JSON), `read_memory?address=&length=`, `decompile_function?address=`, `create_function` (POST JSON `{"address":"0x…"}`), `set_image_base` (POST JSON), `get_xrefs_to?address=&limit=`, `find_anti_analysis_techniques` (works), `detect_crypto_constants` (stub), `import_file` (POST). On the on-disk PE only `.mdata/.TH1/.TH2` carry bytes; the deep fronts need the unpacked image loaded raw at its runtime base.
+
+## 10.16 Nt/Zw native-API surface
+
+Nt*/Zw* functions Themis **resolves and calls** for detection (via its manual GetProcAddress, §10.3) —
+not functions it hooks. Nt* and Zw* are aliases for the same ntdll syscalls; Themis uses both prefixes.
+Source: **[cipher]** = full name in the encrypted `.TH2` core pool (confirmed); **[data]** = the `.data`
+device-info layer — `*` marks a name expanded from a 16-byte-truncated table entry (identity
+high-confidence; the call site stays VMProtect-walled).
+
+| Function | Purpose | Source |
+|---|---|---|
+| `ZwQueryInformationProcess` | anti-debug (DebugPort / DebugObject / DebugFlags) | cipher |
+| `ZwQueryInformationThread` | anti-debug | cipher |
+| `ZwSetInformationThread` | ThreadHideFromDebugger (self-hide) | cipher |
+| `ZwSetInformationProcess` | anti-debug | cipher |
+| `ZwQuerySystemInformation` | kernel-debugger detection | cipher |
+| `ZwGetContextThread` | DR regs / hardware breakpoints | data\* |
+| `ZwSetContextThread` | DR regs / hardware breakpoints | data\* |
+| `ZwQueryVirtualMemory` | memory scan | cipher |
+| `ZwProtectVirtualMemory` | memory integrity | cipher |
+| `NtProtectVirtualMemory` | memory integrity | data\* |
+| `ZwGetWriteWatch` | code-patch (page-write) detection | data |
+| `ZwResetWriteWatch` | code-patch detection | data\* |
+| `ZwOpenFile` | ntdll unhook / clean baseline | cipher |
+| `ZwCreateSection` | ntdll unhook | cipher |
+| `ZwOpenSection` | ntdll unhook | cipher |
+| `ZwMapViewOfSection` | ntdll unhook | cipher |
+| `ZwUnmapViewOfSection` | ntdll unhook | cipher |
+| `ZwCreateThreadEx` | watchdog threads (bypass CreateThread hooks) | data (decompile-confirmed) |
+| `ZwWaitForSingleObject` | watchdog sync | data |
+| `ZwDelayExecution` | timing / delays | cipher |
+| `ZwQueryPerformanceCounter` | timing | data\* |
+| `NtCreateJobObject` | job-object confinement | data\* |
+| `NtOpenJobObject` | job object | data |
+| `NtAssignProcessToJobObject` | job object | data\* |
+| `ZwDeviceIoControlFile` | device I/O | data\* |
+| `NtQueryInformation*` (Process/Thread) | anti-debug (Nt-prefixed variant) | data\* |
+| `ZwRaiseHardError` / `NtRaiseHardError` | force-close the client | cipher / data |
+| `ZwClose` | handle close | cipher |
+
+Full string lists: `scratchpad/themis_research/{th2_strings_current.txt, unpacked_plaintext.txt}`.
+
+## 10.17 Signature / catalog verification — mechanism & why an injected mod is visible
+
+**Mechanism.** Windows code-signing has two forms and Themis runs the full stack for both:
+- *Embedded Authenticode* — signature blob in the PE's certificate directory → `WinVerifyTrust`.
+- *Catalog* — the file's hash is listed in a Microsoft-signed `.cat` under `%SystemRoot%\System32\CatRoot`.
+  Path: `CryptCATAdminAcquireContext` → `CryptCATAdminCalcHashFromFileHandle` (hash the file) →
+  `CryptCATAdminEnumCatalogFromHash` (find the catalog) → `CryptCATCatalogInfoFromContext`.
+- Then `WinVerifyTrust` (via `wintrust.dll`) verifies the chain, and
+  `WTHelperGetProvCertFromChain` / `WTHelperGetProvSignerFromChain` / `WTHelperProvDataFromStateData` →
+  `CertGetNameString` read the **signer's name** (so it can check *who* signed, not just *whether*).
+
+**PROVEN active (ProcMon, live in `xdt.exe`)** — not merely "the API is present":
+- `Load Image` + `ReadFile` on `C:\Windows\System32\wintrust.dll`;
+- catalog DB reads: `CreateFile`/`QueryDirectory`/`QueryBasicInformationFile` on
+  `CatRoot\{127D0A1D-4EF2-11D1-8608-00C04FC295EE}` (the standard Authenticode catalog subsystem GUID) + `catroot2\{…}`;
+- trust policy: `HKCU\…\WinTrust\Trust Providers\Software Publishing`, `HKLM\Software\Microsoft\Cryptography\Wintrust\Config`;
+- SIP-provider enumeration `Cryptography\OID\CryptSIPDll*` (how to hash each subject type).
+Normal Unity/.NET code doesn't run WinVerifyTrust catalog checks in-process; this is the AC/DRM layer.
+
+**Why the mod is visible (layered — signature check is not even the first line):**
+1. **A foreign module is simply loaded.** Module enumeration (`Module32`/`EnumProcessModules`) sees the
+   doorstop proxy (`winhttp.dll`/`version.dll`, loaded at process start), `coreclr.dll`, BepInEx core, and
+   `bugtopia.dll` directly — no signatures needed. This is the root fact.
+2. **The doorstop proxy is the sharpest signature failure.** Doorstop hijacks the DLL search order with a
+   fake `winhttp.dll` (~26 KB) in the game folder. The real `System32\winhttp.dll` is Microsoft-catalog-signed;
+   the replacement is unsigned **and** in the wrong location — a module named like a system DLL that fails
+   verification is a textbook injection tell, exactly what `CryptCATAdmin*`/`WinVerifyTrust` is for.
+3. **The rest of the stack is unsigned/uncatalogued** (bugtopia.dll, BepInEx, 0Harmony, Il2CppInterop).
+4. **Not fixable by signing:** can't sign as Microsoft; a valid *third-party* signature is still an
+   *unexpected signer* (checked via `WTHelperGetProvSignerFromChain`+`CertGetNameString`); catalog-signing is
+   MS/WHQL-only; hiding a loaded module from an in-process enumerator needs kernel stealth the mod doesn't do.
+
+**Honest limits.** Proven: the WinVerifyTrust/catalog machinery runs live and Themis's resolved-API set is
+exactly it. NOT proven (VMProtect-walled + server-side): that it hashes **`bugtopia.dll` specifically** and
+bans for it. Note the ProcMon `bugtopia` file hits are dominated by the **mod's own logging**
+(`WriteFile ×49815` → `bugtopia.log`/breadcrumbs), not an AC read of our DLL — per-module verification
+attribution stays walled. This confirms what §10.4's module scan already implies: an unsigned injected module
+is detectable; the signature check is an independent confirmation of the same fact, not a new escape hatch.
 
 ---
 
-*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review. §10 (native Themis binary reverse engineering) added from Ghidra + memory-dump analysis of `themis_x64.dll`; §10.10 device-fingerprint (`oneid`) sources added from a plaintext-string sweep of the unpacked image.*
+*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review. §10 (native Themis binary reverse engineering) added from Ghidra + memory-dump analysis of `themis_x64.dll`; §10.10 device-fingerprint (`oneid`) sources from a plaintext-string sweep. §10.12–10.15 (2026-08-07): current-build re-verification, VMProtect identification, the named-tool blocklist + verdict strings, the extended capability surface, and the Ghidra-MCP recipe — from a live unpacked image of the shipping binary. §10.16: the Nt/Zw native-API surface. §10.17: signature/catalog verification mechanism + why an injected mod is visible (with live ProcMon evidence).*
