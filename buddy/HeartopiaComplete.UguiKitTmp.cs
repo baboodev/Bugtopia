@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using UnityEngine;
@@ -585,313 +585,286 @@ namespace HeartopiaMod
             return false;
         }
 
-        // `matches` collects every font that covers `probeChar` — the fallback CHAIN for that one
-        // script. Ownership (who may have their material rewritten) is a separate question, asked
-        // of uguiKitBundleFonts: routes 1-3 hand back fonts that belong to the GAME.
+        // Wire EVERY non-Latin face we can reach into LiberationSans' fallback table, in one pass.
+        //
+        // Simplified 2026-08-09 (round 3), once the per-script hunts had proved the point they were
+        // built to prove. Probing at WIRING time was the wrong place for the question: it made the
+        // set of fallbacks depend on which script asked first, which is exactly how a Han probe
+        // came to reject the Korean face. Coverage adds up in a chain, so there is nothing to
+        // decide here — wire them all, and ask about coverage afterwards, once per script that is
+        // actually needed (UguiKitTmpPrimaryHasCharacter).
+        //
+        // `probeChars` is the adoption filter, and callers pass EVERY script the kit models — never
+        // just the ones this session happens to need. That distinction is the whole round-2 lesson:
+        // filtering by the asking script is order-dependent and drops the face the next script will
+        // need; filtering by the fixed full set wires the same chain no matter who asks first. It
+        // earns its keep because the game's font bundles also hold Latin display faces (Quicksand,
+        // Fredoka, XdtownRounded) that LiberationSans makes redundant — without it they take chain
+        // slots and a flattened material clone each, for glyphs they will never be asked to draw.
+        // Returns the head font's name, or null when nothing at all could be wired.
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private TMP_FontAsset UguiKitTmpFindCjkFontAsset(int probeChar, System.Text.StringBuilder report,
-            System.Collections.Generic.List<TMP_FontAsset> matches)
-        {
-            TMP_FontAsset best = null;
-
-            // Route 0 — fonts an earlier sweep already pulled out of the game's bundles. Checked
-            // FIRST because a re-hunt for a second script cannot re-open those bundles at all.
-            for (int i = 0; i < this.uguiKitBundleFonts.Count; i++)
-            {
-                TMP_FontAsset fa = (this.uguiKitBundleFonts[i] != null)
-                    ? this.uguiKitBundleFonts[i].TryCast<TMP_FontAsset>() : null;
-                if (fa == null)
-                {
-                    continue;
-                }
-                bool hit = false;
-                try { hit = fa.HasCharacter((char)probeChar, false, true); }
-                catch { }
-                if (!hit)
-                {
-                    continue;
-                }
-                report.Append("swept='").Append(fa.name ?? "?").Append("' ");
-                if (!matches.Contains(fa))
-                {
-                    matches.Add(fa);
-                }
-                if (best == null)
-                {
-                    best = fa;
-                }
-            }
-
-            // Route 1 — every loaded font asset. tryAddCharacter:true is the important part: a
-            // DYNAMIC font asset reports false for a glyph that is not in its atlas yet, even when
-            // its source font could render it. Round 1 asked without this flag and wrongly rejected
-            // every candidate.
-            try
-            {
-                var all = Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<TMP_FontAsset>());
-                report.Append("assets=[");
-                if (all != null)
-                {
-                    for (int i = 0; i < all.Length; i++)
-                    {
-                        TMP_FontAsset fa = (all[i] != null) ? all[i].TryCast<TMP_FontAsset>() : null;
-                        if (fa == null)
-                        {
-                            continue;
-                        }
-                        bool cjk = false;
-                        try { cjk = fa.HasCharacter((char)probeChar, false, true); }
-                        catch { try { cjk = fa.HasCharacter((char)probeChar); } catch { } }
-                        if (i > 0) { report.Append(", "); }
-                        report.Append(fa.name ?? "?").Append(cjk ? "*HIT" : "");
-                        if (cjk && best == null)
-                        {
-                            best = fa;
-                        }
-                    }
-                }
-                report.Append("] ");
-            }
-            catch (Exception ex) { report.Append("assets=<err ").Append(ex.Message).Append("> "); }
-
-            // Route 2 — TMP's global settings: the game may register its CJK font as the project
-            // default or in the GLOBAL fallback list, which is a different list from any single
-            // font asset's own fallbackFontAssetTable.
-            try
-            {
-                TMP_FontAsset def = TMP_Settings.defaultFontAsset;
-                report.Append("tmpDefault=").Append(def != null ? (def.name ?? "?") : "null").Append(' ');
-                if (best == null && def != null && def.HasCharacter((char)probeChar, false, true))
-                {
-                    best = def;
-                }
-                var globals = TMP_Settings.fallbackFontAssets;
-                report.Append("tmpGlobalFallbacks=[");
-                if (globals != null)
-                {
-                    for (int i = 0; i < globals.Count; i++)
-                    {
-                        TMP_FontAsset fa = globals[i];
-                        if (fa == null)
-                        {
-                            continue;
-                        }
-                        if (i > 0) { report.Append(", "); }
-                        report.Append(fa.name ?? "?");
-                        if (best == null && fa.HasCharacter((char)probeChar, false, true))
-                        {
-                            best = fa;
-                        }
-                    }
-                }
-                report.Append("] ");
-            }
-            catch (Exception ex) { report.Append("tmpSettings=<err ").Append(ex.Message).Append("> "); }
-
-            // Route 3 — the game's own live text components. If Chinese is on screen anywhere, the
-            // font drawing it is reachable here even when the asset scan above missed it (different
-            // load path / not registered as a standalone asset object). Capped: a big scene holds
-            // thousands of these and we only need the first CJK-capable hit.
-            if (best == null)
-            {
-                try
-                {
-                    var texts = Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<TextMeshProUGUI>());
-                    int scanned = 0;
-                    report.Append("liveTextScan=");
-                    if (texts != null)
-                    {
-                        for (int i = 0; i < texts.Length && scanned < 4000; i++)
-                        {
-                            TextMeshProUGUI t = (texts[i] != null) ? texts[i].TryCast<TextMeshProUGUI>() : null;
-                            if (t == null)
-                            {
-                                continue;
-                            }
-                            scanned++;
-                            TMP_FontAsset fa = t.font;
-                            if (fa != null && fa.HasCharacter((char)probeChar, false, true))
-                            {
-                                best = fa;
-                                report.Append(scanned).Append("->FOUND '").Append(fa.name ?? "?").Append("' ");
-                                break;
-                            }
-                        }
-                    }
-                    if (best == null) { report.Append(scanned).Append("->none "); }
-                }
-                catch (Exception ex) { report.Append("liveTextScan=<err ").Append(ex.Message).Append("> "); }
-            }
-
-            // Route 4 — nothing in memory: sweep the game's own font bundles off disk (once per
-            // session), then re-ask route 0 over what that harvested.
-            if (best == null && !this.uguiKitBundleSweepDone)
-            {
-                try
-                {
-                    this.UguiKitTmpSweepFontBundles(report);
-                    for (int i = 0; i < this.uguiKitBundleFonts.Count; i++)
-                    {
-                        TMP_FontAsset fa = (this.uguiKitBundleFonts[i] != null)
-                            ? this.uguiKitBundleFonts[i].TryCast<TMP_FontAsset>() : null;
-                        if (fa == null)
-                        {
-                            continue;
-                        }
-                        bool hit = false;
-                        try { hit = fa.HasCharacter((char)probeChar, false, true); }
-                        catch { }
-                        if (!hit)
-                        {
-                            continue;
-                        }
-                        report.Append("bundleHit='").Append(fa.name ?? "?").Append("' ");
-                        if (!matches.Contains(fa))
-                        {
-                            matches.Add(fa);
-                        }
-                        // FZY4JW is preferred as the head of the chain where it qualifies (the
-                        // game's primary CJK face — its source TTF is the 4.8 MB bundle, the
-                        // largest), so the common case stays visually consistent.
-                        if (best == null
-                            || (fa.name ?? string.Empty).IndexOf("FZY4JW", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            best = fa;
-                        }
-                    }
-                }
-                catch (Exception ex) { report.Append("bundleLoad=<err ").Append(ex.Message).Append("> "); }
-            }
-
-            return best;
-        }
-
-        // One script per call: `probeChar` is that script's representative glyph and `scriptName`
-        // only labels the log. Returns the head font's name once the script resolves, else null.
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private string UguiKitTmpEnsureFallbackForScript(int probeChar, string scriptName)
+        private string UguiKitTmpWireFallbackFonts(int[] probeChars)
         {
             TMP_FontAsset primary = (this.uguiKitTmpFont != null) ? this.uguiKitTmpFont.TryCast<TMP_FontAsset>() : null;
             if (primary == null)
             {
                 return null;
             }
-
-            // Already covered (a non-Latin pin, or a previous pass wired something in). Asked with
-            // THIS script's probe — a chain that covers Han says nothing about Hangul.
-            try
-            {
-                if (primary.HasCharacter((char)probeChar, true, true))
-                {
-                    return "(covered)";
-                }
-            }
-            catch { }
-
-            System.Text.StringBuilder report = new System.Text.StringBuilder();
-            // Every font that covers this script — the chain for it.
-            System.Collections.Generic.List<TMP_FontAsset> matches = new System.Collections.Generic.List<TMP_FontAsset>();
-            TMP_FontAsset cjk = this.UguiKitTmpFindCjkFontAsset(probeChar, report, matches);
-            ModLogger.Msg("[UguiKit] " + scriptName + " font hunt (probe U+"
-                + probeChar.ToString("X4") + "): primary=" + (primary.name ?? "?") + " " + report.ToString()
-                + "=> " + (cjk != null ? ("USING '" + (cjk.name ?? "?") + "'") : "NONE FOUND (legacy Text will be used)"));
-
-            if (cjk == null)
-            {
-                return null; // caller retries; legacy Text carries the script meanwhile
-            }
-
             var table = primary.fallbackFontAssetTable;
             if (table == null)
             {
                 return null;
             }
 
-            // Wire the PREFERRED font first and then every other face that covers this script, so
-            // TMP can chain through them: a glyph missing from the head is looked up in the next
-            // entry instead of rendering as a box. Picking a single font is what produced the
-            // reported "characters mixed with boxes".
-            System.Collections.Generic.List<TMP_FontAsset> chain = new System.Collections.Generic.List<TMP_FontAsset>();
-            chain.Add(cjk);
-            for (int i = 0; i < matches.Count; i++)
+            System.Text.StringBuilder report = new System.Text.StringBuilder();
+            System.Collections.Generic.List<TMP_FontAsset> candidates =
+                new System.Collections.Generic.List<TMP_FontAsset>();
+
+            // Source 1 — the game's font bundles off disk, swept once per session.
+            if (!this.uguiKitBundleSweepDone)
             {
-                if (matches[i] != null && matches[i].Pointer != cjk.Pointer)
+                try { this.UguiKitTmpSweepFontBundles(report); }
+                catch (Exception ex) { report.Append("bundleSweep=<err ").Append(ex.Message).Append("> "); }
+            }
+            for (int i = 0; i < this.uguiKitBundleFonts.Count; i++)
+            {
+                TMP_FontAsset fa = (this.uguiKitBundleFonts[i] != null)
+                    ? this.uguiKitBundleFonts[i].TryCast<TMP_FontAsset>() : null;
+                if (UguiKitTmpFontCoversAny(fa, probeChars))
                 {
-                    chain.Add(matches[i]);
+                    UguiKitTmpAddFontCandidate(candidates, fa);
+                }
+            }
+
+            // Source 2 — font assets already in the process (the game's own, once it has loaded the
+            // face for its language) plus TMP's project-wide defaults, which are a different list
+            // from any single asset's own fallbackFontAssetTable.
+            try
+            {
+                var all = Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<TMP_FontAsset>());
+                if (all != null)
+                {
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        TMP_FontAsset fa = (all[i] != null) ? all[i].TryCast<TMP_FontAsset>() : null;
+                        if (UguiKitTmpFontCoversAny(fa, probeChars))
+                        {
+                            UguiKitTmpAddFontCandidate(candidates, fa);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { report.Append("assetScan=<err ").Append(ex.Message).Append("> "); }
+
+            try
+            {
+                TMP_FontAsset def = TMP_Settings.defaultFontAsset;
+                if (UguiKitTmpFontCoversAny(def, probeChars))
+                {
+                    UguiKitTmpAddFontCandidate(candidates, def);
+                }
+                var globals = TMP_Settings.fallbackFontAssets;
+                if (globals != null)
+                {
+                    for (int i = 0; i < globals.Count; i++)
+                    {
+                        if (UguiKitTmpFontCoversAny(globals[i], probeChars))
+                        {
+                            UguiKitTmpAddFontCandidate(candidates, globals[i]);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { report.Append("tmpSettings=<err ").Append(ex.Message).Append("> "); }
+
+            // Source 3 — the game's live text components. If the script is on screen anywhere, the
+            // font drawing it is reachable here even when the asset scan missed it (different load
+            // path / not registered as a standalone asset object). Capped: a big scene holds
+            // thousands of these, though the DISTINCT fonts among them are few.
+            try
+            {
+                var texts = Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<TextMeshProUGUI>());
+                int scanned = 0;
+                if (texts != null)
+                {
+                    System.Collections.Generic.List<TMP_FontAsset> seen =
+                        new System.Collections.Generic.List<TMP_FontAsset>();
+                    for (int i = 0; i < texts.Length && scanned < 4000; i++)
+                    {
+                        TextMeshProUGUI t = (texts[i] != null) ? texts[i].TryCast<TextMeshProUGUI>() : null;
+                        if (t == null)
+                        {
+                            continue;
+                        }
+                        scanned++;
+                        TMP_FontAsset fa = t.font;
+                        if (fa == null || UguiKitTmpListContains(seen, fa))
+                        {
+                            continue; // HasCharacter(tryAddCharacter) is not free — ask each face once
+                        }
+                        seen.Add(fa);
+                        if (UguiKitTmpFontCoversAny(fa, probeChars))
+                        {
+                            UguiKitTmpAddFontCandidate(candidates, fa);
+                        }
+                    }
+                }
+                report.Append("liveTexts=").Append(scanned).Append(' ');
+            }
+            catch (Exception ex) { report.Append("liveTextScan=<err ").Append(ex.Message).Append("> "); }
+
+            if (candidates.Count == 0)
+            {
+                ModLogger.Msg("[UguiKit] fallback wiring: " + report.ToString() + "=> no non-Latin face found");
+                return null;
+            }
+
+            // FZY4JW leads where it is present: it is the game's primary CJK face, so Han renders in
+            // the shapes the game itself uses rather than the Japanese face's variants. Order only
+            // decides anything for glyphs several candidates share.
+            for (int i = 1; i < candidates.Count; i++)
+            {
+                if ((candidates[i].name ?? string.Empty).IndexOf("FZY4JW", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    TMP_FontAsset head = candidates[i];
+                    candidates.RemoveAt(i);
+                    candidates.Insert(0, head);
+                    break;
                 }
             }
 
             System.Text.StringBuilder wired = new System.Text.StringBuilder();
-            for (int n = 0; n < chain.Count; n++)
+            for (int n = 0; n < candidates.Count; n++)
             {
-                TMP_FontAsset fa = chain[n];
-                bool present = false;
-                for (int i = 0; i < table.Count; i++)
-                {
-                    if (table[i] != null && table[i].Pointer == fa.Pointer)
-                    {
-                        present = true;
-                        break;
-                    }
-                }
-                if (present)
+                TMP_FontAsset fa = candidates[n];
+                if (fa.Pointer == primary.Pointer || UguiKitTmpTableContains(table, fa))
                 {
                     continue;
                 }
-                // Flatten the fallback's OWN material before wiring it. Our flat-material clone is
-                // assigned per-label and therefore only covers the PRIMARY font: TMP renders
-                // fallback glyphs in a separate sub-mesh using the FALLBACK asset's material, so
-                // CJK text was arriving with the game's face intact — outline on, face dilated —
-                // which reads as "too bold / hard to read" next to the flat Latin text. Same
-                // properties as the primary clone plus _FaceDilate, which literally fattens the
-                // glyph body.
-                //
-                // ONLY for assets WE loaded off disk (AssetBundle.LoadFromFile throws for a bundle
-                // the game already holds, so anything in uguiKitBundleFonts is our own instance).
-                // Since 2026-08-09 the hunt also runs with a LATIN menu language against a CJK game
-                // client — and in that case routes 1-3 hit first and hand back the very font asset
-                // the GAME's own UI draws with. Rewriting its material would reach straight into
-                // the game's rendering for a cosmetic tweak that was never even the fix for the
-                // "too bold" report (synthetic bold was — see TrySetUguiLabelBold), so a foreign
-                // asset is wired in as-is.
-                if (!this.UguiKitTmpBundleFontsContains(fa))
+                // Flatten the fallback's OWN material before wiring it — our flat-material clone is
+                // assigned per-label and so only governs the PRIMARY font. ONLY for assets WE loaded
+                // off disk (AssetBundle.LoadFromFile throws for a bundle the game already holds, so
+                // anything in uguiKitBundleFonts is our own instance): against a CJK game client the
+                // sources above hand back the very asset the GAME's UI draws with, and rewriting its
+                // material would reach straight into the game's rendering — for a tweak that was
+                // never even the fix for the "too bold" report (synthetic bold was, see
+                // TrySetUguiLabelBold). A foreign asset is wired in untouched.
+                if (this.UguiKitTmpBundleFontsContains(fa))
                 {
-                    table.Add(fa);
-                    if (wired.Length > 0) { wired.Append(", "); }
-                    wired.Append(fa.name ?? "?").Append(" (game asset, material untouched)");
-                    continue;
-                }
-                try
-                {
-                    Material fbSrc = fa.material;
-                    if (fbSrc != null)
+                    try
                     {
-                        Material fbFlat = new Material(fbSrc);
-                        fbFlat.name = (fbSrc.name ?? "?") + " (Bugtopia flat)";
-                        fbFlat.SetFloat("_OutlineWidth", 0f);
-                        fbFlat.SetFloat("_OutlineSoftness", 0f);
-                        fbFlat.SetFloat("_FaceDilate", 0f);
-                        fbFlat.SetFloat("_GlowPower", 0f);
-                        fbFlat.SetFloat("_GlowOuter", 0f);
-                        fbFlat.SetFloat("_UnderlayDilate", 0f);
-                        fbFlat.SetFloat("_UnderlaySoftness", 0f);
-                        fbFlat.SetFloat("_UnderlayOffsetX", 0f);
-                        fbFlat.SetFloat("_UnderlayOffsetY", 0f);
-                        fa.material = fbFlat;
+                        Material fbSrc = fa.material;
+                        if (fbSrc != null)
+                        {
+                            Material fbFlat = new Material(fbSrc);
+                            fbFlat.name = (fbSrc.name ?? "?") + " (Bugtopia flat)";
+                            fbFlat.SetFloat("_OutlineWidth", 0f);
+                            fbFlat.SetFloat("_OutlineSoftness", 0f);
+                            fbFlat.SetFloat("_FaceDilate", 0f);
+                            fbFlat.SetFloat("_GlowPower", 0f);
+                            fbFlat.SetFloat("_GlowOuter", 0f);
+                            fbFlat.SetFloat("_UnderlayDilate", 0f);
+                            fbFlat.SetFloat("_UnderlaySoftness", 0f);
+                            fbFlat.SetFloat("_UnderlayOffsetX", 0f);
+                            fbFlat.SetFloat("_UnderlayOffsetY", 0f);
+                            fa.material = fbFlat;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ModLogger.Msg("[UguiKit] fallback '" + (fa.name ?? "?") + "' flatten failed: " + ex.Message);
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    ModLogger.Msg("[UguiKit] fallback '" + (fa.name ?? "?") + "' flatten failed: " + ex.Message);
+                    report.Append("(game asset, material untouched) ");
                 }
 
                 table.Add(fa);
                 if (wired.Length > 0) { wired.Append(", "); }
                 wired.Append(fa.name ?? "?");
             }
-            ModLogger.Msg("[UguiKit] " + scriptName + " fallback chain behind " + (primary.name ?? "?")
-                + ": [" + (wired.Length > 0 ? wired.ToString() : "already wired") + "] tableCount=" + table.Count);
-            return cjk.name;
+
+            ModLogger.Msg("[UguiKit] fallback wiring behind " + (primary.name ?? "?") + ": " + report.ToString()
+                + "newly wired [" + (wired.Length > 0 ? wired.ToString() : "none, already present")
+                + "] tableCount=" + table.Count);
+            return candidates[0].name;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void UguiKitTmpAddFontCandidate(System.Collections.Generic.List<TMP_FontAsset> candidates,
+            TMP_FontAsset fa)
+        {
+            if (fa != null && !UguiKitTmpListContains(candidates, fa))
+            {
+                candidates.Add(fa);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool UguiKitTmpListContains(System.Collections.Generic.List<TMP_FontAsset> list,
+            TMP_FontAsset fa)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] != null && list[i].Pointer == fa.Pointer)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool UguiKitTmpTableContains(Il2CppSystem.Collections.Generic.List<TMP_FontAsset> table,
+            TMP_FontAsset fa)
+        {
+            for (int i = 0; i < table.Count; i++)
+            {
+                if (table[i] != null && table[i].Pointer == fa.Pointer)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // tryAddCharacter:true is load-bearing — a DYNAMIC font asset reports false for a glyph that
+        // is not in its atlas yet even when its source font could rasterize it. Asking without it is
+        // what made the very first CJK attempt (2026-07-25) find nothing at all.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool UguiKitTmpFontCoversAny(TMP_FontAsset fa, int[] probeChars)
+        {
+            if (fa == null || probeChars == null)
+            {
+                return false;
+            }
+            for (int i = 0; i < probeChars.Length; i++)
+            {
+                try
+                {
+                    if (fa.HasCharacter((char)probeChars[i], false, true))
+                    {
+                        return true;
+                    }
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        // Coverage question, asked of the PRIMARY font WITH its fallback chain: "can the kit draw
+        // this script now?". The one place a probe glyph belongs.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private bool UguiKitTmpPrimaryHasCharacter(int probeChar)
+        {
+            TMP_FontAsset primary = (this.uguiKitTmpFont != null) ? this.uguiKitTmpFont.TryCast<TMP_FontAsset>() : null;
+            if (primary == null)
+            {
+                return false;
+            }
+            try { return primary.HasCharacter((char)probeChar, true, true); }
+            catch { return false; }
         }
     }
 }

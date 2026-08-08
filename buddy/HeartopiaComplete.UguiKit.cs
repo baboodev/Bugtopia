@@ -174,6 +174,24 @@ namespace HeartopiaMod
             return UguiCjkProbeChar;                           // 中
         }
 
+        // Probe glyphs for a whole mask, in bit order — the qualifier a GAME-owned font has to pass
+        // before the kit adopts it (bundle-swept fonts are adopted unconditionally).
+        private static int[] UguiScriptProbeChars(int mask)
+        {
+            int count = 0;
+            for (int bit = 1; bit <= UguiScriptThai; bit <<= 1)
+            {
+                if ((mask & bit) != 0) { count++; }
+            }
+            int[] probes = new int[count];
+            int n = 0;
+            for (int bit = 1; bit <= UguiScriptThai; bit <<= 1)
+            {
+                if ((mask & bit) != 0) { probes[n++] = UguiScriptProbeChar(bit); }
+            }
+            return probes;
+        }
+
         private static string UguiScriptName(int script)
         {
             if (script == UguiScriptHangul) { return "Hangul"; }
@@ -447,8 +465,11 @@ namespace HeartopiaMod
             }
             int added = scripts & ~this.uguiKitContentScripts;
             this.uguiKitContentScripts |= scripts;
-            ModLogger.Msg("[UguiKit] " + UguiScriptMaskName(added) + " text reached a kit label"
-                + " — hunting a font for it.");
+            // Say which it is: usually the language signals already covered this script and there
+            // is nothing to hunt, and a line claiming otherwise made the log read like a miss.
+            bool alreadyCovered = (added & ~this.uguiKitScriptsCovered) == 0;
+            ModLogger.Msg("[UguiKit] " + UguiScriptMaskName(added) + " text reached a kit label — "
+                + (alreadyCovered ? "already covered." : "hunting a font for it."));
             this.EnsureUguiKitCjkFallback(); // self-throttled; rebuilds the shell once it lands
         }
 
@@ -831,31 +852,46 @@ namespace HeartopiaMod
                 return;
             }
 
+            // ONE wiring pass for everything reachable, then ONE coverage probe per missing script.
+            // Splitting it the other way round — a hunt per script, each filtering candidates by
+            // its own probe — is what let a Han probe throw away the Korean face (round-2 note).
+            // Coverage adds up in a fallback chain, so there is nothing to filter at wiring time.
+            try
+            {
+                // EVERY modelled script, not `missing`: adoption must not depend on which script
+                // asked first (that is the round-2 trap), and the game's font bundles also carry
+                // Latin display faces that LiberationSans already covers — Quicksand, Fredoka,
+                // XdtownRounded were taking chain slots and a material clone each for nothing.
+                string head = this.UguiKitTmpWireFallbackFonts(UguiScriptProbeChars(UguiScriptAll));
+                if (head != null)
+                {
+                    this.uguiKitCjkFallbackName = head;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiKit] fallback wiring failed (legacy Text will carry it): " + ex.Message);
+            }
+
             int covered = 0;
+            System.Text.StringBuilder coverage = new System.Text.StringBuilder();
             for (int bit = 1; bit <= UguiScriptThai; bit <<= 1)
             {
                 if ((missing & bit) == 0)
                 {
                     continue;
                 }
-                try
+                bool ok = false;
+                try { ok = this.UguiKitTmpPrimaryHasCharacter(UguiScriptProbeChar(bit)); }
+                catch { }
+                if (ok)
                 {
-                    // One hunt per script, each with its OWN probe glyph. A single 中 probe is what
-                    // silently excluded the Korean face on a Korean client (round-2 note above).
-                    string name = this.UguiKitTmpEnsureFallbackForScript(
-                        UguiScriptProbeChar(bit), UguiScriptName(bit));
-                    if (name != null)
-                    {
-                        covered |= bit;
-                        this.uguiKitCjkFallbackName = name;
-                    }
+                    covered |= bit;
                 }
-                catch (Exception ex)
-                {
-                    ModLogger.Msg("[UguiKit] " + UguiScriptName(bit) + " font hunt failed"
-                        + " (legacy Text will carry it): " + ex.Message);
-                }
+                if (coverage.Length > 0) { coverage.Append(' '); }
+                coverage.Append(UguiScriptName(bit)).Append(ok ? "=ok" : "=MISSING");
             }
+            ModLogger.Msg("[UguiKit] script coverage: " + coverage.ToString());
 
             if (covered != 0)
             {
