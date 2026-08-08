@@ -365,6 +365,20 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Read-back for the CJK checks that run AFTER construction (the bold gate).
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private bool UguiKitTmpTryGetText(GameObject label, out string text)
+        {
+            text = null;
+            TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
+            if (tmp == null)
+            {
+                return false;
+            }
+            text = tmp.text;
+            return true;
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         private bool UguiKitTmpTrySetColor(GameObject label, Color color)
         {
@@ -462,13 +476,21 @@ namespace HeartopiaMod
         // Sizes are used instead of hardcoded hash names so a content patch (which renames these
         // files) does not silently break it: small bundles hold the SDF assets, the big ones the
         // source fonts. Already-loaded bundles throw and are skipped.
+        //
+        // The sweep runs ONCE per session and harvests EVERY font asset it meets into
+        // uguiKitBundleFonts, whether or not it matches the caller's probe. Two reasons, both
+        // learned the hard way (2026-08-09): a later hunt for a different script cannot re-open
+        // these bundles (LoadFromFile throws for anything already loaded — including by us), and
+        // the Korean face is precisely the one that fails a Han probe, so probe-filtered harvesting
+        // threw away the asset the next hunt needed.
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private TMP_FontAsset UguiKitTmpLoadCjkFontFromBundles(int probeChar, System.Text.StringBuilder report,
-            System.Collections.Generic.List<TMP_FontAsset> cjkFound)
+        private void UguiKitTmpSweepFontBundles(System.Text.StringBuilder report)
         {
+            this.uguiKitBundleSweepDone = true;
+
             string dir;
             try { dir = Application.streamingAssetsPath + "/AssetBundle"; }
-            catch (Exception ex) { report.Append("bundleDir=<err ").Append(ex.Message).Append("> "); return null; }
+            catch (Exception ex) { report.Append("bundleDir=<err ").Append(ex.Message).Append("> "); return; }
 
             string[] files;
             try
@@ -476,11 +498,11 @@ namespace HeartopiaMod
                 if (!System.IO.Directory.Exists(dir))
                 {
                     report.Append("bundleDir=missing ");
-                    return null;
+                    return;
                 }
                 files = System.IO.Directory.GetFiles(dir, "fonts_*.ab");
             }
-            catch (Exception ex) { report.Append("bundleList=<err ").Append(ex.Message).Append("> "); return null; }
+            catch (Exception ex) { report.Append("bundleList=<err ").Append(ex.Message).Append("> "); return; }
 
             // Source fonts first (largest), then the SDF assets (smallest). Same reason as above:
             // the dynamic asset needs its TTF present before it can add a glyph.
@@ -493,9 +515,10 @@ namespace HeartopiaMod
             });
 
             int loaded = 0;
-            TMP_FontAsset best = null;
             report.Append("bundles=").Append(files.Length).Append(' ');
-            for (int pass = 0; pass < 2 && best == null; pass++)
+            // Both passes always run to completion — the sweep is once per session, so stopping at
+            // the first usable font would strand every other face where no later pass can reach it.
+            for (int pass = 0; pass < 2; pass++)
             {
                 for (int i = 0; i < files.Length; i++)
                 {
@@ -532,44 +555,72 @@ namespace HeartopiaMod
                             {
                                 continue;
                             }
-                            bool cjk = false;
-                            try { cjk = fa.HasCharacter((char)probeChar, false, true); }
-                            catch { }
-                            if (!cjk)
+                            // Harvested unconditionally — see this method's header. Which of these
+                            // covers which script is a question each hunt asks for itself.
+                            if (!this.UguiKitTmpBundleFontsContains(fa))
                             {
-                                continue;
-                            }
-                            report.Append("bundleHit='").Append(fa.name ?? "?").Append("' ");
-                            // Keep EVERY CJK font, not just one. The game ships several with
-                            // different coverage (FZY4JW / FZY4K / MPLUSRounded1c / Jua / Kanit),
-                            // and picking a single one rendered "characters mixed with boxes"
-                            // whenever the chosen font lacked a glyph. As a TMP fallback CHAIN
-                            // their coverage adds up, so a glyph missing from one is found in the
-                            // next. FZY4JW is preferred as the head of the chain (it is the game's
-                            // primary CJK face — its source TTF is the 4.8 MB bundle, the largest),
-                            // so the common case stays visually consistent.
-                            if (best == null || (fa.name ?? string.Empty).IndexOf("FZY4JW", StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                best = fa;
-                            }
-                            if (!cjkFound.Contains(fa))
-                            {
-                                cjkFound.Add(fa);
+                                this.uguiKitBundleFonts.Add(fa);
+                                report.Append("bundleFont='").Append(fa.name ?? "?").Append("' ");
                             }
                         }
                     }
                     catch { }
                 }
             }
-            report.Append("bundlesLoaded=").Append(loaded).Append(' ');
-            return best;
+            report.Append("bundlesLoaded=").Append(loaded)
+                .Append(" bundleFonts=").Append(this.uguiKitBundleFonts.Count).Append(' ');
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
+        private bool UguiKitTmpBundleFontsContains(TMP_FontAsset fa)
+        {
+            for (int i = 0; i < this.uguiKitBundleFonts.Count; i++)
+            {
+                UnityObject held = this.uguiKitBundleFonts[i];
+                if (held != null && held.Pointer == fa.Pointer)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // `matches` collects every font that covers `probeChar` — the fallback CHAIN for that one
+        // script. Ownership (who may have their material rewritten) is a separate question, asked
+        // of uguiKitBundleFonts: routes 1-3 hand back fonts that belong to the GAME.
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private TMP_FontAsset UguiKitTmpFindCjkFontAsset(int probeChar, System.Text.StringBuilder report,
-            System.Collections.Generic.List<TMP_FontAsset> cjkFound)
+            System.Collections.Generic.List<TMP_FontAsset> matches)
         {
             TMP_FontAsset best = null;
+
+            // Route 0 — fonts an earlier sweep already pulled out of the game's bundles. Checked
+            // FIRST because a re-hunt for a second script cannot re-open those bundles at all.
+            for (int i = 0; i < this.uguiKitBundleFonts.Count; i++)
+            {
+                TMP_FontAsset fa = (this.uguiKitBundleFonts[i] != null)
+                    ? this.uguiKitBundleFonts[i].TryCast<TMP_FontAsset>() : null;
+                if (fa == null)
+                {
+                    continue;
+                }
+                bool hit = false;
+                try { hit = fa.HasCharacter((char)probeChar, false, true); }
+                catch { }
+                if (!hit)
+                {
+                    continue;
+                }
+                report.Append("swept='").Append(fa.name ?? "?").Append("' ");
+                if (!matches.Contains(fa))
+                {
+                    matches.Add(fa);
+                }
+                if (best == null)
+                {
+                    best = fa;
+                }
+            }
 
             // Route 1 — every loaded font asset. tryAddCharacter:true is the important part: a
             // DYNAMIC font asset reports false for a glyph that is not in its atlas yet, even when
@@ -592,7 +643,7 @@ namespace HeartopiaMod
                         try { cjk = fa.HasCharacter((char)probeChar, false, true); }
                         catch { try { cjk = fa.HasCharacter((char)probeChar); } catch { } }
                         if (i > 0) { report.Append(", "); }
-                        report.Append(fa.name ?? "?").Append(cjk ? "*CJK" : "");
+                        report.Append(fa.name ?? "?").Append(cjk ? "*HIT" : "");
                         if (cjk && best == null)
                         {
                             best = fa;
@@ -672,18 +723,53 @@ namespace HeartopiaMod
                 catch (Exception ex) { report.Append("liveTextScan=<err ").Append(ex.Message).Append("> "); }
             }
 
-            // Route 4 — nothing in memory: load the game's own font bundles off disk.
-            if (best == null)
+            // Route 4 — nothing in memory: sweep the game's own font bundles off disk (once per
+            // session), then re-ask route 0 over what that harvested.
+            if (best == null && !this.uguiKitBundleSweepDone)
             {
-                try { best = this.UguiKitTmpLoadCjkFontFromBundles(probeChar, report, cjkFound); }
+                try
+                {
+                    this.UguiKitTmpSweepFontBundles(report);
+                    for (int i = 0; i < this.uguiKitBundleFonts.Count; i++)
+                    {
+                        TMP_FontAsset fa = (this.uguiKitBundleFonts[i] != null)
+                            ? this.uguiKitBundleFonts[i].TryCast<TMP_FontAsset>() : null;
+                        if (fa == null)
+                        {
+                            continue;
+                        }
+                        bool hit = false;
+                        try { hit = fa.HasCharacter((char)probeChar, false, true); }
+                        catch { }
+                        if (!hit)
+                        {
+                            continue;
+                        }
+                        report.Append("bundleHit='").Append(fa.name ?? "?").Append("' ");
+                        if (!matches.Contains(fa))
+                        {
+                            matches.Add(fa);
+                        }
+                        // FZY4JW is preferred as the head of the chain where it qualifies (the
+                        // game's primary CJK face — its source TTF is the 4.8 MB bundle, the
+                        // largest), so the common case stays visually consistent.
+                        if (best == null
+                            || (fa.name ?? string.Empty).IndexOf("FZY4JW", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            best = fa;
+                        }
+                    }
+                }
                 catch (Exception ex) { report.Append("bundleLoad=<err ").Append(ex.Message).Append("> "); }
             }
 
             return best;
         }
 
+        // One script per call: `probeChar` is that script's representative glyph and `scriptName`
+        // only labels the log. Returns the head font's name once the script resolves, else null.
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private string UguiKitTmpEnsureCjkFallback()
+        private string UguiKitTmpEnsureFallbackForScript(int probeChar, string scriptName)
         {
             TMP_FontAsset primary = (this.uguiKitTmpFont != null) ? this.uguiKitTmpFont.TryCast<TMP_FontAsset>() : null;
             if (primary == null)
@@ -691,10 +777,11 @@ namespace HeartopiaMod
                 return null;
             }
 
-            // Already covered (a non-Latin pin, or a previous pass wired something in).
+            // Already covered (a non-Latin pin, or a previous pass wired something in). Asked with
+            // THIS script's probe — a chain that covers Han says nothing about Hangul.
             try
             {
-                if (primary.HasCharacter((char)UguiCjkProbeChar, true, true))
+                if (primary.HasCharacter((char)probeChar, true, true))
                 {
                     return "(covered)";
                 }
@@ -702,18 +789,16 @@ namespace HeartopiaMod
             catch { }
 
             System.Text.StringBuilder report = new System.Text.StringBuilder();
-            System.Collections.Generic.List<TMP_FontAsset> cjkFound = new System.Collections.Generic.List<TMP_FontAsset>();
-            TMP_FontAsset cjk = this.UguiKitTmpFindCjkFontAsset(UguiCjkProbeChar, report, cjkFound);
-            ModLogger.Msg("[UguiKit] CJK font hunt: primary=" + (primary.name ?? "?") + " " + report.ToString()
+            // Every font that covers this script — the chain for it.
+            System.Collections.Generic.List<TMP_FontAsset> matches = new System.Collections.Generic.List<TMP_FontAsset>();
+            TMP_FontAsset cjk = this.UguiKitTmpFindCjkFontAsset(probeChar, report, matches);
+            ModLogger.Msg("[UguiKit] " + scriptName + " font hunt (probe U+"
+                + probeChar.ToString("X4") + "): primary=" + (primary.name ?? "?") + " " + report.ToString()
                 + "=> " + (cjk != null ? ("USING '" + (cjk.name ?? "?") + "'") : "NONE FOUND (legacy Text will be used)"));
 
             if (cjk == null)
             {
-                return null; // caller retries; legacy Text carries CJK meanwhile
-            }
-            if (!cjkFound.Contains(cjk))
-            {
-                cjkFound.Insert(0, cjk);
+                return null; // caller retries; legacy Text carries the script meanwhile
             }
 
             var table = primary.fallbackFontAssetTable;
@@ -722,18 +807,24 @@ namespace HeartopiaMod
                 return null;
             }
 
-            // Wire the PREFERRED font first and then every other CJK face found, so TMP can chain
-            // through them: a glyph missing from the head of the chain is looked up in the next
+            // Wire the PREFERRED font first and then every other face that covers this script, so
+            // TMP can chain through them: a glyph missing from the head is looked up in the next
             // entry instead of rendering as a box. Picking a single font is what produced the
             // reported "characters mixed with boxes".
-            System.Text.StringBuilder wired = new System.Text.StringBuilder();
-            for (int n = 0; n < cjkFound.Count; n++)
+            System.Collections.Generic.List<TMP_FontAsset> chain = new System.Collections.Generic.List<TMP_FontAsset>();
+            chain.Add(cjk);
+            for (int i = 0; i < matches.Count; i++)
             {
-                TMP_FontAsset fa = (n == 0) ? cjk : cjkFound[n];
-                if (n > 0 && fa.Pointer == cjk.Pointer)
+                if (matches[i] != null && matches[i].Pointer != cjk.Pointer)
                 {
-                    continue; // preferred one already wired as the head
+                    chain.Add(matches[i]);
                 }
+            }
+
+            System.Text.StringBuilder wired = new System.Text.StringBuilder();
+            for (int n = 0; n < chain.Count; n++)
+            {
+                TMP_FontAsset fa = chain[n];
                 bool present = false;
                 for (int i = 0; i < table.Count; i++)
                 {
@@ -753,9 +844,23 @@ namespace HeartopiaMod
                 // CJK text was arriving with the game's face intact — outline on, face dilated —
                 // which reads as "too bold / hard to read" next to the flat Latin text. Same
                 // properties as the primary clone plus _FaceDilate, which literally fattens the
-                // glyph body. Safe to mutate: these assets were loaded from disk BY US
-                // (AssetBundle.LoadFromFile throws for a bundle the game already holds, so anything
-                // we hold is our own instance) — the game's own text is untouched.
+                // glyph body.
+                //
+                // ONLY for assets WE loaded off disk (AssetBundle.LoadFromFile throws for a bundle
+                // the game already holds, so anything in uguiKitBundleFonts is our own instance).
+                // Since 2026-08-09 the hunt also runs with a LATIN menu language against a CJK game
+                // client — and in that case routes 1-3 hit first and hand back the very font asset
+                // the GAME's own UI draws with. Rewriting its material would reach straight into
+                // the game's rendering for a cosmetic tweak that was never even the fix for the
+                // "too bold" report (synthetic bold was — see TrySetUguiLabelBold), so a foreign
+                // asset is wired in as-is.
+                if (!this.UguiKitTmpBundleFontsContains(fa))
+                {
+                    table.Add(fa);
+                    if (wired.Length > 0) { wired.Append(", "); }
+                    wired.Append(fa.name ?? "?").Append(" (game asset, material untouched)");
+                    continue;
+                }
                 try
                 {
                     Material fbSrc = fa.material;
@@ -784,8 +889,8 @@ namespace HeartopiaMod
                 if (wired.Length > 0) { wired.Append(", "); }
                 wired.Append(fa.name ?? "?");
             }
-            ModLogger.Msg("[UguiKit] CJK fallback chain behind " + (primary.name ?? "?") + ": ["
-                + (wired.Length > 0 ? wired.ToString() : "already wired") + "] tableCount=" + table.Count);
+            ModLogger.Msg("[UguiKit] " + scriptName + " fallback chain behind " + (primary.name ?? "?")
+                + ": [" + (wired.Length > 0 ? wired.ToString() : "already wired") + "] tableCount=" + table.Count);
             return cjk.name;
         }
     }

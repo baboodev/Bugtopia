@@ -510,10 +510,10 @@ namespace HeartopiaMod
                 new System.Action<int>(this.OnUguiSettingsMainLanguagePicked), out langWired);
             handle.LangListenerWired = langWired;
 
-            // Renderer switch, directly under the language row because it only applies to CJK
-            // locales (see UguiKitUseLegacyTextForLanguage) — TMP draws SDF glyphs from the game's
-            // Chinese font asset, legacy Text rasterizes through a dynamic Font + the OS fallback
-            // chain. Hidden entirely on Latin locales, where TMP is always the right answer.
+            // Renderer switch, directly under the language row because it only applies to CJK text
+            // (see UguiKitUseLegacyTextForLabel) — TMP draws SDF glyphs from the game's Chinese
+            // font asset, legacy Text rasterizes through a dynamic Font + the OS fallback chain.
+            // Hidden entirely in sessions with no CJK on screen, where TMP is always the answer.
             handle.LegacyTextToggle = this.CreateUguiCheckbox(general.transform, "LegacyTextToggle",
                 this.L("Legacy text renderer"), this.uiLegacyTextRenderer,
                 new System.Action<bool>(this.OnUguiSettingsMainLegacyTextChanged));
@@ -678,8 +678,10 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.LangDropdown.gameObject, panelW - 16f - dropW, gy, dropW, 30f);
             }
             gy += 38f;
-            // CJK-only row: hidden (and costing no height) on Latin locales.
-            bool legacyRow = UguiLanguageNeedsCjk(this.selectedLanguage);
+            // CJK-only row: hidden (and costing no height) when nothing on screen needs CJK glyphs.
+            // Not just the MENU language — a Latin menu against a CJK game client shows CJK in every
+            // game-sourced name, and the switch governs those labels too (UguiKitUseLegacyTextForLabel).
+            bool legacyRow = this.UguiKitNeedsCjkGlyphs();
             SetUguiGoActive(handle.LegacyTextToggle != null ? handle.LegacyTextToggle.gameObject : null, legacyRow);
             if (legacyRow)
             {

@@ -116,10 +116,32 @@ namespace HeartopiaMod
         // every CreateUguiLabel, so an un-throttled retry would rescan on every single label).
         private bool uguiKitFontPinned;
         // CJK fallback: LiberationSans SDF carries no CJK glyphs, so Chinese/Japanese/Korean text
-        // renders as tofu boxes without one. Name of the font asset currently wired in as fallback
-        // (null = none yet); the resolve is retried until a CJK-capable asset is loaded.
+        // renders as tofu boxes without one. Name of the last font asset wired in as a fallback
+        // (null = none yet); coverage itself is tracked per SCRIPT in uguiKitScriptsCovered.
         private string uguiKitCjkFallbackName;
         private float uguiKitCjkRetryAt;
+        // Scripts a string the kit was asked to DISPLAY actually contained — regardless of what
+        // either UI language is set to. Sticky. See UguiKitNeededScriptMask.
+        private int uguiKitContentScripts;
+        // Scripts the primary font can now resolve (through its fallback chain), and how many hunts
+        // have come back short.
+        private int uguiKitScriptsCovered;
+        private int uguiKitCjkHuntAttempts;
+        private bool uguiKitLegacyForUncoveredScripts;
+        // The GAME client's UI language as a TableLanguages id (-1 = not probed yet), and the next
+        // time the probe may run.
+        private int uguiKitGameLangKey = -1;
+        private float uguiKitGameLangProbeAt;
+        private bool uguiKitGameLangProbeFailedLogged;
+        private const float UguiGameLanguageProbeSeconds = 10f;
+        // Every TMP_FontAsset the bundle sweep pulled off disk (held as Object — TMP type refs stay
+        // in UguiKitTmp.cs). Two jobs: it is the set of assets this mod OWNS and may mutate, and it
+        // is what later per-script hunts search instead of re-opening bundles — AssetBundle
+        // .LoadFromFile throws for a bundle that is already loaded, including by us, so the disk
+        // sweep is once per session while the scripts needing a font are discovered over time.
+        private readonly System.Collections.Generic.List<UnityObject> uguiKitBundleFonts =
+            new System.Collections.Generic.List<UnityObject>();
+        private bool uguiKitBundleSweepDone;
         private float uguiKitFontRetryAt;
         private bool uguiKitFontFallbackLogged;
         // Set when the runtime probe finds no TMP types under this flavor's compile-time namespace
@@ -127,8 +149,56 @@ namespace HeartopiaMod
         // so the provisional font-retry loop is suppressed (the namespace can never appear later).
         private bool uguiKitTmpUnavailable;
         private const float UguiFontRetrySeconds = 3f;
+        // Hunts a needed script may miss before the kit gives up on TMP entirely.
+        private const int UguiCjkHuntGiveUpAttempts = 3;
+
+        // Scripts LiberationSans SDF cannot draw, tracked SEPARATELY — see the 2026-08-09 note on
+        // UguiKitNeededScriptMask for why one "CJK" bit is not enough.
+        private const int UguiScriptHan = 1;
+        private const int UguiScriptHangul = 2;
+        private const int UguiScriptKana = 4;
+        private const int UguiScriptThai = 8;
+        private const int UguiScriptAll = UguiScriptHan | UguiScriptHangul | UguiScriptKana | UguiScriptThai;
         // U+4E2D 中 — probe glyph for "can this font render Chinese".
         private const int UguiCjkProbeChar = 0x4E2D;
+
+        // One representative glyph per script. A font is only credited with a script when it can
+        // draw that script's OWN probe: Jua-Regular (Korean) has no Hanja and FZY4JW (Chinese) has
+        // no Hangul, so asking either about 中 answers a different question than the one that
+        // matters.
+        private static int UguiScriptProbeChar(int script)
+        {
+            if (script == UguiScriptHangul) { return 0xD55C; } // 한
+            if (script == UguiScriptKana) { return 0x3042; }   // あ
+            if (script == UguiScriptThai) { return 0x0E01; }   // ก
+            return UguiCjkProbeChar;                           // 中
+        }
+
+        private static string UguiScriptName(int script)
+        {
+            if (script == UguiScriptHangul) { return "Hangul"; }
+            if (script == UguiScriptKana) { return "Kana"; }
+            if (script == UguiScriptThai) { return "Thai"; }
+            return "Han";
+        }
+
+        private static string UguiScriptMaskName(int mask)
+        {
+            if (mask == 0)
+            {
+                return "none";
+            }
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            for (int bit = 1; bit <= UguiScriptThai; bit <<= 1)
+            {
+                if ((mask & bit) != 0)
+                {
+                    if (sb.Length > 0) { sb.Append('+'); }
+                    sb.Append(UguiScriptName(bit));
+                }
+            }
+            return sb.ToString();
+        }
 
         // TMP vs legacy Text, decided by UI language.
         //
@@ -161,6 +231,13 @@ namespace HeartopiaMod
         // resolves missing glyphs against the OS font chain.
         private bool UguiKitUseLegacyTextForLanguage()
         {
+            // A script that is genuinely on screen and that no font asset on this machine can
+            // cover: legacy Text is the only renderer left that will not draw boxes, so the whole
+            // kit switches over (see EnsureUguiKitCjkFallback for when this latches).
+            if (this.uguiKitLegacyForUncoveredScripts)
+            {
+                return true;
+            }
             // Latin locales ALWAYS get TMP: legacy Text has no upside there (TMP is sharper and
             // scales properly), and the whole layout was measured against TMP metrics. The switch
             // is scoped to CJK, which is the only place the two renderers genuinely trade off.
@@ -173,22 +250,238 @@ namespace HeartopiaMod
                 return true; // explicit user choice (Settings -> UI Theme -> DISPLAY)
             }
             this.EnsureUguiKitCjkFallback();
-            return this.uguiKitCjkFallbackName == null; // no CJK font asset available -> legacy
+            // Only the scripts THIS menu language needs have to be covered.
+            return (UguiScriptMaskForLanguage(this.selectedLanguage) & ~this.uguiKitScriptsCovered) != 0;
+        }
+
+        // Per-LABEL renderer decision. The language-wide switch above still governs a CJK menu
+        // language, but a LATIN menu can carry individual CJK strings — every game-sourced name
+        // (food, recipe, bag item, quest, player) arrives in the GAME's language, not the mod's.
+        // Those labels need legacy Text too when no CJK font asset could be found; everything else
+        // in the same panel stays on TMP.
+        private bool UguiKitUseLegacyTextForLabel(string text)
+        {
+            if (this.UguiKitUseLegacyTextForLanguage())
+            {
+                return true;
+            }
+            int scripts = UguiScriptMaskForText(text);
+            if (scripts == 0)
+            {
+                return false;
+            }
+            if (this.uiLegacyTextRenderer)
+            {
+                return true; // explicit user choice, same as for a CJK menu language
+            }
+            this.EnsureUguiKitCjkFallback();
+            return (scripts & ~this.uguiKitScriptsCovered) != 0;
+        }
+
+        // Which non-Latin SCRIPTS does this session actually have to draw?
+        //
+        // BUG FIX (2026-08-09, round 1): every CJK decision used to read ONLY this.selectedLanguage
+        // — the MOD's menu language. That misses the reported case: menu in English, GAME client in
+        // Korean. Food/recipe/bag/quest/player names all come out of the game's own tables in the
+        // GAME's language, so the menu was full of Hangul while the font hunt sat gated off and the
+        // labels were built on LiberationSans — the 2026-07-25 tofu bug again, in a place the
+        // language gate could never see. The language of the TEXT decides, and neither UI language
+        // predicts it on its own, so three independent signals are ORed:
+        //   1. the mod's menu language          -> translated menu strings,
+        //   2. the GAME client's language       -> everything game-sourced,
+        //   3. a sticky content mask            -> whatever the first two fail to predict (a
+        //      Korean player name in an English town, a chat line, a UGC island name).
+        //
+        // BUG FIX (2026-08-09, round 2 — why round 1 did not fix the report): the answer is a
+        // MASK, not a bool. Round 1 detected the Korean client correctly ("game UI language key =
+        // 6 -> needs CJK glyphs" in the log) and then ran a hunt that probes every candidate with
+        // 中 — so it wired FZY4JW + MPLUSRounded1c + FZY4K and skipped Jua-Regular SDF, the one
+        // Korean face in the bundles, because a Korean font has no Hanja. A chain of three fonts
+        // with no Hangul between them renders Hangul as boxes just as thoroughly as no chain at
+        // all. "CJK" is not one glyph set: Han, Hangul, Kana and Thai each need their own probe,
+        // their own hunt and their own coverage bit.
+        // Answering yes when it turns out not to be needed costs nothing: fallbacks only ever go
+        // BEHIND LiberationSans, which keeps drawing every Latin glyph itself.
+        private int UguiKitNeededScriptMask()
+        {
+            return this.uguiKitContentScripts
+                | UguiScriptMaskForLanguage(this.selectedLanguage)
+                | this.UguiKitGameLanguageScriptMask();
+        }
+
+        private bool UguiKitNeedsCjkGlyphs()
+        {
+            return this.UguiKitNeededScriptMask() != 0;
         }
 
         // Languages whose glyphs LiberationSans SDF cannot render. Prefix match so regional variants
         // (zh-CN / zh-TW / ja-JP ...) all count; Thai is included because LiberationSans has no Thai
         // either, and it is already a shipped UI language.
-        private static bool UguiLanguageNeedsCjk(string languageCode)
+        private static int UguiScriptMaskForLanguage(string languageCode)
         {
             if (string.IsNullOrEmpty(languageCode))
             {
+                return 0;
+            }
+            if (languageCode.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+            {
+                return UguiScriptHan;
+            }
+            if (languageCode.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+            {
+                return UguiScriptKana | UguiScriptHan; // Japanese is kana AND kanji
+            }
+            if (languageCode.StartsWith("ko", StringComparison.OrdinalIgnoreCase))
+            {
+                return UguiScriptHangul;
+            }
+            if (languageCode.StartsWith("th", StringComparison.OrdinalIgnoreCase))
+            {
+                return UguiScriptThai;
+            }
+            return 0;
+        }
+
+        private static bool UguiLanguageNeedsCjk(string languageCode)
+        {
+            return UguiScriptMaskForLanguage(languageCode) != 0;
+        }
+
+        // Game UI language, as a TableLanguages id (cn_tables.db "Languages"):
+        //   0 zh-cn  1 tw  2 en  3 de  4 fr  5 ja  6 ko  7 es  8 pt  9 th  10 ru  11 id
+        // Everything else draws in Latin or Cyrillic, both of which LiberationSans covers; signal 3
+        // above catches it if that is ever wrong.
+        private static int UguiScriptMaskForGameLanguageKey(int key)
+        {
+            if (key == 0 || key == 1) { return UguiScriptHan; }
+            if (key == 5) { return UguiScriptKana | UguiScriptHan; }
+            if (key == 6) { return UguiScriptHangul; }
+            if (key == 9) { return UguiScriptThai; }
+            return 0;
+        }
+
+        private int UguiKitGameLanguageScriptMask()
+        {
+            if (this.uguiKitGameLangKey >= 0 && UguiScriptMaskForGameLanguageKey(this.uguiKitGameLangKey) != 0)
+            {
+                return UguiScriptMaskForGameLanguageKey(this.uguiKitGameLangKey); // latched
+            }
+            if (Time.unscaledTime >= this.uguiKitGameLangProbeAt)
+            {
+                this.uguiKitGameLangProbeAt = Time.unscaledTime + UguiGameLanguageProbeSeconds;
+                // Re-probed on a cooldown rather than once: the player can switch the game's own
+                // language mid-session from its settings panel. Managed interop only (no AuraMono)
+                // and only past the world-ready gate — this runs from label construction, which
+                // happens at the LOGIN screen too (the first toast builds the toast stack), and
+                // resolving game types that early is exactly what the gate exists to prevent.
+                if (this.IsWorldReady)
+                {
+                    if (this.TryResolveChatTranslateClientLangKeyManaged(out int key) && key >= 0)
+                    {
+                        if (key != this.uguiKitGameLangKey)
+                        {
+                            this.uguiKitGameLangKey = key;
+                            ModLogger.Msg("[UguiKit] game UI language key = " + key + " -> scripts "
+                                + UguiScriptMaskName(UguiScriptMaskForGameLanguageKey(key)));
+                        }
+                    }
+                    else if (!this.uguiKitGameLangProbeFailedLogged)
+                    {
+                        // Not fatal, and deliberately not escalated to the AuraMono path: signal 3
+                        // (CJK text actually reaching a label) still catches the same sessions, one
+                        // rebuild later. Logged once so a "boxes came back" report is diagnosable.
+                        this.uguiKitGameLangProbeFailedLogged = true;
+                        ModLogger.Msg("[UguiKit] game UI language unreadable (LocalizationManager"
+                            + ".GetLanguageKey) — CJK detection falls back to scanning label text.");
+                    }
+                }
+            }
+            return (this.uguiKitGameLangKey >= 0) ? UguiScriptMaskForGameLanguageKey(this.uguiKitGameLangKey) : 0;
+        }
+
+        // Glyph ranges LiberationSans SDF cannot draw, split by script. Deliberately NOT "anything
+        // above ASCII": accented Latin (es/pt), Cyrillic, and the kit's own arrows/ticks/stars all
+        // render fine, and treating them as CJK would fire the (bundle-loading) font hunt on every
+        // Spanish label. Runs on every label text, so it is a plain char scan with early-outs.
+        private static int UguiScriptMaskForText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return 0;
+            }
+            int mask = 0;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c < 0x0E00)
+                {
+                    continue;                                              // Latin, Greek, Cyrillic
+                }
+                if (c <= 0x0E7F) { mask |= UguiScriptThai; }               // Thai
+                else if (c >= 0x1100 && c <= 0x11FF) { mask |= UguiScriptHangul; }  // Jamo
+                else if (c >= 0x3040 && c <= 0x30FF) { mask |= UguiScriptKana; }    // hiragana/katakana
+                else if (c >= 0x3130 && c <= 0x318F) { mask |= UguiScriptHangul; }  // compat Jamo
+                else if (c >= 0x2E80 && c <= 0x9FFF) { mask |= UguiScriptHan; }     // radicals..ideographs
+                else if (c >= 0xAC00 && c <= 0xD7AF) { mask |= UguiScriptHangul; }  // Hangul syllables
+                else if (c >= 0xF900 && c <= 0xFAFF) { mask |= UguiScriptHan; }     // compat ideographs
+                else if (c >= 0xFF61 && c <= 0xFF9F) { mask |= UguiScriptKana; }    // halfwidth kana
+                else if (c >= 0xFFA0 && c <= 0xFFDC) { mask |= UguiScriptHangul; }  // halfwidth jamo
+                else if (c >= 0xFF00 && c <= 0xFFEF) { mask |= UguiScriptHan; }     // other full/halfwidth
+                if (mask == UguiScriptAll)
+                {
+                    break;
+                }
+            }
+            return mask;
+        }
+
+        // Called from BOTH text funnels (CreateUguiLabel and SetUguiLabelText). Cheap by design:
+        // it sits on the path of every label creation and every text update, per-frame status
+        // lines included.
+        private void NoteUguiCjkTextSeen(string text)
+        {
+            int scripts = UguiScriptMaskForText(text);
+            if (scripts == 0 || (scripts & ~this.uguiKitContentScripts) == 0)
+            {
+                return; // Latin, or a script already on the list
+            }
+            int added = scripts & ~this.uguiKitContentScripts;
+            this.uguiKitContentScripts |= scripts;
+            ModLogger.Msg("[UguiKit] " + UguiScriptMaskName(added) + " text reached a kit label"
+                + " — hunting a font for it.");
+            this.EnsureUguiKitCjkFallback(); // self-throttled; rebuilds the shell once it lands
+        }
+
+        // Same question as UguiScriptMaskForText, asked of a label that already exists (the bold
+        // gate, which runs after construction and has no text argument of its own).
+        private bool UguiKitLabelTextNeedsCjkFont(GameObject label)
+        {
+            if (label == null)
+            {
                 return false;
             }
-            return languageCode.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
-                || languageCode.StartsWith("ja", StringComparison.OrdinalIgnoreCase)
-                || languageCode.StartsWith("ko", StringComparison.OrdinalIgnoreCase)
-                || languageCode.StartsWith("th", StringComparison.OrdinalIgnoreCase);
+            string text = null;
+            if (UguiTmpTypesLoadable())
+            {
+                try
+                {
+                    if (!this.UguiKitTmpTryGetText(label, out text))
+                    {
+                        text = null;
+                    }
+                }
+                catch { text = null; }
+            }
+            if (text == null)
+            {
+                try
+                {
+                    Text txt = label.GetComponent<Text>();
+                    text = (txt != null) ? txt.text : null;
+                }
+                catch { }
+            }
+            return UguiScriptMaskForText(text) != 0;
         }
         private Sprite[] uguiKitIconSprites; // cache: one Sprite per NavIconPngBase64 index
 
@@ -509,14 +802,17 @@ namespace HeartopiaMod
         // renders with its own font, LiberationSans is TMP's built-in that only this mod uses.
         private void EnsureUguiKitCjkFallback()
         {
-            if (this.uguiKitCjkFallbackName != null || this.uguiKitTmpFont == null || this.uguiKitTmpUnavailable)
+            if (this.uguiKitTmpFont == null || this.uguiKitTmpUnavailable)
             {
                 return;
             }
-            // Only a CJK UI language needs this. Gating on the language also means the first hunt
-            // happens when the user actually switches to 简体中文 — by which point the game is fully
-            // loaded — rather than at startup when almost nothing is in memory yet.
-            if (!UguiLanguageNeedsCjk(this.selectedLanguage))
+            // Only the scripts this session actually shows, and only the ones not already covered —
+            // see UguiKitNeededScriptMask for the three signals and for why coverage is per script.
+            // Gating here also means the first hunt happens when such text genuinely appears (a
+            // language switch, or the first game-sourced name reaching a label) — by which point
+            // the game is loaded — rather than at startup when almost nothing is in memory yet.
+            int missing = this.UguiKitNeededScriptMask() & ~this.uguiKitScriptsCovered;
+            if (missing == 0)
             {
                 return;
             }
@@ -534,20 +830,74 @@ namespace HeartopiaMod
             {
                 return;
             }
-            try
+
+            int covered = 0;
+            for (int bit = 1; bit <= UguiScriptThai; bit <<= 1)
             {
-                this.uguiKitCjkFallbackName = this.UguiKitTmpEnsureCjkFallback();
-                if (this.uguiKitCjkFallbackName != null)
+                if ((missing & bit) == 0)
                 {
-                    // A real CJK font asset landed AFTER the shell was built with legacy labels —
-                    // rebuild so those labels come back as TMP. TMP also caches generated meshes, so
-                    // a rebuild is what makes an already-rendered label pick the new fallback up.
-                    this.MarkUguiKitThemeDirty();
+                    continue;
+                }
+                try
+                {
+                    // One hunt per script, each with its OWN probe glyph. A single 中 probe is what
+                    // silently excluded the Korean face on a Korean client (round-2 note above).
+                    string name = this.UguiKitTmpEnsureFallbackForScript(
+                        UguiScriptProbeChar(bit), UguiScriptName(bit));
+                    if (name != null)
+                    {
+                        covered |= bit;
+                        this.uguiKitCjkFallbackName = name;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Msg("[UguiKit] " + UguiScriptName(bit) + " font hunt failed"
+                        + " (legacy Text will carry it): " + ex.Message);
                 }
             }
-            catch (Exception ex)
+
+            if (covered != 0)
             {
-                ModLogger.Msg("[UguiKit] CJK font hunt failed (legacy Text will carry CJK): " + ex.Message);
+                this.uguiKitScriptsCovered |= covered;
+                // A usable font asset landed AFTER the shell was built (possibly with legacy
+                // labels) — rebuild so those labels come back as TMP. TMP also caches generated
+                // meshes, so a rebuild is what makes an already-rendered label pick the new
+                // fallback up.
+                this.MarkUguiKitThemeDirty();
+            }
+
+            int stillMissing = this.UguiKitNeededScriptMask() & ~this.uguiKitScriptsCovered;
+            if (stillMissing == 0)
+            {
+                this.uguiKitCjkHuntAttempts = 0;
+                if (this.uguiKitLegacyForUncoveredScripts)
+                {
+                    // The font turned up late (the game loads its own face well after the mod's
+                    // first labels exist) — take TMP back.
+                    this.uguiKitLegacyForUncoveredScripts = false;
+                    ModLogger.Msg("[UguiKit] every needed script is covered now — back to TMP.");
+                    this.MarkUguiKitThemeDirty();
+                }
+                return;
+            }
+
+            this.uguiKitCjkHuntAttempts++;
+            // Give up on TMP for the whole kit once a script has survived several hunts uncovered
+            // AND is text the kit has genuinely been handed — i.e. there are boxes on screen right
+            // now, not merely a language that predicts some. Legacy Text draws through a dynamic
+            // Font and Unity's OS fallback chain, which has never failed to render CJK here; worse
+            // typography, but not boxes. Reversible (see above) — hunting continues either way.
+            if (!this.uguiKitLegacyForUncoveredScripts
+                && this.uguiKitCjkHuntAttempts >= UguiCjkHuntGiveUpAttempts
+                && (stillMissing & this.uguiKitContentScripts) != 0)
+            {
+                this.uguiKitLegacyForUncoveredScripts = true;
+                ModLogger.Msg("[UguiKit] no font asset covers "
+                    + UguiScriptMaskName(stillMissing & this.uguiKitContentScripts)
+                    + " after " + this.uguiKitCjkHuntAttempts
+                    + " hunts — switching the whole kit to legacy Text.");
+                this.MarkUguiKitThemeDirty();
             }
         }
 
@@ -681,8 +1031,9 @@ namespace HeartopiaMod
         private GameObject CreateUguiLabel(Transform parent, string name, string text, float size, Color color, bool centered)
         {
             this.EnsureUguiFonts();
+            this.NoteUguiCjkTextSeen(text);
             GameObject go = this.CreateUguiGo(name, parent);
-            if (this.uguiKitTmpFont != null && UguiTmpTypesLoadable() && !this.UguiKitUseLegacyTextForLanguage())
+            if (this.uguiKitTmpFont != null && UguiTmpTypesLoadable() && !this.UguiKitUseLegacyTextForLabel(text))
             {
                 // TMP construction lives in UguiKitTmp.cs (JIT isolation). BuiltBroken = a half-
                 // initialized TMP graphic claimed the CanvasRenderer — adding a second Graphic to
@@ -766,7 +1117,10 @@ namespace HeartopiaMod
             // The kit calls this from 113 sites (sidebar, headers, LIVE rail, buttons), so gating it
             // here fixes all of them at once. Weight/emphasis for CJK comes from colour and size in
             // this UI, which is also the normal convention for Chinese typography.
-            if (UguiLanguageNeedsCjk(this.selectedLanguage))
+            // The label's OWN text is checked as well as the menu language (2026-08-09): on an
+            // English menu against a Chinese client the CJK is in individual game-sourced labels,
+            // and those blob exactly the same way while their Latin neighbours still want bold.
+            if (UguiLanguageNeedsCjk(this.selectedLanguage) || this.UguiKitLabelTextNeedsCjkFont(label))
             {
                 return;
             }
@@ -845,6 +1199,11 @@ namespace HeartopiaMod
             {
                 return;
             }
+            // A list row is built EMPTY and bound afterwards ("Name" label + SetUguiLabelText),
+            // so this — not construction — is the funnel every game-sourced name actually arrives
+            // through. Landing the fallback here queues the rebuild that re-renders the row; it is
+            // also what re-creates it as legacy Text if no CJK font asset exists at all.
+            this.NoteUguiCjkTextSeen(text);
             if (UguiTmpTypesLoadable())
             {
                 try { if (this.UguiKitTmpTrySetText(label, text)) return; } catch { }
