@@ -16,12 +16,14 @@ namespace HeartopiaMod
         public bool privacyBlockRoomMerges;
         public bool privacyBlockSpamReports;
         public bool privacyBlockUploadCheat;
+        public bool privacyBlockFriendVisitNotify;
 
         internal static int privacyBlockedLogCount;
         internal static int privacyBlockedMergeCount;
         internal static int privacyBlockedSpamCount;
         internal static int privacyUploadCheatSeenCount;
         internal static int privacyBlockedUploadCheatCount;
+        internal static int privacyBlockedFriendVisitCount;
 
         private const float PrivacyBlockHookRetrySeconds = 5f;
         private const float PrivacyBlockDiagIntervalSeconds = 30f;
@@ -48,26 +50,38 @@ namespace HeartopiaMod
             "Client", "Client.dll"
         };
 
+        // EnterRoomNotifyFriendCommand lives in the shared-module image (EcsClient), not the
+        // protocol one — the Social.Friend network structs are all defined there.
+        private static readonly string[] PrivacyCommandImageNames =
+        {
+            "EcsClient", "EcsClient.dll",
+            "Client", "Client.dll"
+        };
+
         private bool privacyLogHookTried;
         private bool privacyMergeHookTried;
         private bool privacySpamHookTried;
         private bool privacyUploadCheatHookTried;
+        private bool privacyFriendVisitHookTried;
         private bool privacyBlockHooksHardFailed;
 
         private static NativeDetour privacyLogDetour;
         private static NativeDetour privacyMergeDetour;
         private static NativeDetour privacySpamDetour;
         private static NativeDetour privacyUploadCheatDetour;
+        private static NativeDetour privacyFriendVisitDetour;
 
         private static TryUploadLogHookDelegate privacyLogHookKeepAlive;
         private static EnterRoomMergeHookDelegate privacyMergeHookKeepAlive;
         private static ReportHookDelegate privacySpamHookKeepAlive;
         private static UploadCheatHookDelegate privacyUploadCheatHookKeepAlive;
+        private static SendCommandHookDelegate privacyFriendVisitHookKeepAlive;
 
         private static TryUploadLogHookDelegate privacyLogTrampoline;
         private static EnterRoomMergeHookDelegate privacyMergeTrampoline;
         private static ReportHookDelegate privacySpamTrampoline;
         private static UploadCheatHookDelegate privacyUploadCheatTrampoline;
+        private static SendCommandHookDelegate privacyFriendVisitTrampoline;
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void TryUploadLogHookDelegate();
@@ -80,6 +94,16 @@ namespace HeartopiaMod
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void UploadCheatHookDelegate(IntPtr self, IntPtr objectId, IntPtr stream, IntPtr success, IntPtr failure);
+
+        // WebRequestUtility.SendCommand<T>(T command, bool needAuthed, ChannelType channelType) -> int,
+        // inflated over EnterRoomNotifyFriendCommand. That command is a STRUCT of a single long, so
+        // Win64 passes it by value in RCX (not by pointer) — register-identical to an IntPtr slot,
+        // which is all the trampoline needs since we forward the argument unmodified. needAuthed
+        // (bool) and channelType (enum:int) ride RDX/R8 as int32. Arity is validated (3) before the
+        // detour goes in, and the install refuses to splice if mono turns out to share this code
+        // with another instantiation (see TryInstallPrivacyFriendVisitHook).
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int SendCommandHookDelegate(IntPtr command, int needAuthed, int channelType);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr PrivacyBlockCompileMethodDelegate(IntPtr method);
@@ -123,7 +147,8 @@ namespace HeartopiaMod
         }
 
         private bool PrivacyBlockAnyEnabled()
-            => this.privacyBlockLogUploads || this.privacyBlockRoomMerges || this.privacyBlockSpamReports || this.privacyBlockUploadCheat;
+            => this.privacyBlockLogUploads || this.privacyBlockRoomMerges || this.privacyBlockSpamReports
+                || this.privacyBlockUploadCheat || this.privacyBlockFriendVisitNotify;
 
         // A hook is "settled" when its feature is disabled (nothing to install) or it is already
         // installed/tried. Enabling a toggle later un-settles it, so the install loop resumes.
@@ -134,7 +159,8 @@ namespace HeartopiaMod
             return this.PrivacyBlockHookSettled(this.privacyBlockLogUploads, this.privacyLogHookTried, privacyLogTrampoline)
                 && this.PrivacyBlockHookSettled(this.privacyBlockRoomMerges, this.privacyMergeHookTried, privacyMergeTrampoline)
                 && this.PrivacyBlockHookSettled(this.privacyBlockSpamReports, this.privacySpamHookTried, privacySpamTrampoline)
-                && this.PrivacyBlockHookSettled(this.privacyBlockUploadCheat, this.privacyUploadCheatHookTried, privacyUploadCheatTrampoline);
+                && this.PrivacyBlockHookSettled(this.privacyBlockUploadCheat, this.privacyUploadCheatHookTried, privacyUploadCheatTrampoline)
+                && this.PrivacyBlockHookSettled(this.privacyBlockFriendVisitNotify, this.privacyFriendVisitHookTried, privacyFriendVisitTrampoline);
         }
 
         private void PrivacyBlockDiag(string message)
@@ -221,6 +247,11 @@ namespace HeartopiaMod
                 if (this.privacyBlockUploadCheat && !this.privacyUploadCheatHookTried)
                 {
                     this.TryInstallPrivacyUploadCheatHook(compile);
+                }
+
+                if (this.privacyBlockFriendVisitNotify && !this.privacyFriendVisitHookTried)
+                {
+                    this.TryInstallPrivacyFriendVisitHook(compile);
                 }
             }
             catch (Exception ex)
@@ -395,6 +426,97 @@ namespace HeartopiaMod
             ModLogger.Msg("[PrivacyBlock] hooked UploadSystem.UploadCheat @0x" + nativePtr.ToInt64().ToString("X"));
         }
 
+        // Blocks the outgoing "I arrived at your room" notify. The notification is CLIENT-authored:
+        // FriendNoticeSystem.HandleTransferNotice() sends EnterRoomNotifyFriendCommand after a
+        // "go to friend" transfer completes, the server only relays it to the friend, whose client
+        // turns it into the FriendArrivedTipPanel toast.
+        //
+        // The hook sits on the inflated SendCommand<EnterRoomNotifyFriendCommand> — the LAST gate
+        // before the wire — rather than on HandleTransferNotice, because that method clears
+        // _transferFriendId/_friendName at its very end: a no-op detour there would leave the
+        // notice armed and fire it on the NEXT level load instead of cancelling it.
+        private void TryInstallPrivacyFriendVisitHook(PrivacyBlockCompileMethodDelegate compile)
+        {
+            const string sendNameSpace = "XDTDataAndProtocol.ProtocolService";
+            const string sendShortName = "WebRequestUtility";
+            IntPtr sendCls = this.ResolvePrivacyBlockClass(sendNameSpace, sendShortName, PrivacyProtocolImageNames,
+                sendNameSpace + "." + sendShortName);
+            if (sendCls == IntPtr.Zero)
+            {
+                this.PrivacyBlockDiag("WebRequestUtility class not loaded yet");
+                return;
+            }
+
+            IntPtr openSend = this.FindPrivacyBlockMethod(sendCls, "SendCommand", 3);
+            if (openSend == IntPtr.Zero)
+            {
+                this.MarkPrivacyHookMissing(ref this.privacyFriendVisitHookTried, sendNameSpace + "." + sendShortName + ".SendCommand");
+                return;
+            }
+
+            const string cmdNameSpace = "XDT.Scene.Shared.Modules.Social.Friend";
+            IntPtr cmdCls = this.ResolvePrivacyBlockClass(cmdNameSpace, "EnterRoomNotifyFriendCommand", PrivacyCommandImageNames,
+                cmdNameSpace + ".EnterRoomNotifyFriendCommand");
+            if (cmdCls == IntPtr.Zero)
+            {
+                this.PrivacyBlockDiag("EnterRoomNotifyFriendCommand class not loaded yet");
+                return;
+            }
+
+            if (!this.TryInstantCatchInflateAuraSendCommand(openSend, cmdCls, out IntPtr inflated) || inflated == IntPtr.Zero)
+            {
+                this.MarkPrivacyHookMissing(ref this.privacyFriendVisitHookTried, "SendCommand<EnterRoomNotifyFriendCommand> inflate");
+                return;
+            }
+
+            IntPtr nativePtr = compile(inflated);
+            if (nativePtr == IntPtr.Zero)
+            {
+                this.PrivacyBlockDiag("mono_compile_method null for SendCommand<EnterRoomNotifyFriendCommand>");
+                return;
+            }
+
+            // Shared-code guard. Detouring a gsharedvt body would silently kill EVERY command that
+            // shares it, so prove the instantiation got dedicated code first: inflate the same open
+            // method over DeleteFriendNetworkCommand — a struct with the IDENTICAL {long} layout, the
+            // worst case for sharing — and require a different entry point. Probe failure is treated
+            // as "cannot prove it is safe" and aborts the install rather than guessing.
+            IntPtr probeCls = this.ResolvePrivacyBlockClass(cmdNameSpace, "DeleteFriendNetworkCommand", PrivacyCommandImageNames,
+                cmdNameSpace + ".DeleteFriendNetworkCommand");
+            IntPtr probeNative = IntPtr.Zero;
+            if (probeCls != IntPtr.Zero
+                && this.TryInstantCatchInflateAuraSendCommand(openSend, probeCls, out IntPtr probeInflated)
+                && probeInflated != IntPtr.Zero)
+            {
+                probeNative = compile(probeInflated);
+            }
+
+            if (probeNative == IntPtr.Zero || probeNative == nativePtr)
+            {
+                this.privacyFriendVisitHookTried = true;
+                ModLogger.Msg("[PrivacyBlock] SendCommand<EnterRoomNotifyFriendCommand> shares code with another"
+                    + " instantiation (probe=0x" + probeNative.ToInt64().ToString("X")
+                    + " target=0x" + nativePtr.ToInt64().ToString("X") + ") — hook refused");
+                return;
+            }
+
+            this.privacyFriendVisitHookTried = true;
+            privacyFriendVisitHookKeepAlive = PrivacyFriendVisitDetourBody;
+            privacyFriendVisitDetour = new NativeDetour(nativePtr, privacyFriendVisitHookKeepAlive);
+            privacyFriendVisitTrampoline = privacyFriendVisitDetour.GenerateTrampoline<SendCommandHookDelegate>();
+            if (privacyFriendVisitTrampoline == null)
+            {
+                try { privacyFriendVisitDetour?.Undo(); } catch { }
+                privacyFriendVisitDetour = null;
+                privacyFriendVisitHookKeepAlive = null;
+                this.privacyFriendVisitHookTried = false;
+                ModLogger.Msg("[PrivacyBlock] trampoline unavailable for friend-visit notify; detour reverted");
+                return;
+            }
+
+            ModLogger.Msg("[PrivacyBlock] hooked SendCommand<EnterRoomNotifyFriendCommand> @0x" + nativePtr.ToInt64().ToString("X"));
+        }
+
         private void MarkPrivacyHookMissing(ref bool triedFlag, string label)
         {
             triedFlag = true;
@@ -451,6 +573,21 @@ namespace HeartopiaMod
             privacyUploadCheatTrampoline?.Invoke(self, objectId, stream, success, failure);
         }
 
+        // Returns the same int SendCommand hands back; the only caller
+        // (FriendNoticeSystem.HandleTransferNotice) discards it, so 0 is safe for the blocked path.
+        private static int PrivacyFriendVisitDetourBody(IntPtr command, int needAuthed, int channelType)
+        {
+            if (HeartopiaComplete.Instance != null && HeartopiaComplete.Instance.privacyBlockFriendVisitNotify)
+            {
+                Interlocked.Increment(ref privacyBlockedFriendVisitCount);
+                return 0;
+            }
+
+            return privacyFriendVisitTrampoline != null
+                ? privacyFriendVisitTrampoline.Invoke(command, needAuthed, channelType)
+                : 0;
+        }
+
         internal string GetPrivacyBlockHooksStatus()
         {
             if (this.privacyBlockHooksHardFailed)
@@ -462,7 +599,8 @@ namespace HeartopiaMod
             string merge = privacyMergeTrampoline != null ? "ok" : (this.privacyMergeHookTried ? "missing" : "pending");
             string spam = privacySpamTrampoline != null ? "ok" : (this.privacySpamHookTried ? "missing" : "pending");
             string cheat = privacyUploadCheatTrampoline != null ? "ok" : (this.privacyUploadCheatHookTried ? "missing" : "pending");
-            return "Log=" + log + " Merge=" + merge + " Report=" + spam + " UploadCheat=" + cheat;
+            string visit = privacyFriendVisitTrampoline != null ? "ok" : (this.privacyFriendVisitHookTried ? "missing" : "pending");
+            return "Log=" + log + " Merge=" + merge + " Report=" + spam + " UploadCheat=" + cheat + " Visit=" + visit;
         }
 
     }

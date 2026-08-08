@@ -301,6 +301,11 @@ namespace HeartopiaMod
             data.privacyBlockRoomMerges = this.privacyBlockRoomMerges;
             data.privacyBlockSpamReports = this.privacyBlockSpamReports;
             data.privacyBlockUploadCheat = this.privacyBlockUploadCheat;
+            data.privacyBlockFriendVisitNotify = this.privacyBlockFriendVisitNotify;
+            data.mapRevealBlockedPlayers = this.mapRevealBlockedPlayers;
+            data.stealthBlockEnabled = this.stealthBlockEnabled;
+            data.stealthBlockNotifyFriends = this.stealthBlockNotifyFriends;
+            data.stealthBlockOwnedShortIds = new List<long>(this.stealthBlockOwnedShortIds);
             data.autoClickStartEnabled = this.autoClickStartEnabled;
             data.autoCloseAnnouncementEnabled = this.autoCloseAnnouncementEnabled;
             data.maxAutoEatAttempts = this.maxAutoEatAttempts;
@@ -603,6 +608,22 @@ namespace HeartopiaMod
             this.privacyBlockRoomMerges = data.privacyBlockRoomMerges;
             this.privacyBlockSpamReports = data.privacyBlockSpamReports;
             this.privacyBlockUploadCheat = data.privacyBlockUploadCheat;
+            this.privacyBlockFriendVisitNotify = data.privacyBlockFriendVisitNotify;
+            this.mapRevealBlockedPlayers = data.mapRevealBlockedPlayers;
+            this.stealthBlockEnabled = data.stealthBlockEnabled;
+            this.stealthBlockNotifyFriends = data.stealthBlockNotifyFriends;
+            this.stealthBlockOwnedShortIds.Clear();
+            if (data.stealthBlockOwnedShortIds != null)
+            {
+                for (int i = 0; i < data.stealthBlockOwnedShortIds.Count; i++)
+                {
+                    long ownedShortId = data.stealthBlockOwnedShortIds[i];
+                    if (ownedShortId != 0L && !this.stealthBlockOwnedShortIds.Contains(ownedShortId))
+                    {
+                        this.stealthBlockOwnedShortIds.Add(ownedShortId);
+                    }
+                }
+            }
             this.autoClickStartEnabled = data.autoClickStartEnabled;
             this.autoCloseAnnouncementEnabled = data.autoCloseAnnouncementEnabled;
             this.maxAutoEatAttempts = data.maxAutoEatAttempts;

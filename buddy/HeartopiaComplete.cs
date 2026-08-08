@@ -747,6 +747,8 @@ namespace HeartopiaMod
             this.QuestAssistantFishMonitorTick();
             this.QuestAssistantAutoRefreshOnUpdate();
             this.ProcessPrivacyBlockOnUpdate();
+            this.ProcessMapRevealBlockedOnUpdate();
+            this.ProcessStealthBlockOnUpdate();
             this.ProcessInstantTeleportOnUpdate();
             this.ProcessVehicleBypassOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();
@@ -904,6 +906,9 @@ namespace HeartopiaMod
                 }
                 if (this.TryGetModHotkeyDown(this.keyDisableAll))
                 {
+                    // Surface first — this path clears noclipEnabled in the SAME frame, so a
+                    // stealth run would otherwise lose its hover while still inside the terrain.
+                    this.SurfaceFromStealthForaging("Disable All");
                     this.autoFarmActive = false;
                     this.farmState = HeartopiaComplete.AutoFarmState.Idle;
                     this.autoFarmAutoStopAt = -1f;

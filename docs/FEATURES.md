@@ -448,14 +448,77 @@ While engaged:
   as well as a ceiling (e.g. Star Town `y >= 9`), so under-terrain hops would otherwise be rescued
   mid-collect.
 - **Resource hops land below the node:** contamination **−5 m**, every other resource **−1.5 m**
-  (`ApplyForagingNodeTeleportOffset`). **World-load checkpoints keep their exact Y** — farm-location
-  waypoints, priority-area anchors and the cleansing-coral hop are area arrivals that must stream the
-  world in normally.
+  (`ApplyForagingNodeTeleportOffset`). **Area/zone arrivals dive too** (−1.5 m,
+  `ApplyForagingAreaTeleportOffset`): the farm-location waypoints, the priority-area anchors and the
+  startup routing hop. They used to keep their exact Y, which left the player standing in the open
+  for the whole area-load + node-scan window — the most visible moment of a run. Streaming is
+  position-driven, not Y-gated, so the lower arrival loads the same cells. The cleansing-coral hop
+  still keeps its exact Y (it has to land on the coral to work).
+- **Stopping surfaces first.** Every stop path — the Stop Foraging button, the auto-stop timer,
+  Disable All, the friend-join stop, and the radar/aura guards — calls `SurfaceFromStealthForaging`
+  **before** clearing `autoFarmActive`, warping back to the true `lastNodePosition`. Order is
+  load-bearing: `StealthForagingActive` is gated on `autoFarmActive`, and the noclip restore rides
+  the next frame, so gravity only returns once the player is already above ground.
 
 The offset applies to the **teleport argument only**: `lastNodePosition` and every marker / cooldown /
 dwell check keep the true node position, so radar matching and the collect confirmation are unchanged.
 With the mode off, contamination keeps its vanilla sea-floor **lift** (`SeaCleanTeleportYOffset`, +7 m,
 shared with the cleansing-coral hop).
+
+#### Stealth Block
+
+Two independent toggles in **Foraging → SETTINGS**, both persisted and default off.
+
+**Hide from radar** (`StealthBlockFeature.cs`) mass-blocks the town so nobody can watch the run.
+Blocking is *mutual* invisibility in this game — the server mirrors our block back to the target as
+`BeBlockComponent`, so their client hides us too.
+
+Like Stealth Foraging, the checkbox is a **setting, not the trigger**: blocking begins when
+**Start Foraging** is pressed and every block it issued is released when the run ends — by the
+button, the auto-stop timer, Disable All, or the friend-join stop. An idle farm blocks nobody.
+
+It is a state machine, not a switch, and the farm **holds** until it reaches `Armed`:
+
+| Phase | Meaning |
+|---|---|
+| `Arming` | walking the room roster, sending blocks, waiting for confirmation |
+| `Armed` | no friend present **and** every stranger confirmed blocked — the farm may dive |
+| `Blocked` | cannot arm: a friend is in town, the block list is full, or the game API did not resolve |
+
+- **Confirmation is server state**, never "we sent the command": `BlockListProtocolManager.IsPlayerInBlockList(shortId)`.
+- **Friends are excluded unconditionally.** Blocking a friend *deletes the friendship* server-side and
+  unblocking does not restore it — the game's own dialog calls it "Delete and block". A friend in the
+  room therefore holds the farm instead of being blocked. The friend test is fail-closed: if the game
+  counts more friends in the room than the mod could identify, it assumes a friend is present.
+- **Unblock on roster leave** (with a ~45 s grace period that absorbs town↔home bouncing), not on
+  stream unspawn — the latter fires whenever anyone walks out of range and would storm the server.
+  Keeping the list bounded matters: the town holds 12 (24 in Sea World) and the block list has a
+  server cap (`ErrorCode.BlockMaxNum`).
+- **The blocks we issued are persisted** (`stealthBlockOwnedShortIds`). That registry is the only
+  record of which entries are ours vs the user's own manual blocks, so a crash mid-run can still be
+  cleaned up: at the next world entry the registry is pruned against the live block list, and turning
+  the toggle off releases everything still in it.
+
+**Stop When Friend Joins** — independent of *Hide from radar*: it drives the same roster scan but
+issues no block commands, so it works as a plain safety net with no blocking at all. When a friend
+enters the town the player is teleported back up to the true node position (`lastNodePosition`) and
+*then* the farm stops — that order matters, because the noclip restore rides the next frame, so
+gravity returns only after the player is already above ground. Edge-triggered: it fires once per
+friend arrival, not on every roster pass.
+
+#### Show Blocked On Map
+
+**Features → Main**, next to *Player Avatars (all)* / *Player Names (all)* — same "who can I see"
+group, and useful on its own rather than only alongside Stealth Block.
+
+`MapRevealBlockedFeature.cs` puts blocked players' dots back on the big map
+and the minimap, so mass-blocking does not blind the map. Two Mono `NativeDetour`s, both opt-in:
+`BlockingSystem.GetBlockStateByNetId` → `BlockState.none` (covers the minimap entirely and the big map
+on open/add/filter refresh) and `MapSpotWidget.SetBlocked` → forced `false` (covers a block landing
+while the big map is already open). Side effect: blocked players render in the world again at their
+next stream-in — which does **not** make us visible to them. Not covered: floating name/head bubbles,
+which filter through a different path (`IsPlayerInBlockList`), so the dot returns but the nameplate
+does not.
 
 ### Aura Farm
 

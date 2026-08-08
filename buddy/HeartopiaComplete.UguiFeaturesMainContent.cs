@@ -97,6 +97,7 @@ namespace HeartopiaMod
             // RadarConfigData, so they save through QueueRadarSettingsSave, not SaveKeybinds.
             public Toggle PlayerAvatarsToggle;
             public Toggle PlayerNamesToggle;
+            public Toggle MapRevealToggle;        // MapRevealBlockedFeature.cs
 
             public GameObject DisableAllButton;
 
@@ -249,6 +250,11 @@ namespace HeartopiaMod
             handle.PlayerNamesToggle = this.CreateUguiCheckbox(scrollContent, "PlayerNamesToggle",
                 this.L("Player Names (all)"), this.radarPlayerNamesAll,
                 new System.Action<bool>(this.OnUguiFeaturesMainPlayerNamesToggled));
+            // Same "who can I see" group: puts blocked players' dots back on the big map and the
+            // minimap (MapRevealBlockedFeature.cs). Useful on its own, not just with Stealth Block.
+            handle.MapRevealToggle = this.CreateUguiCheckbox(scrollContent, "MapRevealToggle",
+                this.L("Show Blocked On Map"), this.mapRevealBlockedPlayers,
+                new System.Action<bool>(this.OnMapRevealBlockedToggled));
 
             handle.DisableAllButton = this.CreateUguiDangerButton(scrollContent, "DisableAllButton",
                 this.L("DISABLE ALL"),
@@ -361,6 +367,11 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.PlayerNamesToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
+            if (handle.MapRevealToggle != null)
+            {
+                PlaceUguiTopLeft(handle.MapRevealToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
 
             // IMGUI: 260x35 danger button (Gui.cs:554), then num += 45.
             if (handle.DisableAllButton != null)
@@ -399,6 +410,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AutoBubbleCollectToggle, this.autoBubbleCollectEnabled);
                 this.SyncUguiToggleFromField(handle.PlayerAvatarsToggle, this.radarPlayerAvatarsAll);
                 this.SyncUguiToggleFromField(handle.PlayerNamesToggle, this.radarPlayerNamesAll);
+                this.SyncUguiToggleFromField(handle.MapRevealToggle, this.mapRevealBlockedPlayers);
 
                 if (handle.BubbleRateSlider != null
                     && Mathf.Abs(handle.BubbleRateSlider.value - this.bubbleBubblesPerMinute) > 0.0005f)

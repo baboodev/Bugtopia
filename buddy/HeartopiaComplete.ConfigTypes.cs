@@ -288,6 +288,13 @@ namespace HeartopiaMod
             public bool privacyBlockRoomMerges;
             public bool privacyBlockSpamReports;
             public bool privacyBlockUploadCheat;
+            public bool privacyBlockFriendVisitNotify;
+            public bool mapRevealBlockedPlayers;
+            public bool stealthBlockEnabled;
+            public bool stealthBlockNotifyFriends;
+            // Registry of blocks WE issued — persisted so a crash mid-run does not orphan them on
+            // the server with no way to tell ours from the user's own manual blocks.
+            public List<long> stealthBlockOwnedShortIds = new List<long>();
             public bool autoClickStartEnabled;
             public bool autoCloseAnnouncementEnabled;
             public int maxAutoEatAttempts;

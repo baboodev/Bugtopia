@@ -112,6 +112,51 @@ namespace HeartopiaMod
                 + (restored ? "restored off" : "left as the user set it") + ").");
         }
 
+        // Area/zone arrivals — the farm-location waypoints (MovingToLocation -> LoadingArea), the
+        // priority-area anchors (WaitingForPriorityArea) and the startup routing hop.
+        //
+        // These used to keep their exact Y on the theory that an area arrival must stream the world
+        // in normally; in practice the surface hop left the player standing in the open for the
+        // whole areaLoadDelay + node-scan window, which is the most visible moment of a run. They
+        // now dive by the same margin as a resource hop.
+        //
+        // The dive is safe here for the same reasons it is on a node: noclip holds the position
+        // (ProcessNoclipMovementOnUpdate), the OOB rescue is already suppressed for the run, and the
+        // pin below keeps the hover where the hop aimed even if the transfer snaps the arrival to
+        // the surface. Streaming itself is position-driven, not Y-gated, so a −1.5 m arrival loads
+        // the same cells as the surface one.
+        private Vector3 ApplyForagingAreaTeleportOffset(Vector3 position)
+        {
+            if (this.StealthForagingActive)
+            {
+                position.y -= StealthForagingNodeDepth;
+            }
+            return position;
+        }
+
+        // Surfacing on stop. Every hop of a stealth run parks the player UNDER the terrain, so
+        // simply clearing autoFarmActive would drop them out of noclip while still inside it — the
+        // OOB rescue (also suppressed during the run) would then decide where they end up.
+        //
+        // MUST be called while autoFarmActive is still true: StealthForagingActive is
+        // `stealthForagingEnabled && autoFarmActive`, so after the flag is cleared this is a no-op
+        // and the teleport would be skipped. The noclip restore itself rides the NEXT frame's
+        // ProcessStealthForagingOnUpdate edge, which is exactly what makes this ordering work —
+        // by the time gravity returns the player is already standing on the real node position.
+        //
+        // lastNodePosition is the true, un-offset target of the last hop (the dive only ever went
+        // into the teleport argument), so it is the surface point by construction.
+        private void SurfaceFromStealthForaging(string reason)
+        {
+            if (!this.StealthForagingActive || this.lastNodePosition == Vector3.zero)
+            {
+                return;
+            }
+
+            this.TeleportToLocation(this.lastNodePosition);
+            ModLogger.Msg("[StealthForaging] Surfaced to " + this.lastNodePosition + " before stopping (" + reason + ").");
+        }
+
         // Pins the noclip hover at the dive target. TeleportToLocation clears the hold so it
         // re-seeds from the live player, which is right for a normal warp but loses the dive if
         // the game's own transfer snaps the arrival to the surface — this makes the farm hop

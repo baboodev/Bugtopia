@@ -99,6 +99,10 @@ namespace HeartopiaMod
             public Slider TeleportDelaySlider;
             public Toggle StealthToggle;          // Stealth Foraging (always visible)
             public GameObject StealthHintLabel;
+            public Toggle StealthBlockToggle;     // Stealth Block (StealthBlockFeature.cs)
+            public GameObject StealthBlockStatusLabel;
+            public string StealthBlockStatusShown;
+            public Toggle NotifyFriendsToggle;
             public Toggle AutoStopToggle;
             public GameObject TimerCaption;       // timer row (auto-stop-only)
             public GameObject TimerColon1;
@@ -195,6 +199,7 @@ namespace HeartopiaMod
                 statusColor = new Color(1f, 0.32f, 0.32f);
                 if (this.autoFarmActive)
                 {
+                    this.SurfaceFromStealthForaging("radar loot cleared");
                     this.autoFarmActive = false;
                     this.SetGameSpeed(1f);
                     this.farmState = HeartopiaComplete.AutoFarmState.Idle;
@@ -207,6 +212,7 @@ namespace HeartopiaMod
                 statusColor = new Color(1f, 0.7f, 0.45f);
                 if (this.autoFarmActive)
                 {
+                    this.SurfaceFromStealthForaging("aura farm disabled");
                     this.autoFarmActive = false;
                     this.SetGameSpeed(1f);
                     this.farmState = HeartopiaComplete.AutoFarmState.Idle;
@@ -460,6 +466,22 @@ namespace HeartopiaMod
                 new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
             this.TrySetUguiLabelWrapped(handle.StealthHintLabel);
 
+            // Stealth Block trio (StealthBlockFeature.cs / MapRevealBlockedFeature.cs). The status
+            // label is the arming feedback: the farm holds until it reads "Armed", so a silent
+            // toggle would look like a hung button.
+            handle.StealthBlockToggle = this.CreateUguiCheckbox(settings.transform, "StealthBlockToggle",
+                this.L("Hide from radar"), this.stealthBlockEnabled,
+                new System.Action<bool>(this.OnUguiForagingStealthBlockToggled));
+            handle.StealthBlockStatusShown = this.GetStealthBlockStatus();
+            handle.StealthBlockStatusLabel = this.CreateUguiLabel(settings.transform, "StealthBlockStatus",
+                handle.StealthBlockStatusShown, 11f,
+                new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
+            this.TrySetUguiLabelWrapped(handle.StealthBlockStatusLabel);
+
+            handle.NotifyFriendsToggle = this.CreateUguiCheckbox(settings.transform, "NotifyFriendsToggle",
+                this.L("Stop When Friend Joins"), this.stealthBlockNotifyFriends,
+                new System.Action<bool>(this.OnUguiForagingNotifyFriendsToggled));
+
             // Auto Stop Timer toggle + timer row (positions owned by the relayout — the toggle
             // rides below the Stealth row, which itself rides at 110 or 178 depending on the aura
             // block).
@@ -561,6 +583,24 @@ namespace HeartopiaMod
             }
 
             rowY += 34f;
+            if (handle.StealthBlockToggle != null)
+            {
+                PlaceUguiTopLeft(handle.StealthBlockToggle.gameObject, 14f, rowY, 250f, 24f);
+            }
+            if (handle.StealthBlockStatusLabel != null)
+            {
+                PlaceUguiTopLeft(handle.StealthBlockStatusLabel, 270f, rowY + 3f, panelW - 282f, 22f);
+            }
+
+            // Independent of Hide from radar: the friend watch drives the roster scan on its own,
+            // so "stop when a friend shows up" works as a plain safety net with no blocking at all.
+            rowY += 30f;
+            if (handle.NotifyFriendsToggle != null)
+            {
+                PlaceUguiTopLeft(handle.NotifyFriendsToggle.gameObject, 14f, rowY, 250f, 24f);
+            }
+
+            rowY += 34f;
             if (handle.AutoStopToggle != null)
             {
                 PlaceUguiTopLeft(handle.AutoStopToggle.gameObject, 14f, rowY, 250f, 24f);
@@ -654,6 +694,10 @@ namespace HeartopiaMod
                 // Settings re-syncs (external IMGUI edits) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.AuraFarmToggle, this.auraFarmEnabled);
                 this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
+                this.SyncUguiToggleFromField(handle.StealthBlockToggle, this.stealthBlockEnabled);
+                this.SyncUguiToggleFromField(handle.NotifyFriendsToggle, this.stealthBlockNotifyFriends);
+                this.SyncUguiSelfLabelText(handle.StealthBlockStatusLabel, ref handle.StealthBlockStatusShown,
+                    this.GetStealthBlockStatus());
                 this.SyncUguiToggleFromField(handle.AutoStopToggle, this.autoFarmAutoStopEnabled);
                 if (handle.AreaLoadSlider != null && Mathf.Abs(handle.AreaLoadSlider.value - this.areaLoadDelay) > 0.0005f)
                 {
@@ -801,6 +845,29 @@ namespace HeartopiaMod
                 return;
             }
             this.stealthForagingEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Hide from radar (StealthBlockFeature.cs). Turning it OFF does not just stop blocking —
+        // the tick keeps draining the release queue until every block WE issued is lifted, so the
+        // flag is the whole contract. No relayout: both rows are unconditional.
+        private void OnUguiForagingStealthBlockToggled(bool value)
+        {
+            if (value == this.stealthBlockEnabled)
+            {
+                return;
+            }
+            this.stealthBlockEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiForagingNotifyFriendsToggled(bool value)
+        {
+            if (value == this.stealthBlockNotifyFriends)
+            {
+                return;
+            }
+            this.stealthBlockNotifyFriends = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

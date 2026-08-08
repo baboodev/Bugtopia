@@ -398,6 +398,9 @@
     <Compile Include="IceSkatingSequenceFeature.cs" />
     <Compile Include="PadBuildHotkeyFeature.cs" />
     <Compile Include="PrivacyBlockFeature.cs" />
+    <Compile Include="MapRevealBlockedFeature.cs" />
+    <Compile Include="StealthBlockFeature.cs" />
+    <Compile Include="StealthBlockFeature.Mono.cs" />
     <Compile Include="BuildingFreeRotateFeature.cs" />
     <Compile Include="BunnyHopFeature.cs" />
     <Compile Include="ForceLocomotionFeature.cs" />

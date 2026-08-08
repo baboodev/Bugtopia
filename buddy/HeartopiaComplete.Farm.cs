@@ -458,6 +458,17 @@ namespace HeartopiaMod
         // Token: 0x06000015 RID: 21 RVA: 0x00003ECC File Offset: 0x000020CC
         private void RunAutoFarmLogic()
         {
+            // Stealth Block gate (StealthBlockFeature.cs): while the mass-block is enabled but not
+            // ARMED, the whole state machine holds — no hop, no dwell advance. That is what makes
+            // "wait until every stranger is blocked and no friend is around before diving" true for
+            // the START, and it re-engages mid-run the moment an unblocked stranger walks in.
+            if (!this.IsStealthBlockFarmHoldClear(out string stealthHold))
+            {
+                this.autoFarmStatus = stealthHold;
+                this.autoFarmTimer = 0f;
+                return;
+            }
+
             this.RefreshActivePriorityLocations();
             this.autoFarmTimer += Time.unscaledDeltaTime;
             this.priorityRecheckTimer += Time.unscaledDeltaTime;
@@ -509,7 +520,7 @@ namespace HeartopiaMod
                                 float distance = Vector3.Distance(Camera.main.transform.position, recheckLocation.Value);
                                 this.autoFarmStatus = $"Rechecking priority location ({distance:F0}m)...";
                                 this.AutoFarmLog("Periodic priority recheck -> location " + recheckLocation.Value + " distance=" + distance.ToString("F1"));
-                                this.FarmTeleportTo(recheckLocation.Value);
+                                this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(recheckLocation.Value));
                                 this.currentPriorityLocation = recheckLocation;
                                 this.lastTeleportWasPriorityLocation = true;
                                 this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
@@ -580,7 +591,7 @@ namespace HeartopiaMod
                             float distance = Vector3.Distance(Camera.main.transform.position, priorityLocation.Value);
                             this.autoFarmStatus = $"Going to priority location ({distance:F0}m)...";
                             this.AutoFarmLog("Priority location fallback -> " + priorityLocation.Value + " distance=" + distance.ToString("F1"));
-                            this.FarmTeleportTo(priorityLocation.Value);
+                            this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(priorityLocation.Value));
                             this.currentPriorityLocation = priorityLocation;
                             this.lastTeleportWasPriorityLocation = true;
                             this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
@@ -856,7 +867,7 @@ namespace HeartopiaMod
                             else
                             {
                                 this.autoFarmStatus = "Moving to " + farmLocation.Name + "...";
-                                this.FarmTeleportTo(farmLocation.Position);
+                                this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(farmLocation.Position));
                                 this.farmState = HeartopiaComplete.AutoFarmState.LoadingArea;
                                 this.autoFarmTimer = 0f;
                             }
@@ -2643,6 +2654,14 @@ namespace HeartopiaMod
                 }
             }
 
+            // Stop path: surface BEFORE the flag flips — StealthForagingActive is gated on
+            // autoFarmActive, so after the flip this would be a no-op and the player would be
+            // dropped out of noclip inside the terrain (StealthForagingFeature.cs).
+            if (this.autoFarmActive)
+            {
+                this.SurfaceFromStealthForaging("Stop Foraging");
+            }
+
             this.autoFarmActive = !this.autoFarmActive;
             bool flag3 = this.autoFarmActive;
             if (flag3)
@@ -2669,7 +2688,7 @@ namespace HeartopiaMod
                 if (this.currentPriorityLocation.HasValue)
                 {
                     this.AutoFarmLog("Startup routing to priority location " + this.currentPriorityLocation.Value);
-                    this.FarmTeleportTo(this.currentPriorityLocation.Value);
+                    this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(this.currentPriorityLocation.Value));
                     this.lastTeleportWasPriorityLocation = true;
                     this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
                     this.autoFarmStatus = "Going to priority location...";

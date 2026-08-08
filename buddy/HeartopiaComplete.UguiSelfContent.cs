@@ -150,6 +150,7 @@ namespace HeartopiaMod
             public Toggle MergesToggle;
             public Toggle SpamsToggle;
             public Toggle UploadCheatToggle;
+            public Toggle FriendVisitToggle;
             public GameObject LogsCountLabel;
             public string LogsCountShown;
             public GameObject MergesCountLabel;
@@ -158,6 +159,8 @@ namespace HeartopiaMod
             public string SpamsCountShown;
             public GameObject UploadCheatCountLabel;
             public string UploadCheatCountShown;
+            public GameObject FriendVisitCountLabel;
+            public string FriendVisitCountShown;
             public GameObject HooksStatusLabel;
             public string HooksStatusShown;
             public float NextSlowSyncAt;               // 0.5s tick for counters + hooks status
@@ -1577,6 +1580,20 @@ namespace HeartopiaMod
             handle.UploadCheatCountLabel = this.CreateUguiLabel(block.transform, "UploadCheatCount",
                 handle.UploadCheatCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.UploadCheatCountLabel, pad, yCur, rowW, 18f);
+            yCur += 24f;
+
+            // Friend-visit notify (PrivacyBlockFeature.TryInstallPrivacyFriendVisitHook): the toast
+            // is client-authored by the VISITOR, so this only suppresses the popup — the visit
+            // itself is still visible in the room roster / map.
+            handle.FriendVisitToggle = this.CreateUguiCheckbox(block.transform, "FriendVisitToggle",
+                this.L("Block Friend Visit Notification"), this.privacyBlockFriendVisitNotify,
+                new System.Action<bool>(this.OnUguiSelfPrivacyFriendVisitToggled));
+            PlaceUguiTopLeft(handle.FriendVisitToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
+            handle.FriendVisitCountShown = this.LF("Visit notifies blocked: {0}", privacyBlockedFriendVisitCount);
+            handle.FriendVisitCountLabel = this.CreateUguiLabel(block.transform, "FriendVisitCount",
+                handle.FriendVisitCountShown, 11f, counterColor, false);
+            PlaceUguiTopLeft(handle.FriendVisitCountLabel, pad, yCur, rowW, 18f);
             yCur += 22f;
 
             handle.HooksStatusShown = this.GetPrivacyBlockHooksStatus();
@@ -1604,6 +1621,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.MergesToggle, this.privacyBlockRoomMerges);
                 this.SyncUguiToggleFromField(handle.SpamsToggle, this.privacyBlockSpamReports);
                 this.SyncUguiToggleFromField(handle.UploadCheatToggle, this.privacyBlockUploadCheat);
+                this.SyncUguiToggleFromField(handle.FriendVisitToggle, this.privacyBlockFriendVisitNotify);
 
                 // Counters increment from background detour bodies (Interlocked, any time) and the
                 // hooks status flips as install attempts land — 0.5s tick keeps them live without
@@ -1620,6 +1638,8 @@ namespace HeartopiaMod
                     this.SyncUguiSelfLabelText(handle.UploadCheatCountLabel, ref handle.UploadCheatCountShown,
                         this.LF("UploadCheat seen: {0} | blocked: {1}",
                             privacyUploadCheatSeenCount, privacyBlockedUploadCheatCount));
+                    this.SyncUguiSelfLabelText(handle.FriendVisitCountLabel, ref handle.FriendVisitCountShown,
+                        this.LF("Visit notifies blocked: {0}", privacyBlockedFriendVisitCount));
                     this.SyncUguiSelfLabelText(handle.HooksStatusLabel, ref handle.HooksStatusShown,
                         this.GetPrivacyBlockHooksStatus());
                 }
@@ -1673,6 +1693,16 @@ namespace HeartopiaMod
                 return;
             }
             this.privacyBlockUploadCheat = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfPrivacyFriendVisitToggled(bool value)
+        {
+            if (value == this.privacyBlockFriendVisitNotify)
+            {
+                return;
+            }
+            this.privacyBlockFriendVisitNotify = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 
