@@ -423,7 +423,7 @@ namespace HeartopiaMod
             {
                 // Should be unreachable now the button is only built alongside its panel — but a
                 // dead click has to leave a trace rather than look like a frozen page.
-                ModLogger.Msg("[InputMap] direct-keys toggle has no panel to show.");
+                LogInputMap("direct-keys toggle has no panel to show.");
                 return;
             }
 

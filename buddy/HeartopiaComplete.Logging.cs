@@ -9,7 +9,7 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         private const float LoggingTabRowHeight = 30f;
-        private const int LoggingTabRowCount = 43; // keep in sync with BuildUguiLoggingToggleBindings
+        private const int LoggingTabRowCount = 44; // keep in sync with BuildUguiLoggingToggleBindings
 
 
     }

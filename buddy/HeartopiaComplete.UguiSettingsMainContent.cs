@@ -182,7 +182,8 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogCorruptionCleanse, v => MasterLogCorruptionCleanse = v, "Corruption Cleanse"),
                 new UguiLoggingToggleBinding(() => MasterLogUnderwaterRadar, v => MasterLogUnderwaterRadar = v, "Underwater Radar"),
                 new UguiLoggingToggleBinding(() => MasterLogGameLod, v => MasterLogGameLod = v, "Game LOD"),
-                new UguiLoggingToggleBinding(() => MasterLogWorldStage, v => MasterLogWorldStage = v, "World Stage")
+                new UguiLoggingToggleBinding(() => MasterLogWorldStage, v => MasterLogWorldStage = v, "World Stage"),
+                new UguiLoggingToggleBinding(() => MasterLogInputMap, v => MasterLogInputMap = v, "Input Map")
             };
         }
 

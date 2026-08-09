@@ -26,6 +26,21 @@ namespace HeartopiaMod
     // that way is a crash risk; parsing the JSON is not).
     public partial class HeartopiaComplete
     {
+        // Every [InputMap] trace — the one-off asset dump, the per-binding echo, rebind writes and
+        // hint relabelling spread across GameKeyBindings / CameraModeHotkeyGuard / this file — routes
+        // through LogInputMap so a SINGLE Settings → Logging switch governs the lot. OFF by default:
+        // these lines are gold when diagnosing key mapping and pure noise otherwise. Session-only,
+        // like every MasterLog* flag ([[game-key-rebinding-and-hints]]).
+        internal static bool MasterLogInputMap = false;
+
+        private static void LogInputMap(string message)
+        {
+            if (MasterLogInputMap)
+            {
+                ModLogger.Msg("[InputMap] " + message);
+            }
+        }
+
         private bool inputRebindDumpWritten;
 
         // ---- key-hint icons -----------------------------------------------------------------
@@ -129,14 +144,14 @@ namespace HeartopiaMod
                 InputActionAsset asset = this.FindGameInputActionAsset();
                 if (asset == null)
                 {
-                    ModLogger.Msg("[InputMap] no InputActionAsset found — key rebinding unavailable.");
+                    LogInputMap("no InputActionAsset found — key rebinding unavailable.");
                     return;
                 }
 
                 string json = asset.ToJson();
                 if (string.IsNullOrEmpty(json))
                 {
-                    ModLogger.Msg("[InputMap] InputActionAsset.ToJson() returned nothing.");
+                    LogInputMap("InputActionAsset.ToJson() returned nothing.");
                     return;
                 }
 
@@ -144,16 +159,16 @@ namespace HeartopiaMod
                 // hand-built path (see PlayerLoopPumpMarker for why that copy was a liability).
                 string path = HelperPaths.GetFile("inputmap.json");
                 System.IO.File.WriteAllText(path, json);
-                ModLogger.Msg("[InputMap] full asset written to " + path + " (" + json.Length + " chars).");
+                LogInputMap("full asset written to " + path + " (" + json.Length + " chars).");
 
                 foreach (string line in DescribeKeyboardBindings(json))
                 {
-                    ModLogger.Msg("[InputMap] " + line);
+                    LogInputMap(line);
                 }
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[InputMap] dump failed: " + ex.GetType().Name + ": " + ex.Message);
+                LogInputMap("dump failed: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -247,7 +262,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[InputMap] icon sync failed: " + ex.GetType().Name + ": " + ex.Message);
+                LogInputMap("icon sync failed: " + ex.GetType().Name + ": " + ex.Message);
                 this.keyIconNextCheckAt = Time.unscaledTime + 10f;
             }
         }
@@ -318,12 +333,12 @@ namespace HeartopiaMod
                     sb.Append(pair.Key).Append("->").Append(pair.Value);
                 }
 
-                ModLogger.Msg("[InputMap] key hints relabelled: " + sb.ToString()
+                LogInputMap("key hints relabelled: " + sb.ToString()
                               + (iconless > 0 ? " (" + iconless + " rebound onto a key with no hint sprite)" : ""));
             }
             else if (iconless > 0)
             {
-                ModLogger.Msg("[InputMap] no key hints relabelled — " + iconless
+                LogInputMap("no key hints relabelled — " + iconless
                               + " direct key(s) were rebound onto keys the game has no icon for.");
             }
         }
@@ -385,14 +400,14 @@ namespace HeartopiaMod
                 if (!this.keyIconIndexMissReported)
                 {
                     this.keyIconIndexMissReported = true;
-                    ModLogger.Msg("[InputMap] no " + KeyIconPrefix + "* sprites loaded yet — retrying with back-off.");
+                    LogInputMap("no " + KeyIconPrefix + "* sprites loaded yet — retrying with back-off.");
                 }
 
                 return false;
             }
 
             this.keyIconSpritesIndexed = true;
-            ModLogger.Msg("[InputMap] key-hint sprites indexed: " + this.keyIconSprites.Count + " plain, "
+            LogInputMap("key-hint sprites indexed: " + this.keyIconSprites.Count + " plain, "
                           + this.keyChipIconSprites.Count + " chip.");
             return true;
         }
@@ -604,7 +619,7 @@ namespace HeartopiaMod
                 // Log only a real relabel — the no-op case used to log all nine nodes every session.
                 if (this.keyHintNodesReported.Add(action))
                 {
-                    ModLogger.Msg("[InputMap] HUD hint '" + action + "': '" + sprite.name
+                    LogInputMap("HUD hint '" + action + "': '" + sprite.name
                                   + "' -> '" + want.name + "'.");
                 }
 

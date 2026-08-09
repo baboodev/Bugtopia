@@ -273,7 +273,7 @@ namespace HeartopiaMod
             if (this.cameraHintProbes.Count > 0)
             {
                 this.cameraHintScanBackoff = 1f;
-                ModLogger.Msg("[InputMap] camera-bar hint probes: " + this.cameraHintProbes.Count + ".");
+                LogInputMap("camera-bar hint probes: " + this.cameraHintProbes.Count + ".");
             }
         }
 

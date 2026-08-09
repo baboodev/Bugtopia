@@ -129,7 +129,7 @@ namespace HeartopiaMod
                     if (!this.gameKeyAssetMismatchLogged)
                     {
                         this.gameKeyAssetMismatchLogged = true;
-                        ModLogger.Msg("[InputMap] ignoring an InputActionAsset without " + GameKeyDirectMapName
+                        LogInputMap("ignoring an InputActionAsset without " + GameKeyDirectMapName
                                       + " (" + parsed.Count + " bindings) — not the game's; will retry.");
                     }
 
@@ -161,14 +161,14 @@ namespace HeartopiaMod
                     sb.Append(pair.Key).Append('=').Append(pair.Value);
                 }
 
-                ModLogger.Msg("[InputMap] " + parsed.Count + " rebindable key binding(s): " + sb.ToString());
+                LogInputMap(parsed.Count + " rebindable key binding(s): " + sb.ToString());
 
                 this.MarkKeyIconSwapsDirty();
                 return this.gameKeyRows;
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[InputMap] row build failed: " + ex.GetType().Name + ": " + ex.Message);
+                LogInputMap("row build failed: " + ex.GetType().Name + ": " + ex.Message);
                 return null;
             }
         }
@@ -367,7 +367,7 @@ namespace HeartopiaMod
 
                 if (map == null)
                 {
-                    ModLogger.Msg("[InputMap] cannot reach map '" + row.Map + "' for " + row.Action
+                    LogInputMap("cannot reach map '" + row.Map + "' for " + row.Action
                                   + " #" + row.Index + " — override not applied.");
                     return false;
                 }
@@ -390,13 +390,13 @@ namespace HeartopiaMod
                 // from a hard-coded switch — so the icon layer has to be told (InputRebindFeature.cs).
                 this.MarkKeyIconSwapsDirty();
 
-                ModLogger.Msg("[InputMap] " + row.Map + "/" + row.Action + " #" + row.Index + " -> "
+                LogInputMap(row.Map + "/" + row.Action + " #" + row.Index + " -> "
                               + (string.IsNullOrEmpty(path) ? "default (" + row.DefaultPath + ")" : path));
                 return true;
             }
             catch (Exception ex)
             {
-                ModLogger.Msg("[InputMap] override failed: " + ex.GetType().Name + ": " + ex.Message);
+                LogInputMap("override failed: " + ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
         }
@@ -432,7 +432,7 @@ namespace HeartopiaMod
 
             if (moved > 1)
             {
-                ModLogger.Msg("[InputMap] moved " + moved + " binding(s) sharing " + row.DefaultPath
+                LogInputMap("moved " + moved + " binding(s) sharing " + row.DefaultPath
                               + " — the game draws one hint per key, so they travel together.");
             }
 
@@ -572,13 +572,13 @@ namespace HeartopiaMod
             // the gate try again; only a run that actually landed something may consume it.
             if (applied == 0 && skipped > 0)
             {
-                ModLogger.Msg("[InputMap] none of the " + skipped
+                LogInputMap("none of the " + skipped
                               + " saved override(s) match the loaded asset — keeping them and retrying.");
                 return false;
             }
 
             this.pendingGameKeyOverrides = null;
-            ModLogger.Msg("[InputMap] restored " + applied + " saved key override(s)"
+            LogInputMap("restored " + applied + " saved key override(s)"
                           + (skipped > 0 ? ", " + skipped + " no longer match this asset" : "") + ".");
             return true;
         }
