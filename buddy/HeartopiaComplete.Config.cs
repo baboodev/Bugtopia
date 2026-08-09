@@ -232,6 +232,7 @@ namespace HeartopiaMod
             data.strangerChatBypassEnabled = this.strangerChatBypassEnabled;
             data.chatForceTranslateEnabled = this.chatForceTranslateEnabled;
             data.chatTranslateForceAllLangs = this.chatTranslateForceAllLangs;
+            data.blockTutorials = this.blockTutorials;
             // chatTranslateVerboseLog is deliberately NOT persisted — it is a diagnostic that
             // floods the log, so it always starts OFF and must be re-armed per session.
             data.autoIceSkatingEnabled = this.autoIceSkatingEnabled;
@@ -500,6 +501,7 @@ namespace HeartopiaMod
             this.strangerChatBypassEnabled = data.strangerChatBypassEnabled;
             this.chatForceTranslateEnabled = data.chatForceTranslateEnabled;
             this.chatTranslateForceAllLangs = data.chatTranslateForceAllLangs;
+            this.blockTutorials = data.blockTutorials;
             this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
             this.autoIceSkatingMinUltimateScore = Mathf.Clamp(data.autoIceSkatingMinUltimateScore, 0, AutoIceSkatingMinUltimateScoreSliderMax);

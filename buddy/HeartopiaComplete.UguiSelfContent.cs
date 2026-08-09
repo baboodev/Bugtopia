@@ -102,6 +102,7 @@ namespace HeartopiaMod
             public Toggle SkipShowOffToggle;
             public Toggle SkipCraftDyeToggle;
             public Toggle CraftDirectSendToggle;
+            public Toggle BlockTutorialsToggle;
             public GameObject NoclipHelpLabel;  // trailing, only visible while Noclip is on
 
             public int LayoutSignature = -1;    // packed conditional-visibility state
@@ -335,6 +336,9 @@ namespace HeartopiaMod
             handle.CraftDirectSendToggle = this.CreateUguiCheckbox(scrollContent, "CraftDirectSendToggle",
                 this.L("Direct Craft Send (no walk, no animation)"), this.craftDirectSendEnabled,
                 new System.Action<bool>(this.OnUguiSelfCraftDirectSendToggled));
+            handle.BlockTutorialsToggle = this.CreateUguiCheckbox(scrollContent, "BlockTutorialsToggle",
+                this.L("Disable tutorials"), this.blockTutorials,
+                new System.Action<bool>(this.OnUguiSelfBlockTutorialsToggled));
 
             // Trailing conditional help label — localized in the IMGUI drawer, kept verbatim.
             handle.NoclipHelpLabel = this.CreateUguiLabel(scrollContent, "NoclipHelp",
@@ -563,6 +567,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.BlockTutorialsToggle != null)
+            {
+                PlaceUguiTopLeft(handle.BlockTutorialsToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             SetUguiGoActive(handle.NoclipHelpLabel, noclip);
             if (noclip)
             {
@@ -608,6 +618,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
+                this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
 
                 if (handle.NoclipSpeedSlider != null && Mathf.Abs(handle.NoclipSpeedSlider.value - this.noclipSpeed) > 0.0005f)
                 {
@@ -1042,6 +1053,16 @@ namespace HeartopiaMod
                 return;
             }
             this.craftDirectSendEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfBlockTutorialsToggled(bool value)
+        {
+            if (value == this.blockTutorials)
+            {
+                return;
+            }
+            this.blockTutorials = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

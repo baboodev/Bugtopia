@@ -220,6 +220,7 @@ namespace HeartopiaMod
             public bool strangerChatBypassEnabled;
             public bool chatForceTranslateEnabled;
             public bool chatTranslateForceAllLangs;
+            public bool blockTutorials;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             public bool autoIceSkatingOnlyX2Ultimate = true;

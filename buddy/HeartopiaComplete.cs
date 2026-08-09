@@ -698,6 +698,7 @@ namespace HeartopiaMod
             this.ProcessAutoBubbleCollectOnUpdate();
             this.ProcessShowOffBypassOnUpdate();
             this.ProcessCraftAnimationSkipOnUpdate();
+            this.ProcessTutorialBlockOnUpdate();
             this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
             this.ProcessPersistentHudOnUpdate();
