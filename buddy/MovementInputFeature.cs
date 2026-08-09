@@ -155,29 +155,6 @@ namespace HeartopiaMod
             ModLogger.Msg("[MovementBridge] input types are Mono-only; Aura Mono resolver pending (enter a town and retry).");
         }
 
-        // Debug read: PlayerMoveComponent._joystick (the live analog axis the game is acting on).
-        private bool TryReadGameMoveAxis(out Vector2 axis)
-        {
-            axis = Vector2.zero;
-            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
-            {
-                return false;
-            }
-
-            if (!this.TryGetAuraMonoLocalPlayerObject(out IntPtr playerObj) || playerObj == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            if ((!this.TryGetMonoObjectMember(playerObj, "moveComponent", out IntPtr moveObj) || moveObj == IntPtr.Zero)
-                && (!this.TryGetMonoObjectMember(playerObj, "_moveComponent", out moveObj) || moveObj == IntPtr.Zero))
-            {
-                return false;
-            }
-
-            return this.TryGetMonoVector2Member(moveObj, "_joystick", out axis);
-        }
-
         // Inject an analog move axis. axis is RAW joystick space, magnitude clamped to 0..1; the
         // game applies the camera-relative transform. Prefers a direct SetMoveJoystick path that
         // bypasses LocalPlayerComponent._joystickQueue (one dequeue per player tick → input lag).
@@ -749,22 +726,5 @@ namespace HeartopiaMod
             return exc == IntPtr.Zero;
         }
 
-        private unsafe bool TryGetMonoVector2Member(IntPtr obj, string memberName, out Vector2 value)
-        {
-            value = Vector2.zero;
-            if (!this.TryGetMonoObjectMember(obj, memberName, out IntPtr boxed) || boxed == IntPtr.Zero || auraMonoObjectUnbox == null)
-            {
-                return false;
-            }
-
-            IntPtr raw = auraMonoObjectUnbox(boxed);
-            if (raw == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            value = *(Vector2*)raw;
-            return true;
-        }
     }
 }

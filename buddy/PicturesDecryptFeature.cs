@@ -1022,42 +1022,6 @@ namespace HeartopiaMod
             CopiedPlain
         }
 
-        private PicturesDecryptFileResult TryDecryptScreenCaptureFile(string sourceFile, string destFile)
-        {
-            try
-            {
-                byte[] input = File.ReadAllBytes(sourceFile);
-                if (input == null || input.Length == 0)
-                {
-                    return PicturesDecryptFileResult.Failed;
-                }
-
-                if (this.LooksLikeImageBytes(input))
-                {
-                    File.WriteAllBytes(destFile, input);
-                    return PicturesDecryptFileResult.CopiedPlain;
-                }
-
-                if (this.TryDecryptGamePhotoBytes(input, out byte[] decrypted) && this.LooksLikeImageBytes(decrypted))
-                {
-                    File.WriteAllBytes(destFile, decrypted);
-                    return PicturesDecryptFileResult.Decrypted;
-                }
-
-                if (this.TryInvokeGameDecryptBytes(input, out byte[] gameDecrypted) && this.LooksLikeImageBytes(gameDecrypted))
-                {
-                    File.WriteAllBytes(destFile, gameDecrypted);
-                    return PicturesDecryptFileResult.Decrypted;
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Pictures] file failed " + sourceFile + ": " + ex.Message);
-            }
-
-            return PicturesDecryptFileResult.Failed;
-        }
-
         private bool TryDecryptGamePhotoBytes(byte[] encrypted, out byte[] plain)
         {
             plain = null;

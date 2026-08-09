@@ -88,16 +88,6 @@ public static class ModCoroutines
         }
     }
 
-    public static void StopAll()
-    {
-        for (int i = 0; i < _routines.Count; i++)
-        {
-            _routines[i].Dead = true;
-        }
-
-        _pending.Clear();
-    }
-
     internal static int ActiveCount => _routines.Count;
 
     // One step per routine per frame.

@@ -77,17 +77,6 @@ namespace HeartopiaMod
             return this.L(LodOverrideModeLabels[index]);
         }
 
-        private float GetLodSettingsPanelHeight()
-        {
-            float height = 132f;
-            if (this.lodOverrideMode == LodOverrideModeCustom)
-            {
-                height += 92f;
-            }
-
-            return height;
-        }
-
         private void ApplyLodOverride(bool enabled)
         {
             if (!enabled || this.lodOverrideMode == LodOverrideModeDefault)

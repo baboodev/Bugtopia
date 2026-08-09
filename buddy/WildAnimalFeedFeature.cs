@@ -2657,61 +2657,6 @@ namespace HeartopiaMod
             return staticId > 0 && WildAnimalFeedEggStaticIds.Contains(staticId);
         }
 
-        private string GetWildAnimalFeedEntityDisplayName(int staticId)
-        {
-            if (staticId <= 0)
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                if (!this.EnsureWildAnimalFeedTableDataReflection() || this.wildAnimalFeedGetEntityMethod == null)
-                {
-                    return string.Empty;
-                }
-
-                object entity = this.wildAnimalFeedGetEntityMethod.Invoke(null, new object[] { staticId });
-                if (entity == null)
-                {
-                    return string.Empty;
-                }
-
-                if (this.TryGetObjectMember(entity, "name", out object nameObj) && nameObj != null)
-                {
-                    return Convert.ToString(nameObj) ?? string.Empty;
-                }
-
-                if (this.TryGetObjectMember(entity, "Name", out nameObj) && nameObj != null)
-                {
-                    return Convert.ToString(nameObj) ?? string.Empty;
-                }
-            }
-            catch
-            {
-            }
-
-            return string.Empty;
-        }
-
-        private string ResolveWildAnimalFeedFoodNameAuraMono(IntPtr foodObj, int staticId)
-        {
-            if (foodObj != IntPtr.Zero)
-            {
-                if (this.TryGetMonoStringMember(foodObj, "name", out string name) && !string.IsNullOrWhiteSpace(name))
-                {
-                    return name;
-                }
-
-                if (this.TryGetMonoStringMember(foodObj, "Name", out name) && !string.IsNullOrWhiteSpace(name))
-                {
-                    return name;
-                }
-            }
-
-            return this.GetWildAnimalFeedEntityDisplayName(staticId);
-        }
-
         private int ComputeWildAnimalFeedSortScore(int bondExp, int fullness, bool isFavorite, int favoriteAddition)
         {
             int adjustedBond = bondExp;
@@ -3752,21 +3697,6 @@ namespace HeartopiaMod
 
             this.TryEnsureWildAnimalFeedAuraStorageValues();
             return this.wildAnimalFeedAuraStorageByName.TryGetValue(storageName, out storageValue);
-        }
-
-        private IntPtr TryGetWildAnimalFeedAuraMonoTableDataClass()
-        {
-            if (this.wildAnimalFeedAuraTableDataClass != IntPtr.Zero)
-            {
-                return this.wildAnimalFeedAuraTableDataClass;
-            }
-
-            if (this.EnsureWildAnimalFeedAuraTableDataCache())
-            {
-                return this.wildAnimalFeedAuraTableDataClass;
-            }
-
-            return IntPtr.Zero;
         }
 
         private IntPtr ResolveWildAnimalFeedAuraMonoTableDataClassUncached()

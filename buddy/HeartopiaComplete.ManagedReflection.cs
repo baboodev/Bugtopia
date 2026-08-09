@@ -31,94 +31,6 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private bool TryDescribeDynamicMonoBehaviour(Component component, out string description)
-        {
-            description = null;
-            if (component == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type wrapperType = component.GetType();
-                string wrapperName = wrapperType.FullName ?? wrapperType.Name ?? "<unknown>";
-                if (wrapperName.IndexOf("DynamicMonoBehaviour", StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    Il2CppObject obj = component.TryCast<Il2CppObject>();
-                    string ilName = obj?.GetIl2CppType()?.FullName?.ToString();
-                    if (string.IsNullOrEmpty(ilName) || ilName.IndexOf("DynamicMonoBehaviour", StringComparison.OrdinalIgnoreCase) < 0)
-                    {
-                        return false;
-                    }
-                    wrapperName = ilName;
-                }
-
-                string behaviourType = null;
-                MethodInfo getBehaviourTypeMethod = wrapperType.GetMethod("GetBehaviourType", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (getBehaviourTypeMethod != null)
-                {
-                    try
-                    {
-                        behaviourType = getBehaviourTypeMethod.Invoke(component, null)?.ToString();
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                object implObject = null;
-                string implTypeName = null;
-                PropertyInfo implProperty = wrapperType.GetProperty("Impl", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (implProperty != null)
-                {
-                    try
-                    {
-                        implObject = implProperty.GetValue(component, null);
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                if (implObject == null)
-                {
-                    FieldInfo implInternalField = this.FindFieldInHierarchy(wrapperType, "ImplInternal");
-                    if (implInternalField != null)
-                    {
-                        try
-                        {
-                            implObject = implInternalField.GetValue(component);
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
-
-                if (implObject != null)
-                {
-                    Type implType = implObject.GetType();
-                    bool hasRatio = this.FindFieldInHierarchy(implType, "_durabilityRatio") != null;
-                    bool hasNode = this.FindFieldInHierarchy(implType, "durabilityNode") != null;
-                    implTypeName = (implType.FullName ?? implType.Name ?? "<unknown>") + $"[ratio={hasRatio},node={hasNode}]";
-                }
-                else
-                {
-                    implTypeName = "impl=<null>";
-                }
-
-                description = string.IsNullOrEmpty(behaviourType)
-                    ? wrapperName + "->" + implTypeName
-                    : wrapperName + "[" + behaviourType + "]->" + implTypeName;
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private FieldInfo FindFieldInHierarchy(Type type, string fieldName)
         {
             while (type != null)
@@ -419,41 +331,6 @@ namespace HeartopiaMod
             catch { }
 
             return false;
-        }
-
-        private IEnumerable<Type> EnumerateLoadableTypes(Assembly assembly)
-        {
-            if (assembly == null)
-            {
-                yield break;
-            }
-
-            Type[] types = null;
-            try
-            {
-                types = assembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                types = ex.Types;
-            }
-            catch
-            {
-                yield break;
-            }
-
-            if (types == null)
-            {
-                yield break;
-            }
-
-            foreach (Type type in types)
-            {
-                if (type != null)
-                {
-                    yield return type;
-                }
-            }
         }
 
         private bool TryReadObjectInt(object instance, string memberName, out int value)
@@ -806,55 +683,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryConvertManagedNetIdToUInt64(object raw, out ulong value)
-        {
-            value = 0UL;
-            if (raw == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                value = Convert.ToUInt64(raw);
-                return value != 0UL;
-            }
-            catch
-            {
-            }
-
-            string[] valueMemberNames = { "value", "Value", "id", "Id", "_value", "m_Value" };
-            for (int i = 0; i < valueMemberNames.Length; i++)
-            {
-                object innerValue = this.TryGetManagedMemberValue(raw, valueMemberNames[i]);
-                if (innerValue == null || ReferenceEquals(innerValue, raw))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    value = Convert.ToUInt64(innerValue);
-                    return value != 0UL;
-                }
-                catch
-                {
-                }
-            }
-
-            string text = raw.ToString();
-            if (!string.IsNullOrEmpty(text))
-            {
-                string digits = new string(text.Where(char.IsDigit).ToArray());
-                if (!string.IsNullOrEmpty(digits) && ulong.TryParse(digits, out value))
-                {
-                    return value != 0UL;
-                }
-            }
-
-            return false;
-        }
-
         private bool HasChildComponentNamed(Transform root, string componentTypeName)
         {
             if (root == null || string.IsNullOrEmpty(componentTypeName))
@@ -1054,47 +882,6 @@ namespace HeartopiaMod
         {
             this.loadedTypeMissCacheUntil.Clear();
             this.methodMissCacheUntil.Clear();
-        }
-
-        internal bool ModTryInvokeInstanceMethod(object instance, string methodName, params object[] args)
-        {
-            if (instance == null || string.IsNullOrEmpty(methodName))
-            {
-                return false;
-            }
-
-            try
-            {
-                Type type = instance.GetType();
-                Type[] argTypes = args == null || args.Length == 0
-                    ? Type.EmptyTypes
-                    : args.Select(a => a?.GetType() ?? typeof(object)).ToArray();
-                MethodInfo method = this.GetMethodQuiet(
-                    type,
-                    methodName,
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                    argTypes);
-                if (method == null && (args == null || args.Length == 0))
-                {
-                    method = this.GetMethodQuiet(
-                        type,
-                        methodName,
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                        Type.EmptyTypes);
-                }
-
-                if (method == null)
-                {
-                    return false;
-                }
-
-                method.Invoke(instance, args);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private static string BuildMethodLookupCacheKey(Type type, string name, BindingFlags flags, Type[] parameterTypes, int paramCountOnly)

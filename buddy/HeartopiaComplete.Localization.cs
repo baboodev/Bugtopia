@@ -86,49 +86,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryInvokeStaticTableGetter(Type tableDataType, string methodName, int id, out object row)
-        {
-            row = null;
-            if (tableDataType == null || string.IsNullOrEmpty(methodName) || id <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                MethodInfo[] methods = tableDataType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                for (int i = 0; i < methods.Length; i++)
-                {
-                    MethodInfo method = methods[i];
-                    if (!string.Equals(method.Name, methodName, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters = method.GetParameters();
-                    if (parameters.Length == 1 && parameters[0].ParameterType == typeof(int))
-                    {
-                        row = method.Invoke(null, new object[] { id });
-                    }
-                    else if (parameters.Length == 2 && parameters[0].ParameterType == typeof(int) && parameters[1].ParameterType == typeof(bool))
-                    {
-                        row = method.Invoke(null, new object[] { id, false });
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    return row != null;
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
         private MethodInfo FindTableLocalizationMethod(Type tableDataType)
         {
             if (tableDataType == null)

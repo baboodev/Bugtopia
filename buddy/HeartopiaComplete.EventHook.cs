@@ -196,32 +196,6 @@ namespace HeartopiaMod
             return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, true, handler, false);
         }
 
-        // Swallow dispatches of this event type (no game listeners run). Handler is optional.
-        internal bool RegisterGameEventSuppressHook(string eventFullName, int payloadBytes, bool byNetId = false)
-        {
-            return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, byNetId, null, true);
-        }
-
-        // Capture the CONTENT of a `string` field inside this event's struct (byte offset from the
-        // struct start, resolved from mono metadata by the caller) so handlers can read it as
-        // GameEventSnapshot.StringValue. The bytes are memcpy'd during dispatch — the mono string
-        // pointer is never retained, which is what makes this safe (a deferred deref would be a
-        // stale/unrooted object). Pass -1 to stop capturing.
-        internal void SetGameEventHookStringField(string eventFullName, int stringFieldOffset)
-        {
-            if (string.IsNullOrEmpty(eventFullName)
-                || !this.gameEventHooksByName.TryGetValue(eventFullName, out GameEventHookEntry entry))
-            {
-                return;
-            }
-
-            entry.StringFieldOffset = stringFieldOffset;
-            if (entry.Installed)
-            {
-                eventSlotStringOffset[entry.Slot] = stringFieldOffset;
-            }
-        }
-
         internal void SetGameEventHookSuppressForward(string eventFullName, bool suppress)
         {
             if (string.IsNullOrEmpty(eventFullName)

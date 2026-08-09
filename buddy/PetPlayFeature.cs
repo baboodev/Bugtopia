@@ -3252,36 +3252,6 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryRemoveActiveCatQuestionCell(uint catNetId)
-        {
-            string status = "invalid catNetId.";
-            if (catNetId == 0U || !this.TryGetAuraMonoTrackingCatPlay(out IntPtr catPlayObj, out status) || catPlayObj == IntPtr.Zero)
-            {
-                this.PetPlayLog("Cat question clear unavailable: " + status);
-                return false;
-            }
-
-            IntPtr catPlayClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(catPlayObj) : IntPtr.Zero;
-            IntPtr removeMethod = this.FindAuraMonoMethodOnHierarchy(catPlayClass, "RemoveQuestionCell", 1);
-            if (removeMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
-            {
-                this.PetPlayLog("Cat question clear method unavailable.");
-                return false;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            IntPtr* args = stackalloc IntPtr[1];
-            args[0] = (IntPtr)(&catNetId);
-            auraMonoRuntimeInvoke(removeMethod, catPlayObj, (IntPtr)args, ref exc);
-            bool ok = exc == IntPtr.Zero;
-            if (!ok)
-            {
-                this.PetPlayLog("Cat question clear failed: exc=0x" + exc.ToInt64().ToString("X"));
-            }
-
-            return ok;
-        }
-
         private void TryAutoAnswerDogPlayFromUi()
         {
             float nextScanDelay = Time.unscaledTime < this.petPlayLastDogAnswerAt + 1.2f ? 0.12f : 1.25f;
@@ -3333,21 +3303,6 @@ namespace HeartopiaMod
                 this.petPlayNextDogRoundScanAt = Time.unscaledTime + 0.18f;
                 this.petPlayDogAnswerCount++;
                 this.PetPlayLog("Dog QTE answered netId=" + dogNetId + " round=" + round + " action=" + (encourage ? "encourage" : "ignore") + " directNet=" + protocolOk + " " + choiceStatus + ".");
-            }
-        }
-
-        private string FormatCatQteName(int qteValue)
-        {
-            switch (qteValue)
-            {
-                case 0:
-                    return "second";
-                case 1:
-                    return "third";
-                case 2:
-                    return "main";
-                default:
-                    return "type " + qteValue;
             }
         }
 
@@ -3448,41 +3403,6 @@ namespace HeartopiaMod
 
                 status = "AuraMono TableDogLearningMotion motionID=" + motionId + " PreAction=" + preAction;
                 return motionId > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "AuraMono TableDogLearningMotion exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
-        }
-
-        // AuraMono ONLY (EcsClient TableData — managed reflection is dead on this game).
-        private bool TryGetDogLearningPreAction(int learningId, out int preAction, out string status)
-        {
-            return this.TryGetDogLearningPreActionAuraMono(learningId, out preAction, out status);
-        }
-
-        private unsafe bool TryGetDogLearningPreActionAuraMono(int learningId, out int preAction, out string status)
-        {
-            preAction = 0;
-            status = "AuraMono TableDogLearningMotion unavailable.";
-
-            try
-            {
-                if (!this.TryGetAuraMonoDogLearningMotion(learningId, out IntPtr tableObj, out status))
-                {
-                    return false;
-                }
-
-                if (!this.TryGetMonoIntMember(tableObj, "PreAction", out preAction)
-                    && !this.TryGetMonoIntMember(tableObj, "_PreAction", out preAction))
-                {
-                    status = "AuraMono TableDogLearningMotion.PreAction unreadable.";
-                    return false;
-                }
-
-                status = "AuraMono TableDogLearningMotion PreAction=" + preAction;
-                return preAction > 0;
             }
             catch (Exception ex)
             {
@@ -3834,98 +3754,6 @@ namespace HeartopiaMod
             return this.TryGetMonoIntMember(current, memberPath[memberPath.Length - 1], out value);
         }
 
-        private bool TryGetNestedIntMember(object root, out int value, params string[] memberPath)
-        {
-            value = 0;
-            object current = root;
-            if (current == null || memberPath == null || memberPath.Length == 0)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < memberPath.Length; i++)
-            {
-                if (current == null || !this.TryGetObjectMember(current, memberPath[i], out object next) || next == null)
-                {
-                    return false;
-                }
-
-                current = next;
-            }
-
-            try
-            {
-                value = Convert.ToInt32(current);
-                return true;
-            }
-            catch
-            {
-                value = 0;
-                return false;
-            }
-        }
-
-        private bool TryFindDogQteFromVisibleUi(out bool encourage, out string status)
-        {
-            encourage = true;
-            status = "no visible dog action icon";
-
-            int encourageCount = 0;
-            int ignoreCount = 0;
-            string encourageName = string.Empty;
-            string ignoreName = string.Empty;
-
-            try
-            {
-                Image[] images = Resources.FindObjectsOfTypeAll<Image>();
-                for (int i = 0; i < images.Length; i++)
-                {
-                    Image image = images[i];
-                    if (image == null || image.sprite == null || image.gameObject == null || !image.gameObject.activeInHierarchy)
-                    {
-                        continue;
-                    }
-
-                    string name = image.sprite.name ?? string.Empty;
-                    string lower = name.ToLowerInvariant();
-                    if (lower.Contains("dogplay_encourage") || lower.Contains("dog_play_encourage") || lower.Contains("dog_encourage"))
-                    {
-                        encourageCount++;
-                        encourageName = name;
-                        continue;
-                    }
-
-                    if (lower.Contains("dogplay_ignore") || lower.Contains("dog_play_ignore") || lower.Contains("dog_ignore"))
-                    {
-                        ignoreCount++;
-                        ignoreName = name;
-                    }
-                }
-
-                if (encourageCount > 0 && ignoreCount == 0)
-                {
-                    encourage = true;
-                    status = "sprite=" + encourageName + " encourageCount=" + encourageCount;
-                    return true;
-                }
-
-                if (ignoreCount > 0 && encourageCount == 0)
-                {
-                    encourage = false;
-                    status = "sprite=" + ignoreName + " ignoreCount=" + ignoreCount;
-                    return true;
-                }
-
-                status = "visible dog action icons ambiguous encourage=" + encourageCount + " ignore=" + ignoreCount;
-                return false;
-            }
-            catch (Exception ex)
-            {
-                status = "visible dog action scan exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
-        }
-
         private bool TryGetActiveDogPlayRound(out uint dogNetId, out int round, out string status)
         {
             dogNetId = 0U;
@@ -4191,97 +4019,6 @@ namespace HeartopiaMod
             return ok;
         }
 
-        private bool TryFindCatQteFromVisibleUi(out int qteValue, out string spriteName)
-        {
-            qteValue = -1;
-            spriteName = string.Empty;
-
-            Image[] images = Resources.FindObjectsOfTypeAll<Image>();
-            for (int i = 0; i < images.Length; i++)
-            {
-                Image image = images[i];
-                if (image == null || image.sprite == null || image.gameObject == null || !image.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                string name = image.sprite.name ?? string.Empty;
-                string lower = name.ToLowerInvariant();
-                if (lower.Contains("ui_cat_play_up"))
-                {
-                    qteValue = 0;
-                    spriteName = name;
-                    return true;
-                }
-
-                if (lower.Contains("ui_cat_play_down"))
-                {
-                    qteValue = 1;
-                    spriteName = name;
-                    return true;
-                }
-
-                if (lower.Contains("ui_cat_play_shake"))
-                {
-                    qteValue = 2;
-                    spriteName = name;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool IsDogPlayQteVisible()
-        {
-            Image[] images = Resources.FindObjectsOfTypeAll<Image>();
-            for (int i = 0; i < images.Length; i++)
-            {
-                Image image = images[i];
-                if (image == null || image.sprite == null || image.gameObject == null || !image.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                string lower = (image.sprite.name ?? string.Empty).ToLowerInvariant();
-                if (lower.Contains("dogplay_encourage") || lower.Contains("dogplay_ignore"))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool TryGetCurrentTeasePetNetId(out uint netId)
-        {
-            netId = 0U;
-            try
-            {
-                if (!this.TryGetAuraMonoLocalPlayerObject(out IntPtr playerObj) || playerObj == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                if ((!this.TryGetMonoObjectMember(playerObj, "Status", out IntPtr statusObj) && !this.TryGetMonoObjectMember(playerObj, "status", out statusObj)) || statusObj == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                if ((!this.TryGetMonoObjectMember(statusObj, "FsmStatus", out IntPtr fsmStatusObj) && !this.TryGetMonoObjectMember(statusObj, "fsmStatus", out fsmStatusObj)) || fsmStatusObj == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                return this.TryGetMonoUInt32Member(fsmStatusObj, "TeasePetNetId", out netId)
-                    || this.TryGetMonoUInt32Member(fsmStatusObj, "teasePetNetId", out netId);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private bool TryGetAuraMonoCharacterObject(out IntPtr characterObj)
         {
             characterObj = IntPtr.Zero;
@@ -4365,76 +4102,6 @@ namespace HeartopiaMod
             }
 
             return false;
-        }
-
-        private unsafe bool TryInvokeCatLocalQte(int qteValue)
-        {
-            try
-            {
-                if (!this.TryFindAuraMonoPlayerState("PlayerStateTeaseCat", out IntPtr stateObj) || stateObj == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                IntPtr stateClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(stateObj) : IntPtr.Zero;
-                IntPtr method = this.FindAuraMonoMethodOnHierarchy(stateClass, "OnQteEvent", 1);
-                if (method == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                byte qteByte = (byte)Mathf.Clamp(qteValue, 0, 2);
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&qteByte);
-                auraMonoRuntimeInvoke(method, stateObj, (IntPtr)args, ref exc);
-                bool ok = exc == IntPtr.Zero;
-                if (!ok)
-                {
-                    this.PetPlayLog("Cat local QTE failed: exc=0x" + exc.ToInt64().ToString("X"));
-                }
-                return ok;
-            }
-            catch (Exception ex)
-            {
-                this.PetPlayLog("Cat local QTE exception: " + ex.Message);
-                return false;
-            }
-        }
-
-        private unsafe bool TryInvokeDogLocalQte(bool encourage)
-        {
-            try
-            {
-                if (!this.TryFindAuraMonoPlayerState("PlayerStateTeaseDog", out IntPtr stateObj) || stateObj == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                IntPtr stateClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(stateObj) : IntPtr.Zero;
-                IntPtr method = this.FindAuraMonoMethodOnHierarchy(stateClass, encourage ? "OnMainInteraction" : "OnSecondInteraction", 1);
-                if (method == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                bool down = false;
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&down);
-                auraMonoRuntimeInvoke(method, stateObj, (IntPtr)args, ref exc);
-                bool ok = exc == IntPtr.Zero;
-                if (!ok)
-                {
-                    this.PetPlayLog("Dog local QTE failed: exc=0x" + exc.ToInt64().ToString("X"));
-                }
-                return ok;
-            }
-            catch (Exception ex)
-            {
-                this.PetPlayLog("Dog local QTE exception: " + ex.Message);
-                return false;
-            }
         }
 
         private bool EnsureAuraMonoCatTeaseQteMethod(out string status)

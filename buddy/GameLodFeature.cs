@@ -930,28 +930,6 @@ namespace HeartopiaMod
                 + this.gameLodVegetationBaselinePref + " (persisted; restored when the toggle goes off)");
         }
 
-        // Repair hatch, kept but no longer reachable from the UI: the "adopt current" button was
-        // removed because pressing it while our raised value was live re-adopted the mod's own
-        // output as "the game's value" (live log: baseline drifted 30 → 300 → 2000, at which point
-        // the target clamped and the whole setting silently did nothing). Refuses anything outside
-        // the sane game range for the same reason.
-        internal void ResetGameLodVegetationBaseline()
-        {
-            int stored = GameLodVegetationPrefDefault;
-            try { stored = PlayerPrefs.GetInt("PC_LODBIAS", GameLodVegetationPrefDefault); } catch { }
-            if (stored > GameLodVegetationMaxSaneBaseline)
-            {
-                ModLogger.Msg("[GameLod] vegetation: refusing to adopt PC_LODBIAS " + stored
-                    + " as baseline (that is the mod's own raised value, not a game setting)");
-                return;
-            }
-            this.gameLodVegetationBaselinePref = Mathf.Clamp(stored, 1, GameLodVegetationMaxSaneBaseline);
-            this.gameLodVegetationOriginalPref = this.gameLodVegetationBaselinePref;
-            this.gameLodVegetationLastWrittenPref = -1;
-            ModLogger.Msg("[GameLod] vegetation: baseline RESET to live PC_LODBIAS = " + this.gameLodVegetationBaselinePref);
-            try { this.SaveKeybinds(false); } catch { }
-        }
-
         // Direction (proven on the live build, 2026-07-25): PC_LODBIAS is a QUALITY factor, so a
         // HIGHER value holds the high-poly mesh further out.
         //   TreeLoad: num = PC_LODBIAS / 10; lodThreshold[k] /= num

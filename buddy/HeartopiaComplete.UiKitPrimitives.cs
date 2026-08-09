@@ -67,42 +67,9 @@ namespace HeartopiaMod
 
         // ===== Bugtopia 2.0 theme plumbing =====
         // Cached OS font + derived colors + baked textures used by the redesigned chrome.
-        private Font uiThemeFont;
-        private bool uiThemeFontAttempted;
         private bool uiThemeStylesDirty;
         private float uiThemeNextRebuildAt;
         private float uiThemePendingSaveAt = -1f;
-
-
-        private Font EnsureUiThemeFont()
-        {
-            if (this.uiThemeFont != null || this.uiThemeFontAttempted)
-            {
-                return this.uiThemeFont;
-            }
-
-            this.uiThemeFontAttempted = true;
-            string[] candidates = new string[] { "Segoe UI Variable Text", "Segoe UI" };
-            for (int i = 0; i < candidates.Length; i++)
-            {
-                try
-                {
-                    Font font = Font.CreateDynamicFontFromOSFont(candidates[i], 14);
-                    if (font != null)
-                    {
-                        font.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                        this.uiThemeFont = font;
-                        break;
-                    }
-                }
-                catch
-                {
-                    // OS font unavailable — keep IMGUI's built-in font.
-                }
-            }
-
-            return this.uiThemeFont;
-        }
 
 
         // bg3 — control fill one step above the content surface, derived so custom

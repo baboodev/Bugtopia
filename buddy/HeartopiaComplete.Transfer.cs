@@ -368,11 +368,6 @@ namespace HeartopiaMod
             return ModTryUnityBagPanelLooksStaleClosed(bag);
         }
 
-        internal unsafe bool ModTryWarehouseBagOpenForBypass()
-        {
-            return this.ModTryWarehouseBagOpenForBypassCached();
-        }
-
         internal unsafe bool ModTryWarehouseBagOpenForBypassCached()
         {
             if (Time.frameCount == this.warehouseBagOpenBypassCacheFrame)

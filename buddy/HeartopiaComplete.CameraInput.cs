@@ -317,21 +317,6 @@ namespace HeartopiaMod
             }
         }
 
-        public static bool ShouldForceMouseLookButton(int button)
-        {
-            return false;
-        }
-
-        public static bool ShouldForceMouseLookButtonDown(int button)
-        {
-            return false;
-        }
-
-        public static bool ShouldForceMouseLookButtonUp(int button)
-        {
-            return false;
-        }
-
         // How far the axis must have moved behind our back before we treat it as the game's doing
         // rather than smoothing noise. Comfortably above a fast mouse frame's own contribution
         // (which is already folded into the accumulator, so it never shows up here) and well below

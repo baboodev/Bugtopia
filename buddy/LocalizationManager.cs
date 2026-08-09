@@ -127,7 +127,6 @@ namespace HeartopiaMod
             { "Enable Auto Fishing", "Enable Auto Fishing" },
             { "Disable Auto Fishing", "Disable Auto Fishing" },
             { "Equip Axe", "Equip Axe" },
-            { "Auto Pickup Drops", "Auto Pickup Drops" },
             { "Pickup Distance: {0}m", "Pickup Distance: {0}m" },
             { "Hide UI + Player (Client Side)", "Hide UI + Player (Client Side)" },
             { "Hide Jump Button (Space still works)", "Hide Jump Button (Space still works)" },
@@ -1664,7 +1663,6 @@ namespace HeartopiaMod
             { "Prefer rare / uncollected models", "Preferir modelos raros / no coleccionados" },
             { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "Cuando un borrador permite varios modelos, elige el que falte en tu colección 5★ (los más raros primero)." },
             // Backfilled translations
-            { "Auto Pickup Drops", "Auto recoger objetos" },
             { "Pickup Distance: {0}m", "Distancia de recogida: {0}m" },
             { "Use Bait", "Usar cebo" },
             { "Use Attractor", "Usar atrayente" },
@@ -2847,7 +2845,6 @@ namespace HeartopiaMod
             { "Prefer rare / uncollected models", "优先稀有/未收集的模型" },
             { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "当草稿可做出多个模型时，优先选择你5星图鉴中缺失的（稀有优先）。" },
             // Backfilled translations
-            { "Auto Pickup Drops", "自动拾取掉落物" },
             { "Pickup Distance: {0}m", "拾取距离：{0}m" },
             { "Bag automation already running", "背包自动化已在运行" },
             { "Auto Repair: open bag → find {0} → Use → close bag\nAuto Eat: open bag → find {1} → Use → close bag", "自动修理：打开背包 → 找到 {0} → 使用 → 关闭背包\n自动进食：打开背包 → 找到 {1} → 使用 → 关闭背包" },
@@ -4018,7 +4015,6 @@ namespace HeartopiaMod
             { "Prefer rare / uncollected models", "Preferir modelos raros / não coletados" },
             { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "Quando um rascunho permite vários modelos, escolhe o que falta na sua coleção 5★ (mais raros primeiro)." },
             // Backfilled translations
-            { "Auto Pickup Drops", "Coleta automática de itens" },
             { "Pickup Distance: {0}m", "Distância de coleta: {0}m" },
             { "Bird", "Pássaro" },
             { "Birds", "Pássaros" },
@@ -5199,7 +5195,6 @@ namespace HeartopiaMod
             { "Prefer rare / uncollected models", "เลือกแบบหายาก/ยังไม่เก็บก่อน" },
             { "When a draft allows several models, pick the one missing from your 5★ collection (rarest first).", "เมื่อร่างทำได้หลายแบบ ให้เลือกแบบที่ยังไม่มีในคอลเลกชัน 5★ (หายากก่อน)" },
             // Backfilled translations
-            { "Auto Pickup Drops", "เก็บไอเทมที่ตกอัตโนมัติ" },
             { "Pickup Distance: {0}m", "ระยะเก็บ: {0}m" },
             { "Use Bait", "ใช้เหยื่อ" },
             { "Use Attractor", "ใช้ตัวล่อปลา" },

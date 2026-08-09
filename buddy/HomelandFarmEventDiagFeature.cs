@@ -254,11 +254,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryGetHomelandFarmEventBoxWet(uint boxNetId, out bool isWet)
-        {
-            return this.homelandFarmEventBoxWetCache.TryGetValue(boxNetId, out isWet);
-        }
-
         // Dedupe: last logged scalar state per (tag, netId) — a hit only logs when the state string
         // changed since the last logged line for that key (server re-sends identical data often).
         private readonly Dictionary<ulong, string> homelandFarmEventDiagLastLoggedState =

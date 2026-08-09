@@ -361,44 +361,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private object TryGetFieldOrPropertyValue(object obj, params string[] names)
-        {
-            if (obj == null || names == null || names.Length == 0)
-            {
-                return null;
-            }
-
-            try
-            {
-                Type type = obj.GetType();
-                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                foreach (string name in names)
-                {
-                    if (string.IsNullOrEmpty(name))
-                    {
-                        continue;
-                    }
-
-                    FieldInfo field = type.GetField(name, flags);
-                    if (field != null)
-                    {
-                        return field.GetValue(obj);
-                    }
-
-                    PropertyInfo property = type.GetProperty(name, flags);
-                    if (property != null && property.GetIndexParameters().Length == 0)
-                    {
-                        return property.GetValue(obj, null);
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return null;
-        }
-
         private bool TryReadMemberText(Il2CppType ilType, Il2CppObject instance, string memberName, out string value)
         {
             value = string.Empty;
@@ -439,25 +401,6 @@ namespace HeartopiaMod
             }
             catch
             {
-            }
-
-            return false;
-        }
-
-        private bool TryReadAnyIntMember(Il2CppType ilType, Il2CppObject instance, string[] memberNames, out int value)
-        {
-            value = 0;
-            if (memberNames == null)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < memberNames.Length; i++)
-            {
-                if (this.TryReadIntMember(ilType, instance, memberNames[i], out value))
-                {
-                    return true;
-                }
             }
 
             return false;
@@ -506,32 +449,6 @@ namespace HeartopiaMod
             }
 
             return false;
-        }
-
-        private float TryReadSingleMember(object obj, params string[] memberNames)
-        {
-            if (obj == null || memberNames == null)
-            {
-                return 0f;
-            }
-
-            foreach (string memberName in memberNames)
-            {
-                if (!this.TryGetObjectMember(obj, memberName, out object raw) || raw == null)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    return Convert.ToSingle(raw);
-                }
-                catch
-                {
-                }
-            }
-
-            return 0f;
         }
 
         private string TryReadMonoStringMemberOrEmpty(IntPtr obj, string memberName)
@@ -1072,16 +989,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        internal Type ModFindLoadedType(params string[] names) => this.FindLoadedType(names);
-
-        internal Type ModFindLoadedTypeByFullName(string fullName) => this.FindLoadedTypeByFullName(fullName);
-
-        internal bool ModTryGetObjectMember(object instance, string memberName, out object value) =>
-            this.TryGetObjectMember(instance, memberName, out value);
-
-        internal bool ModTrySetObjectMember(object instance, string memberName, object value) =>
-            this.TrySetObjectMember(instance, memberName, value);
-
         private bool TrySetObjectMember(object instance, string memberName, object value)
         {
             if (instance == null)
@@ -1102,45 +1009,6 @@ namespace HeartopiaMod
             {
                 fieldInfo.SetValue(instance, value);
                 return true;
-            }
-
-            return false;
-        }
-
-        private bool TryReadStringMember(Il2CppType ilType, Il2CppObject instance, string memberName, out string value)
-        {
-            value = string.Empty;
-            if (ilType == null || instance == null || string.IsNullOrEmpty(memberName))
-            {
-                return false;
-            }
-
-            try
-            {
-                Il2CppFieldInfo field = ilType.GetField(memberName, (Il2CppBindingFlags)62);
-                object fieldValue = field != null ? field.GetValue(instance) : null;
-                if (fieldValue != null)
-                {
-                    value = fieldValue.ToString();
-                    return !string.IsNullOrWhiteSpace(value);
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                Il2CppPropertyInfo prop = ilType.GetProperty(memberName);
-                object propValue = prop != null ? prop.GetValue(instance) : null;
-                if (propValue != null)
-                {
-                    value = propValue.ToString();
-                    return !string.IsNullOrWhiteSpace(value);
-                }
-            }
-            catch
-            {
             }
 
             return false;
@@ -1437,82 +1305,6 @@ namespace HeartopiaMod
             return unboxed != IntPtr.Zero && Marshal.ReadByte(unboxed) != 0;
         }
 
-        private unsafe int TryReadIl2CppObjectIntField(IntPtr obj, string fieldName)
-        {
-            if (obj == IntPtr.Zero || string.IsNullOrWhiteSpace(fieldName))
-            {
-                return 0;
-            }
-
-            IntPtr klass = IL2CPP.il2cpp_object_get_class(obj);
-            if (klass == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            IntPtr field = IL2CPP.il2cpp_class_get_field_from_name(klass, fieldName);
-            if (field == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            int value = 0;
-            IL2CPP.il2cpp_field_get_value(obj, field, &value);
-            return value;
-        }
-
-        private unsafe int TryReadIl2CppKeyValuePairIntKey(IntPtr pairObj, out IntPtr valueObj)
-        {
-            valueObj = IntPtr.Zero;
-            if (pairObj == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            IntPtr klass = IL2CPP.il2cpp_object_get_class(pairObj);
-            if (klass == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            IntPtr keyField = IL2CPP.il2cpp_class_get_field_from_name(klass, "key");
-            if (keyField == IntPtr.Zero)
-            {
-                keyField = IL2CPP.il2cpp_class_get_field_from_name(klass, "Key");
-            }
-
-            IntPtr valueField = IL2CPP.il2cpp_class_get_field_from_name(klass, "value");
-            if (valueField == IntPtr.Zero)
-            {
-                valueField = IL2CPP.il2cpp_class_get_field_from_name(klass, "Value");
-            }
-
-            int key = 0;
-            if (keyField != IntPtr.Zero)
-            {
-                IntPtr keyObj = IL2CPP.il2cpp_field_get_value_object(keyField, pairObj);
-                if (keyObj != IntPtr.Zero)
-                {
-                    IntPtr unboxed = IL2CPP.il2cpp_object_unbox(keyObj);
-                    if (unboxed != IntPtr.Zero)
-                    {
-                        key = Marshal.ReadInt32(unboxed);
-                    }
-                }
-                else
-                {
-                    IL2CPP.il2cpp_field_get_value(pairObj, keyField, &key);
-                }
-            }
-
-            if (valueField != IntPtr.Zero)
-            {
-                valueObj = IL2CPP.il2cpp_field_get_value_object(valueField, pairObj);
-            }
-
-            return key;
-        }
-
         private unsafe IntPtr TryFindIl2CppClass(string className, params string[] nameSpaces)
         {
             if (string.IsNullOrWhiteSpace(className))
@@ -1653,28 +1445,6 @@ namespace HeartopiaMod
             int value = 0;
             IL2CPP.il2cpp_field_get_value(obj, field, &value);
             return value;
-        }
-
-        private static int ReadIntFieldValue(object instance, string fieldName)
-        {
-            if (instance == null || string.IsNullOrWhiteSpace(fieldName))
-            {
-                return 0;
-            }
-
-            FieldInfo f = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (f == null)
-            {
-                return 0;
-            }
-
-            object v = f.GetValue(instance);
-            if (v == null)
-            {
-                return 0;
-            }
-
-            try { return Convert.ToInt32(v); } catch { return 0; }
         }
 
         private bool TryGetManagedUInt32Member(object obj, string memberName, out uint value)

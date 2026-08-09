@@ -255,19 +255,6 @@ namespace HeartopiaMod
                 "Opened " + label + ".");
         }
 
-        private bool TryOpenResolvedStorePanel(string label, string[] keywords)
-        {
-            if (!this.TryResolveStoreIdByKeywords(keywords, out int storeId, out string matchedName))
-            {
-                this.forceOpenShopStatus = label + " store id not found.";
-                this.LogForceOpenShop(this.forceOpenShopStatus);
-                return false;
-            }
-
-            this.LogForceOpenShop("Resolved " + label + " to storeId=" + storeId + " name='" + matchedName + "'");
-            return this.TryOpenShopPanelByStoreId(storeId, 0, label);
-        }
-
         private bool TryOpenGeneralStore()
         {
             string label = "General Store";
@@ -303,38 +290,6 @@ namespace HeartopiaMod
 
             this.forceOpenShopResolvedStoreIds[label] = storeId;
             this.LogForceOpenShop("Resolved " + label + " to storeId=" + storeId + " name='" + matchedName + "' using Ka Ching/general-store markers.");
-            bool opened = this.TryOpenShopPanelByStoreId(storeId, 0, label);
-            if (opened)
-            {
-                this.forceOpenShopStatus = "Opened " + label + " (storeId " + storeId + ").";
-            }
-            return opened;
-        }
-
-        private bool TryOpenForceShopByResolvedStoreId(string label, string[] keywords)
-        {
-            if (string.IsNullOrWhiteSpace(label))
-            {
-                this.forceOpenShopStatus = "Invalid force-open shop label.";
-                this.LogForceOpenShop(this.forceOpenShopStatus);
-                return false;
-            }
-
-            if (this.forceOpenShopResolvedStoreIds.TryGetValue(label, out int cachedStoreId) && cachedStoreId > 0)
-            {
-                this.LogForceOpenShop("Opening cached " + label + " storeId=" + cachedStoreId);
-                return this.TryOpenShopPanelByStoreId(cachedStoreId, 0, label);
-            }
-
-            if (!this.TryResolveStoreIdByKeywords(keywords, out int storeId, out string matchedName))
-            {
-                this.forceOpenShopStatus = label + " store id not found.";
-                this.LogForceOpenShop(this.forceOpenShopStatus);
-                return false;
-            }
-
-            this.forceOpenShopResolvedStoreIds[label] = storeId;
-            this.LogForceOpenShop("Resolved " + label + " to storeId=" + storeId + " name='" + matchedName + "'");
             bool opened = this.TryOpenShopPanelByStoreId(storeId, 0, label);
             if (opened)
             {
@@ -836,20 +791,6 @@ namespace HeartopiaMod
                 ModLogger.Msg("[ForceOpenShop] " + message);
             }
         }
-
-        // Survivor of the 2026-08-07 auto-buy removal: despite the name this is the shared
-        // shop/dialog logger, still used by the LIVE dialog-option clicker (Interaction.cs), the
-        // cooking-store item clicker (NetCook.cs), the currency check (PeriodCurrency.cs) and the
-        // NPC-approach helpers (Teleport.cs). Its gate, autoBuyLogsEnabled => MasterLogAutoBuy, is
-        // likewise shared. Only the four auto-buy state machines that also used it are gone.
-        private void LogAutoBuy(string message)
-        {
-            if (this.autoBuyLogsEnabled)
-            {
-                ModLogger.Msg("[AutoBuy] " + message);
-            }
-        }
-
 
     }
 }

@@ -135,21 +135,6 @@ namespace HeartopiaMod
             return bag != null && bag.activeInHierarchy;
         }
 
-        private bool IsLikelyBagItemSprite(string spriteName)
-        {
-            if (string.IsNullOrWhiteSpace(spriteName))
-            {
-                return false;
-            }
-
-            return spriteName.StartsWith("ui_item_normal_p_", StringComparison.Ordinal)
-                || spriteName.StartsWith("ui_item_special_p_", StringComparison.Ordinal)
-                || spriteName.StartsWith("p_", StringComparison.Ordinal)
-                || spriteName.Contains("_birdphoto")
-                || spriteName.Contains("_gather_")
-                || spriteName.Contains("_food_");
-        }
-
         private string ResolveBagItemDisplayName(string matchKey, int staticId)
         {
             if (staticId > 0 && this.TryGetResolvedFoodNameFromStaticId(staticId, out string tableName) && !this.IsPoorBagItemDisplayName(tableName, staticId))

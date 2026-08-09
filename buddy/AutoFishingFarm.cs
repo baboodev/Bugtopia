@@ -251,11 +251,9 @@ namespace HeartopiaMod
                 Log("Detect range changed to " + rounded.ToString("F0") + "m");
             }
         }
-        public static float GetInstantCatchSendHz() => instantCatchSendHz;
-        public static void SetInstantCatchSendHz(float value) => instantCatchSendHz = Mathf.Clamp(value, InstantCatchSendHzMin, InstantCatchSendHzMax);
-
         // --- Auto Bait accessors (used by UI + config persistence) ---
         public static bool GetAutoBaitEnabled() => autoBaitEnabled;
+
         public static void SetAutoBaitEnabled(bool value)
         {
             if (autoBaitEnabled == value)
@@ -269,6 +267,7 @@ namespace HeartopiaMod
             nextAutoBaitAt = -999f;
             Log("Auto Bait " + (value ? "enabled" : "disabled") + " choice=" + autoBaitChoice + " max=" + autoBaitMaxCount);
         }
+
         public static int GetAutoBaitChoice() => (int)autoBaitChoice;
         public static void SetAutoBaitChoice(int value) => autoBaitChoice = (AutoBaitChoice)Mathf.Clamp(value, 0, 1);
         public static int GetAutoBaitMaxCount() => autoBaitMaxCount;

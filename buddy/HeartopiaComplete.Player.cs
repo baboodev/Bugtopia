@@ -255,66 +255,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private float GetNearestPlayerDistance()
-        {
-            if (Time.unscaledTime < this.nextNearestPlayerDistanceRefreshAt)
-            {
-                return this.cachedNearestPlayerDistance;
-            }
-
-            if (this.cachedPlayerObject == null || !this.cachedPlayerObject.activeInHierarchy)
-            {
-                this.cachedPlayerObject = GameObject.Find("p_player_skeleton(Clone)");
-                if (this.cachedPlayerObject == null)
-                {
-                    this.cachedNearestPlayerDistance = 999f;
-                    this.nextNearestPlayerDistanceRefreshAt = Time.unscaledTime + 1.5f;
-                    return this.cachedNearestPlayerDistance;
-                }
-            }
-
-            Vector3 myPosition = this.cachedPlayerObject.transform.position;
-            float nearest = 999f;
-
-            GameObject[] allObjects = UnityEngine.Object.FindObjectsOfType<GameObject>();
-            foreach (GameObject obj in allObjects)
-            {
-                if (obj == null) continue;
-
-                // Find other player skeletons (not our own)
-                if (obj.name.Contains("p_player_skeleton") && obj != this.cachedPlayerObject)
-                {
-                    float distance = Vector3.Distance(myPosition, obj.transform.position);
-                    if (distance < nearest)
-                    {
-                        nearest = distance;
-                    }
-                }
-            }
-
-            this.cachedNearestPlayerDistance = nearest;
-            this.nextNearestPlayerDistanceRefreshAt = Time.unscaledTime + 1.5f;
-            return this.cachedNearestPlayerDistance;
-        }
-
-        // Token: 0x06000022 RID: 34 RVA: 0x00006C04 File Offset: 0x00004E04
-        private void SetHomePosition()
-        {
-            GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
-            bool flag = gameObject == null;
-            if (flag)
-            {
-                ModLogger.Msg("Player not found!");
-            }
-            else
-            {
-                this.homePosition = gameObject.transform.position;
-                this.homePositionSet = true;
-                this.autoHomeStatus = "Manual home saved";
-                ModLogger.Msg($"[HOME] Home position set to: {this.homePosition}");
-            }
-        }
-
         private void RefreshAutoHomePosition(bool force = false)
         {
             float unscaledTime = Time.unscaledTime;
@@ -820,8 +760,53 @@ namespace HeartopiaMod
             return false;
         }
 
-        internal bool ModTryGetManagedSelfPlayerObject(out object playerObj, out string source) =>
-            this.TryGetManagedSelfPlayerObject(out playerObj, out source);
+        public static GameObject GetLocalPlayer()
+        {
+            // Quick return if cached and valid
+            try
+            {
+                if (cachedLocalPlayer != null && cachedLocalPlayer.activeInHierarchy)
+                {
+                    return cachedLocalPlayer;
+                }
+            }
+            catch
+            {
+                cachedLocalPlayer = null;
+            }
+
+            // Throttle re-resolves to once per interval REGARDLESS of cache state, so a missing player
+            // (world loading, between worlds, despawned) doesn't hit GameObject.Find every call from
+            // per-frame callers (noclip drive, radar, ESP). A miss returns the (null/stale) cache and
+            // retries at most once per second.
+            if (Time.unscaledTime - lastLocalPlayerCheckTime < LOCAL_PLAYER_CACHE_INTERVAL)
+            {
+                return cachedLocalPlayer;
+            }
+
+            lastLocalPlayerCheckTime = Time.unscaledTime;
+            cachedLocalPlayer = GameObject.Find("p_player_skeleton(Clone)");
+            return cachedLocalPlayer;
+        }
+
+        private GameObject GetPlayer() => GetLocalPlayer();
+
+        private GameObject FindPlayerRoot()
+        {
+            try
+            {
+                GameObject p = GetPlayer();
+                if (p == null) return null;
+                if (p.transform == null) return p;
+                Transform root = p.transform.root;
+                if (root != null && root.gameObject != null) return root.gameObject;
+                return p;
+            }
+            catch
+            {
+                return GetPlayer();
+            }
+        }
 
         // Token: 0x06000026 RID: 38 RVA: 0x00006E94 File Offset: 0x00005094
         private void InspectPlayerComponents()
@@ -868,54 +853,6 @@ namespace HeartopiaMod
                     }
                 }
                 ModLogger.Msg("=== END ===");
-            }
-        }
-
-        public static GameObject GetLocalPlayer()
-        {
-            // Quick return if cached and valid
-            try
-            {
-                if (cachedLocalPlayer != null && cachedLocalPlayer.activeInHierarchy)
-                {
-                    return cachedLocalPlayer;
-                }
-            }
-            catch
-            {
-                cachedLocalPlayer = null;
-            }
-
-            // Throttle re-resolves to once per interval REGARDLESS of cache state, so a missing player
-            // (world loading, between worlds, despawned) doesn't hit GameObject.Find every call from
-            // per-frame callers (noclip drive, radar, ESP). A miss returns the (null/stale) cache and
-            // retries at most once per second.
-            if (Time.unscaledTime - lastLocalPlayerCheckTime < LOCAL_PLAYER_CACHE_INTERVAL)
-            {
-                return cachedLocalPlayer;
-            }
-
-            lastLocalPlayerCheckTime = Time.unscaledTime;
-            cachedLocalPlayer = GameObject.Find("p_player_skeleton(Clone)");
-            return cachedLocalPlayer;
-        }
-
-        private GameObject GetPlayer() => GetLocalPlayer();
-
-        private GameObject FindPlayerRoot()
-        {
-            try
-            {
-                GameObject p = GetPlayer();
-                if (p == null) return null;
-                if (p.transform == null) return p;
-                Transform root = p.transform.root;
-                if (root != null && root.gameObject != null) return root.gameObject;
-                return p;
-            }
-            catch
-            {
-                return GetPlayer();
             }
         }
 

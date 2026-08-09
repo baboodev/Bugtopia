@@ -295,19 +295,5 @@ namespace HeartopiaMod
             mapRevealSetBlockedTrampoline.Invoke(self, isBlocked);
         }
 
-        internal string GetMapRevealStatus()
-        {
-            if (!this.mapRevealBlockedPlayers)
-            {
-                return "off";
-            }
-            if (mapRevealBlockStateTrampoline == null)
-            {
-                return this.mapRevealHookTried ? "unavailable" : "pending";
-            }
-
-            return "on (map+minimap" + (mapRevealSetBlockedTrampoline != null ? "+live" : string.Empty)
-                + ", revealed " + mapRevealMaskedCount + ")";
-        }
     }
 }

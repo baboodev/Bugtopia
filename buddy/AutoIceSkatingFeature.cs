@@ -1013,34 +1013,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private int TryReadCurrentCastNormalActionIdManaged(object skateMode)
-        {
-            if (skateMode == null || this.autoIceSkatingCurrentCastActionField == null)
-            {
-                return 0;
-            }
-
-            object castInfo = this.autoIceSkatingCurrentCastActionField.GetValue(skateMode);
-            if (castInfo == null || this.autoIceSkatingCastNormalActionIdProperty == null)
-            {
-                return 0;
-            }
-
-            int normalActionId = Convert.ToInt32(this.autoIceSkatingCastNormalActionIdProperty.GetValue(castInfo, null));
-            if (normalActionId <= 0 || normalActionId > AutoIceSkatingMaxActionId)
-            {
-                return 0;
-            }
-
-            return this.TryAutoIceSkatingInvokeGetSkateAction(normalActionId) != null ? normalActionId : 0;
-        }
-
-        private unsafe int TryReadAutoIceSkatingAuraCurrentCastNormalActionId(IntPtr skateMode)
-        {
-            this.TryReadAutoIceSkatingAuraCastActionIds(skateMode, out _, out int normalActionId);
-            return normalActionId;
-        }
-
         private bool TryAutoIceSkatingAttemptUltimateTriggerManaged(
             object skateMode,
             int ultimateId,
@@ -1935,16 +1907,6 @@ namespace HeartopiaMod
 
             object row = this.TryAutoIceSkatingInvokeGetSkateAction(actionId);
             return row != null ? actionId : 0;
-        }
-
-        private int TryReadSkateActionId(object config)
-        {
-            if (config == null || this.autoIceSkatingTableSkateActionIdProperty == null)
-            {
-                return 0;
-            }
-
-            return Convert.ToInt32(this.autoIceSkatingTableSkateActionIdProperty.GetValue(config, null));
         }
 
         private object TryAutoIceSkatingInvokeGetSkateAction(int actionId)
@@ -3379,28 +3341,6 @@ namespace HeartopiaMod
             IntPtr exc = IntPtr.Zero;
             IntPtr boxed = auraMonoRuntimeInvoke(getter, skateMode, IntPtr.Zero, ref exc);
             return exc == IntPtr.Zero && this.TryUnboxMonoInt32(boxed, out mode) && mode == AutoIceSkatingSkateModeChallenge;
-        }
-
-        private unsafe int TryReadAutoIceSkatingAuraUltimateActionId(IntPtr skateMode)
-        {
-            if (skateMode == IntPtr.Zero || this.autoIceSkatingAuraGetUltimateSkillMethod == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            IntPtr config = auraMonoRuntimeInvoke(this.autoIceSkatingAuraGetUltimateSkillMethod, skateMode, IntPtr.Zero, ref exc);
-            if (exc != IntPtr.Zero || config == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            if (this.TryGetMonoInt32Member(config, "id", out int id) && id > 0)
-            {
-                return id;
-            }
-
-            return this.TryGetMonoInt32Member(config, "Id", out id) ? id : 0;
         }
 
         private unsafe IntPtr TryAutoIceSkatingAuraGetSkateActionRow(int actionId)

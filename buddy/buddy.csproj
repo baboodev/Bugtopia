@@ -282,7 +282,6 @@
     <Compile Include="DailyClaimsFeature.cs" />
     <Compile Include="BirdPhotoSubmitFeature.cs" />
     <Compile Include="AuraFarm.cs" />
-    <Compile Include="AuraFarm.LootCollect.cs" />
     <Compile Include="AutoFishingFarm.cs" />
     <Compile Include="FishingRouteFeature.cs" />
     <Compile Include="BepInExPlugin.cs" />

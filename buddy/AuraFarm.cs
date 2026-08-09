@@ -121,7 +121,6 @@ namespace HeartopiaMod
         private MethodInfo auraSendAttackTreeMethod;
         private MethodInfo auraSendHitStoneMethod;
         private MethodInfo auraInteractSystemGetInstanceMethod;
-        private MethodInfo auraInteractSystemGetPlayerMethod;
         private FieldInfo auraInteractSystemInstanceField;
         private MethodInfo auraInteractSystemGetTargetListMethod;
         private MethodInfo auraAxeCheckerPhysicalSelectMethod;
@@ -160,7 +159,6 @@ namespace HeartopiaMod
         private PropertyInfo auraInteractSystemFocusLevelObjectsProperty;
         private PropertyInfo auraInteractSystemSelectedProperty;
         private PropertyInfo auraInteractSystemInteractCylinderProperty;
-        private PropertyInfo auraInteractSystemPlayerProperty;
         private FieldInfo auraAxeCheckerInstanceField;
         private PropertyInfo auraAxeCheckerInstanceProperty;
         private FieldInfo auraCylinderCenterField;
@@ -400,28 +398,6 @@ namespace HeartopiaMod
         // still carries the expected parameter count first. Returns true when validation is
         // impossible on this build (missing exports) so working paths are never blocked.
 
-        // Preferred invoke API for new code: explicit success flag + readable error, result is
-        // always Zero on failure. Existing sites reach the same guard via the delegate binding.
-        internal static bool TryAuraInvoke(IntPtr method, IntPtr obj, IntPtr args, out IntPtr result, out string error)
-        {
-            result = IntPtr.Zero;
-            error = null;
-            if (method == IntPtr.Zero || auraMonoRuntimeInvokeRaw == null)
-            {
-                error = "AuraMono invoke unavailable (method or export missing).";
-                return false;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            result = InvokeAuraMonoChecked(method, obj, args, ref exc);
-            if (exc != IntPtr.Zero)
-            {
-                error = "AuraMono invoke of " + auraInvokeLastExceptionSite + " raised " + auraInvokeLastExceptionName + ".";
-                return false;
-            }
-            return true;
-        }
-
         // Cross-frame cache for a MonoObject*: rooted via GC handle when the gchandle exports are
         // available, raw-pointer fallback otherwise (pre-existing behavior), invalidated on world
         // epoch change. Mutable struct — keep instances as fields, never copy into locals to Set/Clear.
@@ -473,7 +449,6 @@ namespace HeartopiaMod
             this.auraTargetInfoByOwnerId.Clear();
             this.auraNextAllowedByOwnerId.Clear();
             this.ArmAuraCollectWait(false);
-            this.ResetAuraLootCollectRuntimeState();
 
             if (enabled)
             {
@@ -524,10 +499,6 @@ namespace HeartopiaMod
 
             this.RunAuraFarmTick();
             this.CleanupAuraCooldownMap(now);
-            // "Auto Pickup Drops" (loot auto-collect) DISABLED 2026-07-09: SendPickLootCommand is rejected by
-            // the server with ErrorCode 3 "Error in uploaded data" after the map-resource rework (stale/wrong
-            // loot netId). UI hidden in HeartopiaComplete.Farm.cs. Re-enable once the netId fix lands.
-            // this.UpdateAuraFarmLootCollect();
         }
 
         private void RunAuraFarmTick()
@@ -907,86 +878,6 @@ namespace HeartopiaMod
             }
 
             return false;
-        }
-
-        private bool IsAuraLocalResourceCooldownActive(Vector3 entityPosition, AuraTargetKind targetKind)
-        {
-            float now = Time.unscaledTime;
-            if (targetKind == AuraTargetKind.Tree || targetKind == AuraTargetKind.Unknown)
-            {
-                if (this.IsAuraCooldownActiveNear(entityPosition, TreePositions, this.treeCooldowns_res, 25f, now)
-                    || this.IsAuraCooldownActiveNear(entityPosition, RareTreePositions, this.rareTreeCooldowns_res, 25f, now)
-                    || this.IsAuraCooldownActiveNear(entityPosition, AppleTreePositions, this.appleTreeCooldowns_res, 25f, now)
-                    || this.IsAuraCooldownActiveNear(entityPosition, OrangeTreePositions, this.orangeTreeCooldowns_res, 25f, now))
-                {
-                    return true;
-                }
-            }
-
-            if (targetKind == AuraTargetKind.Stone || targetKind == AuraTargetKind.Unknown)
-            {
-                if (this.IsAuraCooldownActiveNear(entityPosition, RockPositions, this.rockCooldowns, 25f, now)
-                    || this.IsAuraCooldownActiveNear(entityPosition, OrePositions, this.oreCooldowns, 25f, now))
-                {
-                    return true;
-                }
-            }
-
-            if (targetKind == AuraTargetKind.Bush || targetKind == AuraTargetKind.Unknown)
-            {
-                if (this.IsAuraHorizontalCooldownActiveNear(entityPosition, this.blueberryPositions, this.blueberryCooldowns, 144f, now)
-                    || this.IsAuraHorizontalCooldownActiveNear(entityPosition, this.raspberryPositions, this.raspberryCooldowns, 144f, now))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool IsAuraCooldownActiveNear(Vector3 entityPosition, Vector3[] candidates, Dictionary<int, float> cooldowns, float radiusSqr, float now)
-        {
-            int index = this.FindAuraClosestIndex(entityPosition, candidates, radiusSqr, false);
-            return index >= 0 && cooldowns != null && cooldowns.TryGetValue(index, out float until) && now < until;
-        }
-
-        private bool IsAuraHorizontalCooldownActiveNear(Vector3 entityPosition, Vector3[] candidates, Dictionary<int, float> cooldowns, float radiusSqr, float now)
-        {
-            int index = this.FindAuraClosestIndex(entityPosition, candidates, radiusSqr, true);
-            return index >= 0 && cooldowns != null && cooldowns.TryGetValue(index, out float until) && now < until;
-        }
-
-        private int FindAuraClosestIndex(Vector3 entityPosition, Vector3[] candidates, float radiusSqr, bool horizontalOnly)
-        {
-            if (candidates == null || candidates.Length == 0)
-            {
-                return -1;
-            }
-
-            int bestIndex = -1;
-            float bestSqr = radiusSqr;
-            for (int i = 0; i < candidates.Length; i++)
-            {
-                float sqr;
-                if (horizontalOnly)
-                {
-                    float dx = candidates[i].x - entityPosition.x;
-                    float dz = candidates[i].z - entityPosition.z;
-                    sqr = dx * dx + dz * dz;
-                }
-                else
-                {
-                    sqr = (candidates[i] - entityPosition).sqrMagnitude;
-                }
-
-                if (sqr < bestSqr)
-                {
-                    bestSqr = sqr;
-                    bestIndex = i;
-                }
-            }
-
-            return bestIndex;
         }
 
         private void StampAuraFallbackNodeCooldown(uint ownerNetId, AuraTargetKind targetKind)
@@ -1583,33 +1474,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool InvokeAuraAttackTree(uint ownerNetId, bool isCombo)
-        {
-            try
-            {
-                if (this.auraMonoSendAttackTreeMethodPtr != IntPtr.Zero && auraMonoRuntimeInvoke != null)
-                {
-                    return this.InvokeAuraMonoAttackTree(ownerNetId, isCombo);
-                }
-
-                if (this.auraSendAttackTreeMethod != null)
-                {
-                    this.auraSendAttackTreeMethod.Invoke(null, new object[] { ownerNetId, isCombo });
-                    return true;
-                }
-            }
-            catch (Exception ex)
-            {
-                this.auraLastError = "SendAttackTreeCommand failed: " + ex.Message;
-                if (AuraFarmDebugLogs)
-                {
-                    ModLogger.Msg("[AuraFarm] " + this.auraLastError);
-                }
-            }
-
-            return false;
-        }
-
         private bool InvokeAuraHitStone(uint ownerNetId, bool isCombo)
         {
             try
@@ -1909,33 +1773,6 @@ namespace HeartopiaMod
             if (exc != IntPtr.Zero)
             {
                 this.auraLastError = "mono SendPickBushCommand exception";
-                return false;
-            }
-
-            return true;
-        }
-
-        private unsafe bool InvokeAuraMonoAttackTree(uint ownerNetId, bool isCombo)
-        {
-            if (this.auraMonoSendAttackTreeMethodPtr == IntPtr.Zero || auraMonoRuntimeInvoke == null)
-            {
-                return false;
-            }
-            if (!this.AttachAuraMonoThread())
-            {
-                return false;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            uint id = ownerNetId;
-            byte combo = isCombo ? (byte)1 : (byte)0;
-            IntPtr* args = stackalloc IntPtr[2];
-            args[0] = (IntPtr)(&id);
-            args[1] = (IntPtr)(&combo);
-            auraMonoRuntimeInvoke(this.auraMonoSendAttackTreeMethodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero)
-            {
-                this.auraLastError = "mono SendAttackTreeCommand exception";
                 return false;
             }
 
@@ -2592,200 +2429,6 @@ namespace HeartopiaMod
                 if (AuraFarmDebugLogs)
                 {
                     ModLogger.Msg("[AuraFarm] SphereQueryEntities failed: " + ex.Message);
-                }
-            }
-        }
-
-        private object GetAuraInteractPlayer(object interactSystem)
-        {
-            if (interactSystem == null)
-            {
-                return null;
-            }
-
-            if (this.auraInteractSystemPlayerProperty != null)
-            {
-                try
-                {
-                    object player = this.auraInteractSystemPlayerProperty.GetValue(interactSystem, null);
-                    if (player != null)
-                    {
-                        return player;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            if (this.auraInteractSystemGetPlayerMethod != null)
-            {
-                try
-                {
-                    return this.auraInteractSystemGetPlayerMethod.Invoke(interactSystem, null);
-                }
-                catch
-                {
-                }
-            }
-
-            return null;
-        }
-
-        private object GetAuraAxeCheckerManagedInstance()
-        {
-            if (this.auraAxeCheckerInstanceProperty != null)
-            {
-                try
-                {
-                    object value = this.auraAxeCheckerInstanceProperty.GetValue(null, null);
-                    if (value != null)
-                    {
-                        return value;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            if (this.auraAxeCheckerInstanceField != null)
-            {
-                try
-                {
-                    object value = this.auraAxeCheckerInstanceField.GetValue(null);
-                    if (value != null)
-                    {
-                        return value;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            if (this.auraAxeCheckerType != null)
-            {
-                try
-                {
-                    return Activator.CreateInstance(this.auraAxeCheckerType);
-                }
-                catch
-                {
-                }
-            }
-
-            return null;
-        }
-
-        private void TryCollectAuraOwnerTargetsViaAxeChecker(object interactSystem, HashSet<uint> output)
-        {
-            if (interactSystem == null || this.auraAxeCheckerPhysicalSelectMethod == null || (this.auraSelectPriorityInfoShapeField == null && this.auraSelectPriorityInfoShapeProperty == null))
-            {
-                if (AuraFarmDebugLogs)
-                {
-                    ModLogger.Msg("[AuraFarm] Managed AxeChecker skipped: interactSystem="
-                        + (interactSystem != null)
-                        + " physicalSelect=" + (this.auraAxeCheckerPhysicalSelectMethod != null)
-                        + " shapeMember=" + (this.auraSelectPriorityInfoShapeField != null || this.auraSelectPriorityInfoShapeProperty != null));
-                }
-                return;
-            }
-
-            object checkerObj = this.GetAuraAxeCheckerManagedInstance();
-            object playerObj = this.GetAuraInteractPlayer(interactSystem);
-            if (checkerObj == null || playerObj == null)
-            {
-                if (AuraFarmDebugLogs)
-                {
-                    ModLogger.Msg("[AuraFarm] Managed AxeChecker skipped: checker=" + (checkerObj != null) + " player=" + (playerObj != null));
-                }
-                return;
-            }
-
-            try
-            {
-                ParameterInfo[] parameters = this.auraAxeCheckerPhysicalSelectMethod.GetParameters();
-                if (parameters == null || parameters.Length != 3)
-                {
-                    return;
-                }
-
-                object selectListObj = Activator.CreateInstance(parameters[2].ParameterType);
-                if (selectListObj == null)
-                {
-                    return;
-                }
-
-                object rawCount = this.auraAxeCheckerPhysicalSelectMethod.Invoke(checkerObj, new object[] { playerObj, null, selectListObj });
-                int count = rawCount is int intCount ? intCount : 0;
-
-                if (AuraFarmDebugLogs)
-                {
-                    ModLogger.Msg("[AuraFarm] Managed AxeChecker PhysicalSelect count=" + count);
-                }
-
-                if (count <= 0)
-                {
-                    return;
-                }
-
-                if (selectListObj is IEnumerable enumerable)
-                {
-                    int index = 0;
-                    foreach (object infoObj in enumerable)
-                    {
-                        if (infoObj == null)
-                        {
-                            index++;
-                            if (index >= count)
-                            {
-                                break;
-                            }
-                            continue;
-                        }
-
-                        object shapeObj = null;
-                        if (this.auraSelectPriorityInfoShapeField != null)
-                        {
-                            shapeObj = this.auraSelectPriorityInfoShapeField.GetValue(infoObj);
-                        }
-                        else if (this.auraSelectPriorityInfoShapeProperty != null)
-                        {
-                            shapeObj = this.auraSelectPriorityInfoShapeProperty.GetValue(infoObj, null);
-                        }
-
-                        if (shapeObj != null)
-                        {
-                            if (this.TryGetAuraLevelObjectNetId(shapeObj, out ulong levelObjectId) && levelObjectId != 0UL)
-                            {
-                                this.RegisterAuraTargetFromLevelObjectId(output, levelObjectId, "ManagedAxeChecker[" + index + "]");
-                            }
-                            else if (this.TryGetAuraLevelObjectOwnerNetId(shapeObj, out uint ownerNetId) && ownerNetId != 0U)
-                            {
-                                this.RegisterAuraOwnerOnlyTarget(output, ownerNetId, "ManagedAxeChecker[" + index + "]:owner");
-                            }
-                        }
-
-                        index++;
-                        if (index >= count || output.Count >= AuraMergedTargetSoftCap)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                if (AuraFarmDebugLogs && output.Count > 0)
-                {
-                    ModLogger.Msg("[AuraFarm] Managed AxeChecker path produced " + output.Count + " targets.");
-                }
-            }
-            catch (Exception ex)
-            {
-                this.auraLastError = "Managed AxeChecker failed: " + ex.Message;
-                if (AuraUseMonoTargetFallbacks)
-                {
-                    this.TryCollectAuraOwnerTargetsViaMonoAxeChecker(interactSystem, output);
                 }
             }
         }
@@ -4992,51 +4635,6 @@ namespace HeartopiaMod
 
 
 
-        private unsafe bool TryConvertMonoBoxedTargetToOwnerId(IntPtr boxed, out uint ownerId)
-        {
-            ownerId = 0U;
-            if (boxed == IntPtr.Zero || auraMonoObjectUnbox == null)
-            {
-                return false;
-            }
-
-            if (auraMonoObjectGetClass != null && auraMonoClassIsValueType != null)
-            {
-                IntPtr klass = auraMonoObjectGetClass(boxed);
-                if (klass == IntPtr.Zero || auraMonoClassIsValueType(klass) == 0)
-                {
-                    return false;
-                }
-            }
-
-            IntPtr raw = auraMonoObjectUnbox(boxed);
-            if (raw == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            uint asUInt = *(uint*)raw;
-            if (asUInt != 0U)
-            {
-                ownerId = asUInt;
-                return true;
-            }
-
-            ulong asUlong = *(ulong*)raw;
-            if (asUlong == 0UL)
-            {
-                return false;
-            }
-
-            if (asUlong <= uint.MaxValue)
-            {
-                ownerId = (uint)asUlong;
-                return true;
-            }
-
-            return this.TryResolveOwnerIdFromLevelObjectIdMono(asUlong, out ownerId);
-        }
-
         private unsafe void TryCollectAuraOwnerTargetsViaMonoFocusLevelObjects(IntPtr interactObj, HashSet<uint> output)
         {
             if (interactObj == IntPtr.Zero || this.auraMonoInteractFocusLevelObjectsFieldPtr == IntPtr.Zero || auraMonoFieldGetValue == null)
@@ -5127,95 +4725,6 @@ namespace HeartopiaMod
             }
 
             this.AddOwnerTargetsFromMonoUInt64Array(arrayObj, output, "Mono _selected.Keys");
-        }
-
-        private unsafe void TryCollectAuraOwnerTargetsViaMonoCollectionField(IntPtr interactObj, IntPtr fieldPtr, HashSet<uint> output)
-        {
-            if (interactObj == IntPtr.Zero || fieldPtr == IntPtr.Zero || auraMonoFieldGetValue == null)
-            {
-                return;
-            }
-
-            IntPtr containerObj = IntPtr.Zero;
-            auraMonoFieldGetValue(interactObj, fieldPtr, (IntPtr)(&containerObj));
-            if (containerObj == IntPtr.Zero)
-            {
-                return;
-            }
-
-            uint direct;
-            if (this.TryConvertMonoBoxedTargetToOwnerId(containerObj, out direct))
-            {
-                output.Add(direct);
-                return;
-            }
-
-            this.TryCollectAuraOwnerTargetsFromMonoEnumerable(containerObj, output);
-        }
-
-        private void TryCollectAuraOwnerTargetsFromMonoEnumerable(IntPtr enumerableObj, HashSet<uint> output)
-        {
-            if (enumerableObj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoClassGetMethodFromName == null || auraMonoRuntimeInvoke == null)
-            {
-                return;
-            }
-
-            IntPtr enumerableClass = auraMonoObjectGetClass(enumerableObj);
-            if (enumerableClass == IntPtr.Zero)
-            {
-                return;
-            }
-
-            IntPtr getEnumeratorMethod = auraMonoClassGetMethodFromName(enumerableClass, "GetEnumerator", 0);
-            if (getEnumeratorMethod == IntPtr.Zero)
-            {
-                return;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            IntPtr enumeratorObj = auraMonoRuntimeInvoke(getEnumeratorMethod, enumerableObj, IntPtr.Zero, ref exc);
-            if (exc != IntPtr.Zero || enumeratorObj == IntPtr.Zero)
-            {
-                return;
-            }
-
-            IntPtr enumeratorClass = auraMonoObjectGetClass(enumeratorObj);
-            if (enumeratorClass == IntPtr.Zero)
-            {
-                return;
-            }
-
-            IntPtr moveNextMethod = auraMonoClassGetMethodFromName(enumeratorClass, "MoveNext", 0);
-            IntPtr getCurrentMethod = auraMonoClassGetMethodFromName(enumeratorClass, "get_Current", 0);
-            if (moveNextMethod == IntPtr.Zero || getCurrentMethod == IntPtr.Zero)
-            {
-                return;
-            }
-
-            for (int i = 0; i < 256; i++)
-            {
-                exc = IntPtr.Zero;
-                IntPtr moveNextRet = auraMonoRuntimeInvoke(moveNextMethod, enumeratorObj, IntPtr.Zero, ref exc);
-                if (exc != IntPtr.Zero || moveNextRet == IntPtr.Zero)
-                {
-                    break;
-                }
-
-                bool hasNext;
-                if (!this.TryUnboxMonoBoolean(moveNextRet, out hasNext) || !hasNext)
-                {
-                    break;
-                }
-
-                exc = IntPtr.Zero;
-                IntPtr currentObj = auraMonoRuntimeInvoke(getCurrentMethod, enumeratorObj, IntPtr.Zero, ref exc);
-                if (exc != IntPtr.Zero || currentObj == IntPtr.Zero)
-                {
-                    continue;
-                }
-
-                this.TryCollectAuraOwnerTargetFromMonoItem(currentObj, output);
-            }
         }
 
         private bool EnsureAuraMonoFocusSetAccessors(IntPtr setObj)
@@ -5345,45 +4854,6 @@ namespace HeartopiaMod
         // so each element can be read directly as an IntPtr via mono_array_addr_with_size. Returns
         // false for value-type arrays (inline structs) where a raw pointer read would be wrong.
 
-
-        private void TryCollectAuraOwnerTargetFromMonoItem(IntPtr itemObj, HashSet<uint> output)
-        {
-            uint ownerId;
-            if (this.TryConvertMonoBoxedTargetToOwnerId(itemObj, out ownerId))
-            {
-                output.Add(ownerId);
-                return;
-            }
-
-            if (auraMonoObjectGetClass == null || auraMonoClassGetMethodFromName == null || auraMonoRuntimeInvoke == null)
-            {
-                return;
-            }
-
-            IntPtr itemClass = auraMonoObjectGetClass(itemObj);
-            if (itemClass == IntPtr.Zero)
-            {
-                return;
-            }
-
-            IntPtr getKeyMethod = auraMonoClassGetMethodFromName(itemClass, "get_Key", 0);
-            if (getKeyMethod == IntPtr.Zero)
-            {
-                return;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            IntPtr keyObj = auraMonoRuntimeInvoke(getKeyMethod, itemObj, IntPtr.Zero, ref exc);
-            if (exc != IntPtr.Zero || keyObj == IntPtr.Zero)
-            {
-                return;
-            }
-
-            if (this.TryConvertMonoBoxedTargetToOwnerId(keyObj, out ownerId))
-            {
-                output.Add(ownerId);
-            }
-        }
 
         private void ResolveAuraFarmRuntimeMethodsViaMono()
         {

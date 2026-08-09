@@ -1679,7 +1679,7 @@ namespace HeartopiaMod
                 {
                     // Hop 1s after the loot actually landed in the backpack (RefreshBackPackEvent);
                     // when no bag refresh was seen this dwell, 1s after the collect confirmation.
-                    // Unrelated bag traffic (Auto Pickup Drops vacuuming, neighbor loot) must not
+                    // Unrelated bag traffic (a neighbour's loot, anything else filling the bag) must not
                     // slide the anchor forever — 3s after the confirm the hop goes regardless.
                     float hopAnchor = Mathf.Max(this.auraCollectNodeConfirmedAt, this.auraCollectLastBackpackAt);
                     if (now - hopAnchor >= 1f || now - this.auraCollectNodeConfirmedAt >= 3f)
@@ -2413,49 +2413,6 @@ namespace HeartopiaMod
             bestLabel = label;
             bestCooldowns = cooldowns;
             bestHideUntil = hideUntil;
-        }
-
-        private bool IsCurrentPriorityNodeNearby(float maxDistance)
-        {
-            if (!this.currentPriorityLocation.HasValue || this.radarContainer == null || Camera.main == null)
-            {
-                return false;
-            }
-
-            string token = this.GetPriorityTokenForLocation(this.currentPriorityLocation.Value);
-            if (string.IsNullOrEmpty(token))
-            {
-                return false;
-            }
-
-            Vector3 playerPos = Camera.main.transform.position;
-            for (int i = 0; i < this.radarContainer.transform.childCount; i++)
-            {
-                Transform child = this.radarContainer.transform.GetChild(i);
-                if (child == null)
-                {
-                    continue;
-                }
-
-                GameObject marker = child.gameObject;
-                string markerLabel = this.GetMarkerCanonicalLabel(marker);
-                if (string.IsNullOrEmpty(markerLabel))
-                {
-                    continue;
-                }
-
-                if (this.IsMarkerOnCooldown(marker))
-                {
-                    continue;
-                }
-
-                if (markerLabel.Contains(token) && Vector3.Distance(playerPos, child.position) <= maxDistance)
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private bool HasAvailablePriorityNodeForLocation(Vector3 location)

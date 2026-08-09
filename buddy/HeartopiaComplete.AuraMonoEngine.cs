@@ -1293,16 +1293,5 @@ namespace HeartopiaMod
             }
         }
 
-        private IntPtr GetAuraMonoArrayObjectItem(IntPtr arrayObj, int index)
-        {
-            if (arrayObj == IntPtr.Zero || auraMonoArrayAddrWithSize == null)
-            {
-                return IntPtr.Zero;
-            }
-
-            IntPtr slot = auraMonoArrayAddrWithSize(arrayObj, IntPtr.Size, (UIntPtr)index);
-            return slot == IntPtr.Zero ? IntPtr.Zero : Marshal.ReadIntPtr(slot);
-        }
-
     }
 }

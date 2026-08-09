@@ -236,7 +236,6 @@ namespace HeartopiaMod
         private readonly string[] autoEatFoodKeys = { "food_badfood", "food_bluejam", "food_mixjam", "food_bakemushroom", "food_", "food_custom" };
         private string autoEatCustomFoodName = "";
         private bool customFoodPickMode = false;
-        private string lastClickedBagFood = "";
         private string[] scannedBagFoods = null;
         private Dictionary<string, Texture2D> scannedBagFoodTextures = new Dictionary<string, Texture2D>(); // Cached food textures (copied to survive bag scrolling)
         private readonly Dictionary<string, string> scannedBagFoodDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -370,9 +369,6 @@ namespace HeartopiaMod
         private string lastLoggedAutoRepairNetStatus = string.Empty;
         private float nextLiveDurabilityTriggerAt = 0f;
         private float lastToolDurabilityPollAt = -999f;
-        private float nextAutoRepairPlayerContextProbeAt = -999f;
-        private bool cachedAutoRepairPlayerContextReady = false;
-        private string cachedAutoRepairPlayerContextStatus = "player context unavailable";
         private float nextAutoRepairWorldReadyProbeAt = -999f;
         private bool cachedAutoRepairWorldReady = false;
         private string cachedAutoRepairWorldReadyStatus = "world UI unavailable";
@@ -392,8 +388,6 @@ namespace HeartopiaMod
         private AuraMonoObjectCache cachedAuraMonoBagModuleObj;
         private IntPtr cachedAuraMonoBagExecuteMethod = IntPtr.Zero;
         private float nextAutoEatRepairSlowRuntimeLogAt = 0f;
-        private Component cachedHudDurabilityComponent = null;
-        private float nextHudDurabilitySceneScanAt = 0f;
         private object cachedDirectBackpackSystemObj = null;
         private Type cachedDirectBackpackStorageType = null;
         private MethodInfo cachedDirectBackpackGetAllItemMethod = null;
@@ -1481,78 +1475,6 @@ namespace HeartopiaMod
 
 
 
-        private string GetHudComponentDebugName(Component component)
-        {
-            if (component == null)
-            {
-                return "<null>";
-            }
-
-            try
-            {
-                if (this.TryDescribeDynamicMonoBehaviour(component, out string dynamicDescription) && !string.IsNullOrEmpty(dynamicDescription))
-                {
-                    return dynamicDescription;
-                }
-
-                if (this.TryGetHudDurabilityFromManagedWrapper(component, out _, out _, out string managedTargetName) && !string.IsNullOrEmpty(managedTargetName))
-                {
-                    return (component.GetType().FullName ?? component.GetType().Name ?? "<unknown>") + "->" + managedTargetName;
-                }
-
-                Il2CppObject obj = component.TryCast<Il2CppObject>();
-                Il2CppType componentType = obj?.GetIl2CppType();
-                string baseName = componentType?.FullName?.ToString() ?? componentType?.Name?.ToString() ?? component.GetType().FullName ?? component.GetType().Name ?? "<unknown>";
-                if (this.TryGetHudDurabilityTarget(component, out _, out Il2CppType targetType) && targetType != null)
-                {
-                    string targetName = targetType.FullName?.ToString() ?? targetType.Name?.ToString();
-                    if (!string.IsNullOrEmpty(targetName) && !string.Equals(targetName, baseName, StringComparison.Ordinal))
-                    {
-                        return baseName + "->" + targetName;
-                    }
-                }
-
-                return baseName;
-            }
-            catch
-            {
-                return component.GetType().FullName ?? component.GetType().Name ?? "<unknown>";
-            }
-        }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         // Public helpers for external modules
 
 
@@ -2310,30 +2232,6 @@ namespace HeartopiaMod
 
 
 
-        public static bool IsMenuToggleKey(KeyCode key)
-        {
-            HeartopiaComplete instance = HeartopiaComplete.Instance;
-            return instance != null && key != KeyCode.None && key == instance.keyToggleMenu;
-        }
-
-        public static bool IsMenuToggleKeyName(string keyName)
-        {
-            HeartopiaComplete instance = HeartopiaComplete.Instance;
-            if (instance == null || string.IsNullOrEmpty(keyName) || instance.keyToggleMenu == KeyCode.None)
-            {
-                return false;
-            }
-
-            return string.Equals(keyName.Trim(), instance.keyToggleMenu.ToString(), StringComparison.OrdinalIgnoreCase);
-        }
-
-
-
-
-
-
-
-
         // Refreshes the Transform instance ids the hot-path prefixes compare against. Runs once
         // per frame from OnUpdate; GetLocalPlayer/Camera.main are internally cached, so this is
         // far cheaper than the per-set gameObject.name fetches the prefixes used to do.
@@ -2597,81 +2495,6 @@ namespace HeartopiaMod
 
 
 
-        private bool IsLikelyWorldMiscTarget(GameObject obj)
-        {
-            if (obj == null || !obj.activeInHierarchy)
-            {
-                return false;
-            }
-
-            Renderer r = obj.GetComponent<Renderer>();
-            if (r != null)
-            {
-                return true;
-            }
-
-            return obj.GetComponentInChildren<Renderer>(true) != null;
-        }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         // Token: 0x0600000F RID: 15 RVA: 0x00003A9C File Offset: 0x00001C9C
         private void CleanupExpiredCooldowns()
         {
@@ -2731,50 +2554,6 @@ namespace HeartopiaMod
 
 
         // Advanced Cooking Cleanup (sprite-based)
-
-
-        private void CollectImagesFromPath(string path, List<Image> target)
-        {
-            GameObject root = GameObject.Find(path);
-            if (root == null || !root.activeInHierarchy)
-            {
-                return;
-            }
-
-            Image[] imgs = root.GetComponentsInChildren<Image>(true);
-            if (imgs == null || imgs.Length == 0)
-            {
-                return;
-            }
-
-            for (int i = 0; i < imgs.Length; i++)
-            {
-                Image img = imgs[i];
-                if (img != null)
-                {
-                    target.Add(img);
-                }
-            }
-        }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
         private EventSystem EnsureGameplayEventSystemAvailable()
@@ -3029,22 +2808,6 @@ namespace HeartopiaMod
 
 
 
-
-        private string GetPriorityTokenForLocation(Vector3 loc)
-        {
-            if (loc == this.priorityLocations["Oyster Mushroom"]) return "Oyster";
-            if (loc == this.priorityLocations["Button Mushroom"]) return "Button";
-            if (loc == this.priorityLocations["Penny Bun"]) return "Penny Bun";
-            if (loc == this.priorityLocations["Shiitake"]) return "Shiitake";
-            if (loc == this.priorityLocations["Black Truffle"]) return "Truffle";
-            if (loc == this.priorityLocations["Fiddlehead"]) return "Fiddlehead";
-            if (loc == this.priorityLocations["Tall Mustard"]) return "Tall Mustard";
-            if (loc == this.priorityLocations["Burdock"]) return "Burdock";
-            if (loc == this.priorityLocations["Mustard Greens"]) return "Mustard Greens";
-            if (loc == this.priorityLocations["Blueberry"]) return "Blueberry";
-            if (loc == this.priorityLocations["Raspberry"]) return "Raspberry";
-            return string.Empty;
-        }
 
         private void RefreshActivePriorityLocations()
         {
@@ -3389,7 +3152,6 @@ namespace HeartopiaMod
 
 
 
-        // SalePanel helpers
 
 
 
@@ -3420,18 +3182,6 @@ namespace HeartopiaMod
 
 
 
-
-        private float ExtractCoordinate(string block, string coord)
-        {
-            // Match both "x": value and x: value formats
-            string pattern = $"\"?{coord}\"?:\\s*([+-]?\\d*\\.?\\d+([eE][+-]?\\d+)?)";
-            System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(block, pattern);
-            if (match.Success)
-            {
-                return float.Parse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture);
-            }
-            throw new FormatException($"Could not find \"{coord}\" coordinate in block: {block}");
-        }
 
         // --- AUTO REPAIR METHODS ---
 
@@ -3908,54 +3658,6 @@ namespace HeartopiaMod
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        private bool IsReadableMemoryProtect(uint protect)
-        {
-            return protect == 0x02U || protect == 0x04U || protect == 0x08U || protect == 0x20U || protect == 0x40U;
-        }
 
 
 
@@ -4859,23 +4561,9 @@ namespace HeartopiaMod
         private MethodInfo cachedFishingExitFishingMethod = null;
         private float lastFishingEnterRequestedAt = -999f;
         private float lastFishingExitRequestedAt = -999f;
-        private GameObject cachedPlayerObject = null;
-        private float cachedNearestPlayerDistance = 999f;
-        private float nextNearestPlayerDistanceRefreshAt = 0f;
 
         // Auto Buy fields
-        private bool autoBuyLogsEnabled => MasterLogAutoBuy;
         private bool forceOpenShopLogsEnabled => MasterLogForceOpenShop;
-        // Cached reflection for TryCloseAlertRewardPopupViaTipManager (avoids repeated GetMethods/FindLoadedType per call)
-        private bool tipManagerReflectionInitialized = false;
-        private Type cachedTipManagerType = null;
-        private Type cachedAlertRewardPanelType = null;
-        private PropertyInfo cachedTipInstanceProp = null;
-        private MethodInfo cachedGetTipByTypeMethod = null;
-        private MethodInfo cachedGetTipGenericMethod = null;
-        private MethodInfo cachedCloseTipGenericMethod = null;
-        private MethodInfo cachedAlertPanelClearMethod = null;
-        private FieldInfo cachedTipPanelField = null;
 
         // Auto Buy Store Selection (0=None, 1=Cooking, 2=Birdwatching, 3=Garden, 4=Fishing)
 
@@ -5196,28 +4884,8 @@ namespace HeartopiaMod
         private IntPtr cachedStrangerChatSelfRoomProtocolMethodPtr = IntPtr.Zero;
         private float lastBirdFarmMaxPhotoScareAt = -999f;
         private uint lastBirdFarmMaxPhotoScareNetId = 0U;
-        private Type cachedBirdProtocolManagerRuntimeType = null;
-        private MethodInfo cachedBirdPhotoDirectMethod = null;
         private MethodInfo cachedScannerStatusPanelGetScanningBirdNetIdMethod = null;
         private MethodInfo cachedEntityUtilGetEntityResIdMethod = null;
-        private Type cachedBirdPhotoCommandRuntimeType = null;
-        private object cachedBirdPhotoClientPeerRuntimeObject = null;
-        private MethodInfo cachedBirdPhotoClientPeerSendMethod = null;
-        private MethodInfo cachedBirdPhotoSendCommandMethod = null;
-        private Type cachedBirdPhotoDetailInfoRuntimeType = null;
-        private FieldInfo cachedBirdPhotoDetailInfoRuntimeActionStarField = null;
-        private FieldInfo cachedBirdPhotoDetailInfoRuntimeIsPerfectStarField = null;
-        private FieldInfo cachedBirdPhotoDetailInfoRuntimeIsCoverStarField = null;
-        private FieldInfo cachedBirdPhotoDetailInfoRuntimeActionTypeField = null;
-        private FieldInfo cachedBirdPhotoDetailInfoRuntimeIsUsingZoomField = null;
-        private FieldInfo cachedBirdPhotoDetailInfoRuntimeStandNetIdField = null;
-        private object cachedBirdPhotoReliableChannelValue = null;
-        private string cachedBirdPhotoDirectResolveStatus = "not attempted";
-        private float cachedBirdPhotoDirectResolveNextAttemptAt = -999f;
-        private string cachedBirdPhotoDirectClientResolveStatus = "not attempted";
-        private float cachedBirdPhotoDirectClientNextAttemptAt = -999f;
-        private string cachedBirdPhotoDirectCommandResolveStatus = "not attempted";
-        private float cachedBirdPhotoDirectCommandNextAttemptAt = -999f;
         private IntPtr cachedBirdCamouflageBackpackClass = IntPtr.Zero;
         private IntPtr cachedBirdCamouflageUseMethod = IntPtr.Zero;
         private IntPtr cachedBirdCamouflageCtorMethod = IntPtr.Zero;
@@ -5808,62 +5476,6 @@ namespace HeartopiaMod
 
 
 
-
-
-
-
-
-
-
-
-        private string TryReadUiTextValue(GameObject target)
-        {
-            if (target == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                var text = target.GetComponent<Text>();
-                if (text != null && !string.IsNullOrEmpty(text.text))
-                {
-                    return text.text;
-                }
-
-                foreach (Component comp in target.GetComponents<Component>())
-                {
-                    if (comp == null) continue;
-                    try
-                    {
-                        var ilType = comp.GetIl2CppType();
-                        if (ilType == null) continue;
-                        if (ilType.Name == "XDText")
-                        {
-                            var prop = ilType.GetProperty("text");
-                            if (prop != null)
-                            {
-                                var val = prop.GetValue(comp);
-                                if (val != null)
-                                {
-                                    string s = val.ToString();
-                                    if (!string.IsNullOrEmpty(s))
-                                    {
-                                        return s;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch
-            {
-            }
-
-            return null;
-        }
 
 
 

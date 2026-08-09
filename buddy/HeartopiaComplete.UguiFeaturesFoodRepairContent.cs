@@ -84,7 +84,7 @@ namespace HeartopiaMod
     //    logic is the explicit IMGUI-parity mechanism plus belt-and-braces for a failed blocker.
     //  - Repair pick (:817-822): autoRepairType = i + SaveKeybinds(false), verbatim. Food pick
     //    (:838-858): autoEatFoodType = i FIRST, then the LAST-OPTION CASCADE exactly when
-    //    i == autoEatFoodOptions.Length-1: customFoodPickMode = true; lastClickedBagFood = "";
+    //    i == autoEatFoodOptions.Length-1: customFoodPickMode = true;
     //    OpenInventory() (REAL game-UI call â€” opens the player's bag); the amber (1,0.8,0.4)
     //    L("Custom Food: Scanning your bag...") toast; scannedBagFoods = null;
     //    customFoodScanRetryTime = Time.time + 0.5f. ANY other pick sets customFoodPickMode =
@@ -1131,7 +1131,7 @@ namespace HeartopiaMod
 
         // Gui.cs:838-858 â€” index FIRST, then the last-option cascade / customFoodPickMode reset,
         // SaveKeybinds LAST, all in source order. The cascade fires EXACTLY on the last option
-        // ("Custom Food"): pick mode + lastClickedBagFood reset + OpenInventory() (the REAL game
+        // ("Custom Food"): pick mode + OpenInventory() (the REAL game
         // bag) + the amber scanning toast + scan-state reset + the 0.5s retry arm. Every other
         // pick only clears pick mode. The :841 autoEatFoodDropdownOpen = false write is
         // IMGUI-only visual state, NOT reproduced. The picker's appearance itself is handled by
@@ -1147,7 +1147,9 @@ namespace HeartopiaMod
             if (index == this.autoEatFoodOptions.Length - 1)
             {
                 this.customFoodPickMode = true;
-                this.lastClickedBagFood = "";
+                // (The source also reset lastClickedBagFood here. Its only reader,
+                // CheckForBagFoodClick, was unreachable and was deleted 2026-08-07, so the field
+                // and this write went with it.)
                 this.OpenInventory();
                 this.AddMenuNotification(this.L("Custom Food: Scanning your bag..."), new Color(1f, 0.8f, 0.4f));
                 // Clear any previous scan so it will scan when the bag opens (:849-851).

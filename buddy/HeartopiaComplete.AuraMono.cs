@@ -1258,12 +1258,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryAuraMonoDictionaryGetIntValue(IntPtr dictObj, int key, out IntPtr valueObj)
-        {
-            valueObj = IntPtr.Zero;
-            return dictObj != IntPtr.Zero && key > 0 && this.TryAuraMonoDictionaryContainsIntKey(dictObj, key);
-        }
-
         private bool TryGetAuraMonoDictionaryEntryIntKey(IntPtr entryObj, out int keyInt, out IntPtr valueObj)
         {
             keyInt = 0;

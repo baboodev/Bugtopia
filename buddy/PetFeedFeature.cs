@@ -53,7 +53,6 @@ namespace HeartopiaMod
         private bool petFeedFoodDropdownOpen = false;
         private int petFeedFoodDropdownScrollIndex = 0;
         private string petFeedFoodSearchText = string.Empty;
-        private float petFeedFoodScrollbarDragOffset = 0f;
         private bool petFeedFoodScanInProgress = false;
         private float petFeedNextFoodScanAllowedAt = 0f;
         private float petFeedNextFullBackpackFoodScanAt = 0f;
@@ -62,7 +61,6 @@ namespace HeartopiaMod
         private string petFeedSelectedFoodName = "Any Food";
         private bool petFeedSkipFiveStarFood = true;
         private readonly List<PetFeedTarget> petFeedDetectedPets = new List<PetFeedTarget>();
-        private string petFeedPetListStatus = "Scan pets to list cats and dogs.";
         private readonly List<PetFeedFavoriteUiRow> petFeedFavoriteUiRows = new List<PetFeedFavoriteUiRow>();
         private Vector2 petFeedFavoriteUiScroll = Vector2.zero;
 
@@ -119,8 +117,6 @@ namespace HeartopiaMod
             public int FavoriteGroupId;
             public string PetTextureId;
             public string PetAvatarIconKey;
-            public Texture2D PetTexture;
-            public bool PetTextureLoadAttempted;
         }
 
         private void StartPetFeedAll(bool dog)
@@ -584,160 +580,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryCollectWorldPetFeedTargetsAuraMono(
-            bool dog,
-            List<PetFeedTarget> targets,
-            HashSet<uint> seenPetNetIds,
-            int maxFullness,
-            int entityTypeValue,
-            ref int visibleCount,
-            ref int mineCount,
-            ref int otherCount,
-            ref int unknownOwnerCount,
-            out int added,
-            out string status)
-        {
-            added = 0;
-            status = "world scan unavailable";
-            if (targets == null || seenPetNetIds == null)
-            {
-                status = "world scan target buffers unavailable";
-                return false;
-            }
-
-            try
-            {
-                if (!this.TryGetNetCookScanOrigin(out Vector3 origin, out string originStatus))
-                {
-                    status = "origin unavailable: " + originStatus;
-                    return false;
-                }
-
-                if (!this.TryResolveAuraMonoLevelObjectManager(out IntPtr managerObj, out _, out string managerStatus))
-                {
-                    status = managerStatus;
-                    return false;
-                }
-
-                IntPtr dictionaryObj = IntPtr.Zero;
-                if ((!this.TryGetMonoObjectMember(managerObj, "_dictionary", out dictionaryObj) || dictionaryObj == IntPtr.Zero)
-                    && (!this.TryGetMonoObjectMember(managerObj, "dictionary", out dictionaryObj) || dictionaryObj == IntPtr.Zero))
-                {
-                    status = "level object dictionary unavailable";
-                    return false;
-                }
-
-                List<IntPtr> entries = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(dictionaryObj, entries) || entries.Count <= 0)
-                {
-                    status = "level object dictionary empty";
-                    return false;
-                }
-
-                int nearbyLevelObjects = 0;
-                int ownerResolved = 0;
-                int petComponentResolved = 0;
-                for (int i = 0; i < entries.Count; i++)
-                {
-                    IntPtr entryObj = entries[i];
-                    if (entryObj == IntPtr.Zero)
-                    {
-                        continue;
-                    }
-
-                    IntPtr levelObjectObj = IntPtr.Zero;
-                    if ((!this.TryGetMonoObjectMember(entryObj, "Value", out levelObjectObj) || levelObjectObj == IntPtr.Zero)
-                        && (!this.TryGetMonoObjectMember(entryObj, "value", out levelObjectObj) || levelObjectObj == IntPtr.Zero)
-                        && (!this.TryGetMonoObjectMember(entryObj, "_value", out levelObjectObj) || levelObjectObj == IntPtr.Zero))
-                    {
-                        levelObjectObj = entryObj;
-                    }
-
-                    if (levelObjectObj == IntPtr.Zero)
-                    {
-                        continue;
-                    }
-
-                    if (this.TryGetMonoBoolMember(levelObjectObj, "isActive", out bool isActive) && !isActive)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryExtractHomePositionMonoObject(levelObjectObj, out Vector3 levelObjectPosition))
-                    {
-                        continue;
-                    }
-
-                    float distance = Vector3.Distance(origin, levelObjectPosition);
-                    if (distance > PetFeedWorldScanRadius)
-                    {
-                        continue;
-                    }
-
-                    nearbyLevelObjects++;
-                    ulong levelObjectNetId = 0UL;
-                    if (!this.TryGetMonoUInt64Member(levelObjectObj, "netId", out levelObjectNetId) || levelObjectNetId == 0UL)
-                    {
-                        if (!this.TryGetMonoUInt64Member(entryObj, "Key", out levelObjectNetId)
-                            && !this.TryGetMonoUInt64Member(entryObj, "key", out levelObjectNetId)
-                            && !this.TryGetMonoUInt64Member(entryObj, "_key", out levelObjectNetId))
-                        {
-                            continue;
-                        }
-                    }
-
-                    if (levelObjectNetId == 0UL || !this.TryResolveOwnerIdFromLevelObjectIdMono(levelObjectNetId, out uint ownerNetId) || ownerNetId == 0U)
-                    {
-                        continue;
-                    }
-
-                    ownerResolved++;
-                    if (seenPetNetIds.Contains(ownerNetId))
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryGetAuraMonoEntityObjectByNetId(ownerNetId, out IntPtr entityObj) || entityObj == IntPtr.Zero)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryGetPetFeedTargetFromEntityAuraMono(entityObj, dog, maxFullness, entityTypeValue, out PetFeedTarget target))
-                    {
-                        continue;
-                    }
-
-                    petComponentResolved++;
-                    if (!seenPetNetIds.Add(target.NetId))
-                    {
-                        continue;
-                    }
-
-                    target.Source = "world";
-                    target.IsDog = dog;
-                    visibleCount++;
-                    added++;
-                    this.CountPetFeedOwner(target, ref mineCount, ref otherCount, ref unknownOwnerCount);
-                    if (this.CanAttemptPetFeedTarget(target))
-                    {
-                        targets.Add(target);
-                    }
-                }
-
-                status = "nearbyLevelObjects=" + nearbyLevelObjects
-                    + " owners=" + ownerResolved
-                    + " pets=" + petComponentResolved
-                    + " added=" + added
-                    + " radius=" + PetFeedWorldScanRadius.ToString("F0") + "m";
-                return added > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "world scan exception: " + ex.GetType().Name + ": " + ex.Message;
-                return false;
-            }
-        }
-
         private bool TryGetPetFeedTargetFromEntityAuraMono(IntPtr entityObj, bool dog, int maxFullness, int entityTypeValue, out PetFeedTarget target)
         {
             target = null;
@@ -1169,26 +1011,6 @@ namespace HeartopiaMod
             return tableDataClass;
         }
 
-        private string FormatPetFeedFavoriteDebugSummary()
-        {
-            if (this.petFeedDetectedPets == null || this.petFeedDetectedPets.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            int breedKnown = this.petFeedDetectedPets.Count(pet => pet != null && pet.BreedId > 0);
-            int groupKnown = this.petFeedDetectedPets.Count(pet => pet != null && pet.FavoriteGroupId > 0);
-            string samples = string.Join(",", this.petFeedDetectedPets
-                .Where(pet => pet != null)
-                .Take(3)
-                .Select(pet => (pet.IsDog ? "dog" : "cat") + ":" + pet.NetId
-                    + "/breed=" + pet.BreedId
-                    + "/group=" + pet.FavoriteGroupId
-                    + "/fav=" + (pet.FavoriteFoods != null ? pet.FavoriteFoods.Count : 0)
-                    + "/avatar=" + (string.IsNullOrWhiteSpace(pet.PetAvatarIconKey) ? "none" : pet.PetAvatarIconKey)));
-            return " breedKnown=" + breedKnown + " groupKnown=" + groupKnown + " samples=[" + samples + "]";
-        }
-
         private void TryMergePetFeedPreferenceListsAuraMono(IntPtr obj, ref List<int> favoriteFoods, ref List<int> dislikeFoods)
         {
             if (obj == IntPtr.Zero)
@@ -1421,37 +1243,6 @@ namespace HeartopiaMod
             return staticId > 0 && staticId < 5000000;
         }
 
-        private void RefreshPetFeedPetList()
-        {
-            this.petFeedDetectedPets.Clear();
-
-            int catCount = 0;
-            int dogCount = 0;
-            string catStatus;
-            string dogStatus;
-            bool catOk = this.TryCollectPetFeedPetList(false, this.petFeedDetectedPets, out catCount, out catStatus);
-            bool dogOk = this.TryCollectPetFeedPetList(true, this.petFeedDetectedPets, out dogCount, out dogStatus);
-
-            foreach (PetFeedTarget pet in this.petFeedDetectedPets)
-            {
-                this.TryLoadPetFeedPetTexture(pet);
-            }
-
-            int avatarKnownCount = this.petFeedDetectedPets.Count(pet => pet != null && !string.IsNullOrWhiteSpace(pet.PetAvatarIconKey));
-            int textureKnownCount = this.petFeedDetectedPets.Count(pet => pet != null && pet.PetTexture != null);
-            this.petFeedPetListStatus = "cats=" + catCount + " dogs=" + dogCount;
-            this.PetFeedLog("Pet list scan complete: " + this.petFeedPetListStatus + " avatarKnown=" + avatarKnownCount + " textures=" + textureKnownCount + " catStatus=" + catStatus + " dogStatus=" + dogStatus);
-            if (!catOk && !dogOk)
-            {
-                this.petFeedPetListStatus = "Pet scan failed: cats=" + catStatus + " dogs=" + dogStatus;
-                this.AddMenuNotification("Pet scan failed", new Color(1f, 0.58f, 0.42f));
-            }
-            else
-            {
-                this.AddMenuNotification("Pet scan: " + this.petFeedPetListStatus, new Color(0.45f, 0.88f, 1f));
-            }
-        }
-
         private bool TryCollectPetFeedPetList(bool dog, List<PetFeedTarget> pets, out int count, out string status)
         {
             count = 0;
@@ -1672,39 +1463,6 @@ namespace HeartopiaMod
             }
         }
 
-        private void StartPetFeedSingle(PetFeedTarget pet)
-        {
-            if (pet == null || pet.NetId == 0U)
-            {
-                this.AddMenuNotification("Feed pet: invalid pet", new Color(1f, 0.58f, 0.42f));
-                return;
-            }
-
-            if (!this.TryBuildPetFeedPlan(pet.IsDog, out List<PetFeedTarget> targets, out List<PetFeedFoodSupply> foods, out int visibleCount, out string status))
-            {
-                this.AddMenuNotification("Feed pet: " + status, new Color(1f, 0.58f, 0.42f));
-                this.PetFeedLog("Single feed plan failed netId=" + pet.NetId + ": " + status);
-                return;
-            }
-
-            PetFeedTarget target = targets.FirstOrDefault(candidate => candidate.NetId == pet.NetId);
-            if (target == null)
-            {
-                this.AddMenuNotification("Feed pet: not hungry or not visible", new Color(0.45f, 0.88f, 1f));
-                this.PetFeedLog("Single feed skipped netId=" + pet.NetId + ": not hungry/visible. planVisible=" + visibleCount);
-                return;
-            }
-
-            target.Name = string.IsNullOrWhiteSpace(target.Name) ? pet.Name : target.Name;
-            if ((target.FavoriteFoods == null || target.FavoriteFoods.Count == 0) && pet.FavoriteFoods != null)
-            {
-                target.FavoriteFoods = new List<int>(pet.FavoriteFoods);
-                target.FavoriteSource = pet.FavoriteSource;
-            }
-
-            this.petFeedAllCoroutine = ModCoroutines.Start(this.PetFeedAllRoutine(pet.IsDog, new List<PetFeedTarget> { target }, foods, visibleCount));
-        }
-
         private unsafe bool TryGetPetTextureIdAuraMono(IntPtr petData, out string textureId)
         {
             textureId = string.Empty;
@@ -1735,67 +1493,6 @@ namespace HeartopiaMod
             {
                 return false;
             }
-        }
-
-        private bool TryLoadPetFeedPetTexture(PetFeedTarget pet)
-        {
-            if (pet == null || pet.PetTexture != null)
-            {
-                return pet != null && pet.PetTexture != null;
-            }
-
-            if (pet.PetTextureLoadAttempted)
-            {
-                return false;
-            }
-
-            pet.PetTextureLoadAttempted = true;
-            if (!string.IsNullOrWhiteSpace(pet.PetAvatarIconKey))
-            {
-                List<string> keys = new List<string>
-                {
-                    pet.PetAvatarIconKey,
-                    this.NormalizeRadarIconSpriteKey(pet.PetAvatarIconKey)
-                };
-
-                foreach (string rawKey in keys)
-                {
-                    string key = this.NormalizeRadarIconSpriteKey(rawKey);
-                    if (string.IsNullOrWhiteSpace(key))
-                    {
-                        continue;
-                    }
-
-                    if (this.autoSellBagItemTextures.TryGetValue(key, out Texture2D texture) && texture != null)
-                    {
-                        pet.PetTexture = texture;
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        private string FormatPetFeedFavoriteFoodNames(PetFeedTarget pet)
-        {
-            if (pet == null || pet.FavoriteFoods == null || pet.FavoriteFoods.Count == 0)
-            {
-                return "No known favorite";
-            }
-
-            List<string> names = new List<string>();
-            foreach (int staticId in pet.FavoriteFoods.Take(3))
-            {
-                names.Add(this.GetPetFeedFoodDisplayName(staticId, string.Empty));
-            }
-
-            if (pet.FavoriteFoods.Count > names.Count)
-            {
-                names.Add("+" + (pet.FavoriteFoods.Count - names.Count));
-            }
-
-            return string.Join(", ", names.ToArray());
         }
 
         private void CountPetFeedOwner(PetFeedTarget target, ref int mineCount, ref int otherCount, ref int unknownOwnerCount)
@@ -2087,26 +1784,6 @@ namespace HeartopiaMod
             }
 
             return candidates;
-        }
-
-        private int TryReadPetFeedFoodStarRate(object foodObj)
-        {
-            if (foodObj == null)
-            {
-                return 0;
-            }
-
-            if (this.TryReadIntFromMember(foodObj, "starRate", out int starRate) && starRate > 0)
-            {
-                return starRate;
-            }
-
-            if (this.TryReadIntFromMember(foodObj, "StarRate", out starRate) && starRate > 0)
-            {
-                return starRate;
-            }
-
-            return 0;
         }
 
         private int TryReadPetFeedFoodStarRateAuraMono(IntPtr foodObj)
@@ -2507,17 +2184,6 @@ namespace HeartopiaMod
             }
         }
 
-        private void ScrollPetFeedFoodDropdown(int delta)
-        {
-            if (delta == 0)
-            {
-                return;
-            }
-
-            this.petFeedFoodDropdownScrollIndex += delta;
-            this.ClampPetFeedFoodDropdownScrollIndex();
-        }
-
         private int GetPetFeedFoodDropdownOptionCount()
         {
             if (this.petFeedFoodOptions == null)
@@ -2578,20 +2244,6 @@ namespace HeartopiaMod
             string optionLabel = this.GetPetFeedFoodDisplayName(option.StaticId, option.Name) ?? string.Empty;
             return optionLabel.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
                 || option.StaticId.ToString().IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private void SetPetFeedFoodDropdownScrollIndexFromTrack(float mouseY, Rect scrollTrackRect, float thumbHeight, int optionCount)
-        {
-            int maxScroll = Math.Max(0, optionCount - PetFeedFoodVisibleRows);
-            if (maxScroll <= 0 || scrollTrackRect.height <= thumbHeight)
-            {
-                this.petFeedFoodDropdownScrollIndex = 0;
-                return;
-            }
-
-            float usableHeight = Mathf.Max(1f, scrollTrackRect.height - thumbHeight);
-            float normalized = Mathf.Clamp01((mouseY - scrollTrackRect.y - this.petFeedFoodScrollbarDragOffset) / usableHeight);
-            this.petFeedFoodDropdownScrollIndex = Mathf.Clamp(Mathf.RoundToInt(normalized * maxScroll), 0, maxScroll);
         }
 
         private void ClampPetFeedFoodDropdownScrollIndex()
@@ -2991,108 +2643,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe int SupplementPetFeedFoodSuppliesFromAuraMonoBackpackItems(IntPtr petSystemObj, Dictionary<int, PetFeedFoodSupply> byStaticId)
-        {
-            if (petSystemObj == IntPtr.Zero || byStaticId == null || byStaticId.Count == 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
-            {
-                return 0;
-            }
-
-            try
-            {
-                IntPtr petSystemClass = auraMonoObjectGetClass(petSystemObj);
-                IntPtr getFoodBackpackItemsMethod = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "GetFoodBackpackItems", 0);
-                if (getFoodBackpackItemsMethod == IntPtr.Zero)
-                {
-                    return 0;
-                }
-
-                IntPtr exc = IntPtr.Zero;
-                IntPtr itemsObj = auraMonoRuntimeInvoke(getFoodBackpackItemsMethod, petSystemObj, IntPtr.Zero, ref exc);
-                if (exc != IntPtr.Zero || itemsObj == IntPtr.Zero)
-                {
-                    return 0;
-                }
-
-                List<IntPtr> items = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, items))
-                {
-                    return 0;
-                }
-
-                int named = 0;
-                foreach (IntPtr item in items)
-                {
-                    if (item == IntPtr.Zero || !this.TryGetMonoIntMember(item, "staticId", out int staticId) || staticId <= 0)
-                    {
-                        continue;
-                    }
-
-                    string name = this.ReadPetFeedBackpackItemNameAuraMono(item);
-                    if (!byStaticId.TryGetValue(staticId, out PetFeedFoodSupply supply))
-                    {
-                        int count = this.TryGetMonoIntMember(item, "count", out int itemCount) ? Math.Max(1, itemCount) : 1;
-                        uint netId = this.TryGetMonoUIntMember(item, "netId", out uint itemNetId) ? itemNetId : 0U;
-                        supply = new PetFeedFoodSupply
-                        {
-                            StaticId = staticId,
-                            Count = count,
-                            Fullness = this.TryGetPetFeedFoodFullnessCached(staticId, out int fullness) ? fullness : 1,
-                            NetId = netId,
-                            Name = name,
-                            IsLock = false
-                        };
-                        byStaticId[staticId] = supply;
-                    }
-                    else if (!string.IsNullOrWhiteSpace(name) && (string.IsNullOrWhiteSpace(supply.Name) || int.TryParse(supply.Name, out _)))
-                    {
-                        supply.Name = name;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(name))
-                    {
-                        this.petFeedFoodNameByStaticId[staticId] = name;
-                        named++;
-                    }
-                }
-
-                return named;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private bool MergePetFeedFoodSupply(Dictionary<int, PetFeedFoodSupply> byStaticId, PetFeedFoodSupply food)
-        {
-            if (byStaticId == null || food == null || food.StaticId <= 0 || food.Count <= 0 || food.Fullness <= 0 || food.NetId == 0U || food.IsLock)
-            {
-                return false;
-            }
-
-            if (!byStaticId.TryGetValue(food.StaticId, out PetFeedFoodSupply existing))
-            {
-                byStaticId[food.StaticId] = food;
-                return true;
-            }
-
-            existing.Count = Math.Max(existing.Count, food.Count);
-            if (existing.Fullness <= 0 || food.Fullness < existing.Fullness)
-            {
-                existing.Fullness = food.Fullness;
-            }
-            if (existing.NetId == 0U)
-            {
-                existing.NetId = food.NetId;
-            }
-            if (string.IsNullOrWhiteSpace(existing.Name) && !string.IsNullOrWhiteSpace(food.Name))
-            {
-                existing.Name = food.Name;
-            }
-            return false;
-        }
-
         private void RegisterPetFeedFoodOptionsFromCachedItems()
         {
             Dictionary<int, PetFeedFoodSupply> byStaticId = new Dictionary<int, PetFeedFoodSupply>();
@@ -3332,21 +2882,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryReadPetFeedFoodFullnessFromTableObject(object tableObj, out int fullness)
-        {
-            fullness = 0;
-            foreach (string memberName in new[] { "catFoodFullness", "dogFoodFullness", "foodFullness", "petFoodFullness" })
-            {
-                if (this.TryReadIntListFromMember(tableObj, memberName, out List<int> values) && values != null && values.Count > 0)
-                {
-                    fullness = values.Where(value => value > 0).DefaultIfEmpty(1).Min();
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private bool TryReadPetFeedFoodFullnessFromTableObjectAuraMono(IntPtr tableObj, out int fullness)
         {
             fullness = 0;
@@ -3360,37 +2895,6 @@ namespace HeartopiaMod
             }
 
             return false;
-        }
-
-        private bool TryGetPetFeedFoodSupply(object foodObj, out PetFeedFoodSupply food)
-        {
-            food = null;
-            if (foodObj == null
-                || !this.TryReadUIntFromMember(foodObj, "netId", out uint netId)
-                || !this.TryReadIntFromMember(foodObj, "count", out int count)
-                || !this.TryReadIntFromMember(foodObj, "foodFullness", out int fullness))
-            {
-                return false;
-            }
-
-            this.TryReadIntFromMember(foodObj, "staticId", out int staticId);
-            bool isLock = false;
-            if (this.TryGetObjectMember(foodObj, "isLock", out object lockObj) && lockObj != null)
-            {
-                try { isLock = Convert.ToBoolean(lockObj); } catch { }
-            }
-
-            food = new PetFeedFoodSupply
-            {
-                NetId = netId,
-                Count = count,
-                Fullness = fullness,
-                StaticId = staticId,
-                StarRate = this.TryReadPetFeedFoodStarRate(foodObj),
-                Name = this.ResolvePetFeedFoodName(staticId, foodObj),
-                IsLock = isLock
-            };
-            return true;
         }
 
         private List<PetFeedUsedFood> TakePetFeedFood(List<PetFeedFoodSupply> foods, int neededFullness)
@@ -3758,35 +3262,6 @@ namespace HeartopiaMod
             }
 
             return string.Empty;
-        }
-
-        private bool ObjectMatchesPetFeedStaticId(object obj, int staticId)
-        {
-            if (obj == null || staticId <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (Convert.ToInt32(obj) == staticId)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-
-            foreach (string member in new[] { "id", "_id", "Id", "staticId", "_staticId", "StaticId", "itemId", "_itemId", "ItemId" })
-            {
-                if (this.TryReadIntFromMember(obj, member, out int value) && value == staticId)
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private bool TryReadPetFeedFoodNameFromAuraMonoObject(IntPtr obj, out string name)
@@ -4587,16 +4062,6 @@ namespace HeartopiaMod
 
             this.petFeedAuraSecretDiagnosticLogged = true;
             this.LogPetFeedFavoriteReport(message);
-        }
-
-        private void TryPopulatePetFeedSecretFavorites(PetFeedTarget target)
-        {
-            if (target == null || target.NetId == 0U)
-            {
-                return;
-            }
-
-            this.TryPopulatePetFeedSecretFavoritesAuraMono(target);
         }
 
         private unsafe bool EnsurePetFeedAuraFavoriteMetadataReady()

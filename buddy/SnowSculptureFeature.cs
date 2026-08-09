@@ -2000,22 +2000,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private int TryReadAuraMonoIntFieldOnObject(IntPtr obj, params string[] fieldNames)
-        {
-            if (!this.TryReadAuraMonoObjectField(obj, out IntPtr boxed, fieldNames) || boxed == IntPtr.Zero)
-            {
-                return -1;
-            }
-
-            if (this.TryUnboxMonoInt32(boxed, out int value))
-            {
-                return value;
-            }
-
-            ulong fallback = this.TryReadMonoUnsignedIntegral(boxed);
-            return fallback <= int.MaxValue ? (int)fallback : -1;
-        }
-
         private bool TryGetSnowRatingSingleScore(int ratingId, out int score, out string status)
         {
             score = 0;

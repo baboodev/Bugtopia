@@ -557,30 +557,6 @@ namespace HeartopiaMod
             return string.Equals(label, "Meteor", StringComparison.Ordinal);
         }
 
-        // Only small "gather" collectables have a valid NormalItem icon (p_gather_*/p_fruit_*). Tree/Stone/
-        // Ore entities expose an object prefab that has no item icon -> white circle, so they keep the flag.
-        private static bool IsForageableLabel(string label)
-        {
-            switch (label)
-            {
-                case "Mushroom":
-                case "Oyster":
-                case "Button":
-                case "Penny Bun":
-                case "Shiitake":
-                case "Truffle":
-                case "Fiddlehead":
-                case "Tall Mustard":
-                case "Burdock":
-                case "Mustard Greens":
-                case "Blueberry":
-                case "Raspberry":
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
         // Called when the ESP/Game segmented control changes.
         private void OnRadarDisplayModeChanged()
         {

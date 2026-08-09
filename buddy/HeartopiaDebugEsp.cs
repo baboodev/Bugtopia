@@ -23,12 +23,6 @@ namespace HeartopiaMod
         private bool visualDebugEspOwnerChecked = false;
         private bool visualDebugEspOwnerAllowed = false;
 
-        public static bool IsVisualDebugEspAvailable()
-        {
-            HeartopiaComplete instance = HeartopiaComplete.Instance;
-            return instance != null && instance.IsVisualDebugEspOwnerAllowed();
-        }
-
         public static void DebugEspUpsert(string key, Vector3 position, string label = null, string group = "global", float durationSeconds = 0f)
         {
             DebugEspUpsert(key, position, label, Color.cyan, group, durationSeconds, true);
@@ -61,17 +55,6 @@ namespace HeartopiaMod
             instance.UpsertVisualDebugEspEntry(key, target.transform.position, target, label, color, group, durationSeconds, showDistance);
         }
 
-        public static void DebugEspRemove(string key)
-        {
-            HeartopiaComplete instance = HeartopiaComplete.Instance;
-            if (instance == null || !instance.IsVisualDebugEspOwnerAllowed() || string.IsNullOrWhiteSpace(key))
-            {
-                return;
-            }
-
-            instance.RemoveVisualDebugEspEntry(key);
-        }
-
         public static void DebugEspClearGroup(string group)
         {
             HeartopiaComplete instance = HeartopiaComplete.Instance;
@@ -81,17 +64,6 @@ namespace HeartopiaMod
             }
 
             instance.ClearVisualDebugEspGroup(group);
-        }
-
-        public static void DebugEspClearAll()
-        {
-            HeartopiaComplete instance = HeartopiaComplete.Instance;
-            if (instance == null || !instance.IsVisualDebugEspOwnerAllowed())
-            {
-                return;
-            }
-
-            instance.ClearAllVisualDebugEsp();
         }
 
         private bool IsVisualDebugEspOwnerAllowed()

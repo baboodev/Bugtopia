@@ -105,7 +105,7 @@ namespace HeartopiaMod
         private const float BubbleClaimPendingTtl = 30f;      // drop stale queue entries (queue can take ~38s to drain at cap)
 
         // -- sweep of PRE-EXISTING bubbles (spawned before the detour installed / toggle enabled).
-        // AuraFarm LootCollect pattern: enumerate BubbleComponent objects via AuraMono
+        // AuraMono enumeration pattern: enumerate BubbleComponent objects via AuraMono
         // GetComponents (pinned — sgen moving GC), read entity.netId + entity.position, distance-
         // filter, nearest first, feed the same pending-claim pipeline. NOT the radar bubble scan:
         // its marker ids fall back to synthetic hashes when netId is unresolvable (Radar.cs
@@ -349,7 +349,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            // Nearest first (LootCollect precedent) — the drip limiter serves close bubbles first.
+            // Nearest first — the drip limiter serves close bubbles first.
             this.bubbleSweepCandidateBuffer.Sort((a, b) => a.DistanceSqr.CompareTo(b.DistanceSqr));
 
             int queued = 0;
@@ -412,7 +412,7 @@ namespace HeartopiaMod
         }
 
         // Enumerate live BubbleComponent objects and resolve entity netId + world position.
-        // Pin discipline mirrors TryCollectAuraLootCandidatesAuraMono (moving sgen GC: component
+        // Pin discipline for the moving sgen GC (component
         // list pinned by TryAuraMonoGetComponentObjects, each derived entity pinned across reads).
         private bool TryCollectExistingBubbleCandidates(Vector3 playerPos, float maxDistSqr, List<BubbleSweepCandidate> output)
         {

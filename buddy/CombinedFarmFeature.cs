@@ -460,7 +460,6 @@ namespace HeartopiaMod
         }
 
         // ── Read-only accessors (phase 2 consumes these) ──────────────────────────────────────────
-        public static FarmCensus GetCensus() => census;
         public static bool IsCoordinating => coordinating;
         public static FarmSlice ActiveSlice => activeSlice;
 

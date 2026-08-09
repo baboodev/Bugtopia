@@ -39,9 +39,10 @@ namespace HeartopiaMod
     //    (:117-128) DOES SaveKeybinds(false) on an actual value change (prev-vs-new compare);
     //    the two Runs fields (:130-135, :143-148) deliberately do NOT save — run counts are
     //    ephemeral session values. Verified against the source; no save call added.
-    //  - NO status/log label for the network-sequence part: iceSkatingSequenceLastStatus and
-    //    BuildIceSkatingSequenceUiLogText() are loader-log/internal only — grep confirms zero
-    //    IMGUI draw sites. Failure feedback is the AddMenuNotification toast fired inside
+    //  - NO status/log label for the network-sequence part: iceSkatingSequenceLastStatus is
+    //    loader-log/internal only — grep confirms zero IMGUI draw sites. (Its companion
+    //    BuildIceSkatingSequenceUiLogText was deleted 2026-08-07, unreferenced.) Failure feedback
+    //    is the AddMenuNotification toast fired inside
     //    IceSkatingSequenceFail (:481) — already handled by the shared toast pipeline; nothing
     //    drawn here. Do not add a label the source doesn't have.
     //  - Ultimate-cost slider (:4095-4106): rounds to the NEAREST 50 —

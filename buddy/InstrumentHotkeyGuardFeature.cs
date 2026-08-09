@@ -86,20 +86,6 @@ namespace HeartopiaMod
         private int textInputFocusFrame = -1;
         private bool textInputFocusedCached;
 
-        public static bool IsModHotkeyBlockedByInstrument(KeyCode key)
-        {
-            HeartopiaComplete instance = HeartopiaComplete.Instance;
-            return instance != null && instance.IsInstrumentHotkeyConflict(key);
-        }
-
-        // True when the game has a focused text input field (chat, rename, search, …). Used to
-        // block every mod hotkey except the menu toggle so typed letters don't trigger features.
-        public static bool IsModHotkeyBlockedByTextInput()
-        {
-            HeartopiaComplete instance = HeartopiaComplete.Instance;
-            return instance != null && instance.IsGameTextInputFocused();
-        }
-
         private static bool IsMouseKeyCode(KeyCode key)
         {
             return key >= KeyCode.Mouse0 && key <= KeyCode.Mouse6;

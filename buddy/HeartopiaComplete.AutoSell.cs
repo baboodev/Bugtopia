@@ -49,15 +49,6 @@ namespace HeartopiaMod
         }
 
 
-        private void InvalidateDirectBackpackRuntimeSnapshot()
-        {
-            this.directBackpackRuntimeSnapshotAt = -999f;
-            this.directBackpackRuntimeSnapshotSource = "";
-            this.ClearDirectBackpackRuntimeItems();
-            this.ClearCachedRepairKit();
-            this.ClearCachedFood();
-        }
-
         private bool TryGetDirectBackpackItemCountByNetId(uint targetNetId, out int count, bool forceRefresh = false)
         {
             count = 0;
@@ -3474,58 +3465,6 @@ namespace HeartopiaMod
 
             this.AutoEatRepairLog("[DirectBackpackMono] No protocol fallback for function=" + functionValue);
             return false;
-        }
-
-        private unsafe bool TryInvokeUseBackpackItemProtocol(uint netId)
-        {
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null || auraMonoRuntimeInvoke == null)
-                {
-                    this.AutoEatRepairLog("[DirectBackpackMono] UseBackpackItem protocol unavailable: Mono API not ready.");
-                    return false;
-                }
-
-                int entityType = this.lastDirectBackpackMatchedEntityType;
-                if (entityType == 0)
-                {
-                    this.AutoEatRepairLog("[DirectBackpackMono] UseBackpackItem protocol unavailable: entityType missing for netId=" + netId);
-                    return false;
-                }
-
-                IntPtr dataImage = this.FindAuraMonoImage(new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll" });
-                IntPtr protocolClass = dataImage != IntPtr.Zero ? auraMonoClassFromName(dataImage, "XDTDataAndProtocol.ProtocolService.BackPack", "BackpackProtocolManager") : IntPtr.Zero;
-                if (protocolClass == IntPtr.Zero)
-                {
-                    protocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ProtocolService.BackPack", "BackpackProtocolManager");
-                }
-
-                IntPtr method = protocolClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(protocolClass, "UseBackpackItem", 2) : IntPtr.Zero;
-                this.AutoEatRepairLog("[DirectBackpackMono] UseBackpackItem protocol lookup. class=0x" + protocolClass.ToString("X") + " method=0x" + method.ToString("X") + " entityType=" + entityType + " netId=" + netId);
-                if (method == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                IntPtr* args = stackalloc IntPtr[2];
-                args[0] = (IntPtr)(&entityType);
-                args[1] = (IntPtr)(&netId);
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    this.AutoEatRepairLog("[DirectBackpackMono] UseBackpackItem protocol raised exception.");
-                    return false;
-                }
-
-                this.AutoEatRepairLog("[DirectBackpackMono] UseBackpackItem protocol sent. entityType=" + entityType + " netId=" + netId);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.AutoEatRepairLog("[DirectBackpackMono] UseBackpackItem protocol exception: " + ex.Message);
-                return false;
-            }
         }
 
         private bool TryFindDirectBackpackItemManaged(string itemKey, bool anyFood, out uint netId)
