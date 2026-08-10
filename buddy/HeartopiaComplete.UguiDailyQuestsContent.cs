@@ -13,7 +13,9 @@ namespace HeartopiaMod
     //   1. DailyQuestSubmitFeature.cs:1716-1754 — DrawDailyQuestSubmitControls (busy-gated
     //      Auto Submit button + Skip 5 Star toggle + status);
     //   2. DailyClaimsFeature.cs:74-159        — DrawDailyClaimsControls (the DAILY CLAIMS card:
-    //      8 primary buttons on ONE shared busy gate + status below the card);
+    //      15 primary buttons on ONE shared busy gate + status below the card — 8 originally, plus
+    //      the 2026-08-10 rounds: Festival Challenges | Festival Rewards, Collection Rewards |
+    //      Whalefall Requests, Home Rewards | Dream Rewards, and full-width Event Rewards);
     //   3. BirdPhotoSubmitFeature.cs:558-577   — DrawBirdPhotoSubmitControls (one busy-gated
     //      button + status), then the dispatcher's own +40 gap;
     //   4. HeartopiaComplete.QuestAssistant.cs:1228-1307 — DrawQuestAssistantTab (header, four
@@ -57,12 +59,12 @@ namespace HeartopiaMod
     //    all four button captions, the empty-state hint) is an unlocalized source literal,
     //    kept verbatim. The part-2 inline status "Wild gift claim started." (:143) is also a
     //    raw literal.
-    //  - "CLAIM WILD GIFTS" (:140-144) is DIFFERENT from its 7 card siblings: it does NOT go
+    //  - "CLAIM WILD GIFTS" (:140-144) is DIFFERENT from its 14 card siblings: it does NOT go
     //    through StartDailyClaimsAction — it calls StartWildAnimalClaimAllGifts(silent: false)
     //    directly and writes dailyClaimsLastStatus = "Wild gift claim started." inline. The
-    //    other 7 all wrap their own DailyClaims*Routine() in StartDailyClaimsAction. Reproduced
-    //    one-for-one; all 8 share the card's single 4-way busy gate and the same Primary tier
-    //    (DrawDailyClaimsButton = themePrimaryButtonStyle for all 8).
+    //    other 14 all wrap their own DailyClaims*Routine() in StartDailyClaimsAction. Reproduced
+    //    one-for-one; all 15 share the card's single 4-way busy gate and the same Primary tier
+    //    (DrawDailyClaimsButton = themePrimaryButtonStyle for all of them).
     //  - Skip 5 Star toggle (:1732-1746): flag + SaveKeybinds(false) in try/catch ONLY (no
     //    notification), guarded on actual change (kit checkbox build-fire idiom). DrawSwitchToggle
     //    L()s internally, so the kit checkbox gets this.L(...) once at the call site.
@@ -127,15 +129,19 @@ namespace HeartopiaMod
     // 16..right-edge flush with an 8px gap, i.e. halfW = (panelW-24)/2):
     //   part 1: auto-submit y=8 (240x32 PRIMARY)  (+40)  toggle y=48 (300x28)  (+34)
     //           status1 y=82 (panelW x28)  → returns 118
-    //   part 2: +8 → card y=126 (panelW x216 = 36 header + 4x34 rows + 32 tall Claim All + 12
+    //   part 2: +8 → card y=126 (panelW x352 = 36 header + 8x34 rows + 32 tall Claim All + 12
     //           pad; kit settings-panel chrome carries the L("DAILY CLAIMS") header); buttons
-    //           at card-relative y 36/70/104/138 (28 tall; row 4 = Town Guide | Wild Gifts) and
-    //           172 (Claim All, btnH+4=32 — the source's 4px-taller full-width closer);
-    //           status2 y=348 (panelW x40)  → returns 392
-    //   part 3: bird y=392 (240x32 PRIMARY)  (+40)  status3 y=432 (panelW x28)  → returns 468;
-    //           dispatcher +40 → 508
-    //   part 4: header y=508 (460x24 bold 14)  (+34)  row1 y=542: Dump (8, 200x32) | Window
-    //           (218, 220x32)  (+40)  [row2 y=582: Accept All (8, 180x32) | Submit Ready
+    //           at card-relative y 36/70/104/138/172/206/240/274 (28 tall; row 4 = Town Guide |
+    //           Wild Gifts, row 5 = Festival Challenges | Festival Rewards, row 6 = Collection
+    //           Rewards | Whalefall Requests, row 7 = Home Rewards | Dream Rewards, row 8 =
+    //           full-width Event Rewards) and 308 (Claim All, btnH+4=32 — the source's
+    //           4px-taller full-width closer); status2 y=484 (panelW x40)  → returns 528
+    //           [pre-2026-08-10 the card was x216 with 4 rows and closed at 172; the two rounds
+    //           added 2 rows each, so every anchor from status2 down shifted +136 = 4 rows x 34]
+    //   part 3: bird y=528 (240x32 PRIMARY)  (+40)  status3 y=568 (panelW x28)  → returns 604;
+    //           dispatcher +40 → 644
+    //   part 4: header y=644 (460x24 bold 14)  (+34)  row1 y=678: Dump (8, 200x32) | Window
+    //           (218, 220x32)  (+40)  [row2 y=718: Accept All (8, 180x32) | Submit Ready
     //           (198, 200x32) — conditional, +40 while shown]  status4 (panelW x22)  (+28)
     //           then EITHER the hint (panelW x40, height = y+40) OR the rows (pitch 20/18,
     //           height = final y+20 — DrawQuestAssistantTab:1306; DrawNewFeaturesTab adds 0).
@@ -173,7 +179,7 @@ namespace HeartopiaMod
             public string Status1Shown;
 
             // -------- Part 2: Daily Claims --------
-            public readonly GameObject[] ClaimsButtons = new GameObject[8]; // ONE shared 4-way gate
+            public readonly GameObject[] ClaimsButtons = new GameObject[15]; // ONE shared 4-way gate
             public GameObject Status2Label;
             public string Status2Shown;
 
@@ -213,8 +219,8 @@ namespace HeartopiaMod
 
         // Static y anchors (file header cursor): the Quest Assistant button rows — everything
         // above status4 is built-once fixed.
-        private const float UguiDailyQuestsQaRow1Y = 542f;
-        private const float UguiDailyQuestsQaRow2Y = 582f;
+        private const float UguiDailyQuestsQaRow1Y = 678f;
+        private const float UguiDailyQuestsQaRow2Y = 718f;
 
         // ----------------------------------------------------------------------------------------
         // Busy conditions — the THREE EXACT source expressions (file header). Recomputed on
@@ -328,7 +334,7 @@ namespace HeartopiaMod
             // chrome (Animal Care's card mapping); h = 36 + 4x34 + 32 + 12 = 216 (:94).
             GameObject claimsCard = this.CreateUguiSettingsMainPanel(scrollContent, "ClaimsPanel",
                 this.L("DAILY CLAIMS"));
-            PlaceUguiTopLeft(claimsCard, 8f, 126f, panelW, 216f);
+            PlaceUguiTopLeft(claimsCard, 8f, 126f, panelW, 352f);
 
             // Inner metrics: full-width = innerW inside a 16px margin on BOTH sides, and the
             // half-pairs now share exactly that span with an 8px gutter, so every button in the
@@ -371,10 +377,41 @@ namespace HeartopiaMod
                 this.L("Claim Wild Gifts"), new System.Action(this.OnUguiDailyQuestsClaimWildGiftsClicked));
             PlaceUguiTopLeft(handle.ClaimsButtons[6], 16f + halfW + 8f, 138f, halfW, 28f);
 
+            // Festival round (2026-08-10): the mini-BP challenge/reward sweeps and the pictorial
+            // point track. Same Primary tier and the same single 4-way gate as their eight siblings —
+            // they only add two rows to the card (row pitch 34, so +68 to every anchor below it).
+            handle.ClaimsButtons[7] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimFestivalChallengesButton",
+                this.L("Claim Festival Challenges"), new System.Action(this.OnUguiDailyQuestsClaimFestivalChallengesClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[7], 16f, 172f, halfW, 28f);
+            handle.ClaimsButtons[8] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimFestivalRewardsButton",
+                this.L("Claim Festival Rewards"), new System.Action(this.OnUguiDailyQuestsClaimFestivalRewardsClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[8], 16f + halfW + 8f, 172f, halfW, 28f);
+
+            handle.ClaimsButtons[9] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimCollectionButton",
+                this.L("Claim Collection Rewards"), new System.Action(this.OnUguiDailyQuestsClaimCollectionClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[9], 16f, 206f, halfW, 28f);
+            handle.ClaimsButtons[10] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimWhalefallButton",
+                this.L("Claim Whalefall Requests"), new System.Action(this.OnUguiDailyQuestsClaimWhalefallClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[10], 16f + halfW + 8f, 206f, halfW, 28f);
+
+            // Round 2 (same day): home evaluation, dream targets, and the operation-activity extras
+            // (sticker + badge + activity BP) folded into one Event button. Two more rows → another
+            // +68 on every anchor below the card.
+            handle.ClaimsButtons[11] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimHomeRewardsButton",
+                this.L("Claim Home Rewards"), new System.Action(this.OnUguiDailyQuestsClaimHomeRewardsClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[11], 16f, 240f, halfW, 28f);
+            handle.ClaimsButtons[12] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimDreamRewardsButton",
+                this.L("Claim Dream Rewards"), new System.Action(this.OnUguiDailyQuestsClaimDreamRewardsClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[12], 16f + halfW + 8f, 240f, halfW, 28f);
+
+            handle.ClaimsButtons[13] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimEventRewardsButton",
+                this.L("Claim Event Rewards"), new System.Action(this.OnUguiDailyQuestsClaimEventRewardsClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[13], 16f, 274f, innerW, 28f);
+
             // :147-150 — the full-width closer, btnH+4 = 32 tall (the source's 4px-taller row).
-            handle.ClaimsButtons[7] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimAllDailyButton",
+            handle.ClaimsButtons[14] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimAllDailyButton",
                 this.L("Claim All Daily"), new System.Action(this.OnUguiDailyQuestsClaimAllClicked));
-            PlaceUguiTopLeft(handle.ClaimsButtons[7], 16f, 172f, innerW, 32f);
+            PlaceUguiTopLeft(handle.ClaimsButtons[14], 16f, 308f, innerW, 32f);
 
             bool claimsBusy = this.IsUguiDailyQuestsClaimsBusy();
             for (int i = 0; i < handle.ClaimsButtons.Length; i++)
@@ -387,7 +424,7 @@ namespace HeartopiaMod
             handle.Status2Label = this.CreateUguiLabel(scrollContent, "ClaimsStatus",
                 handle.Status2Shown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.Status2Label);
-            PlaceUguiTopLeft(handle.Status2Label, 8f, 348f, panelW, 40f);
+            PlaceUguiTopLeft(handle.Status2Label, 8f, 484f, panelW, 40f);
 
             // ==================== Part 3 — Bird Photo Submit ====================
 
@@ -395,7 +432,7 @@ namespace HeartopiaMod
             // source order kept).
             handle.BirdPhotoButton = this.CreateUguiPrimaryButton(scrollContent, "BirdPhotoButton",
                 this.L("Submit Bird Photo"), new System.Action(this.OnUguiDailyQuestsBirdPhotoClicked));
-            PlaceUguiTopLeft(handle.BirdPhotoButton, 8f, 392f, 240f, 32f);
+            PlaceUguiTopLeft(handle.BirdPhotoButton, 8f, 528f, 240f, 32f);
             this.SetUguiButtonInteractable(handle.BirdPhotoButton, !this.IsUguiDailyQuestsBirdPhotoBusy());
 
             // :574-576 — status.
@@ -403,7 +440,7 @@ namespace HeartopiaMod
             handle.Status3Label = this.CreateUguiLabel(scrollContent, "BirdPhotoStatus",
                 handle.Status3Shown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.Status3Label);
-            PlaceUguiTopLeft(handle.Status3Label, 8f, 432f, panelW, 28f);
+            PlaceUguiTopLeft(handle.Status3Label, 8f, 568f, panelW, 28f);
 
             // ==================== Part 4 — Quest Assistant ====================
 
@@ -412,7 +449,7 @@ namespace HeartopiaMod
             GameObject qaHeader = this.CreateUguiLabel(scrollContent, "QaHeader",
                 this.L("Quest Assistant"), 14f, headerColor, false);
             this.TrySetUguiLabelBold(qaHeader);
-            PlaceUguiTopLeft(qaHeader, 8f, 508f, 460f, 24f);
+            PlaceUguiTopLeft(qaHeader, 8f, 644f, 460f, 24f);
 
             // Row 1 — the source's own offsets fit the column (file header): :1238-1242 Dump
             // (themePrimaryButtonStyle → Primary, gated on !questAssistantBusy) and :1246-1249
@@ -831,6 +868,43 @@ namespace HeartopiaMod
         {
             this.StartWildAnimalClaimAllGifts(silent: false);
             this.dailyClaimsLastStatus = "Wild gift claim started.";
+        }
+
+        // Festival round — the three new sweeps, wrapped in StartDailyClaimsAction like the six
+        // routine-backed siblings (only Claim Wild Gifts bypasses it).
+        private void OnUguiDailyQuestsClaimFestivalChallengesClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimFestivalChallengesRoutine());
+        }
+
+        private void OnUguiDailyQuestsClaimFestivalRewardsClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimFestivalRewardsRoutine());
+        }
+
+        private void OnUguiDailyQuestsClaimCollectionClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimCollectionRoutine());
+        }
+
+        private void OnUguiDailyQuestsClaimWhalefallClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimWhalefallRequestsRoutine());
+        }
+
+        private void OnUguiDailyQuestsClaimHomeRewardsClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimHomeRewardsRoutine());
+        }
+
+        private void OnUguiDailyQuestsClaimDreamRewardsClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimDreamRewardsRoutine());
+        }
+
+        private void OnUguiDailyQuestsClaimEventRewardsClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimEventRewardsRoutine());
         }
 
         // DailyClaimsFeature.cs:147-150.

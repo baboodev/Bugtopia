@@ -343,7 +343,6 @@ namespace HeartopiaMod
         private bool homelandFarmAuraReflectionReady = false;
         private bool homelandFarmReflectionUnavailable = false;
         private string homelandFarmReflectionUnavailableStatus = string.Empty;
-        private bool homelandFarmInteropAssembliesLoaded = false;
         private const float HomelandFarmInteropLoadRetryIntervalSeconds = 5f;
         private float homelandFarmNextReflectionRetryAt = 0f;
         private bool homelandFarmManagedReflectionUnavailable = false;
@@ -661,7 +660,9 @@ namespace HeartopiaMod
             // throw ReflectionTypeLoadException, so every FindLoadedType miss paid a multi-second
             // full-domain enumeration ("Capture planters" hung ~7s; instant on BepInEx). Marking
             // the flag done keeps callers from retrying; nothing downstream depends on the load.
-            this.homelandFarmInteropAssembliesLoaded = true;
+            // 2026-08-10: the flag itself is gone too — Daily Claims' resolve-probe log line was its
+            // last reader, and that line went with the managed purge. The method stays as an
+            // explicit no-op because ~8 call sites across three files still name it.
         }
 
         private void ClearHomelandFarmReflectionMissCaches()
