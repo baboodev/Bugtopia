@@ -13,12 +13,30 @@ namespace HeartopiaMod
         private const int FlauntActionEventPayloadBytes = 64;
         private const int PlayerStateShowOff = 27;
 
+        // The "Obtained" popup that follows a pickup: AlertRewardPanel, a full-screen mask over a
+        // reward grid ("Tap empty area to close."). Its only trigger is this event, and
+        // UIEventBridge.OnAlertRewards — the ONLY listener — does nothing but
+        // TipDecorator.AlertRewards -> AlertRewardPanel.Open. The rewards themselves were already
+        // granted server-side by the time it fires (OpenGiftAction / PickupOpenGiftAction /
+        // GiftModule / MailSyncSystem all dispatch AlertRewardEvent after the fact), so swallowing
+        // the dispatch removes the panel and nothing else.
+        //
+        // Deliberately NOT hooked one level up at AlertRewardEvent: PetModule (pet-time reward
+        // cache) and the two Monopoly panels listen there and drive real logic off it.
+        //
+        // Gacha keeps its popups — SanrioGachaDirectBuyPanel, GachaDirectBuyPieceWidget,
+        // GachaPoolNoBackDisplayWidget and ToyCapsuleActivityPanel call AlertRewardPanel.Open
+        // directly, bypassing the event.
+        private const string AlertRewardsEventName = "XDTGameSystem.UI.AlertRewardsEvent";
+        private const int AlertRewardsEventPayloadBytes = 0; // one List<> reference — nothing to read
+
         internal static bool MasterLogShowOffBypass = true;
 
         private bool skipShowOffAnimations;
         private bool showOffBypassHooksRegistered;
         private bool showOffBypassFlauntHookInstallLogged;
         private bool showOffBypassFlauntNetIdHookInstallLogged;
+        private bool showOffBypassAlertRewardsHookInstallLogged;
         private bool showOffPollSkipLoggedOnce;
         private float showOffPollSkipAt;
         private float showOffNextFlauntResolveRetryAt;
@@ -30,6 +48,7 @@ namespace HeartopiaMod
             this.EnsureShowOffBypassEventHooks();
             this.SetGameEventHookSuppressForward(FlauntActionEventName, this.skipShowOffAnimations);
             this.SetGameEventHookSuppressForward(FlauntActionWithNetIdEventName, this.skipShowOffAnimations);
+            this.SetGameEventHookSuppressForward(AlertRewardsEventName, this.skipShowOffAnimations);
             this.LogShowOffBypassHookInstallState();
 
             if (this.skipShowOffAnimations)
@@ -48,14 +67,18 @@ namespace HeartopiaMod
             this.showOffBypassHooksRegistered = true;
             if (MasterLogShowOffBypass)
             {
-                ModLogger.Msg("[ShowOffBypass] registering hooks: " + FlauntActionEventName + ", " + FlauntActionWithNetIdEventName);
+                ModLogger.Msg("[ShowOffBypass] registering hooks: " + FlauntActionEventName + ", " + FlauntActionWithNetIdEventName
+                    + ", " + AlertRewardsEventName);
             }
 
             bool flauntOk = this.RegisterGameEventHook(FlauntActionEventName, FlauntActionEventPayloadBytes, this.OnFlauntActionEventHook);
             bool flauntNetIdOk = this.RegisterGameEventHook(FlauntActionWithNetIdEventName, FlauntActionEventPayloadBytes, this.OnFlauntActionWithNetIdEventHook);
+            bool alertRewardsOk = this.RegisterGameEventHook(AlertRewardsEventName, AlertRewardsEventPayloadBytes, this.OnAlertRewardsEventHook);
             if (MasterLogShowOffBypass)
             {
-                ModLogger.Msg("[ShowOffBypass] register result FlauntAction=" + flauntOk + " FlauntActionWithNetId=" + flauntNetIdOk);
+                ModLogger.Msg("[ShowOffBypass] register result FlauntAction=" + flauntOk
+                    + " FlauntActionWithNetId=" + flauntNetIdOk
+                    + " AlertRewards=" + alertRewardsOk);
             }
         }
 
@@ -76,6 +99,12 @@ namespace HeartopiaMod
             {
                 this.showOffBypassFlauntNetIdHookInstallLogged = true;
                 ModLogger.Msg("[ShowOffBypass] hook installed: " + FlauntActionWithNetIdEventName + " suppress=" + this.skipShowOffAnimations);
+            }
+
+            if (!this.showOffBypassAlertRewardsHookInstallLogged && this.IsGameEventHookInstalled(AlertRewardsEventName))
+            {
+                this.showOffBypassAlertRewardsHookInstallLogged = true;
+                ModLogger.Msg("[ShowOffBypass] hook installed: " + AlertRewardsEventName + " suppress=" + this.skipShowOffAnimations);
             }
         }
 
@@ -105,6 +134,18 @@ namespace HeartopiaMod
                 + " staticId=" + staticId
                 + " suppress=" + this.skipShowOffAnimations
                 + " len=" + e.Length);
+        }
+
+        // Payload is a single List<(RewardData, int)> reference — never dereferenced here, so the
+        // snapshot carries nothing and this stays a pure trace of "the Obtained popup was asked for".
+        private void OnAlertRewardsEventHook(GameEventSnapshot e)
+        {
+            if (!MasterLogShowOffBypass)
+            {
+                return;
+            }
+
+            ModLogger.Msg("[ShowOffBypass] AlertRewardsEvent suppress=" + this.skipShowOffAnimations);
         }
 
         private void TryShowOffPollSkipActiveAnimation()
