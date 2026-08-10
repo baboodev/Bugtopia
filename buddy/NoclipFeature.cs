@@ -51,6 +51,25 @@ namespace HeartopiaMod
         private IntPtr noclipAuraEnableInputMethod;
         private bool noclipVehicleJumpInputSuppressed;
 
+        // Server sync while noclip drives a vehicle. ActivateNoclipVehicleDrivingOverride sets
+        // VehicleComponent.ForceDisplacement(true), which parks VehicleComponent.Tick — and with it
+        // SelfVehicleController._TickCharStateCommand -> PostStateCommand, the game's own 20 Hz
+        // VehicleTransform post. Nothing else posts the vehicle position, so without this the server
+        // keeps the pre-noclip position for the whole flight and only catches up in one jump when
+        // the override is released. Same cadence/payload the game uses.
+        private const float NoclipTransformSyncInterval = 0.05f; // VehicleConst.VehicleMotionParam.MovementTickInterval
+        // User switch (Self -> Main, right under Noclip; persisted, default ON). Off = the mod posts
+        // nothing while noclip drives: the vehicle stays where the server last saw it until release,
+        // and the player rides on whatever the game's own poster does.
+        private bool noclipSyncPositionEnabled = true;
+        private float noclipVehicleSyncNextAt;
+        private float noclipPlayerSyncNextAt;
+        private bool noclipVehicleSyncHasLast;
+        private Vector3 noclipVehicleSyncLastPos;
+        private float noclipVehicleSyncLastYaw;
+        private float noclipVehicleSyncLastSpeed;
+        private bool noclipVehicleDrivingOverrideActive;
+
         // Foot noclip hold: the pinned hover position/facing, driven through the game's own
         // PlayerMoveComponent every frame (no Transform setter patch). Seeded from the live
         // player when noclip engages, advanced by input, invalidated on disable / vehicle /
@@ -283,6 +302,7 @@ namespace HeartopiaMod
         private void ClearNoclipVehicleOverride()
         {
             NoclipFeature.OverrideVehiclePosition = false;
+            this.ResetNoclipVehicleSyncState();
 
             this.cachedNoclipVehicleComponentObj.TryGet(out IntPtr vehicleComponentObj);
             this.cachedNoclipVehicleControllerObj.TryGet(out IntPtr vehicleControllerObj);
@@ -300,6 +320,7 @@ namespace HeartopiaMod
         {
             if (this.TryResolveNoclipVehicleContext(out IntPtr vehicleComponentObj, out IntPtr vehicleControllerObj, out Vector3 vehiclePosition))
             {
+                this.ResetNoclipVehicleSyncState();
                 NoclipFeature.OverrideVehiclePosition = true;
                 NoclipFeature.OverrideVehicleTarget = vehiclePosition;
                 this.cachedNoclipVehicleComponentObj.Set(vehicleComponentObj);
@@ -318,7 +339,14 @@ namespace HeartopiaMod
             if (!this.noclipEnabled)
             {
                 this.ClearNoclipVehicleOverride();
-                this.noclipFootHoldValid = false;
+                if (this.noclipFootHoldValid)
+                {
+                    // Release edge of a FOOT hover: post the final resting transform once, the
+                    // player-side counterpart of the vehicle's _ResetSyncData() rebase.
+                    this.noclipFootHoldValid = false;
+                    this.ForceNoclipPlayerTransformSync();
+                }
+
                 return;
             }
 
@@ -348,6 +376,10 @@ namespace HeartopiaMod
                 NoclipFeature.OverrideVehicleTarget = targetPosition;
                 this.ApplyNoclipVehicleWorldPlace(vehicleComponentObj, targetPosition);
                 this.ApplyNoclipMovementFacing(moveDirection, vehicleComponentObj, targetPosition);
+                this.StreamNoclipVehicleTransform(
+                    vehicleComponentObj,
+                    targetPosition,
+                    GetNoclipVehicleSyncSpeed(vehiclePosition, targetPosition));
                 return;
             }
 
@@ -391,6 +423,7 @@ namespace HeartopiaMod
             if (this.TryDrivePlayerNoclipTransformMono(newPosition, this.noclipFootHoldRotation, hasFlatDir, flatDir))
             {
                 this.noclipFootHoldPosition = newPosition;
+                this.StreamNoclipPlayerTransform();
             }
         }
 
@@ -419,8 +452,167 @@ namespace HeartopiaMod
             this.ApplyNoclipMovementFacing(vehicleMoveDirection, vehicleComponentObj, NoclipFeature.OverrideVehicleTarget);
         }
 
+        private void ResetNoclipVehicleSyncState()
+        {
+            this.noclipVehicleSyncNextAt = 0f;
+            this.noclipVehicleSyncHasLast = false;
+        }
+
+        // Horizontal speed reported with the streamed transform. Remote clients feed it into
+        // VehicleLocomotionRemote (_syncSpeed -> currSpeed) and MoveTowards the synced position at
+        // that rate, so posting a flat 0 would leave the vehicle frozen between sync points on other
+        // screens (it only snaps once it drifts a metre out). Capped like the drive speed itself.
+        private static float GetNoclipVehicleSyncSpeed(Vector3 previousPosition, Vector3 targetPosition)
+        {
+            Vector3 delta = targetPosition - previousPosition;
+            float horizontal = new Vector2(delta.x, delta.z).magnitude / Mathf.Max(Time.deltaTime, 0.0001f);
+            return Mathf.Min(horizontal, NoclipFeature.VehicleSpeedCap);
+        }
+
+        // Posts the noclip-driven vehicle transform at the game's own movement tick rate (see the
+        // NoclipTransformSyncInterval note above for why the game's own poster is silent here).
+        private void StreamNoclipVehicleTransform(IntPtr vehicleComponentObj, Vector3 position, float speed)
+        {
+            if (!this.noclipSyncPositionEnabled
+                || vehicleComponentObj == IntPtr.Zero
+                || Time.unscaledTime < this.noclipVehicleSyncNextAt)
+            {
+                return;
+            }
+
+            this.noclipVehicleSyncNextAt = Time.unscaledTime + NoclipTransformSyncInterval;
+
+            if (!this.TryGetMonoObjectMember(vehicleComponentObj, "entity", out IntPtr entityObj)
+                || entityObj == IntPtr.Zero
+                || !this.TryGetMonoUInt32Member(entityObj, "netId", out uint vehicleNetId)
+                || vehicleNetId == 0)
+            {
+                return;
+            }
+
+            // Live rotation, not the last driven facing: idle/vertical-only frames apply no facing,
+            // and posting a 0 yaw there would spin the vehicle on every other client.
+            if (!this.TryGetMonoQuaternionMember(entityObj, "rotation", out Quaternion rotation))
+            {
+                return;
+            }
+
+            float yaw = rotation.eulerAngles.y;
+
+            // Mirrors PostStateCommand's own "only when the state changed" guard, so a stationary
+            // hover costs no packets.
+            if (this.noclipVehicleSyncHasLast
+                && (position - this.noclipVehicleSyncLastPos).sqrMagnitude < 1E-06f
+                && Mathf.Abs(Mathf.DeltaAngle(yaw, this.noclipVehicleSyncLastYaw)) < 0.01f
+                && Mathf.Abs(speed - this.noclipVehicleSyncLastSpeed) < 0.01f)
+            {
+                return;
+            }
+
+            if (!this.TrySendVehicleTransformCommand(vehicleNetId, position, yaw, speed))
+            {
+                return;
+            }
+
+            this.noclipVehicleSyncHasLast = true;
+            this.noclipVehicleSyncLastPos = position;
+            this.noclipVehicleSyncLastYaw = yaw;
+            this.noclipVehicleSyncLastSpeed = speed;
+        }
+
+        // Foot counterpart of StreamNoclipVehicleTransform, on the same 20 Hz contract. The player
+        // path differs from the vehicle one: nothing the hover does parks the game's own poster
+        // (LocalPlayerComponent._TickSendSelfTransform -> BasePlayerComponent.TrySendSelfTransform ->
+        // TransformProtocolManager.PostTransformData), so instead of building a second, competing
+        // sender this drives the game's OWN conditional one. force:false makes it post only when the
+        // transform actually differs from the last posted one, so it costs zero extra packets when
+        // the player tick already sent this frame, and carries the sync when that tick is gated off
+        // (PlayerState.Loading, _movePlatform, a future state that suppresses it).
+        private void StreamNoclipPlayerTransform()
+        {
+            if (!this.noclipSyncPositionEnabled || Time.unscaledTime < this.noclipPlayerSyncNextAt)
+            {
+                return;
+            }
+
+            this.noclipPlayerSyncNextAt = Time.unscaledTime + NoclipTransformSyncInterval;
+            if (!this.cachedNoclipPlayerObj.TryGet(out IntPtr playerObj) || playerObj == IntPtr.Zero)
+            {
+                return;
+            }
+
+            this.TryInvokeNoclipPlayerSendTransform(playerObj, force: false);
+        }
+
+        private void ForceNoclipPlayerTransformSync()
+        {
+            this.noclipPlayerSyncNextAt = 0f;
+            if (this.noclipSyncPositionEnabled
+                && this.cachedNoclipPlayerObj.TryGet(out IntPtr playerObj)
+                && playerObj != IntPtr.Zero)
+            {
+                this.TryInvokeNoclipPlayerSendTransform(playerObj, force: true);
+            }
+        }
+
+        private unsafe bool TryInvokeNoclipPlayerSendTransform(IntPtr playerObj, bool force)
+        {
+            if (playerObj == IntPtr.Zero
+                || !this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoObjectGetClass == null
+                || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr playerClass = auraMonoObjectGetClass(playerObj);
+            IntPtr sendMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "TrySendSelfTransform", 1);
+            if (sendMethod == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            bool forceValue = force;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&forceValue);
+            auraMonoRuntimeInvoke(sendMethod, playerObj, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                // Stale/dead component — same recovery the drive path uses.
+                this.InvalidateNoclipPlayerDriveCache();
+                return false;
+            }
+
+            return true;
+        }
+
+        // SelfVehicleController._TickCharStateCommand advances its next-post time by += 0.05s per
+        // tick, so after a long ForceDisplacement pause it owes hundreds of ticks and then posts
+        // every frame until it catches up. _ResetSyncData() rebases it on Time.time (the same clock
+        // the tick runs on) — exactly what the game does when the controller is constructed.
+        private void TryResetNoclipVehicleControllerSyncTimer(IntPtr vehicleControllerObj)
+        {
+            if (vehicleControllerObj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
+            {
+                return;
+            }
+
+            IntPtr controllerClass = auraMonoObjectGetClass(vehicleControllerObj);
+            IntPtr resetMethod = this.FindAuraMonoMethodOnHierarchy(controllerClass, "_ResetSyncData", 0);
+            if (resetMethod == IntPtr.Zero)
+            {
+                return;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(resetMethod, vehicleControllerObj, IntPtr.Zero, ref exc);
+        }
+
         private void ActivateNoclipVehicleDrivingOverride(IntPtr vehicleComponentObj, IntPtr vehicleControllerObj)
         {
+            this.noclipVehicleDrivingOverrideActive = true;
             this.SetNoclipVehicleJumpInputSuppressed(true);
             this.SetNoclipVehicleForceDisplacement(vehicleComponentObj, true);
             this.TrySetNoclipVehicleControllerStopMove(vehicleControllerObj, true);
@@ -433,6 +625,15 @@ namespace HeartopiaMod
             this.SetNoclipVehicleForceDisplacement(vehicleComponentObj, false);
             this.TrySetNoclipVehicleControllerStopMove(vehicleControllerObj, false);
             this.TryInvokeNoclipVehicleResetVirtualInput(vehicleComponentObj);
+
+            // Release edge only — this method runs every frame while noclip is off, and rebasing the
+            // controller's post timer per frame would turn the game's own 20 Hz sync into one post
+            // per frame for the rest of the drive.
+            if (this.noclipVehicleDrivingOverrideActive)
+            {
+                this.noclipVehicleDrivingOverrideActive = false;
+                this.TryResetNoclipVehicleControllerSyncTimer(vehicleControllerObj);
+            }
         }
 
         private bool TryGetNoclipFlatMoveDirection(Vector3 moveDirection, out Vector3 flatDir)

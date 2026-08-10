@@ -78,7 +78,7 @@ namespace HeartopiaMod
                 }
             }
 
-            this.TryVehicleTeleportSendTransform(vehicleNetId, targetPos, yAxis);
+            this.TrySendVehicleTransformCommand(vehicleNetId, targetPos, yAxis, 0f);
 
             this.vehicleTeleportComponentCache.Set(vehicleComponentObj);
             this.vehicleTeleportControllerCache.Set(vehicleControllerObj);
@@ -228,7 +228,10 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe bool TryVehicleTeleportSendTransform(uint vehicleNetId, Vector3 position, float yAxis)
+        // VehicleProtocolManager.VehicleTransform(netId, pos, yAxis, speed) — the same post the game
+        // makes from SelfVehicleController.PostStateCommand. Shared: the teleport warp sends one
+        // (speed 0), noclip streams them at the movement tick rate (NoclipFeature.cs).
+        private unsafe bool TrySendVehicleTransformCommand(uint vehicleNetId, Vector3 position, float yAxis, float vehicleSpeed)
         {
             if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
             {
@@ -243,7 +246,7 @@ namespace HeartopiaMod
             uint netId = vehicleNetId;
             Vector3 pos = position;
             float axis = yAxis;
-            float speed = 0f;
+            float speed = vehicleSpeed;
             IntPtr exc = IntPtr.Zero;
             IntPtr* args = stackalloc IntPtr[4];
             args[0] = (IntPtr)(&netId);

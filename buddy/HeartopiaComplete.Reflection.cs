@@ -846,6 +846,22 @@ namespace HeartopiaMod
             return true;
         }
 
+        private unsafe bool TryGetMonoQuaternionMember(IntPtr obj, string memberName, out Quaternion value)
+        {
+            value = Quaternion.identity;
+            if (!this.TryGetMonoObjectMember(obj, memberName, out IntPtr boxed) || boxed == IntPtr.Zero || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                return false;
+            }
+            value = *(Quaternion*)raw;
+            return true;
+        }
+
         private bool TryGetMonoUInt32FromObjectMember(IntPtr obj, string objectMemberName, string valueMemberName, out uint value)
         {
             value = 0U;

@@ -140,6 +140,7 @@ namespace HeartopiaMod
             data.autoCleanseCorruptedEnabled = this.autoCleanseCorruptedEnabled;
             data.hideSeaCleanBannerEnabled = this.hideSeaCleanBannerEnabled;
             data.disableOobTeleportEnabled = this.disableOobTeleportEnabled;
+            data.noclipSyncPositionEnabled = this.noclipSyncPositionEnabled;
             data.instantTeleportEnabled = this.instantTeleportEnabled;
             data.instantTeleportWaitFieldLoaded = this.instantTeleportWaitFieldLoaded;
             data.littleWhaleFinderEnabled = this.littleWhaleFinderEnabled;
@@ -392,6 +393,7 @@ namespace HeartopiaMod
             this.autoCleanseCorruptedEnabled = data.autoCleanseCorruptedEnabled;
             this.hideSeaCleanBannerEnabled = data.hideSeaCleanBannerEnabled;
             this.disableOobTeleportEnabled = data.disableOobTeleportEnabled;
+            this.noclipSyncPositionEnabled = data.noclipSyncPositionEnabled;
             this.instantTeleportEnabled = data.instantTeleportEnabled;
             this.instantTeleportWaitFieldLoaded = data.instantTeleportWaitFieldLoaded;
             this.littleWhaleFinderEnabled = data.littleWhaleFinderEnabled;

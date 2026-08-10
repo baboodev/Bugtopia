@@ -70,6 +70,7 @@ namespace HeartopiaMod
             public Toggle CameraToggle;
             public Toggle CrosshairToggle;      // only visible while Camera Toggle is on
             public Toggle NoclipToggle;
+            public Toggle NoclipSyncToggle;     // sits directly under Noclip
             public Toggle DisableOobToggle;
             public Toggle InstantTeleportToggle;
             public Toggle InstantTeleportWaitFieldToggle;
@@ -250,6 +251,9 @@ namespace HeartopiaMod
             handle.NoclipToggle = this.CreateUguiCheckbox(scrollContent, "NoclipToggle",
                 this.L("Noclip"), this.noclipEnabled,
                 new System.Action<bool>(this.OnUguiSelfNoclipToggled));
+            handle.NoclipSyncToggle = this.CreateUguiCheckbox(scrollContent, "NoclipSyncToggle",
+                this.L("Noclip: Sync Position To Server"), this.noclipSyncPositionEnabled,
+                new System.Action<bool>(this.OnUguiSelfNoclipSyncToggled));
             handle.DisableOobToggle = this.CreateUguiCheckbox(scrollContent, "DisableOobToggle",
                 this.L("Disable OOB Teleport"), this.disableOobTeleportEnabled,
                 new System.Action<bool>(this.OnUguiSelfDisableOobToggled));
@@ -399,6 +403,13 @@ namespace HeartopiaMod
             if (handle.NoclipToggle != null)
             {
                 PlaceUguiTopLeft(handle.NoclipToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            // Server-sync switch for the noclip drive: always visible (so it can be set before
+            // engaging noclip), directly under the toggle it belongs to.
+            if (handle.NoclipSyncToggle != null)
+            {
+                PlaceUguiTopLeft(handle.NoclipSyncToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
             // The two noclip sliders belong DIRECTLY under their toggle — they used to be
@@ -602,6 +613,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CameraToggle, this.mouseLookEnabled);
                 this.SyncUguiToggleFromField(handle.CrosshairToggle, this.showMouseLookCrosshair);
                 this.SyncUguiToggleFromField(handle.NoclipToggle, this.noclipEnabled);
+                this.SyncUguiToggleFromField(handle.NoclipSyncToggle, this.noclipSyncPositionEnabled);
                 this.SyncUguiToggleFromField(handle.DisableOobToggle, this.disableOobTeleportEnabled);
                 this.SyncUguiToggleFromField(handle.InstantTeleportToggle, this.instantTeleportEnabled);
                 this.SyncUguiToggleFromField(handle.InstantTeleportWaitFieldToggle, this.instantTeleportWaitFieldLoaded);
@@ -718,6 +730,22 @@ namespace HeartopiaMod
             {
                 this.ClearNoclipVehicleOverride();
             }
+        }
+
+        // Noclip server sync (NoclipFeature.cs). Persisted. ON = the mod posts the driven transform
+        // at the game's own 20 Hz movement tick, so other players/the server follow the flight;
+        // OFF = nothing is posted while noclip drives, and the position lands in one jump on release.
+        private void OnUguiSelfNoclipSyncToggled(bool value)
+        {
+            if (value == this.noclipSyncPositionEnabled)
+            {
+                return;
+            }
+            this.noclipSyncPositionEnabled = value;
+            this.SaveKeybinds(false);
+            this.AddMenuNotification(
+                this.L("Noclip: Sync Position To Server") + " " + (this.noclipSyncPositionEnabled ? "Enabled" : "Disabled"),
+                this.noclipSyncPositionEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
         }
 
         // Disable OOB Teleport (OutOfBoundsGuardFeature). Persisted; the Mono hooks install lazily

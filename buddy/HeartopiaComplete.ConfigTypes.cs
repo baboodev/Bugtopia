@@ -106,6 +106,10 @@ namespace HeartopiaMod
             // (PlayerFishingShipComponent.TryBackToShip / LeaveShipThenTeleportToSafePos).
             // Default false = vanilla: leaving the scene's detect box teleports you to a safe point.
             public bool disableOobTeleportEnabled;
+            // Noclip: stream the driven position to the server at the game's 20 Hz movement tick
+            // instead of letting it land in one jump on release. Default true; old configs lacking
+            // the element keep this initializer.
+            public bool noclipSyncPositionEnabled = true;
             // Instant Teleport: refuse the game's animated transfer command and warp directly.
             // The wait-for-field companion defaults to ON (old configs keep the initializer).
             public bool instantTeleportEnabled;

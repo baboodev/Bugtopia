@@ -140,10 +140,26 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 
 ### Noclip
 
-- Enables `OverridePlayerPosition` via Harmony-patched `CharacterController.Move`.
+- On foot: drives the game's own `PlayerMoveComponent` every frame through AuraMono (no Harmony
+  patch — see [TECHNICAL.md](TECHNICAL.md) "anti-cheat surface cleanup"); `entity.position` feeds
+  `TrySendSelfTransform`, so the server sees it like normal movement.
 - Movement: WASD, Space/Ctrl vertical, Shift = speed boost multiplier.
 - Speed and boost configurable; persisted in config.
 - Blocks normal character controller motion while active.
+- **Sync Position To Server** (toggle directly under Noclip, persisted, default **on**) — posts the
+  driven transform at the game's own 20 Hz movement tick (`VehicleConst.VehicleMotionParam.MovementTickInterval`)
+  so the server and other players follow the flight instead of seeing it land in one jump:
+  - *vehicle*: the hold is `VehicleComponent.ForceDisplacement(true)` + `stopMove`, which also parks
+    the game's own poster (`SelfVehicleController.PostStateCommand`), so the mod posts
+    `VehicleProtocolManager.VehicleTransform` itself, with the live yaw and the real horizontal speed
+    (remote clients interpolate at that speed). Vehicle drive speed stays capped at
+    `MovementAntiCheating.SpeedThresholdOnVehicle` (9).
+  - *on foot*: nothing parks the game's poster, so the mod drives the game's **own** conditional
+    sender (`BasePlayerComponent.TrySendSelfTransform(false)`) — it posts only on a real change, so
+    there are no duplicate packets when the player tick already sent this frame, plus one forced post
+    on release. Note the server's on-foot threshold is `SpeedThresholdWalk` (**4.3**), below the
+    noclip speed slider's minimum (5).
+  - Off = the mod posts nothing while noclip drives.
 
 ### Disable OOB Teleport
 
