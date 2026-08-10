@@ -324,6 +324,7 @@
     <Compile Include="HeartopiaComplete.UguiExtraContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSeaCleanContent.cs" />
     <Compile Include="HeartopiaComplete.UguiMusicContent.cs" />
+    <Compile Include="HeartopiaComplete.Beta.cs" />
     <Compile Include="HeartopiaComplete.UguiHomelandFarmContent.cs" />
     <Compile Include="HeartopiaComplete.UguiDailyQuestsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiQuestAssistantWindowContent.cs" />

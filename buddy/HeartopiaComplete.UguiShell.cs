@@ -563,14 +563,30 @@ namespace HeartopiaMod
 
                 // Per-tab: sidebar nav row + content container (+ its own sub-tab bar when the
                 // tab has sub-tabs). Each piece guarded so one broken tab can't kill the shell.
+                //
+                // Locked tabs (IsUguiShellTabUnlocked — currently the beta gate) are still BUILT,
+                // list slots and all: every display-position constant in UguiShellTabIndices.cs
+                // and every parallel list index stays valid whether or not the gate is open.
+                // Only the sidebar row is left inactive, and `navSlot` — which advances solely for
+                // unlocked tabs — keeps the visible rows contiguous so a hidden one leaves no gap.
+                int navSlot = 0;
                 for (int i = 0; i < tabLabels.Length; i++)
                 {
                     int tabIndex = i; // capture a copy for the click closure
+                    bool tabUnlocked = this.IsUguiShellTabUnlocked(i);
                     try
                     {
                         // --- Sidebar nav row ---
                         GameObject row = this.CreateUguiGo("Nav_" + tabLabels[i], sidebar.transform);
-                        PlaceUguiTopLeft(row, 8f, 10f + i * 40f, UguiShellSidebarW - 16f, 36f);
+                        PlaceUguiTopLeft(row, 8f, 10f + navSlot * 40f, UguiShellSidebarW - 16f, 36f);
+                        if (tabUnlocked)
+                        {
+                            navSlot++;
+                        }
+                        else
+                        {
+                            row.SetActive(false);
+                        }
                         Image rowBg = this.AddUguiImage(row, new Color(0f, 0f, 0f, 0f), true, 1.5f);
                         rowBg.raycastTarget = true;
                         Button rowBtn = row.AddComponent<Button>();
@@ -897,7 +913,10 @@ namespace HeartopiaMod
                             {
                                 this.BuildUguiShellBagWarehouseContent(container.transform, 0f, 0f, contentColW, contentH);
                             }
-                            else if (i == UguiShellMusicTabIndex)
+                            // Locked tabs get an empty container: it keeps TabContents index-aligned
+                            // and can never be activated, while skipping the builder also skips its
+                            // side effects — Music's builder scans the .bin catalog off disk.
+                            else if (i == UguiShellMusicTabIndex && tabUnlocked)
                             {
                                 this.BuildUguiShellMusicContent(container.transform, 0f, 0f, contentColW, contentH);
                             }
@@ -1193,6 +1212,22 @@ namespace HeartopiaMod
         // Selection
         // ----------------------------------------------------------------------------------------
 
+        // Is this display position available this session? Gated tabs are built either way (see
+        // the nav-row loop in BuildUguiShell) — this only decides whether the sidebar shows the
+        // row and whether the tab can be selected.
+        //
+        // The beta gate is a startup-read static (HeartopiaComplete.Beta.cs), so the answer is
+        // fixed for the whole session: no re-flow path is needed, and the theme rebuild simply
+        // asks again and gets the same answer.
+        private bool IsUguiShellTabUnlocked(int displayIndex)
+        {
+            if (displayIndex == UguiShellMusicTabIndex)
+            {
+                return BetaEnabled;
+            }
+            return true;
+        }
+
         private void SelectUguiShellTab(UguiShellHandle shell, int index)
         {
             if (shell == null)
@@ -1202,6 +1237,13 @@ namespace HeartopiaMod
 
             try
             {
+                // A locked tab has no clickable row, but the theme rebuild replays a captured
+                // ActiveIndex and callers pass literals — fall back to the first tab rather than
+                // activating content the sidebar gives no way back out of.
+                if (!this.IsUguiShellTabUnlocked(index))
+                {
+                    index = 0;
+                }
                 if (index == shell.ActiveIndex)
                 {
                     return; // re-clicking the active tab is a no-op

@@ -509,6 +509,10 @@ namespace HeartopiaMod
             // building move panel / quest assistant window = floating), so nothing registers
             // at init anymore — the IMGUI menu and both IMGUI floating panels are retired.
             this.InitializeLocalization();
+            // Beta gate (HeartopiaComplete.Beta.cs) — read ONCE, here, before anything can ask:
+            // the %LocalLow%/Bugtopia/beta marker decides whether experimental surfaces exist this
+            // session. Nothing re-reads it later by design.
+            RefreshBetaFlag();
             this.LoadRadarSpeciesIconIndex();
             this.LoadCustomTeleports();
             this.LoadKeybinds();
