@@ -447,7 +447,11 @@ While engaged:
   *Disable OOB Teleport* toggle in Self → Main is never written). The scene detect box has a floor
   as well as a ceiling (e.g. Star Town `y >= 9`), so under-terrain hops would otherwise be rescued
   mid-collect.
-- **Resource hops land below the node:** contamination **−5 m**, every other resource **−1.5 m**
+- **Resource hops land below the node:** every non-contamination resource **−1.5 m**.
+  Contamination splits by anchor class (`TryGetContaminatedAnchorClass`, SeaCleanQteFeature.cs):
+  **hosted −2 m** (permanent, stuck to a coral on the ground) vs **point-anchored +6 m**
+  (temporary, spawned at a sub-area point and floating in open water — diving under one of those
+  is what pushed the player back to the surface). Unknown class falls back to the hosted dive
   (`ApplyForagingNodeTeleportOffset`). **Area/zone arrivals dive too** (−1.5 m,
   `ApplyForagingAreaTeleportOffset`): the farm-location waypoints, the priority-area anchors and the
   startup routing hop. They used to keep their exact Y, which left the player standing in the open

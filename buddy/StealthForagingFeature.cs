@@ -50,8 +50,10 @@ namespace HeartopiaMod
         private bool stealthForagingNoclipEngaged;
 
         // Dive depth below the resource, in metres. Contamination sits on the sea floor and is
-        // worked by the sea-clean sweep from further out, so it dives deeper than land nodes.
-        private const float StealthForagingContaminationDepth = 5f;
+        // worked by the sea-clean sweep from further out, so it still dives a little deeper than
+        // land nodes — but only −2 m: the original −5 m put the player far enough under the floor
+        // that some spots pushed them back to the surface instead of holding the hover.
+        private const float StealthForagingContaminationDepth = 2f;
         private const float StealthForagingNodeDepth = 1.5f;
 
         // Stealth is only ever "on" while the farm is running: a configured-but-idle farm must
@@ -94,7 +96,8 @@ namespace HeartopiaMod
                 + (this.stealthForagingForcedNoclip ? "forced" : "already on")
                 + ", OOB rescue suppressed, node hops dive -"
                 + StealthForagingNodeDepth.ToString("0.#") + "m / contamination -"
-                + StealthForagingContaminationDepth.ToString("0.#") + "m).");
+                + StealthForagingContaminationDepth.ToString("0.#") + "m hosted, +"
+                + StealthForagingContaminationPointLift.ToString("0.#") + "m point-anchored).");
         }
 
         private void RestoreStealthForagingNoclip()

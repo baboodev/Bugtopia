@@ -119,6 +119,58 @@ namespace HeartopiaMod
         private IntPtr seaCleanQteGetIsQteShieldMethod = IntPtr.Zero;
         private IntPtr seaCleanQteGetIsHiddenMethod = IntPtr.Zero;
         private IntPtr seaCleanQteGetIsPlayerHostedMethod = IntPtr.Zero;
+        // Anchoring discriminators for the "some contaminated spots surface the player" hunt:
+        // SeaCleanMonsterComponentData carries `hostNetId` (the entity the pollutant is stuck to)
+        // and `subAreaPoint` (a fixed spawn point used only when hostNetId == 0). So a pollutant is
+        // either HOSTED — sitting on a coral/prop, which is what "grows on the ground" looks like —
+        // or POINT-anchored, spawned at a sub-area point anywhere in the water column, which is what
+        // reads as "floating in the air". IsPlayerHosted (body pollution) is a third case and is
+        // already filtered out of the radar entirely.
+        private IntPtr seaCleanQteGetHasHostMethod = IntPtr.Zero;
+        private IntPtr seaCleanQteGetHostNetIdMethod = IntPtr.Zero;
+        // One line per DISTINCT pollutant netId, so the trace maps classes to coordinates without
+        // flooding: the radar rescans several times a second.
+        private readonly HashSet<uint> seaCleanQteClassLogged = new HashSet<uint>();
+
+        // Position→class index, rebuilt by every ScanContaminatedRadar pass (the same pass that
+        // builds the radar markers the farm hops to, so anything the farm can target is in here).
+        // Read at teleport time by TryGetContaminatedAnchorClass to pick the Y offset per class.
+        private struct ContaminatedClassEntry
+        {
+            public Vector3 Position;
+            public bool Hosted;
+        }
+
+        private readonly List<ContaminatedClassEntry> seaCleanQteClassIndex = new List<ContaminatedClassEntry>(64);
+
+        // Match tolerance between a radar marker position and the indexed pollutant position. Same
+        // 1.5 m scale the foraging aura uses for its map matching; they come from the same scan, so
+        // this only has to absorb float drift and a moving pollutant between passes.
+        private const float ContaminatedClassMatchRadius = 1.5f;
+
+        // "hosted" = stuck to a world entity (coral/prop) -> the permanent ones that grow on the
+        // ground. "point" = sub-area spawn point, free in the water column -> the temporary ones
+        // that read as floating in the air. Unknown falls back to the hosted offset, which is the
+        // conservative one (a dive, like every other stealth hop).
+        internal bool TryGetContaminatedAnchorClass(Vector3 nodePosition, out bool hosted)
+        {
+            hosted = true;
+            float bestSqr = ContaminatedClassMatchRadius * ContaminatedClassMatchRadius;
+            bool found = false;
+            for (int i = 0; i < this.seaCleanQteClassIndex.Count; i++)
+            {
+                ContaminatedClassEntry entry = this.seaCleanQteClassIndex[i];
+                float sqr = (entry.Position - nodePosition).sqrMagnitude;
+                if (sqr <= bestSqr)
+                {
+                    bestSqr = sqr;
+                    hosted = entry.Hosted;
+                    found = true;
+                }
+            }
+
+            return found;
+        }
         private IntPtr seaCleanQteProtocolClass = IntPtr.Zero;
         private IntPtr seaCleanQteReqStartPublicMethod = IntPtr.Zero;
 
@@ -842,6 +894,16 @@ namespace HeartopiaMod
                     {
                         this.seaCleanQteGetIsHiddenMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_IsHidden", 0);
                     }
+                    if (this.seaCleanQteGetHasHostMethod == IntPtr.Zero)
+                    {
+                        this.seaCleanQteGetHasHostMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_HasHost", 0);
+                    }
+
+                    if (this.seaCleanQteGetHostNetIdMethod == IntPtr.Zero)
+                    {
+                        this.seaCleanQteGetHostNetIdMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_HostNetId", 0);
+                    }
+
                     if (this.seaCleanQteGetIsPlayerHostedMethod == IntPtr.Zero)
                     {
                         this.seaCleanQteGetIsPlayerHostedMethod = this.FindAuraMonoMethodOnHierarchy(this.seaCleanQteMonsterClass, "get_IsPlayerHosted", 0);
@@ -894,6 +956,68 @@ namespace HeartopiaMod
         // Reuses the Auto Sea Clean component resolution (class + IsCleaned/IsHidden getters) and works
         // independently of the auto-clean toggle. Called each RunRadar; fail-closed if AuraMono / the
         // type isn't ready (no-op → no markers, never crash). Same pin discipline as the underwater scan.
+        // Classifies one radar-visible pollutant and logs it once, under the same flag as the
+        // teleport trace so both halves of the investigation land in the same log:
+        //
+        //   hosted   — HostNetId != 0 and the host is not a player: the pollutant is attached to a
+        //              world entity (coral/prop). Attach/detach events are dispatched to the host.
+        //   point    — HostNetId == 0: spawned at a sub-area point (SeaCleanMonsterComponentData
+        //              .subAreaPoint), which is what floats free in the water column.
+        //
+        // Correlate the coordinates here against the "[ForagingTp] node:Contaminated src=(...)"
+        // lines to see which class is the one that surfaces the player.
+        private void IndexContaminatedClass(IntPtr comp, IntPtr entityObj, Vector3 pos)
+        {
+            if (comp == IntPtr.Zero)
+            {
+                return;
+            }
+
+            bool hasHost = this.SeaCleanQteInvokeBoolGetter(comp, this.seaCleanQteGetHasHostMethod, out bool host) && host;
+            this.seaCleanQteClassIndex.Add(new ContaminatedClassEntry { Position = pos, Hosted = hasHost });
+
+            if (!MasterLogForagingTeleport || entityObj == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (!this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U)
+            {
+                return;
+            }
+
+            // Bounded: a long session in a dirty sea would otherwise grow this without limit.
+            if (this.seaCleanQteClassLogged.Count > 512)
+            {
+                this.seaCleanQteClassLogged.Clear();
+            }
+            if (!this.seaCleanQteClassLogged.Add(netId))
+            {
+                return;
+            }
+
+            uint hostNetId = 0U;
+            if (hasHost && this.seaCleanQteGetHostNetIdMethod != IntPtr.Zero)
+            {
+                IntPtr exc = IntPtr.Zero;
+                IntPtr boxed = auraMonoRuntimeInvoke(this.seaCleanQteGetHostNetIdMethod, comp, IntPtr.Zero, ref exc);
+                if (exc == IntPtr.Zero && boxed != IntPtr.Zero)
+                {
+                    this.TryUnboxMonoUInt32(boxed, out hostNetId);
+                }
+            }
+
+            bool shared = this.SeaCleanQteInvokeBoolGetter(comp, this.seaCleanQteGetIsSharedMethod, out bool sh) && sh;
+            bool pub = this.SeaCleanQteInvokeBoolGetter(comp, this.seaCleanQteGetIsPublicMethod, out bool pb) && pb;
+
+            ModLogger.Msg("[ForagingTp] contaminated netId=" + netId
+                + " class=" + (hasHost ? "hosted" : "point")
+                + " host=" + hostNetId
+                + " shared=" + (shared ? "1" : "0")
+                + " public=" + (pub ? "1" : "0")
+                + " pos=(" + pos.x.ToString("F3") + ", " + pos.y.ToString("F3") + ", " + pos.z.ToString("F3") + ")");
+        }
+
         private void ScanContaminatedRadar(Vector3 origin, Material line, Material fill, float maxRange)
         {
             if (!this.showContaminatedRadar || line == null || fill == null)
@@ -909,6 +1033,9 @@ namespace HeartopiaMod
             }
 
             float maxSqr = maxRange * maxRange;
+            // Rebuilt from scratch each pass: a stale entry would hand the wrong Y offset to a hop
+            // after a pollutant is cleaned and another spawns nearby.
+            this.seaCleanQteClassIndex.Clear();
             List<uint> compPins = new List<uint>();
             try
             {
@@ -967,6 +1094,7 @@ namespace HeartopiaMod
                         }
 
                         this.CreateMarker(pos, "contaminated", line, fill, null);
+                        this.IndexContaminatedClass(comp, entityObj, pos);
                     }
                     finally
                     {

@@ -520,7 +520,8 @@ namespace HeartopiaMod
                                 float distance = Vector3.Distance(Camera.main.transform.position, recheckLocation.Value);
                                 this.autoFarmStatus = $"Rechecking priority location ({distance:F0}m)...";
                                 this.AutoFarmLog("Periodic priority recheck -> location " + recheckLocation.Value + " distance=" + distance.ToString("F1"));
-                                this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(recheckLocation.Value));
+                                this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(recheckLocation.Value),
+                                    "area:priority-recheck", recheckLocation.Value);
                                 this.currentPriorityLocation = recheckLocation;
                                 this.lastTeleportWasPriorityLocation = true;
                                 this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
@@ -544,7 +545,8 @@ namespace HeartopiaMod
                                     this.AutoFarmLog("Active priority sweep -> node " + activeAreaPriorityNode.Value
                                         + " area=" + this.currentPriorityLocation.Value + " distance=" + distance.ToString("F1"));
                                     // Priority nodes are plants (never contamination) — pass no label.
-                                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(activeAreaPriorityNode.Value, null));
+                                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(activeAreaPriorityNode.Value, null),
+                                        "node:priority-active", activeAreaPriorityNode.Value);
                                     this.lastNodePosition = activeAreaPriorityNode.Value;
                                     this.lastTeleportWasPriorityLocation = true;
                                     this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
@@ -568,7 +570,8 @@ namespace HeartopiaMod
                                 + " mappedArea=" + (this.lastFoundPriorityNodeLocation.HasValue ? this.lastFoundPriorityNodeLocation.Value.ToString() : "none")
                                 + " distance=" + distance.ToString("F1"));
                             // Priority nodes are plants (never contamination) — pass no label.
-                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(priorityNode.Value, null));
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(priorityNode.Value, null),
+                                "node:priority-visible", priorityNode.Value);
                             this.lastNodePosition = priorityNode.Value;
                             if (this.lastFoundPriorityNodeLocation.HasValue)
                             {
@@ -591,7 +594,8 @@ namespace HeartopiaMod
                             float distance = Vector3.Distance(Camera.main.transform.position, priorityLocation.Value);
                             this.autoFarmStatus = $"Going to priority location ({distance:F0}m)...";
                             this.AutoFarmLog("Priority location fallback -> " + priorityLocation.Value + " distance=" + distance.ToString("F1"));
-                            this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(priorityLocation.Value));
+                            this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(priorityLocation.Value),
+                                "area:priority-fallback", priorityLocation.Value);
                             this.currentPriorityLocation = priorityLocation;
                             this.lastTeleportWasPriorityLocation = true;
                             this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
@@ -607,7 +611,8 @@ namespace HeartopiaMod
                             float value = Vector3.Distance(Camera.main.transform.position, vector.Value);
                             this.autoFarmStatus = $"Teleporting to node ({value:F0}m)...";
                             this.AutoFarmLog("Normal node target -> " + vector.Value + " label=" + scanNodeLabel + " distance=" + value.ToString("F1"));
-                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector.Value, scanNodeLabel));
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector.Value, scanNodeLabel),
+                                "node:" + (scanNodeLabel ?? "unlabelled"), vector.Value);
                             this.lastNodePosition = vector.Value;
                             this.lastTeleportWasPriorityLocation = false;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
@@ -867,7 +872,8 @@ namespace HeartopiaMod
                             else
                             {
                                 this.autoFarmStatus = "Moving to " + farmLocation.Name + "...";
-                                this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(farmLocation.Position));
+                                this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(farmLocation.Position),
+                                    "area:" + farmLocation.Name, farmLocation.Position);
                                 this.farmState = HeartopiaComplete.AutoFarmState.LoadingArea;
                                 this.autoFarmTimer = 0f;
                             }
@@ -916,7 +922,8 @@ namespace HeartopiaMod
                         {
                             float value2 = Vector3.Distance(Camera.main.transform.position, vector2.Value);
                             this.autoFarmStatus = $"Node found! Teleporting ({value2:F0}m)...";
-                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector2.Value, waitingNodeLabel));
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector2.Value, waitingNodeLabel),
+                                "node:" + (waitingNodeLabel ?? "unlabelled"), vector2.Value);
                             this.lastNodePosition = vector2.Value;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                             this.autoFarmTimer = 0f;
@@ -1037,18 +1044,40 @@ namespace HeartopiaMod
         // lastNodePosition keeps the true node position for marker matching and dwell checks.
         private const float SeaCleanTeleportYOffset = 7f;
 
+        // Contamination splits into two anchor classes, and they need OPPOSITE adjustments — see
+        // TryGetContaminatedAnchorClass (SeaCleanQteFeature.cs) for how they are told apart:
+        //   * HOSTED (permanent, stuck to a coral growing on the ground) -> dive -2m like a node.
+        //   * POINT  (temporary, spawned at a sub-area point, floating in open water) -> +6m.
+        //     Diving under one of these puts the player in open water below the pollutant, which is
+        //     where the "player pops back to the surface" reports come from; arriving above it
+        //     keeps the hop inside the pollutant's own volume.
+        // Class unknown (not in the radar index this pass) falls back to the hosted dive — the
+        // conservative choice, identical to the previous behaviour.
+        private const float StealthForagingContaminationPointLift = 6f;
+
         // Y adjustment for a RESOURCE-NODE hop. Deliberately NOT applied to world-load
         // checkpoints (farm-location waypoints, priority-area anchors, cleansing corals) — those
         // are area arrivals that must land where the world streams in normally.
         //   * Stealth Foraging engaged -> dive BELOW the node (StealthForagingFeature.cs):
-        //     contamination -5m, every other resource -1.5m.
+        //     contamination -2m hosted / +6m point-anchored, every other resource -1.5m.
         //   * Otherwise -> the vanilla sea-clean lift for contamination, nothing for the rest.
         private Vector3 ApplyForagingNodeTeleportOffset(Vector3 position, string nodeLabel)
         {
             bool contamination = string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal);
             if (this.StealthForagingActive)
             {
-                position.y -= contamination ? StealthForagingContaminationDepth : StealthForagingNodeDepth;
+                if (contamination)
+                {
+                    bool hosted = true;
+                    this.TryGetContaminatedAnchorClass(position, out hosted);
+                    position.y += hosted
+                        ? -StealthForagingContaminationDepth
+                        : StealthForagingContaminationPointLift;
+                }
+                else
+                {
+                    position.y -= StealthForagingNodeDepth;
+                }
                 return position;
             }
 
@@ -1059,15 +1088,116 @@ namespace HeartopiaMod
             return position;
         }
 
+        // ---- Foraging teleport trace (MasterLogForagingTeleport) -------------------------------
+        // Investigating "at some points the player surfaces above ground/floor". Logging only the
+        // teleport ARGUMENT would prove nothing — the offset is deterministic. What matters is
+        // where the player actually ends up, so each hop also takes two delayed samples of the live
+        // player position: one right after the warp settles and one later, which separates "the
+        // warp landed high" from "the warp landed right and then the player drifted up".
+        private string foragingTpKind = string.Empty;
+        private Vector3 foragingTpSource;
+        private Vector3 foragingTpRequested;
+        private float foragingTpSampleAt1 = -1f;
+        private float foragingTpSampleAt2 = -1f;
+
+        private const float ForagingTpSampleDelay1 = 0.6f;
+        private const float ForagingTpSampleDelay2 = 2.5f;
+
+        private static string FormatForagingTpVector(Vector3 v)
+            => v.x.ToString("F3") + ", " + v.y.ToString("F3") + ", " + v.z.ToString("F3");
+
         // Every Aura Farm hop goes through this wrapper so the throttle clock is stamped uniformly;
         // IsFarmTeleportThrottled() below paces the teleport-initiating states off it.
-        private void FarmTeleportTo(Vector3 position)
+        //
+        // kind   — what we are hopping to ("node:Contaminated", "area:Sea Area 4", ...).
+        // source — the TRUE resource/area position, before any Stealth Foraging Y offset. The
+        //          offset only ever goes into `position`, so this pair is what the trace compares.
+        private void FarmTeleportTo(Vector3 position, string kind = "unknown", Vector3 source = default)
         {
             this.lastFarmTeleportAt = Time.unscaledTime;
+            this.LogForagingTeleportRequest(kind, source, position);
             this.TeleportToLocation(position);
             // Stealth Foraging: hold the hover exactly where the hop aimed (the warp clears the
             // noclip hold, which would otherwise re-seed from a surface-snapped arrival).
             this.PinStealthForagingNoclipHold(position);
+        }
+
+        private void LogForagingTeleportRequest(string kind, Vector3 source, Vector3 requested)
+        {
+            if (!MasterLogForagingTeleport)
+            {
+                this.foragingTpSampleAt1 = -1f;
+                this.foragingTpSampleAt2 = -1f;
+                return;
+            }
+
+            this.foragingTpKind = string.IsNullOrEmpty(kind) ? "unknown" : kind;
+            // Spell out which contamination class drove the offset, so a surfacing report in the
+            // log identifies itself without cross-referencing the [ForagingTp] contaminated lines.
+            if (this.foragingTpKind.EndsWith("Contaminated", StringComparison.Ordinal))
+            {
+                this.foragingTpKind += this.TryGetContaminatedAnchorClass(source, out bool hostedAnchor)
+                    ? (hostedAnchor ? "/hosted" : "/point")
+                    : "/unknown-anchor";
+            }
+            this.foragingTpSource = source;
+            this.foragingTpRequested = requested;
+
+            float now = Time.unscaledTime;
+            this.foragingTpSampleAt1 = now + ForagingTpSampleDelay1;
+            this.foragingTpSampleAt2 = now + ForagingTpSampleDelay2;
+
+            ModLogger.Msg("[ForagingTp] " + this.foragingTpKind
+                + " src=(" + FormatForagingTpVector(source) + ")"
+                + " tp=(" + FormatForagingTpVector(requested) + ")"
+                + " dy=" + (requested.y - source.y).ToString("F3")
+                + " stealth=" + (this.StealthForagingActive ? "on" : "off")
+                + " noclip=" + (this.noclipEnabled ? "on" : "off"));
+        }
+
+        // Drained every frame from OnUpdate (cheap: two float compares when idle).
+        private void ProcessForagingTeleportTraceOnUpdate()
+        {
+            if (this.foragingTpSampleAt1 < 0f && this.foragingTpSampleAt2 < 0f)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (this.foragingTpSampleAt1 >= 0f && now >= this.foragingTpSampleAt1)
+            {
+                this.foragingTpSampleAt1 = -1f;
+                this.SampleForagingTeleportArrival("t+" + ForagingTpSampleDelay1.ToString("0.0") + "s");
+            }
+
+            if (this.foragingTpSampleAt2 >= 0f && now >= this.foragingTpSampleAt2)
+            {
+                this.foragingTpSampleAt2 = -1f;
+                this.SampleForagingTeleportArrival("t+" + ForagingTpSampleDelay2.ToString("0.0") + "s");
+            }
+        }
+
+        private void SampleForagingTeleportArrival(string stamp)
+        {
+            if (!MasterLogForagingTeleport)
+            {
+                return;
+            }
+
+            if (!this.TryGetLocalPlayerPosition(out Vector3 actual))
+            {
+                ModLogger.Msg("[ForagingTp]   " + stamp + " " + this.foragingTpKind + " player position unavailable");
+                return;
+            }
+
+            // vsTp  > 0 -> the player is ABOVE where we asked to land (the surfacing bug).
+            // vsSrc > 0 -> the player is above the resource itself, i.e. fully surfaced.
+            ModLogger.Msg("[ForagingTp]   " + stamp + " " + this.foragingTpKind
+                + " at=(" + FormatForagingTpVector(actual) + ")"
+                + " vsTp=" + (actual.y - this.foragingTpRequested.y).ToString("F3")
+                + " vsSrc=" + (actual.y - this.foragingTpSource.y).ToString("F3")
+                + " state=" + this.farmState
+                + " noclip=" + (this.noclipEnabled ? "on" : "off"));
         }
 
         // True while the configured teleport delay hasn't elapsed since the last farm teleport.
@@ -2645,7 +2775,8 @@ namespace HeartopiaMod
                 if (this.currentPriorityLocation.HasValue)
                 {
                     this.AutoFarmLog("Startup routing to priority location " + this.currentPriorityLocation.Value);
-                    this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(this.currentPriorityLocation.Value));
+                    this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(this.currentPriorityLocation.Value),
+                        "area:startup-priority", this.currentPriorityLocation.Value);
                     this.lastTeleportWasPriorityLocation = true;
                     this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
                     this.autoFarmStatus = "Going to priority location...";

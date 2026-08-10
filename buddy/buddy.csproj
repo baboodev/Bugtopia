@@ -279,6 +279,7 @@
     <Compile Include="RepairThrowAnimationTrimFeature.cs" />
     <Compile Include="CraftDirectSendFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
+    <Compile Include="DailyClaimsAutoClaimFeature.cs" />
     <Compile Include="DailyClaimsFeature.cs" />
     <Compile Include="BirdPhotoSubmitFeature.cs" />
     <Compile Include="AuraFarm.cs" />

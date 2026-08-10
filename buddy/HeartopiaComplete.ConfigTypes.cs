@@ -333,6 +333,7 @@ namespace HeartopiaMod
             public bool autoSellAllMatchingStacks;
             public bool autoSellFullStack;
             public bool dailyQuestSubmitSkipFiveStar;
+            public bool dailyClaimsAutoClaimEnabled;
             public bool autoSellMatchFamily;
             public bool autoSellHideBagItems;
             public int autoSellSelectedStaticId;

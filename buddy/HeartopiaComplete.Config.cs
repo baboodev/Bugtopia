@@ -340,6 +340,7 @@ namespace HeartopiaMod
             data.autoSellAllMatchingStacks = this.autoSellAllMatchingStacks;
             data.autoSellFullStack = this.autoSellFullStack;
             data.dailyQuestSubmitSkipFiveStar = this.dailyQuestSubmitSkipFiveStar;
+            data.dailyClaimsAutoClaimEnabled = this.dailyClaimsAutoClaimEnabled;
             data.autoSellMatchFamily = this.autoSellMatchFamily;
             data.autoSellHideBagItems = this.autoSellHideBagItems;
             data.autoSellSelectedStaticId = this.autoSellSelectedStaticId;
@@ -669,6 +670,9 @@ namespace HeartopiaMod
             this.autoSellAllMatchingStacks = hasAutoSellConfig ? data.autoSellAllMatchingStacks : true;
             this.autoSellFullStack = hasAutoSellConfig ? data.autoSellFullStack : true;
             this.dailyQuestSubmitSkipFiveStar = data.dailyQuestSubmitSkipFiveStar;
+            // Opt-in: auto-claim sends server commands with no user action, so a config written by
+            // an older build (where the field is absent → false) must stay off.
+            this.dailyClaimsAutoClaimEnabled = data.dailyClaimsAutoClaimEnabled;
             this.autoSellMatchFamily = hasAutoSellConfig ? data.autoSellMatchFamily : true;
             this.autoSellHideBagItems = hasAutoSellConfig && data.autoSellHideBagItems;
             this.autoSellSelectedStaticId = Mathf.Max(0, data.autoSellSelectedStaticId);

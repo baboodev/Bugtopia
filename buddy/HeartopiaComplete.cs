@@ -119,6 +119,12 @@ namespace HeartopiaMod
         internal static bool MasterLogCombinedFarm = false;
         internal static bool MasterLogInstantCatch = true;
         internal static bool MasterLogAutoFarm = false;
+        // Per-hop teleport trace for the Stealth Foraging "player surfaces above ground at some
+        // points" investigation: logs the resource kind, the true resource position, the position
+        // actually handed to the warp, and TWO post-arrival samples of where the player really
+        // ended up. Default ON (unlike the other MasterLog flags) because it exists to collect that
+        // data on the next run; Settings → Logging → "Foraging Teleport" turns it off.
+        internal static bool MasterLogForagingTeleport = true;
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
         // recipe-id probes per active quest) — flip to false once classification is confirmed.
         internal static bool MasterLogQuestAssistant = true;
@@ -703,10 +709,14 @@ namespace HeartopiaMod
             this.ProcessCraftDirectSendOnUpdate();
             this.ProcessPersistentHudOnUpdate();
             this.ProcessGameEventHooksOnUpdate();
+            // Daily Claims auto-claim drain — must run AFTER the hook drain so a red point that
+            // arrived this frame is already queued (DailyClaimsAutoClaimFeature.cs).
+            this.ProcessDailyClaimsAutoClaimOnUpdate();
             this.ProcessSeaCleanBannerHideOnUpdate();
             // Stealth Foraging owns the noclip force/restore edge — must run before both the OOB
             // guard (which reads StealthForagingActive) and ProcessNoclipMovementOnUpdate below.
             this.ProcessStealthForagingOnUpdate();
+            this.ProcessForagingTeleportTraceOnUpdate();
             this.ProcessOutOfBoundsGuardOnUpdate();
             this.ProcessLittleWhaleFinderOnUpdate();
             this.ProcessResearchMonitorOnUpdate();
@@ -4153,16 +4163,24 @@ namespace HeartopiaMod
             new HeartopiaComplete.FarmLocation("Rare Tree Spawn 2", new Vector3(-50.454f, 22.314f, -63.417f), "raretree"),
             new HeartopiaComplete.FarmLocation("Rare Tree Spawn 3", new Vector3(-108.954f, 25.088f,49.249f), "raretree"),
             new HeartopiaComplete.FarmLocation("Rare Tree Spawn 4", new Vector3(41.253f, 25.317f, 76.247f), "raretree"),
-            // Underwater / Sea-Clean area waypoints (user-provided 2026-07-11). Toured when any
-            // underwater radar toggle (Contaminated / Glasswort / Sea Grape / Wakame) is on, so the
-            // farm loads new sea areas after clearing the pollutants/plants in range at each point.
-            new HeartopiaComplete.FarmLocation("Sea Area 1", new Vector3(85.670f, -23.746f, -87.544f), "underwater"),
-            new HeartopiaComplete.FarmLocation("Sea Area 2", new Vector3(-43.220f, -60.554f, -53.835f), "underwater"),
-            new HeartopiaComplete.FarmLocation("Sea Area 3", new Vector3(-78.554f, -61.607f, -39.751f), "underwater"),
-            new HeartopiaComplete.FarmLocation("Sea Area 4", new Vector3(-14.896f, -65.087f, 31.243f), "underwater"),
-            new HeartopiaComplete.FarmLocation("Sea Area 5", new Vector3(13.840f, -57.014f, 54.296f), "underwater"),
-            new HeartopiaComplete.FarmLocation("Sea Area 6", new Vector3(83.279f, -38.932f, 52.555f), "underwater"),
-            new HeartopiaComplete.FarmLocation("Sea Area 7", new Vector3(77.268f, -32.197f, -29.265f), "underwater")
+            // Underwater / Sea-Clean area waypoints (user-provided 2026-08-09, replacing the
+            // 7-point 2026-07-11 set). Toured when any underwater radar toggle (Contaminated /
+            // Glasswort / Sea Grape / Wakame) is on, so the farm loads new sea areas after clearing
+            // the pollutants/plants in range at each point.
+            // Stealth Foraging dives these by StealthForagingNodeDepth like any other area arrival
+            // (ApplyForagingAreaTeleportOffset at the MovingToLocation hop) — the checkpoint Y here
+            // is the surface value, the offset is applied to the teleport argument only.
+            new HeartopiaComplete.FarmLocation("Sea Area 1", new Vector3(63.046f, -29.962f, -98.496f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 2", new Vector3(-11.765f, -30.505f, -89.748f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 3", new Vector3(-72.961f, -26.167f, -86.867f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 4", new Vector3(-79.833f, -62.545f, -74.349f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 5", new Vector3(-36.228f, -47.679f, -45.796f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 6", new Vector3(88.033f, -30.830f, -29.323f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 7", new Vector3(97.130f, -33.841f, 12.952f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 8", new Vector3(63.027f, -51.760f, 65.299f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 9", new Vector3(20.917f, -63.367f, 55.683f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 10", new Vector3(-6.620f, -63.507f, 3.523f), "underwater"),
+            new HeartopiaComplete.FarmLocation("Sea Area 11", new Vector3(-48.799f, -69.366f, 32.128f), "underwater")
         };
 
         // House Slot Teleports
