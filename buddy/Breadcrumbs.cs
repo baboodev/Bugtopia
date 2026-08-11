@@ -19,10 +19,14 @@ namespace HeartopiaMod
     //   Tick(area)         - hot paths (per-frame, enumerate loops). Always counts; only rewrites the
     //                        file at most every ThrottleMs, so it is cheap enough for tight loops yet
     //                        the running count still shows up in the trail.
+    //   Phase(area)        - SUB-FRAME resolution, many per frame. Writes to its own file as a
+    //                        fixed-layout ring (see the Phase section below): one 64-byte seek+write
+    //                        per call instead of Drop's whole-ring rewrite, so a single OnUpdate can
+    //                        carry ~20 markers without turning the trail into the bottleneck.
     internal static class Breadcrumbs
     {
         // Bump on every diagnostic deploy so the running build is verifiable from the log header.
-        private const string BuildTag = "2026-06-24T06 privacy-hooks-gated";
+        private const string BuildTag = "2026-08-11T18 onupdate-phase-crumbs";
         private const int RingSize = 160;
         private const long ThrottleMs = 250;
 
@@ -45,6 +49,28 @@ namespace HeartopiaMod
         private static volatile string _lastArea = "(none)";
         private static Thread _watchdog;
 
+        // ---- Phase ring ------------------------------------------------------------------------
+        // Drop() rewrites and flushes the ENTIRE ring on every call (~5 KB). That is fine at the five
+        // markers/frame OnUpdate used to carry, but the 2026-08-11 no-dump crash died somewhere in a
+        // ~150-line stretch between two of them, and resolving that needs ~20 markers per frame --
+        // 4x the calls at 5 KB each. So phases get their own file with a FIXED record layout: every
+        // slot is exactly PhaseRecordBytes wide, so a marker is one seek + one 64-byte write + flush,
+        // with no StringBuilder, no encode and no allocation on the path.
+        //
+        // The file is a ring, so the slots are NOT in chronological order -- each record starts with
+        // a zero-padded sequence number, so sorting the lines lexicographically replays the trail.
+        private const bool PhaseEnabled = true;
+        private const int PhaseSlots = 96;
+        private const int PhaseRecordBytes = 64; // 10 seq + 1 + 12 time + 1 + 39 area + 1 newline
+        private const int PhaseSeqDigits = 10;
+        private const int PhaseAreaOffset = 24;
+        private const int PhaseAreaWidth = PhaseRecordBytes - PhaseAreaOffset - 1;
+        private static readonly object _phaseGate = new object();
+        private static readonly byte[] _phaseRecord = new byte[PhaseRecordBytes];
+        private static FileStream _phaseStream;
+        private static int _phaseHeaderBytes;
+        private static int _phaseNext;
+
         public static void Init()
         {
             try
@@ -52,6 +78,17 @@ namespace HeartopiaMod
                 string path = Path.Combine(HelperPaths.GetDirectory("Logs"), "breadcrumbs.log");
                 // Share ReadWrite so the file can be tailed while the game runs.
                 _stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+                try
+                {
+                    // Secondary trail: never let it take the main one down with it.
+                    InitPhaseStream();
+                }
+                catch (Exception phaseEx)
+                {
+                    _phaseStream = null;
+                    ModLogger.Warning("[Breadcrumb] phase ring unavailable: " + phaseEx.Message);
+                }
+
                 Drop("Init", "breadcrumb trail started");
                 _lastHeartbeatTick = Environment.TickCount64;
                 _watchdog = new Thread(WatchdogLoop) { IsBackground = true, Name = "BreadcrumbWatchdog" };
@@ -108,6 +145,118 @@ namespace HeartopiaMod
                 }
                 _tickNextWriteAt[area] = now + ThrottleMs;
                 DropLocked(area, "x" + count);
+            }
+        }
+
+        // Sub-frame marker. Cheap enough to sprinkle through a single OnUpdate: one fixed-size record
+        // written in place, no allocation. Refreshes the heartbeat and _lastArea too, so a hang that
+        // freezes between two Drops now gets named by the watchdog at phase resolution.
+        public static void Phase(string area)
+        {
+            if (!PhaseEnabled || _disabled || _phaseStream == null)
+            {
+                return;
+            }
+
+            _lastHeartbeatTick = Environment.TickCount64;
+            _lastArea = area ?? "?";
+
+            lock (_phaseGate)
+            {
+                try
+                {
+                    long n = Interlocked.Increment(ref _seq);
+                    DateTime now = DateTime.Now;
+
+                    byte[] rec = _phaseRecord;
+                    WriteDigits(rec, 0, n, PhaseSeqDigits);
+                    rec[10] = (byte)' ';
+                    WriteDigits(rec, 11, now.Hour, 2);
+                    rec[13] = (byte)':';
+                    WriteDigits(rec, 14, now.Minute, 2);
+                    rec[16] = (byte)':';
+                    WriteDigits(rec, 17, now.Second, 2);
+                    rec[19] = (byte)'.';
+                    WriteDigits(rec, 20, now.Millisecond, 3);
+                    rec[23] = (byte)' ';
+                    WriteAsciiPadded(rec, PhaseAreaOffset, PhaseAreaWidth, area);
+                    rec[PhaseRecordBytes - 1] = (byte)'\n';
+
+                    int slot = _phaseNext;
+                    _phaseNext = (_phaseNext + 1) % PhaseSlots;
+
+                    _phaseStream.Seek(_phaseHeaderBytes + (slot * PhaseRecordBytes), SeekOrigin.Begin);
+                    _phaseStream.Write(rec, 0, PhaseRecordBytes);
+                    _phaseStream.Flush();
+                }
+                catch
+                {
+                    // Never let breadcrumb I/O throw into game code.
+                }
+            }
+        }
+
+        private static void InitPhaseStream()
+        {
+            if (!PhaseEnabled)
+            {
+                return;
+            }
+
+            string path = Path.Combine(HelperPaths.GetDirectory("Logs"), "breadcrumbs-phase.log");
+            _phaseStream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+
+            // Fixed-length header: the record offsets below depend on it, so it is written once and
+            // never rewritten. Sort the records by their leading sequence number to read the trail.
+            byte[] header = Encoding.ASCII.GetBytes(
+                "# phase ring (sort lines by the leading seq to replay) build=" + BuildTag + "\n");
+            _phaseHeaderBytes = header.Length;
+            _phaseStream.Write(header, 0, header.Length);
+
+            // Pre-size the ring so unwritten slots read as blanks instead of a ragged tail.
+            byte[] blank = new byte[PhaseRecordBytes];
+            for (int i = 0; i < PhaseRecordBytes - 1; i++)
+            {
+                blank[i] = (byte)' ';
+            }
+            blank[PhaseRecordBytes - 1] = (byte)'\n';
+            for (int i = 0; i < PhaseSlots; i++)
+            {
+                _phaseStream.Write(blank, 0, PhaseRecordBytes);
+            }
+            _phaseStream.Flush();
+        }
+
+        private static void WriteDigits(byte[] buffer, int offset, long value, int width)
+        {
+            if (value < 0L)
+            {
+                value = 0L;
+            }
+
+            for (int i = width - 1; i >= 0; i--)
+            {
+                buffer[offset + i] = (byte)('0' + (int)(value % 10L));
+                value /= 10L;
+            }
+        }
+
+        private static void WriteAsciiPadded(byte[] buffer, int offset, int width, string text)
+        {
+            int copied = 0;
+            if (text != null)
+            {
+                int count = text.Length < width ? text.Length : width;
+                for (; copied < count; copied++)
+                {
+                    char c = text[copied];
+                    buffer[offset + copied] = (c >= ' ' && c < (char)127) ? (byte)c : (byte)'?';
+                }
+            }
+
+            for (; copied < width; copied++)
+            {
+                buffer[offset + copied] = (byte)' ';
             }
         }
 

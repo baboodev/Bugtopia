@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -81,6 +81,16 @@ namespace HeartopiaMod
         // manual sweeps follow.
         private const float DailyClaimsAutoDrainIntervalSeconds = 0.4f;
 
+        // Mail is a CLOSED LOOP if left alone: RequestAllRewards makes the server push
+        // MailUpdatedEvent, whose handler re-arms pendingMail, which sends RequestAllRewards again.
+        // Live trace 2026-08-11: three RequestAllRewards inside 1.5s on every world entry, each
+        // answered with MailErrorCode:RewardIsEmpty. Red points already filter their own echo via
+        // IsAdd == false; MailUpdatedEvent carries no such flag, so it is filtered by time instead.
+        // EchoWindow swallows the server's answer to our own send; MinInterval is the backstop that
+        // caps the loop at one send per window even if an echo slips past it.
+        private const float DailyClaimsAutoMailEchoWindowSeconds = 5f;
+        private const float DailyClaimsAutoMailMinIntervalSeconds = 60f;
+
         // Per-queue cap. A pathological red-point storm must not grow these without bound; dropping
         // the overflow is safe because the manual button remains a full sweep.
         private const int DailyClaimsAutoMaxQueued = 256;
@@ -102,6 +112,8 @@ namespace HeartopiaMod
         private readonly List<int> dailyClaimsAutoActivityIds = new List<int>(8);
         private bool dailyClaimsAutoPendingTownGuide;
         private bool dailyClaimsAutoPendingMail;
+        private float dailyClaimsAutoMailEchoUntil;
+        private float dailyClaimsAutoMailNextAllowedAt;
 
         // World-ready catch-up steps, drained one per tick like everything else.
         private bool dailyClaimsAutoCatchUpActivities;
@@ -262,6 +274,14 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Our own RequestAllRewards makes the server push this event straight back. Re-arming on
+            // it is what produced the send loop, so anything inside the echo window is dropped;
+            // genuinely new mail arriving later still re-arms normally.
+            if (Time.realtimeSinceStartup < this.dailyClaimsAutoMailEchoUntil)
+            {
+                return;
+            }
+
             this.dailyClaimsAutoPendingMail = true;
         }
 
@@ -327,6 +347,7 @@ namespace HeartopiaMod
             // --- targeted, id-carrying claims first: these came straight from a red point ---------
             if (DailyClaimsAutoTakeFirst(this.dailyClaimsAutoTaskIds, out int taskId))
             {
+                Breadcrumbs.Phase("dc.task");
                 bool ok = this.TrySubmitDailyClaimsGameTask(taskId, out string status);
                 this.DailyClaimsAutoReport(ok, "submit task " + taskId, status);
                 return true;
@@ -334,6 +355,7 @@ namespace HeartopiaMod
 
             if (DailyClaimsAutoTakeFirst(this.dailyClaimsAutoIssueIds, out int issueId))
             {
+                Breadcrumbs.Phase("dc.bpissue");
                 bool ok = this.TryClaimDailyClaimsBpIssueReward(issueId, out string status);
                 this.DailyClaimsAutoReport(ok, "bp issue " + issueId, status);
                 return true;
@@ -341,6 +363,7 @@ namespace HeartopiaMod
 
             if (DailyClaimsAutoTakeFirst(this.dailyClaimsAutoPictorialTypes, out int pictorialType))
             {
+                Breadcrumbs.Phase("dc.pictorial");
                 bool ok = this.TryClaimDailyClaimsPictorialTypeReward(pictorialType, out string status);
                 this.DailyClaimsAutoReport(ok, "collection type " + pictorialType, status);
                 return true;
@@ -348,6 +371,7 @@ namespace HeartopiaMod
 
             if (DailyClaimsAutoTakeFirst(this.dailyClaimsAutoAllSuitIds, out int allSuitId))
             {
+                Breadcrumbs.Phase("dc.allsuit");
                 bool ok = this.TryClaimDailyClaimsPediaAllSuitReward(allSuitId, out string status);
                 this.DailyClaimsAutoReport(ok, "all-suit " + allSuitId, status);
                 return true;
@@ -355,6 +379,7 @@ namespace HeartopiaMod
 
             if (DailyClaimsAutoTakeFirst(this.dailyClaimsAutoCertIds, out int certId))
             {
+                Breadcrumbs.Phase("dc.cert");
                 bool ok = this.TryClaimDailyClaimsCertificationReward(certId, out string status);
                 this.DailyClaimsAutoReport(ok, "certification " + certId, status);
                 return true;
@@ -365,20 +390,28 @@ namespace HeartopiaMod
                 // The red point names the suit, not which tier is owed, so ask the service how many
                 // pieces are held and claim every tier at or below it — the same gate the manual
                 // sweep uses, just for one suit.
+                Breadcrumbs.Phase("dc.suit");
                 this.DailyClaimsAutoClaimSuitTiers(suitId);
                 return true;
             }
 
             if (DailyClaimsAutoTakeFirst(this.dailyClaimsAutoActivityIds, out int activityId))
             {
+                Breadcrumbs.Phase("dc.activity");
                 this.DailyClaimsAutoClaimActivity(activityId);
                 return true;
             }
 
             // --- flag-driven claims --------------------------------------------------------------
-            if (this.dailyClaimsAutoPendingMail)
+            // The pending flag is kept (not consumed) while the min-interval backstop holds it off,
+            // so a claim that is merely too early is DELAYED rather than dropped, and the drain
+            // falls through to the next step instead of stalling on it.
+            if (this.dailyClaimsAutoPendingMail && Time.realtimeSinceStartup >= this.dailyClaimsAutoMailNextAllowedAt)
             {
                 this.dailyClaimsAutoPendingMail = false;
+                this.dailyClaimsAutoMailEchoUntil = Time.realtimeSinceStartup + DailyClaimsAutoMailEchoWindowSeconds;
+                this.dailyClaimsAutoMailNextAllowedAt = Time.realtimeSinceStartup + DailyClaimsAutoMailMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.mail");
                 bool ok = this.TryClaimMailAll(out string status);
                 this.DailyClaimsAutoReport(ok, "mail", status);
                 return true;
@@ -387,6 +420,7 @@ namespace HeartopiaMod
             if (this.dailyClaimsAutoPendingTownGuide)
             {
                 this.dailyClaimsAutoPendingTownGuide = false;
+                Breadcrumbs.Phase("dc.townguide");
                 int sent = this.ClaimTownGuideRewards(out string detail);
                 this.DailyClaimsAutoReport(sent > 0, "town guide (sent=" + sent + ")", detail);
                 return true;
@@ -396,6 +430,7 @@ namespace HeartopiaMod
             if (this.dailyClaimsAutoCatchUpBattlePass)
             {
                 this.dailyClaimsAutoCatchUpBattlePass = false;
+                Breadcrumbs.Phase("dc.battlepass");
                 this.TryClaimMiniBpAll(out string miniStatus);
                 this.TryClaimBpLoop(out string loopStatus);
                 this.DailyClaimsAutoReport(true, "catch-up battle pass", miniStatus + "; " + loopStatus);
@@ -405,6 +440,7 @@ namespace HeartopiaMod
             if (this.dailyClaimsAutoCatchUpActivities)
             {
                 this.dailyClaimsAutoCatchUpActivities = false;
+                Breadcrumbs.Phase("dc.signin");
                 int sent = this.ClaimSignInRewards(out string detail);
                 this.DailyClaimsAutoReport(sent > 0, "catch-up sign-in (sent=" + sent + ")", detail);
                 return true;
@@ -413,6 +449,7 @@ namespace HeartopiaMod
             if (this.dailyClaimsAutoCatchUpTasks)
             {
                 this.dailyClaimsAutoCatchUpTasks = false;
+                Breadcrumbs.Phase("dc.catchuptasks");
                 this.DailyClaimsAutoQueueSubmittableTasks();
                 return true;
             }
@@ -420,6 +457,7 @@ namespace HeartopiaMod
             if (this.dailyClaimsAutoCatchUpWhalefall)
             {
                 this.dailyClaimsAutoCatchUpWhalefall = false;
+                Breadcrumbs.Phase("dc.whalefall");
                 this.DailyClaimsAutoQueueWhalefallRequests();
                 return true;
             }

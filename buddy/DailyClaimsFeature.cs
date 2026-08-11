@@ -27,15 +27,36 @@ namespace HeartopiaMod
         // fields the old dual-path senders carried went with them; protocol calls now go straight
         // through TryInvokeDailyClaimsProtocolAuraMono, and commands through
         // TryDailyClaimsSendCommandAura.
-        private DailyClaimsServiceBinding dailyClaimsActivityServiceBinding = default;
-        private DailyClaimsServiceBinding dailyClaimsTownGuideServiceBinding = default;
-        private DailyClaimsServiceBinding dailyClaimsSeaCycleServiceBinding = default;
-        private DailyClaimsServiceBinding dailyClaimsPictorialServiceBinding = default;
+        // Service objects are cached through AuraMonoObjectCache, NOT as raw IntPtrs. Two reasons,
+        // both of them live crashes:
+        //   * SGen is a MOVING collector and a bare MonoObject* is not a root it can see, so an
+        //     unpinned cached pointer goes stale on the next collection (AGENTS.md §11).
+        //   * A level transition tears down and rebuilds the ECS client services. The old service
+        //     object becomes garbage under the scene-load allocation storm, and the next invoke on
+        //     the cached pointer is a native AV with no WER dump — this is exactly the 2026-08-11
+        //     18:09 death entering the underwater level: the town-guide catch-up step ran ~2s after
+        //     world-ready on a binding resolved before the transition. AuraMonoObjectCache pins the
+        //     object AND stamps the world epoch, so a world change forces a clean re-resolve.
+        private AuraMonoObjectCache dailyClaimsActivityServiceCache;
+        private AuraMonoObjectCache dailyClaimsTownGuideServiceCache;
+        private AuraMonoObjectCache dailyClaimsSeaCycleServiceCache;
+        private AuraMonoObjectCache dailyClaimsPictorialServiceCache;
+        private string dailyClaimsActivityServiceSource = string.Empty;
+        private string dailyClaimsTownGuideServiceSource = string.Empty;
+        private string dailyClaimsSeaCycleServiceSource = string.Empty;
+        private string dailyClaimsPictorialServiceSource = string.Empty;
 
         private readonly List<int> dailyClaimsActivityIdBuffer = new List<int>(64);
         private readonly List<string> dailyClaimsNodeStateBuffer = new List<string>(32);
         private readonly List<DailyClaimsTownGuideChapterSnapshot> dailyClaimsTownGuideChapterBuffer = new List<DailyClaimsTownGuideChapterSnapshot>(32);
         private readonly List<IntPtr> dailyClaimsAuraMonoItemBuffer = new List<IntPtr>(64);
+        private readonly List<uint> dailyClaimsAuraMonoPinBuffer = new List<uint>(64);
+        // The chapter parser runs INSIDE the loop that walks dailyClaimsAuraMonoItemBuffer, so it
+        // must never touch that list: it used to take the same instance, Clear() it and refill it
+        // with the chapter's nodes, which left the caller indexing node pointers as chapters (and
+        // re-bounded its loop to the node count). Own buffers, one nesting level.
+        private readonly List<IntPtr> dailyClaimsAuraMonoNodeBuffer = new List<IntPtr>(32);
+        private readonly List<uint> dailyClaimsAuraMonoNodePinBuffer = new List<uint>(32);
         private bool dailyClaimsResolveProbeLogged = false;
 
         private IntPtr dailyClaimsAuraEcsServiceClass = IntPtr.Zero;
@@ -2067,10 +2088,8 @@ namespace HeartopiaMod
 
         private bool TryEnsureDailyClaimsPictorialService(out DailyClaimsServiceBinding binding, out string status)
         {
-            if (this.dailyClaimsPictorialServiceBinding.IsValid)
+            if (TryTakeCachedDailyClaimsService(ref this.dailyClaimsPictorialServiceCache, this.dailyClaimsPictorialServiceSource, out binding, out status))
             {
-                binding = this.dailyClaimsPictorialServiceBinding;
-                status = binding.Source;
                 return true;
             }
 
@@ -2578,46 +2597,59 @@ namespace HeartopiaMod
                 return 0;
             }
 
+            // Pinned walk: IsMailRewardable boxes its bool return on every item, so an unpinned
+            // items[] would be walking relocated mail objects by the time SGen fires (AGENTS.md §11).
             List<IntPtr> items = this.dailyClaimsAuraMonoItemBuffer;
+            List<uint> pins = this.dailyClaimsAuraMonoPinBuffer;
             items.Clear();
-            if (!this.TryEnumerateAuraMonoCollectionItems(mailsObj, items) || items.Count == 0)
+            pins.Clear();
+            uint mailsPin = AuraMonoPinNew(mailsObj);
+            try
             {
-                return 0;
-            }
-
-            IntPtr serviceClass = auraMonoObjectGetClass(mailService);
-            IntPtr isMailRewardableMethod = this.FindAuraMonoMethodOnHierarchy(serviceClass, "IsMailRewardable", 1);
-            if (isMailRewardableMethod == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            int rewardableCount = 0;
-            unsafe
-            {
-                for (int i = 0; i < items.Count; i++)
+                if (!this.TryEnumerateAuraMonoCollectionItems(mailsObj, items, pins) || items.Count == 0)
                 {
-                    IntPtr mailObj = items[i];
-                    if (mailObj == IntPtr.Zero)
-                    {
-                        continue;
-                    }
+                    return 0;
+                }
 
-                    IntPtr exc = IntPtr.Zero;
-                    IntPtr* args = stackalloc IntPtr[1];
-                    args[0] = mailObj;
-                    IntPtr boxedResult = auraMonoRuntimeInvoke(isMailRewardableMethod, mailService, (IntPtr)args, ref exc);
-                    if (exc == IntPtr.Zero
-                        && boxedResult != IntPtr.Zero
-                        && this.TryUnboxMonoBoolean(boxedResult, out bool rewardable)
-                        && rewardable)
+                IntPtr serviceClass = auraMonoObjectGetClass(mailService);
+                IntPtr isMailRewardableMethod = this.FindAuraMonoMethodOnHierarchy(serviceClass, "IsMailRewardable", 1);
+                if (isMailRewardableMethod == IntPtr.Zero)
+                {
+                    return 0;
+                }
+
+                int rewardableCount = 0;
+                unsafe
+                {
+                    for (int i = 0; i < items.Count; i++)
                     {
-                        rewardableCount++;
+                        IntPtr mailObj = items[i];
+                        if (mailObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        IntPtr exc = IntPtr.Zero;
+                        IntPtr* args = stackalloc IntPtr[1];
+                        args[0] = mailObj;
+                        IntPtr boxedResult = auraMonoRuntimeInvoke(isMailRewardableMethod, mailService, (IntPtr)args, ref exc);
+                        if (exc == IntPtr.Zero
+                            && boxedResult != IntPtr.Zero
+                            && this.TryUnboxMonoBoolean(boxedResult, out bool rewardable)
+                            && rewardable)
+                        {
+                            rewardableCount++;
+                        }
                     }
                 }
-            }
 
-            return rewardableCount;
+                return rewardableCount;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+                AuraMonoPinFree(mailsPin);
+            }
         }
 
         private bool TryDailyClaimsGetAuraMonoBattlePassSystem(out IntPtr battlePassSystem, out string status)
@@ -2682,26 +2714,39 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> items = this.dailyClaimsAuraMonoItemBuffer;
+            List<uint> pins = this.dailyClaimsAuraMonoPinBuffer;
             items.Clear();
-            if (!this.TryEnumerateAuraMonoCollectionItems(slotsObj, items))
-            {
-                status = methodName + " list empty";
-                return 0;
-            }
-
+            pins.Clear();
+            uint slotsPin = AuraMonoPinNew(slotsObj);
             int canGetCount = 0;
-            for (int i = 0; i < items.Count; i++)
+            try
             {
-                IntPtr slotObj = items[i];
-                if (slotObj == IntPtr.Zero)
+                if (!this.TryEnumerateAuraMonoCollectionItems(slotsObj, items, pins))
                 {
-                    continue;
+                    status = methodName + " list empty";
+                    return 0;
                 }
 
-                if (this.TryGetMonoInt32Member(slotObj, "state", out int state) && state == DailyClaimsBattlePassSlotCanGet)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    canGetCount++;
+                    IntPtr slotObj = items[i];
+                    if (slotObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    // TryGetMonoInt32Member boxes -> allocates -> SGen may relocate the slots; the
+                    // pins above are what keep slotObj valid for the whole loop.
+                    if (this.TryGetMonoInt32Member(slotObj, "state", out int state) && state == DailyClaimsBattlePassSlotCanGet)
+                    {
+                        canGetCount++;
+                    }
                 }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+                AuraMonoPinFree(slotsPin);
             }
 
             status = methodName + " ok slots=" + items.Count;
@@ -3022,10 +3067,8 @@ namespace HeartopiaMod
 
         private bool TryEnsureDailyClaimsActivityService(out DailyClaimsServiceBinding binding, out string status)
         {
-            if (this.dailyClaimsActivityServiceBinding.IsValid)
+            if (TryTakeCachedDailyClaimsService(ref this.dailyClaimsActivityServiceCache, this.dailyClaimsActivityServiceSource, out binding, out status))
             {
-                binding = this.dailyClaimsActivityServiceBinding;
-                status = binding.Source;
                 return true;
             }
 
@@ -3042,10 +3085,8 @@ namespace HeartopiaMod
 
         private bool TryEnsureDailyClaimsTownGuideService(out DailyClaimsServiceBinding binding, out string status)
         {
-            if (this.dailyClaimsTownGuideServiceBinding.IsValid)
+            if (TryTakeCachedDailyClaimsService(ref this.dailyClaimsTownGuideServiceCache, this.dailyClaimsTownGuideServiceSource, out binding, out status))
             {
-                binding = this.dailyClaimsTownGuideServiceBinding;
-                status = binding.Source;
                 return true;
             }
 
@@ -3062,10 +3103,8 @@ namespace HeartopiaMod
 
         private bool TryEnsureDailyClaimsSeaCycleService(out DailyClaimsServiceBinding binding, out string status)
         {
-            if (this.dailyClaimsSeaCycleServiceBinding.IsValid)
+            if (TryTakeCachedDailyClaimsService(ref this.dailyClaimsSeaCycleServiceCache, this.dailyClaimsSeaCycleServiceSource, out binding, out status))
             {
-                binding = this.dailyClaimsSeaCycleServiceBinding;
-                status = binding.Source;
                 return true;
             }
 
@@ -3406,6 +3445,33 @@ namespace HeartopiaMod
             return false;
         }
 
+        // Reads one cached service back out. Returns false when the entry is empty, when pinning was
+        // unavailable at Set time (the cache deliberately stores nothing rather than an unpinned raw
+        // pointer), or when the world epoch moved on — all three mean "re-resolve", never "reuse".
+        // The pin the cache holds also keeps the object put for the whole synchronous call the
+        // returned binding is used in, which is what makes the member reads downstream safe.
+        private static bool TryTakeCachedDailyClaimsService(
+            ref AuraMonoObjectCache cache,
+            string source,
+            out DailyClaimsServiceBinding binding,
+            out string status)
+        {
+            if (cache.TryGet(out IntPtr serviceObj) && serviceObj != IntPtr.Zero)
+            {
+                binding = new DailyClaimsServiceBinding
+                {
+                    AuraMono = serviceObj,
+                    Source = source
+                };
+                status = source;
+                return true;
+            }
+
+            binding = default;
+            status = "service unavailable";
+            return false;
+        }
+
         private void CacheDailyClaimsServiceBinding(string[] ecsTypeCandidates, string[] managerHints, DailyClaimsServiceBinding binding)
         {
             for (int i = 0; i < managerHints.Length; i++)
@@ -3413,25 +3479,29 @@ namespace HeartopiaMod
                 if (managerHints[i].IndexOf("OperationActivity", StringComparison.OrdinalIgnoreCase) >= 0
                     || managerHints[i].IndexOf("ActivityCenter", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsActivityServiceBinding = binding;
+                    this.dailyClaimsActivityServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsActivityServiceSource = binding.Source;
                     return;
                 }
 
                 if (managerHints[i].IndexOf("TownGuide", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsTownGuideServiceBinding = binding;
+                    this.dailyClaimsTownGuideServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsTownGuideServiceSource = binding.Source;
                     return;
                 }
 
                 if (managerHints[i].IndexOf("SeaCycle", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsSeaCycleServiceBinding = binding;
+                    this.dailyClaimsSeaCycleServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsSeaCycleServiceSource = binding.Source;
                     return;
                 }
 
                 if (managerHints[i].IndexOf("Pictorial", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsPictorialServiceBinding = binding;
+                    this.dailyClaimsPictorialServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsPictorialServiceSource = binding.Source;
                     return;
                 }
             }
@@ -3440,25 +3510,29 @@ namespace HeartopiaMod
             {
                 if (ecsTypeCandidates[i].IndexOf("OperationActivity", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsActivityServiceBinding = binding;
+                    this.dailyClaimsActivityServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsActivityServiceSource = binding.Source;
                     return;
                 }
 
                 if (ecsTypeCandidates[i].IndexOf("TownGuides", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsTownGuideServiceBinding = binding;
+                    this.dailyClaimsTownGuideServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsTownGuideServiceSource = binding.Source;
                     return;
                 }
 
                 if (ecsTypeCandidates[i].IndexOf("SeaCycle", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsSeaCycleServiceBinding = binding;
+                    this.dailyClaimsSeaCycleServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsSeaCycleServiceSource = binding.Source;
                     return;
                 }
 
                 if (ecsTypeCandidates[i].IndexOf("Pictorial", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    this.dailyClaimsPictorialServiceBinding = binding;
+                    this.dailyClaimsPictorialServiceCache.Set(binding.AuraMono);
+                    this.dailyClaimsPictorialServiceSource = binding.Source;
                     return;
                 }
             }
@@ -3857,22 +3931,33 @@ namespace HeartopiaMod
             for (int i = 0; i < chapterIds.Count; i++)
             {
                 int chapterId = chapterIds[i];
+                IntPtr chapterObj;
                 unsafe
                 {
                     IntPtr exc = IntPtr.Zero;
                     IntPtr* args = stackalloc IntPtr[1];
                     args[0] = (IntPtr)(&chapterId);
-                    IntPtr chapterObj = auraMonoRuntimeInvoke(getChapterInfoMethod, binding.AuraMono, (IntPtr)args, ref exc);
+                    chapterObj = auraMonoRuntimeInvoke(getChapterInfoMethod, binding.AuraMono, (IntPtr)args, ref exc);
                     if (exc != IntPtr.Zero || chapterObj == IntPtr.Zero)
                     {
                         continue;
                     }
+                }
 
+                // Pin across the parse: it boxes on every member read, and each box is a mono-side
+                // allocation that can trigger an SGen collection which relocates this very object.
+                uint chapterPin = AuraMonoPinNew(chapterObj);
+                try
+                {
                     DailyClaimsTownGuideChapterSnapshot chapter = this.DailyClaimsParseTownGuideChapterAuraMono(chapterObj);
                     if (chapter.ChapterId > 0)
                     {
                         chapters.Add(chapter);
                     }
+                }
+                finally
+                {
+                    AuraMonoPinFree(chapterPin);
                 }
             }
 
@@ -3910,31 +3995,46 @@ namespace HeartopiaMod
                 return false;
             }
 
-            IntPtr exc = IntPtr.Zero;
+            // listObj is a fresh managed List<GuidesChapterInfo> we just allocated; GetAllChapterInfo
+            // fills it (growing its backing array = more allocation), so it has to be pinned across
+            // the invoke and the walk or SGen can move it out from under both.
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = listObj;
-            auraMonoRuntimeInvoke(getAllMethod, binding.AuraMono, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero)
-            {
-                status = "AuraMono GetAllChapterInfo invoke failed";
-                return false;
-            }
 
+            uint listPin = AuraMonoPinNew(listObj);
             List<IntPtr> items = this.dailyClaimsAuraMonoItemBuffer;
+            List<uint> pins = this.dailyClaimsAuraMonoPinBuffer;
             items.Clear();
-            if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items) || items.Count == 0)
+            pins.Clear();
+            try
             {
-                status = "AuraMono GetAllChapterInfo returned empty list";
-                return false;
-            }
-
-            for (int i = 0; i < items.Count; i++)
-            {
-                DailyClaimsTownGuideChapterSnapshot chapter = this.DailyClaimsParseTownGuideChapterAuraMono(items[i]);
-                if (chapter.ChapterId > 0)
+                IntPtr exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(getAllMethod, binding.AuraMono, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
                 {
-                    chapters.Add(chapter);
+                    status = "AuraMono GetAllChapterInfo invoke failed";
+                    return false;
                 }
+
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins) || items.Count == 0)
+                {
+                    status = "AuraMono GetAllChapterInfo returned empty list";
+                    return false;
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    DailyClaimsTownGuideChapterSnapshot chapter = this.DailyClaimsParseTownGuideChapterAuraMono(items[i]);
+                    if (chapter.ChapterId > 0)
+                    {
+                        chapters.Add(chapter);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+                AuraMonoPinFree(listPin);
             }
 
             status = "AuraMono GetAllChapterInfo ok count=" + chapters.Count;
@@ -4042,34 +4142,45 @@ namespace HeartopiaMod
                 && chaptersTableObj != IntPtr.Zero)
             {
                 List<IntPtr> entries = this.dailyClaimsAuraMonoItemBuffer;
+                List<uint> entryPins = this.dailyClaimsAuraMonoPinBuffer;
                 entries.Clear();
-                if (this.TryEnumerateAuraMonoCollectionItems(chaptersTableObj, entries))
+                entryPins.Clear();
+                uint tablePin = AuraMonoPinNew(chaptersTableObj);
+                try
                 {
-                    for (int i = 0; i < entries.Count; i++)
+                    if (this.TryEnumerateAuraMonoCollectionItems(chaptersTableObj, entries, entryPins))
                     {
-                        IntPtr entryObj = entries[i];
-                        if (entryObj == IntPtr.Zero)
+                        for (int i = 0; i < entries.Count; i++)
                         {
-                            continue;
-                        }
+                            IntPtr entryObj = entries[i];
+                            if (entryObj == IntPtr.Zero)
+                            {
+                                continue;
+                            }
 
-                        if (this.TryGetMonoInt32Member(entryObj, "id", out int chapterId) && chapterId > 0)
-                        {
-                            chapterIds.Add(chapterId);
-                            continue;
-                        }
+                            if (this.TryGetMonoInt32Member(entryObj, "id", out int chapterId) && chapterId > 0)
+                            {
+                                chapterIds.Add(chapterId);
+                                continue;
+                            }
 
-                        if (this.TryGetMonoInt32Member(entryObj, "Key", out chapterId) && chapterId > 0)
-                        {
-                            chapterIds.Add(chapterId);
-                            continue;
-                        }
+                            if (this.TryGetMonoInt32Member(entryObj, "Key", out chapterId) && chapterId > 0)
+                            {
+                                chapterIds.Add(chapterId);
+                                continue;
+                            }
 
-                        if (this.TryGetMonoInt32Member(entryObj, "m_value", out chapterId) && chapterId > 0)
-                        {
-                            chapterIds.Add(chapterId);
+                            if (this.TryGetMonoInt32Member(entryObj, "m_value", out chapterId) && chapterId > 0)
+                            {
+                                chapterIds.Add(chapterId);
+                            }
                         }
                     }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(entryPins);
+                    AuraMonoPinFree(tablePin);
                 }
             }
 
@@ -4112,30 +4223,43 @@ namespace HeartopiaMod
 
             if (this.TryGetMonoObjectMember(chapterObj, "AllNodes", out IntPtr nodesObj) && nodesObj != IntPtr.Zero)
             {
-                List<IntPtr> nodeItems = this.dailyClaimsAuraMonoItemBuffer;
+                // Deliberately NOT dailyClaimsAuraMonoItemBuffer: the caller is mid-walk over that
+                // list (see the buffer declarations). Nodes get their own buffer + pin list.
+                List<IntPtr> nodeItems = this.dailyClaimsAuraMonoNodeBuffer;
+                List<uint> nodePins = this.dailyClaimsAuraMonoNodePinBuffer;
                 nodeItems.Clear();
-                if (this.TryEnumerateAuraMonoCollectionItems(nodesObj, nodeItems))
+                nodePins.Clear();
+                uint nodesPin = AuraMonoPinNew(nodesObj);
+                try
                 {
-                    for (int i = 0; i < nodeItems.Count; i++)
+                    if (this.TryEnumerateAuraMonoCollectionItems(nodesObj, nodeItems, nodePins))
                     {
-                        IntPtr nodeObj = nodeItems[i];
-                        if (nodeObj == IntPtr.Zero)
+                        for (int i = 0; i < nodeItems.Count; i++)
                         {
-                            continue;
-                        }
+                            IntPtr nodeObj = nodeItems[i];
+                            if (nodeObj == IntPtr.Zero)
+                            {
+                                continue;
+                            }
 
-                        int nodeId = 0;
-                        if (!this.TryGetMonoInt32Member(nodeObj, "NodeId", out nodeId))
-                        {
-                            this.TryGetMonoInt32Member(nodeObj, "nodeId", out nodeId);
-                        }
+                            int nodeId = 0;
+                            if (!this.TryGetMonoInt32Member(nodeObj, "NodeId", out nodeId))
+                            {
+                                this.TryGetMonoInt32Member(nodeObj, "nodeId", out nodeId);
+                            }
 
-                        chapter.Nodes.Add(new DailyClaimsTownGuideNodeSnapshot
-                        {
-                            NodeId = nodeId,
-                            State = this.DailyClaimsTryGetAuraMonoEnumName(nodeObj, "State")
-                        });
+                            chapter.Nodes.Add(new DailyClaimsTownGuideNodeSnapshot
+                            {
+                                NodeId = nodeId,
+                                State = this.DailyClaimsTryGetAuraMonoEnumName(nodeObj, "State")
+                            });
+                        }
                     }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(nodePins);
+                    AuraMonoPinFree(nodesPin);
                 }
             }
 
@@ -4224,19 +4348,30 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> items = this.dailyClaimsAuraMonoItemBuffer;
+            List<uint> pins = this.dailyClaimsAuraMonoPinBuffer;
             items.Clear();
-            if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items))
+            pins.Clear();
+            uint listPin = AuraMonoPinNew(listObj);
+            try
             {
-                status = methodName + " AuraMono list empty";
-                return false;
-            }
-
-            for (int i = 0; i < items.Count; i++)
-            {
-                if (this.TryUnboxAuraUInt32(items[i], out uint value))
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins))
                 {
-                    output.Add((int)value);
+                    status = methodName + " AuraMono list empty";
+                    return false;
                 }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (this.TryUnboxAuraUInt32(items[i], out uint value))
+                    {
+                        output.Add((int)value);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+                AuraMonoPinFree(listPin);
             }
 
             status = methodName + " AuraMono ok count=" + output.Count;

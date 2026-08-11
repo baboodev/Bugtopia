@@ -644,12 +644,18 @@ namespace HeartopiaMod
             this.UpdatePetPlayAutomation();
             this.UpdateGameUiClickBlockState();
             Breadcrumbs.Drop("ou.uiblock");
+            // Phase markers (Breadcrumbs.Phase — own file, one 64-byte write each, see Breadcrumbs.cs).
+            // The 2026-08-11 underwater-entry crash died somewhere in this ~150-line stretch and the
+            // coarse ou.* markers could only narrow it to "between uiblock and beforehotkeys". These
+            // name the individual driver so the next no-dump death points at one method.
+            Breadcrumbs.Phase("ou.mouselook");
             // Camera Toggle now just flips the game's own free-look setting on its edges
             // (HeartopiaComplete.CameraRig.cs) — there is no per-frame camera steering any more.
             this.UpdateMouseLookState();
             // Keeps the game's on-screen key hints agreeing with whatever Settings→Game Keys has
             // rebound (InputRebindFeature.cs) — self-throttled, and a no-op with no overrides set.
             this.ProcessGameKeyIconsOnUpdate();
+            Breadcrumbs.Phase("ou.keyicons");
             float instantFps = (Time.unscaledDeltaTime > 0.0001f) ? (1f / Time.unscaledDeltaTime) : this.fpsBypassObservedFps;
             if (this.fpsBypassEnabled)
             {
@@ -692,9 +698,11 @@ namespace HeartopiaMod
                 }
                 this.nextFpsBypassApplyAt = Time.unscaledTime + 0.5f;
             }
+            Breadcrumbs.Phase("ou.lod");
             this.ProcessLodOverrideOnUpdate();
             this.ProcessGameLodFeatureOnUpdate();
             this.ProcessUgcTextureCacheFeatureOnUpdate();
+            Breadcrumbs.Phase("ou.locomotion");
             this.ProcessHideJumpButtonOnUpdate();
             this.ProcessBunnyHopOnUpdate();
             this.ProcessForceLocomotionOnUpdate();
@@ -704,29 +712,41 @@ namespace HeartopiaMod
             this.ProcessGameUiTimingsOnUpdate();
             this.UpdateMovementInputBridge();
             this.ProcessAutoIceSkatingOnUpdate();
+            Breadcrumbs.Phase("ou.bubble");
             this.ProcessBubbleFeatureOnUpdate();
             this.ProcessBubbleSpawnAtPlayerOnUpdate();
             this.ProcessAutoBubbleCollectOnUpdate();
+            Breadcrumbs.Phase("ou.animskip");
             this.ProcessShowOffBypassOnUpdate();
             this.ProcessCraftAnimationSkipOnUpdate();
             this.ProcessTutorialBlockOnUpdate();
             this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
+            Breadcrumbs.Phase("ou.hud");
             this.ProcessPersistentHudOnUpdate();
             this.ProcessMusicPlayerOnUpdate();
+            Breadcrumbs.Phase("ou.eventhooks");
             this.ProcessGameEventHooksOnUpdate();
             // Daily Claims auto-claim drain — must run AFTER the hook drain so a red point that
             // arrived this frame is already queued (DailyClaimsAutoClaimFeature.cs).
+            Breadcrumbs.Phase("ou.dailyclaims");
             this.ProcessDailyClaimsAutoClaimOnUpdate();
+            Breadcrumbs.Phase("ou.seaclean");
             this.ProcessSeaCleanBannerHideOnUpdate();
             // Stealth Foraging owns the noclip force/restore edge — must run before both the OOB
             // guard (which reads StealthForagingActive) and ProcessNoclipMovementOnUpdate below.
+            Breadcrumbs.Phase("ou.foraging");
             this.ProcessStealthForagingOnUpdate();
             this.ProcessForagingTeleportTraceOnUpdate();
+            Breadcrumbs.Phase("ou.oobguard");
             this.ProcessOutOfBoundsGuardOnUpdate();
+            Breadcrumbs.Phase("ou.whalefinder");
             this.ProcessLittleWhaleFinderOnUpdate();
+            Breadcrumbs.Phase("ou.research");
             this.ProcessResearchMonitorOnUpdate();
+            Breadcrumbs.Phase("ou.sanrio");
             this.ProcessSanrioGachaFinderOnUpdate();
+            Breadcrumbs.Phase("ou.uguishell");
             this.ProcessUguiShellOnUpdate();
             // Floating UGUI Building Move Panel — deliberately NOT inside ProcessUguiShellOnUpdate
             // (that early-returns until the shell is first built; this panel must auto-show with
@@ -736,12 +756,14 @@ namespace HeartopiaMod
             // (that early-returns until the shell is first built; this window must work with the
             // shell never opened). Gated on questAssistantWindowVisible ALONE — its IMGUI twin has
             // no menu-state suppression to replicate.
+            Breadcrumbs.Phase("ou.uguiquest");
             this.ProcessUguiQuestAssistantWindowOnUpdate();
             // Theme dirty-consumption + debounced SaveUiTheme flush (HeartopiaComplete.UiKit.cs).
             // Used to piggyback on EnsureThemeStyles at the top of OnGUI; with the IMGUI menu
             // retired the UGUI theme tab is the only theme editor, so the tick must not depend on
             // the IMGUI paint loop. Runs BEFORE ProcessUguiKitThemeOnUpdate so a dirty flag set
             // this frame is consumed into MarkUguiKitThemeDirty before the kit's debounce check.
+            Breadcrumbs.Phase("ou.uguitheme");
             this.ProcessUiThemePersistenceOnUpdate();
             this.ProcessUguiKitThemeOnUpdate();
             this.ProcessUguiStatusOverlayOnUpdate();
@@ -750,6 +772,7 @@ namespace HeartopiaMod
             // inside the IMGUI drawer — without this tick the list would pin at the 6-cap forever.
             this.ProcessUguiToastsOnUpdate();
             this.ProcessSwimSprintVerticalGuardOnUpdate();
+            Breadcrumbs.Phase("ou.questmonitors");
             this.QuestAssistantCollectMonitorTick();
             this.QuestAssistantTalkToNpcMonitorTick();
             this.QuestAssistantBirdMonitorTick();
@@ -757,9 +780,11 @@ namespace HeartopiaMod
             this.QuestAssistantGoToAreaMonitorTick();
             this.QuestAssistantFishMonitorTick();
             this.QuestAssistantAutoRefreshOnUpdate();
+            Breadcrumbs.Phase("ou.privacy");
             this.ProcessPrivacyBlockOnUpdate();
             this.ProcessMapRevealBlockedOnUpdate();
             this.ProcessStealthBlockOnUpdate();
+            Breadcrumbs.Phase("ou.teleport");
             this.ProcessInstantTeleportOnUpdate();
             this.ProcessVehicleBypassOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();
@@ -770,6 +795,7 @@ namespace HeartopiaMod
             // Periodic toast-panel scan fallback (in case UIManager hook isn't available)
             if (this.autoRepairOnToastEnabled)
             {
+                Breadcrumbs.Phase("ou.toastscan");
                 try { this.CheckToastPanel(); } catch { }
             }
 
@@ -784,13 +810,14 @@ namespace HeartopiaMod
                 }
             }
 
+            Breadcrumbs.Phase("ou.noclip");
             this.ProcessNoclipMovementOnUpdate();
 
             if (!string.IsNullOrEmpty(this.keyBindingActive))
             {
                 this.TryCaptureSideMouseKeybindOnUpdate();
             }
-            
+
             Breadcrumbs.Drop("ou.beforehotkeys");
             // Check for keybinds (Only if not currently rebinding and not just assigned)
             if (string.IsNullOrEmpty(this.keyBindingActive) && Time.unscaledTime - this.keyBindAssignedAt >= 0.2f)
