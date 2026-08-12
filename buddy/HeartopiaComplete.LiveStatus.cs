@@ -232,6 +232,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Skip Craft/Dye Anim", this.craftAnimSkipStatus));
             }
 
+            if (this.autoLearnRecipes)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Auto-learn Recipes", this.autoLearnStatus));
+            }
+
             if (this.craftDirectSendEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Direct Craft Send", this.craftDirectSendStatus));

@@ -722,6 +722,7 @@ namespace HeartopiaMod
             this.ProcessTutorialBlockOnUpdate();
             this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
+            this.ProcessAutoLearnRecipesOnUpdate();
             Breadcrumbs.Phase("ou.hud");
             this.ProcessPersistentHudOnUpdate();
             this.ProcessMusicPlayerOnUpdate();

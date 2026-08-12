@@ -225,6 +225,7 @@ namespace HeartopiaMod
             data.analogMoveBridgeEnabled = this.analogMoveBridgeEnabled;
             data.skipShowOffAnimations = this.skipShowOffAnimations;
             data.skipCraftDyeAnimations = this.skipCraftDyeAnimations;
+            data.autoLearnRecipes = this.autoLearnRecipes;
             data.craftDirectSendEnabled = this.craftDirectSendEnabled;
             data.persistentHudEnabled = this.persistentHudEnabled;
             data.vehicleBypassEnabled = this.vehicleBypassEnabled;
@@ -498,6 +499,7 @@ namespace HeartopiaMod
             this.analogMoveBridgeEnabled = data.analogMoveBridgeEnabled;
             this.skipShowOffAnimations = data.skipShowOffAnimations;
             this.skipCraftDyeAnimations = data.skipCraftDyeAnimations;
+            this.autoLearnRecipes = data.autoLearnRecipes;
             this.craftDirectSendEnabled = data.craftDirectSendEnabled;
             this.persistentHudEnabled = data.persistentHudEnabled;
             // Plain assignment is enough: ApplyKeybindConfig only ever runs once, from LoadKeybinds
@@ -829,6 +831,7 @@ namespace HeartopiaMod
                         else if (line.Contains("analogMoveBridgeEnabled")) this.analogMoveBridgeEnabled = GetJsonInt(line, "\"analogMoveBridgeEnabled\":") != 0;
                         else if (line.Contains("skipShowOffAnimations")) this.skipShowOffAnimations = GetJsonInt(line, "\"skipShowOffAnimations\":") != 0;
                         else if (line.Contains("skipCraftDyeAnimations")) this.skipCraftDyeAnimations = GetJsonInt(line, "\"skipCraftDyeAnimations\":") != 0;
+                        else if (line.Contains("autoLearnRecipes")) this.autoLearnRecipes = GetJsonInt(line, "\"autoLearnRecipes\":") != 0;
                         else if (line.Contains("craftDirectSendEnabled")) this.craftDirectSendEnabled = GetJsonInt(line, "\"craftDirectSendEnabled\":") != 0;
                         else if (line.Contains("persistentHudEnabled")) this.persistentHudEnabled = GetJsonInt(line, "\"persistentHudEnabled\":") != 0;
                         else if (line.Contains("autoIceSkatingMinUltimateScore")) this.autoIceSkatingMinUltimateScore = Mathf.Clamp(GetJsonInt(line, "\"autoIceSkatingMinUltimateScore\":"), 0, AutoIceSkatingMinUltimateScoreSliderMax);

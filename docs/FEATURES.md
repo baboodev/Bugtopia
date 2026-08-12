@@ -299,6 +299,31 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   detour is `Undo()`n the moment the toggle goes off, so leaving it alone adds no surface.
 - Persisted; default off. Source: `buddy/CraftDirectSendFeature.cs`.
 
+### Auto-learn Recipes
+
+- Learns every blueprint / cookbook / music sheet that lands in the backpack — no Learn animation,
+  no batch-confirm panel, no click.
+- **Trigger:** `QuickLearnEvent`. The game's own `QuickLearnSystem` listens to
+  `DataCreated<BackpackItem>` and dispatches it 0.5 s after a learnable item arrives (the same
+  signal that raises the vanilla quick-learn prompt), so the feature is event-driven with a 10 s
+  poll fallback until the detour installs. The payload's `List<uint>` is never read — the dispatch
+  alone is the signal and the netIds are re-derived from the bag.
+- **Action:** `CharacterProtocolManager.LearnRecipes(List<uint>)` over AuraMono, i.e.
+  `LearnMoreRecipeNetworkCommand`. This is the same call the game itself makes in
+  `BackpackLearnRecipe`'s animation-free branch (taken when a full-screen UI is open or the player
+  is busy), which is why nothing has to cancel a cast: there is no cast. Batches are chunked to the
+  command's `[MaxLength(120)]`.
+- **Selection is a strict allowlist** of `EntityType` blueprint (302), cookbook (47) and music sheet
+  (42) — exactly `BackPackSystem.GetAllRecipe()`'s predicate. `QuickLearnSystem`'s own cache also
+  queues choosable treasure chests, which are not recipes and must never reach the command;
+  `homelandblueprint` (228) is likewise excluded, so house blueprints are never consumed.
+- Each item netId is attempted at most twice per world load (ledger cleared on world-ready), so a
+  recipe the server refuses cannot loop.
+- ⚠ Learning **consumes** the item. Recipes you meant to gift, sell or keep will be used up while
+  this is on. Also note that with AutoSell running as well, the two features race for the same bag
+  contents — whichever sweeps first wins.
+- Persisted; default off. Self → Main. Source: `buddy/AutoLearnRecipeFeature.cs`.
+
 ### Anti-AFK
 
 - Periodically simulates mouse input to reduce idle kick.

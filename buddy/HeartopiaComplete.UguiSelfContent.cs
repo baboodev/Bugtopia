@@ -104,6 +104,7 @@ namespace HeartopiaMod
             public Toggle SkipCraftDyeToggle;
             public Toggle CraftDirectSendToggle;
             public Toggle BlockTutorialsToggle;
+            public Toggle AutoLearnRecipesToggle;
             public GameObject NoclipHelpLabel;  // trailing, only visible while Noclip is on
 
             public int LayoutSignature = -1;    // packed conditional-visibility state
@@ -349,6 +350,9 @@ namespace HeartopiaMod
             handle.BlockTutorialsToggle = this.CreateUguiCheckbox(scrollContent, "BlockTutorialsToggle",
                 this.L("Disable tutorials"), this.blockTutorials,
                 new System.Action<bool>(this.OnUguiSelfBlockTutorialsToggled));
+            handle.AutoLearnRecipesToggle = this.CreateUguiCheckbox(scrollContent, "AutoLearnRecipesToggle",
+                this.L("Auto-learn recipes"), this.autoLearnRecipes,
+                new System.Action<bool>(this.OnUguiSelfAutoLearnRecipesToggled));
 
             // Trailing conditional help label — localized in the IMGUI drawer, kept verbatim.
             handle.NoclipHelpLabel = this.CreateUguiLabel(scrollContent, "NoclipHelp",
@@ -590,6 +594,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.AutoLearnRecipesToggle != null)
+            {
+                PlaceUguiTopLeft(handle.AutoLearnRecipesToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             SetUguiGoActive(handle.NoclipHelpLabel, noclip);
             if (noclip)
             {
@@ -637,6 +647,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
+                this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
 
                 if (handle.NoclipSpeedSlider != null && Mathf.Abs(handle.NoclipSpeedSlider.value - this.noclipSpeed) > 0.0005f)
                 {
@@ -1097,6 +1108,16 @@ namespace HeartopiaMod
                 return;
             }
             this.blockTutorials = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfAutoLearnRecipesToggled(bool value)
+        {
+            if (value == this.autoLearnRecipes)
+            {
+                return;
+            }
+            this.autoLearnRecipes = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

@@ -214,6 +214,7 @@ namespace HeartopiaMod
             public bool analogMoveBridgeEnabled;
             public bool skipShowOffAnimations;
             public bool skipCraftDyeAnimations;
+            public bool autoLearnRecipes;
             public bool craftDirectSendEnabled;
             public bool persistentHudEnabled;
             // Self-tab bypass toggles. These were session-only until now even though their UI
