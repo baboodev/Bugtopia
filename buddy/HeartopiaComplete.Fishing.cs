@@ -1354,21 +1354,69 @@ namespace HeartopiaMod
             return shipNetId != 0U;
         }
 
+        // XZ disagreement tolerated between the two independent self-position sources (Mono entity vs
+        // the p_player_skeleton GameObject) before any position-writing facing path is refused. Normal
+        // drift is centimetres of visual interpolation lag; metres means one of the two is not us.
+        private const float CastFacingSelfPositionAgreementMeters = 2.5f;
+
         private bool TryFacePlayerTowardCastTarget(Vector3 targetPos, out string status)
         {
             status = "Player unavailable";
 
             try
             {
+                // The position handed to BasePlayerComponent.Transfer must come from the SAME entity we
+                // transfer. GetLocalPlayer() cannot provide that: it is GameObject.Find("p_player_skeleton
+                // (Clone)") and remote players share that object name, so a Find landing on one (the 1s
+                // cache then pins it while it stays active) fed another player's coordinates into a
+                // checkCollision:false Transfer — a hard teleport onto that player. The Mono entity read is
+                // authoritative; the skeleton is only a cross-check, and any disagreement or a missing Mono
+                // read drops us to the rotation-only path instead of writing a position we do not trust.
+                bool monoPosOk = this.TryGetCastFacingSelfPositionMono(out Vector3 monoPos, out string monoPosStatus);
+
                 GameObject skeleton = HeartopiaComplete.GetLocalPlayer();
                 GameObject positionSource = skeleton != null ? skeleton : this.FindPlayerRoot();
-                if (positionSource == null)
+                bool goPosOk = positionSource != null;
+                Vector3 goPos = goPosOk ? positionSource.transform.position : Vector3.zero;
+                if (!monoPosOk && !goPosOk)
                 {
                     return false;
                 }
 
+                Vector3 playerPos = monoPosOk ? monoPos : goPos;
+                float posDrift = monoPosOk && goPosOk
+                    ? new Vector2(monoPos.x - goPos.x, monoPos.z - goPos.z).magnitude
+                    : -1f;
+
+                bool allowPositionWrite;
+                string writeState;
+                if (!monoPosOk)
+                {
+                    allowPositionWrite = false;
+                    writeState = "blocked:" + monoPosStatus;
+                }
+                else if (posDrift > CastFacingSelfPositionAgreementMeters)
+                {
+                    allowPositionWrite = false;
+                    writeState = "blocked:drift";
+                }
+                else
+                {
+                    allowPositionWrite = true;
+                    writeState = "allowed";
+                }
+
+                // The skeleton is only safe to touch (visual fallback) when the Mono anchor confirms it is
+                // ours, or when there is no Mono anchor to check it against.
+                bool skeletonLooksLocal = goPosOk && (!monoPosOk || posDrift <= CastFacingSelfPositionAgreementMeters);
+
+                string anchorTrace = " playerPos=" + playerPos
+                    + " src=" + (monoPosOk ? "mono-entity" : "gameobject")
+                    + " go=" + (goPosOk ? goPos.ToString() : "none")
+                    + (posDrift >= 0f ? " drift=" + posDrift.ToString("F2") + "m" : string.Empty)
+                    + " write=" + writeState;
+
                 bool onFishingShip = this.IsLocalPlayerOnFishingShip(out uint _);
-                Vector3 playerPos = positionSource.transform.position;
                 Vector3 flatDir = targetPos - playerPos;
                 flatDir.y = 0f;
                 if (flatDir.sqrMagnitude < 0.04f)
@@ -1382,11 +1430,17 @@ namespace HeartopiaMod
                 float targetYaw = faceRot.eulerAngles.y;
                 Vector3 eulerAngles = new Vector3(0f, targetYaw, 0f);
 
-                if (this.TrySyncLocalPlayerCastFacingMono(playerPos, eulerAngles, faceRot, flatDir, onFishingShip, out string monoStatus))
+                if (this.TrySyncLocalPlayerCastFacingMono(playerPos, eulerAngles, faceRot, flatDir, onFishingShip, allowPositionWrite, out string monoStatus))
                 {
                     status = monoStatus;
-                    this.AutoFishLog("Pre-cast entity facing yaw=" + targetYaw.ToString("F1") + " " + status + " target=" + targetPos);
+                    this.AutoFishLog("Pre-cast entity facing yaw=" + targetYaw.ToString("F1") + " " + status + anchorTrace + " target=" + targetPos);
                     return true;
+                }
+
+                if (!skeletonLooksLocal)
+                {
+                    status = "skeleton anchor rejected" + anchorTrace;
+                    return false;
                 }
 
                 if (skeleton != null)
@@ -1401,7 +1455,7 @@ namespace HeartopiaMod
                 status = onFishingShip
                     ? "visual-only ship-safe yaw=" + targetYaw.ToString("F1")
                     : "visual-only fallback yaw=" + targetYaw.ToString("F1");
-                this.AutoFishLog("Pre-cast facing fallback " + status + " target=" + targetPos);
+                this.AutoFishLog("Pre-cast facing fallback " + status + anchorTrace + " target=" + targetPos);
                 return true;
             }
             catch (Exception ex)
@@ -1412,7 +1466,54 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TrySyncLocalPlayerCastFacingMono(Vector3 playerPos, Vector3 eulerAngles, Quaternion faceRot, Vector3 flatDir, bool onFishingShip, out string status)
+        // Authoritative self position for the pre-cast facing: read straight off the player component the
+        // facing path transfers (GameplayApi.fishingMode.Player / character.player), so the position can
+        // only ever be that entity's own. Deliberately re-resolves instead of taking a cached pointer —
+        // holding a MonoObject* across the boxing allocations below is the stale-pointer AV pattern.
+        private bool TryGetCastFacingSelfPositionMono(out Vector3 position, out string status)
+        {
+            position = Vector3.zero;
+            status = "mono-unavailable";
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            IntPtr playerObj = IntPtr.Zero;
+            if (!this.TryGetFishingPlayerMonoObject(out playerObj, out _, out _) || playerObj == IntPtr.Zero)
+            {
+                this.TryGetAuraMonoLocalPlayerObject(out playerObj);
+            }
+
+            if (playerObj == IntPtr.Zero)
+            {
+                status = "no-mono-player";
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(playerObj, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+            {
+                status = "no-entity";
+                return false;
+            }
+
+            if (!this.TryGetMonoVector3Member(entityObj, "position", out position) || !IsFiniteVector(position))
+            {
+                position = Vector3.zero;
+                status = "no-entity-position";
+                return false;
+            }
+
+            status = "OK";
+            return true;
+        }
+
+        // allowPositionWrite gates every path that writes a POSITION (Transfer, SetPositionAndRotation).
+        // Both take playerPos verbatim with no collision check, so they teleport whatever they are given;
+        // the caller only sets this once the anchor is proven to be our own entity. Rotation-only
+        // (WorldFaceTo) always runs — it cannot move the player.
+        private unsafe bool TrySyncLocalPlayerCastFacingMono(Vector3 playerPos, Vector3 eulerAngles, Quaternion faceRot, Vector3 flatDir, bool onFishingShip, bool allowPositionWrite, out string status)
         {
             status = "Mono entity facing unavailable";
 
@@ -1442,7 +1543,7 @@ namespace HeartopiaMod
             }
 
             IntPtr playerClass = auraMonoObjectGetClass(playerObj);
-            if (!onFishingShip)
+            if (!onFishingShip && allowPositionWrite)
             {
                 IntPtr transferMethod = this.FindAuraMonoMethodOnHierarchy(playerClass, "Transfer", 4);
                 if (transferMethod == IntPtr.Zero)
@@ -1510,7 +1611,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!onFishingShip)
+            if (!onFishingShip && allowPositionWrite)
             {
                 IntPtr setPosRotMethod = this.FindAuraMonoMethodOnHierarchy(moveClass, "SetPositionAndRotation", 3);
                 if (setPosRotMethod != IntPtr.Zero)
