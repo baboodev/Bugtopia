@@ -394,7 +394,7 @@ namespace HeartopiaMod
                 // resolving game types that early is exactly what the gate exists to prevent.
                 if (this.IsWorldReady)
                 {
-                    if (this.TryResolveChatTranslateClientLangKeyManaged(out int key) && key >= 0)
+                    if (this.TryResolveChatTranslateClientLangKey(out int key) && key >= 0)
                     {
                         if (key != this.uguiKitGameLangKey)
                         {

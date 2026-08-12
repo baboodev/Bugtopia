@@ -709,71 +709,12 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryResolveChatTranslateClientLangKeyManaged(out langKey))
-            {
-                this.chatForceTranslateClientLangKey = langKey;
-                this.chatForceTranslateUnavailableLogged = false;
-                this.ChatTranslateLog("Client language key = " + langKey + " (managed interop).");
-                return true;
-            }
-
             return this.TryResolveChatTranslateClientLangKeyAura(out langKey);
         }
 
         // Managed interop path: LocalizationManager is an engine-side IL2CPP class, so the
         // interop stub is callable via plain reflection (the AuraMono copy lives in the
         // EngineWrapper mono image and is only the fallback).
-        private bool TryResolveChatTranslateClientLangKeyManaged(out int langKey)
-        {
-            langKey = -1;
-            try
-            {
-                Type type = this.FindLoadedType(
-                    "XDFramework.Expansion.LocalizationManager",
-                    "Il2CppXDFramework.Expansion.LocalizationManager",
-                    "LocalizationManager");
-                if (type == null)
-                {
-                    return false;
-                }
-
-                System.Reflection.PropertyInfo instanceProp = type.GetProperty("Instance",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-                object instance = instanceProp != null ? instanceProp.GetValue(null, null) : null;
-                if (instance == null)
-                {
-                    return false;
-                }
-
-                System.Reflection.MethodInfo method = type.GetMethod("GetLanguageKey",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
-                    null, Type.EmptyTypes, null);
-                if (method == null)
-                {
-                    return false;
-                }
-
-                object result = method.Invoke(instance, null);
-                if (result == null)
-                {
-                    return false;
-                }
-
-                int value = Convert.ToInt32(result);
-                if (value < 0)
-                {
-                    return false;
-                }
-
-                langKey = value;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.ChatTranslateVerbose("Managed language key probe failed: " + ex.Message);
-                return false;
-            }
-        }
 
         private bool TryResolveChatTranslateClientLangKeyAura(out int langKey)
         {

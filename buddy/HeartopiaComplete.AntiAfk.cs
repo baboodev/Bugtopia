@@ -11,8 +11,6 @@ namespace HeartopiaMod
 
         private Type antiAfkOperateCommandType;
         private Type antiAfkServerPlayerStateType;
-        private Type antiAfkPlayerProtocolManagerType;
-        private MethodInfo antiAfkPlayerOperateHeartBeatMethod;
         private bool antiAfkHeartbeatUnavailableLogged;
 
         private void RunAntiAfkTick()
@@ -39,11 +37,6 @@ namespace HeartopiaMod
             this.EnsureAuraMonoApiReady();
 
             if (this.TrySendAntiAfkOperateHeartbeatViaCommand())
-            {
-                return;
-            }
-
-            if (this.TryInvokeAntiAfkPlayerOperateHeartBeatManaged())
             {
                 return;
             }
@@ -114,44 +107,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryInvokeAntiAfkPlayerOperateHeartBeatManaged()
-        {
-            try
-            {
-                if (this.antiAfkPlayerProtocolManagerType == null)
-                {
-                    this.antiAfkPlayerProtocolManagerType = this.FindLoadedType(
-                        "XDTDataAndProtocol.ProtocolService.Player.PlayerProtocolManager",
-                        "PlayerProtocolManager");
-                }
-
-                if (this.antiAfkPlayerProtocolManagerType == null)
-                {
-                    return false;
-                }
-
-                if (this.antiAfkPlayerOperateHeartBeatMethod == null)
-                {
-                    this.antiAfkPlayerOperateHeartBeatMethod = this.antiAfkPlayerProtocolManagerType
-                        .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                        .FirstOrDefault(m =>
-                            string.Equals(m.Name, "PlayerOperateHeartBeat", StringComparison.Ordinal)
-                            && m.GetParameters().Length == 0);
-                }
-
-                if (this.antiAfkPlayerOperateHeartBeatMethod == null)
-                {
-                    return false;
-                }
-
-                this.antiAfkPlayerOperateHeartBeatMethod.Invoke(null, null);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private bool TryInvokeAntiAfkPlayerOperateHeartBeatAuraMono()
         {
