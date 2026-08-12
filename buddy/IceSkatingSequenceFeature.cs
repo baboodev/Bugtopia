@@ -489,9 +489,8 @@ namespace HeartopiaMod
             this.EnsureIceSkatingSequenceSkateServiceResolver();
 
             bool hasAuraProto = this.IceSkatingSequenceHasAuraProtocolPath();
-            bool hasManagedProto = this.IceSkatingSequenceHasManagedProtocolPath();
             bool hasSendCommand = this.IceSkatingSequenceHasSendCommandPath();
-            if (!hasAuraProto && !hasManagedProto && !hasSendCommand)
+            if (!hasAuraProto && !hasSendCommand)
             {
                 status = "no path: auraProto=" + hasAuraProto
                     + " proto=" + (this.iceSkatingSequenceProtocolManagerType != null ? this.iceSkatingSequenceProtocolManagerType.FullName : "null")
@@ -502,7 +501,6 @@ namespace HeartopiaMod
 
             this.iceSkatingSequenceResolverReady = true;
             status = "auraProto=" + hasAuraProto
-                + " managedProto=" + hasManagedProto
                 + " sendCommand=" + hasSendCommand
                 + " protoType=" + (this.iceSkatingSequenceProtocolManagerType?.FullName ?? "null");
             return true;
@@ -537,16 +535,6 @@ namespace HeartopiaMod
                 "Il2CppEcsClient." + ns + "." + shortName);
         }
 
-        private bool IceSkatingSequenceHasManagedProtocolPath()
-        {
-            return this.iceSkatingSequenceSendStartMethod != null
-                && this.iceSkatingSequenceSendExitMethod != null
-                && this.iceSkatingSequenceSendChallengeStartMethod != null
-                && this.iceSkatingSequenceSendChallengeEndMethod != null
-                && this.iceSkatingSequenceSendDoActionMethod != null
-                && this.iceSkatingSequenceSendPerfectMethod != null
-                && this.iceSkatingSequenceSendUltimateMethod != null;
-        }
 
         private bool IceSkatingSequenceHasSendCommandPath()
         {
@@ -867,7 +855,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryInvokeIceSkatingManagedProtocol("SendStartSkateCommand", null, out status);
+            return false;
         }
 
         private bool TrySendIceSkatingEnd(out string status)
@@ -882,7 +870,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryInvokeIceSkatingManagedProtocol("SendExitSkateCommand", null, out status);
+            return false;
         }
 
         private bool TrySendIceSkatingChallengeStart(bool isHelp, out string status)
@@ -901,7 +889,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryInvokeIceSkatingManagedProtocol("SendStartChallengeCommand", new object[] { isHelp }, out status);
+            return false;
         }
 
         private bool TrySendIceSkatingChallengeEnd(int score, out string status)
@@ -920,7 +908,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryInvokeIceSkatingManagedProtocol("SendEndChallengeCommand", new object[] { score }, out status);
+            return false;
         }
 
         private bool TrySendIceSkatingPerfect(int perfect, out string status)
@@ -939,7 +927,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryInvokeIceSkatingManagedProtocol("SendReportPerfectCommand", new object[] { perfect }, out status);
+            return false;
         }
 
         private bool TryFlushIceSkatingDoActionBatch(Dictionary<int, int> batch, out string status)
@@ -967,13 +955,6 @@ namespace HeartopiaMod
             }, "SkateReportDoAction", out status))
             {
                 status = "Actions=" + payloadText + " " + status;
-                batch.Clear();
-                return true;
-            }
-
-            if (this.TryInvokeIceSkatingManagedProtocol("SendReportDoActionCommand", new object[] { payload }, out string protoStatus))
-            {
-                status = "Actions=" + payloadText + " " + protoStatus;
                 batch.Clear();
                 return true;
             }
@@ -1214,41 +1195,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryInvokeIceSkatingManagedProtocol(string methodName, object[] args, out string status)
-        {
-            status = methodName + " managed unavailable";
-            MethodInfo method = this.IceSkatingSequenceGetProtocolMethod(methodName);
-            if (method == null)
-            {
-                return false;
-            }
 
-            try
-            {
-                method.Invoke(null, args ?? Array.Empty<object>());
-                status = methodName + " managed (" + this.iceSkatingSequenceProtocolManagerType?.FullName + ")";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = methodName + " managed exception: " + (ex.InnerException ?? ex).Message;
-                return false;
-            }
-        }
-
-        private MethodInfo IceSkatingSequenceGetProtocolMethod(string methodName)
-        {
-            switch (methodName)
-            {
-                case "SendStartSkateCommand": return this.iceSkatingSequenceSendStartMethod;
-                case "SendExitSkateCommand": return this.iceSkatingSequenceSendExitMethod;
-                case "SendStartChallengeCommand": return this.iceSkatingSequenceSendChallengeStartMethod;
-                case "SendEndChallengeCommand": return this.iceSkatingSequenceSendChallengeEndMethod;
-                case "SendReportDoActionCommand": return this.iceSkatingSequenceSendDoActionMethod;
-                case "SendReportPerfectCommand": return this.iceSkatingSequenceSendPerfectMethod;
-                case "SendReportUseUltimateCommand": return this.iceSkatingSequenceSendUltimateMethod;
-                default: return null;
-            }
-        }
     }
 }
