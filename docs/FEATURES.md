@@ -57,7 +57,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 
 | Sub-tab | Content |
 |---------|---------|
-| Animal Care | Wild animal trough feed (manual), claim all wild animal gifts |
+| Animal Care | Wild animal trough feed (manual), claim all wild animal gifts, **Wild Animal Roster** — every unlocked animal with live trough fullness + favourite foods, and a per-animal button that opens the game's own feeding panel (`WildAnimalRosterFeature`) |
 | Daily Quests | Auto-submit item delivery orders (CanSubmit) |
 | Homeland Farm | Crop-box farming: auto farm, water/weed/harvest/sow/fertilize in radius, seed/fertilizer selection |
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |

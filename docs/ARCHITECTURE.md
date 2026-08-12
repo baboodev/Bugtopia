@@ -372,6 +372,7 @@ All merge into `public partial class HeartopiaComplete`:
 | `PetFeedFeature.cs` | 4530 | Feed all pets, UI textures, AuraMono pet APIs |
 | `DailyClaimsFeature.cs` | 2719 | Daily activity / guides / mail / battle-pass claims |
 | `WildAnimalFeedFeature.cs` | 2573 | Trough feeding, table lookups |
+| `WildAnimalRosterFeature.cs` | 1312 | Animal roster (fullness + favourite foods) + open the game's feeding panel per animal |
 | `PuzzleNetFeature.cs` | 2265 | Puzzle solver automation |
 | `PetPlayFeature.cs` | 2188 | Cat play / dog train automation |
 | `ShopDumpFeature.cs` | 1996 | Store dump tooling |
@@ -604,6 +605,10 @@ Used when **`EcsClient.dll` interop is missing** or generic `List<ItemNetPair>` 
 | `CookingSystem` / prepare cook | Net cook (HeartopiaComplete) | Some builds |
 | `PetSystem` / feed APIs | PetFeedFeature | `List<uint>` via Mono when Il2Cpp list fails |
 | `WildAnimalSystem` | WildAnimalFeedFeature | Feed trough |
+| `AnimalFeedPanelLogic.StartLogic(uint)` | WildAnimalRosterFeature | Open the game's feeding panel for one trough netId |
+| `WildAnimalProtocolManager.GetFeedTrough` (private static) | WildAnimalRosterFeature | group → trough `EcsEntity` (+ `EcsEntityExtensions.GetNetId`) |
+| `DataCenter.TryGetComponentData<FeedTroughComponentData>` | WildAnimalRosterFeature | Mono `NativeDetour`, scoped to one `StartLogic` — supplies the panel's group when no trough is streamed |
+| `FeedTroughComponent` (`Entities.GetComponents<T>`) | WildAnimalRosterFeature | Fallback group → trough netId (view-spawned only) |
 | `WildAnimalProtocolManager.HaveGift` / `HaveGift(EcsEntity)` | WildAnimalGiftFeature | Pending groups + animal gift filter |
 | `AnimalUtil.IsGiftBox` / `GetGroup` | WildAnimalGiftFeature | Gift box entity scan |
 | `AnimalProtocolManager.GetNetworkEntity` / `TakeGift` | WildAnimalGiftFeature | Resolve ECS entity + claim command |

@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
+
+using Object = UnityEngine.Object;
 
 namespace HeartopiaMod
 {
@@ -73,6 +77,16 @@ namespace HeartopiaMod
     // busy gates (recomputed live, see above), and the 2 status labels (cached-string diffs —
     // they change from background coroutine activity). Per-frame sync disabled after 3
     // consecutive errors (LIVE rail idiom).
+    //
+    // ROSTER card (added below the gifts status; no IMGUI twin — this surface is UGUI-only).
+    // Lists every unlocked animal with its live trough fullness and its favourite foods, plus a
+    // per-row button that opens the GAME's own feeding panel for that animal
+    // (WildAnimalRosterFeature.cs — AnimalFeedPanelLogic.StartLogic on the trough's netId). Rows
+    // are DYNAMIC, so they follow the Research tab's rail rather than this file's fixed-position
+    // one: the backend snapshot is refreshed on its own 2s throttle, a signature over the fully
+    // computed row text is diffed, and only a real change destroys + rebuilds the rows. The card
+    // height and the scroll content height are recomputed from the row count on every rebuild —
+    // everything above the card keeps its fixed positions untouched.
     // ============================================================================================
     public partial class HeartopiaComplete
     {
@@ -98,6 +112,14 @@ namespace HeartopiaMod
             public GameObject GiftButton;         // busy-gated (independent coroutine/timer pair)
             public GameObject GiftStatusLabel;
             public string GiftStatusShown;
+
+            // ROSTER card — dynamic rows (Research rail: computed-signature diff, see file header)
+            public GameObject RosterPanel;        // resized on every row rebuild
+            public Transform RosterRoot;          // rows live under the card itself
+            public readonly List<GameObject> RosterRows = new List<GameObject>();
+            public Transform ScrollContent;       // needed to re-set the content height per rebuild
+            public float PanelWidth;
+            public string RosterSignature;        // null = never populated
 
             public int ErrorCount;                // per-frame sync disabled at 3 (LIVE rail idiom)
         }
@@ -252,14 +274,161 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(handle.GiftStatusLabel);
             PlaceUguiTopLeft(handle.GiftStatusLabel, 8f, 400f, panelW, 36f);
 
-            // Extent after the troughs trim: 436 (gift status end, content-space) + 48 (the
-            // source DrawAnimalCareTab's own trailing pad, kept as scroll breathing room) = 484
-            // — the same +48 tail the pre-trim 514 carried past its 466 end.
-            this.SetUguiScrollContentHeight(scrollContent, 484f);
+            // -------- ROSTER card (UGUI-only; rows are dynamic, see the file header) --------
+            // Placed at 444 = gift status end (436) + the 8px gap this chain uses. Its height and
+            // the scroll content height are (re)computed by RebuildUguiShellAnimalCareRosterRows;
+            // the initial call below also covers the "backend not ready yet" hint row.
+            handle.RosterPanel = this.CreateUguiSettingsMainPanel(scrollContent, "RosterPanel", this.L("WILD ANIMAL ROSTER"));
+            handle.RosterRoot = handle.RosterPanel.transform;
+            handle.ScrollContent = scrollContent;
+            handle.PanelWidth = panelW;
+
+            this.RefreshWildAnimalRosterIfDue();
+            handle.RosterSignature = this.BuildUguiShellAnimalCareRosterSignature();
+            this.RebuildUguiShellAnimalCareRosterRows(handle);
 
             handle.Root = block;
             this.uguiShellNewFeaturesAnimalCare = handle;
             return block;
+        }
+
+        // Content-space Y where the roster card starts (gift status ends at 436 + the chain's 8px
+        // gap). Everything above it keeps the fixed positions documented in the file header.
+        private const float UguiAnimalCareRosterTopY = 444f;
+
+        private const float UguiAnimalCareRosterRowHeight = 42f;
+        private const float UguiAnimalCareRosterRowsTopY = 34f;   // card-local, under the header
+        private const float UguiAnimalCareRosterButtonWidth = 110f;
+
+        // Signature over the FULLY COMPUTED row text (Research rail): any change in the group set,
+        // a fullness tick, or a late-resolving favourite list rebuilds; an idle roster rebuilds
+        // nothing. The status string joins the signature ONLY in the empty state, where it IS the
+        // painted row — with rows present it is toast-only, and folding it in would rebuild every
+        // row on each button click for no visible change.
+        private string BuildUguiShellAnimalCareRosterSignature()
+        {
+            if (this.wildAnimalRosterEntries.Count == 0)
+            {
+                return "empty:" + (this.wildAnimalRosterStatus ?? string.Empty);
+            }
+
+            StringBuilder sb = new StringBuilder(this.wildAnimalRosterEntries.Count * 48 + 32);
+            for (int i = 0; i < this.wildAnimalRosterEntries.Count; i++)
+            {
+                WildAnimalRosterEntry entry = this.wildAnimalRosterEntries[i];
+                sb.Append(entry.GroupId).Append('|')
+                  .Append(entry.GroupName).Append('|')
+                  .Append(entry.Fullness).Append('/').Append(entry.Capacity).Append('|')
+                  .Append(entry.Favorites).Append('\n');
+            }
+            return sb.ToString();
+        }
+
+        // Destroys + rebuilds the roster rows, then resizes the card AND the scroll content from
+        // the resulting row count. Only called from the initial build or on a signature change.
+        private void RebuildUguiShellAnimalCareRosterRows(UguiShellNewFeaturesAnimalCareHandle handle)
+        {
+            for (int i = 0; i < handle.RosterRows.Count; i++)
+            {
+                GameObject row = handle.RosterRows[i];
+                if (row != null)
+                {
+                    try { Object.Destroy(row); } catch { }
+                }
+            }
+            handle.RosterRows.Clear();
+
+            Transform root = handle.RosterRoot;
+            if (root == null)
+            {
+                return;
+            }
+
+            float panelW = handle.PanelWidth;
+            float cardHeight;
+
+            if (this.wildAnimalRosterEntries.Count == 0)
+            {
+                // Empty state: the backend's own status line (not ready / no unlocked animals /
+                // resolve error) rather than a generic placeholder.
+                string hint = string.IsNullOrEmpty(this.wildAnimalRosterStatus)
+                    ? this.L("Loading animal data…")
+                    : this.wildAnimalRosterStatus;
+                GameObject empty = this.CreateUguiLabel(root, "RosterEmpty", hint, 11f,
+                    this.UguiKitMutedColor(), false);
+                this.TrySetUguiLabelWrapped(empty);
+                PlaceUguiTopLeft(empty, 16f, UguiAnimalCareRosterRowsTopY, panelW - 32f, 34f);
+                handle.RosterRows.Add(empty);
+                cardHeight = UguiAnimalCareRosterRowsTopY + 34f + 12f;
+            }
+            else
+            {
+                float buttonX = panelW - 16f - UguiAnimalCareRosterButtonWidth;
+                float favoritesWidth = Mathf.Max(80f, buttonX - 16f - 8f);
+                Color muted = this.UguiKitMutedColor();
+                float yCur = UguiAnimalCareRosterRowsTopY;
+
+                for (int i = 0; i < this.wildAnimalRosterEntries.Count; i++)
+                {
+                    WildAnimalRosterEntry entry = this.wildAnimalRosterEntries[i];
+
+                    // Animals outside their visiting window never reach this list — the backend
+                    // filters them out (RefreshWildAnimalRoster pass 2), so every row here is
+                    // present and feedable.
+                    GameObject name = this.CreateUguiBodyLabel(root, "RosterName" + i, entry.GroupName, 12f);
+                    PlaceUguiTopLeft(name, 16f, yCur, 150f, 20f);
+                    handle.RosterRows.Add(name);
+
+                    GameObject fullness = this.CreateUguiLabel(root, "RosterFullness" + i,
+                        entry.Capacity > 0 ? entry.Fullness + " / " + entry.Capacity : "—",
+                        12f, UguiAnimalCareFullnessColor(entry.Fullness, entry.Capacity), false);
+                    PlaceUguiTopLeft(fullness, 172f, yCur, 86f, 20f);
+                    handle.RosterRows.Add(fullness);
+
+                    // Capture a copy for the click closure — the entry object is replaced wholesale
+                    // on every backend refresh.
+                    int groupIdCopy = entry.GroupId;
+                    GameObject open = this.CreateUguiSecondaryButton(root, "RosterOpen" + i, this.L("FEED PANEL"),
+                        new System.Action(() => this.StartWildAnimalOpenFeedPanel(groupIdCopy)));
+                    PlaceUguiTopLeft(open, buttonX, yCur - 2f, UguiAnimalCareRosterButtonWidth, 26f);
+                    handle.RosterRows.Add(open);
+
+                    GameObject favorites = this.CreateUguiLabel(root, "RosterFavorites" + i,
+                        string.IsNullOrEmpty(entry.Favorites)
+                            ? this.L("Favorites: —")
+                            : this.LF("Favorites: {0}", entry.Favorites),
+                        10f, new Color(muted.r, muted.g, muted.b, 0.9f), false);
+                    PlaceUguiTopLeft(favorites, 16f, yCur + 20f, favoritesWidth, 18f);
+                    handle.RosterRows.Add(favorites);
+
+                    yCur += UguiAnimalCareRosterRowHeight;
+                }
+
+                cardHeight = yCur + 12f;
+            }
+
+            PlaceUguiTopLeft(handle.RosterPanel, 8f, UguiAnimalCareRosterTopY, panelW, cardHeight);
+
+            // Extent = roster card end + the source DrawAnimalCareTab's own 40px trailing pad.
+            this.SetUguiScrollContentHeight(handle.ScrollContent, UguiAnimalCareRosterTopY + cardHeight + 40f);
+        }
+
+        // Green when full, amber while it still has room, red when the trough is (near) empty —
+        // the same three-band read the game's own trough mesh uses (FeedTroughComponent stages).
+        private static Color UguiAnimalCareFullnessColor(int fullness, int capacity)
+        {
+            if (capacity <= 0)
+            {
+                return new Color(0.7f, 0.7f, 0.7f, 0.9f);
+            }
+
+            float ratio = Mathf.Clamp01(fullness / (float)capacity);
+            if (ratio >= 1f)
+            {
+                return new Color(0.45f, 1f, 0.55f);
+            }
+
+            return ratio < 0.2f ? new Color(1f, 0.55f, 0.45f) : new Color(1f, 0.85f, 0.45f);
         }
 
         // ----------------------------------------------------------------------------------------
@@ -294,6 +463,17 @@ namespace HeartopiaMod
                     this.wildAnimalFeedLastStatus ?? string.Empty);
                 this.SyncUguiSelfLabelText(handle.GiftStatusLabel, ref handle.GiftStatusShown,
                     this.wildAnimalGiftLastStatus ?? string.Empty);
+
+                // Roster rows — the backend snapshot has its own 2s throttle (and only ticks while
+                // this tab is on screen, since this is its only caller); the rebuild below fires
+                // only when the computed row text actually changed.
+                this.RefreshWildAnimalRosterIfDue();
+                string rosterSignature = this.BuildUguiShellAnimalCareRosterSignature();
+                if (!string.Equals(rosterSignature, handle.RosterSignature, StringComparison.Ordinal))
+                {
+                    handle.RosterSignature = rosterSignature;
+                    this.RebuildUguiShellAnimalCareRosterRows(handle);
+                }
             }
             catch (Exception ex)
             {

@@ -441,6 +441,7 @@
     <Compile Include="PicturesDecryptFeature.cs" />
     <Compile Include="WildAnimalFeedFeature.cs" />
     <Compile Include="WildAnimalGiftFeature.cs" />
+    <Compile Include="WildAnimalRosterFeature.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="PuzzleNetFeature.cs" />
     <Compile Include="ShopBuyAllFeature.cs" />

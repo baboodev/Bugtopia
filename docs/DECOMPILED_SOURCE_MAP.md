@@ -705,9 +705,48 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 
 #### `WildAnimalSystem`
 - **Dump:** `XDTGameSystem/GameplaySystem/WildAnimal/WildAnimalSystem.cs`
-- **Features:** Trough feed plans
+- **Features:** Trough feed plans, roster rows (`WildAnimalRosterFeature.cs`)
 - **Access:** **R**, **A**
 - **How:** get animal groups collection → fullness ratio → feed command
+- **Roster:** `GetUnlockedAnimals` + `GetFullness` / `GetFeedTroughCapacity` per group; favourites +
+  display name come from `TableAnimalGroup` (`favoriteFood`, `groupName`) via
+  `TryGetWildAnimalGroupMeta`, food names from `TableData.GetEntity(id).name`
+
+#### `AnimalFeedPanelLogic` — open the feeding panel for one animal
+- **Dump:** `XDTGameUI/XDTGame.UI.Panel/AnimalFeedPanelLogic.cs`
+- **Features:** Animal Care roster "FEED PANEL" button — **File:** `WildAnimalRosterFeature.cs`
+- **Access:** **A** — `StartLogic(uint)` is a plain static Mono method (no generic to inflate)
+- **Game's own chain:** interact **30** `FeedTroughCommand` → `PlayerStateFeedWildAnimal.Enter(troughNetId)`
+  → `G2UOpenInteractPanelEvent{panelName="FeedTroughPanel"}` → `DefaultModule` →
+  `AnimalFeedRequestedEvent` → `UIEventBridge.OnAnimalFeedRequested` → `AnimalFeedPanelLogic.StartLogic`.
+  The mod calls the **last hop only** — no player state, no camera, no server handshake.
+- **⚠ Addressed by the TROUGH's netId, not the animal's.** `InitFeedData` reads
+  `FeedTroughComponentData(netId)` for the group and **falls back to `AnimalGroup.Panda`** when that
+  read misses — never call it with a netId you have not resolved.
+- **Trough netId (primary):** `WildAnimalProtocolManager.GetFeedTrough(AnimalGroup)` → `EcsEntity` →
+  `XD.GameGerm.Ecs.Boost.Extensions.EcsEntityExtensions.GetNetId`. `GetFeedTrough` is **`private
+  static`** — still invokable, `mono_runtime_invoke` ignores visibility. Backed by
+  `IWildAnimalService`'s `FeederGroupProperty` filter, so it works wherever the server has synced
+  the trough. Guard with `XD.GameGerm.Ecs.EcsEntityExtensions.IsAlive` (⚠ a **different** class
+  from the `Boost.Extensions` one).
+- **Trough netId (fallback only):** `Entities.GetComponents<FeedTroughComponent>` → `component.entity`
+  → netId → `AnimalProtocolManager.GetNetworkEntity` → `AnimalUtil.GetGroup`. ⚠ `GetComponents<T>` is
+  `where T : ViewComponent` — it sees only troughs the client has **spawned** (ones you stand next
+  to), which is why a scan-only implementation reported "not loaded here" nearly everywhere.
+- **No trough at all (group spoof):** two entities exist per group — the **species** entity
+  (player-owned `OwnerComponent` + `SpeciesGroupProperty`, present for every unlocked group, carries
+  `FeederFullnessComponent`, which is why `GetFullness(group)` works anywhere) and the **feeder**
+  entity (world object, streams with its map section). Only the panel is bound to the feeder, and
+  there is **no netId to substitute**: `SpawnSpecies` never calls `DataCenter.AddEntity` (only
+  `Spawn`, for animals, does), so writing `FeedTroughComponentData` onto the species netId no-ops —
+  tried live, read-back returned 0. ❌ Do not retry.
+  Shipped instead: a **NativeDetour on the inflated
+  `DataCenter.TryGetComponentData<FeedTroughComponentData>`**, armed with the target group for one
+  synchronous `StartLogic` call and disarmed in a `finally`; the panel is opened with netId 0.
+  Value-type instantiation ⇒ non-shared ⇒ **no hidden rgctx**, native shape
+  `byte(NetId, FeedTroughComponentData*)` (declare the netId arg `IntPtr` so pass-through forwards
+  the full register). netId 0 is safe — the only other consumer is the panel's per-frame
+  `EntityPositionViewModel`, which is null-safe.
 
 #### `WildAnimalProtocolManager`
 - **Dump:** `ProtocolService/WildAnimal/WildAnimalProtocolManager.cs`
