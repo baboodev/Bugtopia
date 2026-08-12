@@ -1046,45 +1046,42 @@ namespace HeartopiaMod
 
         // Contamination splits into two anchor classes, and they need OPPOSITE adjustments — see
         // TryGetContaminatedAnchorClass (SeaCleanQteFeature.cs) for how they are told apart:
-        //   * HOSTED (permanent, stuck to a coral growing on the ground) -> dive -2m like a node.
-        //   * POINT  (temporary, spawned at a sub-area point, floating in open water) -> +6m.
+        //   * HOSTED (permanent, stuck to a coral growing on the ground) -> dive -3m like a node.
+        //   * POINT  (temporary, spawned at a sub-area point, floating in open water) -> +4m.
         //     Diving under one of these puts the player in open water below the pollutant, which is
         //     where the "player pops back to the surface" reports come from; arriving above it
         //     keeps the hop inside the pollutant's own volume.
         // Class unknown (not in the radar index this pass) falls back to the hosted dive — the
-        // conservative choice, identical to the previous behaviour.
-        private const float StealthForagingContaminationPointLift = 6f;
+        // conservative choice, and the same direction every other stealth hop takes.
+        private const float StealthForagingContaminationPointLift = 4f;
 
         // Y adjustment for a RESOURCE-NODE hop. Deliberately NOT applied to world-load
         // checkpoints (farm-location waypoints, priority-area anchors, cleansing corals) — those
         // are area arrivals that must land where the world streams in normally.
-        //   * Stealth Foraging engaged -> dive BELOW the node (StealthForagingFeature.cs):
-        //     contamination -2m hosted / +6m point-anchored, every other resource -1.5m.
-        //   * Otherwise -> the vanilla sea-clean lift for contamination, nothing for the rest.
+        //   * Stealth Foraging engaged -> contamination -3m hosted / +4m point-anchored, every
+        //     other resource -1.5m (StealthForagingFeature.cs).
+        //   * Otherwise -> NO Y adjustment at all. Contamination used to take the vanilla
+        //     SeaCleanTeleportYOffset (+7m) lift here; that lift now lives only on the
+        //     cleansing-coral hop (CorruptionCleanseFeature.cs), which is a different target.
         private Vector3 ApplyForagingNodeTeleportOffset(Vector3 position, string nodeLabel)
         {
-            bool contamination = string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal);
-            if (this.StealthForagingActive)
+            if (!this.StealthForagingActive)
             {
-                if (contamination)
-                {
-                    bool hosted = true;
-                    this.TryGetContaminatedAnchorClass(position, out hosted);
-                    position.y += hosted
-                        ? -StealthForagingContaminationDepth
-                        : StealthForagingContaminationPointLift;
-                }
-                else
-                {
-                    position.y -= StealthForagingNodeDepth;
-                }
                 return position;
             }
 
-            if (contamination)
+            if (string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal))
             {
-                position.y += SeaCleanTeleportYOffset;
+                this.TryGetContaminatedAnchorClass(position, out bool hosted);
+                position.y += hosted
+                    ? -StealthForagingContaminationDepth
+                    : StealthForagingContaminationPointLift;
             }
+            else
+            {
+                position.y -= StealthForagingNodeDepth;
+            }
+
             return position;
         }
 

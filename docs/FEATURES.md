@@ -465,9 +465,11 @@ While engaged:
   mid-collect.
 - **Resource hops land below the node:** every non-contamination resource **−1.5 m**.
   Contamination splits by anchor class (`TryGetContaminatedAnchorClass`, SeaCleanQteFeature.cs):
-  **hosted −2 m** (permanent, stuck to a coral on the ground) vs **point-anchored +6 m**
+  **hosted −3 m** (permanent, stuck to a coral on the ground) vs **point-anchored +4 m**
   (temporary, spawned at a sub-area point and floating in open water — diving under one of those
-  is what pushed the player back to the surface). Unknown class falls back to the hosted dive
+  is what pushed the player back to the surface). Unknown class falls back to the hosted dive.
+  **With Stealth Foraging off the node hop no longer adjusts Y at all** — contamination used to
+  take a +7 m lift here; that lift now applies only to the cleansing-coral hop
   (`ApplyForagingNodeTeleportOffset`). **Area/zone arrivals dive too** (−1.5 m,
   `ApplyForagingAreaTeleportOffset`): the farm-location waypoints, the priority-area anchors and the
   startup routing hop. They used to keep their exact Y, which left the player standing in the open
