@@ -102,6 +102,14 @@ namespace HeartopiaMod
         private string tutorialBlockStatus = "Idle.";
         private string tutorialBlockLastLoggedStatus;
 
+        // Diagnostic: a highlight that opens after a successful seed proves the set we seeded is
+        // not the set the game reads. The probe re-resolves everything FROM SCRATCH at that moment
+        // and reports the pointers, so the two views can be compared directly. Deliberately run
+        // from OnUpdate rather than inside the dispatch detour — re-entering mono from inside a
+        // detour body is not a risk worth taking for a log line.
+        private bool tutorialDiagProbePending;
+        private int tutorialDiagProbeGuideId;
+
         private void ProcessTutorialBlockOnUpdate()
         {
             this.EnsureTutorialBlockRegistrations();
@@ -135,6 +143,13 @@ namespace HeartopiaMod
             this.SetGameEventHookSuppressForward(
                 TutorialHighlightOpenEventName,
                 on && !this.tutorialHighlightBlockApplied);
+
+            // Runs outside the dispatch detour on purpose (see the field comment).
+            if (this.tutorialDiagProbePending)
+            {
+                this.tutorialDiagProbePending = false;
+                this.RunTutorialDoneSetProbe(this.tutorialDiagProbeGuideId);
+            }
 
             if (!on || !this.tutorialBlockApplyPending)
             {
@@ -288,6 +303,7 @@ namespace HeartopiaMod
                         }
 
                         int ceiling = this.ResolveTutorialHighlightIdCeiling();
+                        int countBefore = this.ReadTutorialSetCount(doneSet);
 
                         // stackalloc is hoisted out of the loop on purpose: inside it the frame
                         // would grow by one slot per iteration and never unwind until return.
@@ -309,7 +325,14 @@ namespace HeartopiaMod
 
                         this.tutorialHighlightBlockedCount = ceiling;
                         this.tutorialHighlightBlockApplied = true;
-                        this.TutorialBlockSetStatus("Highlights blocked (applied " + ceiling + " ids).");
+
+                        // Log the EFFECT, not just the intent: a count that did not move by
+                        // `ceiling` means the Add calls landed somewhere the game does not read.
+                        int countAfter = this.ReadTutorialSetCount(doneSet);
+                        this.TutorialBlockSetStatus("Highlights blocked (applied " + ceiling
+                            + " ids, count " + countBefore + " -> " + countAfter
+                            + ", instance=0x" + instance.ToString("X")
+                            + " set=0x" + doneSet.ToString("X") + ").");
                     }
                     finally
                     {
@@ -487,9 +510,131 @@ namespace HeartopiaMod
                 return;
             }
 
-            ModLogger.Msg("[TutorialBlock] NewGuideOpenEvent guideId=" + e.ReadInt32(0)
+            int guideId = e.ReadInt32(0);
+            ModLogger.Msg("[TutorialBlock] NewGuideOpenEvent guideId=" + guideId
                 + " seeded=" + this.tutorialHighlightBlockApplied
                 + " suppress=" + (this.blockTutorials && !this.tutorialHighlightBlockApplied));
+
+            // A highlight got through a seed that reported success — capture the evidence.
+            if (this.tutorialHighlightBlockApplied && !this.tutorialDiagProbePending)
+            {
+                this.tutorialDiagProbeGuideId = guideId;
+                this.tutorialDiagProbePending = true;
+            }
+        }
+
+        // Re-resolve GuideSystem -> reproduceDoneIds from scratch and report what the game would
+        // see right now. Compare the pointers against the ones logged at seed time: identical
+        // pointers with Count=1226 mean the seeding is fine and the block failed elsewhere;
+        // different pointers (or Count=0) mean we seeded the wrong object.
+        private unsafe void RunTutorialDoneSetProbe(int probeGuideId)
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                    || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null
+                    || !AuraMonoGameDataLive || !AuraMonoPinningAvailable)
+                {
+                    ModLogger.Msg("[TutorialBlock] probe skipped — AuraMono not ready.");
+                    return;
+                }
+
+                IntPtr cls = this.FindAuraMonoClassByFullName(TutorialGuideSystemTypeName);
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        TutorialGuideSystemNamespace, TutorialGuideSystemClassName);
+                }
+
+                IntPtr instance = this.TryGetAuraMonoDataModuleInstance(cls);
+                if (instance == IntPtr.Zero)
+                {
+                    ModLogger.Msg("[TutorialBlock] probe: class=0x" + cls.ToString("X") + " instance=NULL");
+                    return;
+                }
+
+                uint instancePin = AuraMonoPinNew(instance);
+                try
+                {
+                    if (!this.TryReadAuraMonoObjectField(instance, out IntPtr doneSet, "reproduceDoneIds")
+                        || doneSet == IntPtr.Zero)
+                    {
+                        ModLogger.Msg("[TutorialBlock] probe: instance=0x" + instance.ToString("X")
+                            + " reproduceDoneIds=NULL");
+                        return;
+                    }
+
+                    uint setPin = AuraMonoPinNew(doneSet);
+                    try
+                    {
+                        int count = this.ReadTutorialSetCount(doneSet);
+                        string contains = "n/a";
+                        IntPtr setClass = auraMonoObjectGetClass(doneSet);
+                        IntPtr containsMethod = setClass != IntPtr.Zero
+                            ? this.FindAuraMonoMethodOnHierarchy(setClass, "Contains", 1)
+                            : IntPtr.Zero;
+                        if (containsMethod != IntPtr.Zero && probeGuideId > 0)
+                        {
+                            int idArg = probeGuideId;
+                            IntPtr* args = stackalloc IntPtr[1];
+                            args[0] = (IntPtr)(&idArg);
+                            IntPtr exc = IntPtr.Zero;
+                            IntPtr boxed = auraMonoRuntimeInvoke(containsMethod, doneSet, (IntPtr)args, ref exc);
+                            if (exc == IntPtr.Zero && boxed != IntPtr.Zero
+                                && this.TryUnboxMonoBoolean(boxed, out bool has))
+                            {
+                                contains = has.ToString();
+                            }
+                        }
+
+                        ModLogger.Msg("[TutorialBlock] probe guideId=" + probeGuideId
+                            + " instance=0x" + instance.ToString("X")
+                            + " set=0x" + doneSet.ToString("X")
+                            + " count=" + count
+                            + " contains=" + contains);
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(setPin);
+                    }
+                }
+                finally
+                {
+                    AuraMonoPinFree(instancePin);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[TutorialBlock] probe error: " + ex.Message);
+            }
+        }
+
+        private int ReadTutorialSetCount(IntPtr setObj)
+        {
+            try
+            {
+                IntPtr setClass = auraMonoObjectGetClass(setObj);
+                IntPtr getCount = setClass != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(setClass, "get_Count", 0)
+                    : IntPtr.Zero;
+                if (getCount == IntPtr.Zero)
+                {
+                    return -1;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr boxed = auraMonoRuntimeInvoke(getCount, setObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || boxed == IntPtr.Zero || !this.TryUnboxMonoInt32(boxed, out int count))
+                {
+                    return -1;
+                }
+
+                return count;
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         private void TutorialBlockSetStatus(string status)
