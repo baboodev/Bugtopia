@@ -163,6 +163,12 @@ namespace HeartopiaMod
             public string UploadCheatCountShown;
             public GameObject FriendVisitCountLabel;
             public string FriendVisitCountShown;
+            public Toggle PartyDeclineToggle;
+            public Toggle PartyAutoLeaveToggle;
+            public GameObject PartyCountLabel;
+            public string PartyCountShown;
+            public GameObject PartyStatusLabel;
+            public string PartyStatusShown;
             public GameObject HooksStatusLabel;
             public string HooksStatusShown;
             public float NextSlowSyncAt;               // 0.5s tick for counters + hooks status
@@ -1643,7 +1649,40 @@ namespace HeartopiaMod
             handle.FriendVisitCountLabel = this.CreateUguiLabel(block.transform, "FriendVisitCount",
                 handle.FriendVisitCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.FriendVisitCountLabel, pad, yCur, rowW, 18f);
-            yCur += 22f;
+            yCur += 26f;
+
+            // Party (PartyAutoDeclineFeature.cs). Sits under Privacy because both halves are
+            // "keep other players from pulling me into something": the first suppresses the invite
+            // phone call outright, the second undoes a server-side area auto-join. A join you made
+            // yourself is detected via ApplyPartyGameResultEvent / IsSelfVisitor and left alone.
+            GameObject partyHeader = this.CreateUguiHeaderLabel(block.transform, "PartyHeader", this.L("Party"), 13f);
+            PlaceUguiTopLeft(partyHeader, pad, yCur, rowW, 22f);
+            yCur += 28f;
+
+            handle.PartyDeclineToggle = this.CreateUguiCheckbox(block.transform, "PartyDeclineToggle",
+                this.L("Auto-Decline Party Invites"), this.partyAutoDeclineInvites,
+                new System.Action<bool>(this.OnUguiSelfPartyDeclineToggled));
+            PlaceUguiTopLeft(handle.PartyDeclineToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
+
+            handle.PartyAutoLeaveToggle = this.CreateUguiCheckbox(block.transform, "PartyAutoLeaveToggle",
+                this.L("Auto-Leave Parties Joined By Area"), this.partyAutoLeaveParties,
+                new System.Action<bool>(this.OnUguiSelfPartyAutoLeaveToggled));
+            PlaceUguiTopLeft(handle.PartyAutoLeaveToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
+
+            handle.PartyCountShown = this.LF("Invites declined: {0} | parties left: {1}",
+                this.partyDeclinedInviteCount, this.partyAutoLeftCount);
+            handle.PartyCountLabel = this.CreateUguiLabel(block.transform, "PartyCount",
+                handle.PartyCountShown, 11f, counterColor, false);
+            PlaceUguiTopLeft(handle.PartyCountLabel, pad, yCur, rowW, 18f);
+            yCur += 20f;
+
+            handle.PartyStatusShown = this.GetPartyAutoDeclineStatus();
+            handle.PartyStatusLabel = this.CreateUguiLabel(block.transform, "PartyStatus",
+                handle.PartyStatusShown, 11f, counterColor, false);
+            PlaceUguiTopLeft(handle.PartyStatusLabel, pad, yCur, rowW, 18f);
+            yCur += 24f;
 
             handle.HooksStatusShown = this.GetPrivacyBlockHooksStatus();
             handle.HooksStatusLabel = this.CreateUguiLabel(block.transform, "HooksStatus",
@@ -1671,6 +1710,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SpamsToggle, this.privacyBlockSpamReports);
                 this.SyncUguiToggleFromField(handle.UploadCheatToggle, this.privacyBlockUploadCheat);
                 this.SyncUguiToggleFromField(handle.FriendVisitToggle, this.privacyBlockFriendVisitNotify);
+                this.SyncUguiToggleFromField(handle.PartyDeclineToggle, this.partyAutoDeclineInvites);
+                this.SyncUguiToggleFromField(handle.PartyAutoLeaveToggle, this.partyAutoLeaveParties);
 
                 // Counters increment from background detour bodies (Interlocked, any time) and the
                 // hooks status flips as install attempts land — 0.5s tick keeps them live without
@@ -1689,6 +1730,11 @@ namespace HeartopiaMod
                             privacyUploadCheatSeenCount, privacyBlockedUploadCheatCount));
                     this.SyncUguiSelfLabelText(handle.FriendVisitCountLabel, ref handle.FriendVisitCountShown,
                         this.LF("Visit notifies blocked: {0}", privacyBlockedFriendVisitCount));
+                    this.SyncUguiSelfLabelText(handle.PartyCountLabel, ref handle.PartyCountShown,
+                        this.LF("Invites declined: {0} | parties left: {1}",
+                            this.partyDeclinedInviteCount, this.partyAutoLeftCount));
+                    this.SyncUguiSelfLabelText(handle.PartyStatusLabel, ref handle.PartyStatusShown,
+                        this.GetPartyAutoDeclineStatus());
                     this.SyncUguiSelfLabelText(handle.HooksStatusLabel, ref handle.HooksStatusShown,
                         this.GetPrivacyBlockHooksStatus());
                 }
@@ -1752,6 +1798,30 @@ namespace HeartopiaMod
                 return;
             }
             this.privacyBlockFriendVisitNotify = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Party pair (PartyAutoDeclineFeature.cs). Same shape as the privacy handlers: the fields
+        // are read by the event hooks and the per-frame tick, so flipping the field is the whole
+        // action — ProcessPartyAutoDeclineOnUpdate mirrors it onto the dispatch-suppression slots.
+
+        private void OnUguiSelfPartyDeclineToggled(bool value)
+        {
+            if (value == this.partyAutoDeclineInvites)
+            {
+                return;
+            }
+            this.partyAutoDeclineInvites = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfPartyAutoLeaveToggled(bool value)
+        {
+            if (value == this.partyAutoLeaveParties)
+            {
+                return;
+            }
+            this.partyAutoLeaveParties = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

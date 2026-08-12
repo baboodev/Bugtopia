@@ -339,6 +339,42 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   Note: the Debug Log toggle is **session-only** — it is never saved to config, so it always starts
   off (it prints a line per chat message).
 
+### Party Auto-Decline (Self → Privacy sub-tab)
+
+Two independent toggles over the party system (`PartyAutoDeclineFeature.cs`, persisted as
+`partyAutoDeclineInvites` / `partyAutoLeaveParties`, both default off). Kept separate on purpose:
+the first is side-effect free, the second talks to the server.
+
+- **Auto-Decline Party Invites** — an invite is not a dialog, it is a **phone call**
+  (`PartyInvitedEvent` → `PartyModule.NoticeInvited` → `PhoneModule.AddCall` → 30 s ringing
+  overlay → missed-call entry + red point). The toggle suppresses the `PartyInvitedEvent` /
+  `OtherRoomPartyInvitedEvent` dispatch, so no call is ever built: no ring, no overlay, no missed
+  call. **Nothing is sent to the server** — the game has no "reject party invite" command at all
+  (`PhoneModule.DropCall` only emits a reject for activity and joint-building calls, the party
+  branch is empty), so a suppressed invite looks exactly like a missed call.
+  - Trade-off: the same handler feeds `_canJoinPartyIds`, which gates
+    `PartyModule.CanJoinToPrivateParty`. While this is on, a **private** party you were invited to
+    cannot be joined by hand — the invite never reaches the client. Open parties and the party
+    festival are unaffected.
+- **Auto-Leave Parties Joined By Area** — walking into a party's home area joins you to it, and
+  that is **100% server-side**: the client's 500 ms area tick
+  (`PartyClientService.CheckPlayerPartyArea`) only raises local enter/leave events and sends no
+  join, so there is nothing to refuse — the only possible answer is to leave afterwards. The
+  toggle watches `PartyMembershipChangedEvent` and calls `PartyProtocolManager.LeaveParty()`, the
+  exact static behind the in-game Exit button, which is why it inherits the server's "left
+  deliberately → do not re-add me when I walk back in" behaviour.
+  - **Your own joins are left alone.** Two signals mark a membership as deliberate:
+    `ApplyPartyGameResultEvent{Success}` (only ever produced by a join *we* requested; an area
+    auto-add arrives as `JoinPartyTipsEvent` instead) and `PartySystem.IsSelfVisitor()` (visitor
+    status in another town is only reachable by clicking Join on a cross-town party).
+  - Attempts are capped — 3 s apart, at most 3 per 60 s — after which the feature stops and toasts
+    *"leave the party area on foot"*. In normal operation exactly one leave is ever sent; the cap
+    only exists for edge cases (party recreated with a fresh netId, re-invite, server restart) and
+    for a server that refuses the leave outright (`PartyErrorCode.NotAllowLeaveParty`, e.g. during
+    hide & seek).
+- The Privacy sub-tab shows a live counter (`Invites declined: N | parties left: M`) and the
+  feature's status line. Verbose tracing: `MasterLogPartyAutoDecline`.
+
 ### Custom Jump (Self → Fun sub-tab)
 
 - Four numeric input fields that retune the player's jump arc by writing the game's live

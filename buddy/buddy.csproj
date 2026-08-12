@@ -394,6 +394,7 @@
     <Compile Include="HideJumpButtonFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
     <Compile Include="TutorialBlockFeature.cs" />
+    <Compile Include="PartyAutoDeclineFeature.cs" />
     <Compile Include="PersistentHudFeature.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="MusicPlayerFeature.cs" />

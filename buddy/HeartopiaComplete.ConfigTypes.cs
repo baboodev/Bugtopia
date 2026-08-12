@@ -225,6 +225,8 @@ namespace HeartopiaMod
             public bool chatForceTranslateEnabled;
             public bool chatTranslateForceAllLangs;
             public bool blockTutorials;
+            public bool partyAutoDeclineInvites;
+            public bool partyAutoLeaveParties;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             public bool autoIceSkatingOnlyX2Ultimate = true;

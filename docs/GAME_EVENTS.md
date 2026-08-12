@@ -340,6 +340,19 @@ All dispatch via `EventCenter.DispatchEvent(in @event)` (global). Consumer: [`He
 
 `UpdateCookingStatusEvent` is exactly 64 bytes = `EventPayloadCap` — if a patch adds fields to `CookingComponentData` the tail truncates; bump `EventPayloadCap`. The NetCook handler guards `Status ∈ [0,6]` and skips caching otherwise (catches a layout/offset drift without crashing).
 
+#### Party events (all global)
+
+Consumer: [`PartyAutoDeclineFeature`](../buddy/PartyAutoDeclineFeature.cs) — the two invite events
+are registered **suppressed** (the invite never reaches `PartyModule`, so no phone call is built),
+the other two drive auto-leave.
+
+| Event | Namespace | `payloadBytes` | Fields (offset) | Notes |
+|---|---|---|---|---|
+| `PartyInvitedEvent` | `XDTDataAndProtocol.Events` | 8 | `partyNetId`(uint)@0, `inviterNetId`(uint)@4 | fully scalar; suppressing it kills the invite phone call |
+| `OtherRoomPartyInvitedEvent` | `XDTDataAndProtocol.Events` | 0 | `InviteInfo` = `OtherTownPartyInviteInfo` — **ref-heavy** (strings, `Guid`, `List<int>`, `Dictionary`), nothing readable by offset | cross-town invite; registered at 0 bytes purely to own a suppression slot |
+| `PartyMembershipChangedEvent` | `XDTGameSystem.UI` | 1 | `inParty`(bool)@0 | dispatched by `PartyModule.RefreshPartyPanelVisibility` on every `SelfPartyChangedEvent` — the clean "am I in a party" edge. Prefer it over `SelfPartyChangedEvent`, whose `PartyInfo?` / `StopPartyReasonType?` fields are nullable structs and unreadable by offset |
+| `ApplyPartyGameResultEvent` | `XDTDataAndProtocol.Events` | 8 | `errorCode`(`PartyErrorCode`=int)@0, `partyNetId`(uint)@4 | **intent discriminator**: only ever dispatched in response to the server's `ApplyPartyTipsEvent`, which the server only sends because the client sent `ApplyPartyGameNetworkCommand`. A server-side area auto-join arrives as `JoinPartyTipsEvent` and never lands here. Dispatched immediately *before* `UpdateSelfPartyInfo()`, so it always precedes the `PartyMembershipChangedEvent` it belongs to (same frame, ring drains in dispatch order) |
+
 #### Per-component events (`DataCreated<T>` / `DataRemoved<T>`)
 
 `ScriptsRefactory.DataAndProtocol.Events.DataCreated<T>` (`struct DataCreated<T> { T Value; }`) is

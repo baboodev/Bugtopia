@@ -784,6 +784,7 @@ namespace HeartopiaMod
             this.ProcessPrivacyBlockOnUpdate();
             this.ProcessMapRevealBlockedOnUpdate();
             this.ProcessStealthBlockOnUpdate();
+            this.ProcessPartyAutoDeclineOnUpdate();
             Breadcrumbs.Phase("ou.teleport");
             this.ProcessInstantTeleportOnUpdate();
             this.ProcessVehicleBypassOnUpdate();
