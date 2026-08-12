@@ -1758,13 +1758,6 @@ namespace HeartopiaMod
                         return true;
                     }
 
-                    if (item.ManagedItem != null && this.TryGetManagedInt32Member(item.ManagedItem, "staticId", out staticId) && staticId > 0)
-                    {
-                        item.StaticId = staticId;
-                        source = "runtimeManaged";
-                        this.RememberAutoSellCollectedStaticId(netId, staticId);
-                        return true;
-                    }
                 }
             }
 
@@ -3039,16 +3032,14 @@ namespace HeartopiaMod
 
             this.ClearDirectBackpackRuntimeItems();
             this.directBackpackRuntimeSnapshotSource = "";
-            if (this.TryBuildDirectBackpackRuntimeSnapshotManaged())
-            {
-                this.directBackpackRuntimeSnapshotAt = now;
-                this.directBackpackRuntimeSnapshotSource = "managed";
-                this.nextDirectBackpackSnapshotRetryAt = -999f;
-                return true;
-            }
 
-            this.ClearDirectBackpackRuntimeItems();
-            if (DirectBackpackUnsafeAuraMonoFallbackEnabled && this.TryBuildDirectBackpackRuntimeSnapshotAuraMono())
+            // AuraMono is the ONLY path. There used to be a managed-reflection builder tried first
+            // here; BackPackSystem is XDTGameSystem.* and the BepInEx interop ships no XDT*/EcsClient
+            // assemblies, so it never resolved on this build — dead code that misled debugging (it
+            // is what AutoLearn was mistakenly modelled on, producing "BackPackSystem unavailable").
+            // The aura path is likewise no longer gated behind the fallback flag: with the managed
+            // half gone there is nothing to fall back FROM.
+            if (this.TryBuildDirectBackpackRuntimeSnapshotAuraMono())
             {
                 this.directBackpackRuntimeSnapshotAt = now;
                 this.directBackpackRuntimeSnapshotSource = "auraMono";
@@ -3059,58 +3050,6 @@ namespace HeartopiaMod
             this.directBackpackRuntimeSnapshotAt = -999f;
             this.nextDirectBackpackSnapshotRetryAt = now + DirectBackpackSnapshotFailureBackoff;
             return false;
-        }
-
-        private bool TryBuildDirectBackpackRuntimeSnapshotManaged()
-        {
-            try
-            {
-                if (!this.TryGetDirectBackpackSystem(out object backPackObj, out MethodInfo getAllItem, out Type storageType, out bool getAllItemNeedsStorage))
-                {
-                    return false;
-                }
-
-                object backpackStorage = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, 1) : (object)1;
-                object itemListObj = getAllItemNeedsStorage
-                    ? getAllItem.Invoke(backPackObj, new[] { backpackStorage })
-                    : getAllItem.Invoke(backPackObj, null);
-
-                IEnumerable items = itemListObj as IEnumerable;
-                if (items == null)
-                {
-                    return false;
-                }
-
-                foreach (object item in items)
-                {
-                    if (item == null)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryGetManagedUInt32Member(item, "netId", out uint itemNetId) || itemNetId == 0U)
-                    {
-                        continue;
-                    }
-
-                    DirectBackpackRuntimeItem entry = new DirectBackpackRuntimeItem
-                    {
-                        NetId = itemNetId,
-                        Descriptor = this.GetManagedBackpackItemDescriptor(item).ToLowerInvariant(),
-                        ManagedItem = item
-                    };
-                    this.TryGetManagedInt32Member(item, "staticId", out entry.StaticId);
-                    this.TryGetManagedInt32Member(item, "entityType", out entry.EntityType);
-                    this.TryGetManagedBackpackItemCount(item, out entry.Count);
-                    this.directBackpackRuntimeItems.Add(entry);
-                }
-
-                return this.directBackpackRuntimeItems.Count > 0;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private bool TryBuildDirectBackpackRuntimeSnapshotAuraMono()
@@ -4152,7 +4091,6 @@ namespace HeartopiaMod
             public int EntityType;
             public int Count;
             public string Descriptor = "";
-            public object ManagedItem;
             // MonoItem is only valid while MonoItemPin (pinned gchandle) roots it: the snapshot
             // outlives the building tick, and SGen moves/collects unrooted objects — reading a
             // stale MonoItem hit mono's "GC filler class" fatal assert (the recurring crash).

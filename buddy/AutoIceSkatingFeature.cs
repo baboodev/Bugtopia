@@ -34,47 +34,7 @@ namespace HeartopiaMod
         private string autoIceSkatingLastUltimateSkipSignature = string.Empty;
         private readonly StringBuilder autoIceSkatingUltimateCandidatesLogBuffer = new StringBuilder();
 
-        private Type autoIceSkatingLocalPlayerComponentType;
-        private Type autoIceSkatingGameSkateModeType;
-        private Type autoIceSkatingTableDataType;
-        private Type autoIceSkatingTableSkateActionType;
-        private MethodInfo autoIceSkatingGetGameModeGeneric;
-        private MethodInfo autoIceSkatingCharacterGetModeGeneric;
-        private MethodInfo autoIceSkatingGetSkateActionMethod;
-        private MethodInfo autoIceSkatingSkillTriggerMethod;
-        private MethodInfo autoIceSkatingCanTriggerUltimateMethod;
-        private MethodInfo autoIceSkatingCalculateSpeedRateMethod;
-        private PropertyInfo autoIceSkatingEnergyProperty;
-        private MethodInfo autoIceSkatingIsReceiverMethod;
-        private MethodInfo autoIceSkatingGetRatioInConfiguredPhaseMethod;
-        private PropertyInfo autoIceSkatingGameModeActivedProperty;
-        private PropertyInfo autoIceSkatingCurrentModeProperty;
-        private PropertyInfo autoIceSkatingUltimateSkillProperty;
-        private PropertyInfo autoIceSkatingSkateSkillsProperty;
-        private FieldInfo autoIceSkatingCurrentCastActionField;
-        private FieldInfo autoIceSkatingCastActionIdField;
-        private FieldInfo autoIceSkatingChallengeInfoField;
-        private MethodInfo autoIceSkatingChallengeIsNewActionMethod;
-        private PropertyInfo autoIceSkatingTableSkateActionScoreProperty;
-        private PropertyInfo autoIceSkatingTableSkateActionBonusScoreProperty;
-        private PropertyInfo autoIceSkatingTableSkateActionPrefectPhaseProperty;
-        private PropertyInfo autoIceSkatingTableSkateActionNormalPhaseProperty;
-        private PropertyInfo autoIceSkatingTableSkateActionIdProperty;
-        private MethodInfo autoIceSkatingGetSkateActionStateMethod;
-        private FieldInfo autoIceSkatingTableSkateActionStatePhaseField;
-        private PropertyInfo autoIceSkatingTableSkateActionActionTypeProperty;
-        private PropertyInfo autoIceSkatingTableSkateActionPairMotionProperty;
-        private MethodInfo autoIceSkatingGetSkateActionTypeMethod;
-        private PropertyInfo autoIceSkatingTableSkateActionTypeUltimateActionIdProperty;
-        private MethodInfo autoIceSkatingGetPairSkateUltimateMethod;
-        private PropertyInfo autoIceSkatingTablePairSkateUltimateScoreProperty;
-        private PropertyInfo autoIceSkatingTablePairSkateUltimateBonusScoreProperty;
-        private MethodInfo autoIceSkatingCheckPairSkateMethod;
-        private FieldInfo autoIceSkatingSkateActionsField;
-        private PropertyInfo autoIceSkatingCastNormalActionIdProperty;
-        private PropertyInfo autoIceSkatingTableSkateActionIconTipCountProperty;
 
-        private bool autoIceSkatingUsesAura;
         private IntPtr autoIceSkatingAuraGameSkateModeClass;
         private IntPtr autoIceSkatingAuraLocalPlayerClass;
         private IntPtr autoIceSkatingAuraCharacterClass;
@@ -120,7 +80,6 @@ namespace HeartopiaMod
         private int autoIceSkatingCachedMaxUltimateSkillsHash;
         private IntPtr autoIceSkatingAuraChallengeDataDurationField;
         private int autoIceSkatingAuraChallengeDataDurationOffset = -1;
-        private PropertyInfo autoIceSkatingChallengeRemainingTimeProperty;
         private float autoIceSkatingCachedMaxUltimateAt = -999f;
         private const int AutoIceSkatingMaxActionId = 100000;
         private const int AutoIceSkatingMaxTreeActionsScanned = 128;
@@ -295,6 +254,11 @@ namespace HeartopiaMod
             }
         }
 
+        // AuraMono only. This tick used to have a managed-reflection twin that ran FIRST, gated on
+        // an autoIceSkatingUsesAura flag. Its resolver looked up GameSkateMode / LocalPlayerComponent
+        // / TableData / TableSkateAction through FindLoadedType — all XDT*/EcsClient types, and the
+        // BepInEx interop ships none of those assemblies, so it never once resolved on this build.
+        // Removed with the rest of the dead managed half (rule: prefer-auramono-no-managed-fallback).
         private void TickAutoIceSkating(float now)
         {
             if (!this.TryResolveAutoIceSkatingReflection(out string resolveDetail))
@@ -303,140 +267,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (this.autoIceSkatingUsesAura)
-            {
-                this.TickAutoIceSkatingAura(now);
-                return;
-            }
-
-            if (!this.TryGetAutoIceSkatingMode(out object localPlayer, out object skateMode, out string modeSource))
-            {
-                this.AutoIceSkatingResetPerformingTrackers();
-                this.AutoIceSkatingSetStatus("Not skating (" + modeSource + ").", "not-skating");
-                return;
-            }
-
-            bool actived = (bool)this.autoIceSkatingGameModeActivedProperty.GetValue(skateMode, null);
-            object currentMode = this.autoIceSkatingCurrentModeProperty != null
-                ? this.autoIceSkatingCurrentModeProperty.GetValue(skateMode, null)
-                : null;
-            if (!actived)
-            {
-                this.AutoIceSkatingResetPerformingTrackers();
-                this.AutoIceSkatingSetStatus(
-                    "Skate mode inactive (enter ice first). mode=" + (currentMode?.ToString() ?? "null") + " via " + modeSource + ".",
-                    "inactive");
-                return;
-            }
-
-            if ((bool)this.autoIceSkatingIsReceiverMethod.Invoke(skateMode, null))
-            {
-                this.AutoIceSkatingSetStatus("Pair receiver — manual only.", "receiver");
-                return;
-            }
-
-            object challengeInfo = this.autoIceSkatingChallengeInfoField.GetValue(skateMode);
-
-            this.TryCollectAutoIceSkatingSkills(skateMode, out List<int> skills, out string skillsDetail);
-            if (skills.Count == 0)
-            {
-                this.AutoIceSkatingSetStatus("No skills in tree (" + skillsDetail + ").", "no-skills");
-                return;
-            }
-
-            int currentActionId = this.TryReadCurrentCastActionId(skateMode);
-            this.AutoIceSkatingSyncPerformingAction(currentActionId);
-            this.AutoIceSkatingSyncUltimateSkipPerformingAction(currentActionId);
-            if (currentActionId > 0)
-            {
-                bool canUltimate = (bool)this.autoIceSkatingCanTriggerUltimateMethod.Invoke(skateMode, null);
-                bool endgame = this.autoIceSkatingLast30sUltimate
-                    && this.AutoIceSkatingIsChallengeEndgameManaged(skateMode, challengeInfo);
-                int requiredTier = endgame
-                    ? 1
-                    : (this.autoIceSkatingOnlyX2Ultimate ? AutoIceSkatingUltimateEnergyTierRequired : 1);
-                if (canUltimate
-                    && this.AutoIceSkatingIsUltimateEnergyTierReadyManaged(skateMode, requiredTier, out int energyTier))
-                {
-                    bool isPairSkate = this.TryAutoIceSkatingIsPairSkateManaged(skateMode);
-                    string candidatesDetail = this.BuildAutoIceSkatingUltimateCandidatesManaged(
-                        skateMode,
-                        challengeInfo,
-                        skills,
-                        isPairSkate);
-                    if (this.TryAutoIceSkatingSelectUltimateManaged(
-                            skateMode,
-                            challengeInfo,
-                            skills,
-                            isPairSkate,
-                            out int ultimateId,
-                            out int ultimateScore,
-                            out int maxSeenScore))
-                    {
-                        if (this.TryAutoIceSkatingAttemptUltimateTriggerManaged(
-                                skateMode,
-                                ultimateId,
-                                ultimateScore,
-                                energyTier,
-                                endgame,
-                                candidatesDetail,
-                                endgame ? "performing-endgame" : "performing",
-                                now))
-                        {
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        this.AutoIceSkatingLogUltimateWaitDisabled(
-                            "performing",
-                            energyTier,
-                            "no-qualifying",
-                            maxSeenScore,
-                            candidatesDetail);
-                    }
-                }
-
-                if (this.TryAutoIceSkatingTryPerfectInterruptManaged(
-                        skateMode,
-                        challengeInfo,
-                        skills,
-                        currentActionId,
-                        now))
-                {
-                    return;
-                }
-
-                this.AutoIceSkatingSetStatus("Performing action " + currentActionId + ".", "performing", log: false);
-                return;
-            }
-
-            if (this.TryAutoIceSkatingTickUltimateOnIdleManaged(skateMode, challengeInfo, skills, now))
-            {
-                return;
-            }
-
-            this.AutoIceSkatingResetPerformingTrackers();
-            if (!this.AutoIceSkatingIsStartTriggerReady(now))
-            {
-                return;
-            }
-
-            int startActionId = this.PickAutoIceSkatingBestSkill(
-                skateMode,
-                challengeInfo,
-                skills,
-                preferDifferentFrom: 0,
-                out string startPickDetail);
-            this.AutoIceSkatingLog("idle pick=" + startActionId + " skills=[" + string.Join(",", skills) + "] (" + startPickDetail + ")", "idle-pick");
-            if (startActionId > 0)
-            {
-                this.TryAutoIceSkatingSkillTrigger(skateMode, startActionId, now, "start");
-            }
-            else
-            {
-                this.AutoIceSkatingSetStatus("Could not pick a skill (" + startPickDetail + ").", "pick-fail");
-            }
+            this.TickAutoIceSkatingAura(now);
         }
 
         private void AutoIceSkatingResetPerformingTrackers()
@@ -465,69 +296,6 @@ namespace HeartopiaMod
             return now - this.autoIceSkatingLastTriggerAt >= AutoIceSkatingMinStartTriggerInterval;
         }
 
-        private bool TryAutoIceSkatingTryPerfectInterruptManaged(
-            object skateMode,
-            object challengeInfo,
-            List<int> skills,
-            int currentActionId,
-            float now)
-        {
-            // "Perfect move" off: chain the next move as soon as the game allows an interrupt
-            // (SkillTrigger gates blend time / interruptibility), not waiting for the perfect window.
-            if (!this.autoIceSkatingPerfectMove)
-            {
-                if (!this.AutoIceSkatingIsStartTriggerReady(now))
-                {
-                    return false;
-                }
-
-                int immediateId = this.PickAutoIceSkatingBestSkill(
-                    skateMode,
-                    challengeInfo,
-                    skills,
-                    preferDifferentFrom: currentActionId,
-                    out string immediateDetail);
-                this.AutoIceSkatingLog("immediate pick=" + immediateId + " (" + immediateDetail + ")", "immediate-pick", force: true);
-                return immediateId > 0
-                    && this.TryAutoIceSkatingSkillTrigger(skateMode, immediateId, now, "immediate");
-            }
-
-            object currentConfig = this.TryAutoIceSkatingInvokeGetSkateAction(currentActionId);
-            int[] prefectPhase = ReadAutoIceSkatingIntArray(currentConfig, this.autoIceSkatingTableSkateActionPrefectPhaseProperty);
-            float perfectRatio = 0f;
-            int perfectPhaseIndex = -1;
-            bool inPerfect = prefectPhase != null
-                && prefectPhase.Length > 0
-                && this.TryIsInConfiguredPhase(skateMode, prefectPhase, out perfectRatio, out perfectPhaseIndex);
-            this.AutoIceSkatingLog(
-                "performing action=" + currentActionId
-                + " prefectLen=" + (prefectPhase?.Length ?? 0)
-                + " inPerfect=" + inPerfect
-                + (inPerfect ? (" ratio=" + perfectRatio.ToString("0.###") + " phaseIdx=" + perfectPhaseIndex) : string.Empty),
-                "performing-" + currentActionId);
-
-            int phaseKey = AutoIceSkatingMakePerfectPhaseKey(currentActionId, perfectPhaseIndex);
-            if (!inPerfect || phaseKey == this.autoIceSkatingLastPerfectPhaseKey)
-            {
-                return false;
-            }
-
-            int nextActionId = this.PickAutoIceSkatingBestSkill(
-                skateMode,
-                challengeInfo,
-                skills,
-                preferDifferentFrom: currentActionId,
-                out string pickDetail);
-            this.AutoIceSkatingLog("perfect window pick=" + nextActionId + " (" + pickDetail + ")", "perfect-pick", force: true);
-            if (nextActionId > 0
-                && this.TryAutoIceSkatingSkillTrigger(skateMode, nextActionId, now, "perfect", applyCooldown: false))
-            {
-                this.autoIceSkatingLastPerfectPhaseKey = phaseKey;
-                return true;
-            }
-
-            return false;
-        }
 
         private static int AutoIceSkatingGetUltimateEnergyTier(int energy)
         {
@@ -539,18 +307,6 @@ namespace HeartopiaMod
             return (int)Math.Floor(energy / AutoIceSkatingEnergyTierUnit);
         }
 
-        private bool AutoIceSkatingIsUltimateEnergyTierReadyManaged(object skateMode, int requiredTier, out int energyTier)
-        {
-            energyTier = 0;
-            if (skateMode == null || this.autoIceSkatingEnergyProperty == null)
-            {
-                return false;
-            }
-
-            int energy = Convert.ToInt32(this.autoIceSkatingEnergyProperty.GetValue(skateMode, null));
-            energyTier = AutoIceSkatingGetUltimateEnergyTier(energy);
-            return energyTier >= requiredTier;
-        }
 
         private bool AutoIceSkatingIsUltimateEnergyTierReadyAura(IntPtr skateMode, int requiredTier, out int energyTier)
         {
@@ -564,25 +320,6 @@ namespace HeartopiaMod
             return energyTier >= requiredTier;
         }
 
-        private bool AutoIceSkatingIsChallengeEndgameManaged(object skateMode, object challengeInfo)
-        {
-            if (challengeInfo == null
-                || this.autoIceSkatingChallengeRemainingTimeProperty == null
-                || !this.AutoIceSkatingIsChallengeManaged(skateMode))
-            {
-                return false;
-            }
-
-            try
-            {
-                float remaining = Convert.ToSingle(this.autoIceSkatingChallengeRemainingTimeProperty.GetValue(challengeInfo, null));
-                return remaining > 0f && remaining <= AutoIceSkatingEndgameSeconds;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private unsafe bool AutoIceSkatingIsChallengeEndgameAura(IntPtr skateMode)
         {
@@ -618,22 +355,6 @@ namespace HeartopiaMod
             return remaining > 0f && remaining <= AutoIceSkatingEndgameSeconds;
         }
 
-        private bool TryAutoIceSkatingIsPairSkateManaged(object skateMode)
-        {
-            if (skateMode == null || this.autoIceSkatingCheckPairSkateMethod == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                return (bool)this.autoIceSkatingCheckPairSkateMethod.Invoke(skateMode, null);
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private bool TryAutoIceSkatingIsPairSkateAura(IntPtr skateMode)
         {
@@ -643,37 +364,6 @@ namespace HeartopiaMod
                 && isPairSkate;
         }
 
-        private int TryAutoIceSkatingResolveUltimateActionIdManaged(int normalActionId)
-        {
-            if (normalActionId <= 0
-                || this.autoIceSkatingGetSkateActionTypeMethod == null
-                || this.autoIceSkatingTableSkateActionActionTypeProperty == null
-                || this.autoIceSkatingTableSkateActionTypeUltimateActionIdProperty == null)
-            {
-                return 0;
-            }
-
-            object normalConfig = this.TryAutoIceSkatingInvokeGetSkateAction(normalActionId);
-            if (normalConfig == null)
-            {
-                return 0;
-            }
-
-            int actionType = Convert.ToInt32(this.autoIceSkatingTableSkateActionActionTypeProperty.GetValue(normalConfig, null));
-            if (actionType == AutoIceSkatingSkateActionTypeUltimate)
-            {
-                return 0;
-            }
-
-            object typeRow = this.TryAutoIceSkatingInvokeGetSkateActionType(actionType);
-            if (typeRow == null)
-            {
-                return 0;
-            }
-
-            int ultimateId = Convert.ToInt32(this.autoIceSkatingTableSkateActionTypeUltimateActionIdProperty.GetValue(typeRow, null));
-            return this.TryAutoIceSkatingInvokeGetSkateAction(ultimateId) != null ? ultimateId : 0;
-        }
 
         private unsafe int TryAutoIceSkatingResolveUltimateActionIdAura(int normalActionId)
         {
@@ -702,142 +392,9 @@ namespace HeartopiaMod
             return this.TryAutoIceSkatingAuraGetSkateActionRow(ultimateId) != IntPtr.Zero ? ultimateId : 0;
         }
 
-        private object TryAutoIceSkatingInvokeGetSkateActionType(int actionTypeId)
-        {
-            if (this.autoIceSkatingGetSkateActionTypeMethod == null || actionTypeId <= 0)
-            {
-                return null;
-            }
 
-            ParameterInfo[] parameters = this.autoIceSkatingGetSkateActionTypeMethod.GetParameters();
-            if (parameters != null && parameters.Length >= 2)
-            {
-                return this.autoIceSkatingGetSkateActionTypeMethod.Invoke(null, new object[] { actionTypeId, false });
-            }
 
-            return this.autoIceSkatingGetSkateActionTypeMethod.Invoke(null, new object[] { actionTypeId });
-        }
 
-        private object TryAutoIceSkatingInvokeGetPairSkateUltimate(int pairMotionId)
-        {
-            if (this.autoIceSkatingGetPairSkateUltimateMethod == null || pairMotionId <= 0)
-            {
-                return null;
-            }
-
-            ParameterInfo[] parameters = this.autoIceSkatingGetPairSkateUltimateMethod.GetParameters();
-            if (parameters != null && parameters.Length >= 2)
-            {
-                return this.autoIceSkatingGetPairSkateUltimateMethod.Invoke(null, new object[] { pairMotionId, false });
-            }
-
-            return this.autoIceSkatingGetPairSkateUltimateMethod.Invoke(null, new object[] { pairMotionId });
-        }
-
-        private int ScoreAutoIceSkatingUltimateManaged(
-            object skateMode,
-            int ultimateActionId,
-            object challengeInfo,
-            bool isPairSkate,
-            out bool hasStarBonus)
-        {
-            hasStarBonus = false;
-            if (!this.TryComputeAutoIceSkatingUltimateScoreManaged(
-                    skateMode,
-                    ultimateActionId,
-                    challengeInfo,
-                    isPairSkate,
-                    out AutoIceSkatingUltimateScoreDetail detail))
-            {
-                return 0;
-            }
-
-            hasStarBonus = detail.HasStarBonus;
-            return detail.FinalScore;
-        }
-
-        private bool TryComputeAutoIceSkatingUltimateScoreManaged(
-            object skateMode,
-            int ultimateActionId,
-            object challengeInfo,
-            bool isPairSkate,
-            out AutoIceSkatingUltimateScoreDetail detail)
-        {
-            detail = default;
-            object config = this.TryAutoIceSkatingInvokeGetSkateAction(ultimateActionId);
-            if (config == null)
-            {
-                return false;
-            }
-
-            int score = Convert.ToInt32(this.autoIceSkatingTableSkateActionScoreProperty.GetValue(config, null));
-            int bonus = this.autoIceSkatingTableSkateActionBonusScoreProperty != null
-                ? Convert.ToInt32(this.autoIceSkatingTableSkateActionBonusScoreProperty.GetValue(config, null))
-                : 0;
-            bool hasIconTip = this.autoIceSkatingTableSkateActionIconTipCountProperty != null
-                && Convert.ToInt32(this.autoIceSkatingTableSkateActionIconTipCountProperty.GetValue(config, null)) > 0;
-            if (isPairSkate
-                && this.autoIceSkatingTableSkateActionPairMotionProperty != null
-                && this.autoIceSkatingGetPairSkateUltimateMethod != null)
-            {
-                int pairMotion = Convert.ToInt32(this.autoIceSkatingTableSkateActionPairMotionProperty.GetValue(config, null));
-                if (pairMotion > 0)
-                {
-                    object pair = this.TryAutoIceSkatingInvokeGetPairSkateUltimate(pairMotion);
-                    if (pair != null)
-                    {
-                        detail.PairOverride = true;
-                        if (this.autoIceSkatingTablePairSkateUltimateScoreProperty != null)
-                        {
-                            score = Convert.ToInt32(this.autoIceSkatingTablePairSkateUltimateScoreProperty.GetValue(pair, null));
-                        }
-
-                        if (this.autoIceSkatingTablePairSkateUltimateBonusScoreProperty != null)
-                        {
-                            bonus = Convert.ToInt32(this.autoIceSkatingTablePairSkateUltimateBonusScoreProperty.GetValue(pair, null));
-                        }
-                    }
-                }
-            }
-
-            detail.TableScore = score;
-            detail.TableBonus = bonus;
-            detail.ChallengeBonusApplied = 0;
-            detail.PreRateScore = score;
-            if (this.AutoIceSkatingIsChallengeManaged(skateMode)
-                && challengeInfo != null
-                && this.autoIceSkatingChallengeIsNewActionMethod != null
-                && (bool)this.autoIceSkatingChallengeIsNewActionMethod.Invoke(challengeInfo, new object[] { ultimateActionId }))
-            {
-                detail.ChallengeBonusApplied = bonus;
-                detail.PreRateScore = score + bonus;
-                if (hasIconTip)
-                {
-                    detail.HasStarBonus = true;
-                }
-            }
-
-            detail.SpeedRate = 1f;
-            if (skateMode != null && this.autoIceSkatingCalculateSpeedRateMethod != null)
-            {
-                try
-                {
-                    detail.SpeedRate = Convert.ToSingle(this.autoIceSkatingCalculateSpeedRateMethod.Invoke(skateMode, null));
-                }
-                catch
-                {
-                    detail.SpeedRate = 1f;
-                }
-            }
-
-            detail.FinalScore = detail.PreRateScore;
-            if (detail.PreRateScore > 0 && detail.SpeedRate != 1f)
-            {
-                detail.FinalScore = (int)((float)detail.PreRateScore * detail.SpeedRate);
-            }
-
-            return true;
-        }
 
         private unsafe int ScoreAutoIceSkatingUltimateAura(
             IntPtr skateMode,
@@ -949,15 +506,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool AutoIceSkatingIsChallengeManaged(object skateMode)
-        {
-            if (skateMode == null || this.autoIceSkatingCurrentModeProperty == null)
-            {
-                return false;
-            }
-
-            return Convert.ToInt32(this.autoIceSkatingCurrentModeProperty.GetValue(skateMode, null)) == AutoIceSkatingSkateModeChallenge;
-        }
 
         private static int AutoIceSkatingHashSkills(List<int> skills)
         {
@@ -1013,38 +561,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryAutoIceSkatingAttemptUltimateTriggerManaged(
-            object skateMode,
-            int ultimateId,
-            int ultimateScore,
-            int energyTier,
-            bool endgame,
-            string candidatesDetail,
-            string context,
-            float now)
-        {
-            if (ultimateId <= 0 || !this.AutoIceSkatingIsStartTriggerReady(now))
-            {
-                return false;
-            }
-
-            this.AutoIceSkatingLog(
-                "ultimate ready tier=x" + energyTier
-                + " ctx=" + context
-                + " id=" + ultimateId
-                + " score=" + ultimateScore
-                + " min=" + this.autoIceSkatingMinUltimateScore
-                + " candidates=" + candidatesDetail,
-                "ultimate-ready:" + ultimateId + ":" + ultimateScore,
-                force: true);
-            if (this.TryAutoIceSkatingSkillTrigger(skateMode, ultimateId, now, endgame ? "ultimate-endgame" : "ultimate"))
-            {
-                this.AutoIceSkatingInvalidateMaxUltimateCache();
-                return true;
-            }
-
-            return false;
-        }
 
         private unsafe bool TryAutoIceSkatingAttemptUltimateTriggerAura(
             IntPtr skateMode,
@@ -1079,56 +595,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private string BuildAutoIceSkatingUltimateCandidatesManaged(
-            object skateMode,
-            object challengeInfo,
-            List<int> skills,
-            bool isPairSkate)
-        {
-            this.autoIceSkatingUltimateCandidatesLogBuffer.Clear();
-            this.TryCollectAutoIceSkatingTreeNormalActionIdsManaged(skateMode, skills, this.autoIceSkatingTreeActionIdsBuffer);
-            this.autoIceSkatingUltimateIdDedup.Clear();
-            int scanLimit = Math.Min(this.autoIceSkatingTreeActionIdsBuffer.Count, AutoIceSkatingMaxTreeActionsScanned);
-            for (int i = 0; i < scanLimit; i++)
-            {
-                int ultimateId = this.TryAutoIceSkatingResolveUltimateActionIdManaged(this.autoIceSkatingTreeActionIdsBuffer[i]);
-                if (ultimateId <= 0 || !this.autoIceSkatingUltimateIdDedup.Add(ultimateId))
-                {
-                    continue;
-                }
-
-                if (!this.TryComputeAutoIceSkatingUltimateScoreManaged(
-                        skateMode,
-                        ultimateId,
-                        challengeInfo,
-                        isPairSkate,
-                        out AutoIceSkatingUltimateScoreDetail detail))
-                {
-                    continue;
-                }
-
-                if (this.autoIceSkatingUltimateCandidatesLogBuffer.Length > 0)
-                {
-                    this.autoIceSkatingUltimateCandidatesLogBuffer.Append(';');
-                }
-
-                float dur = this.EstimateAutoIceSkatingActionDurationManaged(ultimateId);
-                this.autoIceSkatingUltimateCandidatesLogBuffer
-                    .Append(this.autoIceSkatingTreeActionIdsBuffer[i])
-                    .Append("->")
-                    .Append(ultimateId)
-                    .Append('{')
-                    .Append(detail.ToScoreLog())
-                    .Append(" dur=")
-                    .Append(dur.ToString("0.###"))
-                    .Append(detail.FinalScore >= this.autoIceSkatingMinUltimateScore ? " ok" : " below-min")
-                    .Append('}');
-            }
-
-            return this.autoIceSkatingUltimateCandidatesLogBuffer.Length > 0
-                ? this.autoIceSkatingUltimateCandidatesLogBuffer.ToString()
-                : "none";
-        }
 
         private unsafe string BuildAutoIceSkatingUltimateCandidatesAura(
             IntPtr skateMode,
@@ -1185,52 +651,6 @@ namespace HeartopiaMod
                 : "none";
         }
 
-        private bool TryAutoIceSkatingTickUltimateOnIdleManaged(
-            object skateMode,
-            object challengeInfo,
-            List<int> skills,
-            float now)
-        {
-            bool canUltimate = (bool)this.autoIceSkatingCanTriggerUltimateMethod.Invoke(skateMode, null);
-            bool endgame = this.autoIceSkatingLast30sUltimate
-                && this.AutoIceSkatingIsChallengeEndgameManaged(skateMode, challengeInfo);
-            int requiredTier = endgame
-                ? 1
-                : (this.autoIceSkatingOnlyX2Ultimate ? AutoIceSkatingUltimateEnergyTierRequired : 1);
-            if (!canUltimate || !this.AutoIceSkatingIsUltimateEnergyTierReadyManaged(skateMode, requiredTier, out int energyTier))
-            {
-                return false;
-            }
-
-            bool isPairSkate = this.TryAutoIceSkatingIsPairSkateManaged(skateMode);
-            string candidatesDetail = this.BuildAutoIceSkatingUltimateCandidatesManaged(
-                skateMode,
-                challengeInfo,
-                skills,
-                isPairSkate);
-            if (!this.TryAutoIceSkatingSelectUltimateManaged(
-                    skateMode,
-                    challengeInfo,
-                    skills,
-                    isPairSkate,
-                    out int ultimateId,
-                    out int ultimateScore,
-                    out int maxSeenScore))
-            {
-                this.AutoIceSkatingLogUltimateWaitDisabled("idle", energyTier, "no-qualifying", maxSeenScore, candidatesDetail);
-                return false;
-            }
-
-            return this.TryAutoIceSkatingAttemptUltimateTriggerManaged(
-                skateMode,
-                ultimateId,
-                ultimateScore,
-                energyTier,
-                endgame,
-                candidatesDetail,
-                endgame ? "idle-endgame" : "idle",
-                now);
-        }
 
         private unsafe bool TryAutoIceSkatingTickUltimateOnIdleAura(
             IntPtr skateMode,
@@ -1279,38 +699,6 @@ namespace HeartopiaMod
                 now);
         }
 
-        private void TryCollectAutoIceSkatingTreeNormalActionIdsManaged(object skateMode, List<int> skillsFallback, List<int> output)
-        {
-            output.Clear();
-            if (skillsFallback != null)
-            {
-                for (int i = 0; i < skillsFallback.Count; i++)
-                {
-                    if (skillsFallback[i] > 0)
-                    {
-                        output.Add(skillsFallback[i]);
-                    }
-                }
-            }
-
-            if (skateMode == null || this.autoIceSkatingSkateActionsField == null)
-            {
-                return;
-            }
-
-            object dictObj = this.autoIceSkatingSkateActionsField.GetValue(skateMode);
-            if (dictObj is IDictionary dict)
-            {
-                foreach (object key in dict.Keys)
-                {
-                    int actionId = Convert.ToInt32(key);
-                    if (actionId > 0 && !output.Contains(actionId))
-                    {
-                        output.Add(actionId);
-                    }
-                }
-            }
-        }
 
         private unsafe bool TryCollectAutoIceSkatingTreeNormalActionIdsAura(
             IntPtr skateMode,
@@ -1390,92 +778,6 @@ namespace HeartopiaMod
             return output.Count > 0;
         }
 
-        private bool TryAutoIceSkatingSelectUltimateManaged(
-            object skateMode,
-            object challengeInfo,
-            List<int> skills,
-            bool isPairSkate,
-            out int ultimateId,
-            out int ultimateScore,
-            out int maxSeenScore)
-        {
-            ultimateId = 0;
-            ultimateScore = 0;
-            maxSeenScore = this.autoIceSkatingLastMaxUltimateScore;
-            int skillsHash = AutoIceSkatingHashSkills(skills);
-            float now = Time.unscaledTime;
-            if (this.autoIceSkatingCachedMaxUltimateId > 0
-                && skillsHash == this.autoIceSkatingCachedMaxUltimateSkillsHash
-                && now - this.autoIceSkatingCachedMaxUltimateAt < AutoIceSkatingMaxUltimateCacheSeconds)
-            {
-                ultimateId = this.autoIceSkatingCachedMaxUltimateId;
-                ultimateScore = this.autoIceSkatingCachedMaxUltimateScore;
-                return true;
-            }
-
-            if (skateMode == null || this.autoIceSkatingGetSkateActionTypeMethod == null)
-            {
-                return false;
-            }
-
-            this.TryCollectAutoIceSkatingTreeNormalActionIdsManaged(skateMode, skills, this.autoIceSkatingTreeActionIdsBuffer);
-            if (this.autoIceSkatingTreeActionIdsBuffer.Count == 0)
-            {
-                return false;
-            }
-
-            maxSeenScore = 0;
-            float bestDuration = float.PositiveInfinity;
-            this.autoIceSkatingUltimateIdDedup.Clear();
-            int scanLimit = Math.Min(this.autoIceSkatingTreeActionIdsBuffer.Count, AutoIceSkatingMaxTreeActionsScanned);
-            for (int i = 0; i < scanLimit; i++)
-            {
-                int candidateId = this.TryAutoIceSkatingResolveUltimateActionIdManaged(this.autoIceSkatingTreeActionIdsBuffer[i]);
-                if (candidateId <= 0 || !this.autoIceSkatingUltimateIdDedup.Add(candidateId))
-                {
-                    continue;
-                }
-
-                int score = this.ScoreAutoIceSkatingUltimateManaged(
-                    skateMode,
-                    candidateId,
-                    challengeInfo,
-                    isPairSkate,
-                    out _);
-                if (score > maxSeenScore)
-                {
-                    maxSeenScore = score;
-                }
-
-                if (score < this.autoIceSkatingMinUltimateScore)
-                {
-                    continue;
-                }
-
-                // Among qualifying (>= 900) ultimates pick the shortest one; tie -> higher score.
-                float duration = this.EstimateAutoIceSkatingActionDurationManaged(candidateId);
-                if (ultimateId == 0
-                    || duration < bestDuration
-                    || (duration == bestDuration && score > ultimateScore))
-                {
-                    ultimateId = candidateId;
-                    ultimateScore = score;
-                    bestDuration = duration;
-                }
-            }
-
-            this.autoIceSkatingLastMaxUltimateScore = maxSeenScore;
-            if (ultimateId <= 0)
-            {
-                return false;
-            }
-
-            this.autoIceSkatingCachedMaxUltimateId = ultimateId;
-            this.autoIceSkatingCachedMaxUltimateScore = ultimateScore;
-            this.autoIceSkatingCachedMaxUltimateSkillsHash = skillsHash;
-            this.autoIceSkatingCachedMaxUltimateAt = now;
-            return true;
-        }
 
         private unsafe bool TryAutoIceSkatingSelectUltimateAura(
             IntPtr skateMode,
@@ -1563,90 +865,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryAutoIceSkatingSkillTrigger(object skateMode, int actionId, float now, string reason, bool applyCooldown = true)
-        {
-            try
-            {
-                this.autoIceSkatingSkillTriggerMethod.Invoke(skateMode, new object[] { actionId });
-                if (applyCooldown)
-                {
-                    this.autoIceSkatingLastTriggerAt = now;
-                }
-                this.AutoIceSkatingSetStatus("Triggered " + actionId + " (" + reason + ").", force: true);
-                object challengeInfo = this.autoIceSkatingChallengeInfoField != null
-                    ? this.autoIceSkatingChallengeInfoField.GetValue(skateMode)
-                    : null;
-                this.AutoIceSkatingLog(
-                    "SkillTrigger(" + actionId + ") reason=" + reason
-                    + " {" + this.DescribeAutoIceSkatingActionManaged(actionId, challengeInfo) + "}",
-                    force: true);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.AutoIceSkatingSetStatus("SkillTrigger failed: " + ex.Message, force: true);
-                this.AutoIceSkatingLog("SkillTrigger(" + actionId + ") failed: " + ex, force: true);
-                return false;
-            }
-        }
 
-        private int PickAutoIceSkatingBestSkill(
-            object skateMode,
-            object challengeInfo,
-            List<int> skills,
-            int preferDifferentFrom,
-            out string detail)
-        {
-            int bestId = 0;
-            bool bestNew = false;
-            float bestDuration = float.PositiveInfinity;
-            int fallbackId = 0;
-            bool fallbackNew = false;
-            float fallbackDuration = float.PositiveInfinity;
-            bool inChallenge = this.AutoIceSkatingIsChallengeManaged(skateMode);
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < skills.Count; i++)
-            {
-                int actionId = skills[i];
-                if (actionId <= 0)
-                {
-                    continue;
-                }
-
-                // Strategy: among simple actions prefer NEW ones (challenge novelty bonus),
-                // then the SHORTEST duration.
-                bool isNew = inChallenge
-                    && challengeInfo != null
-                    && this.autoIceSkatingChallengeIsNewActionMethod != null
-                    && (bool)this.autoIceSkatingChallengeIsNewActionMethod.Invoke(challengeInfo, new object[] { actionId });
-                float duration = this.EstimateAutoIceSkatingActionDurationManaged(actionId);
-                if (sb.Length > 0)
-                {
-                    sb.Append(" | ");
-                }
-
-                sb.Append('{').Append(this.DescribeAutoIceSkatingActionManaged(actionId, challengeInfo)).Append('}');
-                if (actionId != preferDifferentFrom)
-                {
-                    if (AutoIceSkatingPreferAction(isNew, duration, bestId, bestNew, bestDuration))
-                    {
-                        bestId = actionId;
-                        bestNew = isNew;
-                        bestDuration = duration;
-                    }
-                }
-                else if (AutoIceSkatingPreferAction(isNew, duration, fallbackId, fallbackNew, fallbackDuration))
-                {
-                    fallbackId = actionId;
-                    fallbackNew = isNew;
-                    fallbackDuration = duration;
-                }
-            }
-
-            int picked = bestId > 0 ? bestId : fallbackId;
-            detail = "candidates " + sb + " picked=" + picked;
-            return picked;
-        }
 
         // When "prefer new" is on, new actions outrank used ones; within the same novelty
         // class (or always, if "prefer new" is off) the shortest duration wins.
@@ -1670,91 +889,9 @@ namespace HeartopiaMod
             return candidateDuration < currentDuration;
         }
 
-        private static int AutoIceSkatingReadMemberInt(object target, string name)
-        {
-            if (target == null)
-            {
-                return 0;
-            }
 
-            try
-            {
-                Type type = target.GetType();
-                PropertyInfo property = type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
-                if (property != null)
-                {
-                    return Convert.ToInt32(property.GetValue(target, null));
-                }
-
-                FieldInfo field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                return field != null ? Convert.ToInt32(field.GetValue(target)) : 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static float AutoIceSkatingReadMemberFloat(object target, string name)
-        {
-            if (target == null)
-            {
-                return 0f;
-            }
-
-            try
-            {
-                Type type = target.GetType();
-                PropertyInfo property = type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
-                if (property != null)
-                {
-                    return Convert.ToSingle(property.GetValue(target, null));
-                }
-
-                FieldInfo field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                return field != null ? Convert.ToSingle(field.GetValue(target)) : 0f;
-            }
-            catch
-            {
-                return 0f;
-            }
-        }
 
         // Full property dump for one action so the log shows how candidates differ.
-        private string DescribeAutoIceSkatingActionManaged(int actionId, object challengeInfo)
-        {
-            object config = this.TryAutoIceSkatingInvokeGetSkateAction(actionId);
-            if (config == null)
-            {
-                return "id=" + actionId + "<no-config>";
-            }
-
-            int score = AutoIceSkatingReadMemberInt(config, "score");
-            int bonus = AutoIceSkatingReadMemberInt(config, "bonusScore");
-            int type = AutoIceSkatingReadMemberInt(config, "actionType");
-            int energy = AutoIceSkatingReadMemberInt(config, "energy");
-            int iconTip = AutoIceSkatingReadMemberInt(config, "iconTipCount");
-            int pair = AutoIceSkatingReadMemberInt(config, "pairMotion");
-            float prefScore = AutoIceSkatingReadMemberFloat(config, "prefectScoreRatio");
-            float prefEnergy = AutoIceSkatingReadMemberFloat(config, "prefectEnergyRatio");
-            float dur = this.EstimateAutoIceSkatingActionDurationManaged(actionId);
-            bool isNew = challengeInfo != null
-                && this.autoIceSkatingChallengeIsNewActionMethod != null
-                && (bool)this.autoIceSkatingChallengeIsNewActionMethod.Invoke(challengeInfo, new object[] { actionId });
-            int ultId = this.TryAutoIceSkatingResolveUltimateActionIdManaged(actionId);
-            return "id=" + actionId
-                + " type=" + type
-                + " dur=" + dur.ToString("0.###")
-                + " score=" + score
-                + " bonus=" + bonus
-                + " new=" + (isNew ? 1 : 0)
-                + " prefScore=" + prefScore.ToString("0.##")
-                + " energy=" + energy
-                + " prefEnergy=" + prefEnergy.ToString("0.##")
-                + " iconTip=" + iconTip
-                + " pair=" + pair
-                + " ult=" + ultId;
-        }
 
         private unsafe string DescribeAutoIceSkatingActionAura(IntPtr skateMode, int actionId)
         {
@@ -1789,467 +926,27 @@ namespace HeartopiaMod
                 + " ult=" + ultId;
         }
 
-        private float EstimateAutoIceSkatingActionDurationManaged(int actionId)
-        {
-            object config = this.TryAutoIceSkatingInvokeGetSkateAction(actionId);
-            if (config == null)
-            {
-                return float.PositiveInfinity;
-            }
 
-            int[] phaseIds = ReadAutoIceSkatingIntArray(config, this.autoIceSkatingTableSkateActionPrefectPhaseProperty);
-            if (phaseIds == null || phaseIds.Length == 0)
-            {
-                phaseIds = ReadAutoIceSkatingIntArray(config, this.autoIceSkatingTableSkateActionNormalPhaseProperty);
-            }
 
-            return this.EstimateAutoIceSkatingPhaseIdsDurationManaged(phaseIds);
-        }
 
-        private float EstimateAutoIceSkatingPhaseIdsDurationManaged(int[] phaseIds)
-        {
-            if (phaseIds == null || phaseIds.Length == 0 || this.autoIceSkatingGetSkateActionStateMethod == null)
-            {
-                return float.PositiveInfinity;
-            }
 
-            float sum = 0f;
-            bool any = false;
-            for (int i = 0; i < phaseIds.Length; i++)
-            {
-                object state = this.TryAutoIceSkatingInvokeGetSkateActionState(phaseIds[i]);
-                if (state == null)
-                {
-                    continue;
-                }
 
-                float span = this.ReadAutoIceSkatingPhaseSpanManaged(state);
-                if (span < 0f)
-                {
-                    continue;
-                }
 
-                sum += span;
-                any = true;
-            }
 
-            return any ? sum : float.PositiveInfinity;
-        }
 
-        private float ReadAutoIceSkatingPhaseSpanManaged(object state)
-        {
-            if (state == null || this.autoIceSkatingTableSkateActionStatePhaseField == null)
-            {
-                return -1f;
-            }
 
-            object phaseObj = this.autoIceSkatingTableSkateActionStatePhaseField.GetValue(state);
-            if (phaseObj is float[] phases && phases.Length >= 2)
-            {
-                return phases[phases.Length - 1] - phases[0];
-            }
 
-            if (phaseObj is IList list && list.Count >= 2)
-            {
-                float first = Convert.ToSingle(list[0]);
-                float last = Convert.ToSingle(list[list.Count - 1]);
-                return last - first;
-            }
 
-            return -1f;
-        }
 
-        private object TryAutoIceSkatingInvokeGetSkateActionState(int stateId)
-        {
-            if (this.autoIceSkatingGetSkateActionStateMethod == null || stateId <= 0)
-            {
-                return null;
-            }
 
-            ParameterInfo[] parameters = this.autoIceSkatingGetSkateActionStateMethod.GetParameters();
-            if (parameters.Length >= 2 && parameters[1].ParameterType == typeof(bool))
-            {
-                return this.autoIceSkatingGetSkateActionStateMethod.Invoke(null, new object[] { stateId, false });
-            }
 
-            return this.autoIceSkatingGetSkateActionStateMethod.Invoke(null, new object[] { stateId });
-        }
 
-        private bool TryIsInConfiguredPhase(object skateMode, int[] phaseIds, out float ratioInPhase, out int phaseIndex)
-        {
-            ratioInPhase = 0f;
-            phaseIndex = 0;
-            object[] args = { phaseIds, 0f, 0 };
-            bool result = (bool)this.autoIceSkatingGetRatioInConfiguredPhaseMethod.Invoke(skateMode, args);
-            if (!result)
-            {
-                return false;
-            }
 
-            ratioInPhase = (float)args[1];
-            phaseIndex = (int)args[2];
-            return ratioInPhase > AutoIceSkatingMinPerfectRatio && ratioInPhase <= 1f;
-        }
-
-        private int TryReadCurrentCastActionId(object skateMode)
-        {
-            object castInfo = this.autoIceSkatingCurrentCastActionField.GetValue(skateMode);
-            if (castInfo == null)
-            {
-                return 0;
-            }
-
-            int actionId = Convert.ToInt32(this.autoIceSkatingCastActionIdField.GetValue(castInfo));
-            if (actionId <= 0 || actionId > AutoIceSkatingMaxActionId)
-            {
-                return 0;
-            }
-
-            object row = this.TryAutoIceSkatingInvokeGetSkateAction(actionId);
-            return row != null ? actionId : 0;
-        }
-
-        private object TryAutoIceSkatingInvokeGetSkateAction(int actionId)
-        {
-            if (this.autoIceSkatingGetSkateActionMethod == null || actionId <= 0)
-            {
-                return null;
-            }
-
-            ParameterInfo[] parameters = this.autoIceSkatingGetSkateActionMethod.GetParameters();
-            if (parameters != null && parameters.Length >= 2)
-            {
-                return this.autoIceSkatingGetSkateActionMethod.Invoke(null, new object[] { actionId, false });
-            }
-
-            return this.autoIceSkatingGetSkateActionMethod.Invoke(null, new object[] { actionId });
-        }
-
-        private static int[] ReadAutoIceSkatingIntArray(object target, PropertyInfo property)
-        {
-            if (target == null || property == null)
-            {
-                return null;
-            }
-
-            object value = property.GetValue(target, null);
-            if (value is int[] direct)
-            {
-                return direct;
-            }
-
-            if (value is IList list && list.Count > 0)
-            {
-                int[] converted = new int[list.Count];
-                for (int i = 0; i < list.Count; i++)
-                {
-                    converted[i] = Convert.ToInt32(list[i]);
-                }
-
-                return converted;
-            }
-
-            return null;
-        }
-
-        private void TryCollectAutoIceSkatingSkills(object skateMode, out List<int> skills, out string detail)
-        {
-            skills = new List<int>();
-            StringBuilder sb = new StringBuilder();
-            object skillsObj = this.autoIceSkatingSkateSkillsProperty.GetValue(skateMode, null);
-            if (skillsObj == null)
-            {
-                detail = "SkateSkills=null";
-                return;
-            }
-
-            sb.Append("type=").Append(skillsObj.GetType().FullName).Append(' ');
-            if (skillsObj is IList list)
-            {
-                sb.Append("IList.Count=").Append(list.Count).Append(' ');
-                for (int i = 0; i < list.Count; i++)
-                {
-                    try
-                    {
-                        int id = Convert.ToInt32(list[i]);
-                        if (id > 0)
-                        {
-                            skills.Add(id);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        sb.Append("idx").Append(i).Append(" err=").Append(ex.Message).Append(' ');
-                    }
-                }
-            }
-            else if (skillsObj is IEnumerable enumerable)
-            {
-                int index = 0;
-                foreach (object entry in enumerable)
-                {
-                    try
-                    {
-                        int id = Convert.ToInt32(entry);
-                        if (id > 0)
-                        {
-                            skills.Add(id);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        sb.Append("enum").Append(index).Append(" err=").Append(ex.Message).Append(' ');
-                    }
-
-                    index++;
-                }
-
-                sb.Append("enumerated=").Append(index).Append(' ');
-            }
-            else if (this.TryGetObjectMember(skillsObj, "Count", out object countObj)
-                && this.TryInvokeIntIndexer(skillsObj, out List<int> indexed))
-            {
-                skills.AddRange(indexed);
-                sb.Append("indexed.Count=").Append(countObj).Append(' ');
-            }
-            else
-            {
-                sb.Append("unreadable");
-            }
-
-            detail = sb.ToString().Trim();
-        }
-
-        private bool TryInvokeIntIndexer(object listObj, out List<int> values)
-        {
-            values = new List<int>();
-            if (listObj == null || !this.TryGetObjectMember(listObj, "Count", out object countObj))
-            {
-                return false;
-            }
-
-            int count = Convert.ToInt32(countObj);
-            MethodInfo getItem = listObj.GetType().GetMethod("get_Item", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(int) }, null);
-            if (getItem == null)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < count; i++)
-            {
-                object entry = getItem.Invoke(listObj, new object[] { i });
-                values.Add(Convert.ToInt32(entry));
-            }
-
-            return true;
-        }
-
-        private bool TryGetAutoIceSkatingMode(out object localPlayer, out object skateMode, out string source)
-        {
-            localPlayer = null;
-            skateMode = null;
-            source = "unresolved";
-
-            if (!this.TryResolveAutoIceSkatingLocalPlayer(out localPlayer, out string playerSource))
-            {
-                source = "no LocalPlayerComponent (" + playerSource + ")";
-                return false;
-            }
-
-            if (this.TryResolveAutoIceSkatingModeFromPlayer(localPlayer, out skateMode, out string modePath))
-            {
-                source = playerSource + " -> " + modePath;
-                return true;
-            }
-
-            if (this.TryGetObjectMember(localPlayer, "character", out object characterObj)
-                && characterObj != null
-                && this.TryResolveAutoIceSkatingModeFromCharacter(characterObj, out skateMode, out modePath))
-            {
-                source = playerSource + " -> character -> " + modePath;
-                return true;
-            }
-
-            source = playerSource + " -> GameSkateMode null";
-            return false;
-        }
-
-        private bool TryResolveAutoIceSkatingLocalPlayer(out object localPlayer, out string source)
-        {
-            localPlayer = null;
-            source = "none";
-            this.EnsureAutoIceSkatingLocalPlayerTypeResolved();
-            if (this.autoIceSkatingLocalPlayerComponentType == null)
-            {
-                source = "LocalPlayerComponent type missing";
-                return false;
-            }
-
-            object candidate = null;
-            string candidateSource = "none";
-            if (this.TryGetManagedSelfPlayerObject(out candidate, out candidateSource)
-                && this.TryAutoIceSkatingAcceptPlayerCandidate(candidate, candidateSource, out localPlayer, out source))
-            {
-                return true;
-            }
-
-            if (this.TryGetManagedViewModuleSelfPlayerObject(out candidate, out candidateSource)
-                && this.TryAutoIceSkatingAcceptPlayerCandidate(candidate, candidateSource, out localPlayer, out source))
-            {
-                return true;
-            }
-
-            if (this.TryGetManagedSelfPlayerEntityObject(out candidate, out candidateSource)
-                && this.TryAutoIceSkatingAcceptPlayerCandidate(candidate, candidateSource, out localPlayer, out source))
-            {
-                return true;
-            }
-
-            source = "all player fallbacks failed";
-            return false;
-        }
-
-        private bool TryAutoIceSkatingAcceptPlayerCandidate(object candidate, string candidateSource, out object localPlayer, out string source)
-        {
-            localPlayer = null;
-            source = candidateSource ?? "none";
-            if (candidate == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (this.autoIceSkatingLocalPlayerComponentType.IsInstanceOfType(candidate))
-                {
-                    localPlayer = candidate;
-                    return true;
-                }
-
-                if (this.TryGetComponentOnObject(candidate, this.autoIceSkatingLocalPlayerComponentType, out object component))
-                {
-                    localPlayer = component;
-                    source = candidateSource + " -> GetComponent<LocalPlayerComponent>";
-                    return true;
-                }
-            }
-            catch (Exception ex)
-            {
-                this.AutoIceSkatingLog("player candidate failed: " + ex.Message, "player-candidate");
-            }
-
-            return false;
-        }
-
-        private bool TryResolveAutoIceSkatingModeFromPlayer(object localPlayer, out object skateMode, out string path)
-        {
-            skateMode = null;
-            path = "GetGameMode";
-            if (this.autoIceSkatingGetGameModeGeneric == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                MethodInfo getGameMode = this.autoIceSkatingGetGameModeGeneric.MakeGenericMethod(this.autoIceSkatingGameSkateModeType);
-                skateMode = getGameMode.Invoke(localPlayer, null);
-                return skateMode != null;
-            }
-            catch (Exception ex)
-            {
-                this.AutoIceSkatingLog("GetGameMode failed: " + ex.Message, "getgamemode-fail");
-                return false;
-            }
-        }
-
-        private bool TryResolveAutoIceSkatingModeFromCharacter(object characterObj, out object skateMode, out string path)
-        {
-            skateMode = null;
-            path = "Character.GetMode";
-            if (this.autoIceSkatingCharacterGetModeGeneric == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                MethodInfo getMode = this.autoIceSkatingCharacterGetModeGeneric.MakeGenericMethod(this.autoIceSkatingGameSkateModeType);
-                skateMode = getMode.Invoke(characterObj, null);
-                return skateMode != null;
-            }
-            catch (Exception ex)
-            {
-                this.AutoIceSkatingLog("Character.GetMode failed: " + ex.Message, "getmode-fail");
-                return false;
-            }
-        }
-
-        private bool TryGetComponentOnObject(object host, Type componentType, out object component)
-        {
-            component = null;
-            if (host == null || componentType == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (componentType.IsInstanceOfType(host))
-                {
-                    component = host;
-                    return true;
-                }
-
-                Type hostType = host.GetType();
-                MethodInfo getComponent = null;
-                MethodInfo[] methods = hostType.GetMethods(BindingFlags.Public | BindingFlags.Instance);
-                for (int i = 0; i < methods.Length; i++)
-                {
-                    MethodInfo method = methods[i];
-                    if (method != null
-                        && string.Equals(method.Name, "GetComponent", StringComparison.Ordinal)
-                        && method.IsGenericMethodDefinition
-                        && method.GetParameters().Length == 0)
-                    {
-                        getComponent = method;
-                        break;
-                    }
-                }
-
-                if (getComponent == null)
-                {
-                    return false;
-                }
-
-                component = getComponent.MakeGenericMethod(componentType).Invoke(host, null);
-                return component != null;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private void EnsureAutoIceSkatingLocalPlayerTypeResolved()
-        {
-            if (this.autoIceSkatingLocalPlayerComponentType != null)
-            {
-                return;
-            }
-
-            this.autoIceSkatingLocalPlayerComponentType = this.FindLoadedType(
-                "XDTLevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent",
-                "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent",
-                "Il2CppXDTLevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent",
-                "LocalPlayerComponent");
-        }
 
         private bool TryResolveAutoIceSkatingReflection(out string detail)
         {
             detail = string.Empty;
-            if (this.autoIceSkatingSkillTriggerMethod != null
-                || (this.autoIceSkatingUsesAura && this.autoIceSkatingAuraSkillTriggerMethod != IntPtr.Zero))
+            if (this.autoIceSkatingAuraSkillTriggerMethod != IntPtr.Zero)
             {
                 return true;
             }
@@ -2262,283 +959,9 @@ namespace HeartopiaMod
             }
 
             this.autoIceSkatingReflectionRetryAt = now + AutoIceSkatingReflectionRetrySeconds;
-            if (this.TryResolveAutoIceSkatingManagedReflection(out detail))
-            {
-                this.autoIceSkatingUsesAura = false;
-                return true;
-            }
-
-            if (this.TryResolveAutoIceSkatingAuraReflection(out detail))
-            {
-                this.autoIceSkatingUsesAura = true;
-                return true;
-            }
-
-            return false;
+            return this.TryResolveAutoIceSkatingAuraReflection(out detail);
         }
 
-        private bool TryResolveAutoIceSkatingManagedReflection(out string detail)
-        {
-            detail = string.Empty;
-            StringBuilder missing = new StringBuilder();
-
-            this.EnsureAutoIceSkatingLocalPlayerTypeResolved();
-            this.autoIceSkatingGameSkateModeType = this.FindLoadedType(
-                "XDTLevelAndEntity.Game.GameMode.GameSkateMode",
-                "ScriptsRefactory.LevelAndEntity.Game.GameMode.GameSkateMode",
-                "Il2CppXDTLevelAndEntity.Game.GameMode.GameSkateMode",
-                "GameSkateMode");
-            this.autoIceSkatingTableDataType = this.FindLoadedType(
-                "XDTDataAndProtocol.Config.TableData",
-                "TableData",
-                "EcsClient.TableData");
-            this.autoIceSkatingTableSkateActionType = this.FindLoadedType(
-                "TableSkateAction",
-                "EcsClient.TableSkateAction");
-
-            if (this.autoIceSkatingLocalPlayerComponentType == null) missing.Append("LocalPlayerComponent;");
-            if (this.autoIceSkatingGameSkateModeType == null) missing.Append("GameSkateMode;");
-            if (this.autoIceSkatingTableDataType == null) missing.Append("TableData;");
-            if (this.autoIceSkatingTableSkateActionType == null) missing.Append("TableSkateAction;");
-
-            if (missing.Length > 0)
-            {
-                detail = "Managed types missing: " + missing;
-                this.AutoIceSkatingLog(detail, "reflection-managed-missing");
-                return false;
-            }
-
-            Type characterType = this.FindLoadedType(
-                "XDTLevelAndEntity.Game.GameMode.Character",
-                "ScriptsRefactory.LevelAndEntity.Game.GameMode.Character",
-                "Character");
-            if (characterType != null)
-            {
-                MethodInfo[] characterMethods = characterType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                for (int i = 0; i < characterMethods.Length; i++)
-                {
-                    MethodInfo method = characterMethods[i];
-                    if (method != null
-                        && string.Equals(method.Name, "GetMode", StringComparison.Ordinal)
-                        && method.IsGenericMethodDefinition
-                        && method.GetParameters().Length == 0)
-                    {
-                        this.autoIceSkatingCharacterGetModeGeneric = method;
-                        break;
-                    }
-                }
-            }
-
-            this.autoIceSkatingGetGameModeGeneric = this.autoIceSkatingLocalPlayerComponentType.GetMethod(
-                "GetGameMode",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingGetSkateActionMethod = this.autoIceSkatingTableDataType.GetMethod(
-                "GetSkateAction",
-                BindingFlags.Public | BindingFlags.Static,
-                null,
-                new[] { typeof(int), typeof(bool) },
-                null);
-            if (this.autoIceSkatingGetSkateActionMethod == null)
-            {
-                this.autoIceSkatingGetSkateActionMethod = this.autoIceSkatingTableDataType.GetMethod(
-                    "GetSkateAction",
-                    BindingFlags.Public | BindingFlags.Static,
-                    null,
-                    new[] { typeof(int) },
-                    null);
-            }
-            this.autoIceSkatingSkillTriggerMethod = this.autoIceSkatingGameSkateModeType.GetMethod(
-                "SkillTrigger",
-                BindingFlags.Public | BindingFlags.Instance,
-                null,
-                new[] { typeof(int) },
-                null);
-            this.autoIceSkatingCanTriggerUltimateMethod = this.autoIceSkatingGameSkateModeType.GetMethod(
-                "CanTriggerUltimate",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingCalculateSpeedRateMethod = this.autoIceSkatingGameSkateModeType.GetMethod(
-                "CalculateSpeedRate",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingIsReceiverMethod = this.autoIceSkatingGameSkateModeType.GetMethod(
-                "IsReceiver",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingGetRatioInConfiguredPhaseMethod = this.autoIceSkatingGameSkateModeType.GetMethod(
-                "GetRatioInConfiguredPhase",
-                BindingFlags.NonPublic | BindingFlags.Instance,
-                null,
-                new[] { typeof(int[]), typeof(float).MakeByRefType(), typeof(int).MakeByRefType() },
-                null);
-
-            this.autoIceSkatingGameModeActivedProperty = this.autoIceSkatingGameSkateModeType.GetProperty(
-                "actived",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingCurrentModeProperty = this.autoIceSkatingGameSkateModeType.GetProperty(
-                "CurrentMode",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingUltimateSkillProperty = this.autoIceSkatingGameSkateModeType.GetProperty(
-                "UltimateSkill",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingEnergyProperty = this.autoIceSkatingGameSkateModeType.GetProperty(
-                "Energy",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingSkateSkillsProperty = this.autoIceSkatingGameSkateModeType.GetProperty(
-                "SkateSkills",
-                BindingFlags.Public | BindingFlags.Instance);
-            this.autoIceSkatingCurrentCastActionField = this.autoIceSkatingGameSkateModeType.GetField(
-                "_currentCastAction",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            this.autoIceSkatingChallengeInfoField = this.autoIceSkatingGameSkateModeType.GetField(
-                "ChallengeInfo",
-                BindingFlags.Public | BindingFlags.Instance);
-
-            StringBuilder apiMissing = new StringBuilder();
-            if (this.autoIceSkatingGetGameModeGeneric == null || !this.autoIceSkatingGetGameModeGeneric.IsGenericMethodDefinition) apiMissing.Append("GetGameMode;");
-            if (this.autoIceSkatingGetSkateActionMethod == null) apiMissing.Append("GetSkateAction;");
-            if (this.autoIceSkatingSkillTriggerMethod == null) apiMissing.Append("SkillTrigger;");
-            if (this.autoIceSkatingCanTriggerUltimateMethod == null) apiMissing.Append("CanTriggerUltimate;");
-            if (this.autoIceSkatingIsReceiverMethod == null) apiMissing.Append("IsReceiver;");
-            if (this.autoIceSkatingGetRatioInConfiguredPhaseMethod == null) apiMissing.Append("GetRatioInConfiguredPhase;");
-            if (this.autoIceSkatingGameModeActivedProperty == null) apiMissing.Append("actived;");
-            if (this.autoIceSkatingUltimateSkillProperty == null) apiMissing.Append("UltimateSkill;");
-            if (this.autoIceSkatingEnergyProperty == null) apiMissing.Append("Energy;");
-            if (this.autoIceSkatingSkateSkillsProperty == null) apiMissing.Append("SkateSkills;");
-            if (this.autoIceSkatingCurrentCastActionField == null) apiMissing.Append("_currentCastAction;");
-            if (this.autoIceSkatingChallengeInfoField == null) apiMissing.Append("ChallengeInfo;");
-
-            if (apiMissing.Length > 0)
-            {
-                detail = "API missing: " + apiMissing;
-                this.AutoIceSkatingLog(detail, "reflection-api", force: true);
-                return false;
-            }
-
-            Type castActionInfoType = this.autoIceSkatingCurrentCastActionField.FieldType;
-            this.autoIceSkatingCastActionIdField = castActionInfoType.GetField(
-                "actionID",
-                BindingFlags.Public | BindingFlags.Instance);
-            if (this.autoIceSkatingCastActionIdField == null)
-            {
-                this.autoIceSkatingCastActionIdField = castActionInfoType.GetField(
-                    "actionId",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            }
-
-            Type challengeDataType = this.autoIceSkatingChallengeInfoField.FieldType;
-            this.autoIceSkatingChallengeIsNewActionMethod = challengeDataType.GetMethod(
-                "IsNewAction",
-                BindingFlags.Public | BindingFlags.Instance,
-                null,
-                new[] { typeof(int) },
-                null);
-            this.autoIceSkatingChallengeRemainingTimeProperty = challengeDataType.GetProperty(
-                "RemainingTime",
-                BindingFlags.Public | BindingFlags.Instance);
-
-            this.autoIceSkatingTableSkateActionScoreProperty = this.autoIceSkatingTableSkateActionType.GetProperty("score");
-            this.autoIceSkatingTableSkateActionBonusScoreProperty = this.autoIceSkatingTableSkateActionType.GetProperty("bonusScore");
-            this.autoIceSkatingTableSkateActionPrefectPhaseProperty = this.autoIceSkatingTableSkateActionType.GetProperty("prefectPhase");
-            this.autoIceSkatingTableSkateActionNormalPhaseProperty = this.autoIceSkatingTableSkateActionType.GetProperty("normalPhase");
-            this.autoIceSkatingTableSkateActionIdProperty = this.autoIceSkatingTableSkateActionType.GetProperty("id");
-            this.autoIceSkatingTableSkateActionActionTypeProperty = this.autoIceSkatingTableSkateActionType.GetProperty("actionType");
-            this.autoIceSkatingTableSkateActionIconTipCountProperty = this.autoIceSkatingTableSkateActionType.GetProperty("iconTipCount");
-            this.autoIceSkatingTableSkateActionPairMotionProperty = this.autoIceSkatingTableSkateActionType.GetProperty("pairMotion");
-            this.autoIceSkatingGetSkateActionTypeMethod = this.autoIceSkatingTableDataType.GetMethod(
-                "GetSkateActionType",
-                BindingFlags.Public | BindingFlags.Static,
-                null,
-                new[] { typeof(int), typeof(bool) },
-                null);
-            if (this.autoIceSkatingGetSkateActionTypeMethod == null)
-            {
-                this.autoIceSkatingGetSkateActionTypeMethod = this.autoIceSkatingTableDataType.GetMethod(
-                    "GetSkateActionType",
-                    BindingFlags.Public | BindingFlags.Static,
-                    null,
-                    new[] { typeof(int) },
-                    null);
-            }
-
-            if (this.autoIceSkatingGetSkateActionTypeMethod != null)
-            {
-                Type tableSkateActionTypeType = this.autoIceSkatingGetSkateActionTypeMethod.ReturnType;
-                this.autoIceSkatingTableSkateActionTypeUltimateActionIdProperty = tableSkateActionTypeType.GetProperty("ultimateActionId");
-            }
-
-            this.autoIceSkatingGetSkateActionStateMethod = this.autoIceSkatingTableDataType.GetMethod(
-                "GetSkateActionState",
-                BindingFlags.Public | BindingFlags.Static,
-                null,
-                new[] { typeof(int), typeof(bool) },
-                null);
-            if (this.autoIceSkatingGetSkateActionStateMethod == null)
-            {
-                this.autoIceSkatingGetSkateActionStateMethod = this.autoIceSkatingTableDataType.GetMethod(
-                    "GetSkateActionState",
-                    BindingFlags.Public | BindingFlags.Static,
-                    null,
-                    new[] { typeof(int) },
-                    null);
-            }
-
-            if (this.autoIceSkatingGetSkateActionStateMethod != null)
-            {
-                Type tableSkateActionStateType = this.autoIceSkatingGetSkateActionStateMethod.ReturnType;
-                this.autoIceSkatingTableSkateActionStatePhaseField = tableSkateActionStateType.GetField("phase");
-            }
-
-            this.autoIceSkatingGetPairSkateUltimateMethod = this.autoIceSkatingTableDataType.GetMethod(
-                "GetPairSkateUltimate",
-                BindingFlags.Public | BindingFlags.Static,
-                null,
-                new[] { typeof(int), typeof(bool) },
-                null);
-            if (this.autoIceSkatingGetPairSkateUltimateMethod == null)
-            {
-                this.autoIceSkatingGetPairSkateUltimateMethod = this.autoIceSkatingTableDataType.GetMethod(
-                    "GetPairSkateUltimate",
-                    BindingFlags.Public | BindingFlags.Static,
-                    null,
-                    new[] { typeof(int) },
-                    null);
-            }
-
-            if (this.autoIceSkatingGetPairSkateUltimateMethod != null)
-            {
-                Type tablePairSkateUltimateType = this.autoIceSkatingGetPairSkateUltimateMethod.ReturnType;
-                this.autoIceSkatingTablePairSkateUltimateScoreProperty = tablePairSkateUltimateType.GetProperty("score");
-                this.autoIceSkatingTablePairSkateUltimateBonusScoreProperty = tablePairSkateUltimateType.GetProperty("bonusScore");
-            }
-
-            this.autoIceSkatingCheckPairSkateMethod = this.autoIceSkatingGameSkateModeType.GetMethod(
-                "CheckPairSkate",
-                BindingFlags.Public | BindingFlags.Instance,
-                null,
-                Type.EmptyTypes,
-                null);
-            this.autoIceSkatingSkateActionsField = this.autoIceSkatingGameSkateModeType.GetField(
-                "_skateActions",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            this.autoIceSkatingCastNormalActionIdProperty = castActionInfoType.GetProperty(
-                "normalActionID",
-                BindingFlags.Public | BindingFlags.Instance);
-
-            if (this.autoIceSkatingCastActionIdField == null
-                || this.autoIceSkatingTableSkateActionScoreProperty == null
-                || this.autoIceSkatingTableSkateActionPrefectPhaseProperty == null)
-            {
-                detail = "Table/cast API shape mismatch.";
-                this.AutoIceSkatingLog(detail, "reflection-shape", force: true);
-                return false;
-            }
-
-            detail = "Managed reflection OK.";
-            this.AutoIceSkatingLog(
-                "managed reflection ok LocalPlayer=" + this.autoIceSkatingLocalPlayerComponentType.FullName
-                + " GameSkateMode=" + this.autoIceSkatingGameSkateModeType.FullName
-                + " TableData=" + this.autoIceSkatingTableDataType.FullName,
-                force: true);
-            return true;
-        }
 
         private bool TryResolveAutoIceSkatingAuraReflection(out string detail)
         {
