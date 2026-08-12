@@ -200,12 +200,6 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryLookupPeriodCurrencySaleManaged(currencyTypeId, entityId))
-            {
-                lookupPath = "managed[PeriodCurrencySales]";
-                return true;
-            }
-
             if (this.TryLookupPeriodCurrencySaleFlatTable(currencyTypeId, entityId, out lookupPath))
             {
                 return true;
@@ -217,12 +211,6 @@ namespace HeartopiaMod
         private bool TryLookupPeriodCurrencySaleFlatTable(int currencyTypeId, int entityId, out string lookupPath)
         {
             lookupPath = string.Empty;
-            if (this.TryFlatTableContainsPeriodCurrencyEntityManaged(currencyTypeId, entityId))
-            {
-                lookupPath = "flatManaged";
-                return true;
-            }
-
             if (this.TryFlatTableContainsPeriodCurrencyEntityAura(currencyTypeId, entityId))
             {
                 lookupPath = "flatAura";
@@ -232,55 +220,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryFlatTableContainsPeriodCurrencyEntityManaged(int currencyTypeId, int entityId)
-        {
-            if (currencyTypeId <= 0 || entityId <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type tableDataType = this.FindManagedTableDataType();
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                object flatTable = null;
-                FieldInfo flatField = tableDataType.GetField("TablePeriodCurrencySales", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (flatField != null)
-                {
-                    flatTable = flatField.GetValue(null);
-                }
-                else
-                {
-                    PropertyInfo flatProp = tableDataType.GetProperty("TablePeriodCurrencySales", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    if (flatProp != null)
-                    {
-                        flatTable = flatProp.GetValue(null, null);
-                    }
-                }
-
-                if (flatTable is IDictionary dictionary)
-                {
-                    foreach (DictionaryEntry entry in dictionary)
-                    {
-                        if (this.TryReadPeriodCurrencySaleRowManaged(entry.Value, out int rowCurrency, out int rowEntityId, out _)
-                            && rowCurrency == currencyTypeId
-                            && rowEntityId == entityId)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
 
         private bool TryFlatTableContainsPeriodCurrencyEntityAura(int currencyTypeId, int entityId)
         {
@@ -367,46 +306,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryLookupPeriodCurrencySaleManaged(int currencyTypeId, int entityId)
-        {
-            try
-            {
-                Type tableDataType = this.FindManagedTableDataType();
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                PropertyInfo prop = tableDataType.GetProperty("PeriodCurrencySales", BindingFlags.Public | BindingFlags.Static);
-                if (prop == null)
-                {
-                    return false;
-                }
-
-                if (!(prop.GetValue(null, null) is System.Collections.IDictionary byCurrency))
-                {
-                    return false;
-                }
-
-                IDictionary byEntity = null;
-                foreach (DictionaryEntry bucket in byCurrency)
-                {
-                    int keyValue = 0;
-                    try { keyValue = Convert.ToInt32(bucket.Key); } catch { continue; }
-                    if (keyValue == currencyTypeId)
-                    {
-                        byEntity = bucket.Value as IDictionary;
-                        break;
-                    }
-                }
-
-                return byEntity != null && byEntity.Contains(entityId);
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private unsafe bool TryLookupPeriodCurrencySaleIl2CppContains(int currencyTypeId, int entityId)
         {
@@ -535,10 +434,6 @@ namespace HeartopiaMod
             {
                 source = "nestedAura";
             }
-            else if (this.TryGetAllowedPeriodCurrencyStaticIdsManaged(currencyTypeId, out allowedStaticIds, maxSellByEntityId) && allowedStaticIds.Count > 0)
-            {
-                source = "nestedManaged";
-            }
             else if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTable(currencyTypeId, out allowedStaticIds, out string flatSource, maxSellByEntityId) && allowedStaticIds.Count > 0)
             {
                 source = flatSource;
@@ -571,12 +466,6 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableManaged(currencyTypeId, allowedStaticIds, maxSellByEntityId))
-            {
-                source = "flatManaged";
-                return allowedStaticIds.Count > 0;
-            }
-
             if (this.TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableAura(currencyTypeId, allowedStaticIds, maxSellByEntityId))
             {
                 source = "flatAura";
@@ -586,44 +475,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableManaged(int currencyTypeId, HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
-        {
-            if (allowedStaticIds == null || currencyTypeId <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type tableDataType = this.FindManagedTableDataType();
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                object flatTable = null;
-                FieldInfo flatField = tableDataType.GetField("TablePeriodCurrencySales", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (flatField != null)
-                {
-                    flatTable = flatField.GetValue(null);
-                }
-                else
-                {
-                    PropertyInfo flatProp = tableDataType.GetProperty("TablePeriodCurrencySales", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    if (flatProp != null)
-                    {
-                        flatTable = flatProp.GetValue(null, null);
-                    }
-                }
-
-                return this.TryAddPeriodCurrencyEntityIdsFromFlatTableObject(flatTable, currencyTypeId, allowedStaticIds, maxSellByEntityId);
-            }
-            catch (Exception ex)
-            {
-                this.AutoSellLog("flatManaged allowlist exception: " + ex.Message);
-                return false;
-            }
-        }
 
         private bool TryGetAllowedPeriodCurrencyStaticIdsFromFlatTableAura(int currencyTypeId, HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
         {
@@ -765,163 +616,9 @@ namespace HeartopiaMod
             return entityId > 0;
         }
 
-        private bool TryAddPeriodCurrencyEntityIdsFromFlatTableObject(object flatTable, int currencyTypeId, HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
-        {
-            if (flatTable == null || allowedStaticIds == null || currencyTypeId <= 0)
-            {
-                return false;
-            }
-
-            bool foundAny = false;
-            if (flatTable is IDictionary dictionary)
-            {
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (!this.TryReadPeriodCurrencySaleRowManaged(entry.Value, out int rowCurrency, out int entityId, out int rowMaxSell))
-                    {
-                        continue;
-                    }
-
-                    if (rowCurrency == currencyTypeId && entityId > 0)
-                    {
-                        allowedStaticIds.Add(entityId);
-                        if (maxSellByEntityId != null && rowMaxSell >= 0)
-                        {
-                            maxSellByEntityId[entityId] = rowMaxSell;
-                        }
-                        foundAny = true;
-                    }
-                }
-
-                return foundAny;
-            }
-
-            if (flatTable is IEnumerable enumerable)
-            {
-                foreach (object row in enumerable)
-                {
-                    if (!this.TryReadPeriodCurrencySaleRowManaged(row, out int rowCurrency, out int entityId, out int rowMaxSell))
-                    {
-                        continue;
-                    }
-
-                    if (rowCurrency == currencyTypeId && entityId > 0)
-                    {
-                        allowedStaticIds.Add(entityId);
-                        if (maxSellByEntityId != null && rowMaxSell >= 0)
-                        {
-                            maxSellByEntityId[entityId] = rowMaxSell;
-                        }
-                        foundAny = true;
-                    }
-                }
-            }
-
-            return foundAny;
-        }
 
         // maxSellCount: per-period sell cap (0 = unlimited); -1 when unreadable (treated unlimited).
-        private bool TryReadPeriodCurrencySaleRowManaged(object row, out int currency, out int entityId, out int maxSellCount)
-        {
-            currency = 0;
-            entityId = 0;
-            maxSellCount = -1;
-            if (row == null)
-            {
-                return false;
-            }
 
-            if (!this.TryReadObjectInt(row, "entityId", out entityId) || entityId <= 0)
-            {
-                this.TryReadObjectInt(row, "EntityId", out entityId);
-            }
-
-            if (!this.TryReadObjectInt(row, "currency", out currency) || currency <= 0)
-            {
-                this.TryReadObjectInt(row, "Currency", out currency);
-            }
-
-            if (!this.TryReadObjectInt(row, "maxSellCount", out maxSellCount)
-                && !this.TryReadObjectInt(row, "_maxSellCount", out maxSellCount))
-            {
-                maxSellCount = -1;
-            }
-
-            return entityId > 0;
-        }
-
-        private bool TryGetAllowedPeriodCurrencyStaticIdsManaged(int currencyTypeId, out HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
-        {
-            allowedStaticIds = new HashSet<int>();
-            if (currencyTypeId <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type tableDataType = this.FindManagedTableDataType();
-                if (tableDataType == null)
-                {
-                    return false;
-                }
-
-                PropertyInfo prop = tableDataType.GetProperty("PeriodCurrencySales", BindingFlags.Public | BindingFlags.Static);
-                if (prop == null)
-                {
-                    return false;
-                }
-
-                if (!(prop.GetValue(null, null) is IDictionary byCurrency))
-                {
-                    return false;
-                }
-
-                IDictionary byEntity = null;
-                foreach (DictionaryEntry bucket in byCurrency)
-                {
-                    int keyValue = 0;
-                    try { keyValue = Convert.ToInt32(bucket.Key); } catch { continue; }
-                    if (keyValue == currencyTypeId)
-                    {
-                        byEntity = bucket.Value as IDictionary;
-                        break;
-                    }
-                }
-
-                if (byEntity == null)
-                {
-                    return false;
-                }
-
-                foreach (DictionaryEntry e in byEntity)
-                {
-                    try
-                    {
-                        int entityId = Convert.ToInt32(e.Key);
-                        if (entityId > 0)
-                        {
-                            allowedStaticIds.Add(entityId);
-                            if (maxSellByEntityId != null
-                                && this.TryReadPeriodCurrencySaleRowManaged(e.Value, out _, out _, out int rowMaxSell)
-                                && rowMaxSell >= 0)
-                            {
-                                maxSellByEntityId[entityId] = rowMaxSell;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                return allowedStaticIds.Count > 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private bool TryGetAllowedPeriodCurrencyStaticIdsAura(int currencyTypeId, out HashSet<int> allowedStaticIds, Dictionary<int, int> maxSellByEntityId)
         {

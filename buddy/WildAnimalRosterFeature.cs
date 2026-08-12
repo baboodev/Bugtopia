@@ -16,8 +16,9 @@ namespace HeartopiaMod
     //    channels verbatim — WildAnimalSystem.GetUnlockedAnimals / GetFullness /
     //    GetFeedTroughCapacity for the live numbers, TryGetWildAnimalGroupMeta (TableAnimalGroup)
     //    for groupName + favoriteFood ids, TableData.GetEntity(id).name for the food names.
-    //    Managed reflection first, AuraMono fallback — the same order the feed planner uses, so
-    //    the roster can never disagree with what Feed All would see.
+    //    AuraMono only — the same single channel the feed planner uses, so the roster can never
+    //    disagree with what Feed All would see. (Both used to try a managed-reflection twin first;
+    //    WildAnimalSystem is an XDT* type absent from the BepInEx interop, so it never resolved.)
     //
     //    Two passes ON PURPOSE: pass 1 reads the scalars (groupId/fullness/capacity) with every
     //    Mono group row PINNED, pass 2 resolves names/favorites AFTER the pins are freed. The
@@ -149,8 +150,7 @@ namespace HeartopiaMod
                 }
 
                 string status;
-                if (!this.TryCollectWildAnimalRosterManaged(out status)
-                    && !this.TryCollectWildAnimalRosterAuraMono(out status))
+                if (!this.TryCollectWildAnimalRosterAuraMono(out status))
                 {
                     // Resolver detail to the log; the empty-state row only points at it.
                     this.wildAnimalRosterEntries.Clear();
@@ -214,61 +214,6 @@ namespace HeartopiaMod
 
         // Managed path — the same reflection block the feed planner resolves (EnsureWildAnimalFeed-
         // Reflection), so if Feed All works managed-side, so does this.
-        private bool TryCollectWildAnimalRosterManaged(out string status)
-        {
-            status = string.Empty;
-            try
-            {
-                if (this.wildAnimalFeedManagedReflectionUnavailable
-                    || !this.EnsureWildAnimalFeedReflection(out status))
-                {
-                    return false;
-                }
-
-                object wildAnimalSystem = this.wildAnimalFeedWildAnimalSystemInstanceProperty.GetValue(null, null);
-                if (wildAnimalSystem == null)
-                {
-                    status = "WildAnimalSystem unavailable";
-                    return false;
-                }
-
-                object groupsObj = this.wildAnimalFeedGetUnlockedAnimalsMethod.Invoke(wildAnimalSystem, null);
-                if (groupsObj == null)
-                {
-                    status = "No unlocked animals yet.";
-                    return true;
-                }
-
-                List<object> groups = new List<object>();
-                if (!this.TryEnumerateManagedCollectionItems(groupsObj, groups))
-                {
-                    status = "cannot enumerate unlocked groups";
-                    return false;
-                }
-
-                for (int i = 0; i < groups.Count; i++)
-                {
-                    if (!this.TryGetAnimalGroupId(groups[i], out int groupId) || groupId <= 0)
-                    {
-                        continue;
-                    }
-
-                    object groupEnum = Enum.ToObject(this.wildAnimalFeedAnimalGroupType, groupId);
-                    int fullness = Convert.ToInt32(this.wildAnimalFeedGetFullnessMethod.Invoke(wildAnimalSystem, new[] { groupEnum }));
-                    int capacity = Convert.ToInt32(this.wildAnimalFeedGetFeedTroughCapacityMethod.Invoke(wildAnimalSystem, new[] { groupEnum }));
-                    this.AddWildAnimalRosterEntry(groupId, fullness, capacity);
-                }
-
-                status = this.FormatWildAnimalRosterStatus();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = (ex.InnerException ?? ex).Message;
-                this.WildAnimalRosterLog("managed collect failed: " + status);
-                return false;
-            }
-        }
 
         // AuraMono path — reuses the feed planner's plan context (WildAnimalSystem module object +
         // the resolved GetFullness/GetFeedTroughCapacity methods + the enumerated group rows).

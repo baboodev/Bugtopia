@@ -156,11 +156,6 @@ namespace HeartopiaMod
         private bool TryCollectGoldCoinItems(int storeId, List<ShopBuyAllCandidate> items, out string error)
         {
             error = null;
-            if (this.TryCollectGoldCoinItemsManaged(storeId, items, out error))
-            {
-                return items.Count > 0;
-            }
-
             this.ShopBuyAllLog("managed collect unavailable: " + (error ?? "unknown"));
             if (this.TryCollectGoldCoinItemsAura(storeId, items, out error))
             {
@@ -175,81 +170,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryCollectGoldCoinItemsManaged(int storeId, List<ShopBuyAllCandidate> items, out string error)
-        {
-            error = null;
-            try
-            {
-                Type shopType = this.FindLoadedType("XDTGameSystem.GameplaySystem.Shop.ShopSystem", "ShopSystem");
-                if (shopType == null)
-                {
-                    error = "managed ShopSystem type missing";
-                    return false;
-                }
-
-                object shopObj = null;
-                PropertyInfo instanceProperty = this.GetDataModuleInstanceProperty(shopType);
-                if (instanceProperty != null)
-                {
-                    shopObj = instanceProperty.GetValue(null, null);
-                }
-
-                if (shopObj == null && !this.TryGetManagedModule(shopType, out shopObj))
-                {
-                    error = "managed ShopSystem instance missing";
-                    return false;
-                }
-
-                MethodInfo getStoreGoods = shopType.GetMethod("GetStoreGoodsData", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int) }, null);
-                if (getStoreGoods == null)
-                {
-                    error = "managed GetStoreGoodsData missing";
-                    return false;
-                }
-
-                if (!(getStoreGoods.Invoke(shopObj, new object[] { storeId }) is IEnumerable enumerable))
-                {
-                    error = "managed GetStoreGoodsData returned non-enumerable";
-                    return false;
-                }
-
-                int added = 0;
-                foreach (object entry in enumerable)
-                {
-                    if (entry == null || !this.TryReadManagedShopItemData(entry, out ShopBuyAllCandidate candidate))
-                    {
-                        continue;
-                    }
-
-                    if (candidate.StoreId > 0 && candidate.StoreId != storeId)
-                    {
-                        continue;
-                    }
-
-                    if (!this.IsShopBuyAllPurchasableCoinItem(in candidate) || this.IsShopBuyAllAlreadyOwned(entry, in candidate))
-                    {
-                        continue;
-                    }
-
-                    items.Add(candidate);
-                    added++;
-                }
-
-                if (added <= 0)
-                {
-                    error = "No purchasable Coin items in this store.";
-                    return false;
-                }
-
-                this.ShopBuyAllLog("managed collect count=" + added);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = "managed collect failed: " + ex.Message;
-                return false;
-            }
-        }
 
         private bool TryReadManagedShopItemData(object itemObj, out ShopBuyAllCandidate candidate)
         {

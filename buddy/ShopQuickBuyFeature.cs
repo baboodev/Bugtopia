@@ -25,13 +25,6 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (this.TryOpenSalePanelViaQuickBuyItemManaged(storeId, slotId, itemId, out string managedError))
-            {
-                this.shopQuickBuyStatus = "Opened SalePanel (managed) store=" + storeId + " slot=" + slotId + " item=" + itemId;
-                this.AddMenuNotification(this.shopQuickBuyStatus, new Color(0.45f, 0.88f, 1f));
-                return;
-            }
-
             if (this.TryOpenSalePanelViaQuickBuyItemAura(storeId, slotId, itemId, out string auraError))
             {
                 this.shopQuickBuyStatus = "Opened SalePanel (aura) store=" + storeId + " slot=" + slotId + " item=" + itemId;
@@ -39,7 +32,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.shopQuickBuyStatus = auraError ?? managedError ?? "Open failed.";
+            this.shopQuickBuyStatus = auraError ?? "Open failed.";
             this.AddMenuNotification(this.shopQuickBuyStatus, new Color(1f, 0.55f, 0.45f));
         }
 
@@ -71,170 +64,8 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryOpenSalePanelViaQuickBuyItemManaged(int storeId, int slotId, int itemId, out string error)
-        {
-            error = null;
-            try
-            {
-                Type shopType = this.FindLoadedType(
-                    "XDTGameSystem.GameplaySystem.Shop.ShopSystem",
-                    "ShopSystem");
-                Type quickBuyType = this.FindLoadedType(
-                    "XDTGameSystem.GameplaySystem.Shop.QuickBuyItem",
-                    "QuickBuyItem");
-                Type salePanelType = this.FindLoadedType(
-                    "XDTGame.UI.Panel.SalePanel",
-                    "SalePanel");
-                if (shopType == null || quickBuyType == null || salePanelType == null)
-                {
-                    error = "managed types missing (ShopSystem/QuickBuyItem/SalePanel).";
-                    return false;
-                }
 
-                object shopObj = null;
-                PropertyInfo instanceProperty = this.GetDataModuleInstanceProperty(shopType);
-                if (instanceProperty != null)
-                {
-                    shopObj = instanceProperty.GetValue(null, null);
-                }
 
-                if (shopObj == null && !this.TryGetManagedModule(shopType, out shopObj))
-                {
-                    error = "managed ShopSystem instance missing.";
-                    return false;
-                }
-
-                object quickBuy = Activator.CreateInstance(quickBuyType);
-                this.TrySetManagedInt32Member(quickBuy, "StoreId", storeId);
-                this.TrySetManagedInt32Member(quickBuy, "SlotId", slotId);
-                this.TrySetManagedInt32Member(quickBuy, "ItemId", itemId);
-
-                MethodInfo getShopItemData = shopType.GetMethod(
-                    "GetShopItemData",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    null,
-                    new[] { quickBuyType },
-                    null);
-                if (getShopItemData == null)
-                {
-                    error = "managed GetShopItemData(QuickBuyItem) missing.";
-                    return false;
-                }
-
-                object shopItemData = getShopItemData.Invoke(shopObj, new[] { quickBuy });
-                if (!this.TryValidateManagedShopItemData(shopItemData, storeId, slotId, itemId, out error))
-                {
-                    return false;
-                }
-
-                MethodInfo openMethod = null;
-                foreach (MethodInfo candidate in salePanelType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                {
-                    if (!string.Equals(candidate.Name, "Open", StringComparison.Ordinal) || candidate.IsGenericMethodDefinition)
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters = candidate.GetParameters();
-                    if (parameters.Length == 0 || parameters[0].ParameterType.Name != "ShopItemData")
-                    {
-                        continue;
-                    }
-
-                    openMethod = candidate;
-                    break;
-                }
-
-                if (openMethod == null)
-                {
-                    error = "managed SalePanel.Open missing.";
-                    return false;
-                }
-
-                ParameterInfo[] openParams = openMethod.GetParameters();
-                object[] invokeArgs = new object[openParams.Length];
-                invokeArgs[0] = shopItemData;
-                for (int i = 1; i < openParams.Length; i++)
-                {
-                    invokeArgs[i] = openParams[i].DefaultValue ?? Type.Missing;
-                }
-
-                openMethod.Invoke(null, invokeArgs);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = "managed open failed: " + ex.Message;
-                return false;
-            }
-        }
-
-        private bool TryValidateManagedShopItemData(object shopItemData, int storeId, int slotId, int itemId, out string error)
-        {
-            error = null;
-            if (shopItemData == null)
-            {
-                error = "GetShopItemData returned null (item not in runtime shop).";
-                return false;
-            }
-
-            if (!this.TryReadManagedShopItemData(shopItemData, out ShopBuyAllCandidate candidate))
-            {
-                error = "GetShopItemData returned unreadable ShopItemData.";
-                return false;
-            }
-
-            if (candidate.NetId == 0U && candidate.ItemId <= 0)
-            {
-                error = "Item not in runtime shop (_storeItemData empty for itemId=" + itemId + ").";
-                return false;
-            }
-
-            if (candidate.StoreId > 0 && candidate.StoreId != storeId)
-            {
-                error = "Resolved storeId=" + candidate.StoreId + " expected " + storeId + ".";
-                return false;
-            }
-
-            if (candidate.SlotId > 0 && candidate.SlotId != slotId)
-            {
-                error = "Resolved slotId=" + candidate.SlotId + " expected " + slotId + ".";
-                return false;
-            }
-
-            if (candidate.ItemId > 0 && candidate.ItemId != itemId)
-            {
-                error = "Resolved itemId=" + candidate.ItemId + " expected " + itemId + ".";
-                return false;
-            }
-
-            return true;
-        }
-
-        private bool TrySetManagedInt32Member(object target, string memberName, int value)
-        {
-            if (target == null)
-            {
-                return false;
-            }
-
-            Type type = target.GetType();
-            FieldInfo field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (field != null)
-            {
-                field.SetValue(target, value);
-                return true;
-            }
-
-            PropertyInfo property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (property != null && property.CanWrite)
-            {
-                property.SetValue(target, value, null);
-                return true;
-            }
-
-            return false;
-        }
 
         private unsafe bool TryOpenSalePanelViaQuickBuyItemAura(int storeId, int slotId, int itemId, out string error)
         {
