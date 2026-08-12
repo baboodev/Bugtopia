@@ -265,7 +265,7 @@ See [FEATURES.md § Aura Farm](docs/FEATURES.md), [TECHNICAL.md § Aura Farm](do
 | Sphere / cylinder overlap | `Entities.SphereQueryEntities`, interact cylinders | Aura farm; shape validation required |
 | Interact targets | `InteractSystem` select priority / `SelectPriorityInfo.shape` | Aura farm primary path |
 | Level object owner | `EntityHelper.GetLevelObjectOwner`, shape `ownerEntity.netId` | Link UI shape → entity |
-| Player position | `GameObject.Find("p_player_skeleton(Clone)")` or host helpers | Fragile on prefab rename |
+| Player position | `GameObject.Find("p_player_skeleton(Clone)")` or host helpers | Fragile on prefab rename. **Remote players share that object name** — `Find` returns the first active match and `GetLocalPlayer()` caches it while it stays active, so it can be another player. Fine as a distance anchor; **never feed it into a position WRITE** (`BasePlayerComponent.Transfer`, `SetPositionAndRotation`) — read the position off the same Mono entity you are writing to (`playerComponent.entity.position`) |
 | World props by name | `GameObject.FindObjectsOfType` + name prefix | e.g. radar, meteor rocks |
 | Backpack items | `BackPackSystem.GetAllItem(EStorageType)` | AuraMono or managed — [BACKPACK_AND_ITEMS.md](docs/BACKPACK_AND_ITEMS.md) |
 | Service singleton | `EcsService.TryGet<IService>` | AuraMono inflate, not `Managers._serviceDic` |
