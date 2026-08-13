@@ -10,58 +10,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private string TryResolveItemDumpEntityName(int staticId, object entityObj, MethodInfo localizeMethod)
-        {
-            if (staticId > 0
-                && this.TryGetResolvedFoodNameFromStaticId(staticId, out string resolved)
-                && !this.IsPoorBagItemDisplayName(resolved, staticId))
-            {
-                return resolved;
-            }
 
-            string legacy = this.TryReadTableEntityNameManaged(entityObj, localizeMethod);
-            if (!this.IsPoorBagItemDisplayName(legacy, staticId))
-            {
-                return legacy;
-            }
-
-            return string.Empty;
-        }
-
-        private string TryReadTableEntityNameManaged(object entityObj, MethodInfo localizeMethod)
-        {
-            if (this.TryGetObjectMember(entityObj, "name", out object nameObj) && nameObj != null)
-            {
-                string localized = Convert.ToString(nameObj);
-                if (!string.IsNullOrWhiteSpace(localized))
-                {
-                    return localized;
-                }
-            }
-
-            string rawName = this.TryReadObjectString(entityObj, "_name");
-            if (string.IsNullOrWhiteSpace(rawName))
-            {
-                return string.Empty;
-            }
-
-            if (localizeMethod != null)
-            {
-                try
-                {
-                    object localizedObj = localizeMethod.Invoke(null, new object[] { rawName });
-                    if (localizedObj != null)
-                    {
-                        return Convert.ToString(localizedObj) ?? rawName;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            return rawName;
-        }
 
         private unsafe string TryReadTableEntityNameAura(IntPtr entityObj, IntPtr localizeMethod)
         {
@@ -104,31 +53,6 @@ namespace HeartopiaMod
             ItemDumpEntityNameResolver resolver = new ItemDumpEntityNameResolver();
             try
             {
-                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
-                if (tableDataType != null)
-                {
-                    resolver.LocalizeMethod = tableDataType.GetMethod(
-                        "Localize",
-                        BindingFlags.Public | BindingFlags.Static,
-                        null,
-                        new[] { typeof(string) },
-                        null);
-                    resolver.GetEntityMethod = null;
-                    foreach (MethodInfo method in tableDataType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                    {
-                        if (!string.Equals(method.Name, "GetEntity", StringComparison.Ordinal))
-                        {
-                            continue;
-                        }
-
-                        ParameterInfo[] parameters = method.GetParameters();
-                        if (parameters.Length >= 1 && parameters[0].ParameterType == typeof(int))
-                        {
-                            resolver.GetEntityMethod = method;
-                            break;
-                        }
-                    }
-                }
             }
             catch
             {
@@ -154,9 +78,6 @@ namespace HeartopiaMod
         private sealed class ItemDumpEntityNameResolver
         {
             private readonly Dictionary<int, string> cache = new Dictionary<int, string>();
-
-            public MethodInfo LocalizeMethod;
-            public MethodInfo GetEntityMethod;
             public IntPtr AuraLocalizeMethod;
             public IntPtr AuraGetEntityMethod;
 
@@ -189,27 +110,6 @@ namespace HeartopiaMod
                     && !host.IsPoorBagItemDisplayName(resolved, staticId))
                 {
                     return resolved;
-                }
-
-                if (this.GetEntityMethod != null && this.LocalizeMethod != null)
-                {
-                    try
-                    {
-                        object[] args = this.GetEntityMethod.GetParameters().Length >= 2
-                            ? new object[] { staticId, false }
-                            : new object[] { staticId };
-                        if (this.GetEntityMethod.Invoke(null, args) is object entityObj)
-                        {
-                            string legacy = host.TryResolveItemDumpEntityName(staticId, entityObj, this.LocalizeMethod);
-                            if (!host.IsPoorBagItemDisplayName(legacy, staticId))
-                            {
-                                return legacy;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                    }
                 }
 
                 string auraLegacy = host.TryResolveEntityNameAura(staticId, this.AuraGetEntityMethod, this.AuraLocalizeMethod);

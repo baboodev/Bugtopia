@@ -217,13 +217,6 @@ namespace HeartopiaMod
             worldPosition = Vector3.zero;
             status = "Not a puzzle level object.";
 
-            if (this.TryResolvePuzzleFromLevelObjectManaged(levelObjectNetId, out boardNetId, out staticId, out worldPosition, out status))
-            {
-                this.PuzzleLog("Resolver managed success: levelObject=" + levelObjectNetId + " board=" + boardNetId + " staticId=" + staticId + " pos=" + worldPosition);
-                return true;
-            }
-            this.PuzzleLog("Resolver managed failed: levelObject=" + levelObjectNetId + " status=" + status);
-
             uint ownerNetId = ExtractNetCookOwnerNetId(levelObjectNetId);
             this.PuzzleLog("Resolver owner fallback: levelObject=" + levelObjectNetId + " ownerNetId=" + ownerNetId);
             if (ownerNetId != 0U && this.TryGetJigsawPuzzleComponentData(ownerNetId, out object componentData, out status))
@@ -1093,83 +1086,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryResolvePuzzleFromLevelObjectManaged(ulong levelObjectNetId, out uint boardNetId, out int staticId, out Vector3 worldPosition, out string status)
-        {
-            boardNetId = 0U;
-            staticId = 0;
-            worldPosition = Vector3.zero;
-            status = "Managed LevelObject unavailable.";
-
-            try
-            {
-                Type levelObjectManagerType = this.FindLevelObjectManagerRuntimeType();
-                if (levelObjectManagerType == null)
-                {
-                    status = "LevelObjectManager type unavailable.";
-                    return false;
-                }
-
-                PropertyInfo instanceProperty = levelObjectManagerType.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                object levelObjectManager = instanceProperty != null ? instanceProperty.GetValue(null, null) : null;
-                if (levelObjectManager == null)
-                {
-                    status = "LevelObjectManager.Instance unavailable.";
-                    return false;
-                }
-
-                MethodInfo getLevelObjectMethod = this.GetMethodQuiet(
-                        levelObjectManagerType,
-                        "GetLevelObject",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                        new Type[] { typeof(ulong) })
-                    ?? this.GetMethodQuiet(
-                        levelObjectManagerType,
-                        "GetLevelObject",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                        new Type[] { typeof(ulong), typeof(int) });
-                if (getLevelObjectMethod == null)
-                {
-                    status = "LevelObjectManager.GetLevelObject unavailable.";
-                    return false;
-                }
-
-                object levelObject = getLevelObjectMethod.GetParameters().Length == 1
-                    ? getLevelObjectMethod.Invoke(levelObjectManager, new object[] { levelObjectNetId })
-                    : getLevelObjectMethod.Invoke(levelObjectManager, new object[] { levelObjectNetId, 0 });
-                if (levelObject == null)
-                {
-                    status = "Level object missing.";
-                    return false;
-                }
-
-                this.TryGetNetCookLevelObjectPosition(levelObject, out worldPosition);
-                if (!this.TryReadManagedUInt32Member(levelObject, "ownerNetId", out boardNetId) || boardNetId == 0U)
-                {
-                    status = "Puzzle owner netId missing.";
-                    return false;
-                }
-
-                if (!this.TryGetJigsawPuzzleComponentData(boardNetId, out object componentData, out status))
-                {
-                    status = "Puzzle component lookup failed for owner " + boardNetId + ": " + status;
-                    return false;
-                }
-
-                if (!this.TryReadManagedInt32Member(componentData, "staticId", out staticId) || staticId <= 0)
-                {
-                    status = "Puzzle staticId missing.";
-                    return false;
-                }
-
-                status = "Puzzle context ready.";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "Puzzle managed resolve exception: " + ex.Message;
-                return false;
-            }
-        }
 
         private bool TryGetJigsawPuzzleComponentData(uint boardNetId, out object componentData, out string status)
         {

@@ -171,66 +171,6 @@ namespace HeartopiaMod
         }
 
 
-        private bool TryReadManagedShopItemData(object itemObj, out ShopBuyAllCandidate candidate)
-        {
-            candidate = default(ShopBuyAllCandidate);
-            if (itemObj == null)
-            {
-                return false;
-            }
-
-            this.TryGetManagedUInt32Member(itemObj, "netId", out candidate.NetId);
-            this.TryGetManagedInt32Member(itemObj, "storeId", out candidate.StoreId);
-            this.TryGetManagedInt32Member(itemObj, "slotId", out candidate.SlotId);
-            this.TryGetManagedInt32Member(itemObj, "storeGroupId", out candidate.ItemId);
-            this.TryGetManagedInt32Member(itemObj, "currencyType", out candidate.CurrencyType);
-            this.TryGetManagedInt32Member(itemObj, "price", out candidate.Price);
-            this.TryGetManagedInt32Member(itemObj, "storeMoneyType", out candidate.StoreMoneyType);
-            this.TryGetManagedInt32Member(itemObj, "boughtCount", out candidate.BoughtCount);
-
-            if (this.TryGetObjectMember(itemObj, "isUnlock", out object unlockObj) && unlockObj is bool unlock)
-            {
-                candidate.IsUnlock = unlock;
-            }
-
-            if (this.TryGetObjectMember(itemObj, "isLimitedOne", out object limitedObj) && limitedObj is bool limitedOne)
-            {
-                candidate.IsLimitedOne = limitedOne;
-            }
-
-            if (this.TryGetObjectMember(itemObj, "rewardData", out object rewardObj) && rewardObj != null)
-            {
-                this.TryGetManagedInt32Member(rewardObj, "staticId", out candidate.ItemStaticId);
-                this.TryGetManagedInt32Member(rewardObj, "rewardType", out candidate.RewardType);
-                this.TryGetManagedInt32Member(rewardObj, "rewardId", out candidate.RewardId);
-            }
-
-            if (!this.TryGetManagedInt32Member(itemObj, "_leftCount", out candidate.LeftCount)
-                && this.TryGetObjectMember(itemObj, "leftCount", out object leftCountObj)
-                && leftCountObj != null)
-            {
-                try
-                {
-                    candidate.LeftCount = Convert.ToInt32(leftCountObj);
-                }
-                catch
-                {
-                    candidate.LeftCount = 0;
-                }
-            }
-
-            if (this.TryGetObjectMember(itemObj, "name", out object nameObj) && nameObj != null)
-            {
-                candidate.Name = Convert.ToString(nameObj);
-            }
-
-            if (string.IsNullOrWhiteSpace(candidate.Name))
-            {
-                candidate.Name = ShopBuyAllFormatName(in candidate);
-            }
-
-            return candidate.ItemId > 0 || candidate.NetId != 0U;
-        }
 
         private bool TryCollectGoldCoinItemsAura(int storeId, List<ShopBuyAllCandidate> items, out string error)
         {
@@ -583,46 +523,9 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryGetPlayerItemCountManaged(staticId, out count);
+            return false;
         }
 
-        private bool TryGetPlayerItemCountManaged(int staticId, out int count)
-        {
-            count = 0;
-            try
-            {
-                Type playerType = this.FindLoadedType("XDTGameSystem.PlayerService.PlayerServiceSystem", "PlayerServiceSystem");
-                if (playerType == null)
-                {
-                    return false;
-                }
-
-                object playerObj = null;
-                PropertyInfo instanceProperty = this.GetDataModuleInstanceProperty(playerType);
-                if (instanceProperty != null)
-                {
-                    playerObj = instanceProperty.GetValue(null, null);
-                }
-
-                if (playerObj == null && !this.TryGetManagedModule(playerType, out playerObj))
-                {
-                    return false;
-                }
-
-                MethodInfo getItemCount = playerType.GetMethod("GetItemCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(int) }, null);
-                if (getItemCount == null)
-                {
-                    return false;
-                }
-
-                count = Convert.ToInt32(getItemCount.Invoke(playerObj, new object[] { staticId }));
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private unsafe bool TryGetPlayerItemCountAura(int staticId, out int count)
         {
@@ -761,62 +664,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryInvokeManagedShopBuyItem(in ShopBuyAllCandidate item, int count)
-        {
-            try
-            {
-                Type shopType = this.FindLoadedType("XDTGameSystem.GameplaySystem.Shop.ShopSystem", "ShopSystem");
-                if (shopType == null || item.NetId == 0U)
-                {
-                    return false;
-                }
-
-                object shopObj = null;
-                PropertyInfo instanceProperty = this.GetDataModuleInstanceProperty(shopType);
-                if (instanceProperty != null)
-                {
-                    shopObj = instanceProperty.GetValue(null, null);
-                }
-
-                if (shopObj == null && !this.TryGetManagedModule(shopType, out shopObj))
-                {
-                    return false;
-                }
-
-                MethodInfo buyItem = shopType
-                    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    .FirstOrDefault(m =>
-                    {
-                        if (!string.Equals(m.Name, "BuyItem", StringComparison.Ordinal))
-                        {
-                            return false;
-                        }
-
-                        ParameterInfo[] parameters = m.GetParameters();
-                        return parameters.Length >= 2 && parameters[0].ParameterType == typeof(uint);
-                    });
-                if (buyItem == null)
-                {
-                    return false;
-                }
-
-                object[] args = buyItem.GetParameters().Length switch
-                {
-                    2 => new object[] { item.NetId, count },
-                    3 => new object[] { item.NetId, count, ShopBuyAllCurrencyEnumLeft },
-                    4 => new object[] { item.NetId, count, ShopBuyAllCurrencyEnumLeft, ShopBuyAllRewardNoticeMedium },
-                    _ => new object[] { item.NetId, count, ShopBuyAllCurrencyEnumLeft, ShopBuyAllRewardNoticeMedium, null }
-                };
-                buyItem.Invoke(shopObj, args);
-                this.ShopBuyAllLog("managed BuyItem netId=" + item.NetId + " count=" + count);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.ShopBuyAllLog("managed BuyItem failed: " + ex.Message, always: true);
-                return false;
-            }
-        }
 
         private bool TryEnsureShopBuyAllAuraShelfBuyItem(out string error)
         {
@@ -1075,11 +922,6 @@ namespace HeartopiaMod
             }
 
             count = Mathf.Clamp(count, 1, ShopBuyAllMaxPerCommand);
-            if (item.NetId != 0U && this.TryInvokeManagedShopBuyItem(item, count))
-            {
-                return true;
-            }
-
             if (this.TryInvokeAuraShelfBuyItem(item, count, out error))
             {
                 return true;
