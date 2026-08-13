@@ -10262,7 +10262,6 @@ namespace HeartopiaMod
 
             List<NetCookIngredientRequirement> resolved = new List<NetCookIngredientRequirement>(8);
             if (this.TryGetNetCookRecipeRequirementsAuraMono(recipeId, resolved, out status)
-                || this.TryGetNetCookRecipeRequirementsManaged(recipeId, resolved, out status)
                 || this.TryGetNetCookRecipeRequirementsFromTable(recipeId, resolved, out status))
             {
                 this.netCookRecipeRequirementsCache[recipeId] = resolved;
@@ -10337,52 +10336,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetNetCookRecipeRequirementsManaged(int recipeId, List<NetCookIngredientRequirement> requirements, out string status)
-        {
-            status = "Managed recipe requirements unavailable.";
-            requirements?.Clear();
-            if (requirements == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (!this.EnsureNetCookMethods())
-                {
-                    return false;
-                }
-
-                object cookingSystem = this.netCookCookingSystemInstanceProperty.GetValue(null, null);
-                if (cookingSystem == null)
-                {
-                    return false;
-                }
-
-                object detail = this.netCookInitRecipeDetailMethod.Invoke(cookingSystem, new object[] { recipeId });
-                if (detail == null && this.netCookGetRecipeDetailMethod != null)
-                {
-                    detail = this.netCookGetRecipeDetailMethod.Invoke(cookingSystem, new object[] { recipeId });
-                }
-
-                if (detail == null)
-                {
-                    return false;
-                }
-
-                if (!this.TryAppendNetCookRequirementsFromManagedDetail(detail, requirements))
-                {
-                    return false;
-                }
-
-                status = "Managed recipe requirements ready.";
-                return requirements.Count > 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private bool TryGetNetCookRecipeRequirementsFromTable(int recipeId, List<NetCookIngredientRequirement> requirements, out string status)
         {
@@ -10427,33 +10380,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryAppendNetCookRequirementsFromManagedDetail(object detail, List<NetCookIngredientRequirement> requirements)
-        {
-            if (detail == null || requirements == null)
-            {
-                return false;
-            }
-
-            object slotsObj = this.TryGetManagedMemberValue(detail, "materialSlots");
-            IEnumerable slots = slotsObj as IEnumerable;
-            if (slots != null)
-            {
-                foreach (object slot in slots)
-                {
-                    if (this.TryReadNetCookMaterialSlotRequirementManaged(slot, out NetCookIngredientRequirement requirement))
-                    {
-                        requirements.Add(requirement);
-                    }
-                }
-            }
-
-            if (requirements.Count > 0)
-            {
-                return true;
-            }
-
-            return this.TryAppendNetCookRequirementsFromManagedObject(detail, requirements);
-        }
 
         private unsafe bool TryAppendNetCookRequirementsFromMonoDetail(IntPtr detailObj, List<NetCookIngredientRequirement> requirements)
         {
@@ -10666,12 +10592,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            int countBefore = totalsByStaticId.Count;
             this.AggregateNetCookIngredientCountsAuraMono(storageType, totalsByStaticId);
-            if (totalsByStaticId.Count == countBefore)
-            {
-                this.AggregateNetCookIngredientCountsManaged(storageType, totalsByStaticId);
-            }
         }
 
         private unsafe void AggregateNetCookIngredientCountsAuraMono(int storageType, Dictionary<int, int> totalsByStaticId)
@@ -10771,86 +10692,6 @@ namespace HeartopiaMod
             }
         }
 
-        private void AggregateNetCookIngredientCountsManaged(int storageType, Dictionary<int, int> totalsByStaticId)
-        {
-            try
-            {
-                Type backPackType = this.FindLoadedType("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", "BackPackSystem");
-                if (backPackType == null)
-                {
-                    return;
-                }
-
-                if (!this.TryGetManagedModule(backPackType, out object backPackObj) || backPackObj == null)
-                {
-                    backPackObj = this.TryGetStaticObjectAcrossHierarchy(backPackType, "Instance", "_instance");
-                }
-
-                if (backPackObj == null)
-                {
-                    return;
-                }
-
-                Type storageTypeEnum = this.FindLoadedType("EcsClient.XDT.Scene.Shared.Data.StaticPartial.EStorageType", "EStorageType");
-                object storageArg = storageTypeEnum != null && storageTypeEnum.IsEnum ? Enum.ToObject(storageTypeEnum, storageType) : (object)storageType;
-                MethodInfo getAllItem = backPackObj.GetType().GetMethod("GetAllItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { storageArg.GetType() }, null);
-                if (getAllItem == null)
-                {
-                    getAllItem = backPackObj.GetType().GetMethod("GetAllItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
-                }
-
-                if (getAllItem == null)
-                {
-                    return;
-                }
-
-                object itemListObj = getAllItem.GetParameters().Length == 1
-                    ? getAllItem.Invoke(backPackObj, new[] { storageArg })
-                    : getAllItem.Invoke(backPackObj, null);
-                IEnumerable items = itemListObj as IEnumerable;
-                if (items == null)
-                {
-                    return;
-                }
-
-                foreach (object item in items)
-                {
-                    if (item == null)
-                    {
-                        continue;
-                    }
-
-                    if (this.TryReadManagedBoolMember(item, "isLock", out bool isLocked) && isLocked)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryReadManagedInt32Member(item, "staticId", out int staticId) || staticId <= 0)
-                    {
-                        this.TryReadManagedInt32Member(item, "StaticId", out staticId);
-                    }
-
-                    if (staticId <= 0)
-                    {
-                        continue;
-                    }
-
-                    int count = 1;
-                    this.TryGetManagedBackpackItemCount(item, out count);
-                    if (totalsByStaticId.TryGetValue(staticId, out int existing))
-                    {
-                        totalsByStaticId[staticId] = existing + count;
-                    }
-                    else
-                    {
-                        totalsByStaticId[staticId] = count;
-                    }
-                }
-            }
-            catch
-            {
-            }
-        }
 
         private bool TryMoveNetCookIngredientsFromWarehouse(bool useAll, int cookQuantity, out string status)
         {
