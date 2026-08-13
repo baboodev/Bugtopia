@@ -468,9 +468,6 @@ namespace HeartopiaMod
         private MethodInfo homelandFarmCharacterEquipHandholdMethod = null;
 
         private Type homelandFarmPlayerDataCenterType = null;
-        private Type homelandFarmCropComponentType = null;
-        private Type homelandFarmCropBoxComponentType = null;
-        private Type homelandFarmPlantComponentType = null;
         private Type homelandFarmEntitiesType = null;
         private Type homelandFarmEntityType = null;
         private Type homelandFarmEcsServiceType = null;
@@ -645,53 +642,6 @@ namespace HeartopiaMod
                         }
                     }
                 }
-            }
-
-            return null;
-        }
-
-        internal Type ResolveHomelandFarmCropComponentRuntimeType()
-        {
-            this.TryEnsureHomelandFarmInteropAssembliesLoaded();
-
-            Type resolved = this.ResolveHomelandFarmManagedType(
-                "CropComponent",
-                "XDTLevelAndEntity.Gameplay.Component.Homeland.CropComponent",
-                "XDTLevelAndEntity.Gameplay.Component.Farm.CropComponent",
-                "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Farm.CropComponent");
-            if (resolved != null && this.HomelandFarmLooksLikeCropComponentType(resolved))
-            {
-                return resolved;
-            }
-
-            resolved = this.FindLoadedType(
-                "Il2CppXDTLevelAndEntity.Gameplay.Component.Homeland.CropComponent",
-                "Il2CppXDTLevelAndEntity.Gameplay.Component.Farm.CropComponent",
-                "Il2Cpp.XDTLevelAndEntity.Gameplay.Component.Homeland.CropComponent",
-                "Il2Cpp.XDTLevelAndEntity.Gameplay.Component.Farm.CropComponent");
-            if (resolved != null && this.HomelandFarmLooksLikeCropComponentType(resolved))
-            {
-                return resolved;
-            }
-
-            resolved = this.FindLoadedTypeBySuffix(
-                "Gameplay.Component.Homeland.CropComponent",
-                "Gameplay.Component.Farm.CropComponent",
-                ".Homeland.CropComponent",
-                ".CropComponent");
-            if (resolved != null && this.HomelandFarmLooksLikeCropComponentType(resolved))
-            {
-                return resolved;
-            }
-
-            resolved = this.FindHomelandFarmRuntimeType(
-                "CropComponent",
-                "XDTLevelAndEntity.Gameplay.Component.Homeland",
-                "XDTLevelAndEntity.Gameplay.Component.Farm",
-                "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Farm");
-            if (resolved != null && this.HomelandFarmLooksLikeCropComponentType(resolved))
-            {
-                return resolved;
             }
 
             return null;
@@ -942,15 +892,6 @@ namespace HeartopiaMod
             }
 
             return IntPtr.Zero;
-        }
-
-        private Type ResolveHomelandFarmCropBoxComponentRuntimeType()
-        {
-            return this.ResolveHomelandFarmManagedType(
-                "CropBoxComponent",
-                "XDTLevelAndEntity.Gameplay.Component.Homeland.CropBoxComponent",
-                "XDTLevelAndEntity.Gameplay.Component.Farm.CropBoxComponent",
-                "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Farm.CropBoxComponent");
         }
 
         private void OnAuraFarmRuntimeResolverReady()
@@ -7158,32 +7099,6 @@ namespace HeartopiaMod
                 this.homelandFarmEntityType = this.FindEntityRuntimeType();
             }
 
-            if (this.homelandFarmCropComponentType == null)
-            {
-                this.homelandFarmCropComponentType = this.ResolveHomelandFarmCropComponentRuntimeType();
-            }
-
-            if (this.homelandFarmCropBoxComponentType == null)
-            {
-                this.homelandFarmCropBoxComponentType = this.ResolveHomelandFarmCropBoxComponentRuntimeType()
-                    ?? this.FindTypeByName(
-                        "XDTLevelAndEntity.Gameplay.Component.Homeland.CropBoxComponent",
-                        "XDTLevelAndEntity.Gameplay.Component.Homeland",
-                        "CropBoxComponent")
-                    ?? this.FindTypeByName(
-                        "XDTLevelAndEntity.Gameplay.Component.Farm.CropBoxComponent",
-                        "XDTLevelAndEntity.Gameplay.Component.Farm",
-                        "CropBoxComponent");
-            }
-
-            if (this.homelandFarmPlantComponentType == null)
-            {
-                this.homelandFarmPlantComponentType = this.ResolveHomelandFarmManagedType(
-                    "PlantComponent",
-                    "XDTLevelAndEntity.Gameplay.Component.Homeland.PlantComponent",
-                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Homeland.PlantComponent");
-            }
-
             if (this.homelandFarmEcsServiceType == null)
             {
                 this.homelandFarmEcsServiceType = this.FindLoadedType(
@@ -7562,9 +7477,9 @@ namespace HeartopiaMod
             if (!spatialScan || output.Count == 0)
             {
                 before = output.Count;
-                this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropBoxComponentType, output, "CropBoxComponent");
-                this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmPlantComponentType, output, "PlantComponent");
-                this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropComponentType, output, "CropComponent");
+                this.TryHomelandFarmCollectComponentsNetIds(output, "CropBoxComponent");
+                this.TryHomelandFarmCollectComponentsNetIds(output, "PlantComponent");
+                this.TryHomelandFarmCollectComponentsNetIds(output, "CropComponent");
                 if (output.Count > before)
                 {
                     sources.Add("Entities.GetComponents(" + (output.Count - before) + ")");
@@ -7851,8 +7766,8 @@ namespace HeartopiaMod
 
             this.EnsureHomelandFarmScannerTypes();
             int before = output.Count;
-            this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropComponentType, output, "CropComponent");
-            this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropBoxComponentType, output, "CropBoxComponent");
+            this.TryHomelandFarmCollectComponentsNetIds(output, "CropComponent");
+            this.TryHomelandFarmCollectComponentsNetIds(output, "CropBoxComponent");
             if (output.Count > before)
             {
                 source = "Entities.GetComponents(crop)";
@@ -7918,14 +7833,14 @@ namespace HeartopiaMod
             HashSet<uint> componentNetIds = new HashSet<uint>();
             if (this.homelandFarmEntitiesGetComponentsMethod != null)
             {
-                this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropBoxComponentType, cropBoxComponentNetIds, "CropBoxComponent(radius)");
+                this.TryHomelandFarmCollectComponentsNetIds(cropBoxComponentNetIds, "CropBoxComponent(radius)");
                 foreach (uint cropBoxNetId in cropBoxComponentNetIds)
                 {
                     componentNetIds.Add(cropBoxNetId);
                 }
 
-                this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropComponentType, componentNetIds, "CropComponent(radius)");
-                this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmPlantComponentType, componentNetIds, "PlantComponent(radius)");
+                this.TryHomelandFarmCollectComponentsNetIds(componentNetIds, "CropComponent(radius)");
+                this.TryHomelandFarmCollectComponentsNetIds(componentNetIds, "PlantComponent(radius)");
             }
             else if (allowUnsafeAuraMonoGetComponents && this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
             {
@@ -7945,10 +7860,7 @@ namespace HeartopiaMod
 
             if (componentNetIds.Count == 0)
             {
-                this.HomelandFarmLog("ComponentRadius: GetComponents returned 0 farm components"
-                    + " (cropBoxType=" + (this.homelandFarmCropBoxComponentType != null)
-                    + " cropType=" + (this.homelandFarmCropComponentType != null)
-                    + " plantType=" + (this.homelandFarmPlantComponentType != null) + ").");
+                this.HomelandFarmLog("ComponentRadius: GetComponents returned 0 farm components.");
                 return false;
             }
 
@@ -7985,68 +7897,11 @@ namespace HeartopiaMod
             return added > 0;
         }
 
-        private bool TryHomelandFarmCollectComponentsNetIds(Type componentType, HashSet<uint> output, string label)
+        private bool TryHomelandFarmCollectComponentsNetIds(HashSet<uint> output, string label)
         {
             if (output == null)
             {
                 return false;
-            }
-
-            if (componentType != null
-                && this.TryEnsureHomelandFarmEntitiesGetComponentsReady(out _)
-                && this.homelandFarmEntitiesGetComponentsMethod != null)
-            {
-                try
-                {
-                    Type listType = typeof(List<>).MakeGenericType(componentType);
-                    object componentList = Activator.CreateInstance(listType);
-                    object[] args = new object[] { componentList };
-                    this.homelandFarmEntitiesGetComponentsMethod.MakeGenericMethod(componentType).Invoke(null, args);
-                    object results = args[0] ?? componentList;
-                    if (!(results is IEnumerable enumerable))
-                    {
-                        return false;
-                    }
-
-                    int added = 0;
-                    foreach (object component in enumerable)
-                    {
-                        if (component == null)
-                        {
-                            continue;
-                        }
-
-                        if (!this.TryHomelandFarmTryReadComponentNetId(component, out uint netId) || netId == 0U)
-                        {
-                            continue;
-                        }
-
-                        if (output.Add(netId))
-                        {
-                            added++;
-                            if (componentType == this.homelandFarmCropBoxComponentType)
-                            {
-                                this.homelandFarmLastScanCropBoxNetIds.Add(netId);
-                            }
-
-                            this.TryHomelandFarmRegisterDiscoveredFarmTarget(
-                                netId,
-                                componentType == this.homelandFarmCropBoxComponentType);
-                        }
-                    }
-
-                    if (added > 0)
-                    {
-                        this.HomelandFarmLog(label + " scan added " + added + " netId(s).");
-                    }
-
-                    return added > 0;
-                }
-                catch (Exception ex)
-                {
-                    this.HomelandFarmLog(label + " scan failed: " + ex.Message);
-                    return false;
-                }
             }
 
             if (!HomelandFarmAllowUnsafeAuraMonoGetComponents)
@@ -8061,15 +7916,14 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryResolveHomelandFarmAuraMonoComponentClassForManagedType(componentType, label, out IntPtr componentClass)
+            if (!this.TryResolveHomelandFarmAuraMonoComponentClassForManagedType(label, out IntPtr componentClass)
                 || componentClass == IntPtr.Zero)
             {
                 this.HomelandFarmVerboseLog("ComponentRadius[AuraMono]: " + label + " component class unresolved, skipping.");
                 return false;
             }
 
-            bool isCropBox = componentType == this.homelandFarmCropBoxComponentType
-                || (!string.IsNullOrEmpty(label) && label.IndexOf("CropBox", StringComparison.OrdinalIgnoreCase) >= 0);
+            bool isCropBox = !string.IsNullOrEmpty(label) && label.IndexOf("CropBox", StringComparison.OrdinalIgnoreCase) >= 0;
             this.HomelandFarmVerboseLog("ComponentRadius[AuraMono]: GetComponents<" + label + "> START class=0x" + componentClass.ToInt64().ToString("X") + " isCropBox=" + isCropBox);
             int beforeCount = output.Count;
             bool ok = this.TryHomelandFarmCollectComponentsNetIdsViaAuraMono(componentClass, output, label, isCropBox);
@@ -8142,7 +7996,12 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryResolveHomelandFarmAuraMonoComponentClassForManagedType(Type componentType, string label, out IntPtr componentClass)
+        // The label is the ONLY selector. This used to compare a managed `Type` against cached
+        // CropBox/Plant/Crop component types first, but those types live in embedded Mono and never
+        // resolved through managed reflection — so both operands were always null, `null == null`
+        // picked CropBox on every call and the label branch below was dead. Do not reintroduce a
+        // managed-Type comparison here: it silently routes every scan to the first arm.
+        private bool TryResolveHomelandFarmAuraMonoComponentClassForManagedType(string label, out IntPtr componentClass)
         {
             componentClass = IntPtr.Zero;
             if (!this.TryResolveAuraMonoFarmComponentClasses(out IntPtr plantClass, out IntPtr cropBoxClass, out IntPtr cropClass))
@@ -8150,19 +8009,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (componentType == this.homelandFarmCropBoxComponentType)
-            {
-                componentClass = cropBoxClass;
-            }
-            else if (componentType == this.homelandFarmPlantComponentType)
-            {
-                componentClass = plantClass;
-            }
-            else if (componentType == this.homelandFarmCropComponentType)
-            {
-                componentClass = cropClass;
-            }
-            else if (!string.IsNullOrEmpty(label))
+            if (!string.IsNullOrEmpty(label))
             {
                 if (label.IndexOf("CropBox", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
@@ -9069,63 +8916,6 @@ namespace HeartopiaMod
             return added > 0;
         }
 
-        private Type ResolveHomelandFarmScannerComponentType(string shortName, params string[] fullNames)
-        {
-            Type resolved = null;
-            switch (shortName)
-            {
-                case "CropBoxComponent":
-                    resolved = this.homelandFarmCropBoxComponentType ?? this.ResolveHomelandFarmCropBoxComponentRuntimeType();
-                    break;
-                case "CropComponent":
-                    resolved = this.homelandFarmCropComponentType ?? this.ResolveHomelandFarmCropComponentRuntimeType();
-                    break;
-                case "PlantComponent":
-                    resolved = this.homelandFarmPlantComponentType;
-                    break;
-            }
-
-            if (resolved != null)
-            {
-                return resolved;
-            }
-
-            if (fullNames != null)
-            {
-                for (int i = 0; i < fullNames.Length; i++)
-                {
-                    string fullName = fullNames[i];
-                    if (string.IsNullOrEmpty(fullName))
-                    {
-                        continue;
-                    }
-
-                    resolved = this.FindLoadedType(fullName, shortName);
-                    if (resolved != null)
-                    {
-                        return resolved;
-                    }
-
-                    int lastDot = fullName.LastIndexOf('.');
-                    string namespaceName = lastDot > 0 ? fullName.Substring(0, lastDot) : string.Empty;
-                    resolved = this.FindTypeByName(fullName, namespaceName, shortName);
-                    if (resolved != null)
-                    {
-                        return resolved;
-                    }
-                }
-            }
-
-            resolved = this.FindLoadedType(shortName);
-            if (resolved != null)
-            {
-                return resolved;
-            }
-
-            return this.FindTypeBySignature(shortName, "XDTLevelAndEntity", false, false)
-                ?? this.FindTypeBySignature(shortName, null, false, false);
-        }
-
         private bool TryEnsureHomelandFarmEntitiesGetComponentsReady(out string status)
         {
             status = string.Empty;
@@ -9183,32 +8973,6 @@ namespace HeartopiaMod
                     .FirstOrDefault(m => m.Name == "GetComponents" && m.IsGenericMethodDefinition && m.GetParameters().Length == 1);
             }
 
-            if (this.homelandFarmCropBoxComponentType == null)
-            {
-                this.homelandFarmCropBoxComponentType = this.ResolveHomelandFarmScannerComponentType(
-                    "CropBoxComponent",
-                    "XDTLevelAndEntity.Gameplay.Component.Homeland.CropBoxComponent",
-                    "XDTLevelAndEntity.Gameplay.Component.Farm.CropBoxComponent",
-                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Farm.CropBoxComponent");
-            }
-
-            if (this.homelandFarmCropComponentType == null)
-            {
-                this.homelandFarmCropComponentType = this.ResolveHomelandFarmScannerComponentType(
-                    "CropComponent",
-                    "XDTLevelAndEntity.Gameplay.Component.Homeland.CropComponent",
-                    "XDTLevelAndEntity.Gameplay.Component.Farm.CropComponent",
-                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Farm.CropComponent");
-            }
-
-            if (this.homelandFarmPlantComponentType == null)
-            {
-                this.homelandFarmPlantComponentType = this.ResolveHomelandFarmScannerComponentType(
-                    "PlantComponent",
-                    "XDTLevelAndEntity.Gameplay.Component.Plant.PlantComponent",
-                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Plant.PlantComponent");
-            }
-
             if (this.homelandFarmEntitiesGetComponentsMethod == null || this.homelandFarmEntitiesType == null)
             {
                 status = "Entities.GetComponents unavailable (entitiesType="
@@ -9221,14 +8985,6 @@ namespace HeartopiaMod
                     this.homelandFarmEntitiesGetComponentsUnavailableStatus = status;
                 }
 
-                return false;
-            }
-
-            if (this.homelandFarmCropBoxComponentType == null
-                && this.homelandFarmCropComponentType == null
-                && this.homelandFarmPlantComponentType == null)
-            {
-                status = "Farm component runtime types unavailable.";
                 return false;
             }
 
@@ -11892,7 +11648,7 @@ namespace HeartopiaMod
             int tier2 = cropBoxNetIds.Count - tier1;
 
             HashSet<uint> componentBoxes = new HashSet<uint>();
-            bool componentScanOk = this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropBoxComponentType, componentBoxes, "CropBoxComponent(capture)");
+            bool componentScanOk = this.TryHomelandFarmCollectComponentsNetIds(componentBoxes, "CropBoxComponent(capture)");
             float captureRadiusSq = (radius + 2f) * (radius + 2f);
             int excludedOutsideRadius = 0;
             int beforeTier3 = cropBoxNetIds.Count;
@@ -17227,7 +16983,7 @@ namespace HeartopiaMod
 
             if (cropBoxNetIds.Count == 0)
             {
-                this.TryHomelandFarmCollectComponentsNetIds(this.homelandFarmCropBoxComponentType, cropBoxNetIds, "CropBoxComponent(empty)");
+                this.TryHomelandFarmCollectComponentsNetIds(cropBoxNetIds, "CropBoxComponent(empty)");
             }
 
             this.HomelandFarmLog("Sow slot scan: cropBoxes=" + cropBoxNetIds.Count + " marking occupied...");
