@@ -31,122 +31,13 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private bool TryGetManagedSelfPlayerObject(out object playerObj, out string source)
-        {
-            playerObj = null;
-            source = "none";
 
-            try
-            {
-                Type entityUtilType = this.FindLoadedType("XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityUtil", "EntityUtil");
-                if (entityUtilType != null)
-                {
-                    MethodInfo getSelfPlayerMethod = entityUtilType.GetMethod("GetSelfPlayer", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    if (getSelfPlayerMethod != null)
-                    {
-                        playerObj = getSelfPlayerMethod.Invoke(null, null);
-                        if (playerObj != null)
-                        {
-                            source = "EntityUtil.GetSelfPlayer()";
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                Type characterType = this.FindLoadedType("XDTLevelAndEntity.Game.GameMode.Character", "Character");
-                if (characterType != null)
-                {
-                    PropertyInfo characterProperty = characterType.GetProperty("character", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    object characterObj = characterProperty != null ? characterProperty.GetValue(null, null) : null;
-                    if (characterObj != null)
-                    {
-                        if (this.TryGetObjectMember(characterObj, "player", out playerObj) && playerObj != null)
-                        {
-                            source = "Character.character.player";
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                if (this.TryGetManagedViewModuleSelfPlayerObject(out playerObj, out source))
-                {
-                    return true;
-                }
-            }
-            catch { }
-
-            return false;
-        }
-
-        private bool TryGetManagedInteractPlayerObject(object interactSystemObj, out object playerObj, out string source)
-        {
-            playerObj = null;
-            source = "none";
-            if (interactSystemObj == null)
-            {
-                return false;
-            }
-
-            foreach (string memberName in new string[] { "player", "_interactor", "interactor" })
-            {
-                if (this.TryGetObjectMember(interactSystemObj, memberName, out playerObj) && playerObj != null)
-                {
-                    source = interactSystemObj.GetType().Name + "." + memberName;
-                    return true;
-                }
-            }
-
-            return false;
-        }
 
         public GameObject GetPlayerObject()
         {
             return GetPlayer();
         }
 
-        private bool TryGetManagedViewModuleSelfPlayerObject(out object playerObj, out string source)
-        {
-            playerObj = null;
-            source = "none";
-
-            try
-            {
-                Type entityManagerType = this.FindLoadedType(
-                    "XDTLevelAndEntity.BaseSystem.EntityManager",
-                    "ScriptsRefactory.LevelAndEntity.BaseSystem.EntityManager",
-                    "Il2CppXDTLevelAndEntity.BaseSystem.EntityManager",
-                    "EntityManager");
-                if (entityManagerType == null)
-                {
-                    return false;
-                }
-
-                PropertyInfo instanceProperty = entityManagerType.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                object entityManager = instanceProperty != null ? instanceProperty.GetValue(null, null) : null;
-                if (entityManager == null)
-                {
-                    return false;
-                }
-
-                if (this.TryGetObjectMember(entityManager, "selfPlayer", out object selfPlayerObj) && selfPlayerObj != null)
-                {
-                    playerObj = selfPlayerObj;
-                    source = "EntityManager.Instance.selfPlayer";
-                    return true;
-                }
-            }
-            catch { }
-
-            return false;
-        }
 
         private bool IsLocalPlayerSkeletonGameObject(GameObject obj)
         {

@@ -1801,64 +1801,6 @@ namespace HeartopiaMod
 
 
 
-        private bool TryGetManagedInteractSystemObject(out object interactSystemObj, out string source)
-        {
-            interactSystemObj = null;
-            source = "none";
-
-            Type interactType = this.FindLoadedType("XDTLevelAndEntity.BaseSystem.InteractSystem.InteractSystem", "InteractSystem");
-            if (interactType == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                PropertyInfo instanceProperty = interactType.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (instanceProperty != null)
-                {
-                    interactSystemObj = instanceProperty.GetValue(null, null);
-                    if (interactSystemObj != null)
-                    {
-                        source = "InteractSystem.Instance";
-                        return true;
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                FieldInfo instanceField = interactType.GetField("_instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
-                    ?? interactType.GetField("instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (instanceField != null)
-                {
-                    interactSystemObj = instanceField.GetValue(null);
-                    if (interactSystemObj != null)
-                    {
-                        source = "InteractSystem._instance";
-                        return true;
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                Type playerInteractionType = this.FindLoadedType(
-                    "XDTLevelAndEntity.Gameplay.Interaction.PlayerInteraction",
-                    "PlayerInteraction");
-                if (playerInteractionType != null)
-                {
-                    source = "PlayerInteraction[static]";
-                    interactSystemObj = playerInteractionType;
-                    return true;
-                }
-            }
-            catch { }
-
-            return false;
-        }
 
 
 
