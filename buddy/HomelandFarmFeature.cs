@@ -468,11 +468,6 @@ namespace HeartopiaMod
         private Type homelandFarmCropProtocolManagerType = null;
         private Type homelandFarmFriendServiceType = null;
         private Type homelandFarmCropPlantPointType = null;
-        private Type homelandFarmToolSystemType = null;
-        private Type homelandFarmToolDataModuleType = null;
-        private PropertyInfo homelandFarmToolDataModuleInstanceProperty = null;
-        private MethodInfo homelandFarmToolSystemSetHandholdMethod = null;
-        private MethodInfo homelandFarmToolSystemGetToolMethod = null;
         private bool homelandFarmToolEquipTypesResolved = false;
 
         private MethodInfo homelandFarmCropWaterPlantMethod = null;
@@ -5786,51 +5781,11 @@ namespace HeartopiaMod
 
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
 
-            this.homelandFarmToolSystemType = this.ResolveHomelandFarmManagedType(
-                "ToolSystem",
-                "XDTGameSystem.GameplaySystem.Tool.ToolSystem",
-                "Il2CppXDTGameSystem.GameplaySystem.Tool.ToolSystem");
-
-            if (this.homelandFarmToolSystemType != null)
-            {
-                this.homelandFarmToolSystemSetHandholdMethod = this.homelandFarmToolSystemType.GetMethod(
-                    "SetHandhold",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    new[] { typeof(int) },
-                    null);
-                this.homelandFarmToolSystemGetToolMethod = this.homelandFarmToolSystemType.GetMethod(
-                    "GetTool",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    new[] { typeof(int) },
-                    null);
-
-                Type dataModuleGenericType = null;
-                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    try
-                    {
-                        dataModuleGenericType = assembly.GetType("XDTGame.Core.DataModule`1", false)
-                            ?? assembly.GetType("XDFramework.Core.DataModule`1", false);
-                        if (dataModuleGenericType != null)
-                        {
-                            break;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                if (dataModuleGenericType != null)
-                {
-                    this.homelandFarmToolDataModuleType = dataModuleGenericType.MakeGenericType(this.homelandFarmToolSystemType);
-                    this.homelandFarmToolDataModuleInstanceProperty = this.homelandFarmToolDataModuleType.GetProperty(
-                        "Instance",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                }
-            }
+            // The managed ToolSystem resolution that stood here (SetHandhold / GetTool MethodInfos
+            // plus the DataModule<ToolSystem>.Instance property) went through
+            // ResolveHomelandFarmManagedType, which only searches the managed AppDomain.
+            // XDTGameSystem is embedded-Mono only, so the type was always null and every MethodInfo
+            // below it stayed null with it. The aura pair resolved next is the only real path.
             this.TryHomelandFarmEnsureToolEquipAuraMethods();
 
             bool available = this.HomelandFarmHasToolEquipPathAvailable();
@@ -5857,78 +5812,6 @@ namespace HeartopiaMod
             return this.homelandFarmAuraToolProtocolSetHandHoldMethod != IntPtr.Zero
                 || this.homelandFarmAuraToolSystemSetHandholdMethod != IntPtr.Zero;
         }
-
-        private bool TryHomelandFarmTryGetToolSystemInstance(out object toolSystemInstance)
-        {
-            toolSystemInstance = null;
-            if (!this.TryHomelandFarmEnsureToolEquipTypes())
-            {
-                return false;
-            }
-
-            try
-            {
-                if (this.homelandFarmToolDataModuleInstanceProperty != null)
-                {
-                    toolSystemInstance = this.homelandFarmToolDataModuleInstanceProperty.GetValue(null, null);
-                    if (toolSystemInstance != null)
-                    {
-                        return true;
-                    }
-                }
-
-                PropertyInfo directInstance = this.homelandFarmToolSystemType?.GetProperty(
-                    "Instance",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy);
-                if (directInstance != null)
-                {
-                    toolSystemInstance = directInstance.GetValue(null, null);
-                }
-            }
-            catch
-            {
-            }
-
-            return toolSystemInstance != null;
-        }
-
-        private bool TryHomelandFarmTryResolveToolSkinId(int toolId, out int skinId)
-        {
-            skinId = 0;
-            if (toolId <= 0)
-            {
-                return false;
-            }
-
-            if (!this.TryHomelandFarmTryGetToolSystemInstance(out object toolSystemInstance)
-                || toolSystemInstance == null
-                || this.homelandFarmToolSystemGetToolMethod == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                object tool = this.homelandFarmToolSystemGetToolMethod.Invoke(toolSystemInstance, new object[] { toolId });
-                if (tool == null)
-                {
-                    return false;
-                }
-
-                if (this.TryGetManagedInt32Member(tool, "skinId", out skinId) && skinId > 0)
-                {
-                    return true;
-                }
-
-                return this.TryGetManagedInt32Member(tool, "SkinId", out skinId) && skinId > 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-
 
         private unsafe bool TryHomelandFarmInvokeAuraToolSystemSetHandhold(int toolId, out string status)
         {
@@ -6061,29 +5944,14 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.TryHomelandFarmTryResolveToolSkinId(toolId, out int skinId);
+            // Skin id came from a managed ToolSystem.GetTool lookup that never resolved, so it was
+            // always 0 by the time it reached the aura protocol call below.
+            const int skinId = 0;
 
             if (this.TryHomelandFarmInvokeAuraToolSystemSetHandhold(toolId, out string auraToolSystemStatus))
             {
                 status = auraToolSystemStatus;
                 return true;
-            }
-
-            if (this.TryHomelandFarmTryGetToolSystemInstance(out object toolSystemInstance)
-                && toolSystemInstance != null
-                && this.homelandFarmToolSystemSetHandholdMethod != null)
-            {
-                try
-                {
-                    this.homelandFarmToolSystemSetHandholdMethod.Invoke(toolSystemInstance, new object[] { toolId });
-                    status = "ToolSystem.SetHandhold ok toolId=" + toolId + ".";
-                    this.HomelandFarmLog(status);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    status = "ToolSystem.SetHandhold exception: " + (ex.InnerException ?? ex).Message;
-                }
             }
 
             if (this.TryHomelandFarmInvokeAuraToolProtocolSetHandHold(toolId, skinId, out string auraProtocolStatus))
@@ -6107,23 +5975,6 @@ namespace HeartopiaMod
             {
                 status = auraToolSystemStatus;
                 return true;
-            }
-
-            if (this.TryHomelandFarmTryGetToolSystemInstance(out object toolSystemInstance)
-                && toolSystemInstance != null
-                && this.homelandFarmToolSystemSetHandholdMethod != null)
-            {
-                try
-                {
-                    this.homelandFarmToolSystemSetHandholdMethod.Invoke(toolSystemInstance, new object[] { 0 });
-                    status = "ToolSystem.SetHandhold(0) ok.";
-                    this.HomelandFarmLog(status);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    status = "ToolSystem.SetHandhold(0) exception: " + (ex.InnerException ?? ex).Message;
-                }
             }
 
             if (this.TryHomelandFarmInvokeAuraToolProtocolCancelHandHold(out string auraProtocolStatus))
