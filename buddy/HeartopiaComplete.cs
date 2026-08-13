@@ -399,10 +399,6 @@ namespace HeartopiaMod
         private readonly List<DirectBackpackRuntimeItem> directBackpackRuntimeItems = new List<DirectBackpackRuntimeItem>(256);
         private float directBackpackRuntimeSnapshotAt = -999f;
         private string directBackpackRuntimeSnapshotSource = "";
-        private object cachedDirectBagModuleObj = null;
-        private Type cachedDirectBackpackFunctionType = null;
-        private Type cachedDirectBagStorageType = null;
-        private MethodInfo cachedDirectExecuteBackpackItemFuncMethod = null;
         private readonly Dictionary<string, float> loadedTypeMissCacheUntil = new Dictionary<string, float>(StringComparer.Ordinal);
         private readonly Dictionary<string, MethodInfo> methodLookupCache = new Dictionary<string, MethodInfo>(StringComparer.Ordinal);
         private readonly Dictionary<string, float> methodMissCacheUntil = new Dictionary<string, float>(StringComparer.Ordinal);

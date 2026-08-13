@@ -83,52 +83,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetDirectBagExecutor(out object bagObj, out Type functionType, out Type storageType, out MethodInfo execute)
-        {
-            bagObj = this.cachedDirectBagModuleObj;
-            functionType = this.cachedDirectBackpackFunctionType;
-            storageType = this.cachedDirectBagStorageType;
-            execute = this.cachedDirectExecuteBackpackItemFuncMethod;
-            if (bagObj != null && functionType != null && storageType != null && execute != null)
-            {
-                return true;
-            }
-
-            Type bagType = this.FindLoadedType("XDTLevelAndEntity.Game.Module.Bag.BagModule", "BagModule");
-            if (bagType == null)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] BagModule type unavailable.");
-                return false;
-            }
-
-            if (!this.TryGetManagedModule(bagType, out bagObj) || bagObj == null)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] BagModule instance unavailable.");
-                return false;
-            }
-
-            functionType = this.FindLoadedType("XDTGameSystem.GameplaySystem.BackPack.BackpackItemFunction", "BackpackItemFunction");
-            storageType = this.FindLoadedType("EcsClient.XDT.Scene.Shared.Data.StaticPartial.EStorageType", "EStorageType");
-            if (functionType == null || storageType == null)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] enum type unavailable. functionType=" + (functionType != null) + " storageType=" + (storageType != null));
-                return false;
-            }
-
-            execute = bagObj.GetType().GetMethod("ExecuteBackpackItemFunc", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { functionType, typeof(uint), storageType }, null);
-            if (execute == null)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] ExecuteBackpackItemFunc method unavailable.");
-                return false;
-            }
-
-            this.cachedDirectBagModuleObj = bagObj;
-            this.cachedDirectBackpackFunctionType = functionType;
-            this.cachedDirectBagStorageType = storageType;
-            this.cachedDirectExecuteBackpackItemFuncMethod = execute;
-            return true;
-        }
-
         private bool IsBagOpen()
         {
             GameObject bag = GameObject.Find(BAG_PANEL_PATH);

@@ -946,52 +946,6 @@ namespace HeartopiaMod
             }
         }
 
-        private int TryMarkManagerFindEntitiesSelectedManaged(object managerObj, object bugDictObj)
-        {
-            if (managerObj == null || bugDictObj == null)
-            {
-                return 0;
-            }
-
-            try
-            {
-                if (!(this.TryGetObjectMember(managerObj, "_findEntities", out object findEntities) || this.TryGetObjectMember(managerObj, "findEntities", out findEntities)) || findEntities == null)
-                {
-                    return 0;
-                }
-
-                Type listType = findEntities.GetType();
-                MethodInfo getCountMethod = listType.GetMethod("get_Count", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                MethodInfo getItemMethod = listType.GetMethod("get_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                MethodInfo setItemMethod = bugDictObj.GetType().GetMethod("set_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (getCountMethod == null || getItemMethod == null || setItemMethod == null)
-                {
-                    return 0;
-                }
-
-                int count = Convert.ToInt32(getCountMethod.Invoke(findEntities, null));
-                int marked = 0;
-                for (int i = 0; i < count && i < 64; i++)
-                {
-                    object item = getItemMethod.Invoke(findEntities, new object[] { i });
-                    if (item == null)
-                    {
-                        continue;
-                    }
-
-                    setItemMethod.Invoke(bugDictObj, new object[] { item, true });
-                    marked++;
-                }
-
-                return marked;
-            }
-            catch (Exception ex)
-            {
-                this.InsectFarmNetLog("TryMarkManagerFindEntitiesSelectedManaged error: " + ex.Message);
-                return 0;
-            }
-        }
-
         private bool TryFindPlayerEntityObject(GameObject player, out Il2CppObject entityObj, out string source)
         {
             entityObj = null;

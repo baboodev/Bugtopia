@@ -3147,15 +3147,6 @@ namespace HeartopiaMod
 
 
 
-        private bool TryGetManagedBackpackItemCount(object item, out int count)
-        {
-            return this.TryGetManagedInt32Member(item, "count", out count)
-                || this.TryGetManagedInt32Member(item, "_count", out count)
-                || this.TryGetManagedInt32Member(item, "Count", out count)
-                || this.TryGetManagedInt32Member(item, "counterNum", out count)
-                || this.TryGetManagedInt32Member(item, "CounterNum", out count);
-        }
-
         private string GetManagedBackpackItemDescriptor(object item)
         {
             string[] members = { "icon", "_icon", "Icon", "iconName", "itemIcon", "name", "_name", "itemName", "templateId", "id", "staticId", "description" };

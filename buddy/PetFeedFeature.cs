@@ -1033,49 +1033,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryReadIntListFromMember(object obj, string memberName, out List<int> values)
-        {
-            values = null;
-            if (!this.TryGetObjectMember(obj, memberName, out object raw) || raw == null)
-            {
-                return false;
-            }
-
-            return this.TryReadIntListObject(raw, out values);
-        }
-
-        private bool TryReadIntListObject(object raw, out List<int> values)
-        {
-            values = new List<int>();
-            if (raw == null || raw is string || !(raw is IEnumerable enumerable))
-            {
-                values = null;
-                return false;
-            }
-
-            foreach (object item in enumerable)
-            {
-                if (item == null)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    int value = Convert.ToInt32(item);
-                    if (this.IsPlausiblePetFeedStaticId(value) && !values.Contains(value))
-                    {
-                        values.Add(value);
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            return true;
-        }
-
         private bool TryReadMonoIntListMember(IntPtr obj, string memberName, out List<int> values)
         {
             values = null;
@@ -3731,44 +3688,6 @@ namespace HeartopiaMod
             }
 
             return true;
-        }
-
-        private bool TryReadIntFromMember(object obj, string memberName, out int value)
-        {
-            value = 0;
-            if (!this.TryGetObjectMember(obj, memberName, out object raw) || raw == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                value = Convert.ToInt32(raw);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private bool TryReadUIntFromMember(object obj, string memberName, out uint value)
-        {
-            value = 0U;
-            if (!this.TryGetObjectMember(obj, memberName, out object raw) || raw == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                value = Convert.ToUInt32(raw);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private bool TryGetMonoUIntMember(IntPtr obj, string memberName, out uint value)

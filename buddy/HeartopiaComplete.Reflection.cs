@@ -1005,31 +1005,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TrySetObjectMember(object instance, string memberName, object value)
-        {
-            if (instance == null)
-            {
-                return false;
-            }
-
-            Type type = instance.GetType();
-            PropertyInfo propertyInfo = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-            if (propertyInfo != null && propertyInfo.CanWrite)
-            {
-                propertyInfo.SetValue(instance, value, null);
-                return true;
-            }
-
-            FieldInfo fieldInfo = type.GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-            if (fieldInfo != null)
-            {
-                fieldInfo.SetValue(instance, value);
-                return true;
-            }
-
-            return false;
-        }
-
         private bool TryGetMonoStringMember(IntPtr obj, string memberName, out string value)
         {
             value = string.Empty;
