@@ -469,6 +469,15 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Repair-aura hold, ahead of the state machine so it applies in EVERY state. A repair
+            // kit thrown underwater drops its aura on the sea floor; if the player keeps swimming
+            // (or just floats where the throw happened) the repair never starts. Bounded inside.
+            if (this.farmWalkToNodeEnabled && this.ProcessFarmRepairAuraHold())
+            {
+                this.autoFarmTimer = 0f;
+                return;
+            }
+
             this.RefreshActivePriorityLocations();
             this.autoFarmTimer += Time.unscaledDeltaTime;
             this.priorityRecheckTimer += Time.unscaledDeltaTime;
@@ -544,10 +553,20 @@ namespace HeartopiaMod
                                     this.autoFarmStatus = $"Sweeping active priority node ({distance:F0}m)...";
                                     this.AutoFarmLog("Active priority sweep -> node " + activeAreaPriorityNode.Value
                                         + " area=" + this.currentPriorityLocation.Value + " distance=" + distance.ToString("F1"));
+                                    this.lastNodePosition = activeAreaPriorityNode.Value;
+                                    // Walk-to-node mode (FarmWalkFeature.cs): walk the route the
+                                    // Track line follows instead of hopping. Falls through to the
+                                    // teleport below whenever no route exists.
+                                    if (this.TryBeginFarmWalk(activeAreaPriorityNode.Value, "node:priority-active", true, null))
+                                    {
+                                        this.lastTeleportWasPriorityLocation = true;
+                                        this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                        this.autoFarmTimer = 0f;
+                                        break;
+                                    }
                                     // Priority nodes are plants (never contamination) — pass no label.
                                     this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(activeAreaPriorityNode.Value, null),
                                         "node:priority-active", activeAreaPriorityNode.Value);
-                                    this.lastNodePosition = activeAreaPriorityNode.Value;
                                     this.lastTeleportWasPriorityLocation = true;
                                     this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                                     this.autoFarmTimer = 0f;
@@ -569,10 +588,21 @@ namespace HeartopiaMod
                             this.AutoFarmLog("Visible priority node -> " + priorityNode.Value
                                 + " mappedArea=" + (this.lastFoundPriorityNodeLocation.HasValue ? this.lastFoundPriorityNodeLocation.Value.ToString() : "none")
                                 + " distance=" + distance.ToString("F1"));
+                            this.lastNodePosition = priorityNode.Value;
+                            if (this.TryBeginFarmWalk(priorityNode.Value, "node:priority-visible", true, null))
+                            {
+                                if (this.lastFoundPriorityNodeLocation.HasValue)
+                                {
+                                    this.currentPriorityLocation = this.lastFoundPriorityNodeLocation;
+                                }
+                                this.lastTeleportWasPriorityLocation = this.currentPriorityLocation.HasValue;
+                                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
                             // Priority nodes are plants (never contamination) — pass no label.
                             this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(priorityNode.Value, null),
                                 "node:priority-visible", priorityNode.Value);
-                            this.lastNodePosition = priorityNode.Value;
                             if (this.lastFoundPriorityNodeLocation.HasValue)
                             {
                                 this.currentPriorityLocation = this.lastFoundPriorityNodeLocation;
@@ -611,9 +641,16 @@ namespace HeartopiaMod
                             float value = Vector3.Distance(Camera.main.transform.position, vector.Value);
                             this.autoFarmStatus = $"Teleporting to node ({value:F0}m)...";
                             this.AutoFarmLog("Normal node target -> " + vector.Value + " label=" + scanNodeLabel + " distance=" + value.ToString("F1"));
+                            this.lastNodePosition = vector.Value;
+                            if (this.TryBeginFarmWalk(vector.Value, "node:" + (scanNodeLabel ?? "unlabelled"), false, scanNodeLabel))
+                            {
+                                this.lastTeleportWasPriorityLocation = false;
+                                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
                             this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector.Value, scanNodeLabel),
                                 "node:" + (scanNodeLabel ?? "unlabelled"), vector.Value);
-                            this.lastNodePosition = vector.Value;
                             this.lastTeleportWasPriorityLocation = false;
                             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                             this.autoFarmTimer = 0f;
@@ -621,10 +658,47 @@ namespace HeartopiaMod
                             this.cameraRotationAttempts = 0;
                             this.BeginFarmNodeDwell(scanNodeLabel);
                         }
+                        else if (this.ShouldHoldFarmScanForSkippedNode())
+                        {
+                            // A node was just skipped as unreachable and nothing else is listed yet.
+                            // Keep scanning for a few seconds instead of warping: the radar marker
+                            // list rebuilds on its own cadence and nodes respawn, so most of these
+                            // resolve into an ordinary walk if given a moment.
+                            this.autoFarmStatus = "Looking for another node...";
+                        }
+                        else if (this.TryConsumeFarmWalkSkippedNode(out Vector3 skippedNode, out string skippedLabel))
+                        {
+                            // Nothing else here, and the only reason this one is not a candidate is
+                            // that the walker just skipped it. Take it back with a teleport rather
+                            // than relocating the whole area (FarmWalkFeature.cs explains why).
+                            ModLogger.Msg("[FarmWalk] no other node in range — taking back the skipped one at "
+                                + FormatNavMeshVector(skippedNode) + ".");
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(skippedNode, skippedLabel),
+                                "node:skip-reclaim", skippedNode);
+                            this.lastNodePosition = skippedNode;
+                            this.lastTeleportWasPriorityLocation = false;
+                            this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
+                            this.autoFarmTimer = 0f;
+                            this.autoCollectClickedSinceArrival = false;
+                            this.cameraRotationAttempts = 0;
+                            this.BeginFarmNodeDwell(skippedLabel);
+                        }
                         else
                         {
                             this.farmState = HeartopiaComplete.AutoFarmState.MovingToLocation;
                             this.autoFarmTimer = 0f;
+                        }
+                        break;
+                    }
+                case HeartopiaComplete.AutoFarmState.WalkingToNode:
+                    {
+                        // Ground walk along the Track waypoint route (FarmWalkFeature.cs). The tick
+                        // owns its own timeout / stuck escalation and returns true once the player
+                        // is at the node — whether it walked there or gave up and teleported — so
+                        // both outcomes hand over to Collecting identically.
+                        if (this.RunFarmWalkTick())
+                        {
+                            this.EnterFarmCollectingAfterWalk();
                         }
                         break;
                     }
@@ -1111,6 +1185,13 @@ namespace HeartopiaMod
         //          offset only ever goes into `position`, so this pair is what the trace compares.
         private void FarmTeleportTo(Vector3 position, string kind = "unknown", Vector3 source = default)
         {
+            // Walk-to-node mode, step 0 probes. Purely observational — the hop below is unchanged.
+            // The navmesh one (NavMeshWalkFeature.cs) has already returned a firm NO; it is kept
+            // only so a future game update that wires XDNavigationMgr up would show itself.
+            // The live question is the Track waypoint graph (TrackPathGraphFeature.cs).
+            this.ProbeTrackPathGraph();
+            this.ProbeNavMeshRoute(source == default ? position : source, kind);
+
             this.lastFarmTeleportAt = Time.unscaledTime;
             this.LogForagingTeleportRequest(kind, source, position);
             this.TeleportToLocation(position);
@@ -1294,9 +1375,28 @@ namespace HeartopiaMod
                     if (now - this.contaminationRepairHoldSince <= 45f)
                     {
                         this.autoFarmTimer = 0f;
-                        this.autoFarmStatus = "Cleaning... waiting for sea cleaner repair";
+
+                        // The kit was thrown, but the restorer is an ENTITY resting on the sea
+                        // floor and its repair aura is a SPHERE around it. Floating where the
+                        // throw happened leaves the player outside that sphere, so the repair is
+                        // approved and then never actually starts. Sink onto the kit and stay
+                        // there until the restore buff is running.
+                        this.autoFarmStatus = this.TryHoldDescentIntoRepairAura()
+                            ? "Cleaning... sinking into the repair aura"
+                            : "Cleaning... waiting for sea cleaner repair";
                         return;
                     }
+                }
+
+                // Underwater the throw can be silently refused: the restorer is an ENTITY the
+                // server places on ground, and from open water there may be nothing to place it
+                // on, so CanPutRestorerResult never approves and no ToolRestorerEvent arrives.
+                // IsAutoRepairBusy() then reads false and the dwell used to just give up.
+                // Instead: sink toward the floor and throw again, until the repair truly starts.
+                if (this.TryRetryContaminationRepairThrow(now))
+                {
+                    this.autoFarmTimer = 0f;
+                    return;
                 }
 
                 this.autoFarmStatus = "Sea cleaner depleted - repair needed";
@@ -1304,6 +1404,7 @@ namespace HeartopiaMod
                 return;
             }
             this.contaminationRepairHoldSince = -1f;
+            this.ResetContaminationRepairRetryState();
 
             // Run the shared sweep (self-throttled). It runs even while the equip is still
             // pending: kills stay blocked by the pass's own tool gate, but actionable counts
@@ -2743,6 +2844,9 @@ namespace HeartopiaMod
             // dropped out of noclip inside the terrain (StealthForagingFeature.cs).
             if (this.autoFarmActive)
             {
+                // Release any injected move axis first — stopping mid-walk would otherwise leave
+                // the player driving into whatever they were heading for.
+                this.AbortFarmWalk();
                 this.SurfaceFromStealthForaging("Stop Foraging");
             }
 
@@ -2750,7 +2854,10 @@ namespace HeartopiaMod
             bool flag3 = this.autoFarmActive;
             if (flag3)
             {
-                this.SetGameSpeed(5f);
+                // Walk-to-node mode pins 1x: at timeScale 5 the player covers five times the ground
+                // per REAL second, and the server's MovementAntiCheating samples real time (flags
+                // >4.3 m/s on foot), so a legitimate walk would read as a 20 m/s teleport-slide.
+                this.SetGameSpeed(this.FarmRunGameSpeed);
                 this.CheckRadarAutoToggle(); // This won't auto-enable radar, but checks consistency
                 this.autoFarmStatus = "Starting Auto Farm...";
                 this.autoFarmTimer = 0f;
@@ -2761,6 +2868,8 @@ namespace HeartopiaMod
                 this.cameraRotationAttempts = 0;
                 this.ResetContaminationDwellState();
                 this.ResetCorruptionCleanseState();
+                this.ResetNavMeshProbeState();
+                this.ResetTrackPathGraphProbeState();
                 this.priorityLocationCooldowns.Clear();
                 this.RefreshActivePriorityLocations();
                 this.currentPriorityLocation = this.GetActivePriorityLocation();
@@ -2867,7 +2976,10 @@ namespace HeartopiaMod
             // Token: 0x0400005D RID: 93
             WaitingForPriorityArea,
             // Corrupted-debuff cleanse hold (CorruptionCleanseFeature.cs)
-            CleansingCorruption
+            CleansingCorruption,
+            // Ground walk to a resource node (FarmWalkFeature.cs) — sits between ScanningForNodes
+            // and Collecting when the walk-to-node mode is on.
+            WalkingToNode
         }
 
     }

@@ -99,6 +99,11 @@ namespace HeartopiaMod
             public Slider TeleportDelaySlider;
             public Toggle StealthToggle;          // Stealth Foraging (always visible)
             public GameObject StealthHintLabel;
+            public Toggle WalkToggle;             // Walk to Nodes (always visible)
+            public GameObject WalkHintLabel;
+            public GameObject WalkSpeedLabel;     // speed row — only while walking is on
+            public string WalkSpeedShown;
+            public Slider WalkSpeedSlider;
             public Toggle StealthBlockToggle;     // Stealth Block (StealthBlockFeature.cs)
             public GameObject StealthBlockStatusLabel;
             public string StealthBlockStatusShown;
@@ -303,7 +308,9 @@ namespace HeartopiaMod
         private int ComputeUguiForagingLayoutSignature()
         {
             return (this.auraFarmEnabled ? 1 : 0)
-                 | (this.autoFarmAutoStopEnabled ? 2 : 0);
+                 | (this.autoFarmAutoStopEnabled ? 2 : 0)
+                 // Walk to Nodes shows/hides its own speed row, so it moves everything below it.
+                 | (this.farmWalkToNodeEnabled ? 4 : 0);
         }
 
         // ----------------------------------------------------------------------------------------
@@ -466,6 +473,23 @@ namespace HeartopiaMod
                 new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
             this.TrySetUguiLabelWrapped(handle.StealthHintLabel);
 
+            // Walk to Nodes (FarmWalkFeature.cs) — mutually exclusive with Stealth Foraging above,
+            // which the handlers enforce in both directions. The speed row below only appears while
+            // it is on, so an unused slider never occupies a line.
+            handle.WalkToggle = this.CreateUguiCheckbox(settings.transform, "WalkToggle",
+                this.L("Walk to Nodes"), this.farmWalkToNodeEnabled,
+                new System.Action<bool>(this.OnUguiForagingWalkToggled));
+            handle.WalkHintLabel = this.CreateUguiLabel(settings.transform, "WalkHint",
+                this.L("Walks the route instead of teleporting; forces 1x speed"), 11f,
+                new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
+            this.TrySetUguiLabelWrapped(handle.WalkHintLabel);
+
+            handle.WalkSpeedShown = this.LF("Walk Speed: {0}", this.farmWalkSpeed.ToString("0.00"));
+            handle.WalkSpeedLabel = this.CreateUguiBodyLabel(settings.transform, "WalkSpeedLabel", handle.WalkSpeedShown, 13f);
+            handle.WalkSpeedSlider = this.CreateUguiSlider(settings.transform, "WalkSpeedSlider",
+                FarmWalkSpeedMin, FarmWalkSpeedMax, this.farmWalkSpeed, false,
+                new System.Action<float>(this.OnUguiForagingWalkSpeedChanged));
+
             // Stealth Block trio (StealthBlockFeature.cs / MapRevealBlockedFeature.cs). The status
             // label is the arming feedback: the farm holds until it reads "Armed", so a silent
             // toggle would look like a hung button.
@@ -583,6 +607,34 @@ namespace HeartopiaMod
             }
 
             rowY += 34f;
+            if (handle.WalkToggle != null)
+            {
+                PlaceUguiTopLeft(handle.WalkToggle.gameObject, 14f, rowY, 250f, 24f);
+            }
+            if (handle.WalkHintLabel != null)
+            {
+                PlaceUguiTopLeft(handle.WalkHintLabel, 270f, rowY, panelW - 282f, 28f);
+            }
+
+            // Speed row only exists while walking is on — collapse it entirely otherwise so the
+            // rows below do not sit under a gap.
+            bool walking = this.farmWalkToNodeEnabled;
+            SetUguiGoActive(handle.WalkSpeedLabel, walking);
+            SetUguiGoActive(handle.WalkSpeedSlider != null ? handle.WalkSpeedSlider.gameObject : null, walking);
+            if (walking)
+            {
+                rowY += 30f;
+                if (handle.WalkSpeedLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.WalkSpeedLabel, 14f, rowY, 170f, 20f);
+                }
+                if (handle.WalkSpeedSlider != null)
+                {
+                    PlaceUguiTopLeft(handle.WalkSpeedSlider.gameObject, 192f, rowY + 1f, panelW - 220f, 20f);
+                }
+            }
+
+            rowY += 34f;
             if (handle.StealthBlockToggle != null)
             {
                 PlaceUguiTopLeft(handle.StealthBlockToggle.gameObject, 14f, rowY, 250f, 24f);
@@ -694,6 +746,13 @@ namespace HeartopiaMod
                 // Settings re-syncs (external IMGUI edits) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.AuraFarmToggle, this.auraFarmEnabled);
                 this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
+                this.SyncUguiToggleFromField(handle.WalkToggle, this.farmWalkToNodeEnabled);
+                this.SyncUguiSelfLabelText(handle.WalkSpeedLabel, ref handle.WalkSpeedShown,
+                    this.LF("Walk Speed: {0}", this.farmWalkSpeed.ToString("0.00")));
+                if (handle.WalkSpeedSlider != null && Mathf.Abs(handle.WalkSpeedSlider.value - this.farmWalkSpeed) > 0.0005f)
+                {
+                    handle.WalkSpeedSlider.SetValueWithoutNotify(this.farmWalkSpeed);
+                }
                 this.SyncUguiToggleFromField(handle.StealthBlockToggle, this.stealthBlockEnabled);
                 this.SyncUguiToggleFromField(handle.NotifyFriendsToggle, this.stealthBlockNotifyFriends);
                 this.SyncUguiSelfLabelText(handle.StealthBlockStatusLabel, ref handle.StealthBlockStatusShown,
@@ -845,6 +904,65 @@ namespace HeartopiaMod
                 return;
             }
             this.stealthForagingEnabled = value;
+
+            // Mutually exclusive with Walk to Nodes: stealth parks the player UNDER the terrain on
+            // noclip, and walking needs ordinary ground collision, so the two cannot both be armed.
+            // Clearing the other one loudly beats silently ignoring whichever lost.
+            if (value && this.farmWalkToNodeEnabled)
+            {
+                this.farmWalkToNodeEnabled = false;
+                this.AbortFarmWalk();
+                this.AddMenuNotification(this.L("Walk to Nodes turned off (needs ground collision)"), new Color(1f, 0.75f, 0.45f));
+                ModLogger.Msg("[FarmWalk] disabled — Stealth Foraging was turned on (mutually exclusive).");
+            }
+
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Walk to Nodes (FarmWalkFeature.cs). Like the stealth flag this is only a persisted
+        // setting: the walk itself is driven from the farm state machine, so flipping it while idle
+        // changes nothing until the next Start Foraging. Flipping it mid-run is honoured on the
+        // next hop, and the game speed is re-applied immediately so 5x can never outlive the flag.
+        private void OnUguiForagingWalkToggled(bool value)
+        {
+            if (value == this.farmWalkToNodeEnabled)
+            {
+                return;
+            }
+
+            this.farmWalkToNodeEnabled = value;
+
+            if (value && this.stealthForagingEnabled)
+            {
+                this.stealthForagingEnabled = false;
+                this.AddMenuNotification(this.L("Stealth Foraging turned off (incompatible with walking)"), new Color(1f, 0.75f, 0.45f));
+                ModLogger.Msg("[FarmWalk] Stealth Foraging disabled — walking needs ground collision (mutually exclusive).");
+            }
+
+            if (!value)
+            {
+                this.AbortFarmWalk();
+            }
+
+            // Walking pins 1x; turning it off mid-run hands 5x back. Only while the farm owns the
+            // speed — an idle farm must not stomp the user's own Self-tab game-speed slider.
+            if (this.autoFarmActive)
+            {
+                this.SetGameSpeed(this.FarmRunGameSpeed);
+            }
+
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiForagingWalkSpeedChanged(float value)
+        {
+            float clamped = Mathf.Clamp(value, FarmWalkSpeedMin, FarmWalkSpeedMax);
+            if (Mathf.Abs(clamped - this.farmWalkSpeed) < 0.0005f)
+            {
+                return;
+            }
+
+            this.farmWalkSpeed = clamped;
             try { this.SaveKeybinds(false); } catch { }
         }
 

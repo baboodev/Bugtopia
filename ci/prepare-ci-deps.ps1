@@ -43,6 +43,7 @@ $bepinexCoreDlls = @(
 $interopDlls = @(
     "Il2Cppmscorlib.dll",
     "UnityEngine.dll",
+    "UnityEngine.AIModule.dll",
     "UnityEngine.AnimationModule.dll",
     "UnityEngine.AssetBundleModule.dll",
     "UnityEngine.CoreModule.dll",

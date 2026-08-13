@@ -189,6 +189,8 @@ namespace HeartopiaMod
             data.auraCollectWaitTimeout = this.auraCollectWaitTimeout;
             data.foragingTeleportDelaySeconds = this.foragingTeleportDelaySeconds;
             data.stealthForagingEnabled = this.stealthForagingEnabled;
+            data.farmWalkToNodeEnabled = this.farmWalkToNodeEnabled;
+            data.farmWalkSpeed = this.farmWalkSpeed;
             data.resourceAutoRepairPauseSeconds = this.resourceAutoRepairPauseSeconds;
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
@@ -460,6 +462,17 @@ namespace HeartopiaMod
                 30f);
             this.foragingTeleportDelaySeconds = Mathf.Clamp(data.foragingTeleportDelaySeconds, 0f, 10f);
             this.stealthForagingEnabled = data.stealthForagingEnabled;
+            this.farmWalkToNodeEnabled = data.farmWalkToNodeEnabled;
+            // 0 = never written (pre-walk config) -> keep the 0.75 default rather than clamping a
+            // fresh install to the 0.2 minimum, which would read as "walking is broken, it crawls".
+            this.farmWalkSpeed = data.farmWalkSpeed <= 0f
+                ? 0.75f
+                : Mathf.Clamp(data.farmWalkSpeed, FarmWalkSpeedMin, FarmWalkSpeedMax);
+            // Belt and braces for a hand-edited Config.xml: the two modes cannot both be on.
+            if (this.farmWalkToNodeEnabled && this.stealthForagingEnabled)
+            {
+                this.stealthForagingEnabled = false;
+            }
             this.resourceAutoRepairPauseSeconds = data.resourceAutoRepairPauseSeconds;
             this.gameSpeed = data.gameSpeed;
             this.fpsBypassEnabled = data.fpsBypassEnabled;

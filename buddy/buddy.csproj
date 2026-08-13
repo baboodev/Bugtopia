@@ -114,6 +114,13 @@
       <HintPath>$(BepInExDir)\interop\UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- UnityEngine.AI (NavMesh.CalculatePath / SamplePosition). The game registers its baked mesh
+         with the stock AI system (XDNavigation.XDNavigationMgr holds a NavMeshData +
+         NavMeshDataInstance), which is what the Aura Farm's walk-to-node mode paths along. -->
+    <Reference Include="UnityEngine.AIModule">
+      <HintPath>$(BepInExDir)\interop\UnityEngine.AIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.AnimationModule">
       <HintPath>$(BepInExDir)\interop\UnityEngine.AnimationModule.dll</HintPath>
       <Private>false</Private>
@@ -210,6 +217,10 @@
       <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.AIModule">
+      <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.AIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.AnimationModule">
       <HintPath>$(MelonLoaderDir)\Il2CppAssemblies\UnityEngine.AnimationModule.dll</HintPath>
       <Private>false</Private>
@@ -291,6 +302,9 @@
     <Compile Include="CombinedFarmFeature.cs" />
     <Compile Include="FarmToolBroker.cs" />
     <Compile Include="MovementInputFeature.cs" />
+    <Compile Include="NavMeshWalkFeature.cs" />
+    <Compile Include="TrackPathGraphFeature.cs" />
+    <Compile Include="FarmWalkFeature.cs" />
     <Compile Include="Breadcrumbs.cs" />
     <Compile Include="MonoAssemblyDump.cs" />
     <Compile Include="HeartopiaComplete.cs" />

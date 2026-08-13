@@ -159,6 +159,12 @@ namespace HeartopiaMod
             // land resource hops BELOW the node (contamination -5m, everything else -1.5m).
             // Default false = vanilla hops.
             public bool stealthForagingEnabled;
+            // "Walk to Nodes" — ground-walk the Track waypoint route to each node instead of
+            // teleporting (FarmWalkFeature.cs). Mutually exclusive with Stealth Foraging, and
+            // forces game speed to 1x for the run. Default false = vanilla hops.
+            public bool farmWalkToNodeEnabled;
+            // Joystick axis magnitude while walking. 0 means "unset" so the 0.75 default applies.
+            public float farmWalkSpeed;
             public float resourceAutoRepairPauseSeconds;
             public float gameSpeed;
             public bool fpsBypassEnabled;
