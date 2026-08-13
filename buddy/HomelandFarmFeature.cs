@@ -474,16 +474,12 @@ namespace HeartopiaMod
         private Type homelandFarmLevelEntityComponentDataType = null;
         private Type homelandFarmFriendServiceType = null;
         private Type homelandFarmCropPlantPointType = null;
-        private Type homelandFarmManuredNetworkCommandType = null;
-        private Type homelandFarmAddHolderSystemCommandType = null;
-        private Type homelandFarmEHolderSystemType = null;
         private Type homelandFarmToolSystemType = null;
         private Type homelandFarmToolDataModuleType = null;
         private PropertyInfo homelandFarmToolDataModuleInstanceProperty = null;
         private MethodInfo homelandFarmToolSystemSetHandholdMethod = null;
         private MethodInfo homelandFarmToolSystemGetToolMethod = null;
         private bool homelandFarmToolEquipTypesResolved = false;
-        private bool homelandFarmNetworkCommandTypesResolved = false;
         private Type homelandFarmNetIdType = null;
 
         private MethodInfo homelandFarmDataCenterTryGetComponentDataMethodDef = null;
@@ -5945,50 +5941,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryHomelandFarmEnsureNetworkCommandTypes(out string status)
-        {
-            status = string.Empty;
-            if (this.homelandFarmNetworkCommandTypesResolved)
-            {
-                status = "Manured=" + (this.homelandFarmManuredNetworkCommandType != null)
-                    + " AddHolder=" + (this.homelandFarmAddHolderSystemCommandType != null)
-;
-                return this.homelandFarmManuredNetworkCommandType != null;
-            }
-
-            this.TryEnsureHomelandFarmInteropAssembliesLoaded();
-            if (this.homelandFarmManuredNetworkCommandType == null)
-            {
-                this.homelandFarmManuredNetworkCommandType = this.ResolveHomelandFarmManagedType(
-                    "ManuredNetworkCommand",
-                    "XDT.Scene.Shared.Modules.Farm.ManuredNetworkCommand",
-                    "EcsClient.XDT.Scene.Shared.Modules.Farm.ManuredNetworkCommand");
-            }
-
-            if (this.homelandFarmAddHolderSystemCommandType == null)
-            {
-                this.homelandFarmAddHolderSystemCommandType = this.ResolveHomelandFarmManagedType(
-                    "AddHolderSystemCommand",
-                    "EcsClient.XDT.Scene.Shared.Modules.Tools.AddHolderSystemCommand",
-                    "XDT.Scene.Shared.Modules.Tools.AddHolderSystemCommand");
-            }
-
-            if (this.homelandFarmEHolderSystemType == null)
-            {
-                this.homelandFarmEHolderSystemType = this.ResolveHomelandFarmManagedType(
-                    "EHolderSystem",
-                    "EcsClient.XDT.Scene.Shared.Modules.Tools.EHolderSystem",
-                    "XDT.Scene.Shared.Modules.Tools.EHolderSystem");
-            }
-            this.homelandFarmNetworkCommandTypesResolved = true;
-            status = "Manured=" + (this.homelandFarmManuredNetworkCommandType != null)
-                + " AddHolder=" + (this.homelandFarmAddHolderSystemCommandType != null)
-                + " EHolderSystem=" + (this.homelandFarmEHolderSystemType != null)
-;
-            return this.homelandFarmManuredNetworkCommandType != null;
-        }
-
-
         // Take the item out of the player's hand again after fertilizing via AuraMono
         // CharacterProtocolManager.UnEquipHandhold() (parameterless), the mirror of the
         // EquipHandhold(netId) the equip uses. It sends CancelHolderSystemCommand{HoldItem}
@@ -6949,16 +6901,6 @@ namespace HeartopiaMod
             if (this.homelandFarmCropWaterPlantMethod != null && this.homelandFarmCropWaterPlantMethod.GetParameters().Length >= 2)
             {
                 listType = this.homelandFarmCropWaterPlantMethod.GetParameters()[1].ParameterType;
-            }
-            else if (this.homelandFarmManuredNetworkCommandType != null)
-            {
-                FieldInfo cropNetIdsField = this.homelandFarmManuredNetworkCommandType.GetField(
-                    "cropNetIds",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (cropNetIdsField != null)
-                {
-                    listType = cropNetIdsField.FieldType;
-                }
             }
 
             return this.CreateCompatibleUIntList(listType, values);
@@ -19353,7 +19295,6 @@ namespace HeartopiaMod
 
             yield return null;
             this.TryHomelandFarmEnsureToolEquipTypes();
-            this.TryHomelandFarmEnsureNetworkCommandTypes(out _);
             yield return null;
             this.EnsureHomelandFarmInventoryReflection();
             this.EnsureHomelandFarmTableDataReflection();
