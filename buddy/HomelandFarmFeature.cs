@@ -466,10 +466,6 @@ namespace HeartopiaMod
         private IntPtr homelandFarmAuraEntitiesCreateLevelEntityMethod = IntPtr.Zero;
 
         private Type homelandFarmCropProtocolManagerType = null;
-        private Type homelandFarmCropItemDataType = null;
-        private Type homelandFarmCropBoxItemDataType = null;
-        private Type homelandFarmPlantItemDataType = null;
-        private Type homelandFarmLevelEntityComponentDataType = null;
         private Type homelandFarmFriendServiceType = null;
         private Type homelandFarmCropPlantPointType = null;
         private Type homelandFarmToolSystemType = null;
@@ -478,9 +474,7 @@ namespace HeartopiaMod
         private MethodInfo homelandFarmToolSystemSetHandholdMethod = null;
         private MethodInfo homelandFarmToolSystemGetToolMethod = null;
         private bool homelandFarmToolEquipTypesResolved = false;
-        private Type homelandFarmNetIdType = null;
 
-        private MethodInfo homelandFarmDataCenterTryGetComponentDataMethodDef = null;
         private MethodInfo homelandFarmCropWaterPlantMethod = null;
         private MethodInfo homelandFarmCropSeedingMethod = null;
         private MethodInfo homelandFarmCropAddManureMethod = null;
@@ -502,7 +496,6 @@ namespace HeartopiaMod
         private MethodInfo homelandFarmEntityUtilGetSelfPlayerEntityMethod = null;
         private MethodInfo homelandFarmEcsServiceTryGetMethodDef = null;
         private MethodInfo homelandFarmFriendServiceGetFriendsMethod = null;
-        private MethodInfo homelandFarmCropBoxGetWaterCountMethod = null;
         private MethodInfo homelandFarmCropAddManureInteropMethod = null;
         private MethodInfo homelandFarmCropSeedingInteropMethod = null;
 
@@ -1524,59 +1517,7 @@ namespace HeartopiaMod
                     "DataCenter");
             }
 
-            this.TryResolveHomelandFarmOptionalManagedDataTypes();
             return true;
-        }
-
-        private void TryResolveHomelandFarmOptionalManagedDataTypes()
-        {
-            if (this.homelandFarmCropItemDataType == null)
-            {
-                this.homelandFarmCropItemDataType = this.FindHomelandFarmRuntimeType(
-                    "CropItemData",
-                    "XDTDataAndProtocol.ComponentsData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData");
-            }
-
-            if (this.homelandFarmCropBoxItemDataType == null)
-            {
-                this.homelandFarmCropBoxItemDataType = this.FindHomelandFarmRuntimeType(
-                    "CropBoxItemData",
-                    "XDTDataAndProtocol.ComponentsData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData");
-            }
-
-            if (this.homelandFarmPlantItemDataType == null)
-            {
-                this.homelandFarmPlantItemDataType = this.FindHomelandFarmRuntimeType(
-                    "PlantItemData",
-                    "XDTDataAndProtocol.ComponentsData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData");
-            }
-
-            if (this.homelandFarmLevelEntityComponentDataType == null)
-            {
-                this.homelandFarmLevelEntityComponentDataType = this.FindHomelandFarmRuntimeType(
-                    "LevelEntityComponentData",
-                    "XDTDataAndProtocol.ComponentsData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData");
-            }
-
-            if (this.homelandFarmNetIdType == null)
-            {
-                this.homelandFarmNetIdType = this.FindHomelandFarmRuntimeType(
-                    "NetId",
-                    "EcsClient.XDT.Scene.Shared.Data.SharedData",
-                    "XDT.Scene.Shared.Data.SharedData");
-            }
-
-            if (this.homelandFarmCropBoxItemDataType != null && this.homelandFarmCropBoxGetWaterCountMethod == null)
-            {
-                this.homelandFarmCropBoxGetWaterCountMethod = this.homelandFarmCropBoxItemDataType.GetMethod(
-                    "GetWaterCount",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    Type.EmptyTypes);
-            }
         }
 
         private IntPtr FindHomelandFarmAuraClass(string fullName, string namespaceName, string shortName)
@@ -1737,7 +1678,12 @@ namespace HeartopiaMod
             public IntPtr Handle;
         }
 
-        private bool TryHomelandFarmGetComponentData(Type componentDataType, uint netId, out object data, out string status, string auraDataTypeName = null)
+        // AuraMono only. EnsureHomelandFarmReflectionReady returns true only once
+        // homelandFarmAuraReflectionReady is set, which is exactly what
+        // HomelandFarmPrefersAuraComponentData reports, so the managed DataCenter
+        // TryGetComponentData<T> branch that used to sit below was unreachable by construction —
+        // and its component-data Types never resolved anyway (they live in embedded Mono only).
+        private bool TryHomelandFarmGetComponentData(string dataTypeName, uint netId, out object data, out string status)
         {
             data = null;
             status = "Homeland farm component unavailable.";
@@ -1747,7 +1693,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (componentDataType == null && string.IsNullOrEmpty(auraDataTypeName) && !this.HomelandFarmPrefersAuraComponentData())
+            if (string.IsNullOrEmpty(dataTypeName))
             {
                 status = "Homeland farm component type missing.";
                 return false;
@@ -1763,46 +1709,15 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (this.HomelandFarmPrefersAuraComponentData())
+                if (this.TryHomelandFarmResolveAuraComponentData(netId, dataTypeName, out IntPtr handle) && handle != IntPtr.Zero)
                 {
-                    string typeName = componentDataType != null ? componentDataType.Name : auraDataTypeName ?? string.Empty;
-                    if (string.IsNullOrEmpty(typeName))
-                    {
-                        status = "Homeland farm aura component type missing.";
-                        return false;
-                    }
-
-                    if (this.TryHomelandFarmResolveAuraComponentData(netId, typeName, out IntPtr handle) && handle != IntPtr.Zero)
-                    {
-                        data = new HomelandFarmAuraComponentData { Handle = handle };
-                        status = "Aura component ready.";
-                        return true;
-                    }
-
-                    status = "Aura component missing for netId " + netId + ".";
-                    return false;
+                    data = new HomelandFarmAuraComponentData { Handle = handle };
+                    status = "Aura component ready.";
+                    return true;
                 }
 
-                MethodInfo tryGetMethod = this.homelandFarmDataCenterTryGetComponentDataMethodDef.MakeGenericMethod(componentDataType);
-                object netIdArg = this.CreateNetCookNetIdArgument(this.homelandFarmNetIdType, netId);
-                if (netIdArg == null)
-                {
-                    status = "Homeland farm NetId argument creation failed.";
-                    return false;
-                }
-
-                object dataBox = Activator.CreateInstance(componentDataType);
-                object[] args = new object[] { netIdArg, dataBox };
-                bool found = tryGetMethod.Invoke(null, args) is bool ok && ok;
-                if (!found)
-                {
-                    status = "Homeland farm component missing for netId " + netId + ".";
-                    return false;
-                }
-
-                data = args[1] ?? dataBox;
-                status = "Homeland farm component ready.";
-                return data != null;
+                status = "Aura component missing for netId " + netId + ".";
+                return false;
             }
             catch (Exception ex)
             {
@@ -2823,7 +2738,7 @@ namespace HeartopiaMod
                 }
 
                 // Fast path: most aura candidates for weed/harvest are already CropItemData entities.
-                if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out object directCropData, out _, "CropItemData")
+                if (this.TryHomelandFarmGetComponentData("CropItemData", netId, out object directCropData, out _)
                     && directCropData != null)
                 {
                     if (!seenCrops.Add(netId))
@@ -2866,7 +2781,7 @@ namespace HeartopiaMod
                 // treat the plant entity as the crop. Scoped via includePlantData so weed/harvest
                 // (which read CropItemData-specific fields) are unaffected.
                 if (includePlantData
-                    && this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object directPlantData, out _, "PlantItemData")
+                    && this.TryHomelandFarmGetComponentData("PlantItemData", netId, out object directPlantData, out _)
                     && directPlantData != null)
                 {
                     if (!seenCrops.Add(netId))
@@ -2898,7 +2813,7 @@ namespace HeartopiaMod
                 }
 
                 // Fallback path: resolve linked crop entity from crop-box entities.
-                if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out object cropBoxData, out _, "CropBoxItemData")
+                if (!this.TryHomelandFarmGetComponentData("CropBoxItemData", netId, out object cropBoxData, out _)
                     || cropBoxData == null)
                 {
                     continue;
@@ -2917,7 +2832,7 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out object cropData, out _, "CropItemData")
+                    if (!this.TryHomelandFarmGetComponentData("CropItemData", cropNetId, out object cropData, out _)
                         || cropData == null
                         || !cropPredicate(cropData))
                     {
@@ -3095,7 +3010,7 @@ namespace HeartopiaMod
                     slicer.Yielded();
                 }
 
-                if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object plantData, out _, "PlantItemData")
+                if (!this.TryHomelandFarmGetComponentData("PlantItemData", netId, out object plantData, out _)
                     || plantData == null
                     || !acceptPlant(plantData, netId))
                 {
@@ -3418,12 +3333,12 @@ namespace HeartopiaMod
             }
 
             int before = output.Count;
-            if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData"))
+            if (this.TryHomelandFarmGetComponentData("CropItemData", netId, out _, out _))
             {
                 output.Add(netId);
             }
 
-            if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out object cropBoxData, out _, "CropBoxItemData")
+            if (this.TryHomelandFarmGetComponentData("CropBoxItemData", netId, out object cropBoxData, out _)
                 && cropBoxData != null)
             {
                 string[] cropLinkMembers = { "cropNetId", "CropNetId", "childCropNetId", "linkedCropNetId", "LinkedCropNetId" };
@@ -3871,7 +3786,7 @@ namespace HeartopiaMod
             snapshot = default(HomelandFarmCropFertilizeSnapshot);
             if (cropNetId == 0U
                 || !this.EnsureHomelandFarmReflectionReady()
-                || !this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out object cropData, out _, "CropItemData")
+                || !this.TryHomelandFarmGetComponentData("CropItemData", cropNetId, out object cropData, out _)
                 || cropData == null)
             {
                 return false;
@@ -4348,11 +4263,10 @@ namespace HeartopiaMod
                     }
 
                     if (!this.TryHomelandFarmGetComponentData(
-                            this.homelandFarmCropBoxItemDataType,
+                            "CropBoxItemData",
                             candidateNetId,
                             out _,
-                            out _,
-                            "CropBoxItemData"))
+                            out _))
                     {
                         continue;
                     }
@@ -4404,11 +4318,10 @@ namespace HeartopiaMod
                 }
 
                 if (!this.TryHomelandFarmGetComponentData(
-                        this.homelandFarmCropBoxItemDataType,
+                        "CropBoxItemData",
                         candidateNetId,
                         out _,
-                        out _,
-                        "CropBoxItemData"))
+                        out _))
                 {
                     continue;
                 }
@@ -8047,14 +7960,6 @@ namespace HeartopiaMod
                     .FirstOrDefault(m => m.Name == "TryGet" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
             }
 
-            if (this.homelandFarmCropBoxItemDataType != null && this.homelandFarmCropBoxGetWaterCountMethod == null)
-            {
-                this.homelandFarmCropBoxGetWaterCountMethod = this.homelandFarmCropBoxItemDataType.GetMethod(
-                    "GetWaterCount",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    Type.EmptyTypes);
-            }
-
             bool hasManagedScanPath = this.homelandFarmEntitiesGetComponentsMethod != null
                 || this.FindLevelObjectManagerRuntimeType() != null;
             bool hasAuraScanPath = this.TryResolveHomelandFarmAuraScanClasses(out _);
@@ -9733,15 +9638,15 @@ namespace HeartopiaMod
                 accepted = this.TryHomelandFarmAuraEntityClassifyFarm(netId, out isCropBox, out bool isPlant, out bool isCrop)
                     && (isCropBox || isPlant || isCrop);
             }
-            else if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out _, out _, "CropBoxItemData"))
+            else if (this.TryHomelandFarmGetComponentData("CropBoxItemData", netId, out _, out _))
             {
                 isCropBox = true;
                 accepted = true;
             }
             else
             {
-                accepted = this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out _, out _, "PlantItemData")
-                    || this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData");
+                accepted = this.TryHomelandFarmGetComponentData("PlantItemData", netId, out _, out _)
+                    || this.TryHomelandFarmGetComponentData("CropItemData", netId, out _, out _);
             }
 
             if (accepted)
@@ -10812,21 +10717,6 @@ namespace HeartopiaMod
                     "_waterGuids"))
             {
             }
-            else if (this.homelandFarmCropBoxGetWaterCountMethod != null && !(cropBoxData is HomelandFarmAuraComponentData))
-            {
-                try
-                {
-                    object rawCount = this.homelandFarmCropBoxGetWaterCountMethod.Invoke(cropBoxData, null);
-                    if (rawCount != null)
-                    {
-                        friendWaterCount = Convert.ToInt32(rawCount);
-                        friendWaterCountReadOk = true;
-                    }
-                }
-                catch
-                {
-                }
-            }
             else if (cropBoxData is HomelandFarmAuraComponentData auraCropBox && auraCropBox.Handle != IntPtr.Zero)
             {
                 IntPtr dataHandle = this.TryHomelandFarmResolveAuraComponentDataHandle(auraCropBox.Handle);
@@ -11171,11 +11061,10 @@ namespace HeartopiaMod
             staticId = 0;
             if (plantNetId != 0U
                 && this.TryHomelandFarmGetComponentData(
-                    this.homelandFarmLevelEntityComponentDataType,
+                    "LevelEntityComponentData",
                     plantNetId,
                     out object levelEntityData,
-                    out _,
-                    "LevelEntityComponentData")
+                    out _)
                 && this.TryHomelandFarmReadComponentInt(
                     levelEntityData,
                     out staticId,
@@ -11771,7 +11660,7 @@ namespace HeartopiaMod
 
                 // Crop entities (CropItemData) are a separate entity from the crop box (CropBoxItemData).
                 // hasWeed lives here, and weed/harvest commands target this entity's own netId.
-                if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out object legacyCropPlantData, out _, "CropItemData"))
+                if (this.TryHomelandFarmGetComponentData("CropItemData", netId, out object legacyCropPlantData, out _))
                 {
                     cropPlantCount++;
                     this.TryHomelandFarmTryReadOwnerId(netId, out uint cropOwnerId);
@@ -11810,7 +11699,7 @@ namespace HeartopiaMod
                     legacyOwnerId = legacyFieldOwnerNetId;
                 }
 
-                if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, legacyWaterNetId, out object legacyCropBoxData, out _, "CropBoxItemData"))
+                if (this.TryHomelandFarmGetComponentData("CropBoxItemData", legacyWaterNetId, out object legacyCropBoxData, out _))
                 {
                     cropCount++;
                     this.TryHomelandFarmTryReadCropBoxWaterState(
@@ -11855,7 +11744,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, legacyWaterNetId, out object legacyPlantData, out _, "PlantItemData"))
+                if (this.TryHomelandFarmGetComponentData("PlantItemData", legacyWaterNetId, out object legacyPlantData, out _))
                 {
                     plantCount++;
                     this.TryHomelandFarmTryReadPlantWaterState(
@@ -11939,13 +11828,13 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out _, out _, "CropBoxItemData")
-                || this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out _, out _, "PlantItemData"))
+            if (this.TryHomelandFarmGetComponentData("CropBoxItemData", netId, out _, out _)
+                || this.TryHomelandFarmGetComponentData("PlantItemData", netId, out _, out _))
             {
                 return true;
             }
 
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData"))
+            if (!this.TryHomelandFarmGetComponentData("CropItemData", netId, out _, out _))
             {
                 return false;
             }
@@ -11959,7 +11848,7 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, candidate, out object cropBoxData, out _, "CropBoxItemData")
+                    if (!this.TryHomelandFarmGetComponentData("CropBoxItemData", candidate, out object cropBoxData, out _)
                         || cropBoxData == null)
                     {
                         continue;
@@ -12002,7 +11891,7 @@ namespace HeartopiaMod
             Vector3 position = Vector3.zero;
             this.TryHomelandFarmResolveFarmEntityPosition(netId, out position);
 
-            if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out object cropBoxData, out _, "CropBoxItemData"))
+            if (this.TryHomelandFarmGetComponentData("CropBoxItemData", netId, out object cropBoxData, out _))
             {
                 target = new HomelandFarmTarget
                 {
@@ -12017,7 +11906,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object plantData, out _, "PlantItemData"))
+            if (this.TryHomelandFarmGetComponentData("PlantItemData", netId, out object plantData, out _))
             {
                 target = new HomelandFarmTarget
                 {
@@ -12062,7 +11951,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmLevelEntityComponentDataType, netId, out object levelEntityData, out _, "LevelEntityComponentData"))
+            if (!this.TryHomelandFarmGetComponentData("LevelEntityComponentData", netId, out object levelEntityData, out _))
             {
                 return false;
             }
@@ -13056,11 +12945,11 @@ namespace HeartopiaMod
             }
 
             object cropData = null;
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out cropData, out _, "CropItemData")
+            if (!this.TryHomelandFarmGetComponentData("CropItemData", cropNetId, out cropData, out _)
                 || cropData == null)
             {
                 // Crop-box crops on this IL2CPP build are PlantItemData entities, not CropItemData.
-                if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, cropNetId, out cropData, out _, "PlantItemData")
+                if (!this.TryHomelandFarmGetComponentData("PlantItemData", cropNetId, out cropData, out _)
                     || cropData == null)
                 {
                     return false;
@@ -13104,8 +12993,8 @@ namespace HeartopiaMod
             }
 
             object cropData = null;
-            if (this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out cropData, out _, "CropItemData")
-                || (this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out cropData, out _, "PlantItemData")
+            if (this.TryHomelandFarmGetComponentData("CropItemData", netId, out cropData, out _)
+                || (this.TryHomelandFarmGetComponentData("PlantItemData", netId, out cropData, out _)
                     && cropData != null))
             {
                 return this.TryHomelandFarmReadComponentBool(cropData, out bool isPick, "isPick", "_isPick", "IsPick") && isPick;
@@ -13192,7 +13081,7 @@ namespace HeartopiaMod
             foreach (uint netId in scanNetIds)
             {
                 if (netId != 0U
-                    && this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData"))
+                    && this.TryHomelandFarmGetComponentData("CropItemData", netId, out _, out _))
                 {
                     return true;
                 }
@@ -13208,12 +13097,12 @@ namespace HeartopiaMod
             if (netId == 0U
                 || scanNetIds == null
                 || this.TryHomelandFarmScanHasCropItemDataEntities(scanNetIds)
-                || this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData"))
+                || this.TryHomelandFarmGetComponentData("CropItemData", netId, out _, out _))
             {
                 return false;
             }
 
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out object plantData, out _, "PlantItemData")
+            if (!this.TryHomelandFarmGetComponentData("PlantItemData", netId, out object plantData, out _)
                 || plantData == null)
             {
                 return false;
@@ -13367,17 +13256,15 @@ namespace HeartopiaMod
                 }
 
                 bool netIdIsCropData = this.TryHomelandFarmGetComponentData(
-                    this.homelandFarmCropItemDataType,
+                    "CropItemData",
                     netId,
                     out _,
-                    out _,
-                    "CropItemData");
+                    out _);
                 bool existingIsCropData = this.TryHomelandFarmGetComponentData(
-                    this.homelandFarmCropItemDataType,
+                    "CropItemData",
                     existingNetId,
                     out _,
-                    out _,
-                    "CropItemData");
+                    out _);
                 if (netIdIsCropData && !existingIsCropData)
                 {
                     bestNetIdByBox[boxNetId] = netId;
@@ -13469,7 +13356,7 @@ namespace HeartopiaMod
             // Raw timing dump for the first cached crop — diagnoses maturity/unit mismatches
             // (mature = sowTime + ripeGrowTime - growTime, all in game-unix seconds per FarmUtil).
             if (this.homelandFarmAutoCropNetIds.Count > 0
-                && this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, this.homelandFarmAutoCropNetIds[0], out object sampleCrop, out _, "CropItemData")
+                && this.TryHomelandFarmGetComponentData("CropItemData", this.homelandFarmAutoCropNetIds[0], out object sampleCrop, out _)
                 && sampleCrop != null)
             {
                 this.TryHomelandFarmReadComponentInt(sampleCrop, out int sStage, "stage", "Stage");
@@ -15287,7 +15174,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, plantNetId, out object plantData, out _, "PlantItemData")
+            if (!this.TryHomelandFarmGetComponentData("PlantItemData", plantNetId, out object plantData, out _)
                 || plantData == null)
             {
                 return false;
@@ -17613,8 +17500,8 @@ namespace HeartopiaMod
                     && (isPlant || isCrop);
             }
 
-            return this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, netId, out _, out _, "CropItemData")
-                || this.TryHomelandFarmGetComponentData(this.homelandFarmPlantItemDataType, netId, out _, out _, "PlantItemData");
+            return this.TryHomelandFarmGetComponentData("CropItemData", netId, out _, out _)
+                || this.TryHomelandFarmGetComponentData("PlantItemData", netId, out _, out _);
         }
 
         // One crop's claim on a box during injective occupancy assignment.
@@ -17879,25 +17766,8 @@ namespace HeartopiaMod
 
             // Do not walk raw entity pointers (transformComponent/localPosition): stale loaded-entity
             // handles from large radius scans can AV the mono runtime.
-
-            if (!this.HomelandFarmPrefersAuraComponentData())
-            {
-                Type transformDataType = this.FindLoadedType(
-                    "XDTDataAndProtocol.ComponentsData.TransformComponentData",
-                    "TransformComponentData");
-                if (transformDataType != null
-                    && this.TryHomelandFarmGetComponentData(transformDataType, netId, out object transformDataObj, out _)
-                    && transformDataObj != null)
-                {
-                    if (this.TryGetObjectMember(transformDataObj, "position", out object posObj)
-                        && posObj is Vector3 managedPos
-                        && managedPos != Vector3.zero)
-                    {
-                        fieldLocalPos = HomelandFarmReduceCraftPrecision(managedPos);
-                        return true;
-                    }
-                }
-            }
+            // A managed TransformComponentData fallback used to sit here; FindLoadedType only sees
+            // the managed AppDomain and XDTDataAndProtocol is embedded-Mono only, so it never ran.
 
             return false;
         }
@@ -17911,13 +17781,13 @@ namespace HeartopiaMod
             }
 
             if (!this.HomelandFarmPrefersAuraComponentData()
-                && this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, boxNetId, out _, out _, "CropItemData"))
+                && this.TryHomelandFarmGetComponentData("CropItemData", boxNetId, out _, out _))
             {
                 linkedCropNetId = boxNetId;
                 return true;
             }
 
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, boxNetId, out object cropBoxData, out _, "CropBoxItemData")
+            if (!this.TryHomelandFarmGetComponentData("CropBoxItemData", boxNetId, out object cropBoxData, out _)
                 || cropBoxData == null)
             {
                 return false;
@@ -17972,7 +17842,7 @@ namespace HeartopiaMod
             // carries a CropBox component". Callers that took the netId straight out of a crop-box
             // classification done in the SAME pass already know that, so they opt out.
             if (!skipExistenceRead
-                && !this.TryHomelandFarmGetComponentData(this.homelandFarmCropBoxItemDataType, netId, out _, out _, "CropBoxItemData"))
+                && !this.TryHomelandFarmGetComponentData("CropBoxItemData", netId, out _, out _))
             {
                 return false;
             }
@@ -18687,7 +18557,7 @@ namespace HeartopiaMod
             // Fertilize must apply to CROPS only. A crop has CropItemData; flowers / trees have
             // PlantItemData. Require CropItemData and reject anything else (a PlantItemData-only
             // entity is a flower/tree and must never be fertilized here).
-            if (!this.TryHomelandFarmGetComponentData(this.homelandFarmCropItemDataType, cropNetId, out object cropData, out _, "CropItemData")
+            if (!this.TryHomelandFarmGetComponentData("CropItemData", cropNetId, out object cropData, out _)
                 || cropData == null)
             {
                 reason = "Not a crop (no CropItemData).";
