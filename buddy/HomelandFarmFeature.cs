@@ -10059,12 +10059,9 @@ namespace HeartopiaMod
             }
 
             HashSet<uint> seedNetIds = new HashSet<uint>();
-            if (this.TryGetCurrentFocusedLevelObjectNetId(out ulong focusedLevelObjectNetId, out _)
-                && focusedLevelObjectNetId != 0UL
-                && focusedLevelObjectNetId <= uint.MaxValue)
-            {
-                seedNetIds.Add((uint)focusedLevelObjectNetId);
-            }
+            // The focused-level-object probe that stood here walked the managed self player
+            // (Status.focusTarget); that resolver is part of the dead managed cluster, so it
+            // never contributed a candidate. Interact targets below are the live source.
 
             List<ulong> interactLevelObjects = new List<ulong>(8);
             if (this.TryGetCurrentInteractTargetLevelObjects(interactLevelObjects, out _, null))

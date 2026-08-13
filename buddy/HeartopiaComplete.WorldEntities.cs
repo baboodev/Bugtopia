@@ -1665,63 +1665,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryGetCurrentFocusedLevelObjectNetId(out ulong levelObjectNetId, out string status)
-        {
-            levelObjectNetId = 0UL;
-            status = "Focused target unavailable.";
-
-            try
-            {
-                if (!this.TryGetManagedSelfPlayerObject(out object playerObj, out _)
-                    && !this.TryGetManagedSelfPlayerEntityObject(out playerObj, out _))
-                {
-                    status = "Self player unavailable.";
-                    this.NetCookLog(status);
-                    return false;
-                }
-
-                object playerStatus = this.TryGetManagedMemberValue(playerObj, "Status") ?? this.TryGetManagedMemberValue(playerObj, "status");
-                if (playerStatus == null)
-                {
-                    status = "Player status unavailable.";
-                    this.NetCookLog(status);
-                    return false;
-                }
-
-                object focusUiStatus = this.TryGetManagedMemberValue(playerStatus, "FocusUIStatus") ?? this.TryGetManagedMemberValue(playerStatus, "focusUIStatus");
-                if (focusUiStatus == null)
-                {
-                    status = "Focus UI status unavailable.";
-                    this.NetCookLog(status);
-                    return false;
-                }
-
-                if (!this.TryReadManagedUInt64Member(focusUiStatus, "FocusLevelObject", out levelObjectNetId)
-                    && !this.TryReadManagedUInt64Member(focusUiStatus, "focusLevelObject", out levelObjectNetId))
-                {
-                    status = "Focus level object unavailable.";
-                    this.NetCookLog(status);
-                    return false;
-                }
-
-                if (levelObjectNetId == 0UL)
-                {
-                    status = "No focused level object.";
-                    this.NetCookLog(status);
-                    return false;
-                }
-
-                status = "Focused target ready.";
-                this.NetCookLog("FocusLevelObject=" + levelObjectNetId);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "Focused target exception: " + ex.Message;
-                this.NetCookLog(status);
-                return false;
-            }
-        }
 
         private bool TryGetCurrentInteractTargetLevelObjects(List<ulong> candidateLevelObjects, out string status, HashSet<ulong> candidateLevelObjectSet = null)
         {

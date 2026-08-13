@@ -5362,14 +5362,9 @@ namespace HeartopiaMod
             List<ulong> candidateLevelObjects = new List<ulong>(32);
             HashSet<ulong> candidateLevelObjectSet = new HashSet<ulong>();
 
-            if (this.TryGetCurrentFocusedLevelObjectNetId(out ulong focusedLevelObjectNetId, out string focusStatus) && focusedLevelObjectNetId != 0UL)
-            {
-                AddNetCookCandidateLevelObject(candidateLevelObjects, candidateLevelObjectSet, focusedLevelObjectNetId);
-            }
-            else
-            {
-                this.NetCookCaptureLog("Focused target unavailable: " + focusStatus);
-            }
+            // The focused-level-object probe that stood here walked the managed self player
+            // (Status.focusTarget); that resolver is part of the dead managed cluster, so it
+            // never contributed a candidate. Interact targets below are the live source.
 
             if (this.TryGetCurrentInteractTargetLevelObjects(candidateLevelObjects, out string interactStatus, candidateLevelObjectSet))
             {
@@ -7619,15 +7614,9 @@ namespace HeartopiaMod
             this.NetCookLog("Resolving cooker from current target...");
 
             List<ulong> candidateLevelObjects = new List<ulong>(8);
-            if (this.TryGetCurrentFocusedLevelObjectNetId(out ulong focusedLevelObjectNetId, out string focusStatus) && focusedLevelObjectNetId != 0UL)
-            {
-                candidateLevelObjects.Add(focusedLevelObjectNetId);
-                this.NetCookLog("Focused level object=" + focusedLevelObjectNetId);
-            }
-            else
-            {
-                this.NetCookLog("Focused target unavailable: " + focusStatus);
-            }
+            // The focused-level-object probe that stood here walked the managed self player
+            // (Status.focusTarget); that resolver is part of the dead managed cluster, so it
+            // never contributed a candidate. Interact targets below are the live source.
 
             if (this.TryGetCurrentInteractTargetLevelObjects(candidateLevelObjects, out string interactStatus) && candidateLevelObjects.Count > 0)
             {

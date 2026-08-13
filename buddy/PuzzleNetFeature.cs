@@ -122,23 +122,8 @@ namespace HeartopiaMod
                 List<ulong> candidates = new List<ulong>(16);
                 HashSet<ulong> candidateSet = new HashSet<ulong>();
 
-                bool focusedOk = false;
-                ulong focused = 0UL;
-                string focusedStatus = string.Empty;
-                try
-                {
-                    focusedOk = this.TryGetCurrentFocusedLevelObjectNetId(out focused, out focusedStatus) && focused != 0UL;
-                }
-                catch (Exception ex)
-                {
-                    focusedStatus = "exception: " + ex.GetType().Name + ": " + ex.Message;
-                }
-
-                this.PuzzleLog("Resolver focus: ok=" + focusedOk + " levelObject=" + focused + " status=" + focusedStatus);
-                if (focusedOk)
-                {
-                    AddNetCookCandidateLevelObject(candidates, candidateSet, focused);
-                }
+                // The focused-level-object probe walked the managed self player and never resolved
+                // on this build; interact targets below are the live source of candidates.
 
                 int beforeInteract = candidates.Count;
                 string interactStatus = string.Empty;
