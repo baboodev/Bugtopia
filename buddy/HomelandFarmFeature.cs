@@ -339,7 +339,9 @@ namespace HeartopiaMod
         private bool homelandFarmAuraReflectionReady = false;
         private bool homelandFarmReflectionUnavailable = false;
         private string homelandFarmReflectionUnavailableStatus = string.Empty;
-        private const float HomelandFarmInteropLoadRetryIntervalSeconds = 5f;
+        // Backoff after the aura resolver fails: EnsureHomelandFarmReflectionReady is called from
+        // the per-frame paths, so a failed resolve parks the retry this far out.
+        private const float HomelandFarmInteropLoadRetryIntervalSeconds = 15f;
         private float homelandFarmNextReflectionRetryAt = 0f;
         private bool homelandFarmScannerUnavailableLogged = false;
 
@@ -550,7 +552,7 @@ namespace HeartopiaMod
 
             this.homelandFarmReflectionUnavailable = true;
             this.homelandFarmReflectionUnavailableStatus = auraStatus;
-            this.homelandFarmNextReflectionRetryAt = now + 15f;
+            this.homelandFarmNextReflectionRetryAt = now + HomelandFarmInteropLoadRetryIntervalSeconds;
             this.HomelandFarmLog(this.homelandFarmReflectionUnavailableStatus);
             return false;
         }
