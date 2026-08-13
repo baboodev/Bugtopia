@@ -132,9 +132,17 @@ Embedded Mono (mono-2.0-bdwgc.dll, images EcsClient, XDT*)  ← AuraMono for man
 
 | Layer | Use for |
 |-------|---------|
-| **Interop + reflection** | Most `FindLoadedType`, Unity types, `SendCommand` |
+| **Interop + reflection** | Unity / BCL types ONLY (`FindLoadedType` on `UnityEngine.*`, `XDTreeRender`, …) |
 | **IL2CPP native** | Types missing from interop (`TryFindIl2CppClass`, `ItemNetPair` v10 path) |
-| **AuraMono** | Backpack, aura farm, pets, bubbles, daily claims, UI open via `mono_runtime_invoke` |
+| **AuraMono** | **Every `XDT*` / `EcsClient` gameplay type** — backpack, farm, pets, bubbles, cooking, protocols, `SendCommand`, UI open |
+
+> ⚠️ **The interop folder contains ZERO `XDT*` / `EcsClient` / `EcsSystem` assemblies** (180 dlls; the only
+> XDT-prefixed name is the unrelated `XDTreeRender.dll`). `FindLoadedType`, `FindTypeByName` and
+> `FindTypeBySignature` all walk `AppDomain.CurrentDomain.GetAssemblies()` only, so **any managed
+> lookup of a game type returns null, always**. A ~11 800-line purge on 2026-08-13 removed every
+> managed-reflection branch that targeted game types; it also uncovered a live bug where two
+> permanently-null `Type` operands made `null == null` true and broke all farm scans. Do not add
+> such a path back — see [[prefer-auramono-no-managed-fallback]] in project memory.
 
 Many assemblies load **only after entering a town** — test in-world, not main menu.
 
@@ -225,12 +233,12 @@ flowchart TD
   A[Need game API] --> B{Authoritative server action?}
   B -->|yes| C[Find command struct in EcsClient dump]
   C --> D[WebRequestUtility.SendCommand T]
-  B -->|no| E{Type in interop AppDomain?}
+  B -->|no| E{Unity / BCL type?}
   E -->|yes| F[FindLoadedType + Invoke]
-  E -->|no| G{UI panel / gameplay module?}
+  E -->|no, it is XDT*/EcsClient| G{UI panel / gameplay module?}
   G -->|UI open| H[AuraMono mono_runtime_invoke]
   G -->|ECS components| I[AuraMono GetComponents T inflate]
-  G -->|protocol static| J[AuraMono or managed ProtocolManager]
+  G -->|protocol static| J[AuraMono ProtocolManager invoke]
   E -->|struct only in native| K[IL2CPP.GetIl2CppClass]
 ```
 
