@@ -481,19 +481,15 @@ namespace HeartopiaMod
         private MethodInfo homelandFarmCharacterEquipHandholdMethod = null;
 
         private Type homelandFarmPlayerDataCenterType = null;
-        private Type homelandFarmLocalPlayerComponentType = null;
         private Type homelandFarmCropComponentType = null;
         private Type homelandFarmCropBoxComponentType = null;
         private Type homelandFarmPlantComponentType = null;
         private Type homelandFarmEntitiesType = null;
         private Type homelandFarmEntityType = null;
-        private Type homelandFarmEntityUtilType = null;
         private Type homelandFarmEcsServiceType = null;
 
         private MethodInfo homelandFarmEntitiesGetComponentsMethod = null;
         private MethodInfo homelandFarmEntitiesSphereQueryEntitiesMethod = null;
-        private MethodInfo homelandFarmEntityUtilGetSelfPlayerMethod = null;
-        private MethodInfo homelandFarmEntityUtilGetSelfPlayerEntityMethod = null;
         private MethodInfo homelandFarmEcsServiceTryGetMethodDef = null;
         private MethodInfo homelandFarmFriendServiceGetFriendsMethod = null;
         private MethodInfo homelandFarmCropAddManureInteropMethod = null;
@@ -2119,36 +2115,10 @@ namespace HeartopiaMod
                     }
                 }
 
-                if (this.TryHomelandFarmResolveLocalPlayerComponent(out object localPlayerComponent, out string source)
-                    && localPlayerComponent != null
-                    && this.TryHomelandFarmTryReadInHomeland(localPlayerComponent, out bool inHomeland))
-                {
-                    if (inHomeland)
-                    {
-                        status = "Player is in homeland.";
-                        return true;
-                    }
-
-                    if (allowVisitingFarmArea && this.TryHomelandFarmHasScannableFarmEntities(out string scanSource))
-                    {
-                        status = "Farm area via " + scanSource + ".";
-                        if (logDecisions)
-                        {
-                            this.HomelandFarmLog("Homeland gate open via farm scan (visiting).");
-                        }
-
-                        return true;
-                    }
-
-                    status = "homeland_farm.need_homeland";
-                    if (logDecisions)
-                    {
-                        this.HomelandFarmLog("Homeland gate blocked via " + source + ": inHomeland=false.");
-                    }
-
-                    return false;
-                }
-
+                // The managed LocalPlayerComponent probe that stood here resolved the player through
+                // EntityUtil.GetSelfPlayer() / FindLoadedType, neither of which sees the embedded-Mono
+                // XDT* types, so it never once produced a component. The aura read below is the same
+                // inHomeland check done through AuraMono.
                 if (this.TryHomelandFarmTryReadInHomelandAura(out bool auraInHomeland, out string auraSource))
                 {
                     if (auraInHomeland)
@@ -2251,17 +2221,6 @@ namespace HeartopiaMod
             try
             {
                 this.EnsureHomelandFarmScannerTypes();
-                if (this.homelandFarmEntityUtilGetSelfPlayerEntityMethod != null)
-                {
-                    object selfEntity = this.homelandFarmEntityUtilGetSelfPlayerEntityMethod.Invoke(null, null);
-                    if (selfEntity != null && this.TryHomelandFarmTryReadEntityNetId(selfEntity, out netId) && netId != 0U)
-                    {
-                        status = "Player netId via EntityUtil.GetSelfPlayerEntity().";
-                        this.HomelandFarmCachePlayerNetId(netId);
-                        return true;
-                    }
-                }
-
                 if (this.TryHomelandFarmTryReadPlayerNetIdAura(out netId, out string auraSource) && netId != 0U)
                 {
                     status = "Player netId via " + auraSource + ".";
@@ -3062,27 +3021,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            object positionObj;
             this.EnsureHomelandFarmScannerTypes();
-            if (this.homelandFarmEntityUtilGetSelfPlayerEntityMethod != null)
-            {
-                try
-                {
-                    object selfEntity = this.homelandFarmEntityUtilGetSelfPlayerEntityMethod.Invoke(null, null);
-                    if (selfEntity != null
-                        && this.TryGetObjectMember(selfEntity, "position", out positionObj)
-                        && positionObj is Vector3 entityPos
-                        && entityPos != Vector3.zero)
-                    {
-                        pos = entityPos;
-                        return true;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
             if (this.TryHomelandFarmTryReadPlayerPositionAura(out pos) && pos != Vector3.zero)
             {
                 return true;
@@ -3492,14 +3431,9 @@ namespace HeartopiaMod
 
         private bool TryHomelandFarmTryIsHandHoldSprinklerEquipped()
         {
-            if (this.TryHomelandFarmTryGetEquippedHandholdBagNetId(out uint equippedNetId, out int equippedStaticId)
-                && equippedNetId != 0U
-                && equippedStaticId > 0
-                && this.TryHomelandFarmItemMatchesSprinkler(equippedStaticId, 0))
-            {
-                return true;
-            }
-
+            // The managed equipComponent.handhold probe that stood here read the equipped item off
+            // EntityUtil.GetSelfPlayer(), which never resolves on this build; the aura read below is
+            // the same walk done through AuraMono.
             if (this.EnsureAuraMonoApiReady()
                 && this.AttachAuraMonoThread()
                 && this.TryHomelandFarmTryGetAuraLocalPlayerObject(out IntPtr auraPlayerObj, out _)
@@ -5781,44 +5715,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryHomelandFarmTryGetEquippedHandholdBagNetId(out uint bagNetId, out int staticId)
-        {
-            bagNetId = 0U;
-            staticId = 0;
-            try
-            {
-                this.EnsureHomelandFarmScannerTypes();
-                object playerObj = null;
-                if (this.homelandFarmEntityUtilGetSelfPlayerMethod != null)
-                {
-                    playerObj = this.homelandFarmEntityUtilGetSelfPlayerMethod.Invoke(null, null);
-                }
-
-                if (playerObj != null
-                    && this.TryGetObjectMember(playerObj, "equipComponent", out object equipObj)
-                    && equipObj != null
-                    && this.TryGetObjectMember(equipObj, "handhold", out object handholdObj)
-                    && handholdObj != null)
-                {
-                    this.TryGetUIntMember(handholdObj, "netId", out bagNetId);
-                    if (!this.TryGetManagedInt32Member(handholdObj, "staticId", out staticId))
-                    {
-                        this.TryGetManagedInt32Member(handholdObj, "StaticId", out staticId);
-                    }
-
-                    if (bagNetId != 0U)
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
         private bool TryHomelandFarmEnsureToolEquipAuraMethods()
         {
             if (this.homelandFarmAuraToolProtocolSetHandHoldMethod != IntPtr.Zero
@@ -6713,114 +6609,6 @@ namespace HeartopiaMod
             return this.CreateCompatibleUIntList(listType, values);
         }
 
-        private bool TryHomelandFarmResolveLocalPlayerComponent(out object localPlayerComponent, out string source)
-        {
-            localPlayerComponent = null;
-            source = string.Empty;
-            this.EnsureHomelandFarmLocalPlayerComponentType();
-
-            // Four managed self-player probes stood here (EntityUtil.GetSelfPlayer, the entity
-            // variant, the ViewModule walk and the InteractSystem player). All resolve XDT* types
-            // through FindLoadedType and never succeed on this build; the scanner path below was
-            // always the real resolver.
-            this.EnsureHomelandFarmScannerTypes();
-            if (this.homelandFarmEntityUtilGetSelfPlayerMethod != null)
-            {
-                try
-                {
-                    object directSelfPlayer = this.homelandFarmEntityUtilGetSelfPlayerMethod.Invoke(null, null);
-                    if (this.TryHomelandFarmTryAcceptPlayerCandidate(
-                        directSelfPlayer,
-                        "EntityUtil.GetSelfPlayer()",
-                        out localPlayerComponent,
-                        out source))
-                    {
-                        return true;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            this.HomelandFarmLog("LocalPlayer resolution failed after managed fallbacks.");
-            return false;
-        }
-
-        private void EnsureHomelandFarmLocalPlayerComponentType()
-        {
-            if (this.homelandFarmLocalPlayerComponentType != null)
-            {
-                return;
-            }
-
-            this.homelandFarmLocalPlayerComponentType = this.FindLoadedType(
-                "XDTLevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent",
-                "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent",
-                "Il2CppXDTLevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent",
-                "LocalPlayerComponent");
-        }
-
-        private bool TryHomelandFarmTryAcceptPlayerCandidate(object candidate, string candidateSource, out object accepted, out string acceptedSource)
-        {
-            accepted = null;
-            acceptedSource = string.Empty;
-            if (candidate == null || string.IsNullOrWhiteSpace(candidateSource))
-            {
-                return false;
-            }
-
-            if (this.homelandFarmLocalPlayerComponentType != null
-                && this.homelandFarmLocalPlayerComponentType.IsInstanceOfType(candidate))
-            {
-                accepted = candidate;
-                acceptedSource = candidateSource;
-                this.HomelandFarmLog("LocalPlayer via " + acceptedSource + " type=" + candidate.GetType().FullName);
-                return true;
-            }
-
-            if (this.TryHomelandFarmObjectExposesInHomeland(candidate))
-            {
-                accepted = candidate;
-                acceptedSource = candidateSource;
-                this.HomelandFarmLog("LocalPlayer via " + acceptedSource + " (inHomeland field) type=" + candidate.GetType().FullName);
-                return true;
-            }
-
-            if (this.homelandFarmLocalPlayerComponentType != null
-                && this.TryHomelandFarmGetComponent(candidate, this.homelandFarmLocalPlayerComponentType, out object component)
-                && component != null)
-            {
-                accepted = component;
-                acceptedSource = candidateSource + ".GetComponent";
-                this.HomelandFarmLog("LocalPlayer via " + acceptedSource + " type=" + component.GetType().FullName);
-                return true;
-            }
-
-            // A second candidate route through TryGetManagedPlayerEntityObject stood here; that
-            // resolver is part of the dead managed self-player cluster, so it never contributed.
-            return false;
-        }
-
-        private bool TryHomelandFarmObjectExposesInHomeland(object obj)
-        {
-            if (obj == null)
-            {
-                return false;
-            }
-
-            string[] members = { "inHomeland", "_inHomeland", "InHomeland", "isInHomeland", "IsInHomeland" };
-            for (int i = 0; i < members.Length; i++)
-            {
-                if (this.TryGetObjectMember(obj, members[i], out _))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private unsafe bool TryHomelandFarmTryGetAuraLocalPlayerObject(out IntPtr localPlayerObj, out string source)
         {
             localPlayerObj = IntPtr.Zero;
@@ -7692,33 +7480,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryHomelandFarmTryReadInHomeland(object obj, out bool inHomeland)
-        {
-            inHomeland = false;
-            if (obj == null)
-            {
-                return false;
-            }
-
-            string[] members = { "inHomeland", "_inHomeland", "InHomeland", "isInHomeland", "IsInHomeland" };
-            for (int i = 0; i < members.Length; i++)
-            {
-                if (this.TryGetObjectMember(obj, members[i], out object raw) && raw != null)
-                {
-                    try
-                    {
-                        inHomeland = Convert.ToBoolean(raw);
-                        return true;
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-
-            return false;
-        }
-
         private unsafe bool TryHomelandFarmTryReadInHomelandAura(out bool inHomeland, out string source)
         {
             inHomeland = false;
@@ -7791,55 +7552,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryHomelandFarmGetComponent(object target, Type componentType, out object component)
-        {
-            component = null;
-            if (target == null || componentType == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                MethodInfo[] methods = target.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                for (int i = 0; i < methods.Length; i++)
-                {
-                    MethodInfo method = methods[i];
-                    if (method == null || !string.Equals(method.Name, "GetComponent", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    if (method.IsGenericMethodDefinition && method.GetParameters().Length == 0)
-                    {
-                        MethodInfo closed = method.MakeGenericMethod(componentType);
-                        component = closed.Invoke(target, null);
-                        if (component != null)
-                        {
-                            return true;
-                        }
-
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters = method.GetParameters();
-                    if (parameters.Length == 1 && typeof(Type).IsAssignableFrom(parameters[0].ParameterType))
-                    {
-                        component = method.Invoke(target, new object[] { componentType });
-                        if (component != null)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
         private bool EnsureHomelandFarmScannerTypes()
         {
             // Success short-circuit: without it every call re-ran the full type sweeps below for the
@@ -7874,13 +7586,6 @@ namespace HeartopiaMod
             if (this.homelandFarmEntityType == null)
             {
                 this.homelandFarmEntityType = this.FindEntityRuntimeType();
-            }
-
-            if (this.homelandFarmEntityUtilType == null)
-            {
-                this.homelandFarmEntityUtilType = this.ResolveHomelandFarmManagedType(
-                    "EntityUtil",
-                    "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityUtil");
             }
 
             if (this.homelandFarmCropComponentType == null)
@@ -7930,27 +7635,6 @@ namespace HeartopiaMod
                         null,
                         new Type[] { typeof(Vector3), typeof(float), entityListType },
                         null);
-                }
-            }
-
-            if (this.homelandFarmEntityUtilType != null)
-            {
-                if (this.homelandFarmEntityUtilGetSelfPlayerMethod == null)
-                {
-                    this.homelandFarmEntityUtilGetSelfPlayerMethod = this.GetMethodQuiet(
-                        this.homelandFarmEntityUtilType,
-                        "GetSelfPlayer",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                        Type.EmptyTypes);
-                }
-
-                if (this.homelandFarmEntityUtilGetSelfPlayerEntityMethod == null)
-                {
-                    this.homelandFarmEntityUtilGetSelfPlayerEntityMethod = this.GetMethodQuiet(
-                        this.homelandFarmEntityUtilType,
-                        "GetSelfPlayerEntity",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                        Type.EmptyTypes);
                 }
             }
 
@@ -19055,7 +18739,6 @@ namespace HeartopiaMod
             yield return null;
             this.EnsureHomelandFarmInventoryReflection();
             this.EnsureHomelandFarmTableDataReflection();
-            this.EnsureHomelandFarmLocalPlayerComponentType();
             this.EnsureHomelandFarmPlayerDataCenterType();
             this.TryResolveHomelandFarmCropSeedEntityType(out _);
             this.TryResolveHomelandFarmCropFertilizerEntityType(out _);
