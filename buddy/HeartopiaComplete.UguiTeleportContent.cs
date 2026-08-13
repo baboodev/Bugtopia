@@ -276,11 +276,10 @@ namespace HeartopiaMod
             public GameObject Root;
             public GameObject HeaderLabel;
             public GameObject TpHomeButton;    // disabled (not hidden) until a home resolves
-            public GameObject HomeSetLabel;    // green, only when homePositionSet && !autoHomePositionValid
             public GameObject StatusLabel;     // the 4-way conditional
             public GameObject CopyButton;      // hidden while the player object is missing
             public GameObject CurrentPosLabel;
-            public int LayoutSignature = -1;   // homeSetVisible | playerFound packed
+            public int LayoutSignature = -1;   // playerFound packed
             public int ErrorCount;             // per-frame refresh disabled at 3 (LIVE rail idiom)
         }
 
@@ -299,7 +298,6 @@ namespace HeartopiaMod
             handle.HeaderLabel = this.CreateUguiBodyLabel(block.transform, "Header", this.L("Home Position"), 13f);
             handle.TpHomeButton = this.CreateUguiPrimaryButton(block.transform, "TpHome", this.L("TP Home"),
                 new System.Action(this.TeleportToHome));
-            handle.HomeSetLabel = this.CreateUguiLabel(block.transform, "HomeSet", "", 12f, Color.green, false);
             handle.StatusLabel = this.CreateUguiLabel(block.transform, "Status", "", 12f, Color.yellow, false);
             handle.CopyButton = this.CreateUguiSecondaryButton(block.transform, "CopyPos", this.L("Copy Position"),
                 new System.Action(this.OnUguiTeleportHomeCopyClicked));
@@ -314,10 +312,10 @@ namespace HeartopiaMod
             return block;
         }
 
-        // Positions mirror DrawTeleportTab's y-cursor (header 25 → button 45 → [home-set 25] →
-        // status 30 → [copy 34] → position label). Reposition/SetActive only when the packed
+        // Positions mirror DrawTeleportTab's y-cursor (header 25 → button 45 → status 30 →
+        // [copy 34] → position label). Reposition/SetActive only when the packed
         // conditional state changes — text updates stay per-frame.
-        private void RelayoutUguiShellTeleportHome(UguiShellTeleportHomeHandle handle, bool homeSetVisible, bool playerFound)
+        private void RelayoutUguiShellTeleportHome(UguiShellTeleportHomeHandle handle, bool playerFound)
         {
             const float pad = 16f;
             float yCur = 12f;
@@ -331,15 +329,6 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.TpHomeButton, pad, yCur, 125f, 35f);
             }
             yCur += 45f;
-            SetUguiGoActive(handle.HomeSetLabel, homeSetVisible);
-            if (homeSetVisible)
-            {
-                if (handle.HomeSetLabel != null)
-                {
-                    PlaceUguiTopLeft(handle.HomeSetLabel, pad, yCur, 340f, 20f);
-                }
-                yCur += 25f;
-            }
             if (handle.StatusLabel != null)
             {
                 PlaceUguiTopLeft(handle.StatusLabel, pad, yCur, 340f, 20f);
@@ -364,22 +353,15 @@ namespace HeartopiaMod
         {
             GameObject playerObj = GameObject.Find("p_player_skeleton(Clone)");
             bool playerFound = playerObj != null;
-            bool homeSetVisible = this.homePositionSet && !this.autoHomePositionValid;
 
             // Disabled, not hidden, when no home is resolvable (Research round's idiom).
-            this.SetUguiButtonInteractable(handle.TpHomeButton, this.homePositionSet || this.autoHomePositionValid);
+            this.SetUguiButtonInteractable(handle.TpHomeButton, this.autoHomePositionValid);
 
-            int signature = (homeSetVisible ? 1 : 0) | (playerFound ? 2 : 0);
+            int signature = playerFound ? 1 : 0;
             if (signature != handle.LayoutSignature)
             {
                 handle.LayoutSignature = signature;
-                this.RelayoutUguiShellTeleportHome(handle, homeSetVisible, playerFound);
-            }
-
-            if (homeSetVisible)
-            {
-                this.SetUguiLabelText(handle.HomeSetLabel,
-                    $"Home Set: ({this.homePosition.x:F1}, {this.homePosition.y:F1}, {this.homePosition.z:F1})");
+                this.RelayoutUguiShellTeleportHome(handle, playerFound);
             }
 
             // The 4-way status conditional — copied EXACTLY from DrawTeleportTab (do not simplify):

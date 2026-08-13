@@ -4267,12 +4267,6 @@ namespace HeartopiaMod
         private int radarMarkerStyle = 0;
         private float radarMaxDistance = 75f;
 
-        // Token: 0x04000017 RID: 23
-        private Vector3 homePosition = Vector3.zero;
-
-        // Token: 0x04000018 RID: 24
-        private bool homePositionSet = false;
-
         private Vector3 autoHomePosition = Vector3.zero;
 
         private bool autoHomePositionValid = false;

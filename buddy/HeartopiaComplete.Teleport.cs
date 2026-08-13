@@ -64,12 +64,6 @@ namespace HeartopiaMod
                 this.autoHomeStatus = "Home Ready";
                 ModLogger.Msg($"[HOME] Teleported to auto home [{this.autoHomeNetId}]: {this.autoHomePosition}");
             }
-            else if (this.homePositionSet)
-            {
-                this.TeleportToLocation(this.homePosition);
-                this.autoHomeStatus = "Teleported to manual home";
-                ModLogger.Msg($"[HOME] Teleported to home: {this.homePosition}");
-            }
             else
             {
                 ModLogger.Msg("[HOME] Home position not set!");
