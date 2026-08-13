@@ -4600,7 +4600,6 @@ namespace HeartopiaMod
         private Type netCookContinueCommandType = null;
         private Type netCookInteractCommandType = null;
         private object netCookReliableChannelValue = null;
-        private bool netCookTypeDiagnosticsLogged = false;
         // Auto-cook diagnostics
         // (autoFarmSubTab / automationSubTab / selfSubTab are gone — the UGUI shell's per-tab
         // bars own sub-tab selection now; gates use the IsUguiShell*SubTabActive helpers.)
