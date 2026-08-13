@@ -400,7 +400,6 @@ namespace HeartopiaMod
         // this build (DotnetAssemblies lack CropItemData/DataCenter/...), the resolution never
         // succeeds and would otherwise re-run the full interop-load + miss-cache-clear + type scan
         // on EVERY classify call (~240ms/entity). See HomelandFarmPrefersAuraComponentData.
-        private float homelandFarmComponentDataReflectionRetryAt = 0f;
         // Throttle for the "upgrade managed reflection after aura is ready" probe in
         // EnsureHomelandFarmReflectionReady. Without it, every component-data read re-ran the full
         // managed type scan + miss-cache clear (~managed types absent on this build), so a scan that
@@ -467,7 +466,6 @@ namespace HeartopiaMod
         private IntPtr homelandFarmAuraEntitiesCreateLevelEntityMethod = IntPtr.Zero;
 
         private Type homelandFarmCropProtocolManagerType = null;
-        private Type homelandFarmDataCenterType = null;
         private Type homelandFarmCropItemDataType = null;
         private Type homelandFarmCropBoxItemDataType = null;
         private Type homelandFarmPlantItemDataType = null;
@@ -1645,125 +1643,15 @@ namespace HeartopiaMod
 
         private bool HomelandFarmPrefersAuraComponentData()
         {
-            if (this.TryEnsureHomelandFarmComponentDataManagedReflection())
-            {
-                return false;
-            }
-
-            return this.homelandFarmAuraReflectionReady
-                || (this.homelandFarmManagedReflectionUnavailable && this.TryResolveHomelandFarmAuraProtocol(out _));
+            // The managed component-data resolver that used to short-circuit this is unreachable on
+            // this build (its own comment says so: DataCenter / CropItemData / CropBoxItemData never
+            // resolve), and homelandFarmManagedReflectionUnavailable lost its only writer with the
+            // managed gate, so aura readiness is the whole answer.
+            return this.homelandFarmAuraReflectionReady;
         }
 
         // Resolve only DataCenter + component data types (no protocol methods). Used to avoid
         // native AuraMono GetAllComponents after heavy entity scans when DotnetAssemblies are loaded.
-        private bool TryEnsureHomelandFarmComponentDataManagedReflection()
-        {
-            if (this.homelandFarmDataCenterTryGetComponentDataMethodDef != null
-                && this.homelandFarmCropBoxItemDataType != null
-                && this.homelandFarmCropItemDataType != null)
-            {
-                return true;
-            }
-
-            // Managed reflection already proved unavailable on this build (EnsureHomelandFarmReflectionReady
-            // latches it after its one type sweep: "missing type(s): ... DataCenter, CropItemData,
-            // CropBoxItemData ..."). Those are the very types this resolves, so re-scanning for them
-            // every 30 s forever is pure waste — callers use the AuraMono component path.
-            if (this.homelandFarmManagedReflectionUnavailable)
-            {
-                return false;
-            }
-
-            // Not (fully) resolved. The resolution below reloads interop, clears reflection miss
-            // caches and runs several full type scans — far too costly to repeat per classify when
-            // the types simply do not exist in this build. Throttle re-attempts so the common
-            // "managed component data unavailable" case stays cheap (callers fall back to AuraMono).
-            float nowResolve = Time.realtimeSinceStartup;
-            if (nowResolve < this.homelandFarmComponentDataReflectionRetryAt)
-            {
-                return false;
-            }
-
-            this.homelandFarmComponentDataReflectionRetryAt = nowResolve + HomelandFarmAuraComponentClassResolveRetrySeconds;
-
-            this.TryEnsureHomelandFarmInteropAssembliesLoaded();
-            this.ClearHomelandFarmReflectionMissCaches();
-
-            if (this.homelandFarmDataCenterType == null)
-            {
-                this.homelandFarmDataCenterType = this.ResolveHomelandFarmManagedType(
-                    "DataCenter",
-                    "XDTDataAndProtocol.ComponentsData.DataCenter",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData.DataCenter");
-            }
-
-            if (this.homelandFarmCropItemDataType == null)
-            {
-                this.homelandFarmCropItemDataType = this.ResolveHomelandFarmManagedType(
-                    "CropItemData",
-                    "XDTDataAndProtocol.ComponentsData.CropItemData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData.CropItemData");
-            }
-
-            if (this.homelandFarmCropBoxItemDataType == null)
-            {
-                this.homelandFarmCropBoxItemDataType = this.ResolveHomelandFarmManagedType(
-                    "CropBoxItemData",
-                    "XDTDataAndProtocol.ComponentsData.CropBoxItemData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData.CropBoxItemData");
-            }
-
-            if (this.homelandFarmPlantItemDataType == null)
-            {
-                this.homelandFarmPlantItemDataType = this.ResolveHomelandFarmManagedType(
-                    "PlantItemData",
-                    "XDTDataAndProtocol.ComponentsData.PlantItemData",
-                    "ScriptsRefactory.DataAndProtocol.ComponentsData.PlantItemData");
-            }
-
-            if (this.homelandFarmNetIdType == null)
-            {
-                this.homelandFarmNetIdType = this.ResolveHomelandFarmManagedType(
-                    "NetId",
-                    "EcsClient.XDT.Scene.Shared.Data.SharedData.NetId",
-                    "XDT.Scene.Shared.Data.SharedData.NetId");
-            }
-
-            if (this.homelandFarmDataCenterTryGetComponentDataMethodDef == null && this.homelandFarmDataCenterType != null)
-            {
-                this.homelandFarmDataCenterTryGetComponentDataMethodDef = this.ResolveHomelandFarmTryGetComponentDataMethodDef();
-            }
-
-            return this.homelandFarmDataCenterTryGetComponentDataMethodDef != null
-                && this.homelandFarmCropBoxItemDataType != null
-                && this.homelandFarmCropItemDataType != null
-                && this.homelandFarmNetIdType != null;
-        }
-
-        private MethodInfo ResolveHomelandFarmTryGetComponentDataMethodDef()
-        {
-            if (this.homelandFarmDataCenterType == null || this.homelandFarmNetIdType == null)
-            {
-                return null;
-            }
-
-            foreach (MethodInfo method in this.homelandFarmDataCenterType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-            {
-                if (method == null || method.Name != "TryGetComponentData" || !method.IsGenericMethodDefinition)
-                {
-                    continue;
-                }
-
-                ParameterInfo[] parameters = method.GetParameters();
-                if (parameters.Length == 2
-                    && string.Equals(parameters[0].ParameterType.Name, "NetId", StringComparison.Ordinal))
-                {
-                    return method;
-                }
-            }
-
-            return null;
-        }
 
 
         private MethodInfo ResolveHomelandFarmCropSeedingMethod()
@@ -18272,7 +18160,6 @@ namespace HeartopiaMod
             // upgrade retries still happen in EnsureHomelandFarmReflectionReady's throttle.
             if (!this.HomelandFarmPrefersAuraComponentData())
             {
-                this.TryEnsureHomelandFarmComponentDataManagedReflection();
             }
 
             this.homelandFarmAuraComponentMissCache.Clear();
