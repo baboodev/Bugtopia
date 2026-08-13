@@ -116,7 +116,7 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Settings → Logging (39 MasterLog* toggles, session-only — see HeartopiaComplete.Logging.cs)
+        // Settings → Logging (46 MasterLog* toggles, session-only — see HeartopiaComplete.Logging.cs)
         // ----------------------------------------------------------------------------------------
 
         // One binding per MasterLog* flag — get/set lambdas instead of 39 hand-written toggle
@@ -184,7 +184,8 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogUnderwaterRadar, v => MasterLogUnderwaterRadar = v, "Underwater Radar"),
                 new UguiLoggingToggleBinding(() => MasterLogGameLod, v => MasterLogGameLod = v, "Game LOD"),
                 new UguiLoggingToggleBinding(() => MasterLogWorldStage, v => MasterLogWorldStage = v, "World Stage"),
-                new UguiLoggingToggleBinding(() => MasterLogInputMap, v => MasterLogInputMap = v, "Input Map")
+                new UguiLoggingToggleBinding(() => MasterLogInputMap, v => MasterLogInputMap = v, "Input Map"),
+                new UguiLoggingToggleBinding(() => MasterLogPartyAutoDecline, v => MasterLogPartyAutoDecline = v, "Party Auto-Decline")
             };
         }
 

@@ -125,6 +125,29 @@ namespace HeartopiaMod
         private int partyDeclinedInviteCount;
         private int partyAutoLeftCount;
 
+        // First-sighting latches, one per hooked event. The branch logs below only speak when the
+        // feature ACTS, so a run where nothing happens is indistinguishable from a run where the
+        // event never arrived — which is exactly the state a field report ("call came in, nothing
+        // was declined, counters zero, log empty") leaves you in. These fire once per event type
+        // per session, ungated by MasterLog, so silence in the log becomes real evidence that the
+        // channel is dead rather than an absence of proof.
+        private bool partySawInviteEvent;
+        private bool partySawOtherRoomInviteEvent;
+        private bool partySawMembershipEvent;
+        private bool partySawApplyResultEvent;
+
+        private void PartyAutoDeclineNoteFirstSighting(ref bool latch, string what, string detail)
+        {
+            if (latch)
+            {
+                return;
+            }
+
+            latch = true;
+            ModLogger.Msg("[PartyAutoDecline] first " + what + " received this session" + detail
+                + " — the hook channel is live.");
+        }
+
         // Latched for the lifetime of one membership: set by our own apply-success (or by the
         // visitor check), cleared the moment the party ends. No netId bookkeeping needed — you can
         // only be in one party at a time, so the flag and the membership rise and fall together.
@@ -280,6 +303,8 @@ namespace HeartopiaMod
         {
             uint partyNetId = e.ReadUInt32(0);
             uint inviterNetId = e.ReadUInt32(4);
+            this.PartyAutoDeclineNoteFirstSighting(ref this.partySawInviteEvent, "PartyInvitedEvent",
+                " (party=" + partyNetId + " inviter=" + inviterNetId + ")");
 
             if (!this.partyAutoDeclineInvites)
             {
@@ -300,6 +325,9 @@ namespace HeartopiaMod
 
         private void OnPartyOtherRoomInvitedEventHook(GameEventSnapshot e)
         {
+            this.PartyAutoDeclineNoteFirstSighting(ref this.partySawOtherRoomInviteEvent,
+                "OtherRoomPartyInvitedEvent", string.Empty);
+
             if (!this.partyAutoDeclineInvites)
             {
                 if (MasterLogPartyAutoDecline)
@@ -322,6 +350,8 @@ namespace HeartopiaMod
         {
             int errorCode = e.ReadInt32(0);
             uint partyNetId = e.ReadUInt32(4);
+            this.PartyAutoDeclineNoteFirstSighting(ref this.partySawApplyResultEvent,
+                "ApplyPartyGameResultEvent", " (code=" + errorCode + " party=" + partyNetId + ")");
 
             if (errorCode != PartyErrorCodeSuccess)
             {
@@ -342,6 +372,8 @@ namespace HeartopiaMod
         private void OnPartyMembershipChangedEventHook(GameEventSnapshot e)
         {
             bool inParty = e.ReadBool(0);
+            this.PartyAutoDeclineNoteFirstSighting(ref this.partySawMembershipEvent,
+                "PartyMembershipChangedEvent", " (inParty=" + inParty + ")");
 
             if (!inParty)
             {
