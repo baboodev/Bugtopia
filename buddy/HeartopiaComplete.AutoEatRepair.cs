@@ -115,12 +115,14 @@ namespace HeartopiaMod
                 string primaryStatus = status;
                 string handholdStatus = "expensive fallback throttled";
                 string auraStatus = "expensive fallback throttled";
+                // The managed handhold walk that used to run here resolved the InteractSystem and
+                // self player through FindLoadedType and never succeeded, so AuraMono below was
+                // always the real answer.
                 bool handholdOk = false;
                 bool canUseExpensiveFallback = now >= this.nextAutoRepairExpensiveDurabilityFallbackAt;
                 if (canUseExpensiveFallback)
                 {
                     this.nextAutoRepairExpensiveDurabilityFallbackAt = now + AutoRepairExpensiveFallbackRetrySeconds;
-                    handholdOk = this.TryGetCurrentToolDurabilityViaHandhold(out toolId, out durability, out maxDurability, out handholdStatus);
                 }
 
                 if (!handholdOk)
@@ -603,52 +605,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetCurrentToolDurabilityViaHandhold(out int toolId, out int durability, out int maxDurability, out string status)
-        {
-            toolId = 0;
-            durability = 0;
-            maxDurability = 0;
-            status = "Handhold durability unavailable";
-
-            try
-            {
-                if (!this.TryGetCurrentHandholdObject(out object handholdObj, out string handholdSource) || handholdObj == null)
-                {
-                    status = "Handhold unavailable: " + handholdSource;
-                    return false;
-                }
-
-                if (!this.TryFindDurabilityCarrierObject(handholdObj, out object carrierObj, out string carrierPath))
-                {
-                    string handholdTypeName = handholdObj.GetType().FullName ?? handholdObj.GetType().Name ?? "<unknown>";
-                    status = "Handhold durability unavailable: " + handholdTypeName;
-                    return false;
-                }
-
-                Type carrierType = carrierObj.GetType();
-                if (!this.TryReadIntMember(carrierObj, carrierType, "durability", out durability)
-                    || !this.TryReadIntMember(carrierObj, carrierType, "maxDurability", out maxDurability))
-                {
-                    status = "Handhold durability fields unreadable: " + carrierPath;
-                    return false;
-                }
-
-                if (!this.TryReadIntMember(carrierObj, carrierType, "Id", out toolId)
-                    && !this.TryReadIntMember(carrierObj, carrierType, "id", out toolId)
-                    && !this.TryReadIntMember(carrierObj, carrierType, "toolId", out toolId))
-                {
-                    toolId = -3;
-                }
-
-                status = "Handhold OK: " + handholdSource + " -> " + carrierPath;
-                return maxDurability > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "Handhold durability exception: " + ex.Message;
-                return false;
-            }
-        }
 
         private bool TryGetCurrentToolDurabilityViaAuraMonoToolSystem(out int toolId, out int durability, out int maxDurability, out string status)
         {
@@ -991,74 +947,7 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryFindDurabilityCarrierObject(object rootObj, out object carrierObj, out string carrierPath)
-        {
-            carrierObj = null;
-            carrierPath = null;
-            if (rootObj == null)
-            {
-                return false;
-            }
 
-            Queue<(object obj, string path, int depth)> queue = new Queue<(object obj, string path, int depth)>();
-            HashSet<object> seen = new HashSet<object>();
-            queue.Enqueue((rootObj, rootObj.GetType().FullName ?? rootObj.GetType().Name ?? "<root>", 0));
-
-            string[] preferredMembers = new string[]
-            {
-                "tool", "_tool", "item", "_item", "data", "_data", "toolData", "_toolData",
-                "itemData", "_itemData", "runtimeData", "_runtimeData", "config", "_config",
-                "tableTool", "_tableTool", "toolInfo", "_toolInfo", "useItem", "_useItem",
-                "entity", "_entity", "ComponentData", "_componentData"
-            };
-
-            while (queue.Count > 0)
-            {
-                (object obj, string path, int depth) current = queue.Dequeue();
-                if (current.obj == null || !seen.Add(current.obj))
-                {
-                    continue;
-                }
-
-                Type type = current.obj.GetType();
-                if (this.HasDurabilityMembers(type))
-                {
-                    carrierObj = current.obj;
-                    carrierPath = current.path;
-                    return true;
-                }
-
-                if (current.depth >= 3)
-                {
-                    continue;
-                }
-
-                foreach (string memberName in preferredMembers)
-                {
-                    if (!this.TryGetObjectMember(current.obj, memberName, out object nested) || nested == null)
-                    {
-                        continue;
-                    }
-
-                    Type nestedType = nested.GetType();
-                    if (nestedType.IsPrimitive || nested is string || nestedType.IsEnum)
-                    {
-                        continue;
-                    }
-
-                    queue.Enqueue((nested, current.path + "." + memberName, current.depth + 1));
-                }
-            }
-
-            return false;
-        }
-
-        private bool HasDurabilityMembers(Type type)
-        {
-            return type != null
-                && this.FindFieldInHierarchy(type, "durability") != null
-                && this.FindFieldInHierarchy(type, "maxDurability") != null;
-        }
 
         private bool TryResolveToolDurabilityReflection(out string status)
         {

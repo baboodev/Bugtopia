@@ -988,13 +988,6 @@ namespace HeartopiaMod
                     return true;
                 }
 
-                if (this.TryGetManagedViewModuleSelfPlayerObject(out object selfPlayer, out _)
-                    && this.TryGetObjectMember(selfPlayer, "IsDriving", out object isDrivingObj)
-                    && isDrivingObj is bool isDriving
-                    && isDriving)
-                {
-                    return true;
-                }
             }
             catch
             {
@@ -1099,17 +1092,9 @@ namespace HeartopiaMod
             netId = 0;
             try
             {
-                if (!this.TryGetManagedViewModuleSelfPlayerObject(out object selfPlayer, out _))
-                {
-                    return false;
-                }
-
-                if (this.TryGetObjectMember(selfPlayer, "entity", out object entityObj)
-                    && this.TryGetObjectMember(entityObj, "netId", out object netIdObj))
-                {
-                    netId = netIdObj is uint u ? u : Convert.ToUInt32(netIdObj);
-                    return netId != 0;
-                }
+                // The managed ViewModule walk that stood here is dead on this build (see the note
+                // above); AuraMono PlayerDataCenter is the only source.
+                return false;
             }
             catch
             {

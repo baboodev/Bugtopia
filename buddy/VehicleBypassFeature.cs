@@ -930,16 +930,9 @@ namespace HeartopiaMod
             vehicleNetId = 0;
             try
             {
-                if (!this.TryGetManagedViewModuleSelfPlayerObject(out object selfPlayer, out _)
-                    || !this.TryGetObjectMember(selfPlayer, "Status", out object statusObj)
-                    || !this.TryGetObjectMember(statusObj, "VehicleStatus", out object vehicleStatusObj)
-                    || !this.TryGetObjectMember(vehicleStatusObj, "VehicleNetId", out object netIdObj))
-                {
-                    return false;
-                }
-
-                vehicleNetId = netIdObj is uint u ? u : Convert.ToUInt32(netIdObj);
-                return vehicleNetId != 0;
+                // Managed ViewModule self-player is dead on this build (XDTLevelAndEntity types
+                // never reach the BepInEx interop), so this read could never succeed.
+                return false;
             }
             catch
             {
