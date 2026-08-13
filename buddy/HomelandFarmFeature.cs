@@ -11215,30 +11215,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryHomelandFarmTryReadComponentNetId(object component, out uint netId)
-        {
-            netId = 0U;
-            if (component == null)
-            {
-                return false;
-            }
-
-            if (this.TryGetObjectMember(component, "entity", out object entityObj) && entityObj != null
-                && this.TryHomelandFarmTryReadEntityNetId(entityObj, out netId) && netId != 0U)
-            {
-                return true;
-            }
-
-            if (this.TryGetObjectMember(component, "Entity", out entityObj) && entityObj != null
-                && this.TryHomelandFarmTryReadEntityNetId(entityObj, out netId) && netId != 0U)
-            {
-                return true;
-            }
-
-            return this.TryGetUIntMember(component, "netId", out netId) && netId != 0U
-                || this.TryGetUIntMember(component, "NetId", out netId) && netId != 0U;
-        }
-
         private bool TryHomelandFarmTryReadEntityNetId(object entity, out uint netId)
         {
             netId = 0U;
