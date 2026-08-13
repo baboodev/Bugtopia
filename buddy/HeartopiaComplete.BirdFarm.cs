@@ -48,35 +48,6 @@ namespace HeartopiaMod
             }
         }
 
-        public List<GameObject> GetTrackedBirdObjects()
-        {
-            List<GameObject> result = new List<GameObject>();
-            HashSet<int> seenIds = new HashSet<int>();
-
-            foreach (KeyValuePair<GameObject, GameObject> mapping in this.markerToTarget)
-            {
-                GameObject target = mapping.Value;
-                if (target == null)
-                {
-                    continue;
-                }
-
-                string lowerName = target.name != null ? target.name.ToLowerInvariant() : string.Empty;
-                if (!this.ShouldTrackBirdObject(lowerName))
-                {
-                    continue;
-                }
-
-                int instanceId = target.GetInstanceID();
-                if (seenIds.Add(instanceId))
-                {
-                    result.Add(target);
-                }
-            }
-
-            return result;
-        }
-
         public bool TryGetBirdScannerToolStatus(out bool scannerEquipped, out string status)
         {
             scannerEquipped = false;
@@ -773,25 +744,6 @@ namespace HeartopiaMod
             this.lastBirdFarmRecentPhotoNetId = 0U;
             this.lastBirdFarmRecentPhotoNetIdAt = -999f;
             this.pendingBirdFarmAttemptedNetIds.Clear();
-        }
-
-        public void PrewarmBirdFarmRuntime()
-        {
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
-                {
-                    return;
-                }
-
-                this.TryResolveAuraMonoBirdPhotoMethod(out _, out _, out _);
-                this.TryResolveAuraMonoBirdPhotoDetailInfoClass();
-                this.TryResolveAuraMonoBirdPhotoDetailInfoFields();
-            }
-            catch (Exception ex)
-            {
-                this.BirdFarmNetLog("PrewarmBirdFarmRuntime error: " + ex.Message);
-            }
         }
 
         private bool ShouldSkipRecentBirdFarmNetId(uint netId)

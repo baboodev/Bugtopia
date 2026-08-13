@@ -31,42 +31,6 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        public List<Vector3> GetTrackedInsectPositions()
-        {
-            List<Vector3> res = new List<Vector3>();
-            foreach (KeyValuePair<int, GameObject> kv in this.trackedObjectMarkers)
-            {
-                if (kv.Value == null)
-                {
-                    continue;
-                }
-
-                GameObject target = null;
-                foreach (KeyValuePair<GameObject, GameObject> mapping in this.markerToTarget)
-                {
-                    if (mapping.Key != null && mapping.Key.name == kv.Value.name)
-                    {
-                        target = mapping.Value;
-                        break;
-                    }
-                }
-
-                if (!this.ShouldTrackInsectObject(target))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    res.Add(target.transform.position);
-                }
-                catch
-                {
-                }
-            }
-            return res;
-        }
-
         public bool TryNetCatchNearbyInsects(float scanRange, int batchSize, out int detectedCount, out int resolvedCount, out int sentCount, out string status)
         {
             detectedCount = 0;
@@ -117,34 +81,6 @@ namespace HeartopiaMod
             {
                 status = "Exception: " + ex.Message;
                 this.InsectFarmNetLog("TryNetCatchNearbyInsects exception: " + ex);
-                return false;
-            }
-        }
-
-        public bool TryScanNearbyInsectTargets(float scanRange, int batchSize, out int detectedCount, out List<Vector3> positions, out string status)
-        {
-            detectedCount = 0;
-            positions = new List<Vector3>();
-            status = "Idle";
-
-            try
-            {
-                GameObject player = this.GetPlayerObject();
-                Vector3 playerPos = player != null ? player.transform.position : (Camera.main != null ? Camera.main.transform.position : Vector3.zero);
-                List<uint> ids = new List<uint>();
-                if (!this.TryCollectCatchTargetsViaSweepNetManager(player, playerPos, scanRange, batchSize, ids, positions, out status))
-                {
-                    detectedCount = ids.Count;
-                    return false;
-                }
-
-                detectedCount = ids.Count;
-                return ids.Count > 0 && positions.Count > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "Scan exception: " + ex.Message;
-                this.InsectFarmNetLog("TryScanNearbyInsectTargets exception: " + ex);
                 return false;
             }
         }
