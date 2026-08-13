@@ -104,69 +104,23 @@ namespace HeartopiaMod
                     }
                 }
 
-                bool hasManagedInteract = this.TryGetManagedInteractSystemObject(out object interactSystem, out _);
-                object playerObj = null;
-                bool hasManagedPlayer = this.TryGetManagedSelfPlayerObject(out playerObj, out _);
-                if (!hasManagedPlayer && hasManagedInteract)
+                // The managed interact-system / self-player lookups that used to sit here resolved
+                // XDT* types through FindLoadedType and can never succeed on this build, so every
+                // branch below them was unreachable. That is exactly the wedge described above: the
+                // resolver answered "cannot determine" whenever another tool was in hand, and
+                // AutoFishingFarm.Update retried forever without reaching the equip call. The Mono
+                // verdict resolved above is therefore the whole answer.
+                if (!string.IsNullOrEmpty(monoTentativeStatus))
                 {
-                    this.TryGetManagedInteractPlayerObject(interactSystem, out playerObj, out _);
-                }
-
-                if (playerObj == null)
-                {
-                    // The Mono path already resolved the handhold and concluded it is NOT a rod.
-                    // That is a CONCLUSIVE answer ("a tool is equipped, just not this one"), so
-                    // report it as a successful read with rodEquipped=false.
-                    //
-                    // Returning false here instead was a real wedge (2026-07-28): the managed
-                    // self-player lookup is dead on this build, so any time another tool was in hand
-                    // this method answered "cannot determine", and AutoFishingFarm.Update — the only
-                    // one of the three farms that hard-gates on the return value — sat in its
-                    // "Tool check unavailable" retry forever and NEVER reached the equip call.
-                    // Standalone it hid, because enabling the farm with an empty hand takes the
-                    // "No Tool Equipped" early return above; combined farming always hands over with
-                    // the previous slice's tool still equipped, so the Fish slice could never start.
-                    if (!string.IsNullOrEmpty(monoTentativeStatus))
-                    {
-                        rodEquipped = false;
-                        status = monoTentativeStatus;
-                        this.AutoFishLog("Rod resolver: managed player unavailable, using mono verdict " + status);
-                        return true;
-                    }
-
-                    status = "Player Unavailable";
-                    this.AutoFishLog("Rod resolver failed: " + status);
-                    return false;
-                }
-
-                if (this.TryGetManagedFishingRodObject(interactSystem, playerObj, out object rodObj, out string source))
-                {
-                    if (rodObj != null)
-                    {
-                        rodEquipped = true;
-                        status = "Fishing Rod Equipped";
-                        this.AutoFishLog("Rod resolver: managed rod resolved from " + source);
-                        return true;
-                    }
-                }
-                else if (!string.IsNullOrEmpty(source) && source.IndexOf("not fishing rod", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    int marker = source.IndexOf("[not fishing rod:", StringComparison.OrdinalIgnoreCase);
-                    if (marker >= 0)
-                    {
-                        string detail = source.Substring(marker).Trim('[', ']');
-                        detail = detail.Replace("not fishing rod:", string.Empty).Trim();
-                        status = "Holding " + detail;
-                        return true;
-                    }
-
-                    status = "Holding Other Tool";
+                    rodEquipped = false;
+                    status = monoTentativeStatus;
+                    this.AutoFishLog("Rod resolver: mono verdict " + status);
                     return true;
                 }
 
-                status = !string.IsNullOrEmpty(monoTentativeStatus) ? monoTentativeStatus : "No Tool Equipped";
-                this.AutoFishLog("Rod resolver result: " + status);
-                return true;
+                status = "Player Unavailable";
+                this.AutoFishLog("Rod resolver failed: " + status);
+                return false;
             }
             catch (Exception ex)
             {
@@ -176,92 +130,7 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryGetManagedFishingRodObject(object interactSystemObj, object playerObj, out object rodObj, out string source)
-        {
-            rodObj = null;
-            source = "none";
 
-            if (playerObj == null && interactSystemObj == null)
-            {
-                source = "player/interact unavailable";
-                return false;
-            }
-
-            foreach (string memberName in new string[] { "handhold", "_handhold", "currHandhold", "_currHandhold" })
-            {
-                if (interactSystemObj != null && this.TryGetObjectMember(interactSystemObj, memberName, out rodObj) && rodObj != null)
-                {
-                    if (this.IsManagedFishingRodObject(rodObj))
-                    {
-                        source = "InteractSystem." + memberName;
-                        return true;
-                    }
-
-                    source = "[not fishing rod: " + rodObj.GetType().Name + "]";
-                    return false;
-                }
-            }
-
-            if (playerObj != null
-                && (this.TryGetObjectMember(playerObj, "equipComponent", out object equipComponent)
-                    || this.TryGetObjectMember(playerObj, "_equipComponent", out equipComponent))
-                && equipComponent != null)
-            {
-                if ((this.TryGetObjectMember(equipComponent, "handhold", out rodObj)
-                        || this.TryGetObjectMember(equipComponent, "_handhold", out rodObj))
-                    && rodObj != null)
-                {
-                    if (this.IsManagedFishingRodObject(rodObj))
-                    {
-                        source = equipComponent.GetType().Name + ".handhold";
-                        return true;
-                    }
-
-                    source = "[not fishing rod: " + rodObj.GetType().Name + "]";
-                    return false;
-                }
-            }
-
-            foreach (string memberName in new string[] { "handhold", "_handhold", "currHandhold", "_currHandhold" })
-            {
-                if (playerObj != null && this.TryGetObjectMember(playerObj, memberName, out rodObj) && rodObj != null)
-                {
-                    if (this.IsManagedFishingRodObject(rodObj))
-                    {
-                        source = "Player." + memberName;
-                        return true;
-                    }
-
-                    source = "[not fishing rod: " + rodObj.GetType().Name + "]";
-                    return false;
-                }
-            }
-
-            source = "managed fishing rod unavailable";
-            return false;
-        }
-
-        private bool IsManagedFishingRodObject(object obj)
-        {
-            if (obj == null)
-            {
-                return false;
-            }
-
-            Type type = obj.GetType();
-            string typeName = type.FullName ?? type.Name ?? string.Empty;
-            if (typeName.IndexOf("FishingRod", StringComparison.OrdinalIgnoreCase) >= 0
-                || typeName.IndexOf("HandHoldFishingRod", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return true;
-            }
-
-            object marker;
-            return this.TryGetObjectMember(obj, "_float", out marker)
-                || this.TryGetObjectMember(obj, "floatComponent", out marker)
-                || this.TryGetObjectMember(obj, "_targetFXProxy", out marker)
-                || this.TryGetObjectMember(obj, "_invalidTargetFXProxy", out marker);
-        }
 
         // Just-caught-fish ghost avoidance: right after a catch the caught fish's shadow GameObject
         // lingers a moment at the catch spot before despawning, and the scan would re-target it (empty

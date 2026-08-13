@@ -136,58 +136,14 @@ namespace HeartopiaMod
                         }
                     }
                 }
-
-                bool hasManagedInteract = this.TryGetManagedInteractSystemObject(out object interactSystem, out _);
-                object playerObj = null;
-                bool hasManagedPlayer = this.TryGetManagedSelfPlayerObject(out playerObj, out _);
-                if (!hasManagedInteract && !hasManagedPlayer)
-                {
-                    status = !string.IsNullOrEmpty(monoTentativeStatus) ? monoTentativeStatus : "Tool state unavailable";
-                    return false;
-                }
-
-                if (!hasManagedPlayer && hasManagedInteract && !this.TryGetManagedInteractPlayerObject(interactSystem, out playerObj, out _))
-                {
-                    status = !string.IsNullOrEmpty(monoTentativeStatus) ? monoTentativeStatus : "Player Unavailable";
-                    return false;
-                }
-
-                if (!this.TryGetManagedBirdScannerObject(interactSystem, playerObj, out object scannerObj, out string source))
-                {
-                    if (!string.IsNullOrEmpty(source) && source.IndexOf("not bird scanner", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        int marker = source.IndexOf("[not bird scanner:", StringComparison.OrdinalIgnoreCase);
-                        if (marker >= 0)
-                        {
-                            string detail = source.Substring(marker).Trim('[', ']');
-                            detail = detail.Replace("not bird scanner:", string.Empty).Trim();
-                            status = "Holding " + detail;
-                            return true;
-                        }
-
-                        status = "Holding Other Tool";
-                        return true;
-                    }
-
-                    if (!string.IsNullOrEmpty(monoTentativeStatus))
-                    {
-                        status = monoTentativeStatus;
-                        return true;
-                    }
-
-                    status = "No Tool Equipped";
-                    return true;
-                }
-
-                if (scannerObj != null)
-                {
-                    scannerEquipped = true;
-                    status = "Bird Scanner Equipped";
-                    return true;
-                }
-
-                status = "No Tool Equipped";
-                return true;
+                // The managed interact-system / self-player lookups that used to gate this section
+                // resolve XDT* types through FindLoadedType and never succeed on this build, so the
+                // scanner check below them was unreachable and this always took the branch here.
+                // Behaviour is preserved verbatim, INCLUDING the `return false` ("cannot determine")
+                // — note that is the same shape as the wedge documented in HeartopiaComplete.Fishing
+                // .cs, so if a caller ever hard-gates on this return value it will stall the same way.
+                status = !string.IsNullOrEmpty(monoTentativeStatus) ? monoTentativeStatus : "Tool state unavailable";
+                return false;
             }
             catch (Exception ex)
             {
@@ -3537,84 +3493,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryGetManagedBirdScannerObject(object interactSystemObj, object playerObj, out object scannerObj, out string source)
-        {
-            scannerObj = null;
-            source = "none";
-
-            object handholdObj = null;
-            string handholdSource = string.Empty;
-            if (interactSystemObj != null)
-            {
-                foreach (string memberName in new string[] { "_handhold", "handhold" })
-                {
-                    if (this.TryGetObjectMember(interactSystemObj, memberName, out handholdObj) && handholdObj != null)
-                    {
-                        handholdSource = interactSystemObj.GetType().Name + "." + memberName;
-                        break;
-                    }
-                }
-            }
-
-            if (handholdObj == null && playerObj != null)
-            {
-                object equipComponent;
-                if (this.TryInvokeZeroArgMember(playerObj, out equipComponent, "get_equipComponent", "GetEquipComponent")
-                    || this.TryGetObjectMember(playerObj, "equipComponent", out equipComponent)
-                    || this.TryGetObjectMember(playerObj, "_equipComponent", out equipComponent))
-                {
-                    if (equipComponent != null)
-                    {
-                        if ((this.TryInvokeZeroArgMember(equipComponent, out handholdObj, "get_handhold", "GetHandhold")
-                            || this.TryGetObjectMember(equipComponent, "handhold", out handholdObj)
-                            || this.TryGetObjectMember(equipComponent, "_handhold", out handholdObj)) && handholdObj != null)
-                        {
-                            handholdSource = equipComponent.GetType().Name + ".handhold";
-                        }
-                    }
-                }
-            }
-
-            if (handholdObj == null)
-            {
-                return false;
-            }
-
-            string className = handholdObj.GetType().FullName ?? handholdObj.GetType().Name ?? string.Empty;
-            bool looksLikeBirdScanner = className.IndexOf("BirdScanner", StringComparison.OrdinalIgnoreCase) >= 0
-                || (className.IndexOf("bird", StringComparison.OrdinalIgnoreCase) >= 0 && className.IndexOf("scan", StringComparison.OrdinalIgnoreCase) >= 0)
-                || className.IndexOf("Scanner", StringComparison.OrdinalIgnoreCase) >= 0;
-
-            if (this.TryGetObjectMember(handholdObj, "_scanner", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "scanner", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "_birdScanner", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "birdScanner", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "_scannerStatusPanel", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "scannerStatusPanel", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "_scanComponent", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "scanComponent", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "_photoTargetManager", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "photoTargetManager", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "_birdManager", out scannerObj)
-                || this.TryGetObjectMember(handholdObj, "birdManager", out scannerObj))
-            {
-                if (scannerObj != null)
-                {
-                    source = handholdSource + ".scanner";
-                    return true;
-                }
-            }
-
-            if (!looksLikeBirdScanner)
-            {
-                source = handholdSource + " [not bird scanner: " + className + "]";
-                return false;
-            }
-
-            scannerObj = handholdObj;
-            source = handholdSource;
-            return true;
-        }
 
         private bool TryResolveBirdStaticIdFromGameObject(GameObject obj, out int staticId, out string source)
         {
