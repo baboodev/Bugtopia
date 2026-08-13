@@ -31,24 +31,6 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        [Serializable]
-        public class SerializableVector3
-        {
-            public float x, y, z;
-            public SerializableVector3() { }
-            public SerializableVector3(Vector3 v) { x = v.x; y = v.y; z = v.z; }
-            public Vector3 ToVector3() { return new Vector3(x, y, z); }
-        }
-
-        [Serializable]
-        public class SerializableQuaternion
-        {
-            public float x, y, z, w;
-            public SerializableQuaternion() { }
-            public SerializableQuaternion(Quaternion q) { x = q.x; y = q.y; z = q.z; w = q.w; }
-            public Quaternion ToQuaternion() { return new Quaternion(x, y, z, w); }
-        }
-
         private class MenuNotification
         {
             public string Key;

@@ -196,7 +196,6 @@ namespace HeartopiaMod
         private int mapNameProfileIdOffset = -1;     // PlayerProfile.Id (encoded shortId string) raw offset
         private int mapNameProfileAvatarUrlOffset = -1; // PlayerProfile.AvatarImageUrl raw offset (ESP avatar)
         private IntPtr mapNameDecodeShortIdMethod = IntPtr.Zero; // ShortIdUtil.DecodeShortId(string)->long
-        private IntPtr mapNameGetPlayerNameMethod = IntPtr.Zero; // PlayerServiceSystem.GetPlayerName(long,long)
         private bool mapNameMethodsTried;
         private bool mapNameDiagLogged;
         // shortId -> pinned real-name MonoString. GetPlayerName(shortId) is the central name function (map

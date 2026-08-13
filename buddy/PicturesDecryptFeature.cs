@@ -41,7 +41,6 @@ namespace HeartopiaMod
         private int drawUploadRunsPerChunk = DrawUploadRunsPerChunkDefault;
         private float drawUploadChunkDelaySeconds = DrawUploadChunkDelayDefault;
         private readonly List<string> picturesChangedRelativePaths = new List<string>();
-        private Vector2 picturesChangedScrollPos = Vector2.zero;
         private bool picturesChangedListDirty = true;
 
         private sealed class PicturesManifest
@@ -1013,13 +1012,6 @@ namespace HeartopiaMod
             }
 
             return builder.ToString();
-        }
-
-        private enum PicturesDecryptFileResult
-        {
-            Failed,
-            Decrypted,
-            CopiedPlain
         }
 
         private bool TryDecryptGamePhotoBytes(byte[] encrypted, out byte[] plain)

@@ -1986,8 +1986,6 @@ namespace HeartopiaMod
         private bool fishComponentIl2CppTypeResolved = false;
         private float nextFishShadowResolverMissLogAt = -999f;
         private string lastFishShadowResolverMissLogStatus = string.Empty;
-        private readonly Dictionary<int, int> fishShadowPriorityByFishIdCache = new Dictionary<int, int>();
-        private readonly Dictionary<int, string> fishShadowPrioritySourceByFishIdCache = new Dictionary<int, string>();
 
 
 
@@ -3799,41 +3797,6 @@ namespace HeartopiaMod
 
         // Get display name from sprite name
 
-
-
-        bool SimulateLegacyClick(GameObject target)
-        {
-            if (target == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                var eventTrigger = target.GetComponent<EventTrigger>();
-                if (eventTrigger != null && eventTrigger.triggers.Count > 0)
-                {
-                    PointerEventData eventData = new PointerEventData(EventSystem.current);
-                    foreach (var trigger in eventTrigger.triggers)
-                    {
-                        if (trigger.eventID == EventTriggerType.PointerClick ||
-                            trigger.eventID == EventTriggerType.PointerDown)
-                        {
-                            trigger.callback.Invoke(eventData);
-                            return true;
-                        }
-                    }
-                }
-
-                return ExecuteEvents.Execute(target, new PointerEventData(EventSystem.current), ExecuteEvents.pointerClickHandler) ||
-                       ExecuteEvents.Execute(target, new PointerEventData(EventSystem.current), ExecuteEvents.pointerDownHandler);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         bool SimulateClick(GameObject target)
         {
             EventSystem eventSystem = this.EnsureGameplayEventSystemAvailable();
@@ -3907,42 +3870,6 @@ namespace HeartopiaMod
             }
             return false;
         }
-
-
-        bool ClickUseButton()
-        {
-            var btn = GameObject.Find(USE_BUTTON_PATH)?.GetComponent<Button>();
-            if (btn != null && btn.interactable)
-            {
-                var txt = btn.GetComponentInChildren<Text>();
-                if (txt == null)
-                {
-                    btn.onClick.Invoke();
-                    return true;
-                }
-                string actionText = txt.text == null ? string.Empty : txt.text.Trim();
-
-                foreach (string candidate in LocalizationManager.GetTranslationCandidates("Use"))
-                {
-                    if (actionText.Equals(candidate, StringComparison.OrdinalIgnoreCase))
-                    {
-                        btn.onClick.Invoke();
-                        return true;
-                    }
-                }
-
-                foreach (string candidate in LocalizationManager.GetTranslationCandidates("Eat"))
-                {
-                    if (actionText.Equals(candidate, StringComparison.OrdinalIgnoreCase))
-                    {
-                        btn.onClick.Invoke();
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
         void CloseInventory()
         {
             var btn = GameObject.Find(CLOSE_BUTTON_PATH)?.GetComponent<Button>();
@@ -4376,9 +4303,6 @@ namespace HeartopiaMod
         private float nextGameSpeedConfigSaveAt = 0f;
 
         // NEW FEATURES: Jump Height and Camera FOV
-        private Vector3 lastPlayerVelocity = Vector3.zero;
-        private Vector3 jumpBoostStartPos = Vector3.zero;
-        private Vector3 jumpBoostTargetPos = Vector3.zero;
         private bool customCameraFOVEnabled = false;
         private float cameraFOV = 60f;
         private float originalFOV = -1f;
@@ -4872,10 +4796,6 @@ namespace HeartopiaMod
         private uint lastBirdFarmMaxPhotoScareNetId = 0U;
         private MethodInfo cachedScannerStatusPanelGetScanningBirdNetIdMethod = null;
         private MethodInfo cachedEntityUtilGetEntityResIdMethod = null;
-        private IntPtr cachedBirdCamouflageBackpackClass = IntPtr.Zero;
-        private IntPtr cachedBirdCamouflageUseMethod = IntPtr.Zero;
-        private IntPtr cachedBirdCamouflageCtorMethod = IntPtr.Zero;
-        private IntPtr cachedBirdCamouflageNetIdField = IntPtr.Zero;
         private readonly List<uint> lastInsectFarmSentNetIds = new List<uint>();
         private readonly List<Vector3> lastInsectFarmSentPositions = new List<Vector3>();
         private readonly List<uint> lastBirdFarmSentNetIds = new List<uint>();
@@ -5071,15 +4991,6 @@ namespace HeartopiaMod
         // Token: 0x04000030 RID: 48
         private float lastScanTime = 0f;
 
-        // Token: 0x04000031 RID: 49
-        private const float scanInterval = 2f;
-
-        // Token: 0x04000031 RID: 49
-        private const float blueberryRadarRange = 80f;
-
-        // Token: 0x04000032 RID: 50
-        private const float raspberryRadarRange = 80f;
-
         // Token: 0x04000033 RID: 51
         private Dictionary<GameObject, GameObject> markerToTarget = new Dictionary<GameObject, GameObject>();
 
@@ -5139,12 +5050,6 @@ namespace HeartopiaMod
         // Token: 0x04000038 RID: 56
         private float blueberryCooldownDuration = 125f;
 
-        // Token: 0x04000039 RID: 57
-        private const float blueberryHideDelay = 10f;
-
-        // Token: 0x0400003A RID: 58
-        private const float blueberryCollectDelay = 4f;
-
         // Token: 0x0400003B RID: 59
         private System.Action blueberryCollectListener = null;
 
@@ -5166,12 +5071,6 @@ namespace HeartopiaMod
 
         // Token: 0x0400003F RID: 63
         private float raspberryCooldownDuration = 125f;
-
-        // Token: 0x04000040 RID: 64
-        private const float raspberryHideDelay = 10f;
-
-        // Token: 0x04000041 RID: 65
-        private const float raspberryCollectDelay = 4f;
 
         // Token: 0x04000042 RID: 66
         private System.Action raspberryCollectListener = null;
@@ -5211,17 +5110,11 @@ namespace HeartopiaMod
         // Token: 0x04000049 RID: 73
         private Dictionary<Vector3, float> recentlyVisitedNodes = new Dictionary<Vector3, float>();
 
-        // Token: 0x0400004A RID: 74
-        private const float nodeVisitCooldown = 15f;
-
         // Token: 0x0400004B RID: 75
         private bool autoCollectClickedSinceArrival = false;
 
         // Token: 0x0400004C RID: 76
         private int cameraRotationAttempts = 0;
-
-        // Token: 0x0400004D RID: 77
-        private const int maxCameraRotationAttempts = 3;
 
         // Token: 0x0400004E RID: 78
         private float cameraStuckDisplayTimer = 0f;

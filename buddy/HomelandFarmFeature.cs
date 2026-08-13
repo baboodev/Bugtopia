@@ -281,7 +281,6 @@ namespace HeartopiaMod
         // While set, every radius scan (sow slots, weed, harvest) centers on the captured
         // planter zone instead of the live player position, so the player may drift slightly.
         private Vector3? homelandFarmScanCenterOverride = null;
-        private readonly Dictionary<uint, int> homelandFarmSyncedManureVisualByCropNetId = new Dictionary<uint, int>();
         private sealed class HomelandFarmPlanterSowAnchor
         {
             public Vector3 WorldPosition;

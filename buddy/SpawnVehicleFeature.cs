@@ -123,24 +123,6 @@ namespace HeartopiaMod
             return count;
         }
 
-        // Thin RAII-style helper so the "Get On" button can be visually/functionally disabled for
-        // occupied seats without duplicating GUI.enabled save/restore at every call site.
-        private readonly struct GuiEnabledScope : IDisposable
-        {
-            private readonly bool previous;
-
-            public GuiEnabledScope(bool enabled)
-            {
-                this.previous = GUI.enabled;
-                GUI.enabled = enabled;
-            }
-
-            public void Dispose()
-            {
-                GUI.enabled = this.previous;
-            }
-        }
-
         // Reads TableData.TableCars (Dictionary<int, TableCar>) via AuraMono only — TableData lives in the
         // EcsClient Mono image (per prefer-auramono-no-managed-fallback, no managed reflection path). Names
         // are resolved AFTER the collection pins are freed, using scalar staticIds only, so no moving-GC

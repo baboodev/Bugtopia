@@ -60,7 +60,6 @@ namespace HeartopiaMod
         private int petFeedSelectedFoodStaticId = 0;
         private string petFeedSelectedFoodName = "Any Food";
         private bool petFeedSkipFiveStarFood = true;
-        private readonly List<PetFeedTarget> petFeedDetectedPets = new List<PetFeedTarget>();
         private readonly List<PetFeedFavoriteUiRow> petFeedFavoriteUiRows = new List<PetFeedFavoriteUiRow>();
         private Vector2 petFeedFavoriteUiScroll = Vector2.zero;
 

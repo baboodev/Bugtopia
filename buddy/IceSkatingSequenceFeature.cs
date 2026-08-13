@@ -71,7 +71,6 @@ namespace HeartopiaMod
         private IntPtr iceSkatingAuraDictSetItemMethod;
         private IntPtr iceSkatingAuraDictAddMethod;
         private IntPtr iceSkatingAuraIntIntDictionaryClass;
-        private readonly Dictionary<IntPtr, IntPtr> iceSkatingAuraInflatedTryGetByServiceClass = new Dictionary<IntPtr, IntPtr>();
 
         private static readonly string[] IceSkatingAuraIntIntDictionaryTypeNames =
         {
