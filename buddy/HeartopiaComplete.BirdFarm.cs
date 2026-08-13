@@ -482,27 +482,10 @@ namespace HeartopiaMod
                 if (characterObj == null)
                 {
                     this.BirdFarmNetLog("PhotoMode resolver: Character.character returned null. Trying player.character fallback.");
-                    object playerObj = null;
-                    object interactSystem = null;
-                    bool gotSelfPlayer = this.TryGetManagedSelfPlayerObject(out playerObj, out _);
-                    bool gotInteractSystem = this.TryGetManagedInteractSystemObject(out interactSystem, out _);
-                    if (!gotSelfPlayer && (!gotInteractSystem || interactSystem == null))
-                    {
-                        this.lastBirdPhotoModeResolveStatus = "self player and interact system unavailable";
-                        return false;
-                    }
-
-                    if (playerObj == null && interactSystem != null)
-                    {
-                        this.TryGetManagedInteractPlayerObject(interactSystem, out playerObj, out _);
-                    }
-
-                    if (playerObj == null || !this.TryGetObjectMember(playerObj, "character", out characterObj) || characterObj == null)
-                    {
-                        this.lastBirdPhotoModeResolveStatus = "player.character fallback unavailable";
-                        this.BirdFarmNetLog("PhotoMode resolver: player.character fallback unavailable.");
-                        return false;
-                    }
+                    // The managed self-player / InteractSystem fallback that stood here resolves
+                    // XDT* types through FindLoadedType and never succeeds on this build.
+                    this.lastBirdPhotoModeResolveStatus = "self player and interact system unavailable";
+                    return false;
                 }
 
                 if (gamePhotoModeType != null)

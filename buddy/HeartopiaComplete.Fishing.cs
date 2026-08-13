@@ -1115,112 +1115,11 @@ namespace HeartopiaMod
 
         private bool TryGetLocalPlayerFishingShipNetId(out uint shipNetId)
         {
+            // The whole body was a managed self-player walk (EntityUtil / Character / DataCenter via
+            // FindLoadedType). None of those types reach the BepInEx interop, so this helper has
+            // always answered false; kept as an explicit false rather than a dead reflection tree.
             shipNetId = 0U;
-
-            try
-            {
-                if (!this.TryGetManagedSelfPlayerObject(out object playerObj, out _) || playerObj == null)
-                {
-                    return false;
-                }
-
-                if (this.TryGetManagedUInt32Member(playerObj, "attachShipNetId", out shipNetId) && shipNetId != 0U)
-                {
-                    return true;
-                }
-
-                object entityObj = null;
-                if (!this.TryGetObjectMember(playerObj, "entity", out entityObj) || entityObj == null)
-                {
-                    entityObj = playerObj;
-                }
-
-                Type shipComponentType = this.FindLoadedType(
-                    "XDTLevelAndEntity.Gameplay.Component.Fish.PlayerFishingShipComponent",
-                    "PlayerFishingShipComponent");
-                if (shipComponentType != null)
-                {
-                    object shipComponent = this.TryInvokeManagedGetComponent(entityObj, shipComponentType);
-                    if (shipComponent != null
-                        && this.TryGetManagedUInt32Member(shipComponent, "attachShipNetId", out shipNetId)
-                        && shipNetId != 0U)
-                    {
-                        return true;
-                    }
-                }
-
-                if (this.TryGetManagedUInt32Member(entityObj, "netId", out uint playerNetId) && playerNetId != 0U)
-                {
-                    Type dataCenterType = this.FindLoadedType(
-                        "XDTDataAndProtocol.ComponentsData.DataCenter",
-                        "ScriptsRefactory.DataAndProtocol.ComponentsData.DataCenter",
-                        "DataCenter");
-                    Type shipDataType = this.FindLoadedType(
-                        "XDTDataAndProtocol.ComponentsData.PlayerFishingShipComponentData",
-                        "ScriptsRefactory.DataAndProtocol.ComponentsData.PlayerFishingShipComponentData",
-                        "PlayerFishingShipComponentData");
-                    Type netIdType = this.cachedAutoSellNetIdType
-                        ?? this.FindLoadedType("XDT.Scene.Shared.NetId", "NetId", "EcsClient.XDT.Scene.Shared.NetId");
-                    if (dataCenterType != null && shipDataType != null && netIdType != null)
-                    {
-                        MethodInfo tryGetComponentData = null;
-                        foreach (MethodInfo method in dataCenterType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                        {
-                            if (method == null || method.Name != "TryGetComponentData" || !method.IsGenericMethodDefinition)
-                            {
-                                continue;
-                            }
-
-                            ParameterInfo[] parameters = method.GetParameters();
-                            if (parameters.Length == 2)
-                            {
-                                tryGetComponentData = method;
-                                break;
-                            }
-                        }
-
-                        if (tryGetComponentData != null)
-                        {
-                            MethodInfo closedMethod = tryGetComponentData.MakeGenericMethod(shipDataType);
-                            object netIdArg = netIdType.IsValueType
-                                ? Activator.CreateInstance(netIdType)
-                                : null;
-                            if (netIdType == typeof(uint))
-                            {
-                                netIdArg = playerNetId;
-                            }
-                            else
-                            {
-                                try
-                                {
-                                    netIdArg = Convert.ChangeType(playerNetId, netIdType);
-                                }
-                                catch
-                                {
-                                    netIdArg = null;
-                                }
-                            }
-
-                            if (netIdArg != null)
-                            {
-                                object[] args = new object[] { netIdArg, null };
-                                if (closedMethod.Invoke(null, args) is bool found && found && args[1] != null)
-                                {
-                                    if (this.TryGetManagedUInt32Member(args[1], "shipNetId", out shipNetId) && shipNetId != 0U)
-                                    {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return shipNetId != 0U;
+            return false;
         }
 
         // XZ disagreement tolerated between the two independent self-position sources (Mono entity vs

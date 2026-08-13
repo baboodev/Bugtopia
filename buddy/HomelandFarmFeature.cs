@@ -2673,16 +2673,6 @@ namespace HeartopiaMod
 
             try
             {
-                if (this.TryGetManagedSelfPlayerEntityObject(out object entityObj, out string source) && entityObj != null)
-                {
-                    if (this.TryHomelandFarmTryReadEntityNetId(entityObj, out netId) && netId != 0U)
-                    {
-                        status = "Player netId via " + source + ".";
-                        this.HomelandFarmCachePlayerNetId(netId);
-                        return true;
-                    }
-                }
-
                 this.EnsureHomelandFarmScannerTypes();
                 if (this.homelandFarmEntityUtilGetSelfPlayerEntityMethod != null)
                 {
@@ -3496,15 +3486,6 @@ namespace HeartopiaMod
             }
 
             object positionObj;
-            if (this.TryGetManagedSelfPlayerEntityObject(out object entityObj, out _) && entityObj != null)
-            {
-                if (this.TryGetObjectMember(entityObj, "position", out positionObj) && positionObj is Vector3 position && position != Vector3.zero)
-                {
-                    pos = position;
-                    return true;
-                }
-            }
-
             this.EnsureHomelandFarmScannerTypes();
             if (this.homelandFarmEntityUtilGetSelfPlayerEntityMethod != null)
             {
@@ -3934,26 +3915,6 @@ namespace HeartopiaMod
 
         private bool TryHomelandFarmTryIsHandHoldSprinklerEquipped()
         {
-            try
-            {
-                if (this.TryGetManagedSelfPlayerObject(out object playerObj, out _) && playerObj != null)
-                {
-                    Type sprinklerType = this.FindLoadedType(
-                        "HandHoldSprinkler",
-                        "Il2CppXDTLevelAndEntity.Gameplay.Component.Equip.HandHoldSprinkler",
-                        "XDTLevelAndEntity.Gameplay.Component.Equip.HandHoldSprinkler");
-                    if (sprinklerType != null
-                        && this.TryInvokeMethodByName(playerObj, "GetComponent", out object sprinkler, new object[] { sprinklerType })
-                        && sprinkler != null)
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
             if (this.TryHomelandFarmTryGetEquippedHandholdBagNetId(out uint equippedNetId, out int equippedStaticId)
                 && equippedNetId != 0U
                 && equippedStaticId > 0
@@ -6342,11 +6303,6 @@ namespace HeartopiaMod
                     playerObj = this.homelandFarmEntityUtilGetSelfPlayerMethod.Invoke(null, null);
                 }
 
-                if (playerObj == null && this.TryGetManagedSelfPlayerObject(out object managedPlayer, out _))
-                {
-                    playerObj = managedPlayer;
-                }
-
                 if (playerObj != null
                     && this.TryGetObjectMember(playerObj, "equipComponent", out object equipObj)
                     && equipObj != null
@@ -7311,35 +7267,10 @@ namespace HeartopiaMod
             source = string.Empty;
             this.EnsureHomelandFarmLocalPlayerComponentType();
 
-            if (this.TryGetManagedSelfPlayerObject(out object selfPlayerObj, out string selfPlayerSource)
-                && this.TryHomelandFarmTryAcceptPlayerCandidate(selfPlayerObj, selfPlayerSource, out localPlayerComponent, out source))
-            {
-                return true;
-            }
-
-            if (this.TryGetManagedSelfPlayerEntityObject(out object selfEntityObj, out string selfEntitySource)
-                && this.TryHomelandFarmTryAcceptPlayerCandidate(selfEntityObj, selfEntitySource, out localPlayerComponent, out source))
-            {
-                return true;
-            }
-
-            if (this.TryGetManagedViewModuleSelfPlayerObject(out object viewModulePlayerObj, out string viewModuleSource)
-                && this.TryHomelandFarmTryAcceptPlayerCandidate(viewModulePlayerObj, viewModuleSource, out localPlayerComponent, out source))
-            {
-                return true;
-            }
-
-            if (this.TryGetManagedInteractSystemObject(out object interactSystemObj, out string interactSource)
-                && this.TryGetManagedInteractPlayerObject(interactSystemObj, out object interactPlayerObj, out string interactPlayerSource)
-                && this.TryHomelandFarmTryAcceptPlayerCandidate(
-                    interactPlayerObj,
-                    interactSource + "/" + interactPlayerSource,
-                    out localPlayerComponent,
-                    out source))
-            {
-                return true;
-            }
-
+            // Four managed self-player probes stood here (EntityUtil.GetSelfPlayer, the entity
+            // variant, the ViewModule walk and the InteractSystem player). All resolve XDT* types
+            // through FindLoadedType and never succeed on this build; the scanner path below was
+            // always the real resolver.
             this.EnsureHomelandFarmScannerTypes();
             if (this.homelandFarmEntityUtilGetSelfPlayerMethod != null)
             {
@@ -7414,18 +7345,8 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryGetManagedPlayerEntityObject(candidate, out object entityObj, out string entitySource)
-                && entityObj != null
-                && this.homelandFarmLocalPlayerComponentType != null
-                && this.TryHomelandFarmGetComponent(entityObj, this.homelandFarmLocalPlayerComponentType, out component)
-                && component != null)
-            {
-                accepted = component;
-                acceptedSource = candidateSource + "." + entitySource + ".GetComponent";
-                this.HomelandFarmLog("LocalPlayer via " + acceptedSource + " type=" + component.GetType().FullName);
-                return true;
-            }
-
+            // A second candidate route through TryGetManagedPlayerEntityObject stood here; that
+            // resolver is part of the dead managed self-player cluster, so it never contributed.
             return false;
         }
 
@@ -12742,22 +12663,6 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryGetManagedSelfPlayerObject(out object localPlayer, out _)
-                && localPlayer != null
-                && this.TryGetUIntMember(localPlayer, "inFieldOwnerId", out fieldOwnerNetId)
-                && fieldOwnerNetId != 0U)
-            {
-                return true;
-            }
-
-            if (this.TryGetManagedSelfPlayerObject(out localPlayer, out _)
-                && localPlayer != null
-                && this.TryGetUIntMember(localPlayer, "InFieldOwnerId", out fieldOwnerNetId)
-                && fieldOwnerNetId != 0U)
-            {
-                return true;
-            }
-
             Type gameplayApiType = this.FindLoadedType(
                 "XDTLevelAndEntity.GameplaySystem.GameplayApi",
                 "ScriptsRefactory.LevelAndEntity.GameplaySystem.GameplayApi",
@@ -17172,17 +17077,6 @@ namespace HeartopiaMod
                             return true;
                         }
                     }
-                }
-            }
-
-            if (this.TryGetManagedSelfPlayerObject(out object localPlayer, out _)
-                && localPlayer != null)
-            {
-                if ((this.TryGetUIntMember(localPlayer, "inFieldNetId", out fieldNetId)
-                        || this.TryGetUIntMember(localPlayer, "InFieldNetId", out fieldNetId))
-                    && fieldNetId != 0U)
-                {
-                    return true;
                 }
             }
 
