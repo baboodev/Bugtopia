@@ -18,8 +18,11 @@ namespace HeartopiaMod
         private const float InstantCatchInterval = 0.1f;
         // High-frequency buoy resend: the decision loop is gated (~0.15s), but our successLength=-2 must
         // be the server's value within ~1 frame of the bite/buoy-activation to win the latch race for
-        // close fish. This fires (before the gate) using state cached from the last tick. The rate is
-        // user-tunable (Hz) — higher = surer win but more reliable traffic.
+        // close fish. This fires (before the gate) using state cached from the last tick.
+        // The rate is NOT user-tunable: the slider was removed once the NotifyFloatInWater detour
+        // started rewriting successLength at source, and nothing writes instantCatchSendHz any more,
+        // so it stays at the 0 default and the resend branch below never runs. Min/Max are kept as
+        // the documented range should the fallback ever be wired up again.
         private const float InstantCatchSendHzMin = 0f; // 0 = disable our timed resend (rely on the detour)
         private const float InstantCatchSendHzMax = 240f;
         private const float InstantCatchSendHzDefault = 0f; // detour handles it; resend is an opt-in fallback

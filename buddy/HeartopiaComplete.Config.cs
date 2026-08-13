@@ -861,7 +861,13 @@ namespace HeartopiaMod
             else if (line.Contains("netCookUseAllIngredients")) this.netCookUseAllIngredients = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookUseAllIngredients\":") != 0;
             else if (line.Contains("autoFishScanTimeout")) this.saved_autoFishScanTimeout = GetJsonFloat(line, "\"autoFishScanTimeout\":");
                         else if (line.Contains("autoFishTeleportDelay")) this.saved_autoFishTeleportDelay = GetJsonFloat(line, "\"autoFishTeleportDelay\":");
-                        else if (line.Contains("autoFishInstantCatchSendHz")) { /* send rate not restored; consume line so it can't collide with autoFishInstantCatch below */ }
+                        // Prefix-collision guard — the empty body is the point, do not delete it.
+                        // These are Contains() probes, not exact key matches, so the legacy
+                        // "autoFishInstantCatchSendHz" key also contains "autoFishInstantCatch" and
+                        // would fall into the bool branch below, parsing a float send rate as an
+                        // on/off flag. Matching it first swallows the line. There is nothing to
+                        // restore: the send rate has no setter any more (AutoFishingFarm.cs).
+                        else if (line.Contains("autoFishInstantCatchSendHz")) { }
                         else if (line.Contains("autoFishFishShadowDetectRange")) AutoFishingFarm.SetDetectRange(GetJsonFloat(line, "\"autoFishFishShadowDetectRange\":"));
                         else if (line.Contains("autoFishInstantCatch")) AutoFishingFarm.SetInstantCatchEnabled(GetJsonInt(line, "\"autoFishInstantCatch\":") != 0);
                         else if (line.Contains("autoFishAutoBaitNoFishSeconds")) AutoFishingFarm.SetAutoBaitNoFishSeconds(GetJsonFloat(line, "\"autoFishAutoBaitNoFishSeconds\":"));
