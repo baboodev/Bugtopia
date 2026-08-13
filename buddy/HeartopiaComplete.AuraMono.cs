@@ -891,102 +891,6 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryInvokeAuraMonoVector2Arg(IntPtr obj, string methodName, Vector2 argValue, out string status)
-        {
-            status = "Aura mono Vector2 invoke unavailable";
-
-            try
-            {
-                if (obj == IntPtr.Zero || string.IsNullOrEmpty(methodName) || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
-                {
-                    status = "Aura mono Vector2 runtime unavailable";
-                    return false;
-                }
-
-                IntPtr classPtr = auraMonoObjectGetClass(obj);
-                if (classPtr == IntPtr.Zero)
-                {
-                    status = "Aura mono Vector2 class unavailable";
-                    return false;
-                }
-
-                IntPtr methodPtr = this.FindAuraMonoMethodOnHierarchy(classPtr, methodName, 1);
-                if (methodPtr == IntPtr.Zero)
-                {
-                    status = "Aura mono Vector2 method unavailable";
-                    return false;
-                }
-
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[1];
-                Vector2 value = argValue;
-                args[0] = (IntPtr)(&value);
-                auraMonoRuntimeInvoke(methodPtr, obj, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    status = "Aura mono Vector2 exception";
-                    return false;
-                }
-
-                status = "OK";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "Aura mono Vector2 failed: " + ex.Message;
-                return false;
-            }
-        }
-
-        private unsafe bool TryInvokeAuraMonoStaticZeroArgMethod(string fullTypeName, string methodName, string successStatus)
-        {
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
-                {
-                    this.forceOpenShopStatus = "Aura mono runtime not ready.";
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                IntPtr classPtr = this.FindAuraMonoClassByFullName(fullTypeName);
-                if (classPtr == IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura class not found: " + fullTypeName;
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                IntPtr methodPtr = this.FindAuraMonoMethodOnHierarchy(classPtr, methodName, 0);
-                if (methodPtr == IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura method not found: " + fullTypeName + "." + methodName + "()";
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                this.LogForceOpenShop("Invoking aura static method: " + this.GetAuraMonoClassDisplayName(classPtr) + "." + methodName + "()");
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, IntPtr.Zero, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura invoke exception: " + fullTypeName + "." + methodName;
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                this.forceOpenShopStatus = successStatus;
-                this.LogForceOpenShop("Aura invoke succeeded: " + successStatus);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.forceOpenShopStatus = "Aura invoke failed: " + ex.Message;
-                this.LogForceOpenShop("Aura zero-arg invoke exception: " + ex);
-                return false;
-            }
-        }
-
         private unsafe bool TryInvokeAuraMonoStaticIntIntMethod(string fullTypeName, string methodName, int firstArg, int secondArg, string successStatus)
         {
             try
@@ -1037,60 +941,6 @@ namespace HeartopiaMod
             {
                 this.forceOpenShopStatus = "Aura invoke failed: " + ex.Message;
                 this.LogForceOpenShop("Aura int-int invoke exception: " + ex);
-                return false;
-            }
-        }
-
-        private unsafe bool TryInvokeAuraMonoStaticStringBoolMethod(string fullTypeName, string methodName, string stringArg, bool boolArg, string successStatus)
-        {
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null || auraMonoStringNew == null || this.auraMonoRootDomain == IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura mono runtime not ready.";
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                IntPtr classPtr = this.FindAuraMonoClassByFullName(fullTypeName);
-                if (classPtr == IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura class not found: " + fullTypeName;
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                IntPtr methodPtr = this.FindAuraMonoMethodOnHierarchy(classPtr, methodName, 2);
-                if (methodPtr == IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura method not found: " + fullTypeName + "." + methodName + "(2)";
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                this.LogForceOpenShop("Invoking aura static method: " + this.GetAuraMonoClassDisplayName(classPtr) + "." + methodName + "(string,bool)");
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[2];
-                IntPtr stringObj = string.IsNullOrEmpty(stringArg) ? IntPtr.Zero : auraMonoStringNew(this.auraMonoRootDomain, stringArg);
-                bool boolValue = boolArg;
-                args[0] = stringObj;
-                args[1] = (IntPtr)(&boolValue);
-                auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura invoke exception: " + fullTypeName + "." + methodName;
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                this.forceOpenShopStatus = successStatus;
-                this.LogForceOpenShop("Aura invoke succeeded: " + successStatus);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.forceOpenShopStatus = "Aura invoke failed: " + ex.Message;
-                this.LogForceOpenShop("Aura string-bool invoke exception: " + ex);
                 return false;
             }
         }
@@ -1196,64 +1046,6 @@ namespace HeartopiaMod
             {
                 this.forceOpenShopStatus = "Aura invoke failed: " + ex.Message;
                 this.LogForceOpenShop("Aura null-bool invoke exception: " + ex);
-                return false;
-            }
-        }
-
-        private unsafe bool TryInvokeAuraMonoStaticIntIntIntBoolMethod(string fullTypeName, string methodName, int firstArg, int secondArg, int thirdArg, bool boolArg, string successStatus)
-        {
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
-                {
-                    this.forceOpenShopStatus = "Aura mono runtime not ready.";
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                IntPtr classPtr = this.FindAuraMonoClassByFullName(fullTypeName);
-                if (classPtr == IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura class not found: " + fullTypeName;
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                IntPtr methodPtr = this.FindAuraMonoMethodOnHierarchy(classPtr, methodName, 4);
-                if (methodPtr == IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura method not found: " + fullTypeName + "." + methodName + "(4)";
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                this.LogForceOpenShop("Invoking aura static method: " + this.GetAuraMonoClassDisplayName(classPtr) + "." + methodName + "(" + firstArg + ", " + secondArg + ", " + thirdArg + ", " + boolArg.ToString() + ")");
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[4];
-                int firstValue = firstArg;
-                int secondValue = secondArg;
-                int thirdValue = thirdArg;
-                bool boolValue = boolArg;
-                args[0] = (IntPtr)(&firstValue);
-                args[1] = (IntPtr)(&secondValue);
-                args[2] = (IntPtr)(&thirdValue);
-                args[3] = (IntPtr)(&boolValue);
-                auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    this.forceOpenShopStatus = "Aura invoke exception: " + fullTypeName + "." + methodName;
-                    this.LogForceOpenShop(this.forceOpenShopStatus);
-                    return false;
-                }
-
-                this.forceOpenShopStatus = successStatus;
-                this.LogForceOpenShop("Aura invoke succeeded: " + successStatus);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.forceOpenShopStatus = "Aura invoke failed: " + ex.Message;
-                this.LogForceOpenShop("Aura int-int-int-bool invoke exception: " + ex);
                 return false;
             }
         }
@@ -1375,42 +1167,6 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryInvokeAuraMonoObjectIntArg(IntPtr obj, IntPtr argObj, out IntPtr result, params string[] methodNames)
-        {
-            result = IntPtr.Zero;
-            if (obj == IntPtr.Zero || argObj == IntPtr.Zero || methodNames == null || methodNames.Length == 0 || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
-            {
-                return false;
-            }
-
-            IntPtr classPtr = auraMonoObjectGetClass(obj);
-            if (classPtr == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            foreach (string methodName in methodNames)
-            {
-                IntPtr method = this.FindAuraMonoMethodOnHierarchy(classPtr, methodName, 1);
-                if (method == IntPtr.Zero)
-                {
-                    continue;
-                }
-
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = argObj;
-                result = auraMonoRuntimeInvoke(method, obj, (IntPtr)args, ref exc);
-                if (exc == IntPtr.Zero && result != IntPtr.Zero)
-                {
-                    return true;
-                }
-            }
-
-            result = IntPtr.Zero;
-            return false;
-        }
-
         private unsafe bool TryInvokeAuraMonoObjectIntArgReturningBool(IntPtr obj, IntPtr argObj, out bool result, params string[] methodNames)
         {
             result = false;
@@ -1444,24 +1200,6 @@ namespace HeartopiaMod
             }
 
             return false;
-        }
-
-        private unsafe bool TryInvokeAuraMonoStaticTwoIntMethod(IntPtr methodPtr, int firstArg, int secondArg, out IntPtr resultObj)
-        {
-            resultObj = IntPtr.Zero;
-            if (methodPtr == IntPtr.Zero || auraMonoRuntimeInvoke == null)
-            {
-                return false;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            IntPtr* args = stackalloc IntPtr[2];
-            int localFirst = firstArg;
-            int localSecond = secondArg;
-            args[0] = (IntPtr)(&localFirst);
-            args[1] = (IntPtr)(&localSecond);
-            resultObj = auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-            return exc == IntPtr.Zero && resultObj != IntPtr.Zero;
         }
 
         private bool TryAuraMonoDictionaryContainsIntKey(IntPtr dictObj, int key)
