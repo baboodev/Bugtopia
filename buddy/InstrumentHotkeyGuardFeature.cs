@@ -74,12 +74,6 @@ namespace HeartopiaMod
         private int instrumentHotkeyGuardFrame = -1;
         private float instrumentHotkeyGuardNextResolveAt;
         private float instrumentHotkeyGuardAuraRetryAt;
-        private Type instrumentPanelTypeCache;
-        private Type uiManagerTypeCache;
-        private FieldInfo instrumentPanelInstrumentTypeField;
-        private FieldInfo instrumentPanelKeyOptionField;
-        private MethodInfo uiManagerGetViewMethod;
-        private PropertyInfo uiManagerInstanceProperty;
 
         // Per-frame cache for "is a game text input field focused". Like the instrument guard,
         // the ~50 keybind checks per frame dedupe to one EventSystem lookup.
@@ -327,7 +321,7 @@ namespace HeartopiaMod
         private bool TryResolveInstrumentPanelKeyBindings(out HashSet<KeyCode> keys)
         {
             keys = null;
-            if (!this.TryGetOpenInstrumentPanel(out object panel, out int instrumentType, out int keyOption))
+            if (!this.TryGetOpenInstrumentPanel(out int instrumentType, out int keyOption))
             {
                 return false;
             }
@@ -409,42 +403,24 @@ namespace HeartopiaMod
             return KeyCode.None;
         }
 
-        private bool TryGetOpenInstrumentPanel(out object panel, out int instrumentType, out int keyOption)
+        // AuraMono only. There used to be a managed-reflection twin ahead of this that resolved the
+        // panel through UIManager.GetView(typeof(InstrumentPanel)) and then read instrumentType /
+        // keyOption off the returned object with FieldInfo. It could not work on this build for two
+        // independent reasons: InstrumentPanel is not a Unity object at all (InstrumentPanel ->
+        // UIFullScreenView -> UIView -> UIViewBase -> View, a plain C# class — it only HOLDS a
+        // prefab GameObject), and it lives in embedded Mono, whose assemblies never get BepInEx
+        // interop stubs. So FindLoadedType("XDTGame.UI.Panel.InstrumentPanel") always returned null
+        // and the whole branch was unreachable. Its own comment already said as much.
+        //
+        // The miss cooldown stays: a closed instrument must not trigger a full native scan (and the
+        // native-AV exposure that comes with it) on every resolve tick.
+        private bool TryGetOpenInstrumentPanel(out int instrumentType, out int keyOption)
         {
-            panel = null;
             instrumentType = 0;
             keyOption = MusicKeyOptionMode15a;
 
             try
             {
-                panel = this.TryGetOpenInstrumentPanelManaged();
-                if (panel != null)
-                {
-                    this.EnsureInstrumentPanelReflection(panel.GetType());
-                    if (this.instrumentPanelInstrumentTypeField != null)
-                    {
-                        object value = this.instrumentPanelInstrumentTypeField.GetValue(panel);
-                        if (value != null)
-                        {
-                            instrumentType = Convert.ToInt32(value);
-                        }
-                    }
-
-                    if (this.instrumentPanelKeyOptionField != null)
-                    {
-                        object value = this.instrumentPanelKeyOptionField.GetValue(panel);
-                        if (value != null)
-                        {
-                            keyOption = Convert.ToInt32(value);
-                        }
-                    }
-
-                    return true;
-                }
-
-                // Managed path failed (UI types are absent on this build). Fall back to the
-                // native AuraMono lookup, but only after the miss cooldown so a closed instrument
-                // doesn't trigger a full native scan / native-AV exposure on every resolve tick.
                 if (Time.unscaledTime < this.instrumentHotkeyGuardAuraRetryAt)
                 {
                     return false;
@@ -466,7 +442,6 @@ namespace HeartopiaMod
                 // A native fault here is uncatchable, but a managed exception still means the
                 // native path is unstable right now — back off before retrying it.
                 this.instrumentHotkeyGuardAuraRetryAt = Time.unscaledTime + InstrumentHotkeyGuardAuraMissCooldown;
-                panel = null;
                 return false;
             }
         }
@@ -511,70 +486,8 @@ namespace HeartopiaMod
             }
         }
 
-        private object TryGetOpenInstrumentPanelManaged()
-        {
-            this.EnsureInstrumentUiReflection();
-            if (this.uiManagerTypeCache == null
-                || this.instrumentPanelTypeCache == null
-                || this.uiManagerInstanceProperty == null
-                || this.uiManagerGetViewMethod == null)
-            {
-                return null;
-            }
 
-            object uiManager = this.uiManagerInstanceProperty.GetValue(null);
-            if (uiManager == null)
-            {
-                return null;
-            }
 
-            return this.uiManagerGetViewMethod.Invoke(uiManager, new object[] { this.instrumentPanelTypeCache });
-        }
-
-        private void EnsureInstrumentUiReflection()
-        {
-            if (this.uiManagerTypeCache != null && this.instrumentPanelTypeCache != null)
-            {
-                return;
-            }
-
-            this.uiManagerTypeCache = this.FindLoadedType("XDTGame.Core.UIManager", "UIManager");
-            this.instrumentPanelTypeCache = this.FindLoadedType("XDTGame.UI.Panel.InstrumentPanel", "InstrumentPanel");
-            if (this.uiManagerTypeCache == null || this.instrumentPanelTypeCache == null)
-            {
-                return;
-            }
-
-            this.uiManagerInstanceProperty = this.uiManagerTypeCache.GetProperty(
-                "Instance",
-                BindingFlags.Public | BindingFlags.Static);
-            this.uiManagerGetViewMethod = this.uiManagerTypeCache.GetMethod(
-                "GetView",
-                BindingFlags.Public | BindingFlags.Instance,
-                null,
-                new[] { typeof(Type) },
-                null);
-        }
-
-        private void EnsureInstrumentPanelReflection(Type panelType)
-        {
-            if (panelType == null)
-            {
-                return;
-            }
-
-            if (this.instrumentPanelInstrumentTypeField != null
-                && this.instrumentPanelInstrumentTypeField.DeclaringType == panelType)
-            {
-                return;
-            }
-
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
-            this.instrumentPanelInstrumentTypeField = panelType.GetField("_instrumentType", flags)
-                ?? panelType.GetField("instrumentType", flags);
-            this.instrumentPanelKeyOptionField = panelType.GetField("_nowKeyOption", flags)
-                ?? panelType.GetField("nowKeyOption", flags);
-        }
 
         private bool TryGetGameSettingPianoSemitone(out bool pianoSemitone)
         {
