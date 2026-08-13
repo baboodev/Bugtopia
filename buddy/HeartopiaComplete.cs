@@ -395,10 +395,6 @@ namespace HeartopiaMod
         private AuraMonoObjectCache cachedAuraMonoBagModuleObj;
         private IntPtr cachedAuraMonoBagExecuteMethod = IntPtr.Zero;
         private float nextAutoEatRepairSlowRuntimeLogAt = 0f;
-        private object cachedDirectBackpackSystemObj = null;
-        private Type cachedDirectBackpackStorageType = null;
-        private MethodInfo cachedDirectBackpackGetAllItemMethod = null;
-        private bool cachedDirectBackpackGetAllItemNeedsStorage = true;
         private readonly Dictionary<string, Type> loadedTypeLookupCache = new Dictionary<string, Type>(StringComparer.Ordinal);
         private readonly List<DirectBackpackRuntimeItem> directBackpackRuntimeItems = new List<DirectBackpackRuntimeItem>(256);
         private float directBackpackRuntimeSnapshotAt = -999f;
@@ -422,7 +418,6 @@ namespace HeartopiaMod
         private const float BusyDirectBackpackRuntimeSnapshotTtl = 2.5f;
         private const float DirectBackpackLookupMissBackoff = 2.0f;
         private const float DirectBackpackSnapshotFailureBackoff = 1.5f;
-        private const bool DirectBackpackUnsafeAuraMonoFallbackEnabled = true;
         private const bool DirectBackpackVerboseLogsEnabled = false;
         private const float EnergyReadCacheInterval = 0.15f;
         // While PlayerStaminaUpdatedEvent flows, the UI-text energy parse is suppressed this long
@@ -5193,7 +5188,6 @@ namespace HeartopiaMod
         private int transferPendingRescanRetries = 0;
         private readonly Dictionary<uint, int> transferBatch = new Dictionary<uint, int>();
         private IntPtr transferMonoMoveBatchMethod = IntPtr.Zero;
-        private MethodInfo cachedMoveBatchBackpackItemsMethod = null;
 
         // Token: 0x04000035 RID: 53
         private Dictionary<int, float> blueberryCooldowns = new Dictionary<int, float>();

@@ -70,57 +70,9 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.TryGetDirectBackpackItemCountByNetIdManaged(targetNetId, out count))
-            {
-                return true;
-            }
-
-            return DirectBackpackUnsafeAuraMonoFallbackEnabled
-                && this.TryGetDirectBackpackItemCountByNetIdAuraMono(targetNetId, out count);
+            return this.TryGetDirectBackpackItemCountByNetIdAuraMono(targetNetId, out count);
         }
 
-        private bool TryGetDirectBackpackItemCountByNetIdManaged(uint targetNetId, out int count)
-        {
-            count = 0;
-            try
-            {
-                if (!this.TryGetDirectBackpackSystem(out object backPackObj, out MethodInfo getAllItem, out Type storageType, out bool getAllItemNeedsStorage))
-                {
-                    return false;
-                }
-
-                object backpackStorage = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, 1) : (object)1;
-                object itemListObj = getAllItemNeedsStorage
-                    ? getAllItem.Invoke(backPackObj, new[] { backpackStorage })
-                    : getAllItem.Invoke(backPackObj, null);
-
-                IEnumerable items = itemListObj as IEnumerable;
-                if (items == null)
-                {
-                    return false;
-                }
-
-                foreach (object item in items)
-                {
-                    if (item == null)
-                    {
-                        continue;
-                    }
-
-                    if (this.TryGetManagedUInt32Member(item, "netId", out uint candidateNetId)
-                        && candidateNetId == targetNetId)
-                    {
-                        this.TryGetManagedBackpackItemCount(item, out count);
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
 
         private bool TryGetDirectBackpackItemCountByNetIdAuraMono(uint targetNetId, out int count)
         {
@@ -229,66 +181,9 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.TryFindDirectBackpackItemByStaticIdManaged(staticId, out netId))
-            {
-                return true;
-            }
-
-            if (!DirectBackpackUnsafeAuraMonoFallbackEnabled)
-            {
-                return false;
-            }
-
             return this.TryFindDirectBackpackItemByStaticIdAuraMono(staticId, out netId);
         }
 
-        private bool TryFindDirectBackpackItemByStaticIdManaged(int staticId, out uint netId)
-        {
-            netId = 0U;
-            try
-            {
-                if (!this.TryGetDirectBackpackSystem(out object backPackObj, out MethodInfo getAllItem, out Type storageType, out bool getAllItemNeedsStorage))
-                {
-                    return false;
-                }
-
-                object backpackStorage = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, 1) : (object)1;
-                object itemListObj = getAllItemNeedsStorage
-                    ? getAllItem.Invoke(backPackObj, new[] { backpackStorage })
-                    : getAllItem.Invoke(backPackObj, null);
-
-                IEnumerable items = itemListObj as IEnumerable;
-                if (items == null)
-                {
-                    return false;
-                }
-
-                foreach (object item in items)
-                {
-                    if (item == null
-                        || !this.TryGetManagedInt32Member(item, "staticId", out int candidateStaticId)
-                        || candidateStaticId != staticId
-                        || !this.TryGetManagedUInt32Member(item, "netId", out uint candidateNetId)
-                        || candidateNetId == 0U)
-                    {
-                        continue;
-                    }
-
-                    netId = candidateNetId;
-                    this.lastDirectBackpackMatchedNetId = candidateNetId;
-                    this.lastDirectBackpackMatchedStaticId = candidateStaticId;
-                    this.TryGetManagedInt32Member(item, "entityType", out this.lastDirectBackpackMatchedEntityType);
-                    this.TryGetManagedBackpackItemCount(item, out this.lastDirectBackpackMatchedCount);
-                    this.AutoEatRepairLog("[UseBait] Managed match netId=" + candidateNetId + " staticId=" + candidateStaticId + " count=" + this.lastDirectBackpackMatchedCount);
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
 
         private bool TryFindDirectBackpackItemByStaticIdAuraMono(int staticId, out uint netId)
         {
@@ -1893,19 +1788,11 @@ namespace HeartopiaMod
                 bool sentBatch = false;
                 if (currencyTypeId > 0)
                 {
-                    sentBatch = this.TryInvokeQuickSellManaged(batch, currencyTypeId);
-                    if (!sentBatch)
-                    {
-                        sentBatch = this.TryInvokeQuickSellAuraMono(batch, currencyTypeId);
-                    }
+                    sentBatch = this.TryInvokeQuickSellAuraMono(batch, currencyTypeId);
                 }
                 else
                 {
-                    sentBatch = this.TryInvokeQuickSellManaged(batch, 0);
-                    if (!sentBatch)
-                    {
-                        sentBatch = this.TryInvokeQuickSellAuraMono(batch, 0);
-                    }
+                    sentBatch = this.TryInvokeQuickSellAuraMono(batch, 0);
                 }
 
                 if (sentBatch)
@@ -2423,88 +2310,6 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryInvokeQuickSellManaged(Dictionary<uint, int> itemsToSell, int currencyTypeId = 0)
-        {
-            Breadcrumbs.Drop("AutoSell.quicksell.managed", "n=" + (itemsToSell?.Count ?? 0) + " cur=" + currencyTypeId);
-            try
-            {
-                Type recycleType = this.FindLoadedType(
-                    "XDTDataAndProtocol.ProtocolService.Recycle.RecycleProtocolManager",
-                    "RecycleProtocolManager");
-                if (recycleType == null)
-                {
-                    this.AutoSellLog("RecycleProtocolManager type unavailable.");
-                    return false;
-                }
-
-                bool useAltCurrency = currencyTypeId > 0;
-                if (useAltCurrency)
-                {
-                    MethodInfo alt = null;
-                    foreach (MethodInfo candidate in recycleType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                    {
-                        if (candidate == null || candidate.Name != "CmdBattlePassSell")
-                        {
-                            continue;
-                        }
-
-                        ParameterInfo[] ps = candidate.GetParameters();
-                        if (ps == null || ps.Length != 2)
-                        {
-                            continue;
-                        }
-
-                        Type firstType = ps[0].ParameterType;
-                        Type secondType = ps[1].ParameterType;
-                        if (firstType != null && firstType.IsEnum && secondType != null && typeof(IDictionary).IsAssignableFrom(secondType))
-                        {
-                            alt = candidate;
-                            break;
-                        }
-                    }
-
-                    if (alt == null)
-                    {
-                        this.AutoSellLog("CmdBattlePassSell method unavailable.");
-                        return false;
-                    }
-
-                    Type currencyEnumType = alt.GetParameters()[0].ParameterType;
-                    object currencyValue = Enum.ToObject(currencyEnumType, currencyTypeId);
-                    alt.Invoke(null, new object[] { currencyValue, itemsToSell });
-                    this.AutoSellLog("CmdBattlePassSell sent. currency=" + currencyTypeId + " stacks=" + itemsToSell.Count);
-                    return true;
-                }
-
-                MethodInfo method = recycleType.GetMethod("CmdQuickSell", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Dictionary<uint, int>) }, null);
-                if (method == null)
-                {
-                    foreach (MethodInfo candidate in recycleType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                    {
-                        if (candidate != null && candidate.Name == "CmdQuickSell" && candidate.GetParameters().Length == 1)
-                        {
-                            method = candidate;
-                            break;
-                        }
-                    }
-                }
-                if (method == null)
-                {
-                    this.AutoSellLog("CmdQuickSell method unavailable.");
-                    return false;
-                }
-
-                method.Invoke(null, new object[] { itemsToSell });
-                this.AutoSellLog("CmdQuickSell sent. stacks=" + itemsToSell.Count);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Exception inner = ex.InnerException ?? ex;
-                this.AutoSellLog("Managed sell command exception: " + inner.GetType().Name + ": " + inner.Message);
-                return false;
-            }
-        }
 
         private bool TryInvokeQuickSellAuraMono(Dictionary<uint, int> itemsToSell, int currencyTypeId = 0)
         {
@@ -2671,53 +2476,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryInvokeMoveBatchBackpackItemsManaged(Dictionary<uint, int> netIdToCounts, int targetStorageType)
-        {
-            try
-            {
-                if (netIdToCounts == null || netIdToCounts.Count == 0)
-                {
-                    return false;
-                }
-
-                if (this.cachedMoveBatchBackpackItemsMethod == null)
-                {
-                    Type protocolType = this.FindTypeByName("XDTDataAndProtocol.ProtocolService.BackPack.BackpackProtocolManager", "XDTDataAndProtocol.ProtocolService.BackPack", "BackpackProtocolManager")
-                        ?? this.FindTypeBySignature("BackpackProtocolManager", "XDTDataAndProtocol", true, false);
-                    if (protocolType == null)
-                    {
-                        return false;
-                    }
-
-                    this.cachedMoveBatchBackpackItemsMethod = protocolType.GetMethod("MoveBatchBackpackItems", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Dictionary<uint, int>), typeof(int) }, null);
-                    if (this.cachedMoveBatchBackpackItemsMethod == null)
-                    {
-                        foreach (MethodInfo candidate in protocolType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                        {
-                            if (candidate != null && candidate.Name == "MoveBatchBackpackItems" && candidate.GetParameters().Length == 2)
-                            {
-                                this.cachedMoveBatchBackpackItemsMethod = candidate;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (this.cachedMoveBatchBackpackItemsMethod == null)
-                {
-                    return false;
-                }
-
-                this.cachedMoveBatchBackpackItemsMethod.Invoke(null, new object[] { netIdToCounts, targetStorageType });
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Exception inner = ex.InnerException ?? ex;
-                ModLogger.Msg("[TRANSFER] Managed MoveBatchBackpackItems exception: " + inner.GetType().Name + ": " + inner.Message);
-                return false;
-            }
-        }
 
         private bool TryInvokeMoveBatchBackpackItemsAuraMono(Dictionary<uint, int> netIdToCounts, int targetStorageType)
         {
@@ -2835,21 +2593,6 @@ namespace HeartopiaMod
                 return true;
             }
             if (runtimeSnapshotAvailable)
-            {
-                this.lastDirectBackpackLookupKey = normalizedLookupKey;
-                this.lastDirectBackpackLookupAnyFood = anyFood;
-                this.nextDirectBackpackLookupRetryAt = now + DirectBackpackLookupMissBackoff;
-                return false;
-            }
-
-            if (this.TryFindDirectBackpackItemManaged(itemKey, anyFood, out netId))
-            {
-                this.lastDirectBackpackLookupKey = string.Empty;
-                this.nextDirectBackpackLookupRetryAt = -999f;
-                return true;
-            }
-
-            if (!DirectBackpackUnsafeAuraMonoFallbackEnabled)
             {
                 this.lastDirectBackpackLookupKey = normalizedLookupKey;
                 this.lastDirectBackpackLookupAnyFood = anyFood;
@@ -3315,11 +3058,6 @@ namespace HeartopiaMod
 
         private unsafe bool TryExecuteDirectBackpackItemFunc(int functionValue, uint netId)
         {
-            if (this.TryExecuteDirectBackpackItemFuncManaged(functionValue, netId))
-            {
-                return true;
-            }
-
             try
             {
                 this.AutoEatRepairLog("[DirectBackpackMono] Execute request. function=" + functionValue + " netId=" + netId);
@@ -3406,155 +3144,8 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryFindDirectBackpackItemManaged(string itemKey, bool anyFood, out uint netId)
-        {
-            netId = 0U;
-            try
-            {
-                if (!this.TryGetDirectBackpackSystem(out object backPackObj, out MethodInfo getAllItem, out Type storageType, out bool getAllItemNeedsStorage))
-                {
-                    return false;
-                }
 
-                object backpackStorage = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, 1) : (object)1;
-                object itemListObj = null;
-                if (getAllItemNeedsStorage)
-                {
-                    itemListObj = getAllItem.Invoke(backPackObj, new[] { backpackStorage });
-                }
-                else
-                {
-                    itemListObj = getAllItem.Invoke(backPackObj, null);
-                }
 
-                IEnumerable items = itemListObj as IEnumerable;
-                if (items == null)
-                {
-                    this.AutoEatRepairLog("[DirectBackpackManaged] GetAllItem returned unreadable list.");
-                    return false;
-                }
-
-                string normalizedKey = (itemKey ?? string.Empty).ToLowerInvariant();
-                int inspected = 0;
-                int samples = 0;
-                foreach (object item in items)
-                {
-                    if (item == null)
-                    {
-                        continue;
-                    }
-
-                    inspected++;
-                    if (!this.TryGetManagedUInt32Member(item, "netId", out uint candidateNetId) || candidateNetId == 0U)
-                    {
-                        continue;
-                    }
-
-                    string descriptor = this.GetManagedBackpackItemDescriptor(item).ToLowerInvariant();
-                    if (samples < 6)
-                    {
-                        samples++;
-                        this.AutoEatRepairLog("[DirectBackpackManaged] Item sample " + samples + ": netId=" + candidateNetId + " descriptor=" + descriptor);
-                    }
-
-                    bool matches = anyFood
-                        ? (descriptor.Contains("food_") || descriptor.Contains("p_food") || descriptor.Contains("ui_item_normal_p_food"))
-                        : (!string.IsNullOrEmpty(normalizedKey) && descriptor.Contains(normalizedKey));
-                    if (matches)
-                    {
-                        netId = candidateNetId;
-                        this.lastDirectBackpackMatchedNetId = netId;
-                        this.TryGetManagedInt32Member(item, "staticId", out this.lastDirectBackpackMatchedStaticId);
-                        this.TryGetManagedInt32Member(item, "entityType", out this.lastDirectBackpackMatchedEntityType);
-                        this.TryGetManagedBackpackItemCount(item, out this.lastDirectBackpackMatchedCount);
-                        this.AutoEatRepairLog("[DirectBackpackManaged] Matched item netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + " count=" + this.lastDirectBackpackMatchedCount + " descriptor=" + descriptor);
-                        return true;
-                    }
-                }
-
-                this.AutoEatRepairLog("[DirectBackpackManaged] No match. inspected=" + inspected + " key=" + normalizedKey);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] Item scan exception: " + ex.GetType().Name + ": " + ex.Message);
-                netId = 0U;
-                return false;
-            }
-        }
-
-        private bool TryExecuteDirectBackpackItemFuncManaged(int functionValue, uint netId)
-        {
-            try
-            {
-                if (!this.TryGetDirectBagExecutor(out object bagObj, out Type functionType, out Type storageType, out MethodInfo execute))
-                {
-                    return false;
-                }
-                object function = Enum.ToObject(functionType, functionValue);
-                object backpackStorage = Enum.ToObject(storageType, 1);
-                this.AutoEatRepairLog("[DirectBackpackManaged] Execute request. function=" + functionValue + " netId=" + netId);
-                execute.Invoke(bagObj, new object[] { function, netId, backpackStorage });
-                this.AutoEatRepairLog("[DirectBackpackManaged] ExecuteBackpackItemFunc completed.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Exception inner = ex.InnerException ?? ex;
-                this.AutoEatRepairLog("[DirectBackpackManaged] Execute exception: " + inner.GetType().Name + ": " + inner.Message);
-                return false;
-            }
-        }
-
-        private bool TryGetDirectBackpackSystem(out object backPackObj, out MethodInfo getAllItem, out Type storageType, out bool getAllItemNeedsStorage)
-        {
-            backPackObj = this.cachedDirectBackpackSystemObj;
-            getAllItem = this.cachedDirectBackpackGetAllItemMethod;
-            storageType = this.cachedDirectBackpackStorageType;
-            getAllItemNeedsStorage = this.cachedDirectBackpackGetAllItemNeedsStorage;
-            if (backPackObj != null && getAllItem != null)
-            {
-                return true;
-            }
-
-            Type backPackType = this.FindLoadedType("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", "BackPackSystem");
-            if (backPackType == null)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] BackPackSystem type unavailable.");
-                return false;
-            }
-
-            if (!this.TryGetManagedModule(backPackType, out backPackObj) || backPackObj == null)
-            {
-                backPackObj = this.TryGetStaticObjectAcrossHierarchy(backPackType, "Instance", "_instance");
-            }
-            if (backPackObj == null)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] BackPackSystem instance unavailable.");
-                return false;
-            }
-
-            storageType = this.FindLoadedType("EcsClient.XDT.Scene.Shared.Data.StaticPartial.EStorageType", "EStorageType");
-            object backpackStorage = storageType != null && storageType.IsEnum ? Enum.ToObject(storageType, 1) : (object)1;
-            getAllItem = backPackObj.GetType().GetMethod("GetAllItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { backpackStorage.GetType() }, null);
-            getAllItemNeedsStorage = getAllItem != null;
-            if (getAllItem == null)
-            {
-                getAllItem = backPackObj.GetType().GetMethod("GetAllItem", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
-                getAllItemNeedsStorage = false;
-            }
-            if (getAllItem == null)
-            {
-                this.AutoEatRepairLog("[DirectBackpackManaged] GetAllItem method unavailable.");
-                return false;
-            }
-
-            this.cachedDirectBackpackSystemObj = backPackObj;
-            this.cachedDirectBackpackStorageType = storageType;
-            this.cachedDirectBackpackGetAllItemMethod = getAllItem;
-            this.cachedDirectBackpackGetAllItemNeedsStorage = getAllItemNeedsStorage;
-            return true;
-        }
 
         private bool TryGetManagedBackpackItemCount(object item, out int count)
         {

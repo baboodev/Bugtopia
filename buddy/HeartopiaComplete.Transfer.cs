@@ -431,8 +431,7 @@ namespace HeartopiaMod
             }
 
             int targetStorageType = this.GetTransferTargetStorageType(sourceStorageType);
-            bool sent = this.TryInvokeMoveBatchBackpackItemsAuraMono(netIdToCounts, targetStorageType)
-                || this.TryInvokeMoveBatchBackpackItemsManaged(netIdToCounts, targetStorageType);
+            bool sent = this.TryInvokeMoveBatchBackpackItemsAuraMono(netIdToCounts, targetStorageType);
             if (!sent)
             {
                 error = "MoveBatchBackpackItems unavailable";
