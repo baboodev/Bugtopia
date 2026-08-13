@@ -1463,26 +1463,6 @@ namespace HeartopiaMod
             return value;
         }
 
-        private bool TryGetManagedUInt32Member(object obj, string memberName, out uint value)
-        {
-            value = 0U;
-            if (!this.TryGetObjectMember(obj, memberName, out object raw) || raw == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                value = Convert.ToUInt32(raw);
-                return true;
-            }
-            catch
-            {
-                value = 0U;
-                return false;
-            }
-        }
-
         private bool TryGetManagedInt32Member(object obj, string memberName, out int value)
         {
             value = 0;

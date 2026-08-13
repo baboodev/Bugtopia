@@ -355,37 +355,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private object TryInvokeManagedGetComponent(object entityObj, Type componentType)
-        {
-            if (entityObj == null || componentType == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                foreach (MethodInfo method in entityObj.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (method == null || method.Name != "GetComponent" || !method.IsGenericMethodDefinition)
-                    {
-                        continue;
-                    }
-
-                    if (method.GetParameters().Length != 0)
-                    {
-                        continue;
-                    }
-
-                    return method.MakeGenericMethod(componentType).Invoke(entityObj, null);
-                }
-            }
-            catch
-            {
-            }
-
-            return null;
-        }
-
         private string TryReadObjectString(object obj, string memberName)
         {
             object valueObj;
@@ -395,40 +364,6 @@ namespace HeartopiaMod
             }
 
             return string.Empty;
-        }
-
-        private bool TryInvokeMethodByName(object target, string methodName, out object result, object[] args)
-        {
-            result = null;
-            if (target == null || string.IsNullOrWhiteSpace(methodName))
-            {
-                return false;
-            }
-
-            try
-            {
-                MethodInfo[] methods = target.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                for (int i = 0; i < methods.Length; i++)
-                {
-                    MethodInfo method = methods[i];
-                    if (method == null || !string.Equals(method.Name, methodName, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters = method.GetParameters();
-                    if ((args == null ? 0 : args.Length) != parameters.Length)
-                    {
-                        continue;
-                    }
-
-                    result = method.Invoke(target, args);
-                    return true;
-                }
-            }
-            catch { }
-
-            return false;
         }
 
         private object CreateCompatibleUIntList(Type listType, List<uint> values)
@@ -1052,46 +987,6 @@ namespace HeartopiaMod
             return string.IsNullOrEmpty(assemblyName)
                 ? (type.FullName ?? type.Name ?? "unknown")
                 : (type.FullName ?? type.Name ?? "unknown") + "@" + assemblyName;
-        }
-
-        private static Dictionary<uint, int> ReadUIntIntDictionaryField(object instance, string fieldName)
-        {
-            if (instance == null || string.IsNullOrWhiteSpace(fieldName))
-            {
-                return null;
-            }
-
-            FieldInfo f = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (f == null)
-            {
-                return null;
-            }
-
-            object v = f.GetValue(instance);
-            if (v is Dictionary<uint, int> direct)
-            {
-                return direct;
-            }
-
-            if (v is IDictionary dict)
-            {
-                Dictionary<uint, int> map = new Dictionary<uint, int>();
-                foreach (DictionaryEntry e in dict)
-                {
-                    try
-                    {
-                        uint key = Convert.ToUInt32(e.Key);
-                        int value = Convert.ToInt32(e.Value);
-                        map[key] = value;
-                    }
-                    catch
-                    {
-                    }
-                }
-                return map;
-            }
-
-            return null;
         }
 
         private bool TryGetManagedModule(Type moduleType, out object moduleObj)
