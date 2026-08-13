@@ -185,23 +185,6 @@ namespace HeartopiaMod
 
                 if (moduleObj == null)
                 {
-                    if (this.TryGetManagedInteractSystemObject(out object interactSystem, out string interactSource))
-                    {
-                        object playerObj = null;
-                        string playerSource = string.Empty;
-                        if (this.TryGetManagedSelfPlayerObject(out playerObj, out playerSource) || this.TryGetManagedInteractPlayerObject(interactSystem, out playerObj, out playerSource))
-                        {
-                            if (this.TryGetManagedSweepNetManagerObject(interactSystem, playerObj, out object managerObj, out string managerSource) && managerObj != null)
-                            {
-                                moduleObj = managerObj;
-                                this.InsectFarmNetLog($"Loaded insect scan using active sweep-net manager fallback. interact={interactSource} player={playerSource} manager={managerSource}");
-                            }
-                        }
-                    }
-                }
-
-                if (moduleObj == null)
-                {
                     status = moduleType == null ? "LevelInscetManager type unavailable" : "LevelInscetManager module unavailable";
                     return false;
                 }
@@ -539,48 +522,10 @@ namespace HeartopiaMod
             }
             catch { }
 
-            try
-            {
-                if (this.TryGetManagedInteractSystemObject(out object interactSystem, out _))
-                {
-                    object playerObj = null;
-                    if (!this.TryGetManagedSelfPlayerObject(out playerObj, out _) && !this.TryGetManagedInteractPlayerObject(interactSystem, out playerObj, out _))
-                    {
-                        managedStatus = "Managed interact player unavailable";
-                    }
-                    else if (!this.TryGetManagedSweepNetManagerObject(interactSystem, playerObj, out object managerObj, out string source))
-                    {
-                        managedStatus = "Managed sweep-net manager unavailable";
-                        if (!string.IsNullOrEmpty(source) && source.IndexOf("not sweep net", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            int marker = source.IndexOf("[not sweep net:", StringComparison.OrdinalIgnoreCase);
-                            if (marker >= 0)
-                            {
-                                string detail = source.Substring(marker).Trim('[', ']');
-                                detail = detail.Replace("not sweep net:", string.Empty).Trim();
-                                status = "Holding " + detail;
-                                return true;
-                            }
-                            status = "Holding Other Tool";
-                            return true;
-                        }
-
-                        status = "No Tool Equipped";
-                        return true;
-                    }
-                    else if (managerObj != null)
-                    {
-                        netEquipped = true;
-                        status = "Net Equipped";
-                        return true;
-                    }
-                }
-                else
-                {
-                    managedStatus = "Managed InteractSystem unavailable";
-                }
-            }
-            catch { }
+            // The managed InteractSystem / self-player probe that stood here resolves XDT* types
+            // through FindLoadedType and never succeeds on this build, so it only ever set this
+            // status string. Kept as the same string so the composite diagnostic below is unchanged.
+            managedStatus = "Managed InteractSystem unavailable";
 
             try
             {
@@ -728,18 +673,6 @@ namespace HeartopiaMod
                 if (this.IsFinalInsectFarmStatus(auraStatus))
                 {
                     status = auraStatus;
-                    return false;
-                }
-
-                string managedStatus;
-                if (this.TryCollectCatchTargetsViaManagedInteractSystem(playerPos, scanRange, batchSize, ids, positions, out managedStatus))
-                {
-                    status = managedStatus;
-                    return true;
-                }
-                if (this.IsFinalInsectFarmStatus(managedStatus))
-                {
-                    status = managedStatus;
                     return false;
                 }
 
