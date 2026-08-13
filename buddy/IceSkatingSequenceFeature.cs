@@ -9,8 +9,12 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // SkateProtocolManager + *NetworkCommand live in embedded Mono only (see DrawUploadFeature.cs).
-    // Primary path: AuraMono static invoke on SkateProtocolManager; SendCommand is fallback when interop loads.
+    // SkateProtocolManager + *NetworkCommand live in embedded Mono ONLY (see DrawUploadFeature.cs),
+    // so the AuraMono static invoke on SkateProtocolManager is the only channel there has ever
+    // been. Two managed-reflection twins used to sit behind it — a SkateProtocolManager
+    // MethodInfo path and WebRequestUtility.SendCommand<T> over FindLoadedType'd command types.
+    // Neither can resolve (no XDT*/EcsClient assembly reaches the BepInEx interop), so both were
+    // removed; rule: prefer-auramono-no-managed-fallback.
     public partial class HeartopiaComplete
     {
         private const bool IceSkatingSequenceLogsEnabled = true;
@@ -75,13 +79,6 @@ namespace HeartopiaMod
             "System.Collections.Generic.Dictionary`2[[System.Int32, mscorlib],[System.Int32, mscorlib]]"
         };
 
-        private Type iceSkatingSequenceCmdStartType;
-        private Type iceSkatingSequenceCmdEndType;
-        private Type iceSkatingSequenceCmdChallengeStartType;
-        private Type iceSkatingSequenceCmdChallengeEndType;
-        private Type iceSkatingSequenceCmdDoActionType;
-        private Type iceSkatingSequenceCmdPerfectType;
-        private Type iceSkatingSequenceCmdUltimateType;
 
         private Type iceSkatingSequenceSkateServiceType;
         private MethodInfo iceSkatingSequenceEcsTryGetGeneric;
@@ -475,33 +472,21 @@ namespace HeartopiaMod
                 this.iceSkatingSequenceSendUltimateMethod = this.iceSkatingSequenceProtocolManagerType.GetMethod("SendReportUseUltimateCommand", flags);
             }
 
-            this.iceSkatingSequenceCmdStartType = this.ResolveIceSkatingCommandType("SkateStartNetworkCommand");
-            this.iceSkatingSequenceCmdEndType = this.ResolveIceSkatingCommandType("SkateEndNetworkCommand");
-            this.iceSkatingSequenceCmdChallengeStartType = this.ResolveIceSkatingCommandType("SkateChallengeStartNetworkCommand");
-            this.iceSkatingSequenceCmdChallengeEndType = this.ResolveIceSkatingCommandType("SkateChallengeEndNetworkCommand");
-            this.iceSkatingSequenceCmdDoActionType = this.ResolveIceSkatingCommandType("SkateReportDoActionNetworkCommand");
-            this.iceSkatingSequenceCmdPerfectType = this.ResolveIceSkatingCommandType("SkateReportPerfectNetworkCommand");
-            this.iceSkatingSequenceCmdUltimateType = this.ResolveIceSkatingCommandType("SkateReportUseUltimateNetworkCommand");
-
             this.TryEnsureIceSkatingAuraProtocolResolver();
-            this.EnsureHomelandFarmSendCommandResolver();
             this.EnsureIceSkatingSequenceTableResolver();
             this.EnsureIceSkatingSequenceSkateServiceResolver();
 
             bool hasAuraProto = this.IceSkatingSequenceHasAuraProtocolPath();
-            bool hasSendCommand = this.IceSkatingSequenceHasSendCommandPath();
-            if (!hasAuraProto && !hasSendCommand)
+            if (!hasAuraProto)
             {
                 status = "no path: auraProto=" + hasAuraProto
                     + " proto=" + (this.iceSkatingSequenceProtocolManagerType != null ? this.iceSkatingSequenceProtocolManagerType.FullName : "null")
-                    + " cmdStart=" + (this.iceSkatingSequenceCmdStartType != null ? this.iceSkatingSequenceCmdStartType.FullName : "null")
-                    + " sendCmd=" + (this.homelandFarmSendCommandMethodDef != null);
+;
                 return false;
             }
 
             this.iceSkatingSequenceResolverReady = true;
             status = "auraProto=" + hasAuraProto
-                + " sendCommand=" + hasSendCommand
                 + " protoType=" + (this.iceSkatingSequenceProtocolManagerType?.FullName ?? "null");
             return true;
         }
@@ -521,31 +506,6 @@ namespace HeartopiaMod
         private Type ResolveIceSkatingManagedType(string shortName, params string[] fullNames)
         {
             return this.ResolveHomelandFarmManagedType(shortName, fullNames);
-        }
-
-        private Type ResolveIceSkatingCommandType(string shortName)
-        {
-            string ns = IceSkatingSequenceCommandNamespace;
-            return this.ResolveHomelandFarmManagedType(
-                shortName,
-                ns + "." + shortName,
-                "EcsClient." + ns + "." + shortName,
-                "Il2CppEcsClient." + ns + "." + shortName,
-                "Il2Cpp." + ns + "." + shortName,
-                "Il2CppEcsClient." + ns + "." + shortName);
-        }
-
-
-        private bool IceSkatingSequenceHasSendCommandPath()
-        {
-            return this.homelandFarmSendCommandMethodDef != null
-                && this.iceSkatingSequenceCmdStartType != null
-                && this.iceSkatingSequenceCmdEndType != null
-                && this.iceSkatingSequenceCmdChallengeStartType != null
-                && this.iceSkatingSequenceCmdChallengeEndType != null
-                && this.iceSkatingSequenceCmdDoActionType != null
-                && this.iceSkatingSequenceCmdPerfectType != null
-                && this.iceSkatingSequenceCmdUltimateType != null;
         }
 
         private void TryEnsureIceSkatingAuraProtocolResolver()
@@ -850,22 +810,12 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryIceSkatingSendCommand(this.iceSkatingSequenceCmdStartType, _ => true, "SkateStart", out status))
-            {
-                return true;
-            }
-
             return false;
         }
 
         private bool TrySendIceSkatingEnd(out string status)
         {
             if (this.TryInvokeIceSkatingAuraProtocolZeroArg(this.iceSkatingAuraSendExitMethod, "SendExitSkateCommand", out status))
-            {
-                return true;
-            }
-
-            if (this.TryIceSkatingSendCommand(this.iceSkatingSequenceCmdEndType, _ => true, "SkateEnd", out status))
             {
                 return true;
             }
@@ -880,15 +830,6 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryIceSkatingSendCommand(this.iceSkatingSequenceCmdChallengeStartType, cmd =>
-            {
-                this.TrySetObjectMember(cmd, "IsHelp", isHelp);
-                return true;
-            }, "SkateChallengeStart", out status))
-            {
-                return true;
-            }
-
             return false;
         }
 
@@ -899,30 +840,12 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryIceSkatingSendCommand(this.iceSkatingSequenceCmdChallengeEndType, cmd =>
-            {
-                this.TrySetObjectMember(cmd, "Score", score);
-                return true;
-            }, "SkateChallengeEnd", out status))
-            {
-                return true;
-            }
-
             return false;
         }
 
         private bool TrySendIceSkatingPerfect(int perfect, out string status)
         {
             if (this.TryInvokeIceSkatingAuraProtocolIntArg(this.iceSkatingAuraSendPerfectMethod, "SendReportPerfectCommand", perfect, out status))
-            {
-                return true;
-            }
-
-            if (this.TryIceSkatingSendCommand(this.iceSkatingSequenceCmdPerfectType, cmd =>
-            {
-                this.TrySetObjectMember(cmd, "Perfect", perfect);
-                return true;
-            }, "SkateReportPerfect", out status))
             {
                 return true;
             }
@@ -948,18 +871,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryIceSkatingSendCommand(this.iceSkatingSequenceCmdDoActionType, cmd =>
-            {
-                this.TrySetObjectMember(cmd, "Actions", payload);
-                return true;
-            }, "SkateReportDoAction", out status))
-            {
-                status = "Actions=" + payloadText + " " + status;
-                batch.Clear();
-                return true;
-            }
-
-            status = "Actions=" + payloadText + " aura=" + auraStatus + "; " + status;
+            status = "Actions=" + payloadText + " aura=" + auraStatus;
             return false;
         }
 
@@ -1176,24 +1088,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryIceSkatingSendCommand(Type commandType, Func<object, bool> populate, string label, out string status)
-        {
-            status = label + " SendCommand unavailable.";
-            if (commandType == null || populate == null)
-            {
-                status = label + " command type missing.";
-                return false;
-            }
-
-            if (!this.TryHomelandFarmSendCommand(commandType, populate, out string sendStatus))
-            {
-                status = label + " " + sendStatus;
-                return false;
-            }
-
-            status = label + " " + sendStatus + " type=" + commandType.FullName;
-            return true;
-        }
 
 
     }

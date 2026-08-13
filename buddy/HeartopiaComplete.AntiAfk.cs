@@ -9,8 +9,6 @@ namespace HeartopiaMod
     {
         private const float AntiAfkHeartbeatIntervalCapSec = 9f;
 
-        private Type antiAfkOperateCommandType;
-        private Type antiAfkServerPlayerStateType;
         private bool antiAfkHeartbeatUnavailableLogged;
 
         private void RunAntiAfkTick()
@@ -36,11 +34,6 @@ namespace HeartopiaMod
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
             this.EnsureAuraMonoApiReady();
 
-            if (this.TrySendAntiAfkOperateHeartbeatViaCommand())
-            {
-                return;
-            }
-
             if (this.TryInvokeAntiAfkPlayerOperateHeartBeatAuraMono())
             {
                 return;
@@ -53,59 +46,7 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TrySendAntiAfkOperateHeartbeatViaCommand()
-        {
-            if (this.antiAfkOperateCommandType == null)
-            {
-                this.antiAfkOperateCommandType = this.FindLoadedType(
-                    "XDT.Scene.Shared.Modules.Player.PlayerOperateStateNetworkCommand",
-                    "EcsClient.XDT.Scene.Shared.Modules.Player.PlayerOperateStateNetworkCommand",
-                    "Il2CppXDT.Scene.Shared.Modules.Player.PlayerOperateStateNetworkCommand",
-                    "PlayerOperateStateNetworkCommand");
-            }
 
-            if (this.antiAfkOperateCommandType == null)
-            {
-                return false;
-            }
-
-            object operatingState = this.ResolveAntiAfkOperatingPlayerState();
-            if (operatingState == null)
-            {
-                return false;
-            }
-
-            return this.TryHomelandFarmSendCommand(
-                this.antiAfkOperateCommandType,
-                cmd => this.TrySetObjectMember(cmd, "State", operatingState),
-                out _);
-        }
-
-        private object ResolveAntiAfkOperatingPlayerState()
-        {
-            if (this.antiAfkServerPlayerStateType == null)
-            {
-                this.antiAfkServerPlayerStateType = this.FindLoadedType(
-                    "XDT.Scene.Shared.Modules.Player.ServerPlayerStateType",
-                    "EcsClient.XDT.Scene.Shared.Modules.Player.ServerPlayerStateType",
-                    "Il2CppXDT.Scene.Shared.Modules.Player.ServerPlayerStateType",
-                    "ServerPlayerStateType");
-            }
-
-            if (this.antiAfkServerPlayerStateType == null || !this.antiAfkServerPlayerStateType.IsEnum)
-            {
-                return null;
-            }
-
-            try
-            {
-                return Enum.Parse(this.antiAfkServerPlayerStateType, "Operating");
-            }
-            catch
-            {
-                return null;
-            }
-        }
 
 
         private bool TryInvokeAntiAfkPlayerOperateHeartBeatAuraMono()
