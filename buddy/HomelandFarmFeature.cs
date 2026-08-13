@@ -5045,69 +5045,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryHomelandFarmPlayFertilizerFeedbackVfxManaged(uint cropNetId, int feedbackEffectId, out string status)
-        {
-            status = "Managed feedback VFX unavailable.";
-            if (cropNetId == 0U || feedbackEffectId <= 0)
-            {
-                return false;
-            }
-
-            this.EnsureHomelandFarmScannerTypes();
-            if (this.homelandFarmEntitiesType == null)
-            {
-                return false;
-            }
-
-            if (!this.TryHomelandFarmTryGetCropEntityPositionRotation(cropNetId, out Vector3 position, out Quaternion rotation)
-                || position == Vector3.zero)
-            {
-                status = "Crop position unavailable.";
-                return false;
-            }
-
-            try
-            {
-                MethodInfo playVfxMethod = this.homelandFarmEntitiesType.GetMethod(
-                    "PlayVfxAt",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                    null,
-                    new Type[] { typeof(int), typeof(Vector3), typeof(Quaternion) },
-                    null);
-                if (playVfxMethod == null)
-                {
-                    playVfxMethod = this.homelandFarmEntitiesType.GetMethod(
-                        "PlayVfxAt",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                        null,
-                        new Type[] { typeof(int), typeof(Vector3) },
-                        null);
-                }
-
-                if (playVfxMethod == null)
-                {
-                    status = "Entities.PlayVfxAt missing.";
-                    return false;
-                }
-
-                if (playVfxMethod.GetParameters().Length == 2)
-                {
-                    playVfxMethod.Invoke(null, new object[] { feedbackEffectId, position });
-                }
-                else
-                {
-                    playVfxMethod.Invoke(null, new object[] { feedbackEffectId, position, rotation });
-                }
-
-                status = "Managed PlayVfxAt ok effect=" + feedbackEffectId + ".";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "Managed PlayVfxAt failed: " + (ex.InnerException ?? ex).Message;
-                return false;
-            }
-        }
 
         private unsafe bool TryHomelandFarmPlayFertilizerVfxOnAura(uint cropNetId, int effectId, string socketName, out string status)
         {
@@ -5844,16 +5781,6 @@ namespace HeartopiaMod
 
                     attempts.Append("PlayVfxAt(").Append(effectLabels[i]).Append('=').Append(effectId).Append(")");
                 }
-                else if (this.TryHomelandFarmPlayFertilizerFeedbackVfxManaged(cropNetId, effectId, out atStatus))
-                {
-                    any = true;
-                    if (attempts.Length > 0)
-                    {
-                        attempts.Append(';');
-                    }
-
-                    attempts.Append("managed PlayVfxAt(").Append(effectLabels[i]).Append('=').Append(effectId).Append(")");
-                }
 
                 if (this.TryHomelandFarmPlayFertilizerVfxOnAura(cropNetId, effectId, "vfx_root", out string onStatus))
                 {
@@ -6109,143 +6036,8 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryHomelandFarmRefreshCropManureVisualManaged(uint cropNetId, int fertilizerStaticId, out int decorationId, out int feedbackEffect, out string status)
-        {
-            status = "Managed visual refresh unavailable.";
-            decorationId = 0;
-            feedbackEffect = 0;
-            int actionEffect = 0;
-            this.TryHomelandFarmTryGetCropFertilizerVisualInfo(
-                fertilizerStaticId,
-                out _,
-                out decorationId,
-                out feedbackEffect,
-                out actionEffect,
-                out string visualSource);
 
-            if (cropNetId == 0U || !this.EnsureHomelandFarmScannerTypes() || this.homelandFarmCropComponentType == null)
-            {
-                return false;
-            }
 
-            bool decorationCreated = false;
-            if (this.EnsureHomelandFarmTableDataReflection() && this.homelandFarmGetEntityMethod != null)
-            {
-                try
-                {
-                    object entity = this.homelandFarmGetEntityMethod.GetParameters().Length == 2
-                        ? this.homelandFarmGetEntityMethod.Invoke(null, new object[] { cropNetId, true })
-                        : this.homelandFarmGetEntityMethod.Invoke(null, new object[] { cropNetId });
-                    if (entity != null
-                        && this.TryHomelandFarmGetComponent(entity, this.homelandFarmCropComponentType, out object cropComponent)
-                        && cropComponent != null)
-                    {
-                        Type cropType = cropComponent.GetType();
-                        this.TryInvokeManagedInstanceMethod(cropType, cropComponent, "StopManureEffect");
-                        this.TrySetManagedInstanceField(cropType, cropComponent, 0, "_lastManureId", "lastManureId", "_LastManureId", "LastManureId");
-                        decorationCreated = decorationId > 0
-                            && this.TryHomelandFarmCreateManureDecorationAura(cropNetId, decorationId, out _);
-                        if (fertilizerStaticId > 0)
-                        {
-                            this.TrySetManagedInstanceField(
-                                cropType,
-                                cropComponent,
-                                fertilizerStaticId,
-                                "_lastManureId",
-                                "lastManureId",
-                                "_LastManureId",
-                                "LastManureId");
-                        }
-
-                        this.TryInvokeManagedInstanceMethod(cropType, cropComponent, "PlayShakeEffect");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    status = "Managed refresh exception: " + (ex.InnerException ?? ex).Message;
-                    return false;
-                }
-            }
-
-            bool vfxPlayed = this.TryHomelandFarmPlayFertilizerVisualEffects(
-                cropNetId,
-                feedbackEffect,
-                actionEffect,
-                out string vfxDetail);
-
-            if (decorationCreated || vfxPlayed)
-            {
-                status = "Managed netId=" + cropNetId
-                    + " src=" + visualSource
-                    + " decoration=" + (decorationCreated ? "ok" : "skip")
-                    + " vfx=" + (vfxPlayed ? vfxDetail : "none")
-                    + " decorationId=" + decorationId
-                    + " feedbackEffect=" + feedbackEffect
-                    + " actionEffect=" + actionEffect + ".";
-                return true;
-            }
-
-            return false;
-        }
-
-        private bool TryInvokeManagedInstanceMethod(Type type, object target, string methodName)
-        {
-            if (type == null || target == null || string.IsNullOrEmpty(methodName))
-            {
-                return false;
-            }
-
-            try
-            {
-                MethodInfo method = type.GetMethod(
-                    methodName,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    null,
-                    Type.EmptyTypes,
-                    null);
-                if (method == null)
-                {
-                    return false;
-                }
-
-                method.Invoke(target, null);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private bool TrySetManagedInstanceField(Type type, object target, int value, params string[] fieldNames)
-        {
-            if (type == null || target == null || fieldNames == null)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < fieldNames.Length; i++)
-            {
-                try
-                {
-                    FieldInfo field = type.GetField(
-                        fieldNames[i],
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (field == null)
-                    {
-                        continue;
-                    }
-
-                    field.SetValue(target, Convert.ChangeType(value, field.FieldType));
-                    return true;
-                }
-                catch
-                {
-                }
-            }
-
-            return false;
-        }
 
         private bool TryHomelandFarmRefreshCropManureVisual(uint cropNetId, int fertilizerStaticId, out string status)
         {
@@ -6274,18 +6066,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryHomelandFarmRefreshCropManureVisualManaged(
-                    cropNetId,
-                    fertilizerStaticId,
-                    out decorationId,
-                    out feedbackEffect,
-                    out string managedStatus))
-            {
-                status = managedStatus;
-                return true;
-            }
-
-            status = auraStatus + "; " + managedStatus
+            status = auraStatus
                 + " src=" + visualSource
                 + " effectType=" + effectType
                 + " decorationId=" + decorationId
@@ -11257,35 +11038,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryHomelandFarmTryReadSelfPlayerGuidFromLoginInfoManaged(out Guid playerGuid)
-        {
-            playerGuid = Guid.Empty;
-            this.EnsureHomelandFarmPlayerDataCenterType();
-            if (this.homelandFarmPlayerDataCenterType == null)
-            {
-                return false;
-            }
-
-            MethodInfo getLoginInfoMethod = this.GetMethodQuiet(
-                this.homelandFarmPlayerDataCenterType,
-                "GetLoginInfo",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                Type.EmptyTypes);
-            if (getLoginInfoMethod == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                object loginInfo = getLoginInfoMethod.Invoke(null, null);
-                return this.TryHomelandFarmTryReadGuidFromLoginInfoObject(loginInfo, out playerGuid);
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private unsafe bool TryHomelandFarmTryReadSelfPlayerGuidFromLoginInfoAura(out Guid playerGuid)
         {
@@ -11366,12 +11118,6 @@ namespace HeartopiaMod
         {
             playerGuid = Guid.Empty;
             readOk = false;
-
-            if (this.TryHomelandFarmTryReadSelfPlayerGuidFromLoginInfoManaged(out playerGuid) && playerGuid != Guid.Empty)
-            {
-                readOk = true;
-                return true;
-            }
 
             if (this.TryHomelandFarmTryReadSelfPlayerGuidFromLoginInfoAura(out playerGuid) && playerGuid != Guid.Empty)
             {
@@ -11926,7 +11672,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryHomelandFarmTryReadPlantCheckIfOutOfSeasonManaged(plantNetId, out outOfSeason);
+            return false;
         }
 
         private bool TryHomelandFarmTryInvokePlantCheckIfOutOfSeasonOnEntity(IntPtr entityObj, out bool outOfSeason)
@@ -11996,71 +11742,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryHomelandFarmTryReadPlantCheckIfOutOfSeasonManaged(uint plantNetId, out bool outOfSeason)
-        {
-            outOfSeason = false;
-            if (plantNetId == 0U)
-            {
-                return false;
-            }
-
-            if (this.homelandFarmPlantComponentType == null)
-            {
-                this.homelandFarmPlantComponentType = this.ResolveHomelandFarmManagedType(
-                    "PlantComponent",
-                    "XDTLevelAndEntity.Gameplay.Component.Homeland.PlantComponent",
-                    "ScriptsRefactory.LevelAndEntity.Gameplay.Component.Homeland.PlantComponent");
-            }
-
-            if (this.homelandFarmPlantComponentType == null)
-            {
-                return false;
-            }
-
-            MethodInfo checkMethod = this.homelandFarmPlantComponentType.GetMethod(
-                "CheckIfOutOfSeason",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                Type.EmptyTypes,
-                null);
-            if (checkMethod == null)
-            {
-                return false;
-            }
-
-            if (this.homelandFarmEntitiesType != null)
-            {
-                MethodInfo getEntityMethod = this.homelandFarmEntitiesType.GetMethod(
-                    "GetEntity",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                    null,
-                    new[] { typeof(uint) },
-                    null);
-                if (getEntityMethod != null)
-                {
-                    try
-                    {
-                        object entity = getEntityMethod.Invoke(null, new object[] { plantNetId });
-                        if (entity != null
-                            && this.TryHomelandFarmGetComponent(entity, this.homelandFarmPlantComponentType, out object plantComponent)
-                            && plantComponent != null)
-                        {
-                            object result = checkMethod.Invoke(plantComponent, null);
-                            if (result is bool value)
-                            {
-                                outOfSeason = value;
-                                return true;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-
-            return false;
-        }
 
         private bool TryHomelandFarmTryReadFlowerStaticIdForOutOfSeason(IntPtr entityObj, uint plantNetId, out int staticId)
         {
@@ -16735,23 +16416,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private string TryHomelandFarmFormatManagedInventoryItemLabel(object item, int staticId, int count, uint netId)
-        {
-            int step = 0;
-            if (item != null)
-            {
-                if (!this.TryGetManagedInt32Member(item, "step", out step))
-                {
-                    this.TryGetManagedInt32Member(item, "Step", out step);
-                }
-            }
-
-            string displayName = this.TryHomelandFarmResolveBackpackItemDisplayName(IntPtr.Zero, item, staticId, step, netId, out string resolvedName)
-                ? resolvedName
-                : this.TryHomelandFarmGetItemLabel(staticId);
-
-            return displayName + " x" + count;
-        }
 
         private string TryHomelandFarmFormatAuraInventoryItemLabel(IntPtr itemObj, int staticId, int count, uint netId)
         {
@@ -16798,108 +16462,6 @@ namespace HeartopiaMod
             return storageValue;
         }
 
-        private bool TryCollectHomelandFarmInventoryItemsManaged(
-            HomelandFarmStorageSource source,
-            Func<int, int, bool> accept,
-            List<HomelandFarmInventoryItem> output,
-            HashSet<uint> seenNetIds)
-        {
-            if (output == null || seenNetIds == null || accept == null || !this.EnsureHomelandFarmInventoryReflection())
-            {
-                return false;
-            }
-
-            object backPackObj = this.GetHomelandFarmBackPackSystemInstance();
-            if (backPackObj == null || this.homelandFarmBackPackGetAllItemMethod == null)
-            {
-                return false;
-            }
-
-            bool added = false;
-            foreach (int storageValue in this.GetHomelandFarmStorageTypeValues(source))
-            {
-                object storageArg = this.TryHomelandFarmGetStorageObject(storageValue);
-                object itemListObj;
-                try
-                {
-                    ParameterInfo[] parameters = this.homelandFarmBackPackGetAllItemMethod.GetParameters();
-                    itemListObj = parameters.Length == 1
-                        ? this.homelandFarmBackPackGetAllItemMethod.Invoke(backPackObj, new[] { storageArg })
-                        : this.homelandFarmBackPackGetAllItemMethod.Invoke(backPackObj, null);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (itemListObj == null)
-                {
-                    continue;
-                }
-
-                List<object> items = new List<object>();
-                if (!this.TryEnumerateManagedCollectionItems(itemListObj, items) && itemListObj is IEnumerable enumerable)
-                {
-                    foreach (object item in enumerable)
-                    {
-                        if (item != null)
-                        {
-                            items.Add(item);
-                        }
-                    }
-                }
-
-                for (int i = 0; i < items.Count; i++)
-                {
-                    object item = items[i];
-                    if (item == null)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryReadIntFromMember(item, "staticId", out int staticId))
-                    {
-                        this.TryReadIntFromMember(item, "StaticId", out staticId);
-                    }
-
-                    if (!this.TryReadUIntFromMember(item, "netId", out uint netId))
-                    {
-                        this.TryReadUIntFromMember(item, "NetId", out netId);
-                    }
-
-                    if (!this.TryReadIntFromMember(item, "count", out int count))
-                    {
-                        this.TryReadIntFromMember(item, "Count", out count);
-                    }
-
-                    if (!this.TryReadIntFromMember(item, "entityType", out int itemEntityType))
-                    {
-                        this.TryReadIntFromMember(item, "EntityType", out itemEntityType);
-                    }
-
-                    if (staticId <= 0 || netId == 0U || count <= 0 || !seenNetIds.Add(netId))
-                    {
-                        continue;
-                    }
-
-                    if (!accept(staticId, itemEntityType))
-                    {
-                        continue;
-                    }
-
-                    output.Add(new HomelandFarmInventoryItem
-                    {
-                        StaticId = staticId,
-                        NetId = netId,
-                        Count = count,
-                        Label = this.TryHomelandFarmFormatManagedInventoryItemLabel(item, staticId, count, netId)
-                    });
-                    added = true;
-                }
-            }
-
-            return added;
-        }
 
         private unsafe bool TryCollectHomelandFarmInventoryItemsAura(
             HomelandFarmStorageSource source,
@@ -17016,10 +16578,7 @@ namespace HeartopiaMod
             HashSet<uint> seenNetIds = new HashSet<uint>();
             bool accept(int staticId, int itemEntityType) => this.TryHomelandFarmItemMatchesCropSeed(staticId, itemEntityType);
 
-            if (!this.TryCollectHomelandFarmInventoryItemsManaged(source, accept, results, seenNetIds))
-            {
-                this.TryCollectHomelandFarmInventoryItemsAura(source, accept, results, seenNetIds);
-            }
+            this.TryCollectHomelandFarmInventoryItemsAura(source, accept, results, seenNetIds);
 
             results.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
             this.homelandFarmSeedsCacheTime = Time.realtimeSinceStartup;
@@ -17033,10 +16592,7 @@ namespace HeartopiaMod
             HashSet<uint> seenNetIds = new HashSet<uint>();
             bool accept(int staticId, int itemEntityType) => this.TryHomelandFarmItemMatchesCropFertilizer(staticId, itemEntityType);
 
-            if (!this.TryCollectHomelandFarmInventoryItemsManaged(source, accept, results, seenNetIds))
-            {
-                this.TryCollectHomelandFarmInventoryItemsAura(source, accept, results, seenNetIds);
-            }
+            this.TryCollectHomelandFarmInventoryItemsAura(source, accept, results, seenNetIds);
 
             results.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
             this.homelandFarmFertilizersCacheTime = Time.realtimeSinceStartup;
@@ -17474,28 +17030,6 @@ namespace HeartopiaMod
             return levelObjectObj != IntPtr.Zero;
         }
 
-        private bool TryHomelandFarmTryReadManagedDictionaryLevelObjectEntry(
-            object entry,
-            out ulong dictionaryKey,
-            out object levelObject)
-        {
-            dictionaryKey = 0UL;
-            levelObject = null;
-            if (entry == null)
-            {
-                return false;
-            }
-
-            if (!this.TryReadManagedUInt64Member(entry, "Key", out dictionaryKey) || dictionaryKey == 0UL)
-            {
-                this.TryReadManagedUInt64Member(entry, "key", out dictionaryKey);
-            }
-
-            levelObject = this.TryGetManagedMemberValue(entry, "Value")
-                ?? this.TryGetManagedMemberValue(entry, "value")
-                ?? entry;
-            return levelObject != null;
-        }
 
         private unsafe bool TryHomelandFarmFindPlanterSowPutZoneAura(uint planterNetId, out ulong levelObjectNetId, out int slot)
         {
@@ -17588,82 +17122,6 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryHomelandFarmFindPlanterSowPutZoneManaged(uint planterNetId, out ulong levelObjectNetId, out int slot)
-        {
-            levelObjectNetId = 0UL;
-            slot = -1;
-            if (planterNetId == 0U)
-            {
-                return false;
-            }
-
-            try
-            {
-                Type levelObjectManagerType = this.FindLevelObjectManagerRuntimeType();
-                if (levelObjectManagerType == null)
-                {
-                    return false;
-                }
-
-                PropertyInfo instanceProperty = levelObjectManagerType.GetProperty(
-                    "Instance",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                object levelObjectManager = instanceProperty != null ? instanceProperty.GetValue(null, null) : null;
-                if (levelObjectManager == null)
-                {
-                    return false;
-                }
-
-                object dictionaryObj = this.TryGetManagedMemberValue(levelObjectManager, "_dictionary")
-                    ?? this.TryGetManagedMemberValue(levelObjectManager, "dictionary");
-                if (!(dictionaryObj is IEnumerable enumerable))
-                {
-                    return false;
-                }
-
-                int bestScore = -1;
-                ulong bestNetId = 0UL;
-                int bestSlot = -1;
-                foreach (object entry in enumerable)
-                {
-                    if (!this.TryHomelandFarmTryReadManagedDictionaryLevelObjectEntry(entry, out ulong dictionaryKey, out object levelObject)
-                        || levelObject == null)
-                    {
-                        continue;
-                    }
-
-                    if (!this.TryHomelandFarmTryReadLevelObjectOwnerNetIdManaged(levelObject, dictionaryKey, out uint ownerNetId)
-                        || ownerNetId != planterNetId)
-                    {
-                        continue;
-                    }
-
-                    bool flagsReadOk = this.TryHomelandFarmTryReadManagedLevelObjectPutZoneFlags(levelObject, out int flags);
-                    int score = HomelandFarmScoreSowPutZoneFlags(flags, flagsReadOk);
-                    ulong candidateNetId = dictionaryKey;
-                    if (candidateNetId == 0UL && this.TryGetAuraLevelObjectNetId(levelObject, out ulong netIdFromObject))
-                    {
-                        candidateNetId = netIdFromObject;
-                    }
-
-                    HomelandFarmTryUpdateBestSowPutZoneCandidate(candidateNetId, score, ref bestScore, ref bestNetId, ref bestSlot);
-                }
-
-                if (bestNetId == 0UL)
-                {
-                    return false;
-                }
-
-                levelObjectNetId = bestNetId;
-                slot = bestSlot;
-                return true;
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
 
         // Memoized: resolved once per sow point, i.e. once per box, before this.
         private bool TryHomelandFarmTryGetCraftFieldNetId(out uint fieldNetId)
@@ -18505,15 +17963,6 @@ namespace HeartopiaMod
 
             int slot = -1;
             if (this.TryHomelandFarmFindPlanterSowPutZoneAura(planterNetId, out levelObjectNetId, out slot)
-                && levelObjectNetId != 0UL
-                && this.TryHomelandFarmValidateSowPutZoneLevelObject(levelObjectNetId))
-            {
-                this.homelandFarmResolvedPutZoneByPlanterNetId[planterNetId] = levelObjectNetId;
-                return true;
-            }
-
-            levelObjectNetId = 0UL;
-            if (this.TryHomelandFarmFindPlanterSowPutZoneManaged(planterNetId, out levelObjectNetId, out slot)
                 && levelObjectNetId != 0UL
                 && this.TryHomelandFarmValidateSowPutZoneLevelObject(levelObjectNetId))
             {
