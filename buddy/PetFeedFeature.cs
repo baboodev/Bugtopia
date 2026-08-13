@@ -3893,22 +3893,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            bool eatenPopulated = false;
-            if (false)
-            {
-                try
-                {
-                }
-                catch
-                {
-                }
-            }
-
-            if (!eatenPopulated)
-            {
-                this.TryPopulatePetFeedKnownFavoriteFoodsViaAuraMono(target);
-            }
-
+            this.TryPopulatePetFeedKnownFavoriteFoodsViaAuraMono(target);
             this.TryPopulatePetFeedSecretFavoritesAuraMono(target);
         }
 

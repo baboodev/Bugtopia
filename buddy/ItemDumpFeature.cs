@@ -51,13 +51,6 @@ namespace HeartopiaMod
         private ItemDumpEntityNameResolver CreateItemDumpEntityNameResolver()
         {
             ItemDumpEntityNameResolver resolver = new ItemDumpEntityNameResolver();
-            try
-            {
-            }
-            catch
-            {
-            }
-
             if (this.EnsureAuraMonoApiReady())
             {
                 IntPtr tableDataClass = this.FindAuraMonoTableDataClass();
