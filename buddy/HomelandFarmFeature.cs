@@ -480,8 +480,6 @@ namespace HeartopiaMod
         private Type homelandFarmCropPlantPointType = null;
         private Type homelandFarmGrowCropNetworkCommandType = null;
         private Type homelandFarmWaterCropNetworkCommandType = null;
-        private bool homelandFarmWaterCropSendUnavailable = false;
-        private bool homelandFarmWaterPlantSendUnavailable = false;
         private Type homelandFarmHarvestNetworkCommandType = null;
         private Type homelandFarmWeedingNetworkCommandType = null;
         private Type homelandFarmManuredNetworkCommandType = null;
@@ -533,9 +531,6 @@ namespace HeartopiaMod
         private MethodInfo homelandFarmEcsServiceTryGetMethodDef = null;
         private MethodInfo homelandFarmFriendServiceGetFriendsMethod = null;
         private MethodInfo homelandFarmCropBoxGetWaterCountMethod = null;
-        private MethodInfo homelandFarmSendCommandMethodDef = null;
-        private MethodInfo homelandFarmManuredSendCommandMethod = null;
-        private object homelandFarmReliableChannelValue = null;
         private MethodInfo homelandFarmCropAddManureInteropMethod = null;
         private MethodInfo homelandFarmCropSeedingInteropMethod = null;
 
@@ -4110,12 +4105,6 @@ namespace HeartopiaMod
                 && this.TryHomelandFarmInvokeStaticUintProtocol(
                     this.homelandFarmCropPickPlantMethod,
                     cropNetId,
-                    this.homelandFarmHarvestNetworkCommandType,
-                    command =>
-                    {
-                        object cmd = command;
-                        return this.TrySetFieldValue(this.homelandFarmHarvestNetworkCommandType, ref cmd, "netId", cropNetId);
-                    },
                     "Harvest",
                     out status))
             {
@@ -4144,13 +4133,6 @@ namespace HeartopiaMod
                 && this.TryHomelandFarmInvokeStaticUintProtocol(
                     this.homelandFarmPlantCollectSeedMethod,
                     plantNetId,
-                    this.homelandFarmPickPlantCrossedSeedNetworkCommandType,
-                    command =>
-                    {
-                        object cmd = command;
-                        return this.TrySetFieldValue(this.homelandFarmPickPlantCrossedSeedNetworkCommandType, ref cmd, "netId", plantNetId)
-                            || this.TrySetFieldValue(this.homelandFarmPickPlantCrossedSeedNetworkCommandType, ref cmd, "plantNetId", plantNetId);
-                    },
                     "CollectPlantSeed",
                     out status))
             {
@@ -4179,13 +4161,6 @@ namespace HeartopiaMod
                 && this.TryHomelandFarmInvokeStaticUintProtocol(
                     this.homelandFarmPlantPickPlantMethod,
                     plantNetId,
-                    this.homelandFarmPickPlantNetworkCommandType,
-                    command =>
-                    {
-                        object cmd = command;
-                        return this.TrySetFieldValue(this.homelandFarmPickPlantNetworkCommandType, ref cmd, "plantNetId", plantNetId)
-                            || this.TrySetFieldValue(this.homelandFarmPickPlantNetworkCommandType, ref cmd, "netId", plantNetId);
-                    },
                     "PickFlower",
                     out status))
             {
@@ -4214,12 +4189,6 @@ namespace HeartopiaMod
                 && this.TryHomelandFarmInvokeStaticUintProtocol(
                     this.homelandFarmCropWeedMethod,
                     cropNetId,
-                    this.homelandFarmWeedingNetworkCommandType,
-                    command =>
-                    {
-                        object cmd = command;
-                        return this.TrySetFieldValue(this.homelandFarmWeedingNetworkCommandType, ref cmd, "netId", cropNetId);
-                    },
                     "Weed",
                     out status))
             {
@@ -4288,14 +4257,6 @@ namespace HeartopiaMod
             }
 
             attemptLog.Add("interop=" + interopStatus);
-
-            if (this.TryHomelandFarmSendManureCommand(cropNetIds, out string sendStatus))
-            {
-                status = sendStatus;
-                return true;
-            }
-
-            attemptLog.Add("send=" + sendStatus);
 
             if (this.EnsureHomelandFarmReflectionReady() && this.homelandFarmCropAddManureMethod != null)
             {
@@ -6511,9 +6472,8 @@ namespace HeartopiaMod
             {
                 status = "Manured=" + (this.homelandFarmManuredNetworkCommandType != null)
                     + " AddHolder=" + (this.homelandFarmAddHolderSystemCommandType != null)
-                    + " SendCommand=" + (this.homelandFarmSendCommandMethodDef != null);
-                return this.homelandFarmManuredNetworkCommandType != null
-                    && this.homelandFarmSendCommandMethodDef != null;
+;
+                return this.homelandFarmManuredNetworkCommandType != null;
             }
 
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
@@ -6540,68 +6500,14 @@ namespace HeartopiaMod
                     "EcsClient.XDT.Scene.Shared.Modules.Tools.EHolderSystem",
                     "XDT.Scene.Shared.Modules.Tools.EHolderSystem");
             }
-
-            this.EnsureHomelandFarmSendCommandResolver();
             this.homelandFarmNetworkCommandTypesResolved = true;
             status = "Manured=" + (this.homelandFarmManuredNetworkCommandType != null)
                 + " AddHolder=" + (this.homelandFarmAddHolderSystemCommandType != null)
                 + " EHolderSystem=" + (this.homelandFarmEHolderSystemType != null)
-                + " SendCommand=" + (this.homelandFarmSendCommandMethodDef != null);
-            return this.homelandFarmManuredNetworkCommandType != null
-                && this.homelandFarmSendCommandMethodDef != null;
+;
+            return this.homelandFarmManuredNetworkCommandType != null;
         }
 
-        private bool TryHomelandFarmSendAddHolderSystemCommand(uint itemNetId, out string status)
-        {
-            status = "AddHolder SendCommand unavailable.";
-            if (itemNetId == 0U)
-            {
-                status = "Handhold netId missing.";
-                return false;
-            }
-
-            if (this.homelandFarmAddHolderSystemCommandType == null)
-            {
-                this.TryHomelandFarmEnsureNetworkCommandTypes(out _);
-            }
-
-            if (this.homelandFarmAddHolderSystemCommandType == null)
-            {
-                status = "AddHolderSystemCommand type missing.";
-                return false;
-            }
-
-            object holdItemSystem = 4;
-            if (this.homelandFarmEHolderSystemType != null && this.homelandFarmEHolderSystemType.IsEnum)
-            {
-                try
-                {
-                    holdItemSystem = Enum.Parse(this.homelandFarmEHolderSystemType, "HoldItem");
-                }
-                catch
-                {
-                    holdItemSystem = 4;
-                }
-            }
-
-            bool sent = this.TryHomelandFarmSendCommand(
-                this.homelandFarmAddHolderSystemCommandType,
-                command =>
-                {
-                    object cmd = command;
-                    bool ok = this.TrySetFieldValue(this.homelandFarmAddHolderSystemCommandType, ref cmd, "NetId", itemNetId);
-                    ok = this.TrySetFieldValue(this.homelandFarmAddHolderSystemCommandType, ref cmd, "System", holdItemSystem) || ok;
-                    return ok;
-                },
-                out status);
-            if (sent)
-            {
-                status = "AddHolder SendCommand ok netId=" + itemNetId + ".";
-                this.HomelandFarmLog(status);
-            }
-
-            return sent;
-        }
 
         // Take the item out of the player's hand again after fertilizing via AuraMono
         // CharacterProtocolManager.UnEquipHandhold() (parameterless), the mirror of the
@@ -6827,8 +6733,6 @@ namespace HeartopiaMod
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 }
             }
-
-            this.EnsureHomelandFarmSendCommandResolver();
             this.TryHomelandFarmEnsureToolEquipAuraMethods();
 
             bool available = this.HomelandFarmHasToolEquipPathAvailable();
@@ -6842,7 +6746,6 @@ namespace HeartopiaMod
                     "Tool equip paths unresolved holdTool=" + (this.homelandFarmHoldToolCommandType != null)
                     + " setHandHold=" + (this.homelandFarmToolProtocolSetHandHoldMethod != null)
                     + " toolSystem=" + (this.homelandFarmToolSystemSetHandholdMethod != null)
-                    + " sendCommand=" + (this.homelandFarmSendCommandMethodDef != null)
                     + " auraSetHandHold=0x" + this.homelandFarmAuraToolProtocolSetHandHoldMethod.ToInt64().ToString("X")
                     + " auraToolSystem=0x" + this.homelandFarmAuraToolSystemSetHandholdMethod.ToInt64().ToString("X"));
             }
@@ -6930,109 +6833,7 @@ namespace HeartopiaMod
             }
         }
 
-        private bool TryHomelandFarmSendHoldToolCommand(int toolId, int skinId, out string status)
-        {
-            status = "HoldTool SendCommand unavailable.";
-            if (toolId <= 0)
-            {
-                status = "Tool id missing.";
-                return false;
-            }
 
-            if (this.homelandFarmToolProtocolSetHandHoldMethod != null)
-            {
-                try
-                {
-                    this.homelandFarmToolProtocolSetHandHoldMethod.Invoke(null, new object[] { toolId, skinId });
-                    status = "ToolProtocolManager.SetHandHold ok toolId=" + toolId + " skinId=" + skinId + ".";
-                    this.HomelandFarmLog(status);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    status = "ToolProtocolManager.SetHandHold exception: " + (ex.InnerException ?? ex).Message;
-                }
-            }
-
-            if (this.homelandFarmHoldToolCommandType == null)
-            {
-                this.TryHomelandFarmEnsureToolEquipTypes();
-            }
-
-            if (this.homelandFarmHoldToolCommandType == null)
-            {
-                return false;
-            }
-
-            bool sent = this.TryHomelandFarmSendCommand(
-                this.homelandFarmHoldToolCommandType,
-                command =>
-                {
-                    object cmd = command;
-                    bool ok = this.TrySetFieldValue(this.homelandFarmHoldToolCommandType, ref cmd, "ToolId", toolId);
-                    ok = this.TrySetFieldValue(this.homelandFarmHoldToolCommandType, ref cmd, "ToolSkinId", skinId) || ok;
-                    return ok;
-                },
-                out status);
-            if (sent)
-            {
-                status = "HoldTool SendCommand ok toolId=" + toolId + " skinId=" + skinId + ".";
-                this.HomelandFarmLog(status);
-            }
-
-            return sent;
-        }
-
-        private bool TryHomelandFarmSendCancelHandToolCommand(out string status)
-        {
-            status = "Cancel HoldTool SendCommand unavailable.";
-            if (this.homelandFarmToolProtocolSetHandHoldMethod != null)
-            {
-                try
-                {
-                    this.homelandFarmToolProtocolSetHandHoldMethod.Invoke(null, new object[] { 0, 0 });
-                    status = "ToolProtocolManager.SetHandHold(0) ok.";
-                    this.HomelandFarmLog(status);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    status = "ToolProtocolManager.SetHandHold(0) exception: " + (ex.InnerException ?? ex).Message;
-                }
-            }
-
-            if (this.TryHomelandFarmInvokeAuraToolProtocolCancelHandHold(out string auraProtocolStatus))
-            {
-                status = auraProtocolStatus;
-                return true;
-            }
-
-            if (this.homelandFarmCancelHolderSystemCommandType == null)
-            {
-                this.TryHomelandFarmEnsureToolEquipTypes();
-            }
-
-            if (this.homelandFarmCancelHolderSystemCommandType == null)
-            {
-                return false;
-            }
-
-            bool sent = this.TryHomelandFarmSendCommand(
-                this.homelandFarmCancelHolderSystemCommandType,
-                command =>
-                {
-                    object cmd = command;
-                    return this.TrySetFieldValue(this.homelandFarmCancelHolderSystemCommandType, ref cmd, "System", HomelandFarmHolderSystemHoldTool);
-                },
-                out status);
-            if (sent)
-            {
-                status = "CancelHolderSystemCommand ok.";
-                this.HomelandFarmLog(status);
-            }
-
-            return sent;
-        }
 
         private unsafe bool TryHomelandFarmInvokeAuraToolSystemSetHandhold(int toolId, out string status)
         {
@@ -7196,7 +6997,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryHomelandFarmSendHoldToolCommand(toolId, skinId, out status);
+            return false;
         }
 
         private bool TryHomelandFarmUnequipHandTool(out string status)
@@ -7236,7 +7037,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryHomelandFarmSendCancelHandToolCommand(out status);
+            return false;
         }
 
         public bool TryEquipHandTool(int toolId, out string status)
@@ -7309,12 +7110,6 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.TryHomelandFarmSendAddHolderSystemCommand(itemNetId, out string sendStatus))
-            {
-                status = sendStatus;
-                return true;
-            }
-
             if (this.homelandFarmCharacterEquipHandholdMethod != null)
             {
                 try
@@ -7336,9 +7131,9 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (!string.IsNullOrEmpty(sendStatus))
+            if (!string.IsNullOrEmpty(auraStatus))
             {
-                status = sendStatus;
+                status = auraStatus;
             }
 
             return false;
@@ -13732,23 +13527,15 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.TryHomelandFarmSendWaterCropCommand(ownerNetId, cropBoxNetIds, out string sendStatus))
-            {
-                status = sendStatus;
-                this.HomelandFarmLog("Crop water via managed SendCommand count=" + cropBoxNetIds.Count + " status=" + sendStatus);
-                return true;
-            }
-
             if (this.TryHomelandFarmInvokeCropWaterAura(ownerNetId, cropBoxNetIds, out string auraStatus))
             {
                 status = auraStatus;
                 return true;
             }
 
-            status = string.IsNullOrEmpty(status) ? sendStatus : (status + ". " + sendStatus);
             if (!string.IsNullOrEmpty(auraStatus))
             {
-                status = status + ". " + auraStatus;
+                status = string.IsNullOrEmpty(status) ? auraStatus : (status + ". " + auraStatus);
             }
 
             return false;
@@ -13773,23 +13560,15 @@ namespace HeartopiaMod
                 }
             }
 
-            if (this.TryHomelandFarmSendWaterPlantCommand(ownerNetId, plantNetIds, mode, out string sendStatus))
-            {
-                status = sendStatus;
-                this.HomelandFarmLog("Plant water via managed SendCommand count=" + plantNetIds.Count + " owner=" + ownerNetId + " mode=" + mode + " status=" + sendStatus);
-                return true;
-            }
-
             if (this.TryHomelandFarmInvokePlantWaterAura(ownerNetId, plantNetIds, mode, out string auraStatus))
             {
                 status = auraStatus;
                 return true;
             }
 
-            status = string.IsNullOrEmpty(status) ? sendStatus : (status + ". " + sendStatus);
             if (!string.IsNullOrEmpty(auraStatus))
             {
-                status = status + ". " + auraStatus;
+                status = string.IsNullOrEmpty(status) ? auraStatus : (status + ". " + auraStatus);
             }
 
             return false;
@@ -13798,8 +13577,6 @@ namespace HeartopiaMod
         private bool TryHomelandFarmInvokeStaticUintProtocol(
             MethodInfo protocolMethod,
             uint netId,
-            Type commandType,
-            Func<object, bool> populateCommand,
             string label,
             out string status)
         {
@@ -13813,255 +13590,14 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 status = (ex.InnerException ?? ex).Message;
-                string sendStatus = "SendCommand fallback unavailable.";
-                if (commandType != null && populateCommand != null && this.TryHomelandFarmSendCommand(commandType, populateCommand, out sendStatus))
-                {
-                    status = sendStatus;
-                    return true;
-                }
-
-                status = status + ". " + sendStatus;
                 return false;
             }
         }
 
-        private bool EnsureHomelandFarmSendCommandResolver()
-        {
-            if (this.homelandFarmSendCommandMethodDef != null && this.homelandFarmReliableChannelValue != null)
-            {
-                return true;
-            }
 
-            Type webRequestType = this.FindHomelandFarmRuntimeType(
-                "WebRequestUtility",
-                "XDTDataAndProtocol.ProtocolService");
-            if (webRequestType == null)
-            {
-                return false;
-            }
 
-            this.homelandFarmSendCommandMethodDef = webRequestType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .FirstOrDefault(m => m.Name == "SendCommand" && m.IsGenericMethodDefinition && m.GetParameters().Length == 3);
-            Type channelType = this.FindLoadedType(
-                    "XD.GameGerm.Network.ChannelType",
-                    "Il2CppXD.GameGerm.Network.ChannelType",
-                    "ChannelType")
-                ?? this.FindLoadedTypeByFullName("XD.GameGerm.Network.ChannelType")
-                ?? this.FindLoadedTypeByFullName("Il2CppXD.GameGerm.Network.ChannelType");
-            if (channelType != null)
-            {
-                try
-                {
-                    this.homelandFarmReliableChannelValue = Enum.Parse(channelType, "Reliable");
-                }
-                catch
-                {
-                }
-            }
 
-            if (this.homelandFarmReliableChannelValue == null)
-            {
-                this.homelandFarmReliableChannelValue = 1;
-            }
 
-            return this.homelandFarmSendCommandMethodDef != null;
-        }
-
-        private bool TryHomelandFarmSendCommand(Type commandType, Func<object, bool> populateCommand, out string status)
-        {
-            status = "SendCommand unavailable.";
-            if (commandType == null || populateCommand == null || !this.EnsureHomelandFarmSendCommandResolver())
-            {
-                return false;
-            }
-
-            try
-            {
-                object command = Activator.CreateInstance(commandType);
-                if (!populateCommand(command))
-                {
-                    status = "Command populate failed.";
-                    return false;
-                }
-
-                MethodInfo sendMethod = this.homelandFarmSendCommandMethodDef.MakeGenericMethod(commandType);
-                object result = sendMethod.Invoke(null, new object[] { command, true, this.homelandFarmReliableChannelValue });
-                int sendCode = result is int code ? code : -1;
-                if (sendCode < 0)
-                {
-                    status = "SendCommand failed (" + sendCode + ").";
-                    return false;
-                }
-
-                status = "SendCommand ok.";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "SendCommand exception: " + (ex.InnerException ?? ex).Message;
-                return false;
-            }
-        }
-
-        private bool TryHomelandFarmSendWaterCropCommand(uint ownerNetId, List<uint> cropBoxNetIds, out string status)
-        {
-            status = "WaterCrop SendCommand unavailable.";
-            if (this.homelandFarmWaterCropSendUnavailable)
-            {
-                return false;
-            }
-
-            if (this.homelandFarmWaterCropNetworkCommandType == null)
-            {
-                this.homelandFarmWaterCropNetworkCommandType = this.ResolveHomelandFarmManagedType(
-                    "WaterCropNetworkCommand",
-                    "XDT.Scene.Shared.Modules.Farm.WaterCropNetworkCommand",
-                    "EcsClient.XDT.Scene.Shared.Modules.Farm.WaterCropNetworkCommand");
-            }
-
-            if (this.homelandFarmWaterCropNetworkCommandType == null)
-            {
-                this.homelandFarmWaterCropSendUnavailable = true;
-                return false;
-            }
-
-            return this.TryHomelandFarmSendCommand(
-                this.homelandFarmWaterCropNetworkCommandType,
-                command =>
-                {
-                    object cmd = command;
-                    bool ok = this.TrySetFieldValue(this.homelandFarmWaterCropNetworkCommandType, ref cmd, "ownerNetId", ownerNetId)
-                        || this.TrySetFieldValue(this.homelandFarmWaterCropNetworkCommandType, ref cmd, "fieldOwnerNetId", ownerNetId);
-                    FieldInfo netIdsField = this.homelandFarmWaterCropNetworkCommandType.GetField("netIds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (netIdsField != null)
-                    {
-                        netIdsField.SetValue(cmd, this.CreateHomelandFarmUintList(cropBoxNetIds, netIdsField.FieldType));
-                        ok = true;
-                    }
-
-                    return ok;
-                },
-                out status);
-        }
-
-        private bool TryHomelandFarmSendWaterPlantCommand(uint ownerNetId, List<uint> plantNetIds, int mode, out string status)
-        {
-            status = "WaterPlant SendCommand unavailable.";
-            if (this.homelandFarmWaterPlantSendUnavailable)
-            {
-                return false;
-            }
-
-            if (this.homelandFarmWaterPlantNetworkCommandType == null)
-            {
-                this.homelandFarmWaterPlantNetworkCommandType = this.ResolveHomelandFarmManagedType(
-                    "WaterPlantNetworkCommand",
-                    "XDT.Scene.Shared.Modules.Plant.WaterPlantNetworkCommand",
-                    "EcsClient.XDT.Scene.Shared.Modules.Plant.WaterPlantNetworkCommand");
-            }
-
-            if (this.homelandFarmWaterPlantNetworkCommandType == null)
-            {
-                this.homelandFarmWaterPlantSendUnavailable = true;
-                return false;
-            }
-
-            return this.TryHomelandFarmSendCommand(
-                this.homelandFarmWaterPlantNetworkCommandType,
-                command =>
-                {
-                    object cmd = command;
-                    bool ok = this.TrySetFieldValue(this.homelandFarmWaterPlantNetworkCommandType, ref cmd, "fieldOwnerNetId", ownerNetId)
-                        || this.TrySetFieldValue(this.homelandFarmWaterPlantNetworkCommandType, ref cmd, "ownerNetId", ownerNetId);
-                    FieldInfo netIdsField = this.homelandFarmWaterPlantNetworkCommandType.GetField("plantNetIds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                        ?? this.homelandFarmWaterPlantNetworkCommandType.GetField("netIds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (netIdsField != null)
-                    {
-                        netIdsField.SetValue(cmd, this.CreateHomelandFarmUintList(plantNetIds, netIdsField.FieldType));
-                        ok = true;
-                    }
-
-                    ok = this.TrySetFieldValue(this.homelandFarmWaterPlantNetworkCommandType, ref cmd, "mode", mode) || ok;
-                    return ok;
-                },
-                out status);
-        }
-
-        private bool TryHomelandFarmSendManureCommand(List<uint> cropNetIds, out string status)
-        {
-            status = "Manure SendCommand unavailable.";
-            if (!this.TryHomelandFarmEnsureNetworkCommandTypes(out string typeStatus)
-                || this.homelandFarmManuredNetworkCommandType == null)
-            {
-                status = typeStatus;
-                return false;
-            }
-
-            if (this.homelandFarmManuredSendCommandMethod == null)
-            {
-                if (!this.EnsureHomelandFarmSendCommandResolver())
-                {
-                    status = "SendCommand resolver unavailable.";
-                    return false;
-                }
-
-                try
-                {
-                    this.homelandFarmManuredSendCommandMethod = this.homelandFarmSendCommandMethodDef.MakeGenericMethod(
-                        this.homelandFarmManuredNetworkCommandType);
-                }
-                catch (Exception ex)
-                {
-                    status = "Manure SendCommand generic bind failed: " + ex.Message;
-                    this.HomelandFarmLog(status);
-                    return false;
-                }
-            }
-
-            try
-            {
-                object command = Activator.CreateInstance(this.homelandFarmManuredNetworkCommandType);
-                object cmd = command;
-                FieldInfo netIdsField = this.homelandFarmManuredNetworkCommandType.GetField(
-                    "cropNetIds",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    ?? this.homelandFarmManuredNetworkCommandType.GetField(
-                        "netIds",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (netIdsField == null)
-                {
-                    status = "Manure SendCommand cropNetIds field missing.";
-                    return false;
-                }
-
-                object listArg = this.CreateHomelandFarmUintList(cropNetIds, netIdsField.FieldType);
-                if (!this.TrySetFieldValue(this.homelandFarmManuredNetworkCommandType, ref cmd, netIdsField.Name, listArg))
-                {
-                    netIdsField.SetValue(cmd, listArg);
-                }
-
-                object result = this.homelandFarmManuredSendCommandMethod.Invoke(
-                    null,
-                    new object[] { cmd, true, this.homelandFarmReliableChannelValue });
-                int sendCode = result is int code ? code : -1;
-                if (sendCode < 0)
-                {
-                    status = "Manure SendCommand failed (" + sendCode + ").";
-                    this.HomelandFarmLog(status);
-                    return false;
-                }
-
-                status = "Manure SendCommand ok count=" + cropNetIds.Count + ".";
-                this.HomelandFarmLog(status);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "Manure SendCommand exception: " + (ex.InnerException ?? ex).Message;
-                this.HomelandFarmLog(status);
-                return false;
-            }
-        }
 
         private bool IsHomelandFarmBusy()
         {
