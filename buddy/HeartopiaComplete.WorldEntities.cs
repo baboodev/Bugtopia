@@ -1732,64 +1732,10 @@ namespace HeartopiaMod
                 return false;
             }
 
-            try
-            {
-                if (!this.TryGetManagedInteractSystemObject(out object interactSystemObj, out _))
-                {
-                    this.NetCookLog("InteractSystem unavailable. Trying static interact target helpers...");
-                    return this.TryGetCurrentInteractTargetLevelObjectsViaStaticHelper(candidateLevelObjects, out status, candidateLevelObjectSet);
-                }
-
-                MethodInfo getInteractTargetListMethod = null;
-                if (interactSystemObj is Type interactStaticType)
-                {
-                    getInteractTargetListMethod = interactStaticType.GetMethod("GetInteractTargetList", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, null, new Type[] { typeof(List<ulong>) }, null);
-                }
-                else
-                {
-                    getInteractTargetListMethod = interactSystemObj.GetType().GetMethod("GetInteractTargetList", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new Type[] { typeof(List<ulong>) }, null);
-                }
-                if (getInteractTargetListMethod == null)
-                {
-                    this.NetCookLog("GetInteractTargetList unavailable on primary object. Trying static interact target helpers...");
-                    return this.TryGetCurrentInteractTargetLevelObjectsViaStaticHelper(candidateLevelObjects, out status, candidateLevelObjectSet);
-                }
-
-                List<ulong> interactTargets = new List<ulong>(8);
-                object invokeResult = getInteractTargetListMethod.Invoke(interactSystemObj is Type ? null : interactSystemObj, new object[] { interactTargets });
-                int targetCount = 0;
-                if (invokeResult is int count)
-                {
-                    targetCount = count;
-                }
-                else
-                {
-                    targetCount = interactTargets.Count;
-                }
-
-                if (NetCookLogsEnabled)
-                {
-                    this.NetCookLog("GetInteractTargetList returned count=" + targetCount + " targets=[" + string.Join(", ", interactTargets) + "]");
-                }
-
-                for (int i = 0; i < interactTargets.Count; i++)
-                {
-                    ulong targetLevelObjectNetId = interactTargets[i];
-                    if (!AddNetCookCandidateLevelObject(candidateLevelObjects, candidateLevelObjectSet, targetLevelObjectNetId))
-                    {
-                        continue;
-                    }
-                }
-
-                status = "Interact targets ready: " + targetCount;
-                return targetCount > 0;
-            }
-            catch (Exception ex)
-            {
-                status = "Interact target exception: " + ex.Message;
-                this.NetCookLog(status);
-                return false;
-            }
+            // The managed InteractSystem walk that used to run first resolves XDT* types through
+            // FindLoadedType and never succeeds on this build, so this always fell through to the
+            // static helper below. Calling it directly keeps behaviour and drops the dead detour.
+            return this.TryGetCurrentInteractTargetLevelObjectsViaStaticHelper(candidateLevelObjects, out status, candidateLevelObjectSet);
         }
 
         private bool TryGetCurrentInteractTargetLevelObjectsViaStaticHelper(List<ulong> candidateLevelObjects, out string status, HashSet<ulong> candidateLevelObjectSet = null)
