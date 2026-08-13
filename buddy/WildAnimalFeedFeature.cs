@@ -82,8 +82,6 @@ namespace HeartopiaMod
         private IntPtr wildAnimalFeedAuraGetAnimalFoodThoughMethod = IntPtr.Zero;
         private IntPtr wildAnimalFeedAuraGetAnimalGroupMethod = IntPtr.Zero;
         private bool wildAnimalFeedAuraTableDataCacheAttempted = false;
-        private bool wildAnimalFeedGameTimeReflectionResolved = false;
-        private MethodInfo wildAnimalFeedGameTimeCheckPeriodMethod = null;
         private IntPtr wildAnimalFeedAuraGameTimeClass = IntPtr.Zero;
         private IntPtr wildAnimalFeedAuraGameTimeCheckPeriodMethod = IntPtr.Zero;
         private IntPtr wildAnimalFeedAuraGetCurrentGameTimeMsMethod = IntPtr.Zero;
@@ -517,27 +515,6 @@ namespace HeartopiaMod
             return exc == IntPtr.Zero && groupObj != IntPtr.Zero;
         }
 
-        private bool TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(int staticId, out object row)
-        {
-            row = null;
-            if (staticId <= 0 || !this.EnsureWildAnimalFeedTableDataReflection() || this.wildAnimalFeedGetAnimalFoodThoughMethod == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                ParameterInfo[] parameters = this.wildAnimalFeedGetAnimalFoodThoughMethod.GetParameters();
-                row = parameters.Length >= 2
-                    ? this.wildAnimalFeedGetAnimalFoodThoughMethod.Invoke(null, new object[] { staticId, false })
-                    : this.wildAnimalFeedGetAnimalFoodThoughMethod.Invoke(null, new object[] { staticId });
-                return row != null;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private unsafe bool TryInvokeWildAnimalFeedGetAnimalFoodThoughAuraMono(int staticId, out IntPtr rowObj)
         {
@@ -1386,12 +1363,6 @@ namespace HeartopiaMod
             }
 
             groupIds = new HashSet<int>();
-            if (this.TryGetWildAnimalFoodGroupIdsForStaticIdManaged(staticId, groupIds) && groupIds.Count > 0)
-            {
-                this.wildAnimalFeedGroupIdsByStaticIdCache[staticId] = groupIds;
-                return true;
-            }
-
             if (this.TryGetWildAnimalFoodGroupIdsForStaticIdAuraMono(staticId, groupIds) && groupIds.Count > 0)
             {
                 this.wildAnimalFeedGroupIdsByStaticIdCache[staticId] = groupIds;
@@ -1402,25 +1373,6 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryGetWildAnimalFoodGroupIdsForStaticIdManaged(int staticId, HashSet<int> groupIds)
-        {
-            if (staticId <= 0 || groupIds == null || !this.TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(staticId, out object row))
-            {
-                return false;
-            }
-
-            if (!this.TryReadIntListFromMember(row, "groupId", out List<int> ids) || ids == null)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < ids.Count; i++)
-            {
-                groupIds.Add(ids[i]);
-            }
-
-            return groupIds.Count > 0;
-        }
 
         private bool TryGetWildAnimalFoodFullnessForGroup(int staticId, int starRate, int groupId, out int fullness)
         {
@@ -1448,28 +1400,6 @@ namespace HeartopiaMod
             {
                 this.wildAnimalFeedFullnessByKeyCache[cacheKey] = WildAnimalFeedFullnessCacheMiss;
                 return false;
-            }
-
-            try
-            {
-                if (this.TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(staticId, out object row)
-                    && row != null
-                    && this.TryReadIntArrayFromMember(row, "feedValue", out int[] feedValues)
-                    && feedValues != null
-                    && feedValues.Length > 0)
-                {
-                    int index = starRate > 0 && starRate <= 5 ? starRate - 1 : 0;
-                    index = Mathf.Clamp(index, 0, feedValues.Length - 1);
-                    fullness = feedValues[index];
-                    if (fullness > 0)
-                    {
-                        this.wildAnimalFeedFullnessByKeyCache[cacheKey] = fullness;
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
             }
 
             if (this.TryGetWildAnimalFoodFullnessForGroupAuraMono(staticId, starRate, groupId, out fullness) && fullness > 0)
@@ -1629,8 +1559,12 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // bondExp feeds ComputeWildAnimalFeedSortScore below. Its only reader was a managed
+            // TableData.GetAnimalFoodThough reflection path, which never resolved on this build, so
+            // this has always been 0 in practice. Left at 0 rather than pretending otherwise; an
+            // AuraMono reader for the row's "exp" array (mirror TryGetWildAnimalFoodFullnessFor-
+            // GroupAuraMono, which already reads "feedValue" from the same row) would restore it.
             int bondExp = 0;
-            this.TryGetWildAnimalFoodBondExp(staticId, starRate, out bondExp);
             bool isFavorite = (favoriteIds != null && favoriteIds.Contains(staticId))
                 || (staticFavorites != null && staticFavorites.Contains(staticId));
             candidate = new WildAnimalFeedFoodCandidate
@@ -1716,8 +1650,12 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // bondExp feeds ComputeWildAnimalFeedSortScore below. Its only reader was a managed
+            // TableData.GetAnimalFoodThough reflection path, which never resolved on this build, so
+            // this has always been 0 in practice. Left at 0 rather than pretending otherwise; an
+            // AuraMono reader for the row's "exp" array (mirror TryGetWildAnimalFoodFullnessFor-
+            // GroupAuraMono, which already reads "feedValue" from the same row) would restore it.
             int bondExp = 0;
-            this.TryGetWildAnimalFoodBondExp(staticId, starRate, out bondExp);
             bool isFavorite = (favoriteIds != null && favoriteIds.Contains(staticId))
                 || (staticFavorites != null && staticFavorites.Contains(staticId));
             candidate = new WildAnimalFeedFoodCandidate
@@ -2131,45 +2069,9 @@ namespace HeartopiaMod
 
         private bool TryGetWildAnimalGroupAppearTime(int groupId, out int appearTime)
         {
-            if (this.TryGetWildAnimalGroupAppearTimeManaged(groupId, out appearTime))
-            {
-                return true;
-            }
-
             return this.TryGetWildAnimalGroupAppearTimeAuraMono(groupId, out appearTime);
         }
 
-        private bool TryGetWildAnimalGroupAppearTimeManaged(int groupId, out int appearTime)
-        {
-            appearTime = 0;
-            try
-            {
-                if (!this.EnsureWildAnimalFeedTableDataReflection() || this.wildAnimalFeedGetAnimalGroupMethod == null)
-                {
-                    return false;
-                }
-
-                object[] args = this.wildAnimalFeedGetAnimalGroupMethod.GetParameters().Length == 2
-                    ? new object[] { groupId, false }
-                    : new object[] { groupId };
-                object group = this.wildAnimalFeedGetAnimalGroupMethod.Invoke(null, args);
-                if (group == null)
-                {
-                    return false;
-                }
-
-                if (this.TryGetObjectMember(group, "appearTime", out object appearObj) && appearObj != null)
-                {
-                    appearTime = Convert.ToInt32(appearObj);
-                }
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private unsafe bool TryGetWildAnimalGroupAppearTimeAuraMono(int groupId, out int appearTime)
         {
@@ -2192,11 +2094,6 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.TryGameTimeCheckInSpecifiedTimePeriodManaged(periodId, out inPeriod))
-            {
-                return true;
-            }
-
             if (this.TryGameTimeCheckInSpecifiedTimePeriodAuraMono(periodId, out inPeriod))
             {
                 return true;
@@ -2205,25 +2102,6 @@ namespace HeartopiaMod
             return this.TryGameTimeCheckInSpecifiedTimePeriodAuraMonoFallback(periodId, out inPeriod);
         }
 
-        private bool TryGameTimeCheckInSpecifiedTimePeriodManaged(int periodId, out bool inPeriod)
-        {
-            inPeriod = false;
-            if (!this.EnsureWildAnimalFeedGameTimeReflection())
-            {
-                return false;
-            }
-
-            try
-            {
-                object result = this.wildAnimalFeedGameTimeCheckPeriodMethod.Invoke(null, new object[] { periodId });
-                inPeriod = result != null && Convert.ToBoolean(result);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private bool EnsureWildAnimalFeedAuraGameTimeClass()
         {
@@ -2393,83 +2271,12 @@ namespace HeartopiaMod
             return this.TryUnboxMonoBoolean(resultObj, out inPeriod);
         }
 
-        private bool EnsureWildAnimalFeedGameTimeReflection()
-        {
-            if (this.wildAnimalFeedGameTimeReflectionResolved)
-            {
-                return this.wildAnimalFeedGameTimeCheckPeriodMethod != null;
-            }
-
-            this.wildAnimalFeedGameTimeReflectionResolved = true;
-            Type gameTimeType = this.FindLoadedTypeByFullName("XDTDataAndProtocol.ProtocolService.GameTimeUtility")
-                ?? this.FindLoadedType("XDTDataAndProtocol.ProtocolService.GameTimeUtility", "GameTimeUtility");
-            if (gameTimeType == null)
-            {
-                return false;
-            }
-
-            this.wildAnimalFeedGameTimeCheckPeriodMethod = gameTimeType.GetMethod(
-                "CheckInSpecifiedTimePeriod",
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { typeof(int) },
-                null);
-            return this.wildAnimalFeedGameTimeCheckPeriodMethod != null;
-        }
 
         private bool TryGetWildAnimalGroupMeta(int groupId, out List<int> favoriteFoods, out int favoriteAddition, out string groupName)
         {
-            if (this.TryGetWildAnimalGroupMetaManaged(groupId, out favoriteFoods, out favoriteAddition, out groupName))
-            {
-                return true;
-            }
-
             return this.TryGetWildAnimalGroupMetaAuraMono(groupId, out favoriteFoods, out favoriteAddition, out groupName);
         }
 
-        private bool TryGetWildAnimalGroupMetaManaged(int groupId, out List<int> favoriteFoods, out int favoriteAddition, out string groupName)
-        {
-            favoriteFoods = null;
-            favoriteAddition = 0;
-            groupName = string.Empty;
-            try
-            {
-                if (!this.EnsureWildAnimalFeedTableDataReflection() || this.wildAnimalFeedGetAnimalGroupMethod == null)
-                {
-                    return false;
-                }
-
-                object[] args = this.wildAnimalFeedGetAnimalGroupMethod.GetParameters().Length == 2
-                    ? new object[] { groupId, false }
-                    : new object[] { groupId };
-                object group = this.wildAnimalFeedGetAnimalGroupMethod.Invoke(null, args);
-                if (group == null)
-                {
-                    return false;
-                }
-
-                if (this.TryReadIntListFromMember(group, "favoriteFood", out List<int> favorites))
-                {
-                    favoriteFoods = favorites;
-                }
-
-                if (this.TryGetObjectMember(group, "favoriteFoodAddition", out object additionObj) && additionObj != null)
-                {
-                    favoriteAddition = Convert.ToInt32(additionObj);
-                }
-
-                if (this.TryGetObjectMember(group, "groupName", out object nameObj))
-                {
-                    groupName = Convert.ToString(nameObj) ?? string.Empty;
-                }
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
 
         private unsafe bool TryGetWildAnimalGroupMetaAuraMono(int groupId, out List<int> favoriteFoods, out int favoriteAddition, out string groupName)
         {
@@ -2495,75 +2302,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryGetWildAnimalFoodBondExp(int staticId, int starRate, out int bondExp)
-        {
-            bondExp = 0;
-            try
-            {
-                if (!this.TryInvokeWildAnimalFeedGetAnimalFoodThoughManaged(staticId, out object row) || row == null)
-                {
-                    return false;
-                }
 
-                if (!this.TryReadIntArrayFromMember(row, "exp", out int[] expValues))
-                {
-                    return false;
-                }
-
-                int index = 0;
-                if (starRate > 0 && starRate <= 5)
-                {
-                    index = starRate - 1;
-                }
-
-                if (expValues == null || expValues.Length == 0)
-                {
-                    return false;
-                }
-
-                index = Mathf.Clamp(index, 0, expValues.Length - 1);
-                bondExp = expValues[index];
-                return bondExp > 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private bool TryReadIntArrayFromMember(object target, string memberName, out int[] values)
-        {
-            values = null;
-            if (target == null || !this.TryGetObjectMember(target, memberName, out object raw) || raw == null)
-            {
-                return false;
-            }
-
-            if (raw is int[] direct)
-            {
-                values = direct;
-                return values.Length > 0;
-            }
-
-            if (raw is IEnumerable enumerable)
-            {
-                List<int> list = new List<int>();
-                foreach (object item in enumerable)
-                {
-                    if (item == null)
-                    {
-                        continue;
-                    }
-
-                    list.Add(Convert.ToInt32(item));
-                }
-
-                values = list.ToArray();
-                return values.Length > 0;
-            }
-
-            return false;
-        }
 
 
         private bool EnsureWildAnimalFeedBackpackReflection()
