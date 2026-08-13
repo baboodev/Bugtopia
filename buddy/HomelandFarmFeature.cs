@@ -477,10 +477,6 @@ namespace HeartopiaMod
         private Type homelandFarmManuredNetworkCommandType = null;
         private Type homelandFarmAddHolderSystemCommandType = null;
         private Type homelandFarmEHolderSystemType = null;
-        private Type homelandFarmHoldToolCommandType = null;
-        private Type homelandFarmCancelHolderSystemCommandType = null;
-        private Type homelandFarmToolProtocolManagerType = null;
-        private MethodInfo homelandFarmToolProtocolSetHandHoldMethod = null;
         private Type homelandFarmToolSystemType = null;
         private Type homelandFarmToolDataModuleType = null;
         private PropertyInfo homelandFarmToolDataModuleInstanceProperty = null;
@@ -6141,32 +6137,6 @@ namespace HeartopiaMod
 
             this.TryEnsureHomelandFarmInteropAssembliesLoaded();
 
-            this.homelandFarmHoldToolCommandType = this.ResolveHomelandFarmManagedType(
-                "HoldToolCommand",
-                "EcsClient.XDT.Scene.Shared.Modules.Tools.HoldToolCommand",
-                "XDT.Scene.Shared.Modules.Tools.HoldToolCommand",
-                "Il2CppEcsClient.XDT.Scene.Shared.Modules.Tools.HoldToolCommand");
-            this.homelandFarmCancelHolderSystemCommandType = this.ResolveHomelandFarmManagedType(
-                "CancelHolderSystemCommand",
-                "EcsClient.XDT.Scene.Shared.Modules.Tools.CancelHolderSystemCommand",
-                "XDT.Scene.Shared.Modules.Tools.CancelHolderSystemCommand",
-                "Il2CppEcsClient.XDT.Scene.Shared.Modules.Tools.CancelHolderSystemCommand");
-
-            this.homelandFarmToolProtocolManagerType = this.ResolveHomelandFarmManagedType(
-                "ToolProtocolManager",
-                "ToolProtocolManager",
-                "XDTDataAndProtocol.ToolProtocolManager");
-
-            if (this.homelandFarmToolProtocolManagerType != null)
-            {
-                this.homelandFarmToolProtocolSetHandHoldMethod = this.homelandFarmToolProtocolManagerType.GetMethod(
-                    "SetHandHold",
-                    BindingFlags.Public | BindingFlags.Static,
-                    null,
-                    new[] { typeof(int), typeof(int) },
-                    null);
-            }
-
             this.homelandFarmToolSystemType = this.ResolveHomelandFarmManagedType(
                 "ToolSystem",
                 "XDTGameSystem.GameplaySystem.Tool.ToolSystem",
@@ -6222,10 +6192,7 @@ namespace HeartopiaMod
             else
             {
                 this.HomelandFarmLog(
-                    "Tool equip paths unresolved holdTool=" + (this.homelandFarmHoldToolCommandType != null)
-                    + " setHandHold=" + (this.homelandFarmToolProtocolSetHandHoldMethod != null)
-                    + " toolSystem=" + (this.homelandFarmToolSystemSetHandholdMethod != null)
-                    + " auraSetHandHold=0x" + this.homelandFarmAuraToolProtocolSetHandHoldMethod.ToInt64().ToString("X")
+                    "Tool equip paths unresolved auraSetHandHold=0x" + this.homelandFarmAuraToolProtocolSetHandHoldMethod.ToInt64().ToString("X")
                     + " auraToolSystem=0x" + this.homelandFarmAuraToolSystemSetHandholdMethod.ToInt64().ToString("X"));
             }
 
@@ -6234,11 +6201,11 @@ namespace HeartopiaMod
 
         private bool HomelandFarmHasToolEquipPathAvailable()
         {
-            return this.homelandFarmHoldToolCommandType != null
-                || this.homelandFarmCancelHolderSystemCommandType != null
-                || this.homelandFarmToolProtocolSetHandHoldMethod != null
-                || this.homelandFarmToolSystemSetHandholdMethod != null
-                || this.homelandFarmAuraToolProtocolSetHandHoldMethod != IntPtr.Zero
+            // The four managed terms that stood here (HoldTool / CancelHolderSystem command types
+            // and the two SetHandhold MethodInfos) all come from ResolveHomelandFarmManagedType,
+            // which only searches the managed AppDomain — no XDT*/EcsClient assembly reaches the
+            // BepInEx interop, so they were always null. Only the aura pair can report availability.
+            return this.homelandFarmAuraToolProtocolSetHandHoldMethod != IntPtr.Zero
                 || this.homelandFarmAuraToolSystemSetHandholdMethod != IntPtr.Zero;
         }
 
