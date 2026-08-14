@@ -150,6 +150,24 @@ namespace HeartopiaMod
 
         private const float FarmWalkDescendHoldDistance = 4f;
 
+        // Deepest drop that may be postponed to the end of the leg. Past this the descent runs
+        // alongside the traverse instead — see the defer test for what holding a 13 m drop did.
+        private const float FarmWalkMaxDeferredDescent = 5f;
+
+        // How many back-off rounds get a vertical leg: one up, one down, then no more.
+        private const int FarmWalkBackOffVerticalRounds = 2;
+
+        // Rebuilds that hand back the SAME route while the walker has not advanced a corner. Past
+        // this the node is abandoned for a different one — the graph has nothing else to offer here.
+        private const int FarmWalkMaxFutileRepaths = 3;
+
+        private int farmWalkFutileRepaths;
+
+        // Waypoints proven unwalkable during THIS run. Survives between walks — the blockage is a
+        // property of the world, and re-learning it costs a whole walk each time. Cleared with the
+        // rest of the per-run state when the farm starts.
+        private readonly HashSet<int> farmWalkBlockedGraphNodes = new HashSet<int>();
+
         // Inside this horizontal radius the approach is treated as purely vertical and the move
         // axis is released. Deliberately tight: it exists only to stop the walker steering on a
         // direction that is mostly noise, not to halt travel early.
@@ -182,6 +200,8 @@ namespace HeartopiaMod
 
         private const int FarmWalkUnstickIdle = 0;
         private const int FarmWalkUnstickBackingOff = 1;
+        // "Ascending" by history only — the phase now drives whichever vertical direction the
+        // alternator picked for this round, so it descends on even rounds.
         private const int FarmWalkUnstickAscending = 2;
         private const int FarmWalkUnstickProbing = 3;
         private const int FarmWalkUnstickHopBurst = 4;
@@ -207,9 +227,16 @@ namespace HeartopiaMod
         // whatever geometry is in the way. Cheaper than giving up on the node, and it is the only
         // search available — the mod has no collision data to reason about the obstacle with.
         // Aborted the moment the 3-D distance improves.
-        private const float FarmWalkProbeMoveSeconds = 0.8f;
+        // Horizontal leg of the probe: swim this far off the blocker before trying the vertical
+        // again. Distance, not duration — see UpdateFarmWalkProbe. Matched to
+        // FarmWalkBackOffDistance so both underwater unsticks retreat by the same amount.
+        private const float FarmWalkProbeHorizontalDistance = 5f;
+
+        // Guard for the leg above, sized for 5 m at swim speed with slack for drag and turning.
+        private const float FarmWalkProbeHorizontalTimeout = 4f;
+
         private const float FarmWalkProbeVerticalSeconds = 0.6f;
-        private const int FarmWalkProbeDirections = 8;
+        private const int FarmWalkProbeDirections = 4;
         private const float FarmWalkProbeProgress = 0.4f;
         private const int FarmWalkProbeStageHorizontal = 0;
         private const int FarmWalkProbeStageVertical = 1;
@@ -225,15 +252,22 @@ namespace HeartopiaMod
         // matching, cooldown stamping and the dwell are all unaffected.
         private const float FarmWalkContaminationStandoff = 3f;
 
+        // How far off the AIM POINT a standoff approach may finish. Not the server's collect rule —
+        // that governs plain nodes only. See the arrival test for why this is a judgement call.
+        private const float FarmWalkStandoffArrivalDistance = 4f;
+
         // Within this range of the target, "no progress" means the last metres are simply not
         // walkable (a ledge, a rock, a jetty). Escalate to the final-approach teleport on the FIRST
         // stuck sample instead of burning the full three strikes on something that cannot be fixed
         // by walking harder.
         private const float FarmWalkFinalApproachDistance = 8f;
 
-        // Re-path cadence, and the off-corridor distance that forces one early. 4 m mirrors the
-        // game's own live deviateDis (16 sqr).
-        private const float FarmWalkRepathInterval = 1.5f;
+        // SAFETY cadence, not a driver — the route is pinned and re-paths on cause (see the
+        // re-path block). At 1.5 s this rebuilt the route ~40 times per walk and was itself the
+        // reason the walker circled; 12 s is a backstop for a route that has gone stale in a way
+        // neither the corridor test nor the not-closing timer notices.
+        // The off-corridor distance below mirrors the game's own live deviateDis (16 sqr).
+        private const float FarmWalkRepathInterval = 12f;
         private const float FarmWalkCorridorTolerance = 4f;
 
         // Stuck detection: sample this often, and treat less than this much ground covered while a
@@ -417,9 +451,18 @@ namespace HeartopiaMod
         private readonly System.Collections.Generic.Dictionary<Vector3, int> farmWalkNodeFailures
             = new System.Collections.Generic.Dictionary<Vector3, int>();
 
-        // What the current hop burst is trying to reach: the node on a final approach, the current
-        // corner on a mid-route wedge.
+        // What the current hop burst / probe is trying to reach: the node on a final approach, the
+        // current corner on a mid-route wedge.
         private Vector3 farmWalkHopBurstAim;
+        private Vector3 farmWalkProbeAim;
+
+        // Underwater back-off rounds. The vertical leg alternates up / down between them, so a
+        // blocker that cannot be cleared over is tried under on the next attempt.
+        private int farmWalkBackOffRound;
+        private int farmWalkBackOffVerticalDir = 1;
+
+        // Where the current probe leg started, so it can end on distance swum rather than on time.
+        private Vector3 farmWalkProbeLegFrom;
 
         // Mirrors StealthForagingActive: the toggle only means anything while a run is going.
         // Read by OutOfBoundsGuardFeature — see IsOutOfBoundsGuardRequested for why.
@@ -484,6 +527,10 @@ namespace HeartopiaMod
         // Arrival setup captured from the caller, so finishing a walk reproduces exactly what the
         // teleport path would have done at the moment it landed.
         private bool farmWalkPendingPriority;
+
+        // This walk is heading for a cleansing coral, not a resource — the arrival hands over to
+        // the cleanse wait instead of starting a collect.
+        internal bool farmWalkPendingCleanse;
         private string farmWalkDwellLabel = string.Empty;
 
         // Game speed the farm would use when walking is off. Walking pins 1x instead.
@@ -509,7 +556,21 @@ namespace HeartopiaMod
             this.farmWalkDwellLabel = dwellLabel;
             // Cleared BEFORE the first route build: unreachability is a property of where the
             // player was standing on the last walk, not a permanent fact about the graph.
+            //
+            // The one exception is a waypoint that has already proved unwalkable THIS RUN. That is
+            // a fact about the world, not about the last walk, and re-learning it costs a whole
+            // walk each time — the 04:xx run failed four consecutive targets at corner 2 because
+            // every route from that spot ran through the same blocked waypoint.
             this.farmWalkExcludedNodes.Clear();
+            foreach (int blocked in this.farmWalkBlockedGraphNodes)
+            {
+                this.farmWalkExcludedNodes.Add(blocked);
+            }
+
+            // Each walk gets its own budget of futile rebuilds. Carrying the tally over meant the
+            // third target was abandoned after ONE rebuild and the fourth after one more, which is
+            // what turned "try another node" into "teleport" so quickly.
+            this.farmWalkFutileRepaths = 0;
 
             // A retry avoids the final waypoint whose approach already failed; every other walk
             // starts with no end-side restriction.
@@ -580,6 +641,8 @@ namespace HeartopiaMod
             this.farmWalkDashBrakeUntil = 0f;
             this.farmWalkSteerDirValid = false; // first frame steers straight, no smoothing lag
             this.farmWalkJumpsUsed = 0;
+            this.farmWalkBackOffRound = 0;   // next walk starts its alternation at "rise" again
+            this.farmWalkBackOffVerticalDir = 1;
             this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
             this.farmWalkProbeUsed = false;   // one probe sweep per walk
             this.farmWalkHopBurstUsed = false; // one hop burst per walk
@@ -843,10 +906,28 @@ namespace HeartopiaMod
             // difference only has to fit inside the anti-cheat radius.
             if (remaining <= FarmWalkCollectDistance)
             {
-                // With a deliberate standoff the aim point IS the goal, so the server's 2 m collect
-                // rule does not apply — the sweep reaches from there, and measuring against the
-                // true node would reject an arrival that is exactly where we wanted to be.
-                if (this.farmWalkAimOffsetY != 0f || distance3D <= FarmWalkServerCollectDistance)
+                // Two different questions, so two different tolerances.
+                //
+                // Plain node: the gate is the SERVER's collect rule, so measure against
+                // FarmWalkServerCollectDistance and stay under its 2 m.
+                //
+                // Standoff (contamination): the server's collect rule does not apply — the repair
+                // kit is thrown, the aim point is deliberately 3 m off the node, and being closer
+                // is not better. But "no check at all" was wrong too: the bypass short-circuited on
+                // farmWalkAimOffsetY alone, and distance3D is measured against the AIM POINT (not
+                // the node, which the old comment here got wrong), so arrivals were accepted on
+                // horizontal distance only. The remote run logged "arrived 0,21m horizontally
+                // (7,38m 3-D) [standoff +3m]" and again at 10,79m — directly over the node but ten
+                // metres off the point we meant to throw from.
+                //
+                // ⚠️ FarmWalkStandoffArrivalDistance is a JUDGEMENT CALL, not a measured value: the
+                // repair throw's real range is unknown. It is set wide enough to keep the ~3.7 m
+                // arrivals that the same run collected successfully, and tight enough to reject the
+                // 7-11 m ones. If contamination starts failing, this is the number to revisit.
+                float arrivalTolerance = this.farmWalkAimOffsetY != 0f
+                    ? FarmWalkStandoffArrivalDistance
+                    : FarmWalkServerCollectDistance;
+                if (distance3D <= arrivalTolerance)
                 {
                     this.FinishFarmWalk("arrived " + remaining.ToString("F2") + "m horizontally ("
                         + distance3D.ToString("F2") + "m 3-D) from the aim point"
@@ -879,7 +960,8 @@ namespace HeartopiaMod
 
             // Decide the axis order for this frame (see FarmWalkDescendHoldDistance). Suspended
             // entirely during an unstick, which owns both axes while it runs.
-            float dyNow = this.farmWalkTarget.y - selfPos.y;
+            // Same aim the depth control uses, so the defer / climb-hold decisions agree with it.
+            float dyNow = this.ResolveFarmWalkDepthAim().y - selfPos.y;
             bool unsticking = this.farmWalkUnstickPhase != FarmWalkUnstickIdle;
             // BOTH are swimming-only. On land there is no vertical axis to order: the player
             // cannot float up or sink down, height is whatever the ground gives. Ungated, the
@@ -890,7 +972,20 @@ namespace HeartopiaMod
                 && !unsticking
                 && dyNow > FarmWalkDepthEngageTolerance
                 && now < this.farmWalkClimbFirstUntil;
-            this.farmWalkDeferDescent = this.farmWalkIsSwimming
+            // ⚠️ Only SMALL descents get deferred.
+            //
+            // Holding the whole descent until the last 4 m keeps the traverse at the depth we
+            // happen to be at, and if the node sits far below, that depth is inside the terrain
+            // between us and it. The run logged exactly that: "corner=16,5m target=16,5m dy=-13,5m
+            // held=0 gameVerticalInput=0,00" — thirteen metres to drop, zero dive input, the walker
+            // pushing horizontally into a wall until its four unstick rounds ran out.
+            //
+            // A deep node wants a DIAGONAL: descend while travelling, so the approach arrives at
+            // roughly the right depth. Only shallow drops are worth flattening out to keep the
+            // traverse off the floor, which is what the defer was for in the first place.
+            bool deferrableDrop = dyNow > -FarmWalkMaxDeferredDescent;
+            this.farmWalkDeferDescent = deferrableDrop
+                && this.farmWalkIsSwimming
                 && !unsticking
                 && dyNow < -FarmWalkDepthEngageTolerance
                 && remaining > FarmWalkDescendHoldDistance;
@@ -909,7 +1004,10 @@ namespace HeartopiaMod
 
             if (this.farmWalkVerticalHeld != 0)
             {
-                routeRemaining += Mathf.Abs(this.farmWalkTarget.y - selfPos.y);
+                // The gap the hold is actually working on — the corner's, not the node's. Adding
+                // the node's would keep 30 m of not-yet-relevant depth in the metric for the whole
+                // route, so closing an intermediate corner would barely register as progress.
+                routeRemaining += Mathf.Abs(dyNow);
             }
 
             // Re-baseline the progress metric whenever the vertical state changes, and hold it
@@ -996,6 +1094,9 @@ namespace HeartopiaMod
                 this.farmWalkLegStart = candidate;
                 this.farmWalkCornerIndex++;
                 this.farmWalkEverAdvanced = true;
+
+                // Real progress along the route — the futile-rebuild tally starts over.
+                this.farmWalkFutileRepaths = 0;
             }
 
             if (this.farmWalkCornerIndex >= this.farmWalkCorners.Count)
@@ -1006,20 +1107,98 @@ namespace HeartopiaMod
 
             Vector3 corner = this.farmWalkCorners[this.farmWalkCornerIndex];
 
-            // Re-path on cadence, or immediately when we have drifted off the corridor (pushed by
-            // another player, shoved off a ledge, or the route was stale).
-            if (now >= this.farmWalkNextRepathAt
-                || DistanceToWalkLeg(selfPos, this.farmWalkLegStart, corner) > FarmWalkCorridorTolerance)
+            // THE ROUTE IS PINNED. Re-path only on a real cause, never merely because time passed.
+            //
+            // This used to rebuild from scratch every 1.5 s unconditionally — around forty times
+            // over a minute-long walk. Each rebuild re-snaps both ends, so it can land on different
+            // graph nodes and hand back a different chain of corners at different heights. On land
+            // that mostly went unnoticed; underwater it is visible as a vertical flip-flop, because
+            // the depth control follows the current corner:
+            //     diving 17,6m / surfacing 1,1m / diving 17,6m / surfacing 2,1m ...
+            // — the aim alternating between two corners of two different routes, the player bobbing
+            // in place. "Кружится, маршрут перестраивается постоянно" is exactly this.
+            //
+            // Three real causes remain, and the safety cadence is now long enough to be a backstop
+            // rather than a driver:
+            //   * off the corridor  — pushed aside, shoved off a ledge, route genuinely stale;
+            //   * not closing       — the route may be the problem, so a fresh one is worth trying;
+            //   * long safety timer — never re-pathing at all would be its own trap.
+            bool offCorridor = DistanceToWalkLeg(selfPos, this.farmWalkLegStart, corner) > FarmWalkCorridorTolerance;
+            bool notClosing = now - this.farmWalkBestAt >= FarmWalkNoClosingTimeout * 0.5f;
+            bool safetyDue = now >= this.farmWalkNextRepathAt;
+            if (offCorridor || notClosing || safetyDue)
             {
                 this.farmWalkNextRepathAt = now + FarmWalkRepathInterval;
+                int cornersBefore = this.farmWalkCorners.Count;
+                Vector3 firstBefore = this.farmWalkCorners.Count > 0 ? this.farmWalkCorners[0] : Vector3.zero;
                 if (this.TryBuildFarmWalkRoute(selfPos, this.farmWalkTarget) && this.farmWalkCorners.Count > 0)
                 {
                     corner = this.farmWalkCorners[this.farmWalkCornerIndex];
 
-                    // A different route has a different length, so the previous best is not
-                    // comparable — re-baseline rather than reading the change as lost progress.
-                    this.farmWalkBestDistance = this.ComputeFarmWalkRouteRemaining(selfPos);
-                    this.farmWalkBestAt = now;
+                    // Did the rebuild actually produce anything new?
+                    bool routeChanged = this.farmWalkCorners.Count != cornersBefore
+                        || (this.farmWalkCorners[0] - firstBefore).sqrMagnitude > 0.01f;
+
+                    // Say WHY and WHAT CHANGED. A silent rebuild is what made this take a week to
+                    // spot: the walk-begin line prints one route and the walker then follows a
+                    // succession of unlogged others.
+                    ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": re-pathed ("
+                        + (offCorridor ? "off corridor" : notClosing ? "not closing" : "safety cadence")
+                        + "): " + cornersBefore + " -> " + this.farmWalkCorners.Count
+                        + " corners, now at " + this.farmWalkCornerIndex
+                        + (routeChanged ? string.Empty : " (IDENTICAL)") + ".");
+
+                    if (routeChanged)
+                    {
+                        // A different route has a different length, so the previous best is not
+                        // comparable — re-baseline rather than reading the change as lost progress.
+                        this.farmWalkBestDistance = this.ComputeFarmWalkRouteRemaining(selfPos);
+                        this.farmWalkBestAt = now;
+                        this.farmWalkFutileRepaths = 0;
+                    }
+                    else
+                    {
+                        // ⚠️ LIVELOCK GUARD. Re-baselining here is what made the walk immortal:
+                        // "not closing" fires at HALF the window and triggers a re-path, the
+                        // re-path reset the timer, so the full window — the one that ends the walk
+                        // — could never elapse. The log showed the same line for two minutes:
+                        // "re-pathed (not closing): 9 -> 9 corners, now at 0", the graph handing
+                        // back the identical route every time while the player sat against a wall.
+                        //
+                        // An identical route is not new information. Leave the timer running, and
+                        // count the futile attempts so a node that cannot be approached at all is
+                        // abandoned for a different one instead of being retried forever.
+                        this.farmWalkFutileRepaths++;
+                        if (this.farmWalkFutileRepaths >= FarmWalkMaxFutileRepaths)
+                        {
+                            // Before giving up on the NODE, give up on the WAYPOINT. The route is
+                            // wedged at a specific corner, and A* will keep handing back that same
+                            // corner until it is taken off the table — which is why four different
+                            // targets in a row all died at "corner 2": different destinations,
+                            // identical blocked waypoint in the middle. Banning it for the rest of
+                            // the run is both cheaper and more correct than abandoning resources
+                            // that are perfectly reachable by another way round.
+                            if (this.TryFindNearestTrackGraphNode(corner, FarmWalkGraphSnapRadius,
+                                    out int blockedIndex, this.farmWalkBlockedGraphNodes)
+                                && this.farmWalkBlockedGraphNodes.Add(blockedIndex))
+                            {
+                                this.farmWalkExcludedNodes.Add(blockedIndex);
+                                this.farmWalkFutileRepaths = 0;
+                                this.farmWalkNextRepathAt = 0f;
+                                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": corner "
+                                    + this.farmWalkCornerIndex + " is unwalkable — banning waypoint "
+                                    + blockedIndex + " for this run and routing around it.");
+                                return false;
+                            }
+
+                            this.FinishFarmWalk("the graph keeps returning the same unwalkable route ("
+                                + this.farmWalkCorners.Count + " corners, still at corner "
+                                + this.farmWalkCornerIndex + " after " + this.farmWalkFutileRepaths
+                                + " rebuilds, " + this.farmWalkBlockedGraphNodes.Count
+                                + " waypoint(s) already banned)", teleport: true);
+                            return true;
+                        }
+                    }
                 }
             }
 
@@ -1229,7 +1408,7 @@ namespace HeartopiaMod
                 {
                     // Underwater the 8-direction sweep stays: there the blocker really is geometry
                     // to swim around, and the player is already moving in three dimensions.
-                    this.BeginFarmWalkProbe(selfPos, now, stallDistance);
+                    this.BeginFarmWalkProbe(selfPos, now, stallDistance, this.farmWalkTarget);
                     return;
                 }
 
@@ -1285,12 +1464,25 @@ namespace HeartopiaMod
                 //
                 // Aimed at the CORNER, not the node. At 53 m out, progress measured against the
                 // node would not register a hop that cleared the fence in front of us.
-                if (!this.farmWalkIsSwimming && !this.farmWalkHopBurstUsed
-                    && this.farmWalkCornerIndex < this.farmWalkCorners.Count)
+                if (this.farmWalkCornerIndex < this.farmWalkCorners.Count)
                 {
                     Vector3 wedgeCorner = this.farmWalkCorners[this.farmWalkCornerIndex];
-                    this.BeginFarmWalkHopBurst(selfPos, now, Distance3D(selfPos, wedgeCorner), wedgeCorner);
-                    return;
+                    if (!this.farmWalkIsSwimming && !this.farmWalkHopBurstUsed)
+                    {
+                        this.BeginFarmWalkHopBurst(selfPos, now, Distance3D(selfPos, wedgeCorner), wedgeCorner);
+                        return;
+                    }
+
+                    // UNDERWATER: the 8-direction sweep is the water-side equivalent, and it was
+                    // reachable ONLY from the final-approach branch — within 8 m of the node. A reef
+                    // between corner 3 and corner 4, thirty metres out, got the back-off/ascend
+                    // unstick and then nothing at all. Giving land a mid-route recovery and leaving
+                    // water without one was an asymmetry, not a design.
+                    if (this.farmWalkIsSwimming && !this.farmWalkProbeUsed)
+                    {
+                        this.BeginFarmWalkProbe(selfPos, now, Distance3D(selfPos, wedgeCorner), wedgeCorner);
+                        return;
+                    }
                 }
 
                 // Net displacement, deliberately: an oscillation covers ground while going nowhere,
@@ -1302,6 +1494,20 @@ namespace HeartopiaMod
                 {
                     detail += " corner=" + HorizontalDistance(selfPos, this.farmWalkCorners[this.farmWalkCornerIndex]).ToString("F1")
                         + "m target=" + HorizontalDistance(selfPos, this.farmWalkTarget).ToString("F1") + "m";
+                }
+
+                // The vertical state, same as the final-approach line already reports. Without it a
+                // stall three metres out horizontally and sixteen down reads as an ordinary wedge,
+                // when the question is actually "is the game taking the dive input at all". Only
+                // "final approach not walkable" carried this, and a deep-water stall never gets
+                // there — it escalates through the stuck path instead.
+                detail += " dyAim=" + (this.ResolveFarmWalkDepthAim().y - selfPos.y).ToString("F1")
+                    + "m dyNode=" + (this.farmWalkTarget.y - selfPos.y).ToString("F1")
+                    + "m held=" + this.farmWalkVerticalHeld;
+                if (this.TryGetFarmWalkSwimLocomotion(out IntPtr stuckSwim)
+                    && this.TryGetMonoSingleMember(stuckSwim, "_swimVerticalInput", out float stuckVerticalInput))
+                {
+                    detail += " gameVerticalInput=" + stuckVerticalInput.ToString("F2");
                 }
 
                 this.FinishFarmWalk(detail, teleport: true);
@@ -1496,12 +1702,18 @@ namespace HeartopiaMod
             this.farmWalkCornerIndex = 0;
             this.ReleaseFarmWalkDepth();
             this.TryClearGameMoveAxis();
+            this.farmWalkPendingCleanse = false;
         }
 
         // Arrival setup, shared by "walked there" and "gave up and teleported" — both end standing
         // at the node, so both hand over to Collecting the same way the teleport path always did.
         private void EnterFarmCollectingAfterWalk()
         {
+            // Consume the flag HERE, before any early return. Left set on a skipped cleanse walk it
+            // would misroute the next ordinary arrival into the cleanse wait.
+            bool cleanseWalk = this.farmWalkPendingCleanse;
+            this.farmWalkPendingCleanse = false;
+
             // A skipped node was never reached, so there is nothing to collect — go straight back
             // to the scan, which will pick the next nearest node with this one stamped out.
             if (this.farmWalkSkipToScan)
@@ -1520,6 +1732,14 @@ namespace HeartopiaMod
             // Opens the "let the aura finish" window that MovingToLocation waits out before leaving
             // the area — a walk arrival is the walk-mode equivalent of a node teleport.
             this.lastFarmNodeActivityAt = Time.unscaledTime;
+
+            // Swam to a cleansing coral rather than a resource: hand straight to the cleanse wait,
+            // which takes it from "arrived, confirm the flow started" exactly as the teleport did.
+            if (cleanseWalk)
+            {
+                this.NoteCorruptionCleanseArrival();
+                return;
+            }
 
             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
             this.autoFarmTimer = 0f;
@@ -1726,6 +1946,30 @@ namespace HeartopiaMod
             this.farmWalkSprintCancelTries = 0;
         }
 
+        // What the DEPTH control aims at this frame: the current corner while the route still has
+        // corners to run, the node itself only on the final leg.
+        //
+        // Depth used to aim at the node unconditionally, and underwater that is how the walker
+        // swam into the floor. The waypoint graph carries real heights — a route is a chain of
+        // corners at different depths, and the sea-side graph is sparse enough that consecutive
+        // ones differ by tens of metres. Standing on corner 1 of 13, driving full dive toward a
+        // node 32 m below is not "descending toward the goal", it is descending into whatever the
+        // corner is sitting on. The run logged exactly that: "corner=2,8m target=29,7m dy=-32,4m
+        // held=-1 gameVerticalInput=-1,00" — full dive input, 0.04 m of movement.
+        //
+        // Following the corners' own heights is what makes the vertical axis agree with the
+        // horizontal one: both now head for the same point.
+        private Vector3 ResolveFarmWalkDepthAim()
+        {
+            if (this.farmWalkCornerIndex >= 0
+                && this.farmWalkCornerIndex < this.farmWalkCorners.Count - 1)
+            {
+                return this.farmWalkCorners[this.farmWalkCornerIndex];
+            }
+
+            return this.farmWalkTarget;
+        }
+
         // Is the vertical gap to the target actually shrinking? Sampled on its own clock so a dive
         // in progress is never mistaken for a stall. Only meaningful while a depth hold is engaged.
         private bool IsFarmWalkDepthClosing(Vector3 selfPos, float now)
@@ -1735,7 +1979,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            float dy = Mathf.Abs(this.farmWalkTarget.y - selfPos.y);
+            float dy = Mathf.Abs(this.ResolveFarmWalkDepthAim().y - selfPos.y);
             if (now - this.farmWalkDySampleAt < 0.5f)
             {
                 // Between samples, keep the last verdict rather than flapping.
@@ -1768,16 +2012,40 @@ namespace HeartopiaMod
                 bool farEnough = Distance3D(selfPos, this.farmWalkUnstickFrom) >= FarmWalkBackOffDistance;
                 if (farEnough || now >= this.farmWalkUnstickPhaseUntil)
                 {
-                    // Only climb if the node is ABOVE. Ascending after a back-off while heading
-                    // DOWN just undoes the descent we are trying to finish — the back-off alone is
-                    // the useful part there, so resume immediately and let the dive continue.
-                    bool targetIsAbove = this.farmWalkTarget.y - selfPos.y > 0f;
-                    this.farmWalkUnstickPhase = targetIsAbove ? FarmWalkUnstickAscending : FarmWalkUnstickIdle;
+                    // ALWAYS take a vertical leg, ALTERNATE its direction between rounds, and start
+                    // with the direction that does NOT undo the approach.
+                    //
+                    // The old code climbed only when the node was above, which left "blocked while
+                    // diving" with no vertical attempt at all. Alternating fixed that but, seeded
+                    // at "rise" unconditionally, it made a deep descent strictly worse: the run
+                    // logged diving 15,8 -> 16,6 -> (round 1 rising) -> 20,0, i.e. every odd round
+                    // gave back ~3 m of the ~1 m the dive had just won, and dy oscillated between
+                    // 15,8 and 20,0 for four rounds without ever closing.
+                    //
+                    // Seeding from where the node actually is keeps both directions in play — the
+                    // second round still tries the other way — while the FIRST attempt pushes the
+                    // way we were already trying to go.
+                    int firstDir = this.ResolveFarmWalkDepthAim().y - selfPos.y > 0f ? 1 : -1;
+                    this.farmWalkBackOffVerticalDir = this.farmWalkBackOffRound % 2 == 0 ? firstDir : -firstDir;
+                    this.farmWalkBackOffRound++;
+
+                    // Only the first two rounds get a vertical leg: one each way, which is the whole
+                    // point of alternating. Rounds three and four just repeat it, and repeating is
+                    // what turned a stall into a climb — the run logged diving 12,0 -> 15,8 -> 21,4
+                    // across four rounds, each "rising" leg giving back more than the "descending"
+                    // one had won, so the walker ended nine metres higher than it started while
+                    // trying to get down. Past two rounds the back-off alone is the useful part.
+                    this.farmWalkUnstickPhase = this.farmWalkBackOffRound <= FarmWalkBackOffVerticalRounds
+                        ? FarmWalkUnstickAscending
+                        : FarmWalkUnstickIdle;
                     this.farmWalkUnstickPhaseUntil = now + FarmWalkObstacleAscendDuration;
-                    this.AutoFarmLog("[FarmWalk] backed off "
+                    ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": backed off "
                         + Distance3D(selfPos, this.farmWalkUnstickFrom).ToString("F1") + "m ("
-                        + (farEnough ? "clear" : "timed out") + "), "
-                        + (targetIsAbove ? "ascending." : "resuming the descent."));
+                        + (farEnough ? "clear" : "TIMED OUT — backing off is blocked too") + "), round "
+                        + this.farmWalkBackOffRound + " — "
+                        + (this.farmWalkUnstickPhase != FarmWalkUnstickAscending
+                            ? "no vertical leg (both directions already tried)."
+                            : this.farmWalkBackOffVerticalDir > 0 ? "rising." : "descending."));
                 }
 
                 return;
@@ -1801,11 +2069,15 @@ namespace HeartopiaMod
             }
         }
 
-        // Probe order, as offsets from the bearing we were pushing toward the node when we wedged.
+        // Probe order, as offsets from the bearing we were pushing toward the aim when we wedged.
         // BACKWARDS FIRST: whatever we are jammed against is in front, so reversing is the move
         // most likely to free us — and it is the one the back-off unstick already proves works.
-        // Then progressively less-reversed angles, sideways, and only lastly forward again.
-        private static readonly float[] FarmWalkProbeOffsets = { 180f, 135f, 225f, 90f, 270f, 45f, 315f, 0f };
+        // Then the two sides, and only lastly forward again.
+        //
+        // FOUR directions, not eight. The eight-way sweep spent 8 x (0.8 s horizontal + 0.6 s
+        // vertical) = 11 s before giving up, and the diagonals sit between legs that were already
+        // tried — most of that time bought nothing. Four covers the same space in 5.6 s.
+        private static readonly float[] FarmWalkProbeOffsets = { 180f, 90f, 270f, 0f };
 
         private Vector3 GetFarmWalkProbeDirection(int index)
         {
@@ -1817,7 +2089,7 @@ namespace HeartopiaMod
         // soon as the target gets meaningfully closer, or when every direction has been tried.
         private void UpdateFarmWalkProbe(Vector3 selfPos, float now)
         {
-            float distance = Distance3D(selfPos, this.farmWalkTarget);
+            float distance = Distance3D(selfPos, this.farmWalkProbeAim);
             if (distance < this.farmWalkProbeBestDistance - FarmWalkProbeProgress)
             {
                 ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": probe found a way through at "
@@ -1830,23 +2102,51 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (now < this.farmWalkUnstickPhaseUntil)
-            {
-                return;
-            }
-
             if (this.farmWalkProbeStage == FarmWalkProbeStageHorizontal)
             {
+                // The horizontal leg ends on DISTANCE, not on a stopwatch — same rule as the
+                // back-off unstick, and for the same reason. A fixed 0.8 s of swimming covers
+                // whatever the water lets it: shove off a reef and it is metres, jammed into a
+                // crevice it is centimetres, and the probe then declared that direction "tried"
+                // without having gone anywhere. 5 m is enough to be past most single blockers, and
+                // matches FarmWalkBackOffDistance so both unsticks retreat by the same amount.
+                //
+                // The timer stays as the guard for exactly the case the distance test cannot end:
+                // blocked in this direction too.
+                if (this.farmWalkProbeLegFrom == Vector3.zero)
+                {
+                    this.farmWalkProbeLegFrom = selfPos;
+                }
+
+                bool farEnough = Distance3D(selfPos, this.farmWalkProbeLegFrom) >= FarmWalkProbeHorizontalDistance;
+                if (!farEnough && now < this.farmWalkUnstickPhaseUntil)
+                {
+                    return;
+                }
+
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": probe leg "
+                    + (this.farmWalkProbeIndex + 1) + "/" + FarmWalkProbeDirections + " ("
+                    + FarmWalkProbeOffsets[this.farmWalkProbeIndex % FarmWalkProbeOffsets.Length].ToString("0")
+                    + " deg) swam " + Distance3D(selfPos, this.farmWalkProbeLegFrom).ToString("F1") + "m of "
+                    + FarmWalkProbeHorizontalDistance.ToString("0.#") + "m ("
+                    + (farEnough ? "clear" : "blocked this way too") + ") — trying the vertical.");
+
                 // Horizontal leg done; now try to move vertically from the new spot.
                 this.farmWalkProbeStage = FarmWalkProbeStageVertical;
                 this.farmWalkUnstickPhaseUntil = now + FarmWalkProbeVerticalSeconds;
                 return;
             }
 
+            if (now < this.farmWalkUnstickPhaseUntil)
+            {
+                return;
+            }
+
             // Vertical leg done — next direction.
             this.farmWalkProbeStage = FarmWalkProbeStageHorizontal;
             this.farmWalkProbeIndex++;
-            this.farmWalkUnstickPhaseUntil = now + FarmWalkProbeMoveSeconds;
+            this.farmWalkProbeLegFrom = Vector3.zero; // re-seeded on the next leg's first tick
+            this.farmWalkUnstickPhaseUntil = now + FarmWalkProbeHorizontalTimeout;
 
             if (this.farmWalkProbeIndex >= FarmWalkProbeDirections)
             {
@@ -1967,17 +2267,23 @@ namespace HeartopiaMod
             }
         }
 
-        private void BeginFarmWalkProbe(Vector3 selfPos, float now, float distance)
+        // `aim` is what the sweep is trying to reach — the node on a final approach, the current
+        // corner on a mid-route wedge. It sets BOTH the bearing the offsets rotate around and the
+        // distance progress is judged by; using the node for a wedge thirty metres out would point
+        // the first reversal at the wrong thing and then fail to notice a successful detour.
+        private void BeginFarmWalkProbe(Vector3 selfPos, float now, float distance, Vector3 aim)
         {
             this.farmWalkProbeUsed = true;
             this.farmWalkUnstickPhase = FarmWalkUnstickProbing;
             this.farmWalkProbeIndex = 0;
             this.farmWalkProbeStage = FarmWalkProbeStageHorizontal;
             this.farmWalkProbeBestDistance = distance;
-            this.farmWalkUnstickPhaseUntil = now + FarmWalkProbeMoveSeconds;
+            this.farmWalkProbeAim = aim;
+            this.farmWalkProbeLegFrom = Vector3.zero; // seeded on the first tick of the leg
+            this.farmWalkUnstickPhaseUntil = now + FarmWalkProbeHorizontalTimeout;
 
-            // Bearing we were pushing toward the node; the probe reverses it first.
-            Vector3 toTarget = this.farmWalkTarget - selfPos;
+            // Bearing we were pushing toward the aim; the probe reverses it first.
+            Vector3 toTarget = aim - selfPos;
             toTarget.y = 0f;
             this.farmWalkProbeBaseYaw = toTarget.sqrMagnitude > 0.0001f
                 ? Mathf.Atan2(toTarget.x, toTarget.z) * Mathf.Rad2Deg
@@ -2001,7 +2307,7 @@ namespace HeartopiaMod
             this.farmWalkIsSwimming = true;
 
             float now = Time.unscaledTime;
-            float dy = this.farmWalkTarget.y - selfPos.y;
+            float dy = this.ResolveFarmWalkDepthAim().y - selfPos.y;
 
             // Only the ASCEND phase overrides the node's direction; while backing off, depth is
             // still aimed normally so the reverse move stays level.
@@ -2028,7 +2334,8 @@ namespace HeartopiaMod
             }
             else if (clearingObstacle)
             {
-                want = 1;
+                // Whichever way this round decided to clear — up on odd rounds, down on even.
+                want = this.farmWalkBackOffVerticalDir >= 0 ? 1 : -1;
             }
             else if (this.farmWalkVerticalHeld > 0)
             {

@@ -661,7 +661,7 @@ namespace HeartopiaMod
                         string scanNodeLabel;
                         if (this.farmWalkToNodeEnabled)
                         {
-                            Vector3 tourOrigin = Camera.main.transform.position;
+                            Vector3 tourOrigin = this.ResolveFarmTourOrigin();
                             this.TopUpFarmTour(tourOrigin, 0);
                             vector = this.TryGetNextFarmTourStop(tourOrigin, out Vector3 tourStop, out scanNodeLabel)
                                 ? new Vector3?(tourStop)
@@ -1060,7 +1060,7 @@ namespace HeartopiaMod
                         string waitingNodeLabel;
                         if (this.farmWalkToNodeEnabled)
                         {
-                            Vector3 waitOrigin = Camera.main.transform.position;
+                            Vector3 waitOrigin = this.ResolveFarmTourOrigin();
                             this.TopUpFarmTour(waitOrigin, 0);
                             vector2 = this.TryGetNextFarmTourStop(waitOrigin, out Vector3 waitStop, out waitingNodeLabel)
                                 ? new Vector3?(waitStop)
@@ -2987,6 +2987,7 @@ namespace HeartopiaMod
                 this.farmWalkNodeFailures.Clear();
                 this.farmWalkLastRescueTeleportAt = 0f;
                 this.lastFarmNodeActivityAt = 0f;
+                this.farmWalkBlockedGraphNodes.Clear();
 
                 // The tour is per-run too. Carrying one over means the next run opens with a plan
                 // built around wherever the player happened to be standing minutes ago.

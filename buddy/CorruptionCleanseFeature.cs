@@ -922,7 +922,11 @@ namespace HeartopiaMod
             this.corruptionCleanseStartedAt = now;
             this.corruptionCleanseArrivedAt = now;
             this.corruptionCleanseNextReteleportAt = now + CorruptionCleanseReteleportMinIntervalSeconds;
-            this.CorruptionCleanseTeleportTo(first.Center);
+            if (this.TravelToCleanseArea(first.Center, "buff " + CorruptionBuffId + " active"))
+            {
+                return true; // WalkingToNode owns the state machine until the coral is reached
+            }
+
             this.farmState = HeartopiaComplete.AutoFarmState.CleansingCorruption;
             this.autoFarmTimer = 0f;
             this.autoFarmStatus = "Cleansing Corrupted...";
@@ -940,6 +944,51 @@ namespace HeartopiaMod
         {
             center.y += SeaCleanTeleportYOffset;
             this.TeleportToLocation(center);
+        }
+
+        // Travel to a cleansing coral. SWIMS there when Walk to Nodes is on, teleports otherwise.
+        //
+        // The cleanse used to warp unconditionally, which in walk mode is the one thing the whole
+        // mode exists to avoid: the corals sit 40-75 m down in the same water the farm is already
+        // swimming through, so there is nothing special about this hop except that it was written
+        // before walking existed.
+        //
+        // Returns true when a walk started (the caller must then leave the state machine alone —
+        // WalkingToNode owns it until EnterFarmCollectingAfterWalk hands back through
+        // NoteCorruptionCleanseArrival). Falls back to the teleport whenever a route cannot be
+        // built, so a coral behind unwalkable geometry still gets reached.
+        private bool TravelToCleanseArea(Vector3 center, string why)
+        {
+            Vector3 aim = center;
+            aim.y += SeaCleanTeleportYOffset;
+
+            if (this.farmWalkToNodeEnabled
+                && this.TryBeginFarmWalk(aim, "cleanse:" + this.corruptionCleanseTargetTriggerId, false, null))
+            {
+                this.farmWalkPendingCleanse = true;
+                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                this.autoFarmTimer = 0f;
+                this.autoFarmStatus = "Swimming to the cleansing coral...";
+                ModLogger.Msg("[CorruptionCleanse] " + why + " -> swimming to trigger "
+                    + this.corruptionCleanseTargetTriggerId + " @ " + aim.ToString("F1") + ".");
+                return true;
+            }
+
+            this.CorruptionCleanseTeleportTo(center);
+            return false;
+        }
+
+        // The walk reached the coral: resume the cleanse wait where the teleport used to leave it.
+        internal void NoteCorruptionCleanseArrival()
+        {
+            float now = Time.unscaledTime;
+            this.corruptionCleanseArrivedAt = now;
+            this.corruptionCleanseNextReteleportAt = now + CorruptionCleanseReteleportMinIntervalSeconds;
+            this.farmState = HeartopiaComplete.AutoFarmState.CleansingCorruption;
+            this.autoFarmTimer = 0f;
+            this.autoFarmStatus = "Cleansing Corrupted...";
+            ModLogger.Msg("[CorruptionCleanse] swam to trigger " + this.corruptionCleanseTargetTriggerId
+                + " — waiting for the cleanse flow.");
         }
 
         // CleansingCorruption state body: confirm the cleanse flow started, hold inside the polygon
@@ -985,7 +1034,11 @@ namespace HeartopiaMod
                         this.corruptionCleanseTargetCenter = next.Center;
                         this.corruptionCleanseArrivedAt = now;
                         this.corruptionCleanseNextReteleportAt = now + CorruptionCleanseReteleportMinIntervalSeconds;
-                        this.CorruptionCleanseTeleportTo(next.Center);
+                        if (this.TravelToCleanseArea(next.Center, "no cleanse flow at the previous coral"))
+                        {
+                            return; // swimming there; WalkingToNode hands back on arrival
+                        }
+
                         this.autoFarmStatus = "Cleansing Corrupted... trying next coral area";
                         this.AutoFarmLog("Corruption cleanse: no cleanse flow -> next candidate trigger "
                             + next.TriggerId + " @ " + next.Center.ToString("F1")

@@ -68,11 +68,56 @@ namespace HeartopiaMod
 
         private bool farmTourBuilt;
 
-        private static float FarmTourDistance(Vector3 a, Vector3 b)
+        // Size of the tour at the last full ordering pass — the yardstick the re-plan trigger uses.
+        private int farmTourPlannedCount;
+
+        // Below this a re-plan is not worth turning the player around for.
+        private const int FarmTourReplanMinStops = 8;
+
+        // Refreshed once per plan / top-up: is the farm currently swimming?
+        private bool farmTourVerticalCost;
+
+        // ⚠️ Горизонтально НА СУШЕ, полностью в 3-D ПОД ВОДОЙ.
+        //
+        // На суше ходьба не меняет высоту, и учёт Y отталкивал соседние по земле точки только
+        // потому, что одна из них на скале, — это была верная причина считать плоско.
+        //
+        // Под водой всё наоборот: погружение И ЕСТЬ перемещение, а разброс глубин там больше
+        // разброса по горизонтали (в прогоне −36…−74 м). Плоская метрика объявляла соседями точки,
+        // между которыми двадцать метров вертикали, и порядок обхода выглядел случайным. В логе это
+        // видно буквально: `walking 9,7m` — и тут же `diving 19,6m`, `wedged at 20,6m`.
+        private float FarmTourDistance(Vector3 a, Vector3 b)
         {
             float dx = a.x - b.x;
             float dz = a.z - b.z;
-            return Mathf.Sqrt(dx * dx + dz * dz);
+            float planar = dx * dx + dz * dz;
+            if (!this.farmTourVerticalCost)
+            {
+                return Mathf.Sqrt(planar);
+            }
+
+            float dy = a.y - b.y;
+            return Mathf.Sqrt(planar + dy * dy);
+        }
+
+        private void RefreshFarmTourCostModel()
+        {
+            this.farmTourVerticalCost = this.TryGetFarmWalkSwimLocomotion(out _);
+        }
+
+        // Откуда меряем маршрут. Камера — не игрок: под водой она висит позади и выше, и с 3-D
+        // метрикой этот сдвиг искажает выбор первой точки сильнее всего, ровно там, где цена
+        // ошибки максимальна. Камера остаётся запасным вариантом на случай, если позиция игрока
+        // не разрешилась.
+        internal Vector3 ResolveFarmTourOrigin()
+        {
+            if (this.TryGetNavMeshSelfPosition(out Vector3 selfPos, out _))
+            {
+                return selfPos;
+            }
+
+            Camera cam = Camera.main;
+            return cam != null ? cam.transform.position : Vector3.zero;
         }
 
         private static bool IsSameFarmTourStop(Vector3 a, Vector3 b)
@@ -83,6 +128,8 @@ namespace HeartopiaMod
         // Собрать кандидатов через обычный скан. Возвращает false, если радар не готов.
         private bool TryCollectFarmTourCandidates(Vector3 origin)
         {
+            // Every ordering decision below depends on this, so resolve it before any of them.
+            this.RefreshFarmTourCostModel();
             this.farmTourCandidates.Clear();
             this.farmCandidateSink = this.farmTourCandidates;
             try
@@ -159,8 +206,10 @@ namespace HeartopiaMod
             float after = this.MeasureFarmTour(origin);
 
             this.farmTourBuilt = true;
+            this.farmTourPlannedCount = this.farmTourStops.Count;
             ModLogger.Msg("[FarmTour] planned " + this.farmTourStops.Count + " stops, "
                 + after.ToString("F0") + "m total"
+                + (this.farmTourVerticalCost ? " [3-D cost]" : " [planar cost]")
                 + (before - after > 0.5f ? " (2-opt saved " + (before - after).ToString("F0") + "m)" : string.Empty)
                 + (pool.Count > 0 ? " — " + pool.Count + " candidate(s) over the " + FarmTourMaxStops + " cap" : string.Empty)
                 + ".");
@@ -249,6 +298,27 @@ namespace HeartopiaMod
                 return;
             }
 
+            // One deliberate re-plan when the tour has outgrown the plan it was built from.
+            //
+            // The radar only ever sees what has streamed in, so the first plan is built from
+            // whatever is in range at that moment — the previous run started from TWO stops and
+            // reached twenty-three purely by insertion. Insertion never reverses direction (which
+            // is what keeps the route stable) but it also never fixes a seed that small.
+            //
+            // Rare and loud, not per-scan: doubling is a real change of the picture, and the log
+            // says so, whereas re-optimising every two seconds is what made the player oscillate.
+            if (this.farmTourStops.Count >= FarmTourReplanMinStops
+                && this.farmTourStops.Count >= this.farmTourPlannedCount * 2)
+            {
+                int grewFrom = this.farmTourPlannedCount;
+                float beforeLength = this.MeasureFarmTour(origin);
+                this.ImproveFarmTourWithTwoOpt(origin, 0);
+                this.farmTourPlannedCount = this.farmTourStops.Count;
+                ModLogger.Msg("[FarmTour] re-planned: grew from " + grewFrom + " to "
+                    + this.farmTourStops.Count + " stops, " + beforeLength.ToString("F0") + "m -> "
+                    + this.MeasureFarmTour(origin).ToString("F0") + "m.");
+            }
+
             int added = 0;
             for (int c = 0; c < this.farmTourCandidates.Count; c++)
             {
@@ -304,8 +374,21 @@ namespace HeartopiaMod
 
             if (added > 0)
             {
-                // Хвост переоптимизировать можно: голова заперта lockedPrefix.
-                this.ImproveFarmTourWithTwoOpt(origin, Mathf.Max(lockedPrefix, 1));
+                // ⚠️ НИКАКОГО 2-opt при пополнении — только вставка.
+                //
+                // Я его здесь запускал, рассуждая «голова заперта, хвост трогать можно». Голова
+                // действительно не двигалась, но 2-opt решает ОТКРЫТУЮ задачу, и её оптимум резко
+                // зависит от точки старта. Точка старта — игрок, а он смещается после каждого
+                // сбора. Поэтому на каждом пополнении оптимизатор законно находил другой ответ и
+                // разворачивал остаток маршрута целиком.
+                //
+                // В логе это читается по z: 51 → 41 → 16 → 6 → 1, потом обратно 16 → 24 → 40 → 66,
+                // потом снова назад 73 → 51 → 21. Игрок вычёсывал зону в одну сторону, разворачивался
+                // и шёл обратно — «плавает туда-сюда».
+                //
+                // Вставка сама по себе порядок не переставляет, поэтому маршрут остаётся связным.
+                // Полный 2-opt делается один раз, при построении плана. Это ровно то, что просил
+                // пользователь: отсортировать заранее, дальше только пополнять.
                 ModLogger.Msg("[FarmTour] +" + added + " new stop(s), " + this.farmTourStops.Count
                     + " pending, " + this.MeasureFarmTour(origin).ToString("F0") + "m total.");
             }
@@ -336,8 +419,34 @@ namespace HeartopiaMod
                 return false;
             }
 
-            position = this.farmTourStops[0].Position;
-            label = this.farmTourStops[0].Label;
+            // ПОД ВОДОЙ — всегда ближайшая, а не следующая по плану.
+            //
+            // Планировать обход имеет смысл там, где леги предсказуемы. Под водой они не такие:
+            // граф путевых точек здесь 86 узлов против 1745 на суше, перегоны между ними по
+            // 20-30 м прямой, и каждый третий упирается в рельеф. Порядок, посчитанный по
+            // расстояниям, ничего не стоит, если половина переходов в нём не проходима, а цена
+            // ошибки — заклинивший проход с четырьмя отступами.
+            //
+            // Ближайшая точка почти всегда достижима просто потому, что она рядом. План при этом
+            // никуда не девается: список тот же, пополняется так же, чистится так же — меняется
+            // только правило выбора головы.
+            int pick = 0;
+            if (this.farmTourVerticalCost)
+            {
+                float bestDist = FarmTourDistance(origin, this.farmTourStops[0].Position);
+                for (int i = 1; i < this.farmTourStops.Count; i++)
+                {
+                    float d = FarmTourDistance(origin, this.farmTourStops[i].Position);
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        pick = i;
+                    }
+                }
+            }
+
+            position = this.farmTourStops[pick].Position;
+            label = this.farmTourStops[pick].Label;
             return true;
         }
 
@@ -378,6 +487,7 @@ namespace HeartopiaMod
             this.farmTourCandidates.Clear();
             this.farmCandidateSink = null;
             this.farmTourBuilt = false;
+            this.farmTourPlannedCount = 0;
         }
     }
 }
