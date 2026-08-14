@@ -364,11 +364,37 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   Note: the Debug Log toggle is **session-only** — it is never saved to config, so it always starts
   off (it prints a line per chat message).
 
-### Party Auto-Decline (Self → Privacy sub-tab)
+### Party & Events Auto-Decline (Self → Privacy sub-tab)
 
-Two independent toggles over the party system (`PartyAutoDeclineFeature.cs`, persisted as
-`partyAutoDeclineInvites` / `partyAutoLeaveParties`, both default off). Kept separate on purpose:
-the first is side-effect free, the second talks to the server.
+**Four** toggles, in two independent pairs — because the game has two parallel "join other players"
+systems that look the same in the UI and share no code:
+
+| Pair | Covers | Table | File |
+|---|---|---|---|
+| **Party** | the 5 minigame party types: Free, Sea Fishing, Tea, Obstacle, Hide-and-Seek | `Party` (5 rows) | `PartyAutoDeclineFeature.cs` |
+| **Events** | every scheduled world event — all the fish-shoal events (Neritic Shoal Event = id 225/226), toy-fish, ice-crystal fish… | `ActivityEvent` (~606 rows) | `ActivityEventAutoDeclineFeature.cs` |
+
+**The daily events that auto-join you in an area are the Events pair, not the Party pair.** A party
+toggle will not touch a shoal event and vice versa; if a toggle appears to do nothing, first check
+which subsystem the thing you are testing against actually belongs to.
+
+The Events pair mirrors the Party pair exactly: `ActivityInvitedEvent` /
+`OtherRoomActivityInvitedEvent` suppressed for invites, `SelfActivityChangedEvent` +
+`ActivityEventSystem.IsSelfInActivity()` as the membership trigger,
+`ActivityEventProtocolManager.SendQuitActivityEventCommand()` to leave, and
+`OnRequestJoinActivitySuccess` (plus an invite deliberately let through, plus `IsSelfVisitor()`) as
+the deliberate-join discriminators. Persisted as `activityAutoDeclineInvites` /
+`activityAutoLeaveEvents`, both default off. Verbose tracing: `MasterLogActivityAutoDecline`.
+
+One known gap on the Events side: activities *do* have a real reject command
+(`SendRejectActivityEventCommand`, `ActivityOpType.Reject = 3`) that the game sends on hang-up, but
+it needs the inviter's **short** id while the event carries only net ids — and the conversion
+(`TryGetPlayerShortId(uint, out long)`) is a value-type out-param through `mono_runtime_invoke`, the
+documented stack-corruption trap. So invites are suppressed rather than rejected: the inviter sees a
+timeout instead of an immediate decline.
+
+The Party pair below (`partyAutoDeclineInvites` / `partyAutoLeaveParties`, both default off). Kept
+separate on purpose: the first is side-effect free, the second talks to the server.
 
 - **Auto-Decline Party Invites** — an invite is not a dialog, it is a **phone call**
   (`PartyInvitedEvent` → `PartyModule.NoticeInvited` → `PhoneModule.AddCall` → 30 s ringing
@@ -1415,11 +1441,29 @@ Rebind by clicking the button in Settings and pressing a new key. Mouse buttons 
 
 ---
 
-## Master Log Switches (Source Code)
+## Master Log Switches (Settings → Logging)
 
-Verbose logging for subsystems is controlled by `private const bool MasterLog*` flags at the top of `HeartopiaComplete.cs`. All are **`false`** in release-style defaults except `MasterLogForceOpenShop = true`.
+Verbose logging is controlled by **47 `internal static bool MasterLog*` flags**, declared next to the
+subsystems they trace (most in `HeartopiaComplete.cs`, the rest in the feature file that uses them).
+No rebuild is needed to change one: every flag has a checkbox in **Settings → Logging**, driven from
+the single `BuildUguiLoggingToggleBindings()` array in `HeartopiaComplete.UguiSettingsMainContent.cs`
+— adding a new flag means adding one entry there, or it silently has no UI.
 
-To enable debug logs, change the relevant constant and rebuild.
+**All 47 default to `false` and are persisted** (`KeybindConfigData`, saved in
+`PopulateKeybindConfig`, restored in `ApplyKeybindConfig` — field names match the flags 1:1, so the
+XML is greppable). A config written before they existed simply lacks the elements, which deserialize
+to `false` — the same as the compiled default, so old and new configs agree.
+
+Previously the whole set was session-only and thirteen flags shipped `true`, so a flag you switched
+off came back on at the next launch. That is fixed; the trade-off is the opposite one — a flag left
+on now stays on across restarts and will keep writing to the log until you turn it off.
+
+Two deliberate exceptions that are **not** in this set and stay session-only:
+
+| Flag | Why |
+|---|---|
+| `chatTranslateVerboseLog` | prints a line per chat message; explicitly skipped in `PopulateKeybindConfig` |
+| `MasterLogTutorialBlock` | has no Logging-tab entry and still defaults `true` |
 
 ---
 

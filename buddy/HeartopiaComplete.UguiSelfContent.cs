@@ -166,6 +166,8 @@ namespace HeartopiaMod
             public string FriendVisitCountShown;
             public Toggle PartyDeclineToggle;
             public Toggle PartyAutoLeaveToggle;
+            public Toggle ActivityDeclineToggle;
+            public Toggle ActivityAutoLeaveToggle;
             public GameObject PartyCountLabel;
             public string PartyCountShown;
             public GameObject PartyStatusLabel;
@@ -1676,7 +1678,11 @@ namespace HeartopiaMod
             // "keep other players from pulling me into something": the first suppresses the invite
             // phone call outright, the second undoes a server-side area auto-join. A join you made
             // yourself is detected via ApplyPartyGameResultEvent / IsSelfVisitor and left alone.
-            GameObject partyHeader = this.CreateUguiHeaderLabel(block.transform, "PartyHeader", this.L("Party"), 13f);
+            // Two PAIRS, not one: `Party` (the 5 minigame party types) and `ActivityEvent` (~606
+            // scheduled world events — every fish shoal, toy-fish, ice-crystal event) are separate
+            // game subsystems with separate protocols. A toggle for one does nothing for the other.
+            GameObject partyHeader = this.CreateUguiHeaderLabel(block.transform, "PartyHeader",
+                this.L("Party & Events"), 13f);
             PlaceUguiTopLeft(partyHeader, pad, yCur, rowW, 22f);
             yCur += 28f;
 
@@ -1692,8 +1698,19 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.PartyAutoLeaveToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
 
-            handle.PartyCountShown = this.LF("Invites declined: {0} | parties left: {1}",
-                this.partyDeclinedInviteCount, this.partyAutoLeftCount);
+            handle.ActivityDeclineToggle = this.CreateUguiCheckbox(block.transform, "ActivityDeclineToggle",
+                this.L("Auto-Decline Event Invites"), this.activityAutoDeclineInvites,
+                new System.Action<bool>(this.OnUguiSelfActivityDeclineToggled));
+            PlaceUguiTopLeft(handle.ActivityDeclineToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
+
+            handle.ActivityAutoLeaveToggle = this.CreateUguiCheckbox(block.transform, "ActivityAutoLeaveToggle",
+                this.L("Auto-Leave Events Joined By Area"), this.activityAutoLeaveEvents,
+                new System.Action<bool>(this.OnUguiSelfActivityAutoLeaveToggled));
+            PlaceUguiTopLeft(handle.ActivityAutoLeaveToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
+
+            handle.PartyCountShown = this.GetActivityAutoDeclineCounters();
             handle.PartyCountLabel = this.CreateUguiLabel(block.transform, "PartyCount",
                 handle.PartyCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.PartyCountLabel, pad, yCur, rowW, 18f);
@@ -1733,6 +1750,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.FriendVisitToggle, this.privacyBlockFriendVisitNotify);
                 this.SyncUguiToggleFromField(handle.PartyDeclineToggle, this.partyAutoDeclineInvites);
                 this.SyncUguiToggleFromField(handle.PartyAutoLeaveToggle, this.partyAutoLeaveParties);
+                this.SyncUguiToggleFromField(handle.ActivityDeclineToggle, this.activityAutoDeclineInvites);
+                this.SyncUguiToggleFromField(handle.ActivityAutoLeaveToggle, this.activityAutoLeaveEvents);
 
                 // Counters increment from background detour bodies (Interlocked, any time) and the
                 // hooks status flips as install attempts land — 0.5s tick keeps them live without
@@ -1752,8 +1771,7 @@ namespace HeartopiaMod
                     this.SyncUguiSelfLabelText(handle.FriendVisitCountLabel, ref handle.FriendVisitCountShown,
                         this.LF("Visit notifies blocked: {0}", privacyBlockedFriendVisitCount));
                     this.SyncUguiSelfLabelText(handle.PartyCountLabel, ref handle.PartyCountShown,
-                        this.LF("Invites declined: {0} | parties left: {1}",
-                            this.partyDeclinedInviteCount, this.partyAutoLeftCount));
+                        this.GetActivityAutoDeclineCounters());
                     this.SyncUguiSelfLabelText(handle.PartyStatusLabel, ref handle.PartyStatusShown,
                         this.GetPartyAutoDeclineStatus());
                     this.SyncUguiSelfLabelText(handle.HooksStatusLabel, ref handle.HooksStatusShown,
@@ -1843,6 +1861,26 @@ namespace HeartopiaMod
                 return;
             }
             this.partyAutoLeaveParties = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfActivityDeclineToggled(bool value)
+        {
+            if (value == this.activityAutoDeclineInvites)
+            {
+                return;
+            }
+            this.activityAutoDeclineInvites = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfActivityAutoLeaveToggled(bool value)
+        {
+            if (value == this.activityAutoLeaveEvents)
+            {
+                return;
+            }
+            this.activityAutoLeaveEvents = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

@@ -107,7 +107,7 @@ namespace HeartopiaMod
         // Runtime-toggleable from Settings → Logging (session-only; never persisted).
         internal static bool MasterLogAuraFarm = false;
         internal static bool MasterLogBirdFarm = false;
-        internal static bool MasterLogBirdFarmCrashTrace = true;
+        internal static bool MasterLogBirdFarmCrashTrace = false;
         internal static bool MasterLogInsectFarm = false;
         internal static bool MasterLogAutoFish = false;
         // Combined Farming. OFF by default now that phases 0-4 are verified — this only controls
@@ -117,17 +117,17 @@ namespace HeartopiaMod
         // FindObjectsOfType bird scan every ~2s plus an insect GetComponents scan on the same
         // cadence — that is the only reason it is not simply always on.
         internal static bool MasterLogCombinedFarm = false;
-        internal static bool MasterLogInstantCatch = true;
+        internal static bool MasterLogInstantCatch = false;
         internal static bool MasterLogAutoFarm = false;
         // Per-hop teleport trace for the Stealth Foraging "player surfaces above ground at some
         // points" investigation: logs the resource kind, the true resource position, the position
         // actually handed to the warp, and TWO post-arrival samples of where the player really
         // ended up. Default ON (unlike the other MasterLog flags) because it exists to collect that
         // data on the next run; Settings → Logging → "Foraging Teleport" turns it off.
-        internal static bool MasterLogForagingTeleport = true;
+        internal static bool MasterLogForagingTeleport = false;
         // Verbose during Quest Assistant Phase 0/1 verification (dumps track marks / conditions /
         // recipe-id probes per active quest) — flip to false once classification is confirmed.
-        internal static bool MasterLogQuestAssistant = true;
+        internal static bool MasterLogQuestAssistant = false;
         internal static bool MasterLogMusicPlayer = false;
         private static bool MasterLogAutoEatRepair = false;
         private static bool MasterLogNpcTeleport = false;
@@ -141,17 +141,17 @@ namespace HeartopiaMod
 #if HIDE_LOADER_CONSOLE
         private static bool MasterLogForceOpenShop = false;
 #else
-        private static bool MasterLogForceOpenShop = true;
+        private static bool MasterLogForceOpenShop = false;
 #endif
         private static bool MasterLogPetPlay = false;
         private static bool MasterLogPetFeed = false;
         private static bool MasterLogWildAnimalFeed = false;
-        private static bool MasterLogHomelandFarm = true;
-        private static bool MasterLogPadBuild = true;
-        private static bool MasterLogWildAnimalGift = true;
+        private static bool MasterLogHomelandFarm = false;
+        private static bool MasterLogPadBuild = false;
+        private static bool MasterLogWildAnimalGift = false;
         private static bool MasterLogAutoIceSkating = false;
-        private static bool MasterLogDailyQuestSubmit = true;
-        internal static bool MasterLogDailyClaims = true;
+        private static bool MasterLogDailyQuestSubmit = false;
+        internal static bool MasterLogDailyClaims = false;
         private static bool MasterLogBirdPhotoSubmit = false;
         private static bool MasterLogStrangerChat = false;
 
@@ -777,6 +777,7 @@ namespace HeartopiaMod
             this.ProcessMapRevealBlockedOnUpdate();
             this.ProcessStealthBlockOnUpdate();
             this.ProcessPartyAutoDeclineOnUpdate();
+            this.ProcessActivityAutoDeclineOnUpdate();
             Breadcrumbs.Phase("ou.teleport");
             this.ProcessInstantTeleportOnUpdate();
             this.ProcessVehicleBypassOnUpdate();

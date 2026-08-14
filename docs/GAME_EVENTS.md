@@ -353,6 +353,32 @@ the other two drive auto-leave.
 | `PartyMembershipChangedEvent` | `XDTGameSystem.UI` | 1 | `inParty`(bool)@0 | dispatched by `PartyModule.RefreshPartyPanelVisibility` on every `SelfPartyChangedEvent` — the clean "am I in a party" edge. Prefer it over `SelfPartyChangedEvent`, whose `PartyInfo?` / `StopPartyReasonType?` fields are nullable structs and unreadable by offset |
 | `ApplyPartyGameResultEvent` | `XDTDataAndProtocol.Events` | 8 | `errorCode`(`PartyErrorCode`=int)@0, `partyNetId`(uint)@4 | **intent discriminator**: only ever dispatched in response to the server's `ApplyPartyTipsEvent`, which the server only sends because the client sent `ApplyPartyGameNetworkCommand`. A server-side area auto-join arrives as `JoinPartyTipsEvent` and never lands here. Dispatched immediately *before* `UpdateSelfPartyInfo()`, so it always precedes the `PartyMembershipChangedEvent` it belongs to (same frame, ring drains in dispatch order) |
 
+#### Activity-event events (all global)
+
+⚠️ **`Party` and `ActivityEvent` are different subsystems.** Table `Party` has **5** rows (Free /
+Sea Fishing / Tea / Obstacle / Hide-and-Seek party); table `ActivityEvent` has **~606** — every
+scheduled world event lives there, including all the 鱼潮 shoal events (Neritic Shoal Event =
+ids 225/226, groupId 45). Hooking the party events does nothing for a shoal event and vice versa.
+Check which table a feature's target belongs to *before* choosing events — see
+[`search-gamedata`](../.claude/skills/search-gamedata/SKILL.md).
+
+Consumer: [`ActivityEventAutoDeclineFeature`](../buddy/ActivityEventAutoDeclineFeature.cs).
+
+| Event | Namespace | `payloadBytes` | Fields (offset) | Notes |
+|---|---|---|---|---|
+| `ActivityInvitedEvent` | `XDTDataAndProtocol.Events` | 8 | `activityNetId`(uint)@0, `inviterNetId`(uint)@4 | fully scalar; suppressing it kills the invite phone call (`EventCallData`) |
+| `OtherRoomActivityInvitedEvent` | `XDTDataAndProtocol.Events` | 0 | `InviteInfo` = `OtherTownActivityInviteInfo` — ref-heavy | cross-town invite; 0 bytes, suppression slot only |
+| `SelfActivityChangedEvent` | `XDTDataAndProtocol.Events` | 0 | `endEventInfo` = `ActivityEventInfo?` — **nullable struct, unreadable by offset** | membership edge; dispatched by `UpdateActivityEvent` (netId == current) and `UpdateParticipantInfo` (self in participants), so it covers the server-side area add. Resolve the actual state with `ActivityEventSystem.IsSelfInActivity()` (0-arg bool) — **not** `IsSelfInActivityOrParty()` |
+| `OnRequestJoinActivitySuccess` | `XDTDataAndProtocol.Events` | 4 | `activityNetId`(uint)@0 | **intent discriminator**: dispatched only by `RequestJoinActivityResult` on success, which only runs because the client sent `ApplyForActivityEventCommand`. A server-side area add never reaches it |
+
+Commands (`ActivityEventProtocolManager`, all static): `SendQuitActivityEventCommand()` (0 args) —
+leave; `SendRejectActivityEventCommand(uint eventNetId, long inviterShortId, ActivityOpType)` with
+`Accept=1, Later=2, Reject=3, Overtime=4` — a **real** reject protocol, unlike parties. Note the
+`inviterShortId`: `ActivityInvitedEvent` carries net ids only, and converting needs
+`PlayerProtocolManager.TryGetPlayerShortId(uint, out long)` — a value-type out-param through
+`mono_runtime_invoke`, i.e. the stack-corruption trap. The mod therefore suppresses instead of
+rejecting, which the server sees as an unanswered call.
+
 #### Per-component events (`DataCreated<T>` / `DataRemoved<T>`)
 
 `ScriptsRefactory.DataAndProtocol.Events.DataCreated<T>` (`struct DataCreated<T> { T Value; }`) is

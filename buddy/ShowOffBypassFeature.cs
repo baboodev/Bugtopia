@@ -28,7 +28,7 @@ namespace HeartopiaMod
         private const string AlertRewardsEventName = "XDTGameSystem.UI.AlertRewardsEvent";
         private const int AlertRewardsEventPayloadBytes = 0; // one List<> reference — nothing to read
 
-        internal static bool MasterLogShowOffBypass = true;
+        internal static bool MasterLogShowOffBypass = false;
 
         private bool skipShowOffAnimations;
         private bool showOffBypassHooksRegistered;

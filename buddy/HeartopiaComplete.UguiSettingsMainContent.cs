@@ -116,7 +116,12 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Settings → Logging (46 MasterLog* toggles, session-only — see HeartopiaComplete.Logging.cs)
+        // Settings → Logging (47 MasterLog* toggles, session-only — see HeartopiaComplete.Logging.cs)
+        // SESSION-ONLY IS LOAD-BEARING, NOT AN OVERSIGHT: none of these are in KeybindConfigData and
+        // neither PopulateKeybindConfig nor ApplyKeybindConfig touches them, so every launch starts
+        // from the compiled defaults below. Twelve of them default to TRUE, so turning one off lasts
+        // only until the next restart. Same rationale as chatTranslateVerboseLog's explicit
+        // exclusion: a verbose flag left on silently floods the log forever.
         // ----------------------------------------------------------------------------------------
 
         // One binding per MasterLog* flag — get/set lambdas instead of 39 hand-written toggle
@@ -185,7 +190,8 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogGameLod, v => MasterLogGameLod = v, "Game LOD"),
                 new UguiLoggingToggleBinding(() => MasterLogWorldStage, v => MasterLogWorldStage = v, "World Stage"),
                 new UguiLoggingToggleBinding(() => MasterLogInputMap, v => MasterLogInputMap = v, "Input Map"),
-                new UguiLoggingToggleBinding(() => MasterLogPartyAutoDecline, v => MasterLogPartyAutoDecline = v, "Party Auto-Decline")
+                new UguiLoggingToggleBinding(() => MasterLogPartyAutoDecline, v => MasterLogPartyAutoDecline = v, "Party Auto-Decline"),
+                new UguiLoggingToggleBinding(() => MasterLogActivityAutoDecline, v => MasterLogActivityAutoDecline = v, "Event Auto-Decline")
             };
         }
 
