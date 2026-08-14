@@ -275,10 +275,10 @@ namespace HeartopiaMod
             handle.Bindings = BuildUguiLoggingToggleBindings();
             if (handle.Bindings.Length != LoggingTabRowCount)
             {
-                // The IMGUI drawer's row-count constant is the shared contract; a mismatch means
-                // one surface gained/lost a flag the other doesn't show.
+                // IMGUI is gone; the constant now just pins the expected flag count so adding a
+                // binding without noticing shows up in the log instead of silently changing layout.
                 ModLogger.Msg("[UguiShell] Logging bindings (" + handle.Bindings.Length
-                    + ") != IMGUI LoggingTabRowCount (" + LoggingTabRowCount + ") — surfaces out of sync");
+                    + ") != LoggingTabRowCount (" + LoggingTabRowCount + ") — update the constant");
             }
 
             const float rowStep = 28f;
@@ -311,9 +311,22 @@ namespace HeartopiaMod
             for (int i = 0; i < handle.Bindings.Length; i++)
             {
                 UguiLoggingToggleBinding binding = handle.Bindings[i];
-                // DrawSwitchToggle localizes its label, so the UGUI twin does too.
+
+                // binding.Set is a bare `v => MasterLogX = v`, which was the whole story while these
+                // flags were session-only. Now that they persist it must also commit, or the flag
+                // changes in memory and the config never learns about it — the toggle then "works"
+                // until the next launch and silently reverts. Every other toggle in the mod saves
+                // from its own handler; these had no handler to save from, so wrap it here.
+                // Local copy: `binding` is a struct declared inside the loop, so the closure
+                // captures this iteration's delegate, not the last one's.
+                Action<bool> commit = binding.Set;
                 Toggle tog = this.CreateUguiCheckbox(rowsContent, "Log" + i,
-                    this.L(binding.Label), binding.Get(), binding.Set);
+                    this.L(binding.Label), binding.Get(),
+                    delegate(bool v)
+                    {
+                        commit(v);
+                        try { this.SaveKeybinds(false); } catch { }
+                    });
                 PlaceUguiTopLeft(tog.gameObject, 8f, 8f + i * rowStep, rowW - 16f, 24f);
                 handle.Toggles.Add(tog);
             }

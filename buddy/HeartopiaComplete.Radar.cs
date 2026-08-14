@@ -1815,6 +1815,12 @@ namespace HeartopiaMod
                     if (!flag3)
                     {
                         GameObject gameObject = child.gameObject;
+                        // Линия маршрута живёт между сканами — её обновляет UpdateMarkers каждый кадр.
+                        if (gameObject.name == FarmWalkRouteLineName)
+                        {
+                            continue;
+                        }
+
                         bool flag4 = gameObject.name.StartsWith("TrackedMarker_") || this.TryParseBubbleTrackedMarkerId(gameObject.name, out _);
                         bool flag5 = !flag4;
                         if (flag5)
@@ -2953,6 +2959,7 @@ namespace HeartopiaMod
                 }
                 Transform transform = cam.transform;
                 Vector3 position = transform.position;
+                this.SyncFarmWalkRouteLine(this.radarLineMaterial);
                 for (int i = 0; i < this.radarContainer.transform.childCount; i++)
                 {
                     Transform child = this.radarContainer.transform.GetChild(i);
@@ -2960,6 +2967,11 @@ namespace HeartopiaMod
                     if (!flag2)
                     {
                         GameObject gameObject = child.gameObject;
+                        if (gameObject.name == FarmWalkRouteLineName)
+                        {
+                            continue;
+                        }
+
                         bool isBubbleTrackedMarker = this.TryParseBubbleTrackedMarkerId(gameObject.name, out int bubbleTrackedId);
                         bool isHideAndSeekMorphMarker = this.TryParseHideAndSeekMorphMarkerId(gameObject.name, out uint hideAndSeekMorphTrackedId);
                         if (isBubbleTrackedMarker)

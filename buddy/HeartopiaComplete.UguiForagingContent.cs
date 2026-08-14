@@ -101,9 +101,8 @@ namespace HeartopiaMod
             public GameObject StealthHintLabel;
             public Toggle WalkToggle;             // Walk to Nodes (always visible)
             public GameObject WalkHintLabel;
-            public GameObject WalkSpeedLabel;     // speed row — only while walking is on
-            public string WalkSpeedShown;
-            public Slider WalkSpeedSlider;
+            public Toggle TrackCompareToggle;     // Compare Game Track (diagnostic)
+            public GameObject TrackCompareHintLabel;
             public Toggle StealthBlockToggle;     // Stealth Block (StealthBlockFeature.cs)
             public GameObject StealthBlockStatusLabel;
             public string StealthBlockStatusShown;
@@ -484,11 +483,15 @@ namespace HeartopiaMod
                 new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
             this.TrySetUguiLabelWrapped(handle.WalkHintLabel);
 
-            handle.WalkSpeedShown = this.LF("Walk Speed: {0}", this.farmWalkSpeed.ToString("0.00"));
-            handle.WalkSpeedLabel = this.CreateUguiBodyLabel(settings.transform, "WalkSpeedLabel", handle.WalkSpeedShown, 13f);
-            handle.WalkSpeedSlider = this.CreateUguiSlider(settings.transform, "WalkSpeedSlider",
-                FarmWalkSpeedMin, FarmWalkSpeedMax, this.farmWalkSpeed, false,
-                new System.Action<float>(this.OnUguiForagingWalkSpeedChanged));
+            // Диагностика маршрутов (FarmWalkTrackCompareFeature.cs).
+            handle.TrackCompareToggle = this.CreateUguiCheckbox(settings.transform, "TrackCompareToggle",
+                this.L("Compare Game Track"), this.farmWalkTrackCompareEnabled,
+                new System.Action<bool>(this.OnUguiForagingTrackCompareToggled));
+            handle.TrackCompareHintLabel = this.CreateUguiLabel(settings.transform, "TrackCompareHint",
+                this.L("Draws the mod's route in green and makes the game route to the same node; overrides your own track"), 11f,
+                new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
+            this.TrySetUguiLabelWrapped(handle.TrackCompareHintLabel);
+
 
             // Stealth Block trio (StealthBlockFeature.cs / MapRevealBlockedFeature.cs). The status
             // label is the arming feedback: the farm holds until it reads "Armed", so a silent
@@ -616,22 +619,14 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.WalkHintLabel, 270f, rowY, panelW - 282f, 28f);
             }
 
-            // Speed row only exists while walking is on — collapse it entirely otherwise so the
-            // rows below do not sit under a gap.
-            bool walking = this.farmWalkToNodeEnabled;
-            SetUguiGoActive(handle.WalkSpeedLabel, walking);
-            SetUguiGoActive(handle.WalkSpeedSlider != null ? handle.WalkSpeedSlider.gameObject : null, walking);
-            if (walking)
+            rowY += 34f;
+            if (handle.TrackCompareToggle != null)
             {
-                rowY += 30f;
-                if (handle.WalkSpeedLabel != null)
-                {
-                    PlaceUguiTopLeft(handle.WalkSpeedLabel, 14f, rowY, 170f, 20f);
-                }
-                if (handle.WalkSpeedSlider != null)
-                {
-                    PlaceUguiTopLeft(handle.WalkSpeedSlider.gameObject, 192f, rowY + 1f, panelW - 220f, 20f);
-                }
+                PlaceUguiTopLeft(handle.TrackCompareToggle.gameObject, 14f, rowY, 250f, 24f);
+            }
+            if (handle.TrackCompareHintLabel != null)
+            {
+                PlaceUguiTopLeft(handle.TrackCompareHintLabel, 270f, rowY, panelW - 282f, 28f);
             }
 
             rowY += 34f;
@@ -747,12 +742,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AuraFarmToggle, this.auraFarmEnabled);
                 this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
                 this.SyncUguiToggleFromField(handle.WalkToggle, this.farmWalkToNodeEnabled);
-                this.SyncUguiSelfLabelText(handle.WalkSpeedLabel, ref handle.WalkSpeedShown,
-                    this.LF("Walk Speed: {0}", this.farmWalkSpeed.ToString("0.00")));
-                if (handle.WalkSpeedSlider != null && Mathf.Abs(handle.WalkSpeedSlider.value - this.farmWalkSpeed) > 0.0005f)
-                {
-                    handle.WalkSpeedSlider.SetValueWithoutNotify(this.farmWalkSpeed);
-                }
+                this.SyncUguiToggleFromField(handle.TrackCompareToggle, this.farmWalkTrackCompareEnabled);
                 this.SyncUguiToggleFromField(handle.StealthBlockToggle, this.stealthBlockEnabled);
                 this.SyncUguiToggleFromField(handle.NotifyFriendsToggle, this.stealthBlockNotifyFriends);
                 this.SyncUguiSelfLabelText(handle.StealthBlockStatusLabel, ref handle.StealthBlockStatusShown,
@@ -923,6 +913,25 @@ namespace HeartopiaMod
         // setting: the walk itself is driven from the farm state machine, so flipping it while idle
         // changes nothing until the next Start Foraging. Flipping it mid-run is honoured on the
         // next hop, and the game speed is re-applied immediately so 5x can never outlive the flag.
+        // Диагностика маршрутов. Отдельный тумблер, потому что StartLocalTrackMapSign внутри
+        // вызывает StopAllLocalTrack() — то есть сбивает трек, который игрок поставил сам.
+        private void OnUguiForagingTrackCompareToggled(bool value)
+        {
+            if (value == this.farmWalkTrackCompareEnabled)
+            {
+                return;
+            }
+
+            this.farmWalkTrackCompareEnabled = value;
+            if (value)
+            {
+                this.AddMenuNotification(this.L("Game track will follow the farm (your own track is cleared)"),
+                    new Color(0.55f, 0.88f, 1f));
+            }
+
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
         private void OnUguiForagingWalkToggled(bool value)
         {
             if (value == this.farmWalkToNodeEnabled)
@@ -954,17 +963,6 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        private void OnUguiForagingWalkSpeedChanged(float value)
-        {
-            float clamped = Mathf.Clamp(value, FarmWalkSpeedMin, FarmWalkSpeedMax);
-            if (Mathf.Abs(clamped - this.farmWalkSpeed) < 0.0005f)
-            {
-                return;
-            }
-
-            this.farmWalkSpeed = clamped;
-            try { this.SaveKeybinds(false); } catch { }
-        }
 
         // Hide from radar (StealthBlockFeature.cs). Turning it OFF does not just stop blocking —
         // the tick keeps draining the release queue until every block WE issued is lifted, so the

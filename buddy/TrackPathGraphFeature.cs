@@ -519,6 +519,27 @@ namespace HeartopiaMod
         // line-of-sight test of its own (the game's own _FindNearestPoint filters candidates with a
         // Passable linecast; PhysicsExtension is Mono-only and not resolved here). Learning from a
         // failed approach is the cheap equivalent.
+        // How many nearest nodes get a reachability probe before the sweep gives up. Each probe is
+        // two Mono linecasts (feet + chest), so this is a wall-clock budget, not a search limit.
+        private const int FarmWalkSnapMaxProbes = 12;
+
+        private string lastTrackGraphSnapVerdict = string.Empty;
+
+        private readonly struct TrackGraphSnapCandidate
+        {
+            internal readonly int Index;
+            internal readonly float DistanceSqr;
+
+            internal TrackGraphSnapCandidate(int index, float distanceSqr)
+            {
+                this.Index = index;
+                this.DistanceSqr = distanceSqr;
+            }
+        }
+
+        private readonly System.Collections.Generic.List<TrackGraphSnapCandidate> trackGraphSnapCandidates
+            = new System.Collections.Generic.List<TrackGraphSnapCandidate>();
+
         private bool TryFindNearestTrackGraphNode(Vector3 position, float maxDistance, out int index,
             System.Collections.Generic.HashSet<int> excluded = null)
         {
@@ -546,6 +567,104 @@ namespace HeartopiaMod
             }
 
             return index >= 0;
+        }
+
+        // Nearest graph node that can actually be REACHED from `position`, not merely the nearest one.
+        //
+        // This is the difference that produced "a wall in the middle". The game's _FindNearestPoint
+        // never takes a node on faith:
+        //
+        //     _aStar.GetNeighbour(pos, ref _neighbours);
+        //     foreach (node in _neighbours)
+        //         if (dist < best && _HasNoCollider(pos, node.position, Passable))   // <-- the filter
+        //
+        // Snapping by distance alone puts the route's first leg (player -> start node) and its last
+        // leg (end node -> resource) straight through whatever stands between, because neither leg
+        // is part of the graph and so neither is ever validated. A* then reports a perfectly good
+        // route across nodes that are genuinely connected, and the walker drives into a building.
+        //
+        // The game's route is LONGER than ours precisely because of this filter, and longer is what
+        // correct looks like here: it enters and leaves the graph only where it can.
+        //
+        // Probes are Mono invokes, so candidates are tried nearest-first and the sweep stops after
+        // FarmWalkSnapMaxProbes. Falls back to the plain nearest node (with a log) rather than
+        // failing the walk outright — a slightly wrong route still beats a teleport.
+        private bool TryFindReachableTrackGraphNode(Vector3 position, float maxDistance, out int index,
+            System.Collections.Generic.HashSet<int> excluded, string endpointName)
+        {
+            index = -1;
+            if (!this.trackGraphReady || this.trackGraphPositions == null)
+            {
+                return false;
+            }
+
+            if (!this.EnsureFarmWalkLinecast())
+            {
+                // No physics access: behave exactly as before rather than refusing to walk.
+                return this.TryFindNearestTrackGraphNode(position, maxDistance, out index, excluded);
+            }
+
+            this.trackGraphSnapCandidates.Clear();
+            Vector3[] positions = this.trackGraphPositions;
+            float maxSqr = maxDistance * maxDistance;
+            for (int i = 0; i < positions.Length; i++)
+            {
+                if (excluded != null && excluded.Contains(i))
+                {
+                    continue;
+                }
+
+                float sqr = (positions[i] - position).sqrMagnitude;
+                if (sqr < maxSqr)
+                {
+                    this.trackGraphSnapCandidates.Add(new TrackGraphSnapCandidate(i, sqr));
+                }
+            }
+
+            if (this.trackGraphSnapCandidates.Count == 0)
+            {
+                return false;
+            }
+
+            this.trackGraphSnapCandidates.Sort((a, b) => a.DistanceSqr.CompareTo(b.DistanceSqr));
+
+            int probes = System.Math.Min(this.trackGraphSnapCandidates.Count, FarmWalkSnapMaxProbes);
+            for (int i = 0; i < probes; i++)
+            {
+                int candidate = this.trackGraphSnapCandidates[i].Index;
+                if (this.IsFarmWalkLineClear(position, positions[candidate], this.farmWalkMaskPassable))
+                {
+                    index = candidate;
+                    if (i > 0)
+                    {
+                        // Unconditional, but deduplicated. Whether the reachability filter ever
+                        // REJECTS anything is the only way to tell a working filter from a
+                        // decorative one — the first run after it landed printed nothing at all,
+                        // which read as "clean" but actually meant "every candidate passed".
+                        // The re-path timer then took it to the other extreme: the same line 22
+                        // times in 33 seconds. Print it when the verdict CHANGES.
+                        string verdict = endpointName + "|" + i + "|"
+                            + Mathf.Sqrt(this.trackGraphSnapCandidates[i].DistanceSqr).ToString("F1");
+                        if (verdict != this.lastTrackGraphSnapVerdict)
+                        {
+                            this.lastTrackGraphSnapVerdict = verdict;
+                            ModLogger.Msg("[FarmWalk] " + endpointName + " snap skipped " + i
+                                + " blocked node(s); took one "
+                                + Mathf.Sqrt(this.trackGraphSnapCandidates[i].DistanceSqr).ToString("F1") + "m out.");
+                        }
+                    }
+
+                    return true;
+                }
+            }
+
+            // Nothing within reach. Take the nearest anyway, but say so — this is the shape of
+            // failure that ends in "final approach not walkable".
+            index = this.trackGraphSnapCandidates[0].Index;
+            ModLogger.Msg("[FarmWalk] " + endpointName + " snap: no clear line to any of the "
+                + probes + " nearest graph nodes — falling back to the nearest ("
+                + Mathf.Sqrt(this.trackGraphSnapCandidates[0].DistanceSqr).ToString("F1") + "m).");
+            return true;
         }
 
         // A* over the snapshot, same shape as the game's AStar.GetPath: corner list from start node

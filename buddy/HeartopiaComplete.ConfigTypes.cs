@@ -163,8 +163,9 @@ namespace HeartopiaMod
             // teleporting (FarmWalkFeature.cs). Mutually exclusive with Stealth Foraging, and
             // forces game speed to 1x for the run. Default false = vanilla hops.
             public bool farmWalkToNodeEnabled;
-            // Joystick axis magnitude while walking. 0 means "unset" so the 0.75 default applies.
-            public float farmWalkSpeed;
+            // "Compare Game Track" — просить игру строить свой маршрут к тому же узлу и логировать
+            // расхождение. Диагностика; сбивает ручной трек игрока, поэтому по умолчанию выкл.
+            public bool farmWalkTrackCompareEnabled;
             public float resourceAutoRepairPauseSeconds;
             public float gameSpeed;
             public bool fpsBypassEnabled;

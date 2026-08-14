@@ -633,8 +633,45 @@ namespace HeartopiaMod
                             break;
                         }
 
-                        // THIRD: Normal scanning logic
-                        Vector3? vector = this.FindClosestAvailableNode(out string scanNodeLabel);
+                        // A node skipped as unreachable gets one more attempt now that the next one
+                        // has been collected — from a different position, so the route is
+                        // recomputed from a new angle (FarmWalkFeature.cs).
+                        if (this.TryTakeFarmWalkRetryNode(out Vector3 retryNode, out string retryLabel))
+                        {
+                            this.lastNodePosition = retryNode;
+                            if (this.TryBeginFarmWalk(retryNode, "node:retry", false, retryLabel))
+                            {
+                                ModLogger.Msg("[FarmWalk] retrying the node skipped earlier at "
+                                    + FormatNavMeshVector(retryNode) + ".");
+                                this.lastTeleportWasPriorityLocation = false;
+                                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
+                            // No route from here either — fall through to the normal scan.
+                        }
+
+                        // THIRD: Normal scanning logic.
+                        //
+                        // Walk mode follows a PLANNED tour instead of re-picking the nearest node
+                        // every scan: on foot the greedy pick walks into dead ends and the target
+                        // can change mid-approach. Teleporting keeps the old behaviour — a warp
+                        // costs the same from anywhere, so ordering buys nothing there.
+                        Vector3? vector;
+                        string scanNodeLabel;
+                        if (this.farmWalkToNodeEnabled)
+                        {
+                            Vector3 tourOrigin = Camera.main.transform.position;
+                            this.TopUpFarmTour(tourOrigin, 0);
+                            vector = this.TryGetNextFarmTourStop(tourOrigin, out Vector3 tourStop, out scanNodeLabel)
+                                ? new Vector3?(tourStop)
+                                : null;
+                        }
+                        else
+                        {
+                            vector = this.FindClosestAvailableNode(out scanNodeLabel);
+                        }
+
                         bool flag2 = vector != null;
                         if (flag2)
                         {
@@ -804,6 +841,23 @@ namespace HeartopiaMod
                         if (this.IsFarmTeleportThrottled(out float tpCooldownMove))
                         {
                             this.autoFarmStatus = $"Teleport cooldown... ({tpCooldownMove:F1}s)";
+                            break;
+                        }
+
+                        // Let the aura finish on the node we just reached before leaving the area.
+                        //
+                        // The throttle above measures time since the last TELEPORT, and in walk
+                        // mode there may not have been one for minutes — so it gates nothing and
+                        // the relocation fires the moment the scan comes up empty. The 22:31 run
+                        // arrived at a Shiitake at :06 and warped to Oyster Spawn at :09, three
+                        // seconds later, with the collect still in flight. Measure from the last
+                        // NODE arrival instead, using the same delay the user configured.
+                        float sinceNodeActivity = Time.unscaledTime - this.lastFarmNodeActivityAt;
+                        if (this.lastFarmNodeActivityAt > 0f
+                            && sinceNodeActivity < this.foragingTeleportDelaySeconds)
+                        {
+                            this.autoFarmStatus =
+                                $"Letting the last node finish... ({this.foragingTeleportDelaySeconds - sinceNodeActivity:F1}s)";
                             break;
                         }
 
@@ -984,17 +1038,62 @@ namespace HeartopiaMod
                             break;
                         }
 
-                        if (this.IsFarmTeleportThrottled(out float tpCooldownWait))
+                        // In walk mode the throttle must NOT gate this branch. It exists to space
+                        // out teleports, and walking is not a teleport — gating here meant every
+                        // area relocation was followed by the configured delay of standing still
+                        // before the walker was allowed to even look at the next node. The one
+                        // teleport this branch can still perform is guarded on its own line below.
+                        bool waitThrottled = this.IsFarmTeleportThrottled(out float tpCooldownWait);
+                        if (!this.farmWalkToNodeEnabled && waitThrottled)
                         {
                             this.autoFarmStatus = $"Teleport cooldown... ({tpCooldownWait:F1}s)";
                             break;
                         }
 
-                        Vector3? vector2 = this.FindClosestAvailableNode(out string waitingNodeLabel);
+                        // Same tour + walk path as ScanningForNodes. This branch used to teleport
+                        // unconditionally, which is what put two hops back to back in the log:
+                        // area:Oyster Spawn landed at (-139.8, 21.3, 205.2) and eight seconds later
+                        // node:Oyster warped 7.7 m to (-132.2, 22.8, 203.6) — a distance the walker
+                        // covers in three seconds. An area relocation always ends here, so every
+                        // single relocation was costing a second, pointless teleport.
+                        Vector3? vector2;
+                        string waitingNodeLabel;
+                        if (this.farmWalkToNodeEnabled)
+                        {
+                            Vector3 waitOrigin = Camera.main.transform.position;
+                            this.TopUpFarmTour(waitOrigin, 0);
+                            vector2 = this.TryGetNextFarmTourStop(waitOrigin, out Vector3 waitStop, out waitingNodeLabel)
+                                ? new Vector3?(waitStop)
+                                : null;
+                        }
+                        else
+                        {
+                            vector2 = this.FindClosestAvailableNode(out waitingNodeLabel);
+                        }
+
                         bool flag21 = vector2 != null;
                         if (flag21)
                         {
                             float value2 = Vector3.Distance(Camera.main.transform.position, vector2.Value);
+                            if (this.TryBeginFarmWalk(vector2.Value, "node:" + (waitingNodeLabel ?? "unlabelled"),
+                                    false, waitingNodeLabel))
+                            {
+                                this.lastNodePosition = vector2.Value;
+                                this.lastTeleportWasPriorityLocation = false;
+                                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
+
+                            // Walking did not start, so this really is a teleport — and now the
+                            // throttle applies, exactly as it did before walk mode bypassed the
+                            // branch gate above.
+                            if (waitThrottled)
+                            {
+                                this.autoFarmStatus = $"Teleport cooldown... ({tpCooldownWait:F1}s)";
+                                break;
+                            }
+
                             this.autoFarmStatus = $"Node found! Teleporting ({value2:F0}m)...";
                             this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector2.Value, waitingNodeLabel),
                                 "node:" + (waitingNodeLabel ?? "unlabelled"), vector2.Value);
@@ -1075,6 +1174,11 @@ namespace HeartopiaMod
         // it. Prevents the farm from teleporting too frequently.
         private float foragingTeleportDelaySeconds = 0f;
         private float lastFarmTeleportAt = -999f;
+
+        // When the farm last ARRIVED at a node — a walk arrival or a node teleport. Distinct from
+        // lastFarmTeleportAt, which only moves on teleports and therefore says nothing at all in
+        // walk mode. Zero means "no node touched yet this run", which must not block anything.
+        private float lastFarmNodeActivityAt;
 
         // Visited-node stamp durations. A node PROVEN cold is blocked for its REAL remaining
         // cooldown when a server end time is known (CollectColdEvent.endUnixTimeMs for the node we
@@ -1193,6 +1297,23 @@ namespace HeartopiaMod
             this.ProbeNavMeshRoute(source == default ? position : source, kind);
 
             this.lastFarmTeleportAt = Time.unscaledTime;
+
+            // A node hop IS an arrival at a resource, same as a walk finishing — it starts the
+            // "let the aura finish" window that MovingToLocation waits on.
+            if (kind != null && kind.StartsWith("node:"))
+            {
+                this.lastFarmNodeActivityAt = Time.unscaledTime;
+            }
+
+            // Any area:* hop is a relocation to a different spawn, so the planned tour describes a
+            // place we are no longer in. Dropping it here — at the single chokepoint every farm
+            // teleport goes through — is the only way to be sure no relocation path is missed.
+            // Node hops deliberately KEEP the tour: the plan is exactly what they are following.
+            if (kind != null && kind.StartsWith("area:"))
+            {
+                this.ResetFarmTour();
+            }
+
             this.LogForagingTeleportRequest(kind, source, position);
             this.TeleportToLocation(position);
             // Stealth Foraging: hold the hover exactly where the hop aimed (the warp clears the
@@ -1202,10 +1323,16 @@ namespace HeartopiaMod
 
         private void LogForagingTeleportRequest(string kind, Vector3 source, Vector3 requested)
         {
+            // EVERY farm teleport gets a one-line record, unconditionally. The detailed arrival
+            // sampling below stays behind MasterLogForagingTeleport, but "the farm just warped and
+            // nothing says why" is not a debuggable state — with the flag off, a log could show a
+            // clean run of walks while the player was actually being teleported around.
             if (!MasterLogForagingTeleport)
             {
                 this.foragingTpSampleAt1 = -1f;
                 this.foragingTpSampleAt2 = -1f;
+                ModLogger.Msg("[FarmTeleport] " + (string.IsNullOrEmpty(kind) ? "unknown" : kind)
+                    + " -> (" + FormatForagingTpVector(requested) + ")");
                 return;
             }
 
@@ -2346,6 +2473,12 @@ namespace HeartopiaMod
                                             continue;
                                         }
 
+                                        // Every eligible candidate, not just the nearest — the tour
+                                        // planner needs the whole set to order it. Collecting here
+                                        // rather than duplicating the filter chain keeps the two
+                                        // callers from drifting apart.
+                                        this.farmCandidateSink?.Add(new FarmTourStop(child.position, markerLabel));
+
                                         float num2 = Vector3.Distance(position, child.position);
                                         bool flag16 = num2 < num;
                                         if (flag16)
@@ -2848,6 +2981,16 @@ namespace HeartopiaMod
                 // the player driving into whatever they were heading for.
                 this.AbortFarmWalk();
                 this.SurfaceFromStealthForaging("Stop Foraging");
+
+                // Per-run state: a node that beat the walker last session deserves a fresh try, and
+                // the rescue cooldown should not carry over into a run that starts minutes later.
+                this.farmWalkNodeFailures.Clear();
+                this.farmWalkLastRescueTeleportAt = 0f;
+                this.lastFarmNodeActivityAt = 0f;
+
+                // The tour is per-run too. Carrying one over means the next run opens with a plan
+                // built around wherever the player happened to be standing minutes ago.
+                this.ResetFarmTour();
             }
 
             this.autoFarmActive = !this.autoFarmActive;
@@ -2863,7 +3006,12 @@ namespace HeartopiaMod
                 this.autoFarmTimer = 0f;
                 this.nextLiveColdSyncAt = 0f; // fresh authoritative cold states before the first hop
                 this.lastScanTime = 0f;       // rebuild radar markers from them in the same frame (sync -> RunRadar -> farm tick order in OnUpdate)
-                this.currentLocationIndex = 0;
+                // -1, not 0. The rotation pre-increments — `(index + 1) % Count` — so starting at 0
+                // makes the first relocation go to farmLocations[1] and leaves index 0 as the LAST
+                // stop of a full cycle. With Black Truffle Spawn sitting at index 0 and the farm
+                // being restarted often, it was reached once in an entire log while Oyster (index
+                // 1) was reached seven times. -1 makes index 0 the first stop instead.
+                this.currentLocationIndex = -1;
                 this.recentlyVisitedNodes.Clear();
                 this.cameraRotationAttempts = 0;
                 this.ResetContaminationDwellState();

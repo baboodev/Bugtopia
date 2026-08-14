@@ -84,9 +84,17 @@ namespace HeartopiaMod
         // terrain, which trips the detect box's FLOOR, e.g. StarTown y>=9). Stealth borrows the
         // hooks instead of writing disableOobTeleportEnabled: that flag is persisted, so a
         // temporary write could leak into Config.xml through any unrelated save during the run.
+        //
+        // A walking farm run needs the same suppression, and for a reason that is easy to miss:
+        // Walk to Nodes is mutually exclusive with Stealth Foraging, so switching it on silently
+        // took the suppression away. The underwater farm areas sit at y ~ -30, well under the
+        // detect box's floor, so every relocation there was rescued straight back out — the 22:20
+        // run teleported to (63.0, -29.96, -98.5) and thirteen seconds later the player was at
+        // (45.0, +18.1, -87.9), 48 m higher. With no nodes in sight the farm relocated to the next
+        // sea area and the whole thing repeated.
         private bool IsOutOfBoundsGuardRequested()
         {
-            return this.disableOobTeleportEnabled || this.StealthForagingActive;
+            return this.disableOobTeleportEnabled || this.StealthForagingActive || this.FarmWalkRunActive;
         }
 
         // Called every frame from OnUpdate. Mirrors the toggle into the static flag the hook bodies
