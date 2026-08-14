@@ -347,6 +347,9 @@ namespace HeartopiaMod
         private bool farmWalkProbeUsed;
         // Bearing toward the node when the probe started; every probe direction is an offset of it.
         private float farmWalkProbeBaseYaw;
+        // Is the player in water this frame? Set by DriveFarmWalkDepth. Everything vertical —
+        // dive/surface, axis ordering, the ascend unstick — is gated on it; land has no such axis.
+        private bool farmWalkIsSwimming;
         private IntPtr farmSwimLocomotionClass;
         private IntPtr farmSwimSetVerticalMethod;
         private int farmWalkStuckStrikes;
@@ -606,10 +609,17 @@ namespace HeartopiaMod
             // entirely during an unstick, which owns both axes while it runs.
             float dyNow = this.farmWalkTarget.y - selfPos.y;
             bool unsticking = this.farmWalkUnstickPhase != FarmWalkUnstickIdle;
-            this.farmWalkHoldHorizontalForClimb = !unsticking
+            // BOTH are swimming-only. On land there is no vertical axis to order: the player
+            // cannot float up or sink down, height is whatever the ground gives. Ungated, the
+            // climb-first hold cleared the move axis for any node more than 0.35 m above — a
+            // slope, a mushroom on a rise — and the player just stood there jumping until the
+            // walk timed out. Land walking must never hold the horizontal.
+            this.farmWalkHoldHorizontalForClimb = this.farmWalkIsSwimming
+                && !unsticking
                 && dyNow > FarmWalkDepthEngageTolerance
                 && now < this.farmWalkClimbFirstUntil;
-            this.farmWalkDeferDescent = !unsticking
+            this.farmWalkDeferDescent = this.farmWalkIsSwimming
+                && !unsticking
                 && dyNow < -FarmWalkDepthEngageTolerance
                 && remaining > FarmWalkDescendHoldDistance;
 
@@ -1503,9 +1513,12 @@ namespace HeartopiaMod
         {
             if (!this.TryGetFarmWalkSwimLocomotion(out IntPtr swim))
             {
+                this.farmWalkIsSwimming = false;
                 this.farmWalkVerticalHeld = 0; // not swimming: nothing is held, nothing to release
                 return;
             }
+
+            this.farmWalkIsSwimming = true;
 
             float now = Time.unscaledTime;
             float dy = this.farmWalkTarget.y - selfPos.y;
