@@ -34,6 +34,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | User-facing features / menu | [docs/FEATURES.md](docs/FEATURES.md) |
 | Inventory / `ItemNetPair` / bag pipelines | [docs/BACKPACK_AND_ITEMS.md](docs/BACKPACK_AND_ITEMS.md) |
 | Instrument WAV export (noteId ↔ Wwise subsong) | [docs/INSTRUMENT_SAMPLE_EXPORT.md](docs/INSTRUMENT_SAMPLE_EXPORT.md) |
+| **Asking the RUNNING game instead of the dumps** (type search, live field/method tables, entity enumeration, `eval`, screenshots) | [docs/MCP_BRIDGE.md](docs/MCP_BRIDGE.md) |
 
 **Rule:** Do not guess type names from memory. Copy **full namespaces** from decompilations or interop DLLs for the target game build.
 
@@ -190,6 +191,14 @@ If `ilspy-dumps/` is missing locally: dump to `%LocalLow%/Bugtopia/DecryptedAsse
 
 ## 7. Type resolution (critical)
 
+> **If the game is running with the MCP bridge, ask it instead of guessing.** `mono.search` finds
+> types by substring across every loaded image (~38k types in ~7 ms), `mono.find` resolves a name and
+> tries the spelling variants below for you, and `mono.describe` returns the field and method tables
+> — including **method arities**, which is what an AuraMono invoke actually needs. Those answers come
+> from the loaded image, so unlike a decompilation they cannot be stale after a game patch. The
+> alias-by-hand ritual below remains the fallback for when the game is not running.
+> See [docs/MCP_BRIDGE.md](docs/MCP_BRIDGE.md).
+
 ### Core API
 
 **`HeartopiaComplete.FindLoadedType(params string[] names)`** — first match across `AppDomain`, with 30 s miss cache.
@@ -317,6 +326,14 @@ Only files listed in `buddy/buddy.csproj` `<Compile Include="...">` ship. Adding
 ---
 
 ## 10. Workflow: add or fix a feature
+
+> **0. If the game is running with the MCP bridge, start there** — steps 1–2 become verification
+> rather than discovery, and steps 5–6 can be prototyped before writing any mod code:
+> `mono.search` finds the type without knowing its name, `mono.describe` gives its real fields and
+> method arities, `Mono.GetComponents` enumerates live instances with pinning, `ValidateCommand`
+> checks a `SendCommand` payload **without sending it**, and `eval` runs a C# snippet in the live
+> world in ~15 ms. Then write the feature once, already knowing it works.
+> See [docs/MCP_BRIDGE.md](docs/MCP_BRIDGE.md).
 
 1. **Decompile** — find UI / manager / command in `ilspy-dumps/`; note assembly image.
 2. **List type aliases** — full name, `Gameplay`/`GamePlay`, `Il2Cpp` prefix, `ScriptsRefactory`, short name.
