@@ -101,6 +101,16 @@ namespace HeartopiaMod
             public GameObject StealthHintLabel;
             public Toggle WalkToggle;             // Walk to Nodes (always visible)
             public GameObject WalkHintLabel;
+            public Toggle WalkToAreaToggle;       // Walk to Zone Point (shown while Walk to Nodes is on)
+            public GameObject WalkToAreaHintLabel;
+            public Toggle WalkVehicleToggle;      // Use Vehicle (shown while Walk to Nodes is on)
+            public GameObject WalkVehicleHintLabel;
+            public GameObject WalkVehicleDistanceLabel;   // slider row, shown only while Use Vehicle is on
+            public Slider WalkVehicleDistanceSlider;
+            public string WalkVehicleDistanceShown;
+            public GameObject WalkVehicleDismountLabel;   // second slider row, same gate
+            public Slider WalkVehicleDismountSlider;
+            public string WalkVehicleDismountShown;
             public Toggle TrackCompareToggle;     // Compare Game Track (diagnostic)
             public GameObject TrackCompareHintLabel;
             public Toggle StealthBlockToggle;     // Stealth Block (StealthBlockFeature.cs)
@@ -309,7 +319,9 @@ namespace HeartopiaMod
             return (this.auraFarmEnabled ? 1 : 0)
                  | (this.autoFarmAutoStopEnabled ? 2 : 0)
                  // Walk to Nodes shows/hides its own speed row, so it moves everything below it.
-                 | (this.farmWalkToNodeEnabled ? 4 : 0);
+                 | (this.farmWalkToNodeEnabled ? 4 : 0)
+                 // Use Vehicle owns the distance-slider row underneath it.
+                 | (this.farmWalkUseVehicleEnabled ? 8 : 0);
         }
 
         // ----------------------------------------------------------------------------------------
@@ -483,6 +495,41 @@ namespace HeartopiaMod
                 new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
             this.TrySetUguiLabelWrapped(handle.WalkHintLabel);
 
+            // Zone travel, two independent switches under Walk to Nodes. Kept separate on request:
+            // walking between areas is useful on its own, and the vehicle is a second decision with
+            // its own failure modes (it cannot be summoned underwater at all).
+            handle.WalkToAreaToggle = this.CreateUguiCheckbox(settings.transform, "WalkToAreaToggle",
+                this.L("Walk to Zone Point"), this.farmWalkToAreaEnabled,
+                new System.Action<bool>(this.OnUguiForagingWalkToAreaToggled));
+            handle.WalkToAreaHintLabel = this.CreateUguiLabel(settings.transform, "WalkToAreaHint",
+                this.L("Travels to the next farm zone instead of teleporting there"), 11f,
+                new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
+            this.TrySetUguiLabelWrapped(handle.WalkToAreaHintLabel);
+
+            handle.WalkVehicleToggle = this.CreateUguiCheckbox(settings.transform, "WalkVehicleToggle",
+                this.L("Use Vehicle"), this.farmWalkUseVehicleEnabled,
+                new System.Action<bool>(this.OnUguiForagingWalkVehicleToggled));
+            handle.WalkVehicleHintLabel = this.CreateUguiLabel(settings.transform, "WalkVehicleHint",
+                this.L("Summons the default vehicle for long hauls; never underwater"), 11f,
+                new Color(stealthMuted.r, stealthMuted.g, stealthMuted.b, 0.9f), false);
+            this.TrySetUguiLabelWrapped(handle.WalkVehicleHintLabel);
+
+            handle.WalkVehicleDistanceShown = this.LF("Vehicle From: {0}m", (int)this.farmWalkVehicleMinDistance);
+            handle.WalkVehicleDistanceLabel = this.CreateUguiBodyLabel(settings.transform,
+                "WalkVehicleDistanceLabel", handle.WalkVehicleDistanceShown, 13f);
+            handle.WalkVehicleDistanceSlider = this.CreateUguiSlider(settings.transform, "WalkVehicleDistanceSlider",
+                FarmWalkVehicleMinDistanceFloor, FarmWalkVehicleMinDistanceCeiling,
+                this.farmWalkVehicleMinDistance, true,
+                new System.Action<float>(this.OnUguiForagingWalkVehicleDistanceChanged));
+
+            handle.WalkVehicleDismountShown = this.LF("Get Out At: {0}m", (int)this.farmWalkVehicleDismountDistance);
+            handle.WalkVehicleDismountLabel = this.CreateUguiBodyLabel(settings.transform,
+                "WalkVehicleDismountLabel", handle.WalkVehicleDismountShown, 13f);
+            handle.WalkVehicleDismountSlider = this.CreateUguiSlider(settings.transform, "WalkVehicleDismountSlider",
+                FarmWalkVehicleDismountFloor, FarmWalkVehicleDismountCeiling,
+                this.farmWalkVehicleDismountDistance, true,
+                new System.Action<float>(this.OnUguiForagingWalkVehicleDismountChanged));
+
             // Диагностика маршрутов (FarmWalkTrackCompareFeature.cs).
             handle.TrackCompareToggle = this.CreateUguiCheckbox(settings.transform, "TrackCompareToggle",
                 this.L("Compare Game Track"), this.farmWalkTrackCompareEnabled,
@@ -619,6 +666,67 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.WalkHintLabel, 270f, rowY, panelW - 282f, 28f);
             }
 
+            // Both zone-travel rows hang off Walk to Nodes: with it off they mean nothing, so they
+            // are hidden rather than shown greyed — the panel is already dense.
+            bool walkRows = this.farmWalkToNodeEnabled;
+            SetUguiGoActive(handle.WalkToAreaToggle != null ? handle.WalkToAreaToggle.gameObject : null, walkRows);
+            SetUguiGoActive(handle.WalkToAreaHintLabel, walkRows);
+            SetUguiGoActive(handle.WalkVehicleToggle != null ? handle.WalkVehicleToggle.gameObject : null, walkRows);
+            SetUguiGoActive(handle.WalkVehicleHintLabel, walkRows);
+
+            // The distance slider needs BOTH: walking on, and the vehicle actually in use.
+            bool vehicleRow = walkRows && this.farmWalkUseVehicleEnabled;
+            SetUguiGoActive(handle.WalkVehicleDistanceLabel, vehicleRow);
+            SetUguiGoActive(handle.WalkVehicleDistanceSlider != null ? handle.WalkVehicleDistanceSlider.gameObject : null, vehicleRow);
+            SetUguiGoActive(handle.WalkVehicleDismountLabel, vehicleRow);
+            SetUguiGoActive(handle.WalkVehicleDismountSlider != null ? handle.WalkVehicleDismountSlider.gameObject : null, vehicleRow);
+
+            if (walkRows)
+            {
+                rowY += 34f;
+                if (handle.WalkToAreaToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.WalkToAreaToggle.gameObject, 30f, rowY, 250f, 24f);
+                }
+                if (handle.WalkToAreaHintLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.WalkToAreaHintLabel, 286f, rowY, panelW - 298f, 28f);
+                }
+
+                rowY += 34f;
+                if (handle.WalkVehicleToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.WalkVehicleToggle.gameObject, 30f, rowY, 250f, 24f);
+                }
+                if (handle.WalkVehicleHintLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.WalkVehicleHintLabel, 286f, rowY, panelW - 298f, 28f);
+                }
+
+                if (vehicleRow)
+                {
+                    rowY += 30f;
+                    if (handle.WalkVehicleDistanceLabel != null)
+                    {
+                        PlaceUguiTopLeft(handle.WalkVehicleDistanceLabel, 46f, rowY, 170f, 20f);
+                    }
+                    if (handle.WalkVehicleDistanceSlider != null)
+                    {
+                        PlaceUguiTopLeft(handle.WalkVehicleDistanceSlider.gameObject, 224f, rowY + 1f, panelW - 252f, 20f);
+                    }
+
+                    rowY += 26f;
+                    if (handle.WalkVehicleDismountLabel != null)
+                    {
+                        PlaceUguiTopLeft(handle.WalkVehicleDismountLabel, 46f, rowY, 170f, 20f);
+                    }
+                    if (handle.WalkVehicleDismountSlider != null)
+                    {
+                        PlaceUguiTopLeft(handle.WalkVehicleDismountSlider.gameObject, 224f, rowY + 1f, panelW - 252f, 20f);
+                    }
+                }
+            }
+
             rowY += 34f;
             if (handle.TrackCompareToggle != null)
             {
@@ -742,6 +850,12 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AuraFarmToggle, this.auraFarmEnabled);
                 this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
                 this.SyncUguiToggleFromField(handle.WalkToggle, this.farmWalkToNodeEnabled);
+                this.SyncUguiToggleFromField(handle.WalkToAreaToggle, this.farmWalkToAreaEnabled);
+                this.SyncUguiToggleFromField(handle.WalkVehicleToggle, this.farmWalkUseVehicleEnabled);
+                this.SyncUguiSelfLabelText(handle.WalkVehicleDistanceLabel, ref handle.WalkVehicleDistanceShown,
+                    this.LF("Vehicle From: {0}m", (int)this.farmWalkVehicleMinDistance));
+                this.SyncUguiSelfLabelText(handle.WalkVehicleDismountLabel, ref handle.WalkVehicleDismountShown,
+                    this.LF("Get Out At: {0}m", (int)this.farmWalkVehicleDismountDistance));
                 this.SyncUguiToggleFromField(handle.TrackCompareToggle, this.farmWalkTrackCompareEnabled);
                 this.SyncUguiToggleFromField(handle.StealthBlockToggle, this.stealthBlockEnabled);
                 this.SyncUguiToggleFromField(handle.NotifyFriendsToggle, this.stealthBlockNotifyFriends);
@@ -960,6 +1074,57 @@ namespace HeartopiaMod
                 this.SetGameSpeed(this.FarmRunGameSpeed);
             }
 
+            // Both zone-travel rows appear and disappear with this toggle.
+
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiForagingWalkToAreaToggled(bool value)
+        {
+            if (value == this.farmWalkToAreaEnabled)
+            {
+                return;
+            }
+
+            this.farmWalkToAreaEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Turning the vehicle on/off changes whether the distance row exists, hence the relayout.
+        private void OnUguiForagingWalkVehicleToggled(bool value)
+        {
+            if (value == this.farmWalkUseVehicleEnabled)
+            {
+                return;
+            }
+
+            this.farmWalkUseVehicleEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiForagingWalkVehicleDistanceChanged(float value)
+        {
+            float clamped = Mathf.Clamp(Mathf.Round(value),
+                FarmWalkVehicleMinDistanceFloor, FarmWalkVehicleMinDistanceCeiling);
+            if (Mathf.Approximately(clamped, this.farmWalkVehicleMinDistance))
+            {
+                return;
+            }
+
+            this.farmWalkVehicleMinDistance = clamped;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiForagingWalkVehicleDismountChanged(float value)
+        {
+            float clamped = Mathf.Clamp(Mathf.Round(value),
+                FarmWalkVehicleDismountFloor, FarmWalkVehicleDismountCeiling);
+            if (Mathf.Approximately(clamped, this.farmWalkVehicleDismountDistance))
+            {
+                return;
+            }
+
+            this.farmWalkVehicleDismountDistance = clamped;
             try { this.SaveKeybinds(false); } catch { }
         }
 

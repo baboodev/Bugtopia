@@ -51,6 +51,16 @@ namespace HeartopiaMod
         // The aura's own scan radius (AuraDirectScanRadius, 8 m) is far looser and hides this; the
         // server just drops the collect, and per project memory those rejections are SILENT, so the
         // farm looks like it is working while gathering nothing.
+        // HORIZONTAL target. The 3-D verdict is FarmWalkArrivalDistance below, and the two must NOT
+        // be the same number: 3-D distance is always >= horizontal, so equal thresholds leave
+        // sqrt(t^2 - dy^2) of horizontal room, i.e. ZERO once dy reaches the threshold. Setting both
+        // to 0.5 made a node twenty centimetres above the player unreachable — the 04:49 run failed
+        // five in a row with "under the node but 0,5m away vertically (dy=0,2m)" while the one node
+        // that happened to be level arrived at 0,49m.
+        //
+        // 0.25 horizontal + 0.8 3-D leaves room for ~0.76 m of height, which is what the walker can
+        // actually close.
+        //
         // 0.25 m — walk essentially ONTO the node, the way the teleport path used to land.
         //
         // Reasoning from the in-game runs: at 1.5 m the walker reported "arrived 1,29m" and then
@@ -60,6 +70,7 @@ namespace HeartopiaMod
         // sufficient — the gather itself wants to be on top of the resource. Anything the walker
         // cannot quite close now trips the not-closing timeout and gets a very short final hop,
         // which is a strictly better failure than looping on an uncollectable node.
+        //
         private const float FarmWalkCollectDistance = 0.25f;
 
         // Below this range the approach eases off. At full axis the locomotion overshoots a 0.25 m
@@ -68,13 +79,28 @@ namespace HeartopiaMod
         private const float FarmWalkSlowApproachDistance = 2f;
         private const float FarmWalkSlowApproachSpeed = 0.2f;
 
-        // Walking cannot change the height difference to a resource, so 0.25 m is a HORIZONTAL
-        // target; the 3-D separation just has to end up inside the server's collect rule.
-        // Measuring arrival purely in 3-D made an unreachable goal out of anything sitting even
-        // slightly above the player: one run logged "final approach not walkable (0,3m, dy=0,3m)"
-        // — standing directly under a mushroom 0.3 m up, with 0 m of horizontal distance left to
-        // walk, timing out because 3-D distance could never drop below 0.3.
-        private const float FarmWalkServerCollectDistance = 1.8f;
+        // 2026-08-16, on request: the ARRIVAL VERDICT is 0.5 m in 3-D, replacing the old 1.8 m
+        // backstop that let half a metre in the plane pass with over a metre of unclosed height.
+        //
+        // ⚠️ Keep this STRICTLY LARGER than FarmWalkCollectDistance. They are not two views of one
+        // number: 3-D >= horizontal always, so with both at the same value the height budget is
+        // sqrt(t^2 - t^2) = 0, and any node even slightly off level becomes unreachable. That is
+        // exactly what a run with both at 0.5 did — five consecutive failures at dy = 0.1-0.2 m.
+        //
+        // ⚠️ The horizontal test stays as the ENTRY to the arrival block, and it has to: the branch
+        // underneath it — "horizontally there, vertically short" — is what drives the final dive
+        // onto a sea grape and what reports an unreachable ledge on land. Testing 3-D alone would
+        // skip straight past it.
+        // 2026-08-16: 0.5 -> 0.8 on request. Still well inside the server's 2 m, and it widens the
+        // height budget the walker can accept without the wider fallback below:
+        // sqrt(0.8^2 - 0.25^2) = 0.76 m, up from 0.43.
+        private const float FarmWalkArrivalDistance = 0.8f;
+
+        // The SERVER's rule, not ours: CollectAntiCheating.Distance is 2 m in 3-D, so 1.8 leaves a
+        // margin. Used only to decide whether an approach that could not close the HEIGHT should be
+        // abandoned — walking cannot fix a 1.2 m drop, but the game will still accept the gather
+        // from there, and skipping it loses the resource for nothing.
+        private const float FarmWalkServerCollectRadius = 1.8f;
 
         // Steering smoothing. The raw desired direction can swing hard when a corner is cleared or
         // a re-path lands, and the character turns to face wherever it is driven — so feeding the
@@ -464,6 +490,23 @@ namespace HeartopiaMod
         // Where the current probe leg started, so it can end on distance swum rather than on time.
         private Vector3 farmWalkProbeLegFrom;
 
+        // Zone travel, two independent user switches.
+        //
+        // Walking between farm areas and riding there are separate decisions, and deliberately so:
+        // the areas are 200-400 m apart, so walking one is a real time cost the user may accept on
+        // its own, while the vehicle carries its own constraints — it cannot be summoned underwater
+        // at all (twice-confirmed silent AreaForbid), and its summon needs clear space in front of
+        // the player. Either switch is useful without the other.
+        internal bool farmWalkToAreaEnabled;
+        internal bool farmWalkUseVehicleEnabled;
+
+        // Straight-line distance past which the vehicle is worth summoning. Slider bounds, not
+        // behaviour limits: below the floor the summon costs more time than it saves, and the
+        // ceiling is past the widest gap between farm areas on this map (~390 m observed).
+        internal const float FarmWalkVehicleMinDistanceFloor = 10f;
+        internal const float FarmWalkVehicleMinDistanceCeiling = 1000f;
+        internal float farmWalkVehicleMinDistance = 50f;
+
         // Mirrors StealthForagingActive: the toggle only means anything while a run is going.
         // Read by OutOfBoundsGuardFeature — see IsOutOfBoundsGuardRequested for why.
         //
@@ -537,6 +580,9 @@ namespace HeartopiaMod
         // This walk is heading for a cleansing coral, not a resource — the arrival hands over to
         // the cleanse wait instead of starting a collect.
         internal bool farmWalkPendingCleanse;
+
+        // This walk is a zone haul: the arrival goes to LoadingArea, not to a collect.
+        internal bool farmWalkPendingArea;
         private string farmWalkDwellLabel = string.Empty;
 
         // Game speed the farm would use when walking is off. Walking pins 1x instead.
@@ -612,10 +658,21 @@ namespace HeartopiaMod
             // Fresh walk, so the detour search is allowed once more.
             this.farmWalkDetourSearchDone = false;
 
+            // Vehicle for any long haul, not just a zone move. The node hops on this map run
+            // 77-104 m routinely, which is the same distance the vehicle was added for — the only
+            // thing that made a zone move special was that it happened to be the case asked for
+            // first. ShouldFarmWalkSummonVehicle owns every precondition (option on, far enough,
+            // on land, not already riding), so calling it here covers node walks, retries,
+            // priority nodes and zone hauls from one place.
             // Already in server collect range. Start a walk that completes on its first tick rather
             // than returning false — false sends the caller into FarmTeleportTo, which is how the
             // farm ended up teleporting onto a node it was already standing 1.3 m from.
             bool alreadyInRange = Distance3D(selfPos, target) <= FarmWalkCollectDistance;
+
+            if (!alreadyInRange && this.ShouldFarmWalkSummonVehicle(selfPos, target))
+            {
+                this.TryFarmWalkSummonAndMount(); // failure means "walk it", never "abort"
+            }
             if (alreadyInRange)
             {
                 this.farmWalkCorners.Clear();
@@ -906,16 +963,15 @@ namespace HeartopiaMod
 
             float distance3D = Distance3D(selfPos, this.farmWalkTarget);
 
-            // Arrived once we are horizontally on top of the node AND close enough overall for the
-            // server to accept the collect. Splitting the two is what makes a slightly-raised
-            // resource reachable: the walker closes the part it can (horizontal) and the height
-            // difference only has to fit inside the anti-cheat radius.
+            // Arrived once we are within FarmWalkCollectDistance of the node in 3-D. The horizontal
+            // test is the gate rather than the verdict — see the constant for why it has to stay.
             if (remaining <= FarmWalkCollectDistance)
             {
                 // Two different questions, so two different tolerances.
                 //
-                // Plain node: the gate is the SERVER's collect rule, so measure against
-                // FarmWalkServerCollectDistance and stay under its 2 m.
+                // Plain node: FarmWalkArrivalDistance in 3-D — "arrived" means genuinely within
+                // half a metre of the resource in every axis, not half a metre in the plane with
+                // up to 1.8 m of unclosed height.
                 //
                 // Standoff (contamination): the server's collect rule does not apply — the repair
                 // kit is thrown, the aim point is deliberately 3 m off the node, and being closer
@@ -932,7 +988,7 @@ namespace HeartopiaMod
                 // 7-11 m ones. If contamination starts failing, this is the number to revisit.
                 float arrivalTolerance = this.farmWalkAimOffsetY != 0f
                     ? FarmWalkStandoffArrivalDistance
-                    : FarmWalkServerCollectDistance;
+                    : FarmWalkArrivalDistance;
                 if (distance3D <= arrivalTolerance)
                 {
                     this.FinishFarmWalk("arrived " + remaining.ToString("F2") + "m horizontally ("
@@ -948,6 +1004,27 @@ namespace HeartopiaMod
                 // On land it is a ledge or an overhang, which no amount of walking fixes.
                 if (this.farmWalkVerticalHeld == 0)
                 {
+                    // ...but "not as close as we wanted" is not the same as "cannot collect".
+                    //
+                    // The server's own rule is CollectAntiCheating.Distance = 2 m measured in 3-D,
+                    // so a node 1.2 m below the player with the horizontal closed is a perfectly
+                    // legal gather. Failing it throws away a resource the game would have handed
+                    // over — and the 04:59 run did exactly that on Penny Bun and Ore at dy = -1.1
+                    // to -1.5 m, every one of them inside the server's radius.
+                    //
+                    // FarmWalkArrivalDistance stays the target the walker aims for; this is the
+                    // wider "the collect will still work from here" fallback that decides whether
+                    // to give up. Logged distinctly so the compromise is never invisible.
+                    if (distance3D <= FarmWalkServerCollectRadius)
+                    {
+                        this.FinishFarmWalk("arrived " + remaining.ToString("F2") + "m horizontally ("
+                            + distance3D.ToString("F2") + "m 3-D, dy="
+                            + (this.farmWalkTarget.y - selfPos.y).ToString("F1")
+                            + "m) — height not closed, but inside the server's collect radius",
+                            teleport: false);
+                        return true;
+                    }
+
                     this.FinishFarmWalk("under the node but " + distance3D.ToString("F1") + "m away vertically (dy="
                         + (this.farmWalkTarget.y - selfPos.y).ToString("F1") + "m)", teleport: true);
                     return true;
@@ -1238,6 +1315,7 @@ namespace HeartopiaMod
                 this.SteerFarmWalkToward(selfPos, corner);
             }
             this.SampleFarmWalkProgress(selfPos, now);
+            this.ProcessFarmWalkVehicleDismount(selfPos);
             this.autoFarmStatus = "Walking to node (" + remaining.ToString("F0") + "m)...";
             return false;
         }
@@ -1258,9 +1336,16 @@ namespace HeartopiaMod
 
             delta.Normalize();
 
+            // Driving out of a wedge: reverse, then perpendicular. Handled before the on-foot
+            // cases because a vehicle never takes any of them.
+            if (this.TryGetFarmWalkVehicleUnstickDirection(delta, out Vector3 vehicleDir)
+                && vehicleDir.sqrMagnitude > 0.0001f)
+            {
+                delta = vehicleDir.normalized;
+            }
             // Backing off an obstacle: drive the opposite way. Reversed BEFORE smoothing, so the
             // turn sweeps rather than snapping, exactly like any other direction change.
-            if (this.farmWalkUnstickPhase == FarmWalkUnstickBackingOff
+            else if (this.farmWalkUnstickPhase == FarmWalkUnstickBackingOff
                 || (this.farmWalkUnstickPhase == FarmWalkUnstickHopBurst && this.farmWalkHopRetreating))
             {
                 // Hop burst reverses only while retreating, then drives at the node again so the
@@ -1535,6 +1620,19 @@ namespace HeartopiaMod
             this.farmWalkLastJumpAt = Time.unscaledTime;
             this.farmWalkJumpsUsed++;
 
+            // IN A VEHICLE FIRST. A car cannot jump and cannot thread a gap the way a swimmer can,
+            // so its escape is the driver's one — reverse, then pull out sideways. Two rounds, and
+            // then the vehicle IS the obstacle: BeginFarmWalkVehicleUnstick gets out on the third
+            // call and the on-foot ladder below takes over from the next block.
+            if (this.IsFarmWalkRidingVehicle())
+            {
+                if (this.TryGetNavMeshSelfPosition(out Vector3 vehiclePos, out _))
+                {
+                    this.BeginFarmWalkVehicleUnstick(vehiclePos, Time.unscaledTime, why);
+                    return;
+                }
+            }
+
             // In water, rise over the obstacle instead of jumping at it. Same budget, because both
             // are "the walker is blocked and is trying something"; a reef that survives four
             // attempts should still escalate rather than being climbed forever.
@@ -1709,6 +1807,11 @@ namespace HeartopiaMod
             this.ReleaseFarmWalkDepth();
             this.TryClearGameMoveAxis();
             this.farmWalkPendingCleanse = false;
+            this.farmWalkPendingArea = false;
+            if (this.farmWalkVehicleOurs)
+            {
+                this.TryFarmWalkDismount("walk aborted");
+            }
         }
 
         // Arrival setup, shared by "walked there" and "gave up and teleported" — both end standing
@@ -1719,6 +1822,25 @@ namespace HeartopiaMod
             // would misroute the next ordinary arrival into the cleanse wait.
             bool cleanseWalk = this.farmWalkPendingCleanse;
             this.farmWalkPendingCleanse = false;
+            bool areaWalk = this.farmWalkPendingArea;
+            this.farmWalkPendingArea = false;
+
+            // A zone haul ends at the area, not at a resource — and the vehicle goes back whether
+            // the haul succeeded or was skipped, so it never follows us into the next one.
+            if (this.farmWalkVehicleOurs)
+            {
+                this.TryFarmWalkDismount("zone haul finished");
+            }
+
+            if (areaWalk)
+            {
+                this.farmWalkSkipToScan = false;
+                this.farmState = HeartopiaComplete.AutoFarmState.LoadingArea;
+                this.autoFarmTimer = 0f;
+                this.autoFarmStatus = "Arrived — loading the area...";
+                this.ResetFarmTour(); // the plan described the zone we just left
+                return;
+            }
 
             // A skipped node was never reached, so there is nothing to collect — go straight back
             // to the scan, which will pick the next nearest node with this one stamped out.
@@ -2054,6 +2176,13 @@ namespace HeartopiaMod
                             : this.farmWalkBackOffVerticalDir > 0 ? "rising." : "descending."));
                 }
 
+                return;
+            }
+
+            if (this.farmWalkUnstickPhase == FarmWalkUnstickVehicleBackOff
+                || this.farmWalkUnstickPhase == FarmWalkUnstickVehicleSideStep)
+            {
+                this.UpdateFarmWalkVehicleUnstick(selfPos, now);
                 return;
             }
 

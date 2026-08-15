@@ -192,6 +192,10 @@ namespace HeartopiaMod
             data.stealthForagingEnabled = this.stealthForagingEnabled;
             data.farmWalkToNodeEnabled = this.farmWalkToNodeEnabled;
             data.farmWalkTrackCompareEnabled = this.farmWalkTrackCompareEnabled;
+            data.farmWalkToAreaEnabled = this.farmWalkToAreaEnabled;
+            data.farmWalkUseVehicleEnabled = this.farmWalkUseVehicleEnabled;
+            data.farmWalkVehicleMinDistance = this.farmWalkVehicleMinDistance;
+            data.farmWalkVehicleDismountDistance = this.farmWalkVehicleDismountDistance;
             data.resourceAutoRepairPauseSeconds = this.resourceAutoRepairPauseSeconds;
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
@@ -516,6 +520,20 @@ namespace HeartopiaMod
             this.stealthForagingEnabled = data.stealthForagingEnabled;
             this.farmWalkToNodeEnabled = data.farmWalkToNodeEnabled;
             this.farmWalkTrackCompareEnabled = data.farmWalkTrackCompareEnabled;
+            this.farmWalkToAreaEnabled = data.farmWalkToAreaEnabled;
+            this.farmWalkUseVehicleEnabled = data.farmWalkUseVehicleEnabled;
+            // A pre-existing Config.xml has no entry for this — a raw 0 would put the slider under
+            // its own floor, so an unset value falls back to the default rather than being clamped
+            // to 10 m and silently changing what "long haul" means.
+            this.farmWalkVehicleMinDistance = data.farmWalkVehicleMinDistance <= 0f
+                ? 50f
+                : Mathf.Clamp(data.farmWalkVehicleMinDistance,
+                    FarmWalkVehicleMinDistanceFloor, FarmWalkVehicleMinDistanceCeiling);
+            // Same reasoning: an absent entry is 0, which is not a value the slider can produce.
+            this.farmWalkVehicleDismountDistance = data.farmWalkVehicleDismountDistance <= 0f
+                ? 10f
+                : Mathf.Clamp(data.farmWalkVehicleDismountDistance,
+                    FarmWalkVehicleDismountFloor, FarmWalkVehicleDismountCeiling);
             // Belt and braces for a hand-edited Config.xml: the two modes cannot both be on.
             if (this.farmWalkToNodeEnabled && this.stealthForagingEnabled)
             {

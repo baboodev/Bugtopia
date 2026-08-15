@@ -167,6 +167,15 @@ namespace HeartopiaMod
             // "Compare Game Track" — просить игру строить свой маршрут к тому же узлу и логировать
             // расхождение. Диагностика; сбивает ручной трек игрока, поэтому по умолчанию выкл.
             public bool farmWalkTrackCompareEnabled;
+            // "Walk to Zone Point" — travel to the next farm area on foot instead of the area:*
+            // teleport. Independent of the vehicle switch below.
+            public bool farmWalkToAreaEnabled;
+            // "Use Vehicle" + its distance slider — summon the default vehicle for a long zone
+            // haul. Land only; underwater summons are rejected by the server.
+            public bool farmWalkUseVehicleEnabled;
+            public float farmWalkVehicleMinDistance;
+            // Distance from the destination at which the driver gets out.
+            public float farmWalkVehicleDismountDistance;
             public float resourceAutoRepairPauseSeconds;
             public float gameSpeed;
             public bool fpsBypassEnabled;

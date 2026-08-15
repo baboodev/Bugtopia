@@ -999,6 +999,19 @@ namespace HeartopiaMod
                             }
                             else
                             {
+                                // Travel there on foot (and by vehicle on a long haul) when the
+                                // user asked for it. Both switches are independent: walking is
+                                // useful without the vehicle, and the vehicle only ever shortens a
+                                // walk that was going to happen anyway.
+                                if (this.farmWalkToAreaEnabled
+                                    && this.TryBeginFarmWalkToArea(farmLocation.Position, farmLocation.Name))
+                                {
+                                    this.autoFarmStatus = "Travelling to " + farmLocation.Name + "...";
+                                    this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                    this.autoFarmTimer = 0f;
+                                    break;
+                                }
+
                                 this.autoFarmStatus = "Moving to " + farmLocation.Name + "...";
                                 this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(farmLocation.Position),
                                     "area:" + farmLocation.Name, farmLocation.Position);

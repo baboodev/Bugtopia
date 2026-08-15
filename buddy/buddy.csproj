@@ -328,6 +328,7 @@
     <Compile Include="QuestWalkFeature.cs" />
     <Compile Include="FarmWalkTrackCompareFeature.cs" />
     <Compile Include="FarmWalkRadarFocusFeature.cs" />
+    <Compile Include="FarmWalkVehicleFeature.cs" />
     <Compile Include="FarmRoutePlanFeature.cs" />
     <Compile Include="Breadcrumbs.cs" />
     <Compile Include="MonoAssemblyDump.cs" />
