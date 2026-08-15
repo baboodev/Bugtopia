@@ -47,6 +47,9 @@ namespace HeartopiaMod
         private KeyCode keyInspectPlayer = KeyCode.None;
         private KeyCode keyInspectMove = KeyCode.None;
         private KeyCode keyAutoRepair = KeyCode.None;
+        // The ONE key Quest Walk gets: start or stop moving to the tracked quest point
+        // (QuestWalkFeature.cs). Everything else about the feature lives on the Daily Quests page.
+        private KeyCode keyQuestWalk = KeyCode.None;
         private KeyCode keyAutoJoinFriend = KeyCode.None;
         private KeyCode keyJoinPublic = KeyCode.None;
         private KeyCode keyJoinMyTown = KeyCode.None;
@@ -763,6 +766,11 @@ namespace HeartopiaMod
             this.ProcessResearchMonitorOnUpdate();
             Breadcrumbs.Phase("ou.sanrio");
             this.ProcessSanrioGachaFinderOnUpdate();
+            // Quest Walk drives the SAME walker the farm does, so it must tick before the shell
+            // (which only paints) and outside the farm state machine (which owns the walker only
+            // while a farm run is going). QuestWalkFeature.cs.
+            Breadcrumbs.Phase("ou.questwalk");
+            this.ProcessQuestWalkOnUpdate();
             Breadcrumbs.Phase("ou.uguishell");
             this.ProcessUguiShellOnUpdate();
             // Floating UGUI Building Move Panel — deliberately NOT inside ProcessUguiShellOnUpdate
@@ -1007,6 +1015,12 @@ namespace HeartopiaMod
                 if (this.TryGetModHotkeyDown(this.keyInspectMove))
                 {
                     this.InspectMovementComponent();
+                }
+                // ONE key for Quest Walk: start, or stop. Deliberately not two (start/stop) and not
+                // three (start/stop/re-aim) — the feature has exactly one thing to decide.
+                if (this.TryGetModHotkeyDown(this.keyQuestWalk))
+                {
+                    this.ToggleQuestWalk();
                 }
                 if (this.TryGetModHotkeyDown(this.keyAutoRepair))
                 {

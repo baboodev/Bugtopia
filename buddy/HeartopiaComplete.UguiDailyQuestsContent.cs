@@ -172,6 +172,18 @@ namespace HeartopiaMod
             public float PanelW;
             public Color StatusColor;             // the shared statusStyle color (grow-time rows)
 
+            // -------- Part 0: Quest Walk (QuestWalkFeature.cs) --------
+            // A FIXED header above the scroll view rather than another row inside it: everything in
+            // the scroll is positioned by absolute Y literals and a relayout that owns the flowing
+            // tail, so inserting at the top would mean shifting every one of them. Parking it above
+            // the viewport changes exactly one line (the scroll's own placement) and leaves every
+            // existing coordinate untouched — and it puts the feature's control where it is reached
+            // without scrolling past a variable-length quest list.
+            public GameObject WalkButton;
+            public int WalkButtonState = -1;      // -1 never composed; else 0/1 = following
+            public GameObject WalkStatusLabel;
+            public string WalkStatusShown;
+
             // -------- Part 1: Daily Quest Submit --------
             public GameObject AutoSubmitButton;   // gate 1 (3-way)
             public Toggle SkipFiveStarToggle;
@@ -272,9 +284,30 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(block, x, y, w, h);
             this.AddUguiImage(block, this.UguiKitContentBg(), true, 1f);
 
+            // ==================== Part 0 — Quest Walk (fixed header, above the scroll) ============
+            const float walkHeaderH = 64f;
+            handle.WalkButton = this.CreateUguiPrimaryButton(block.transform, "QuestWalkButton",
+                this.questWalkFollowing ? this.L("Stop Walking") : this.L("Walk to Quest Point"),
+                new System.Action(this.OnUguiDailyQuestsWalkClicked));
+            PlaceUguiTopLeft(handle.WalkButton, 8f, 8f, 220f, 32f);
+            handle.WalkButtonState = this.questWalkFollowing ? 1 : 0;
+
+            handle.WalkStatusShown = this.BuildQuestWalkSummary();
+            handle.WalkStatusLabel = this.CreateUguiLabel(block.transform, "QuestWalkStatus",
+                handle.WalkStatusShown, 11f,
+                new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.82f), false);
+            this.TrySetUguiLabelWrapped(handle.WalkStatusLabel);
+            PlaceUguiTopLeft(handle.WalkStatusLabel, 236f, 8f, w - 244f, 32f);
+
+            GameObject walkHint = this.CreateUguiMutedLabel(block.transform, "QuestWalkHint",
+                this.L("Walks to the point the game published for the tracked quest, and keeps going after a world change. Bind a key under Settings → Keybinds → Quest Walk."),
+                10f);
+            this.TrySetUguiLabelWrapped(walkHint);
+            PlaceUguiTopLeft(walkHint, 8f, 42f, w - 16f, 20f);
+
             Transform scrollContent;
             GameObject scroll = this.CreateUguiScrollView(block.transform, "Scroll", 10f, out scrollContent);
-            PlaceUguiTopLeft(scroll, 0f, 0f, w, h);
+            PlaceUguiTopLeft(scroll, 0f, walkHeaderH, w, h - walkHeaderH);
             // Flat look over the block's ContentBg (Logging idiom) — alpha-0 images still
             // raycast, so wheel/drag scrolling keeps working.
             try
@@ -752,6 +785,23 @@ namespace HeartopiaMod
 
             try
             {
+                // Part 0 — Quest Walk. The caption follows the live flag because the hotkey can flip
+                // it without the page being touched; the status line self-diffs like every other.
+                int walkState = this.questWalkFollowing ? 1 : 0;
+                if (walkState != handle.WalkButtonState)
+                {
+                    handle.WalkButtonState = walkState;
+                    this.SetUguiButtonLabel(handle.WalkButton,
+                        this.questWalkFollowing ? this.L("Stop Walking") : this.L("Walk to Quest Point"));
+                }
+
+                string walkStatus = this.BuildQuestWalkSummary();
+                if (!string.Equals(walkStatus, handle.WalkStatusShown, StringComparison.Ordinal))
+                {
+                    handle.WalkStatusShown = walkStatus;
+                    this.SetUguiLabelText(handle.WalkStatusLabel, walkStatus);
+                }
+
                 // Toggle re-sync (external IMGUI edits) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.SkipFiveStarToggle, this.dailyQuestSubmitSkipFiveStar);
 
@@ -957,6 +1007,12 @@ namespace HeartopiaMod
 
         // QuestAssistant.cs:1239-1242 — the method carries its own busy/min-interval guards, so
         // a same-frame race click is harmless (same as the IMGUI twin).
+        // Part 0 — the same entry point the hotkey uses, so the two can never diverge.
+        private void OnUguiDailyQuestsWalkClicked()
+        {
+            this.ToggleQuestWalk();
+        }
+
         private void OnUguiDailyQuestsDumpClicked()
         {
             this.QuestAssistantOnDumpButtonClicked();

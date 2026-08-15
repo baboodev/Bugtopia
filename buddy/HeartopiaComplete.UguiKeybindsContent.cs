@@ -118,6 +118,7 @@ namespace HeartopiaMod
                     new UguiKeybindRowBinding("Bird Vacuum", () => this.keyBirdVacuum),
                     new UguiKeybindRowBinding("Spawn Bubble", () => this.keySpawnBubble),
                     new UguiKeybindRowBinding("Auto Repair", () => this.keyAutoRepair),
+                    new UguiKeybindRowBinding("Quest Walk", () => this.keyQuestWalk),
                     new UguiKeybindRowBinding("Auto Eat", () => this.keyAutoEat),
                     new UguiKeybindRowBinding("Use Bait", () => this.keyUseBait),
                     new UguiKeybindRowBinding("Use Attractor", () => this.keyUseAttractor)

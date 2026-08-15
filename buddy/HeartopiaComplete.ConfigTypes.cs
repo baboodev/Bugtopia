@@ -57,6 +57,7 @@ namespace HeartopiaMod
             public int keyInspectPlayer;
             public int keyInspectMove;
             public int keyAutoRepair;
+            public int keyQuestWalk;
             public int keyAutoJoinFriend;
             public int keyJoinPublic;
             public int keyJoinMyTown;

@@ -466,7 +466,13 @@ namespace HeartopiaMod
 
         // Mirrors StealthForagingActive: the toggle only means anything while a run is going.
         // Read by OutOfBoundsGuardFeature — see IsOutOfBoundsGuardRequested for why.
-        internal bool FarmWalkRunActive => this.farmWalkToNodeEnabled && this.autoFarmActive;
+        //
+        // ⚠️ Quest Walk is a SECOND term, deliberately added rather than routed around. The OOB
+        // rescue suppression hangs off this property, and the last time a feature quietly dropped
+        // a term from it every underwater relocation got rolled back 48 m upward. A quest walk
+        // drives the same walker through the same water, so it needs the same suppression.
+        internal bool FarmWalkRunActive => (this.farmWalkToNodeEnabled && this.autoFarmActive)
+                                           || this.questWalkFollowing;
 
         // How many alternative end nodes to try when the direct line to a node is blocked.
         private const int FarmWalkDetourAttempts = 4;

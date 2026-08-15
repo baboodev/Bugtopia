@@ -119,6 +119,7 @@ namespace HeartopiaMod
             data.keyInspectPlayer = (int)this.keyInspectPlayer;
             data.keyInspectMove = (int)this.keyInspectMove;
             data.keyAutoRepair = (int)this.keyAutoRepair;
+            data.keyQuestWalk = (int)this.keyQuestWalk;
             data.keyAutoJoinFriend = (int)this.keyAutoJoinFriend;
             data.keyJoinPublic = (int)this.keyJoinPublic;
             data.keyJoinMyTown = (int)this.keyJoinMyTown;
@@ -425,6 +426,7 @@ namespace HeartopiaMod
             this.keyInspectPlayer = (KeyCode)data.keyInspectPlayer;
             this.keyInspectMove = (KeyCode)data.keyInspectMove;
             this.keyAutoRepair = (KeyCode)data.keyAutoRepair;
+            this.keyQuestWalk = (KeyCode)data.keyQuestWalk;
             this.keyAutoJoinFriend = (KeyCode)data.keyAutoJoinFriend;
             this.keyJoinPublic = (KeyCode)data.keyJoinPublic;
             this.keyJoinMyTown = (KeyCode)data.keyJoinMyTown;
@@ -903,6 +905,7 @@ namespace HeartopiaMod
                         else if (line.Contains("keyInspectPlayer")) this.keyInspectPlayer = (KeyCode)GetJsonInt(line, "\"keyInspectPlayer\":");
                         else if (line.Contains("keyInspectMove")) this.keyInspectMove = (KeyCode)GetJsonInt(line, "\"keyInspectMove\":");
                         else if (line.Contains("keyAutoRepair")) this.keyAutoRepair = (KeyCode)GetJsonInt(line, "\"keyAutoRepair\":");
+                        else if (line.Contains("keyQuestWalk")) this.keyQuestWalk = (KeyCode)GetJsonInt(line, "\"keyQuestWalk\":");
                         else if (line.Contains("keyAutoJoinFriend")) this.keyAutoJoinFriend = (KeyCode)GetJsonInt(line, "\"keyAutoJoinFriend\":");
                         else if (line.Contains("keySeaCleanQte")) this.seaCleanQteHotkey = (KeyCode)GetJsonInt(line, "\"keySeaCleanQte\":");
                         else if (line.Contains("keyAutoSnow")) this.autoSnowHotkey = (KeyCode)GetJsonInt(line, "\"keyAutoSnow\":");
@@ -1091,6 +1094,7 @@ namespace HeartopiaMod
             this.keyInspectPlayer = KeyCode.None;
             this.keyInspectMove = KeyCode.None;
             this.keyAutoRepair = KeyCode.None;
+            this.keyQuestWalk = KeyCode.None;
             this.keyAutoJoinFriend = KeyCode.None;
             this.keyNoclip = KeyCode.None;
             this.keyCameraToggle = KeyCode.None;
@@ -1222,6 +1226,7 @@ namespace HeartopiaMod
                 case "Inspect Player": this.keyInspectPlayer = newKey; break;
                 case "Inspect Move": this.keyInspectMove = newKey; break;
                 case "Auto Repair": this.keyAutoRepair = newKey; break;
+                case "Quest Walk": this.keyQuestWalk = newKey; break;
                 case "Auto Join Friend": this.keyAutoJoinFriend = newKey; break;
                 case "Auto Snow Sculpture": this.autoSnowHotkey = newKey; break;
                 case "Auto Sand Sculpture": this.autoSandHotkey = newKey; break;
