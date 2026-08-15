@@ -1375,11 +1375,24 @@ namespace HeartopiaMod
         // The game's own eat flow (BackpackEatCommand.OnExecuteAsync) does TWO independent things:
         //   base.player.Cast(PlayerParameterEat)            ← client-only eating ANIMATION clip
         //   CharacterProtocolManager.EatFood(foodNetId)     ← the actual server consume + stamina
-        // The wire command (EatFoodNetworkCommand{FoodNetId}) is sent at cast START, not when the
-        // animation ends — the server cannot tell whether the clip played. So calling EatFood
-        // directly eats the food with NO animation, no pose lock, no ~2.3s clip. Auto Eat uses
-        // this path when enabled; on any resolve/invoke failure — or if the server ignores the
-        // bare command (fertilizer-style silent rejection) — it falls back to the BagModule Eat
+        // Only the second one reaches the server, and it goes out at cast START, not when the clip
+        // ends — the server cannot tell whether the animation played. So calling EatFood directly
+        // eats the food with NO animation, no pose lock, no ~2.3s clip. PlayerEatAction carries no
+        // protocol, stat or buff code, so skipping the Cast costs visuals only; stamina and the
+        // hunger UI come back from the server (PlayerStaminaUpdatedEvent, hooked above).
+        //
+        // EatFood is itself a one-liner: SendCommand(new EatFoodNetworkCommand{FoodNetId}) on the
+        // defaults needAuthed=true, ChannelType.Reliable. That bare command IS accepted by the
+        // server — measured 2026-08-15, two sends through the MCP bridge, backpack 12→11→10 with a
+        // RefreshBackPackEvent each time. (An earlier version of this comment claimed a
+        // fertilizer-style silent rejection; that was wrong.) Building the command here would be
+        // identical on the wire, so the EatFood invoke stays: it is the smaller AuraMono operation
+        // — one 1-arg static invoke, versus inflating SendCommand<T>, allocating the struct and
+        // setting its field.
+        //
+        // What IS dropped silently is a stale FoodNetId (netIds are reassigned every game start;
+        // the send still reports ok). That is what SendEatForAutoEat's health check catches — on no
+        // stamina change, and on any resolve/invoke failure, it falls back to the BagModule Eat
         // function (112, the animated path) for the rest of the session.
         private const float SilentEatVerifySeconds = 2.5f;
         private IntPtr cachedCharacterEatFoodMethod = IntPtr.Zero;
@@ -1444,9 +1457,10 @@ namespace HeartopiaMod
             {
                 float now = Time.unscaledTime;
                 // Health check on the previous silent send: if no stamina event arrived since and
-                // the cached energy never rose, the server ignored the bare command — stop using
-                // the silent path this session (empirical guard; cf. the fertilizer no-equip path
-                // that silently failed).
+                // the cached energy never rose, the send did not take effect. The command itself is
+                // accepted by the server (see above), so the usual cause is a stale FoodNetId, which
+                // is dropped silently. Empirical guard — stop burning attempts on the silent path
+                // for this session.
                 if (this.lastSilentEatSentAt > 0f
                     && now - this.lastSilentEatSentAt >= SilentEatVerifySeconds
                     && this.staminaEventSeenAt < this.lastSilentEatSentAt
