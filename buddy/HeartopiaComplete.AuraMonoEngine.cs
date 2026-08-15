@@ -193,6 +193,26 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate uint MonoFieldGetFlagsDelegate(IntPtr field);
 
+        // Read-only metadata table access, for mono.search.
+        //
+        // Deliberately NOT mono_class_get: that materializes a MonoClass, so sweeping every type in
+        // every loaded image would initialise thousands of classes nobody asked for. Decoding the
+        // TypeDef table and reading the string heap yields the same names while loading nothing.
+        private delegate IntPtr MonoImageGetTableInfoDelegate(IntPtr image, int tableId);
+
+        private delegate int MonoTableInfoGetRowsDelegate(IntPtr table);
+
+        private delegate uint MonoMetadataDecodeRowColDelegate(IntPtr table, int idx, uint col);
+
+        private delegate IntPtr MonoMetadataStringHeapDelegate(IntPtr image, uint index);
+
+        // Field TYPE reporting, for mono.describe. `mono_type_get_name` returns a g_malloc'd string
+        // that the caller must release with mono_free — unlike mono_field_get_name, which points
+        // into metadata and must NOT be freed.
+        private delegate IntPtr MonoFieldGetTypeDelegate(IntPtr field);
+
+        private delegate IntPtr MonoTypeGetNameDelegate(IntPtr type);
+
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoFieldGetParentDelegate(IntPtr field);
 
@@ -314,6 +334,12 @@ namespace HeartopiaMod
         // storage (mono_class_get_field_from_name walks the hierarchy, so the field can belong to a
         // base class). Missing exports => that read refuses instead of guessing.
         private static MonoFieldGetFlagsDelegate auraMonoFieldGetFlags;
+        private static MonoFieldGetTypeDelegate auraMonoFieldGetType;
+        private static MonoTypeGetNameDelegate auraMonoTypeGetName;
+        private static MonoImageGetTableInfoDelegate auraMonoImageGetTableInfo;
+        private static MonoTableInfoGetRowsDelegate auraMonoTableInfoGetRows;
+        private static MonoMetadataDecodeRowColDelegate auraMonoMetadataDecodeRowCol;
+        private static MonoMetadataStringHeapDelegate auraMonoMetadataStringHeap;
 
         private static MonoFieldGetParentDelegate auraMonoFieldGetParent;
 
@@ -963,6 +989,12 @@ namespace HeartopiaMod
             auraMonoArrayAddrWithSize = this.GetAuraMonoExport<MonoArrayAddrWithSizeDelegate>(monoModule, "mono_array_addr_with_size");
             auraMonoArrayElementSize = this.GetAuraMonoExport<MonoArrayElementSizeDelegate>(monoModule, "mono_array_element_size");
             auraMonoFieldGetOffset = this.GetAuraMonoExport<MonoFieldGetOffsetDelegate>(monoModule, "mono_field_get_offset");
+            auraMonoFieldGetType = this.GetAuraMonoExport<MonoFieldGetTypeDelegate>(monoModule, "mono_field_get_type");
+            auraMonoTypeGetName = this.GetAuraMonoExport<MonoTypeGetNameDelegate>(monoModule, "mono_type_get_name");
+            auraMonoImageGetTableInfo = this.GetAuraMonoExport<MonoImageGetTableInfoDelegate>(monoModule, "mono_image_get_table_info");
+            auraMonoTableInfoGetRows = this.GetAuraMonoExport<MonoTableInfoGetRowsDelegate>(monoModule, "mono_table_info_get_rows");
+            auraMonoMetadataDecodeRowCol = this.GetAuraMonoExport<MonoMetadataDecodeRowColDelegate>(monoModule, "mono_metadata_decode_row_col");
+            auraMonoMetadataStringHeap = this.GetAuraMonoExport<MonoMetadataStringHeapDelegate>(monoModule, "mono_metadata_string_heap");
             auraMonoFieldGetFlags = this.GetAuraMonoExport<MonoFieldGetFlagsDelegate>(monoModule, "mono_field_get_flags");
             auraMonoFieldGetParent = this.GetAuraMonoExport<MonoFieldGetParentDelegate>(monoModule, "mono_field_get_parent");
             auraMonoArrayNew = this.GetAuraMonoExport<MonoArrayNewDelegate>(monoModule, "mono_array_new");

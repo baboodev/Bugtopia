@@ -6,6 +6,10 @@ buddy/bin
 buddy/obj
 .cache
 tools/bin
+tools/BugtopiaMcp/bin
+tools/BugtopiaMcp/obj
+tools/SamplePlugin/bin
+tools/SamplePlugin/obj
 tools/cpp2il_out
 tools/reports
 tools/ilspy-verify

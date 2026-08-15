@@ -229,6 +229,56 @@ namespace HeartopiaMod
             return slot;
         }
 
+        // Adds ONE extra node to the live player loop, for callers outside the pump.
+        //
+        // Deliberately separate from Install(): that method treats a failed InsertAfter as fatal and
+        // returns false, which drops the mod onto the injected-MonoBehaviour pump — i.e. back to
+        // ClassInjector and its five GameAssembly .text detours. An optional feature must never be
+        // able to cause that, so it gets its own entry point whose failure is local, and Status is
+        // restored on the way out so a failed optional insert cannot rewrite the pump's own state.
+        internal static IntPtr AllocSlot(IntPtr codePtr) => MakeSlot(codePtr);
+
+        internal static bool TryInsertExtraNode(string phaseFullName, string anchorSimpleName,
+                                                IntPtr slot, Il2CppSystem.Type nodeType, out string error)
+        {
+            string savedStatus = Status;
+            error = null;
+            try
+            {
+                PlayerLoopSystem root = PlayerLoop.GetCurrentPlayerLoop();
+                Il2CppReferenceArray<PlayerLoopSystem> phases = root?.subSystemList;
+                if (phases == null || phases.Length == 0)
+                {
+                    error = "player loop unavailable";
+                    return false;
+                }
+
+                if (!InsertAfter(phases, phaseFullName, anchorSimpleName, slot, nodeType))
+                {
+                    error = "no " + phaseFullName + "/" + anchorSimpleName + " anchor";
+                    return false;
+                }
+
+                PlayerLoop.SetPlayerLoop(root);
+                if (!NodeCarries(slot))
+                {
+                    error = "SetPlayerLoop did not retain the node";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+            finally
+            {
+                Status = savedStatus;
+            }
+        }
+
         // Nulling the slot is the engine's OWN disable mechanism (`test rcx,rcx; je <skip>`), so this
         // stops the call before it can ever reach the CLR — strictly better than a managed flag,
         // which would still require entering managed code to be read.

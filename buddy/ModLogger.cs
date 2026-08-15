@@ -17,9 +17,120 @@ public static class ModLogger
         _warn = warn;
     }
 
-    public static void Msg(string message) => _msg?.Invoke(message);
+    public static void Msg(string message)
+    {
+        _msg?.Invoke(message);
+#if FEATURE_MCP
+        RingAdd("INFO", message);
+#endif
+    }
 
-    public static void Warning(string message) => _warn?.Invoke(message);
+    public static void Warning(string message)
+    {
+        _warn?.Invoke(message);
+#if FEATURE_MCP
+        RingAdd("WARN", message);
+#endif
+    }
+
+#if FEATURE_MCP
+    // ── Session log ring, for the MCP bridge's `log.tail` ────────────────────────────────────────
+    // Reading the loader's own log FILE would mean racing the StreamWriter that is still appending
+    // to it, from a different thread, with no shared lock. A ring the log front owns is race-free
+    // and gives the agent the mod's lines only — not BepInEx's whole console.
+    //
+    // Allocated on demand: without the `%LocalLow%/Bugtopia/mcp` marker, EnableRing() is never
+    // called, the array is never created, and every log call costs one bool test.
+    private const int RingCapacity = 256;
+    private static readonly object RingLock = new object();
+    private static string[] _ring;
+    private static int _ringNext;
+    private static int _ringCount;
+
+    internal static bool RingEnabled { get; private set; }
+
+    internal static void EnableRing()
+    {
+        lock (RingLock)
+        {
+            if (_ring == null)
+            {
+                _ring = new string[RingCapacity];
+            }
+
+            RingEnabled = true;
+        }
+    }
+
+    private static void RingAdd(string level, string message)
+    {
+        if (!RingEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            string line = DateTime.Now.ToString("HH:mm:ss") + " [" + level + "] " + message;
+            lock (RingLock)
+            {
+                if (_ring == null)
+                {
+                    return;
+                }
+
+                _ring[_ringNext] = line;
+                _ringNext = (_ringNext + 1) % _ring.Length;
+                if (_ringCount < _ring.Length)
+                {
+                    _ringCount++;
+                }
+            }
+        }
+        catch
+        {
+            // A logging path must never throw into its caller.
+        }
+    }
+
+    // Oldest-to-newest, optionally filtered, then trimmed to the last `max` entries.
+    internal static string[] RingSnapshot(int max, string filter)
+    {
+        List<string> matched = new List<string>(Math.Min(max, RingCapacity));
+        lock (RingLock)
+        {
+            if (_ring == null || _ringCount == 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            int start = (_ringNext - _ringCount + _ring.Length) % _ring.Length;
+            for (int i = 0; i < _ringCount; i++)
+            {
+                string line = _ring[(start + i) % _ring.Length];
+                if (line == null)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(filter)
+                    && line.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                matched.Add(line);
+            }
+        }
+
+        if (matched.Count <= max)
+        {
+            return matched.ToArray();
+        }
+
+        return matched.GetRange(matched.Count - max, max).ToArray();
+    }
+#endif
 }
 
 // MelonLoader-backed sink. Only compiled under LOADER_MELON (MelonLoader / Universal), so a

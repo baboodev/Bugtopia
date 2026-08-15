@@ -93,6 +93,16 @@ namespace HeartopiaMod
                 (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, IntPtr, void>)&ThunkSprite);
         }
 
+        // A zero-argument delegate whose il2cpp TYPE is only known at runtime — `Il2CppSystem.Action`
+        // for `Application.quitting`, for instance. Same ABI as ForVoid; the type comes from the
+        // target method's own parameter rather than being hardcoded, so a signature change surfaces
+        // as a clean failure instead of a mismatched delegate.
+        internal static object ForVoidOfType(Type il2cppDelegateType, Action handler)
+        {
+            return CreateForType(il2cppDelegateType, handler, 0,
+                (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, void>)&ThunkVoid);
+        }
+
         internal static UnityEngine.Events.UnityAction<bool> ForBool(Action<bool> handler)
         {
             return Create<UnityEngine.Events.UnityAction<bool>>(handler, 1,

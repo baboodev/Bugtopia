@@ -1771,7 +1771,12 @@ namespace HeartopiaMod
             }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTLevelAndEntity", StringComparison.Ordinal))
             {
-                imageNames = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
+                // XDTDataAndProtocol is in this list because the namespace does NOT predict the
+                // image here: everything under XDTLevelAndEntity.Core.World.* — EntityComponent,
+                // ViewComponent, Entity — actually compiles into XDTDataAndProtocol. Measured with
+                // mono.search; before this line nothing in that namespace resolved at all, which is
+                // why several features hand-roll an across-assemblies fallback after calling this.
+                imageNames = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
             }
             else if (!string.IsNullOrEmpty(nameSpace) && (nameSpace.StartsWith("XDTGame.Framework", StringComparison.Ordinal) || nameSpace.StartsWith("XDTGame.Core", StringComparison.Ordinal)))
             {

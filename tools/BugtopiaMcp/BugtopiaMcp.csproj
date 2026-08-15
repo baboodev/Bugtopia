@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Bugtopia MCP bridge — the stdio MCP server Claude Code spawns. It owns the MCP protocol and
+       forwards to the game over the loopback NDJSON socket that bugtopia.dll opens when
+       %LocalLow%/Bugtopia/mcp exists.
+
+       WHY IT IS A SEPARATE PROCESS: MCP-layer churn (schemas, protocol version, content types) is
+       where most iteration happens, and in here it costs a 3 s rebuild instead of a game restart
+       plus relogin. It also stays answerable when the game is not running, so the tool list never
+       disappears from the client — the tools just report `game not running`.
+
+       The MCP transport itself has NO package dependencies: System.Text.Json is in the shared
+       framework, and stdio MCP is newline-delimited JSON-RPC 2.0, which is ~200 lines to speak
+       directly. The single PackageReference below is Roslyn, for `game_eval` — and it lives HERE
+       rather than in the game precisely so ~15 MB of compiler does not sit inside the game process.
+
+       Build:  dotnet build tools/BugtopiaMcp/BugtopiaMcp.csproj -c Release
+       Launch: dotnet <repo>/tools/BugtopiaMcp/bin/Release/net10.0/BugtopiaMcp.dll
+       Do NOT launch it with `dotnet run`: that writes build output to stdout, which is the MCP
+       transport, and corrupts the very first message.
+
+       The TFM is independent of the mod's net6.0 — this process never shares a runtime with the
+       game, it only speaks TCP to it. Newest installed SDK, so the build stays warning-free. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>BugtopiaMcp</AssemblyName>
+    <RootNamespace>BugtopiaMcp</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <LangVersion>10.0</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reference sandbox plugin for the MCP plugin host (docs/MCP_BRIDGE.md, phase 4).
+       Doubles as the executable documentation of the contract: build it, load the DLL through
+       `plugin.load`, reload it after an edit without restarting the game.
+
+         dotnet build tools/SamplePlugin/SamplePlugin.csproj -c Release
+
+       NOTE the deliberate absence of 0Harmony / MonoMod references. The host rejects an assembly
+       that carries them before it ever loads the bytes, because a detour into a context that later
+       unloads is an instant crash. Same for [DllImport], ClassInjector, Thread and Timer. -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>SamplePlugin</AssemblyName>
+    <RootNamespace>SamplePlugin</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>10.0</LangVersion>
+    <!-- Portable pdb: plugin.load can ship it alongside the dll so exceptions carry line numbers. -->
+    <DebugType>portable</DebugType>
+    <BugtopiaDll Condition="'$(BugtopiaDll)' == ''">$(MSBuildThisFileDirectory)..\..\buddy\bin\BepInEx\Release\bugtopia.dll</BugtopiaDll>
+    <InteropDir Condition="'$(InteropDir)' == ''">C:\Users\coder\workplace\Heartopia-Mods\BepInEx\interop</InteropDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="bugtopia">
+      <HintPath>$(BugtopiaDll)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(InteropDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(InteropDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

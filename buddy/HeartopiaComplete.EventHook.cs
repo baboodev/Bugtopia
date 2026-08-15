@@ -874,6 +874,14 @@ namespace HeartopiaMod
 
                 GameEventSnapshot snap = new GameEventSnapshot(entry.EventFullName, netId, buf, len, strBuf, strLen);
 
+#if FEATURE_MCP
+                // Agent observation log (McpOps.Data.cs). Deliberately HERE and not in
+                // PushEventToRing: this is the main thread, whereas the ring is filled from the
+                // detour body, where allocating or touching Mono deadlocks the game. One bool test
+                // when no agent is connected.
+                McpNoteGameEvent(entry.EventFullName, netId, len);
+#endif
+
                 if (MasterLogGameEvents)
                 {
                     ModLogger.Msg("[EventHook] " + entry.EventFullName + (netId != 0u ? " netId=" + netId : string.Empty) + " len=" + len + GameEventScalarDump(buf, len));

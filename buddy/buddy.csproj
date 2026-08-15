@@ -10,6 +10,13 @@
          flag: #if strips the code AND its string literals from the assembly, whereas a bool would
          leave "https://t.me/..." sitting in the DLL's string heap for anyone to grep. -->
     <Telegram Condition="'$(Telegram)' == ''">true</Telegram>
+    <!-- Mcp: false (default) = the agent bridge is not in the binary at all. true = compile it
+         (McpJson / McpOps / McpBridgeFeature / HeartopiaComplete.Mcp). Like Telegram this MUST stay
+         a compile-time switch: #if strips the code AND the listener's string literals, so a build
+         without it cannot be switched on by dropping the marker file — there is nothing to switch.
+         BEPINEX ONLY, by decision: the bridge is a development surface and there is no reason to
+         carry a second loader's code paths through it. ValidateMcpLoader below enforces that. -->
+    <Mcp Condition="'$(Mcp)' == ''">false</Mcp>
     <HeartopiaDir Condition="'$(HeartopiaDir)' == ''">D:\SteamLibrary\steamapps\common\Heartopia</HeartopiaDir>
     <!-- BepInEx root. Defaults to the install-next-to-the-game layout (and CI, where the deps zip
          extracts to BepInEx\core + MelonLoader\net6 side by side under HeartopiaDir), but Doorstop's
@@ -73,6 +80,19 @@
   <PropertyGroup Condition="'$(Telegram)' == 'true'">
     <DefineConstants>$(DefineConstants);FEATURE_TELEGRAM</DefineConstants>
   </PropertyGroup>
+
+  <!-- FEATURE_MCP gates the whole agent bridge. Build it with:
+         dotnet build buddy.csproj -c Release -p:Loader=BepInEx -p:Mcp=true -->
+  <PropertyGroup Condition="'$(Mcp)' == 'true'">
+    <DefineConstants>$(DefineConstants);FEATURE_MCP</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Fail loudly instead of quietly producing a Universal/MelonLoader DLL with a listening socket
+       in it. The bridge is BepInEx-only on purpose (see the Mcp property above). -->
+  <Target Name="ValidateMcpLoader" BeforeTargets="BeforeBuild"
+          Condition="'$(Mcp)' == 'true' And '$(Loader)' != 'BepInEx'">
+    <Error Text="Mcp=true is supported only with Loader=BepInEx (got Loader=$(Loader)). Build with: dotnet build buddy.csproj -c Release -p:Loader=BepInEx -p:Mcp=true" />
+  </Target>
 
   <!-- BepInEx + shared deps + IL2CPP interop, from the BepInEx install. Used by the BepInEx build
        AND the Universal build (Universal adds only MelonLoader.dll below). No game assemblies:
@@ -477,6 +497,24 @@
     <Compile Include="VehicleTeleportFeature.cs" />
     <Compile Include="SpawnVehicleFeature.cs" />
     <Compile Include="WarehouseBypassFeature.cs" />
+    <!-- MCP agent bridge. Listed unconditionally: every one of these files is wrapped in
+         #if FEATURE_MCP, so without -p:Mcp=true they compile to nothing (same pattern as the
+         Telegram gate, which is inline #if rather than a conditional ItemGroup). -->
+    <Compile Include="McpJson.cs" />
+    <Compile Include="McpOps.cs" />
+    <Compile Include="McpBridgeFeature.cs" />
+    <Compile Include="HeartopiaComplete.Mcp.cs" />
+    <Compile Include="McpOps.World.cs" />
+    <Compile Include="McpOps.Data.cs" />
+    <Compile Include="McpOps.Mono.cs" />
+    <Compile Include="HeartopiaComplete.AuraSendCommand.cs" />
+    <Compile Include="McpEventBroker.cs" />
+    <Compile Include="McpScreenshot.cs" />
+    <Compile Include="PluginContract.cs" />
+    <Compile Include="PluginHostFeature.cs" />
+    <Compile Include="McpOps.Plugins.cs" />
+    <Compile Include="McpForensics.cs" />
+    <Compile Include="McpQuitSignal.cs" />
   </ItemGroup>
 
   <ItemGroup>

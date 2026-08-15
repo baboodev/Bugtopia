@@ -8355,7 +8355,19 @@ namespace HeartopiaMod
         // FreeAuraMonoPins(pins) once done. Callers that scalarize instantly may pass null.
         private unsafe bool TryAuraMonoGetComponentObjects(IntPtr componentClass, out List<IntPtr> components, List<uint> pins = null)
         {
+            return this.TryAuraMonoGetComponentObjects(componentClass, out components, out _, pins);
+        }
+
+        // `infrastructureOk` separates "the query ran and found nothing" from "the query could not
+        // run". The bool return conflates them — it is false for an empty result too — which is fine
+        // for a feature (nothing to act on either way) and actively misleading for anything that
+        // REPORTS the outcome: "no such component type" and "no bubbles right now" are different
+        // answers. Existing callers are untouched; they use the 3-argument overload above.
+        private unsafe bool TryAuraMonoGetComponentObjects(IntPtr componentClass, out List<IntPtr> components,
+                                                           out bool infrastructureOk, List<uint> pins = null)
+        {
             components = null;
+            infrastructureOk = false;
             if (componentClass == IntPtr.Zero || !HomelandFarmAllowUnsafeAuraMonoGetComponents)
             {
                 return false;
@@ -8389,6 +8401,11 @@ namespace HeartopiaMod
             {
                 return false;
             }
+
+            // Past this point the query itself ran: the class resolved, the inflated generic method
+            // was found and the invoke returned without an exception. Anything after is about the
+            // CONTENTS, not the machinery.
+            infrastructureOk = true;
 
             IntPtr resultList = listSlot[0] != IntPtr.Zero ? listSlot[0] : listObj;
             List<IntPtr> items = new List<IntPtr>();
