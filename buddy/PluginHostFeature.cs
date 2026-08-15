@@ -556,7 +556,7 @@ namespace HeartopiaMod
                     HeartopiaComplete mod = HeartopiaComplete.Instance;
                     return mod == null || string.IsNullOrEmpty(fullName)
                         ? IntPtr.Zero
-                        : mod.McpMonoFindClass(fullName);
+                        : mod.FindAuraMonoClassAnySpelling(fullName);
                 }
 
                 public IntPtr FindMethod(IntPtr klass, string methodName, int paramCount)

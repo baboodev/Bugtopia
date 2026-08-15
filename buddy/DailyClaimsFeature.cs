@@ -1615,175 +1615,40 @@ namespace HeartopiaMod
         // network-command structs are absent from the interop, so every claim that landed went
         // through AuraMono and every managed attempt was a silent no-op.
         //
-        // This mirrors the shipped CraftDirectSend/CarpetStamp path: resolve
-        // WebRequestUtility.SendCommand(3), inflate it for the concrete command class, allocate the
-        // command, poke its int fields, and invoke with (cmd, needAuthed, channel).
+        // The resolve → inflate → allocate → poke → invoke sequence this used to carry itself is now
+        // HeartopiaComplete.TryAuraSendCommand (HeartopiaComplete.AuraSendCommand.cs); what is left
+        // here is the array-shaped call convention its eight claim sites are written against.
         // ==========================================================================================
 
-        private const int DailyClaimsChannelReliable = 1; // ChannelType.Reliable
-
-        private IntPtr dailyClaimsAuraWebRequestClass = IntPtr.Zero;
-        private IntPtr dailyClaimsAuraSendCommandOpenMethod = IntPtr.Zero;
-        private readonly Dictionary<string, IntPtr> dailyClaimsAuraCommandClassByName =
-            new Dictionary<string, IntPtr>(StringComparer.Ordinal);
-        private readonly Dictionary<IntPtr, IntPtr> dailyClaimsAuraInflatedSendByCommandClass =
-            new Dictionary<IntPtr, IntPtr>();
-
-        private bool EnsureDailyClaimsAuraSendCommand()
-        {
-            if (this.dailyClaimsAuraSendCommandOpenMethod != IntPtr.Zero)
-            {
-                return true;
-            }
-
-            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
-            {
-                return false;
-            }
-
-            if (this.dailyClaimsAuraWebRequestClass == IntPtr.Zero)
-            {
-                this.dailyClaimsAuraWebRequestClass = this.FindAuraMonoClassByFullName(
-                    "XDTDataAndProtocol.ProtocolService.WebRequestUtility");
-                if (this.dailyClaimsAuraWebRequestClass == IntPtr.Zero)
-                {
-                    this.dailyClaimsAuraWebRequestClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
-                        "XDTDataAndProtocol.ProtocolService",
-                        "WebRequestUtility");
-                }
-            }
-
-            if (this.dailyClaimsAuraWebRequestClass == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            this.dailyClaimsAuraSendCommandOpenMethod = this.FindAuraMonoMethodOnHierarchy(
-                this.dailyClaimsAuraWebRequestClass,
-                "SendCommand",
-                3);
-            return this.dailyClaimsAuraSendCommandOpenMethod != IntPtr.Zero;
-        }
-
-        private unsafe bool TryDailyClaimsSendCommandAura(
+        // Every claim command in this feature takes int fields only — the shared sender picks the
+        // write width from each value's runtime type, so boxing as int keeps the exact 4-byte writes
+        // the hand-rolled loop did.
+        private bool TryDailyClaimsSendCommandAura(
             string commandFullName,
             string[] fieldNames,
             int[] fieldValues,
             out string status)
         {
-            status = commandFullName + " AuraMono send unavailable";
-            if (!this.EnsureDailyClaimsAuraSendCommand()
-                || auraMonoRuntimeInvoke == null
-                || auraMonoObjectNew == null
-                || auraMonoObjectUnbox == null
-                || auraMonoFieldSetValue == null
-                || this.auraMonoRootDomain == IntPtr.Zero)
+            int fieldCount = fieldNames != null ? fieldNames.Length : 0;
+            if (fieldCount != (fieldValues != null ? fieldValues.Length : 0))
+            {
+                status = commandFullName + " field name/value count mismatch";
+                return false;
+            }
+
+            Dictionary<string, object> fields = new Dictionary<string, object>(fieldCount, StringComparer.Ordinal);
+            for (int i = 0; i < fieldCount; i++)
+            {
+                fields[fieldNames[i]] = fieldValues[i];
+            }
+
+            if (!this.TryAuraSendCommand(commandFullName, fields, AuraChannelReliable, true, out status))
             {
                 return false;
             }
 
-            if (!this.dailyClaimsAuraCommandClassByName.TryGetValue(commandFullName, out IntPtr commandClass)
-                || commandClass == IntPtr.Zero)
-            {
-                commandClass = this.FindAuraMonoClassByFullName(commandFullName);
-                if (commandClass == IntPtr.Zero)
-                {
-                    int lastDot = commandFullName.LastIndexOf('.');
-                    commandClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
-                        lastDot > 0 ? commandFullName.Substring(0, lastDot) : string.Empty,
-                        lastDot > 0 ? commandFullName.Substring(lastDot + 1) : commandFullName);
-                }
-
-                if (commandClass == IntPtr.Zero)
-                {
-                    status = commandFullName + " AuraMono class missing";
-                    return false;
-                }
-
-                this.dailyClaimsAuraCommandClassByName[commandFullName] = commandClass;
-            }
-
-            if (!this.dailyClaimsAuraInflatedSendByCommandClass.TryGetValue(commandClass, out IntPtr inflatedSend)
-                || inflatedSend == IntPtr.Zero)
-            {
-                if (!this.TryInstantCatchInflateAuraSendCommand(
-                    this.dailyClaimsAuraSendCommandOpenMethod, commandClass, out inflatedSend)
-                    || inflatedSend == IntPtr.Zero)
-                {
-                    status = commandFullName + " SendCommand inflate failed";
-                    return false;
-                }
-
-                // A mismatched method_inst AVs the process on invoke instead of throwing.
-                if (!AuraMonoMethodParamCountIs(inflatedSend, 3))
-                {
-                    status = commandFullName + " inflated SendCommand arity mismatch";
-                    return false;
-                }
-
-                this.dailyClaimsAuraInflatedSendByCommandClass[commandClass] = inflatedSend;
-            }
-
-            IntPtr cmdObj = auraMonoObjectNew(this.auraMonoRootDomain, commandClass);
-            if (cmdObj == IntPtr.Zero)
-            {
-                status = commandFullName + " alloc failed";
-                return false;
-            }
-
-            uint pin = AuraMonoPinNew(cmdObj);
-            if (pin == 0U)
-            {
-                status = commandFullName + " pin failed";
-                return false;
-            }
-
-            try
-            {
-                int fieldCount = fieldNames != null ? fieldNames.Length : 0;
-                for (int i = 0; i < fieldCount; i++)
-                {
-                    IntPtr field = this.FindAuraMonoFieldOnHierarchy(commandClass, fieldNames[i]);
-                    if (field == IntPtr.Zero)
-                    {
-                        status = commandFullName + " field missing: " + fieldNames[i];
-                        return false;
-                    }
-
-                    int fieldValue = fieldValues[i];
-                    auraMonoFieldSetValue(cmdObj, field, (IntPtr)(&fieldValue));
-                }
-
-                // SendCommand<T> takes T by value: hand it the unboxed payload, not the box.
-                IntPtr cmdPtr = auraMonoObjectUnbox(cmdObj);
-                if (cmdPtr == IntPtr.Zero)
-                {
-                    status = commandFullName + " unbox failed";
-                    return false;
-                }
-
-                int needAuthed = 1;
-                int channel = DailyClaimsChannelReliable;
-                IntPtr* args = stackalloc IntPtr[3];
-                args[0] = cmdPtr;
-                args[1] = (IntPtr)(&needAuthed);
-                args[2] = (IntPtr)(&channel);
-
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(inflatedSend, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    status = commandFullName + " SendCommand threw";
-                    return false;
-                }
-
-                status = "AuraMono SendCommand " + commandFullName + " ok";
-                return true;
-            }
-            finally
-            {
-                AuraMonoPinFree(pin);
-            }
+            status = "AuraMono SendCommand " + commandFullName + " ok";
+            return true;
         }
 
         // ==========================================================================================

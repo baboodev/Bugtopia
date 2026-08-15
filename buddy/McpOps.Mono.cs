@@ -108,13 +108,16 @@ namespace HeartopiaMod
 
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
 
-            McpMonoSweepImages.Clear();
-            if (mcpMonoSweepCallbackKeepAlive == null)
+            // Same image sweep FindAuraMonoClassAnySpelling uses (HeartopiaComplete.AuraClassResolve.cs);
+            // both are synchronous and main-thread, so sharing the buffer and the kept-alive callback
+            // is safe.
+            AuraMonoSweepImages.Clear();
+            if (auraMonoSweepCallbackKeepAlive == null)
             {
-                mcpMonoSweepCallbackKeepAlive = McpMonoSweepCollect;
+                auraMonoSweepCallbackKeepAlive = AuraMonoSweepCollect;
             }
 
-            auraMonoAssemblyForeach(mcpMonoSweepCallbackKeepAlive, IntPtr.Zero);
+            auraMonoAssemblyForeach(auraMonoSweepCallbackKeepAlive, IntPtr.Zero);
 
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
@@ -125,9 +128,9 @@ namespace HeartopiaMod
             int matched = 0;
             int emitted = 0;
 
-            for (int i = 0; i < McpMonoSweepImages.Count; i++)
+            for (int i = 0; i < AuraMonoSweepImages.Count; i++)
             {
-                IntPtr image = McpMonoSweepImages[i];
+                IntPtr image = AuraMonoSweepImages[i];
                 if (image == IntPtr.Zero)
                 {
                     continue;
@@ -230,163 +233,10 @@ namespace HeartopiaMod
             return w.ToString();
         }
 
-        // The spelling variants AGENTS.md §7 tells a human to write out by hand. Doing it here is the
-        // entire point: the caller states the type once and learns which form the build actually uses.
-        private static List<string> BuildMcpMonoNameCandidates(string name)
-        {
-            List<string> candidates = new List<string>(6) { name };
-
-            void Add(string candidate)
-            {
-                if (!string.IsNullOrEmpty(candidate) && !candidates.Contains(candidate))
-                {
-                    candidates.Add(candidate);
-                }
-            }
-
-            if (name.Contains(".Gameplay."))
-            {
-                Add(name.Replace(".Gameplay.", ".GamePlay."));
-            }
-            else if (name.Contains(".GamePlay."))
-            {
-                Add(name.Replace(".GamePlay.", ".Gameplay."));
-            }
-
-            if (name.StartsWith("Il2Cpp", StringComparison.Ordinal))
-            {
-                Add(name.Substring(6));
-            }
-            else
-            {
-                Add("Il2Cpp" + name);
-            }
-
-            if (name.StartsWith("ScriptsRefactory.", StringComparison.Ordinal))
-            {
-                Add(name.Substring("ScriptsRefactory.".Length));
-            }
-            else
-            {
-                Add("ScriptsRefactory." + name);
-            }
-
-            return candidates;
-        }
-
-        private bool TryResolveMcpMonoClass(string name, out IntPtr klass, out string resolvedName)
-        {
-            klass = IntPtr.Zero;
-            resolvedName = null;
-
-            List<string> candidates = BuildMcpMonoNameCandidates(name);
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                IntPtr found = this.FindAuraMonoClassByFullName(candidates[i]);
-                if (found != IntPtr.Zero)
-                {
-                    klass = found;
-                    resolvedName = candidates[i];
-                    return true;
-                }
-            }
-
-            // Exhaustive sweep, because the shared resolver is HINT-DRIVEN: it maps a namespace
-            // prefix to a short list of likely images and its across-assemblies fallback goes through
-            // managed reflection on Il2CppMonoGame.MonoHost. Measured blind spot: every
-            // XDTLevelAndEntity.Core.World.* type — including ViewComponent, the live base class of
-            // components this very session enumerated 16 instances of. A research tool that answers
-            // "no such type" when the type is demonstrably loaded is worse than no tool, so this asks
-            // every loaded image directly.
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                IntPtr found = this.TryFindMcpMonoClassInAnyImage(candidates[i]);
-                if (found != IntPtr.Zero)
-                {
-                    klass = found;
-                    resolvedName = candidates[i];
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        // Collected by the native callback below; only ever touched inside the synchronous sweep.
-        private static readonly List<IntPtr> McpMonoSweepImages = new List<IntPtr>();
-        private static MonoAssemblyForeachCallbackDelegate mcpMonoSweepCallbackKeepAlive;
-
-        private IntPtr TryFindMcpMonoClassInAnyImage(string fullTypeName)
-        {
-            if (auraMonoAssemblyForeach == null || auraMonoAssemblyGetImage == null
-                || auraMonoClassFromName == null || string.IsNullOrWhiteSpace(fullTypeName))
-            {
-                return IntPtr.Zero;
-            }
-
-            int lastDot = fullTypeName.LastIndexOf('.');
-            if (lastDot <= 0)
-            {
-                return IntPtr.Zero;
-            }
-
-            string ns = fullTypeName.Substring(0, lastDot);
-            string cn = fullTypeName.Substring(lastDot + 1);
-
-            try
-            {
-                McpMonoSweepImages.Clear();
-                if (mcpMonoSweepCallbackKeepAlive == null)
-                {
-                    // Held in a static: a delegate handed to native code and then collected is a
-                    // callback into freed memory.
-                    mcpMonoSweepCallbackKeepAlive = McpMonoSweepCollect;
-                }
-
-                auraMonoAssemblyForeach(mcpMonoSweepCallbackKeepAlive, IntPtr.Zero);
-
-                for (int i = 0; i < McpMonoSweepImages.Count; i++)
-                {
-                    IntPtr image = McpMonoSweepImages[i];
-                    if (image == IntPtr.Zero)
-                    {
-                        continue;
-                    }
-
-                    IntPtr found = auraMonoClassFromName(image, ns, cn);
-                    if (found != IntPtr.Zero)
-                    {
-                        return found;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return IntPtr.Zero;
-        }
-
-        private static void McpMonoSweepCollect(IntPtr assembly, IntPtr userData)
-        {
-            // Returns into native code — nothing may escape.
-            try
-            {
-                if (assembly == IntPtr.Zero || auraMonoAssemblyGetImage == null)
-                {
-                    return;
-                }
-
-                IntPtr image = auraMonoAssemblyGetImage(assembly);
-                if (image != IntPtr.Zero)
-                {
-                    McpMonoSweepImages.Add(image);
-                }
-            }
-            catch
-            {
-            }
-        }
+        // Name candidates + the exhaustive image sweep moved to HeartopiaComplete.AuraClassResolve.cs
+        // (BuildAuraMonoNameCandidates / TryResolveAuraMonoClassAnySpelling / FindAuraMonoClassAnySpelling)
+        // when TryAuraSendCommand started resolving command types through them: that helper ships in
+        // normal builds, so its resolver cannot live behind this gate.
 
         private string HandleMcpMonoFind(Dictionary<string, object> args)
         {
@@ -396,7 +246,7 @@ namespace HeartopiaMod
                 throw new McpOpException("bad_args", "'name' is required");
             }
 
-            bool found = this.TryResolveMcpMonoClass(name, out IntPtr klass, out string resolved);
+            bool found = this.TryResolveAuraMonoClassAnySpelling(name, out IntPtr klass, out string resolved);
 
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
@@ -411,7 +261,7 @@ namespace HeartopiaMod
             else
             {
                 w.BeginArray("tried");
-                List<string> candidates = BuildMcpMonoNameCandidates(name);
+                List<string> candidates = BuildAuraMonoNameCandidates(name);
                 for (int i = 0; i < candidates.Count; i++)
                 {
                     w.ArrayStr(candidates[i]);
@@ -460,7 +310,7 @@ namespace HeartopiaMod
                 throw new McpOpException("bad_args", "'name' is required");
             }
 
-            if (!this.TryResolveMcpMonoClass(name, out IntPtr klass, out string resolved))
+            if (!this.TryResolveAuraMonoClassAnySpelling(name, out IntPtr klass, out string resolved))
             {
                 throw new McpOpException("bad_args",
                     "no type resolved for '" + name + "' — run mono.find to see the spellings tried");
@@ -701,11 +551,6 @@ namespace HeartopiaMod
         // Without this, a snippet can only touch the mod's PUBLIC surface — which excludes every
         // AuraMono helper — so `eval` could not reach a single game type. That gap is what made an
         // earlier claim ("eval already covers arbitrary invocation") false.
-
-        internal IntPtr McpMonoFindClass(string fullName)
-        {
-            return this.TryResolveMcpMonoClass(fullName, out IntPtr klass, out _) ? klass : IntPtr.Zero;
-        }
 
         internal IntPtr McpMonoFindMethod(IntPtr klass, string methodName, int paramCount)
         {

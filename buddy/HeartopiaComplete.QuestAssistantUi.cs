@@ -2232,16 +2232,10 @@ namespace HeartopiaMod
         // through the dialogue tree. The talk RPC and the client panel do NOT move this progress.
         //
         // WebRequestUtility + EnterDialogNode are embedded-Mono only (like the fishing buoy command),
-        // and SendCommand<T> is a generic method — so this reuses the shipped AuraMono generic-inflation
-        // path VERBATIM: TryInstantCatchInflateAuraSendCommand (mono_class_inflate_generic_method +
-        // mono_compile_method — the SAFE inflation, not the runtime-inflate crash trap) then invoke with
-        // (command, needAuthed=1, channel=Reliable), exactly as TrySendBuoyUpdateReliable does.
-        private IntPtr questAssistantWebRequestClass = IntPtr.Zero;
-        private IntPtr questAssistantEnterDialogNodeClass = IntPtr.Zero;
-        private IntPtr questAssistantSendCommandOpenMethod = IntPtr.Zero;
-        private IntPtr questAssistantEnterDialogNodeInflatedSend = IntPtr.Zero;
-        private IntPtr questAssistantEnterDialogNodeFieldNodeId = IntPtr.Zero;
-        private const int QuestAssistantChannelReliable = 1; // ChannelType.Reliable
+        // and SendCommand<T> is a generic method — so this goes through the shared sender
+        // (HeartopiaComplete.AuraSendCommand.cs), which owns the safe generic inflation
+        // (mono_class_inflate_generic_method + mono_compile_method, not the runtime-inflate crash
+        // trap) and the class/method caching this file used to duplicate.
 
         // The dialogue-node id an active EnterDialogNode step requires (its typeParam), or 0 when the
         // active TalkToNpc step is a plain InteractWithNpc (talk RPC alone credits it — no node command).
@@ -2276,100 +2270,18 @@ namespace HeartopiaMod
             return 0;
         }
 
-        private unsafe bool QuestAssistantTrySendEnterDialogNode(int nodeId, out string status)
+        private bool QuestAssistantTrySendEnterDialogNode(int nodeId, out string status)
         {
-            status = "AuraMono unavailable";
             if (nodeId <= 0)
             {
                 status = "no node id";
                 return false;
             }
 
-            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
-                || auraMonoRuntimeInvoke == null || auraMonoObjectNew == null
-                || auraMonoFieldSetValue == null || auraMonoObjectUnbox == null)
+            if (!this.TryAuraSendCommand("XDT.Scene.Shared.Modules.Dialog.EnterDialogNode",
+                    new Dictionary<string, object> { ["NodeId"] = nodeId },
+                    AuraChannelReliable, true, out status))
             {
-                return false;
-            }
-
-            if (this.questAssistantWebRequestClass == IntPtr.Zero)
-            {
-                this.questAssistantWebRequestClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.WebRequestUtility");
-            }
-
-            if (this.questAssistantEnterDialogNodeClass == IntPtr.Zero)
-            {
-                this.questAssistantEnterDialogNodeClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Modules.Dialog.EnterDialogNode");
-                if (this.questAssistantEnterDialogNodeClass == IntPtr.Zero)
-                {
-                    this.questAssistantEnterDialogNodeClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDT.Scene.Shared.Modules.Dialog", "EnterDialogNode");
-                }
-            }
-
-            if (this.questAssistantWebRequestClass == IntPtr.Zero || this.questAssistantEnterDialogNodeClass == IntPtr.Zero)
-            {
-                status = "class missing web=" + (this.questAssistantWebRequestClass != IntPtr.Zero) + " cmd=" + (this.questAssistantEnterDialogNodeClass != IntPtr.Zero);
-                return false;
-            }
-
-            if (this.questAssistantSendCommandOpenMethod == IntPtr.Zero)
-            {
-                this.questAssistantSendCommandOpenMethod = this.FindAuraMonoMethodOnHierarchy(this.questAssistantWebRequestClass, "SendCommand", 3);
-            }
-
-            if (this.questAssistantSendCommandOpenMethod == IntPtr.Zero)
-            {
-                status = "SendCommand(3) missing on WebRequestUtility";
-                return false;
-            }
-
-            if (this.questAssistantEnterDialogNodeInflatedSend == IntPtr.Zero
-                && !this.TryInstantCatchInflateAuraSendCommand(this.questAssistantSendCommandOpenMethod, this.questAssistantEnterDialogNodeClass, out this.questAssistantEnterDialogNodeInflatedSend))
-            {
-                status = "SendCommand<EnterDialogNode> inflate failed";
-                return false;
-            }
-
-            if (this.questAssistantEnterDialogNodeFieldNodeId == IntPtr.Zero)
-            {
-                this.questAssistantEnterDialogNodeFieldNodeId = this.FindAuraMonoFieldOnHierarchy(this.questAssistantEnterDialogNodeClass, "NodeId");
-            }
-
-            if (this.questAssistantEnterDialogNodeFieldNodeId == IntPtr.Zero)
-            {
-                status = "NodeId field missing";
-                return false;
-            }
-
-            IntPtr cmdObj = auraMonoObjectNew(this.auraMonoRootDomain, this.questAssistantEnterDialogNodeClass);
-            if (cmdObj == IntPtr.Zero)
-            {
-                status = "cmd alloc failed";
-                return false;
-            }
-
-            int nodeIdValue = nodeId;
-            auraMonoFieldSetValue(cmdObj, this.questAssistantEnterDialogNodeFieldNodeId, (IntPtr)(&nodeIdValue));
-
-            IntPtr cmdPtr = auraMonoObjectUnbox(cmdObj);
-            if (cmdPtr == IntPtr.Zero)
-            {
-                status = "cmd unbox failed";
-                return false;
-            }
-
-            int needAuthed = 1;
-            int channel = QuestAssistantChannelReliable;
-            IntPtr* args = stackalloc IntPtr[3];
-            args[0] = cmdPtr;
-            args[1] = (IntPtr)(&needAuthed);
-            args[2] = (IntPtr)(&channel);
-
-            IntPtr exc = IntPtr.Zero;
-            auraMonoRuntimeInvoke(this.questAssistantEnterDialogNodeInflatedSend, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero)
-            {
-                status = "SendCommand exc=0x" + exc.ToInt64().ToString("X");
                 return false;
             }
 
@@ -2388,11 +2300,6 @@ namespace HeartopiaMod
         // the step without moving. Same AuraMono generic-SendCommand path as EnterDialogNode. (The
         // game ALSO calls PlayerProtocolManager.PlayerEnterArea(id), but that only dispatches a LOCAL
         // client EventCenter event — not the server credit — so it's not needed here.)
-        private IntPtr questAssistantPlayerEnterAreaClass = IntPtr.Zero;
-        private IntPtr questAssistantPlayerEnterAreaInflatedSend = IntPtr.Zero;
-        private IntPtr questAssistantPlayerEnterAreaFieldNetId = IntPtr.Zero;
-        private IntPtr questAssistantPlayerEnterAreaFieldAreaId = IntPtr.Zero;
-
         private void QuestAssistantOnEnterAreaClicked(QuestSnapshot focused, int areaTriggerId)
         {
             if (areaTriggerId <= 0)
@@ -2421,103 +2328,24 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool QuestAssistantTrySendPlayerEnterArea(uint playerNetId, int areaTriggerId, out string status)
+        private bool QuestAssistantTrySendPlayerEnterArea(uint playerNetId, int areaTriggerId, out string status)
         {
-            status = "AuraMono unavailable";
             if (areaTriggerId <= 0)
             {
                 status = "no area id";
                 return false;
             }
 
-            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
-                || auraMonoRuntimeInvoke == null || auraMonoObjectNew == null
-                || auraMonoFieldSetValue == null || auraMonoObjectUnbox == null)
+            // PlayerNetId is uint on the command and AreaTriggerId is int — the shared sender picks
+            // the write width from each value's runtime type, so these two must stay uint/int.
+            if (!this.TryAuraSendCommand("XDT.Scene.Shared.Modules.Meta.Area.PlayerEnterAreaCommand",
+                    new Dictionary<string, object>
+                    {
+                        ["PlayerNetId"] = playerNetId,
+                        ["AreaTriggerId"] = areaTriggerId,
+                    },
+                    AuraChannelReliable, true, out status))
             {
-                return false;
-            }
-
-            if (this.questAssistantWebRequestClass == IntPtr.Zero)
-            {
-                this.questAssistantWebRequestClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.WebRequestUtility");
-            }
-
-            if (this.questAssistantPlayerEnterAreaClass == IntPtr.Zero)
-            {
-                this.questAssistantPlayerEnterAreaClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Modules.Meta.Area.PlayerEnterAreaCommand");
-                if (this.questAssistantPlayerEnterAreaClass == IntPtr.Zero)
-                {
-                    this.questAssistantPlayerEnterAreaClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDT.Scene.Shared.Modules.Meta.Area", "PlayerEnterAreaCommand");
-                }
-            }
-
-            if (this.questAssistantWebRequestClass == IntPtr.Zero || this.questAssistantPlayerEnterAreaClass == IntPtr.Zero)
-            {
-                status = "class missing web=" + (this.questAssistantWebRequestClass != IntPtr.Zero) + " cmd=" + (this.questAssistantPlayerEnterAreaClass != IntPtr.Zero);
-                return false;
-            }
-
-            if (this.questAssistantSendCommandOpenMethod == IntPtr.Zero)
-            {
-                this.questAssistantSendCommandOpenMethod = this.FindAuraMonoMethodOnHierarchy(this.questAssistantWebRequestClass, "SendCommand", 3);
-            }
-
-            if (this.questAssistantSendCommandOpenMethod == IntPtr.Zero)
-            {
-                status = "SendCommand(3) missing on WebRequestUtility";
-                return false;
-            }
-
-            if (this.questAssistantPlayerEnterAreaInflatedSend == IntPtr.Zero
-                && !this.TryInstantCatchInflateAuraSendCommand(this.questAssistantSendCommandOpenMethod, this.questAssistantPlayerEnterAreaClass, out this.questAssistantPlayerEnterAreaInflatedSend))
-            {
-                status = "SendCommand<PlayerEnterAreaCommand> inflate failed";
-                return false;
-            }
-
-            if (this.questAssistantPlayerEnterAreaFieldNetId == IntPtr.Zero)
-            {
-                this.questAssistantPlayerEnterAreaFieldNetId = this.FindAuraMonoFieldOnHierarchy(this.questAssistantPlayerEnterAreaClass, "PlayerNetId");
-                this.questAssistantPlayerEnterAreaFieldAreaId = this.FindAuraMonoFieldOnHierarchy(this.questAssistantPlayerEnterAreaClass, "AreaTriggerId");
-            }
-
-            if (this.questAssistantPlayerEnterAreaFieldNetId == IntPtr.Zero || this.questAssistantPlayerEnterAreaFieldAreaId == IntPtr.Zero)
-            {
-                status = "PlayerEnterAreaCommand fields missing";
-                return false;
-            }
-
-            IntPtr cmdObj = auraMonoObjectNew(this.auraMonoRootDomain, this.questAssistantPlayerEnterAreaClass);
-            if (cmdObj == IntPtr.Zero)
-            {
-                status = "cmd alloc failed";
-                return false;
-            }
-
-            uint netIdValue = playerNetId;
-            int areaIdValue = areaTriggerId;
-            auraMonoFieldSetValue(cmdObj, this.questAssistantPlayerEnterAreaFieldNetId, (IntPtr)(&netIdValue));
-            auraMonoFieldSetValue(cmdObj, this.questAssistantPlayerEnterAreaFieldAreaId, (IntPtr)(&areaIdValue));
-
-            IntPtr cmdPtr = auraMonoObjectUnbox(cmdObj);
-            if (cmdPtr == IntPtr.Zero)
-            {
-                status = "cmd unbox failed";
-                return false;
-            }
-
-            int needAuthed = 1;
-            int channel = QuestAssistantChannelReliable;
-            IntPtr* args = stackalloc IntPtr[3];
-            args[0] = cmdPtr;
-            args[1] = (IntPtr)(&needAuthed);
-            args[2] = (IntPtr)(&channel);
-
-            IntPtr exc = IntPtr.Zero;
-            auraMonoRuntimeInvoke(this.questAssistantPlayerEnterAreaInflatedSend, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero)
-            {
-                status = "SendCommand exc=0x" + exc.ToInt64().ToString("X");
                 return false;
             }
 

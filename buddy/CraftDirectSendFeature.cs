@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
@@ -70,7 +71,9 @@ namespace HeartopiaMod
         // InteractErrorCode.Invalid — the one non-zero code ToastInteractError does not toast.
         private const int CraftDirectSendRefuseCode = -1;
         private const int CraftDirectSendMaxStructSpan = 256;
-        private const int CraftDirectSendChannelReliable = 1; // ChannelType.Reliable
+
+        private const string CraftDirectSendMakeItemCommand =
+            "XDT.Scene.Shared.Modules.CraftingManual.MakeItemNetworkCommand";
 
         // Occupy release. The vanilla craft ALWAYS ends with CharacterProtocolManager
         // .CancelOccupyCommand() — from PlayerCraftsmanAction.OnBehaveFinish on success and from
@@ -127,23 +130,14 @@ namespace HeartopiaMod
         private string craftDirectSendLastLoggedStatus;
         private FeatureBreakerState craftDirectSendBreaker;
 
-        // WebRequestUtility.SendCommand<MakeItemNetworkCommand> resolution (cached metadata ptrs).
-        private IntPtr craftDirectSendWebRequestClass = IntPtr.Zero;
-        private IntPtr craftDirectSendCommandClass = IntPtr.Zero;
-        private IntPtr craftDirectSendOpenSendMethod = IntPtr.Zero;
-        private IntPtr craftDirectSendInflatedSendMethod = IntPtr.Zero;
-        private IntPtr craftDirectSendFieldRecipeId = IntPtr.Zero;
-        private IntPtr craftDirectSendFieldCount = IntPtr.Zero;
-        private IntPtr craftDirectSendFieldColorThemeId = IntPtr.Zero;
+        // Both sends go through the shared HeartopiaComplete.TryAuraSendCommand, which owns the
+        // WebRequestUtility / command-class / inflated-method caching — hence no per-feature ptrs.
+        private bool craftDirectSendSenderValidated;
 
-        // Occupy-release state + its own SendCommand<ItemReleaseNetworkCommand> resolution.
+        // Occupy-release state.
         private bool craftDirectSendReleaseHookRegistered;
         private bool craftDirectSendReleasePending;
         private float craftDirectSendReleaseDueAt;
-        private IntPtr craftDirectSendReleaseClass = IntPtr.Zero;
-        private IntPtr craftDirectSendReleaseInflated = IntPtr.Zero;
-        private IntPtr craftDirectSendReleaseFieldNetId = IntPtr.Zero;
-        private IntPtr craftDirectSendReleaseFieldMask = IntPtr.Zero;
 
         private void ProcessCraftDirectSendOnUpdate()
         {
@@ -250,144 +244,34 @@ namespace HeartopiaMod
         // WebRequestUtility.SendCommand<ItemReleaseNetworkCommand>{ ReleaseItemNetId = 0,
         // CharacterPartMask = Body } — byte-for-byte what CharacterProtocolManager
         // .CancelOccupyCommand() sends with its default arguments.
-        private unsafe void TryCraftDirectSendReleaseOccupy()
+        private void TryCraftDirectSendReleaseOccupy()
         {
             try
             {
-                if (!this.TryEnsureCraftDirectSendReleaseResolved(out string resolveStatus))
+                // ReleaseItemNetId is uint on the command and CharacterPartMask is int — the shared
+                // sender maps each field by its runtime type, so the boxed types here are what decide
+                // the width written into the struct. They must stay as they are.
+                if (!this.TryAuraSendCommand("XDT.Scene.Shared.Modules.Occupy.ItemReleaseNetworkCommand",
+                        new Dictionary<string, object>
+                        {
+                            ["ReleaseItemNetId"] = 0u,
+                            ["CharacterPartMask"] = CraftDirectSendPartMaskBody,
+                        },
+                        AuraChannelReliable, true, out string sendStatus))
                 {
-                    this.CraftDirectSendSetStatus("Release unresolved: " + resolveStatus);
+                    this.CraftDirectSendSetStatus("Release failed: " + sendStatus);
                     return;
                 }
 
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                if (MasterLogCraftDirectSend)
                 {
-                    this.CraftDirectSendSetStatus("Release skipped: AuraMono unavailable.");
-                    return;
-                }
-
-                IntPtr cmdObj = auraMonoObjectNew(this.auraMonoRootDomain, this.craftDirectSendReleaseClass);
-                if (cmdObj == IntPtr.Zero)
-                {
-                    this.CraftDirectSendSetStatus("Release alloc failed.");
-                    return;
-                }
-
-                uint pin = AuraMonoPinNew(cmdObj);
-                if (pin == 0U)
-                {
-                    this.CraftDirectSendSetStatus("Release pin failed.");
-                    return;
-                }
-
-                try
-                {
-                    uint releaseItemNetId = 0u;
-                    int partMask = CraftDirectSendPartMaskBody;
-                    auraMonoFieldSetValue(cmdObj, this.craftDirectSendReleaseFieldNetId, (IntPtr)(&releaseItemNetId));
-                    auraMonoFieldSetValue(cmdObj, this.craftDirectSendReleaseFieldMask, (IntPtr)(&partMask));
-
-                    IntPtr cmdPtr = auraMonoObjectUnbox(cmdObj);
-                    if (cmdPtr == IntPtr.Zero)
-                    {
-                        this.CraftDirectSendSetStatus("Release unbox failed.");
-                        return;
-                    }
-
-                    int needAuthed = 1;
-                    int channel = CraftDirectSendChannelReliable;
-                    IntPtr* args = stackalloc IntPtr[3];
-                    args[0] = cmdPtr;
-                    args[1] = (IntPtr)(&needAuthed);
-                    args[2] = (IntPtr)(&channel);
-
-                    IntPtr exc = IntPtr.Zero;
-                    auraMonoRuntimeInvoke(this.craftDirectSendReleaseInflated, IntPtr.Zero, (IntPtr)args, ref exc);
-                    if (exc != IntPtr.Zero)
-                    {
-                        this.CraftDirectSendSetStatus("Release SendCommand threw.");
-                        return;
-                    }
-
-                    if (MasterLogCraftDirectSend)
-                    {
-                        ModLogger.Msg("[CraftDirectSend] ItemReleaseNetworkCommand sent (occupy released).");
-                    }
-                }
-                finally
-                {
-                    AuraMonoPinFree(pin);
+                    ModLogger.Msg("[CraftDirectSend] ItemReleaseNetworkCommand sent (occupy released).");
                 }
             }
             catch (Exception ex)
             {
                 this.CraftDirectSendSetStatus("Release error: " + ex.Message);
             }
-        }
-
-        private bool TryEnsureCraftDirectSendReleaseResolved(out string status)
-        {
-            if (this.craftDirectSendReleaseInflated != IntPtr.Zero
-                && this.craftDirectSendReleaseFieldNetId != IntPtr.Zero
-                && this.craftDirectSendReleaseFieldMask != IntPtr.Zero)
-            {
-                status = "ok";
-                return true;
-            }
-
-            // Shares WebRequestUtility + SendCommand(3) with the craft sender.
-            if (!this.TryEnsureCraftDirectSendResolved(out status))
-            {
-                return false;
-            }
-
-            if (this.craftDirectSendReleaseClass == IntPtr.Zero)
-            {
-                this.craftDirectSendReleaseClass =
-                    this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Modules.Occupy.ItemReleaseNetworkCommand");
-                if (this.craftDirectSendReleaseClass == IntPtr.Zero)
-                {
-                    this.craftDirectSendReleaseClass =
-                        this.FindAuraMonoClassAcrossLoadedAssemblies("XDT.Scene.Shared.Modules.Occupy", "ItemReleaseNetworkCommand");
-                }
-            }
-
-            if (this.craftDirectSendReleaseClass == IntPtr.Zero)
-            {
-                status = "ItemReleaseNetworkCommand class missing.";
-                return false;
-            }
-
-            if (this.craftDirectSendReleaseInflated == IntPtr.Zero
-                && !this.TryInstantCatchInflateAuraSendCommand(this.craftDirectSendOpenSendMethod,
-                    this.craftDirectSendReleaseClass, out this.craftDirectSendReleaseInflated))
-            {
-                status = "SendCommand<ItemReleaseNetworkCommand> inflate failed.";
-                return false;
-            }
-
-            if (this.craftDirectSendReleaseFieldNetId == IntPtr.Zero)
-            {
-                this.craftDirectSendReleaseFieldNetId =
-                    this.FindAuraMonoFieldOnHierarchy(this.craftDirectSendReleaseClass, "ReleaseItemNetId");
-            }
-
-            if (this.craftDirectSendReleaseFieldMask == IntPtr.Zero)
-            {
-                this.craftDirectSendReleaseFieldMask =
-                    this.FindAuraMonoFieldOnHierarchy(this.craftDirectSendReleaseClass, "CharacterPartMask");
-            }
-
-            if (this.craftDirectSendReleaseFieldNetId == IntPtr.Zero || this.craftDirectSendReleaseFieldMask == IntPtr.Zero)
-            {
-                status = "ItemReleaseNetworkCommand fields missing: ReleaseItemNetId="
-                    + (this.craftDirectSendReleaseFieldNetId != IntPtr.Zero)
-                    + " CharacterPartMask=" + (this.craftDirectSendReleaseFieldMask != IntPtr.Zero);
-                return false;
-            }
-
-            status = "ok";
-            return true;
         }
 
         // World-ready callback: returns true when there is nothing left to do for this world
@@ -609,178 +493,65 @@ namespace HeartopiaMod
         // call CraftProtocolManager.MakeItem makes. Built directly rather than through MakeItem
         // itself because that takes an `int? themeId`, and a Nullable<> argument over
         // mono_runtime_invoke is exactly the generic-arg trap the project has been bitten by.
+        //
+        // Pre-flight for the detour install. This gate is load-bearing: the detour REFUSES the game's
+        // own craft command, so arming it while the sender is unresolvable would make crafting
+        // silently vanish. TryValidateAuraCommand runs the entire send sequence except the send
+        // itself — resolve, inflate, arity-check, allocate, pin, set all three fields, unbox — so it
+        // proves more than the old resolve-only check did, and proves it without touching the server.
         private bool TryEnsureCraftDirectSendResolved(out string status)
         {
-            if (this.craftDirectSendInflatedSendMethod != IntPtr.Zero
-                && this.craftDirectSendFieldRecipeId != IntPtr.Zero
-                && this.craftDirectSendFieldCount != IntPtr.Zero
-                && this.craftDirectSendFieldColorThemeId != IntPtr.Zero)
+            if (this.craftDirectSendSenderValidated)
             {
                 status = "ok";
                 return true;
             }
 
-            if (auraMonoObjectNew == null || auraMonoFieldSetValue == null || auraMonoObjectUnbox == null)
+            if (!this.TryValidateAuraCommand(CraftDirectSendMakeItemCommand,
+                    new Dictionary<string, object>
+                    {
+                        ["RecipeId"] = 0,
+                        ["Count"] = 0,
+                        ["colorThemeId"] = 0,
+                    },
+                    out status))
             {
-                status = "AuraMono object/field exports unavailable.";
                 return false;
             }
 
-            if (this.craftDirectSendWebRequestClass == IntPtr.Zero)
-            {
-                this.craftDirectSendWebRequestClass =
-                    this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.WebRequestUtility");
-                if (this.craftDirectSendWebRequestClass == IntPtr.Zero)
-                {
-                    this.craftDirectSendWebRequestClass =
-                        this.FindAuraMonoClassAcrossLoadedAssemblies("XDTDataAndProtocol.ProtocolService", "WebRequestUtility");
-                }
-            }
-
-            if (this.craftDirectSendCommandClass == IntPtr.Zero)
-            {
-                this.craftDirectSendCommandClass =
-                    this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Modules.CraftingManual.MakeItemNetworkCommand");
-                if (this.craftDirectSendCommandClass == IntPtr.Zero)
-                {
-                    this.craftDirectSendCommandClass =
-                        this.FindAuraMonoClassAcrossLoadedAssemblies("XDT.Scene.Shared.Modules.CraftingManual", "MakeItemNetworkCommand");
-                }
-            }
-
-            if (this.craftDirectSendWebRequestClass == IntPtr.Zero || this.craftDirectSendCommandClass == IntPtr.Zero)
-            {
-                status = "class missing: WebRequestUtility=" + (this.craftDirectSendWebRequestClass != IntPtr.Zero)
-                    + " MakeItemNetworkCommand=" + (this.craftDirectSendCommandClass != IntPtr.Zero);
-                return false;
-            }
-
-            if (this.craftDirectSendOpenSendMethod == IntPtr.Zero)
-            {
-                this.craftDirectSendOpenSendMethod =
-                    this.FindAuraMonoMethodOnHierarchy(this.craftDirectSendWebRequestClass, "SendCommand", 3);
-            }
-
-            if (this.craftDirectSendOpenSendMethod == IntPtr.Zero)
-            {
-                status = "SendCommand(3) missing on WebRequestUtility.";
-                return false;
-            }
-
-            if (this.craftDirectSendInflatedSendMethod == IntPtr.Zero
-                && !this.TryInstantCatchInflateAuraSendCommand(this.craftDirectSendOpenSendMethod,
-                    this.craftDirectSendCommandClass, out this.craftDirectSendInflatedSendMethod))
-            {
-                status = "SendCommand<MakeItemNetworkCommand> inflate failed.";
-                return false;
-            }
-
-            if (this.craftDirectSendFieldRecipeId == IntPtr.Zero)
-            {
-                this.craftDirectSendFieldRecipeId = this.FindAuraMonoFieldOnHierarchy(this.craftDirectSendCommandClass, "RecipeId");
-            }
-
-            if (this.craftDirectSendFieldCount == IntPtr.Zero)
-            {
-                this.craftDirectSendFieldCount = this.FindAuraMonoFieldOnHierarchy(this.craftDirectSendCommandClass, "Count");
-            }
-
-            if (this.craftDirectSendFieldColorThemeId == IntPtr.Zero)
-            {
-                this.craftDirectSendFieldColorThemeId = this.FindAuraMonoFieldOnHierarchy(this.craftDirectSendCommandClass, "colorThemeId");
-            }
-
-            if (this.craftDirectSendFieldRecipeId == IntPtr.Zero || this.craftDirectSendFieldCount == IntPtr.Zero
-                || this.craftDirectSendFieldColorThemeId == IntPtr.Zero)
-            {
-                status = "MakeItemNetworkCommand fields missing: RecipeId=" + (this.craftDirectSendFieldRecipeId != IntPtr.Zero)
-                    + " Count=" + (this.craftDirectSendFieldCount != IntPtr.Zero)
-                    + " colorThemeId=" + (this.craftDirectSendFieldColorThemeId != IntPtr.Zero);
-                return false;
-            }
-
+            this.craftDirectSendSenderValidated = true;
             if (!this.craftDirectSendResolveLogged)
             {
                 this.craftDirectSendResolveLogged = true;
-                ModLogger.Msg("[CraftDirectSend] sender resolved: SendCommand<MakeItemNetworkCommand>=0x"
-                    + this.craftDirectSendInflatedSendMethod.ToInt64().ToString("X"));
+                ModLogger.Msg("[CraftDirectSend] sender resolved: " + status);
             }
 
             status = "ok";
             return true;
         }
 
-        private unsafe bool TryCraftDirectSendMakeItem(int recipeId, int count, int themeId, out string status)
+        private bool TryCraftDirectSendMakeItem(int recipeId, int count, int themeId, out string status)
         {
-            if (!this.TryEnsureCraftDirectSendResolved(out status))
+            if (!this.TryAuraSendCommand(CraftDirectSendMakeItemCommand,
+                    new Dictionary<string, object>
+                    {
+                        ["RecipeId"] = recipeId,
+                        ["Count"] = count,
+                        ["colorThemeId"] = themeId,
+                    },
+                    AuraChannelReliable, true, out status))
             {
                 return false;
             }
 
-            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            if (MasterLogCraftDirectSend)
             {
-                status = "AuraMono runtime unavailable.";
-                return false;
+                ModLogger.Msg("[CraftDirectSend] MakeItemNetworkCommand sent recipeId=" + recipeId
+                    + " count=" + count + " colorThemeId=" + themeId);
             }
 
-            IntPtr cmdObj = auraMonoObjectNew(this.auraMonoRootDomain, this.craftDirectSendCommandClass);
-            if (cmdObj == IntPtr.Zero)
-            {
-                status = "command alloc failed.";
-                return false;
-            }
-
-            uint pin = AuraMonoPinNew(cmdObj);
-            if (pin == 0U)
-            {
-                status = "command pin failed.";
-                return false;
-            }
-
-            try
-            {
-                int recipeValue = recipeId;
-                int countValue = count;
-                int themeValue = themeId;
-                auraMonoFieldSetValue(cmdObj, this.craftDirectSendFieldRecipeId, (IntPtr)(&recipeValue));
-                auraMonoFieldSetValue(cmdObj, this.craftDirectSendFieldCount, (IntPtr)(&countValue));
-                auraMonoFieldSetValue(cmdObj, this.craftDirectSendFieldColorThemeId, (IntPtr)(&themeValue));
-
-                IntPtr cmdPtr = auraMonoObjectUnbox(cmdObj);
-                if (cmdPtr == IntPtr.Zero)
-                {
-                    status = "command unbox failed.";
-                    return false;
-                }
-
-                int needAuthed = 1;
-                int channel = CraftDirectSendChannelReliable;
-                IntPtr* args = stackalloc IntPtr[3];
-                args[0] = cmdPtr;
-                args[1] = (IntPtr)(&needAuthed);
-                args[2] = (IntPtr)(&channel);
-
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(this.craftDirectSendInflatedSendMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    status = "SendCommand threw.";
-                    return false;
-                }
-
-                if (MasterLogCraftDirectSend)
-                {
-                    ModLogger.Msg("[CraftDirectSend] MakeItemNetworkCommand sent recipeId=" + recipeId
-                        + " count=" + count + " colorThemeId=" + themeId);
-                }
-
-                status = "ok";
-                return true;
-            }
-            finally
-            {
-                AuraMonoPinFree(pin);
-            }
+            status = "ok";
+            return true;
         }
 
         private void CraftDirectSendSetStatus(string status)
@@ -792,8 +563,13 @@ namespace HeartopiaMod
             }
 
             this.craftDirectSendLastLoggedStatus = status;
+            // "Release" is here because a failed occupy release is the one failure with no visible
+            // error and a lasting cost: the bench keeps its isOccupied flag, so its interact icon
+            // never comes back. Only the failure paths set a Release status — success is MasterLog
+            // only — so this cannot become chatter.
             if (MasterLogCraftDirectSend || status.StartsWith("Send failed", StringComparison.Ordinal)
-                || status.StartsWith("Error", StringComparison.Ordinal))
+                || status.StartsWith("Error", StringComparison.Ordinal)
+                || status.StartsWith("Release", StringComparison.Ordinal))
             {
                 ModLogger.Msg("[CraftDirectSend] " + status);
             }

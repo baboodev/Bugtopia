@@ -91,8 +91,12 @@ namespace HeartopiaMod
         private const float StealthBlockUnblockGraceSeconds = 45f;
         private const float StealthBlockArmTimeoutSeconds = 30f;
         private const int StealthBlockReasonDefault = 3;   // BlockReason.Default — least accusatory
-        private const int StealthBlockChannelReliable = 1; // ChannelType.Reliable
         private const int StealthBlockSpotEnumPlayer = 3;  // SpotEnum.Player
+
+        private const string StealthBlockBlockCommand =
+            "XDT.Scene.Shared.Modules.Social.BlockList.BlockPlayerCommand";
+        private const string StealthBlockUnblockCommand =
+            "XDT.Scene.Shared.Modules.Social.BlockList.UnblockPlayerCommand";
 
         private static readonly string[] StealthBlockGameSystemImages =
         {
@@ -104,11 +108,6 @@ namespace HeartopiaMod
             "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll"
         };
 
-        private static readonly string[] StealthBlockCommandImages =
-        {
-            "EcsClient", "EcsClient.dll", "Client", "Client.dll"
-        };
-
         // Resolved once per session (class/method IntPtrs stay raw — image lifetime).
         private IntPtr stealthBlockMapSpotsClass = IntPtr.Zero;
         private IntPtr stealthBlockGetPlayerCountMethod = IntPtr.Zero;
@@ -117,14 +116,10 @@ namespace HeartopiaMod
         private IntPtr stealthBlockTryGetShortIdMethod = IntPtr.Zero;
         private IntPtr stealthBlockFriendLevelMethod = IntPtr.Zero;
         private IntPtr stealthBlockIsBlockedMethod = IntPtr.Zero;
-        private IntPtr stealthBlockSendOpenMethod = IntPtr.Zero;
-        private IntPtr stealthBlockBlockCmdClass = IntPtr.Zero;
-        private IntPtr stealthBlockUnblockCmdClass = IntPtr.Zero;
-        private IntPtr stealthBlockBlockSendMethod = IntPtr.Zero;
-        private IntPtr stealthBlockUnblockSendMethod = IntPtr.Zero;
-        private IntPtr stealthBlockBlockShortIdField = IntPtr.Zero;
-        private IntPtr stealthBlockBlockReasonField = IntPtr.Zero;
-        private IntPtr stealthBlockUnblockShortIdField = IntPtr.Zero;
+
+        // Both sends go through the shared HeartopiaComplete.TryAuraSendCommand; this records that
+        // TryValidateAuraCommand has proved both command types and their fields resolve.
+        private bool stealthBlockSendValidated;
         private int stealthBlockSpotCategoryOffset = -1;
         private int stealthBlockSpotUsageIdOffset = -1;
         private bool stealthBlockResolveFailedLogged;

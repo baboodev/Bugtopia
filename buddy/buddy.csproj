@@ -333,6 +333,8 @@
     <Compile Include="HeartopiaComplete.cs" />
     <Compile Include="HeartopiaComplete.Json.cs" />
     <Compile Include="HeartopiaComplete.AuraMono.cs" />
+    <Compile Include="HeartopiaComplete.AuraClassResolve.cs" />
+    <Compile Include="HeartopiaComplete.AuraSendCommand.cs" />
     <Compile Include="HeartopiaComplete.Reflection.cs" />
     <Compile Include="HeartopiaComplete.UiKit.cs" />
     <Compile Include="HeartopiaComplete.UguiKit.cs" />
@@ -507,7 +509,6 @@
     <Compile Include="McpOps.World.cs" />
     <Compile Include="McpOps.Data.cs" />
     <Compile Include="McpOps.Mono.cs" />
-    <Compile Include="HeartopiaComplete.AuraSendCommand.cs" />
     <Compile Include="McpEventBroker.cs" />
     <Compile Include="McpScreenshot.cs" />
     <Compile Include="PluginContract.cs" />

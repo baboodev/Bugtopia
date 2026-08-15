@@ -335,9 +335,13 @@ Two limits of the shared code were found by using this and are worth knowing bef
 **Sending server commands.** `IHostApi.Mono.SendCommand` is the first *generic*
 `WebRequestUtility.SendCommand<T>` in this mod — seven features each carried their own copy of the
 resolve → inflate → allocate → set fields → unbox → invoke sequence, and five separately defined
-`ChannelType.Reliable = 1`. Those seven are deliberately **not** migrated: they work, they touch
-server-authoritative paths, and rewriting them is a separate change with its own testing. The shared
-one exists so new work is not an eighth copy. Its four fatal invariants are in the header of
+`ChannelType.Reliable = 1`. Five of those features now share this one (CraftDirectSend,
+QuestAssistant, CarpetStamp, DailyClaims, StealthBlock), migrated one at a time with an in-game test
+each, and all five channel constants collapsed onto `AuraChannelReliable`. The fishing buoy update
+and the vehicle call stayed put: both set `Vector3` fields and branch on `SendCommand`'s return code,
+and this helper maps fields by runtime type and discards the return value — so they need it extended
+before they can move. SnowSculpture stayed put too, for a different reason: it is a managed
+`MethodInfo.MakeGenericMethod` path, not AuraMono. Its four fatal invariants are in the header of
 `buddy/HeartopiaComplete.AuraSendCommand.cs`; the least obvious is that `mono_field_set_value` wants
 the *address* of a value-type value but the *pointer itself* for a string field — swapping them
 corrupts silently.
@@ -351,8 +355,11 @@ coerced, for the same reason.
 Verified live end to end by eating an apple: `mono.describe` gave the field
 (`XDT.Scene.Shared.Modules.Cooking.EatFoodNetworkCommand.FoodNetId`, a **netId** not a staticId),
 the send returned ok, the backpack went 12→11, and the event-driven cache invalidated itself.
-Incidentally that disproves a comment in `HeartopiaComplete.AutoEatRepair.cs:1375` which expected the
-bare command to be silently rejected.
+Incidentally that disproved a comment in `HeartopiaComplete.AutoEatRepair.cs` which expected the bare
+command to be silently rejected; that comment has since been corrected. Auto Eat still invokes
+`CharacterProtocolManager.EatFood` rather than sending the command itself — the two are identical on
+the wire (`EatFood` is a one-line `SendCommand` wrapper), and the invoke is the smaller AuraMono
+operation.
 
 Worked example, discovered entirely from the running process without opening a decompilation: a
 component carries no `netId` at all — it is `component → <entity>k__BackingField → _netId`, and

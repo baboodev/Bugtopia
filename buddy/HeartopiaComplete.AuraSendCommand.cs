@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 
@@ -7,21 +6,34 @@ namespace HeartopiaMod
     // ============================================================================================
     // Shared AuraMono `WebRequestUtility.SendCommand<T>` — the first generic one in this mod.
     //
-    // Seven features each cache their own open-method pointer and re-implement the same resolve →
-    // inflate → allocate → set fields → unbox → invoke sequence
-    // (`craftDirectSendCommandClass`, `questAssistantSendCommandOpenMethod`,
-    // `snowCachedSendCommandMethod`, `vehicleBypassSendCommandMethod`,
-    // `carpetStampSendCommandOpenMethod`, `dailyClaimsAuraSendCommandOpenMethod`,
-    // `cachedInstantCatchAuraSendCommandOpenMethod`), and five separately define
+    // Seven features each cached their own open-method pointer and re-implemented the same resolve →
+    // inflate → allocate → set fields → unbox → invoke sequence, and five separately defined
     // `ChannelType.Reliable = 1`. This is that sequence written once.
+    //
+    // Migrated: CraftDirectSend (MakeItem + occupy release), QuestAssistant (EnterDialogNode +
+    // PlayerEnterArea), CarpetStamp, DailyClaims (all eight claim commands), StealthBlock
+    // (block + unblock). All five `ChannelType.Reliable = 1` constants collapsed onto
+    // AuraChannelReliable below.
+    //
+    // NOT migrated, and not migratable as-is — each needs this helper extended first:
+    //   * `cachedInstantCatchAuraSendCommandOpenMethod` (fishing buoy) and
+    //     `vehicleBypassSendCommandMethod` set Vector3 fields and branch on SendCommand's return
+    //     code. This maps fields by runtime type and discards the return value, so both would break
+    //     silently — a Vector3 is refused outright, and a dropped send code turns a rejected send
+    //     into a reported success.
+    //   * `snowCachedSendCommandMethod` is a different shape entirely: managed
+    //     MethodInfo.MakeGenericMethod, not AuraMono. Moving it is a rewrite, not a migration.
     //
     // ⚠️ IT SENDS REAL COMMANDS TO A LIVE SERVER. A wrong field value is not a wrong answer, it is a
     // changed account. Everything reachable through it is unsafe-tier by construction.
     //
-    // The existing seven callers are deliberately NOT migrated here: they work, they touch
-    // server-authoritative paths, and rewriting them is a separate change with its own testing.
-    // This exists so new work — and anything prototyped through the MCP bridge — has one correct
-    // implementation to use instead of an eighth copy.
+    // The per-feature copies are being migrated onto this one at a time, each tested in-game before
+    // the next is started — they touch server-authoritative paths, so a batch rewrite would be a
+    // batch of untested sends. New work should start here rather than add an eighth copy.
+    //
+    // This file is deliberately NOT gated on FEATURE_MCP (it was, while the MCP bridge was its only
+    // caller). Its command-type resolver moved out of the gate with it —
+    // `FindAuraMonoClassAnySpelling`, HeartopiaComplete.AuraClassResolve.cs.
     //
     // ── THE FOUR THINGS THAT MAKE IT CRASH IF DONE WRONG ────────────────────────────────────────
     //  1. The command is a VALUE TYPE. SendCommand<T> takes T by value, so the boxed object must be
@@ -59,11 +71,11 @@ namespace HeartopiaMod
 
             if (this.auraSendCommandWebRequestClass == IntPtr.Zero)
             {
-                // Goes through the MCP resolver, which ends in an exhaustive image sweep — the
-                // hint-driven resolver alone has measured blind spots, which is exactly why the
-                // existing callers all hand-roll an across-assemblies fallback after it.
+                // Ends in an exhaustive image sweep — the hint-driven resolver alone has measured
+                // blind spots, which is exactly why the per-feature callers all hand-roll an
+                // across-assemblies fallback after it.
                 this.auraSendCommandWebRequestClass =
-                    this.McpMonoFindClass("XDTDataAndProtocol.ProtocolService.WebRequestUtility");
+                    this.FindAuraMonoClassAnySpelling("XDTDataAndProtocol.ProtocolService.WebRequestUtility");
             }
 
             if (this.auraSendCommandWebRequestClass == IntPtr.Zero)
@@ -112,7 +124,12 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.EnsureAuraSendCommandOpenMethod()
+            // Re-attached on every send, not just on the resolving call: the open method is cached
+            // process-wide, so gating the attach on "first resolve" would leave any later caller on
+            // an unattached thread. Both calls are idempotent and cached.
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || !this.EnsureAuraSendCommandOpenMethod()
                 || auraMonoRuntimeInvoke == null
                 || auraMonoObjectNew == null
                 || auraMonoObjectUnbox == null
@@ -134,7 +151,7 @@ namespace HeartopiaMod
             if (!this.auraSendCommandClassByName.TryGetValue(commandFullName, out IntPtr commandClass)
                 || commandClass == IntPtr.Zero)
             {
-                commandClass = this.McpMonoFindClass(commandFullName);
+                commandClass = this.FindAuraMonoClassAnySpelling(commandFullName);
                 if (commandClass == IntPtr.Zero)
                 {
                     status = "command type not found: " + commandFullName;
@@ -220,7 +237,14 @@ namespace HeartopiaMod
                 auraMonoRuntimeInvoke(inflated, IntPtr.Zero, (IntPtr)args, ref exc);
                 if (exc != IntPtr.Zero)
                 {
-                    status = commandFullName + " threw on send";
+                    // Read the message here, before anything else allocates — same best-effort read,
+                    // in the same position, as the per-feature copies. "It threw" on its own is not
+                    // something a caller can act on when the send mutates a live account.
+                    status = commandFullName + " threw on send: "
+                        + (this.TryGetMonoStringMember(exc, "Message", out string excMessage)
+                                && !string.IsNullOrWhiteSpace(excMessage)
+                            ? excMessage
+                            : "0x" + exc.ToInt64().ToString("X"));
                     return false;
                 }
 
@@ -307,4 +331,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

@@ -63,7 +63,6 @@ namespace HeartopiaMod
         };
 
         private const int CarpetStampStampedeUgcType = 1002; // UgcType.StampedeInteraction
-        private const int CarpetStampChannelReliable = 1;    // ChannelType.Reliable
         private const int CarpetStampMaxRowsShown = 12;
 
         private readonly List<CarpetStampEntry> carpetStampScanResults = new List<CarpetStampEntry>();
@@ -71,14 +70,6 @@ namespace HeartopiaMod
         private int carpetStampScanTotalActors;
 
         private IntPtr carpetStampUgcWorldClass = IntPtr.Zero;
-        private IntPtr carpetStampWebRequestClass = IntPtr.Zero;
-        private IntPtr carpetStampCommandClass = IntPtr.Zero;
-        private IntPtr carpetStampSendCommandOpenMethod = IntPtr.Zero;
-        private IntPtr carpetStampInflatedSendMethod = IntPtr.Zero;
-        private IntPtr carpetStampFieldType = IntPtr.Zero;
-        private IntPtr carpetStampFieldNetId = IntPtr.Zero;
-        private IntPtr carpetStampFieldOperateMethod = IntPtr.Zero;
-        private bool carpetStampSendResolveLogged;
 
         private static void CarpetStampLog(string message)
         {
@@ -271,159 +262,31 @@ namespace HeartopiaMod
 
         // ===== Send =====
 
-        private bool TryCarpetStampEnsureSendResolved(out string status)
+        private bool TryCarpetStampSendOperate(uint carpetNetId, int ugcTypeValue, int skillId, string actionLabel, out string status)
         {
-            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
-                || auraMonoRuntimeInvoke == null || auraMonoObjectNew == null
-                || auraMonoFieldSetValue == null || auraMonoObjectUnbox == null
-                || this.auraMonoRootDomain == IntPtr.Zero)
-            {
-                status = "AuraMono API unavailable.";
-                return false;
-            }
-
-            if (this.carpetStampWebRequestClass == IntPtr.Zero)
-            {
-                this.carpetStampWebRequestClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.WebRequestUtility");
-            }
-
-            if (this.carpetStampCommandClass == IntPtr.Zero)
-            {
-                this.carpetStampCommandClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Modules.Build.UgcOperateCommand");
-                if (this.carpetStampCommandClass == IntPtr.Zero)
-                {
-                    this.carpetStampCommandClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDT.Scene.Shared.Modules.Build", "UgcOperateCommand");
-                }
-            }
-
-            if (this.carpetStampWebRequestClass == IntPtr.Zero || this.carpetStampCommandClass == IntPtr.Zero)
-            {
-                status = "class missing: WebRequestUtility=" + (this.carpetStampWebRequestClass != IntPtr.Zero)
-                    + " UgcOperateCommand=" + (this.carpetStampCommandClass != IntPtr.Zero);
-                return false;
-            }
-
-            if (this.carpetStampSendCommandOpenMethod == IntPtr.Zero)
-            {
-                this.carpetStampSendCommandOpenMethod = this.FindAuraMonoMethodOnHierarchy(this.carpetStampWebRequestClass, "SendCommand", 3);
-            }
-
-            if (this.carpetStampSendCommandOpenMethod == IntPtr.Zero)
-            {
-                status = "SendCommand(3) missing on WebRequestUtility.";
-                return false;
-            }
-
-            if (this.carpetStampInflatedSendMethod == IntPtr.Zero
-                && !this.TryInstantCatchInflateAuraSendCommand(this.carpetStampSendCommandOpenMethod, this.carpetStampCommandClass, out this.carpetStampInflatedSendMethod))
-            {
-                status = "SendCommand<UgcOperateCommand> inflate failed.";
-                return false;
-            }
-
-            if (this.carpetStampFieldType == IntPtr.Zero)
-            {
-                this.carpetStampFieldType = this.FindAuraMonoFieldOnHierarchy(this.carpetStampCommandClass, "Type");
-            }
-
-            if (this.carpetStampFieldNetId == IntPtr.Zero)
-            {
-                this.carpetStampFieldNetId = this.FindAuraMonoFieldOnHierarchy(this.carpetStampCommandClass, "NetId");
-            }
-
-            if (this.carpetStampFieldOperateMethod == IntPtr.Zero)
-            {
-                this.carpetStampFieldOperateMethod = this.FindAuraMonoFieldOnHierarchy(this.carpetStampCommandClass, "OperateMethod");
-            }
-
-            if (this.carpetStampFieldType == IntPtr.Zero || this.carpetStampFieldNetId == IntPtr.Zero || this.carpetStampFieldOperateMethod == IntPtr.Zero)
-            {
-                status = "UgcOperateCommand fields missing: Type=" + (this.carpetStampFieldType != IntPtr.Zero)
-                    + " NetId=" + (this.carpetStampFieldNetId != IntPtr.Zero)
-                    + " OperateMethod=" + (this.carpetStampFieldOperateMethod != IntPtr.Zero);
-                return false;
-            }
-
-            if (!this.carpetStampSendResolveLogged)
-            {
-                this.carpetStampSendResolveLogged = true;
-                CarpetStampLog("Resolve: WebRequestUtility=0x" + this.carpetStampWebRequestClass.ToInt64().ToString("X")
-                    + " UgcOperateCommand=0x" + this.carpetStampCommandClass.ToInt64().ToString("X")
-                    + " SendCommand(3)=0x" + this.carpetStampSendCommandOpenMethod.ToInt64().ToString("X")
-                    + " inflated=0x" + this.carpetStampInflatedSendMethod.ToInt64().ToString("X")
-                    + " fields Type/NetId/OperateMethod=0x" + this.carpetStampFieldType.ToInt64().ToString("X")
-                    + "/0x" + this.carpetStampFieldNetId.ToInt64().ToString("X")
-                    + "/0x" + this.carpetStampFieldOperateMethod.ToInt64().ToString("X"));
-            }
-
-            status = "ok";
-            return true;
-        }
-
-        private unsafe bool TryCarpetStampSendOperate(uint carpetNetId, int ugcTypeValue, int skillId, string actionLabel, out string status)
-        {
-            if (!this.TryCarpetStampEnsureSendResolved(out status))
-            {
-                CarpetStampLog("Send " + actionLabel + " aborted: " + status);
-                return false;
-            }
-
             CarpetStampLog($"Send {actionLabel}: UgcOperateCommand Type={ugcTypeValue} NetId={carpetNetId} OperateMethod={skillId}"
-                + $" needAuthed=1 channel=Reliable ({CarpetStampChannelReliable}), Params=null (game sends it null too)");
+                + $" needAuthed=1 channel=Reliable ({AuraChannelReliable}), Params=null (game sends it null too)");
 
-            IntPtr cmdObj = auraMonoObjectNew(this.auraMonoRootDomain, this.carpetStampCommandClass);
-            if (cmdObj == IntPtr.Zero)
+            // Type is int, NetId and OperateMethod are uint on the command — the shared sender takes
+            // the write width from each value's runtime type, so these three casts are load-bearing.
+            // OperateMethod keeps its unchecked cast: skill ids arrive as int and must reinterpret,
+            // not range-check.
+            if (!this.TryAuraSendCommand("XDT.Scene.Shared.Modules.Build.UgcOperateCommand",
+                    new Dictionary<string, object>
+                    {
+                        ["Type"] = ugcTypeValue,
+                        ["NetId"] = carpetNetId,
+                        ["OperateMethod"] = unchecked((uint)skillId),
+                    },
+                    AuraChannelReliable, true, out status))
             {
-                status = "command alloc failed.";
                 CarpetStampLog("Send " + actionLabel + " failed: " + status);
                 return false;
             }
 
-            uint pin = AuraMonoPinNew(cmdObj);
-            try
-            {
-                int typeValue = ugcTypeValue;
-                uint netIdValue = carpetNetId;
-                uint operateValue = unchecked((uint)skillId);
-                auraMonoFieldSetValue(cmdObj, this.carpetStampFieldType, (IntPtr)(&typeValue));
-                auraMonoFieldSetValue(cmdObj, this.carpetStampFieldNetId, (IntPtr)(&netIdValue));
-                auraMonoFieldSetValue(cmdObj, this.carpetStampFieldOperateMethod, (IntPtr)(&operateValue));
-
-                IntPtr cmdPtr = auraMonoObjectUnbox(cmdObj);
-                if (cmdPtr == IntPtr.Zero)
-                {
-                    status = "command unbox failed.";
-                    CarpetStampLog("Send " + actionLabel + " failed: " + status);
-                    return false;
-                }
-
-                int needAuthed = 1;
-                int channel = CarpetStampChannelReliable;
-                IntPtr* args = stackalloc IntPtr[3];
-                args[0] = cmdPtr;
-                args[1] = (IntPtr)(&needAuthed);
-                args[2] = (IntPtr)(&channel);
-
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(this.carpetStampInflatedSendMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    string excText = this.TryGetMonoStringMember(exc, "Message", out string msg) && !string.IsNullOrWhiteSpace(msg)
-                        ? msg
-                        : ("exception 0x" + exc.ToInt64().ToString("X"));
-                    status = "SendCommand threw: " + excText;
-                    CarpetStampLog("Send " + actionLabel + " failed: " + status);
-                    return false;
-                }
-
-                status = actionLabel + " sent (netId=" + carpetNetId + ", skill=" + skillId + ").";
-                CarpetStampLog("Send " + actionLabel + " OK.");
-                return true;
-            }
-            finally
-            {
-                AuraMonoPinFree(pin);
-            }
+            status = actionLabel + " sent (netId=" + carpetNetId + ", skill=" + skillId + ").";
+            CarpetStampLog("Send " + actionLabel + " OK.");
+            return true;
         }
 
         // Single step-on: the PlayerEnter skill → server AddBuff (Slippery Rug: 1003, +20% speed, no expiry).

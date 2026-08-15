@@ -20,8 +20,7 @@ namespace HeartopiaMod
             if (this.stealthBlockGetMapSpotsMethod != IntPtr.Zero
                 && this.stealthBlockTryGetShortIdMethod != IntPtr.Zero
                 && this.stealthBlockIsBlockedMethod != IntPtr.Zero
-                && this.stealthBlockBlockSendMethod != IntPtr.Zero
-                && this.stealthBlockUnblockSendMethod != IntPtr.Zero
+                && this.stealthBlockSendValidated
                 && this.stealthBlockSpotUsageIdOffset >= 0)
             {
                 return true;
@@ -115,26 +114,25 @@ namespace HeartopiaMod
                     }
                 }
 
-                if (this.stealthBlockSendOpenMethod == IntPtr.Zero)
+                if (!this.stealthBlockSendValidated)
                 {
-                    IntPtr webRequest = this.FindAuraMonoClassInImages(
-                        "XDTDataAndProtocol.ProtocolService", "WebRequestUtility", StealthBlockProtocolImages);
-                    if (webRequest == IntPtr.Zero)
-                    {
-                        webRequest = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.WebRequestUtility");
-                    }
-                    if (webRequest != IntPtr.Zero)
-                    {
-                        this.stealthBlockSendOpenMethod = this.FindAuraMonoMethodOnHierarchy(webRequest, "SendCommand", 3);
-                    }
+                    // Both commands proved end-to-end without sending: resolved, inflated,
+                    // arity-checked, allocated, fields set, unboxed. Blocking is the one send in this
+                    // mod that cannot be walked back — it deletes the friendship on the way — so the
+                    // readiness gate has to be something stronger than "the pointers are non-null",
+                    // and it has to cost nothing to be wrong.
+                    this.stealthBlockSendValidated =
+                        this.TryValidateAuraCommand(StealthBlockBlockCommand,
+                            new Dictionary<string, object>
+                            {
+                                ["ShortId"] = 0L,
+                                ["Reason"] = StealthBlockReasonDefault,
+                            },
+                            out _)
+                        && this.TryValidateAuraCommand(StealthBlockUnblockCommand,
+                            new Dictionary<string, object> { ["ShortId"] = 0L },
+                            out _);
                 }
-
-                this.ResolveStealthBlockCommand("BlockPlayerCommand", ref this.stealthBlockBlockCmdClass,
-                    ref this.stealthBlockBlockSendMethod, ref this.stealthBlockBlockShortIdField, "ShortId",
-                    ref this.stealthBlockBlockReasonField, "Reason");
-                this.ResolveStealthBlockCommand("UnblockPlayerCommand", ref this.stealthBlockUnblockCmdClass,
-                    ref this.stealthBlockUnblockSendMethod, ref this.stealthBlockUnblockShortIdField, "ShortId",
-                    ref this.stealthBlockBlockReasonField, null);
 
                 if (this.stealthBlockSpotUsageIdOffset < 0)
                 {
@@ -146,8 +144,7 @@ namespace HeartopiaMod
                     && this.stealthBlockGetFriendsCountMethod != IntPtr.Zero
                     && this.stealthBlockTryGetShortIdMethod != IntPtr.Zero
                     && this.stealthBlockIsBlockedMethod != IntPtr.Zero
-                    && this.stealthBlockBlockSendMethod != IntPtr.Zero
-                    && this.stealthBlockUnblockSendMethod != IntPtr.Zero
+                    && this.stealthBlockSendValidated
                     && this.stealthBlockSpotUsageIdOffset >= 0;
 
                 if (!ready && !this.stealthBlockResolveFailedLogged)
@@ -158,8 +155,7 @@ namespace HeartopiaMod
                         + " shortId=" + (this.stealthBlockTryGetShortIdMethod != IntPtr.Zero)
                         + " friend=" + (this.stealthBlockFriendLevelMethod != IntPtr.Zero)
                         + " isBlocked=" + (this.stealthBlockIsBlockedMethod != IntPtr.Zero)
-                        + " block=" + (this.stealthBlockBlockSendMethod != IntPtr.Zero)
-                        + " unblock=" + (this.stealthBlockUnblockSendMethod != IntPtr.Zero)
+                        + " sends=" + this.stealthBlockSendValidated
                         + " spotOffsets=" + this.stealthBlockSpotUsageIdOffset);
                 }
 
@@ -173,49 +169,6 @@ namespace HeartopiaMod
                     ModLogger.Msg("[StealthBlock] Resolve threw: " + ex.Message);
                 }
                 return false;
-            }
-        }
-
-        private void ResolveStealthBlockCommand(string shortName, ref IntPtr cmdClass, ref IntPtr sendMethod,
-            ref IntPtr shortIdField, string shortIdName, ref IntPtr reasonField, string reasonName)
-        {
-            if (sendMethod != IntPtr.Zero || this.stealthBlockSendOpenMethod == IntPtr.Zero)
-            {
-                return;
-            }
-
-            if (cmdClass == IntPtr.Zero)
-            {
-                cmdClass = this.FindAuraMonoClassInImages(
-                    "XDT.Scene.Shared.Modules.Social.BlockList", shortName, StealthBlockCommandImages);
-                if (cmdClass == IntPtr.Zero)
-                {
-                    cmdClass = this.FindAuraMonoClassByFullName("XDT.Scene.Shared.Modules.Social.BlockList." + shortName);
-                }
-            }
-
-            if (cmdClass == IntPtr.Zero)
-            {
-                return;
-            }
-
-            if (shortIdField == IntPtr.Zero)
-            {
-                shortIdField = this.FindAuraMonoFieldOnHierarchy(cmdClass, shortIdName);
-            }
-            if (reasonName != null && reasonField == IntPtr.Zero)
-            {
-                reasonField = this.FindAuraMonoFieldOnHierarchy(cmdClass, reasonName);
-            }
-            if (shortIdField == IntPtr.Zero || (reasonName != null && reasonField == IntPtr.Zero))
-            {
-                return;
-            }
-
-            if (this.TryInstantCatchInflateAuraSendCommand(this.stealthBlockSendOpenMethod, cmdClass, out IntPtr inflated)
-                && inflated != IntPtr.Zero)
-            {
-                sendMethod = inflated;
             }
         }
 
@@ -444,69 +397,36 @@ namespace HeartopiaMod
             // fetch purely so the server can also drop the follow relation; false means "do not
             // touch follows", which is both cheaper (no per-player profile round trip) and less
             // destructive than what the vanilla path does.
-            return this.TryStealthBlockSendCommand(this.stealthBlockBlockSendMethod, this.stealthBlockBlockCmdClass,
-                this.stealthBlockBlockShortIdField, this.stealthBlockBlockReasonField, shortId, StealthBlockReasonDefault, "block");
+            // ShortId is Int64 and Reason is an int-backed enum — the shared sender takes the write
+            // width from each value's runtime type, so the L suffix is load-bearing.
+            return this.TryStealthBlockSendCommand(StealthBlockBlockCommand,
+                new Dictionary<string, object>
+                {
+                    ["ShortId"] = shortId,
+                    ["Reason"] = StealthBlockReasonDefault,
+                },
+                shortId, "block");
         }
 
         private bool TryStealthBlockSendUnblock(long shortId)
         {
-            return this.TryStealthBlockSendCommand(this.stealthBlockUnblockSendMethod, this.stealthBlockUnblockCmdClass,
-                this.stealthBlockUnblockShortIdField, IntPtr.Zero, shortId, 0, "unblock");
+            return this.TryStealthBlockSendCommand(StealthBlockUnblockCommand,
+                new Dictionary<string, object> { ["ShortId"] = shortId },
+                shortId, "unblock");
         }
 
-        private unsafe bool TryStealthBlockSendCommand(IntPtr sendMethod, IntPtr cmdClass, IntPtr shortIdField,
-            IntPtr reasonField, long shortId, int reason, string label)
+        private bool TryStealthBlockSendCommand(string commandFullName, IDictionary<string, object> fields,
+            long shortId, string label)
         {
-            if (sendMethod == IntPtr.Zero || cmdClass == IntPtr.Zero || shortIdField == IntPtr.Zero
-                || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            if (!this.TryAuraSendCommand(commandFullName, fields, AuraChannelReliable, true, out string status))
             {
+                // Logged for every failure, not just a thrown one: a block that quietly did not go
+                // out leaves the roster believing it did.
+                ModLogger.Msg("[StealthBlock] " + label + " send failed for shortId=" + shortId + ": " + status);
                 return false;
             }
 
-            IntPtr cmdObj = auraMonoObjectNew(this.auraMonoRootDomain, cmdClass);
-            if (cmdObj == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            uint pin = AuraMonoPinNew(cmdObj);
-            try
-            {
-                long shortIdValue = shortId;
-                auraMonoFieldSetValue(cmdObj, shortIdField, (IntPtr)(&shortIdValue));
-                if (reasonField != IntPtr.Zero)
-                {
-                    int reasonValue = reason;
-                    auraMonoFieldSetValue(cmdObj, reasonField, (IntPtr)(&reasonValue));
-                }
-
-                IntPtr cmdPtr = auraMonoObjectUnbox(cmdObj);
-                if (cmdPtr == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                int needAuthed = 1;
-                int channel = StealthBlockChannelReliable;
-                IntPtr* args = stackalloc IntPtr[3];
-                args[0] = cmdPtr;
-                args[1] = (IntPtr)(&needAuthed);
-                args[2] = (IntPtr)(&channel);
-
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(sendMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    ModLogger.Msg("[StealthBlock] " + label + " send threw for shortId=" + shortId);
-                    return false;
-                }
-
-                return true;
-            }
-            finally
-            {
-                AuraMonoPinFree(pin);
-            }
+            return true;
         }
     }
 }
