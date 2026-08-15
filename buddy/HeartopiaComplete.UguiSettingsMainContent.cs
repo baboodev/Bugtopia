@@ -272,39 +272,11 @@ namespace HeartopiaMod
                 rowY += mirrorNoteH + mirrorGap;
             }
 
-#if FEATURE_MCP
-            // MCP agent bridge privileges. Rendered ONLY while the bridge is actually listening, i.e.
-            // when the %LocalLow%/Bugtopia/mcp marker opened the channel this session — no marker, no
-            // row, exactly like every other part of the feature.
-            //
-            // The split is deliberate: the marker authorises the CHANNEL, these authorise what it may
-            // DO. Session-only and never written to config — a privilege that survives a restart is
-            // one nobody remembers granting.
-            if (McpBridge.Listening)
-            {
-                const float mcpTogH = 24f;
-                float mcpW = w - pad * 2f;
-                string mcpNoteText = this.L("Agent bridge is listening on 127.0.0.1:") + McpBridge.Port
-                    + this.L(". Writes let it change game state; unsafe additionally allows raw invokes and hot-loaded plugins, which can crash the game. Session only — never saved.");
-                GameObject mcpNote = this.CreateUguiMutedLabel(block.transform, "McpNote", mcpNoteText, 12f);
-                this.TrySetUguiLabelWrapped(mcpNote);
-                float mcpNoteH = this.MeasureUguiPicturesWrappedHeight(mcpNote, mcpNoteText, mcpW, 52f, out _);
-                PlaceUguiTopLeft(mcpNote, pad, rowY, mcpW, mcpNoteH);
-                rowY += mcpNoteH + 4f;
-
-                Toggle mcpWrites = this.CreateUguiCheckbox(block.transform, "McpAllowWrites",
-                    this.L("MCP: allow write ops"), McpBridge.AllowWrites,
-                    v => McpBridge.SetPrivileges(v, McpBridge.AllowUnsafe));
-                PlaceUguiTopLeft(mcpWrites.gameObject, pad, rowY, mcpW, mcpTogH);
-                rowY += mcpTogH + 2f;
-
-                Toggle mcpUnsafe = this.CreateUguiCheckbox(block.transform, "McpAllowUnsafe",
-                    this.L("MCP: allow unsafe ops (plugins, raw invokes)"), McpBridge.AllowUnsafe,
-                    v => McpBridge.SetPrivileges(McpBridge.AllowWrites, v));
-                PlaceUguiTopLeft(mcpUnsafe.gameObject, pad, rowY, mcpW, mcpTogH);
-                rowY += mcpTogH + 8f;
-            }
-#endif
+            // MCP agent-bridge privileges USED TO BE HERE. They moved to the Agent tab
+            // (HeartopiaComplete.UguiAgentContent.cs), which only exists while the bridge is
+            // listening — putting a bridge control on a page every user opens meant a permanently
+            // conditional row in the middle of an otherwise static list. Nothing is left behind on
+            // purpose: the sidebar shows the Agent tab exactly when those toggles are meaningful.
 
             handle.Bindings = BuildUguiLoggingToggleBindings();
             if (handle.Bindings.Length != LoggingTabRowCount)

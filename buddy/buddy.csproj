@@ -516,6 +516,7 @@
     <Compile Include="McpOps.Plugins.cs" />
     <Compile Include="McpForensics.cs" />
     <Compile Include="McpQuitSignal.cs" />
+    <Compile Include="HeartopiaComplete.UguiAgentContent.cs" />
   </ItemGroup>
 
   <ItemGroup>

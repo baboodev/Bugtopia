@@ -98,6 +98,67 @@ namespace HeartopiaMod.Plugins
         /// EventCenter subscriptions. AGENTS.md §7 puts events ahead of polling for anything that
         /// reacts to a state change, so this is what makes that rule testable from a snippet.
         IEventsApi Events { get; }
+
+        /// A page of the plugin's own controls in the mod menu's Agent tab. REMOVED AUTOMATICALLY on
+        /// unload — the same reason IEventsApi exists rather than letting plugins wire themselves in.
+        IUiApi Ui { get; }
+    }
+
+    /// Putting a plugin's own controls in the mod menu.
+    ///
+    /// A page is a RETAINED MODEL, not a pile of GameObjects: the host stores what you asked for and
+    /// renders it whenever the shell exists. That is why AddPage works before the menu has ever been
+    /// opened, and why pages survive a UI-theme change (which destroys and rebuilds the whole shell).
+    ///
+    /// Every callback you hand over is held behind a host-owned trampoline that is CUT on unload, so
+    /// a button left on screen for the frame it takes Unity to destroy it can no longer reach into
+    /// your assembly. Without that, one click handler would pin the load context forever — the same
+    /// trap that makes threads and detours contract violations.
+    public interface IUiApi
+    {
+        /// Adds a page titled `title`, shown as a sub-tab of the Agent tab next to "Bridge".
+        /// Null only when the mod instance is gone (i.e. during shutdown).
+        IPluginPage AddPage(string title);
+
+        /// False when the mod instance is not available; AddPage would return null.
+        bool IsAvailable { get; }
+    }
+
+    /// One plugin page. Elements stack top to bottom in the order they are added, inside a scroll
+    /// view — there is no layout to manage.
+    ///
+    /// All methods are main-thread only (call them from Load/Tick, or from an event handler, which
+    /// the host also runs on the main thread).
+    public interface IPluginPage
+    {
+        /// Body text. The returned handle updates it later — that is how a page shows live values
+        /// without rebuilding anything.
+        IPluginLabel AddLabel(string text);
+
+        /// Smaller, dimmer text that wraps — for notes and explanations.
+        IPluginLabel AddNote(string text);
+
+        void AddButton(string text, Action onClick);
+
+        void AddToggle(string text, bool initial, Action<bool> onChanged);
+
+        void AddSlider(string label, float min, float max, float initial, bool wholeNumbers,
+                       Action<float> onChanged);
+
+        /// Drops every element and starts the page over. Handles from before are inert afterwards.
+        void Clear();
+
+        /// Removes the page and its sub-tab now, rather than waiting for unload.
+        void Remove();
+
+        /// How many elements the page holds. Capped — see the host log if elements stop appearing.
+        int ElementCount { get; }
+    }
+
+    /// A live handle to one text element.
+    public interface IPluginLabel
+    {
+        void SetText(string text);
     }
 
     /// Subscribing to the game's own event bus.
@@ -228,11 +289,15 @@ namespace HeartopiaMod.Plugins
         string Error { get; }
     }
 
-    /// Bumped when the contract changes shape. The host refuses a plugin built against a different
-    /// major so a stale plugin fails with a clear message instead of a MissingMethodException.
+    /// Bumped when the contract changes shape, so a plugin can log (or check) what it was built
+    /// against. Nothing enforces it: plugins only CONSUME these interfaces, so adding a member is
+    /// binary-compatible for them and a stale plugin keeps working — it just cannot see the new
+    /// surface until it is rebuilt.
+    ///
+    /// v2 added IHostApi.Ui (plugin pages in the Agent tab).
     public static class PluginSdk
     {
-        public const int Version = 1;
+        public const int Version = 2;
     }
 }
 #endif

@@ -53,6 +53,10 @@ on any code path. The extension is ignored (`mcp`, `mcp.txt`, `mcp.on` all count
 hides known extensions. No marker ⇒ no listener, no bound port, no op registry, and one bool test
 per frame. Deleting it mid-session does not stop that session — it takes effect on the next launch.
 
+With the marker, the mod menu grows an **Agent** tab at the bottom of the sidebar: the bridge's live
+status, its write/unsafe toggles, and a sub-tab for each page a sandbox plugin has added. Without it
+the tab is not in the sidebar at all and cannot be selected.
+
 **3 — Build and register the bridge.**
 
 ```bash
@@ -223,6 +227,30 @@ miserable — the plugin loads, works, "unloads", and the process quietly grows.
 reported at once so they can be fixed in one pass.
 
 Measured: 20 load→tick→call→unload cycles, 0 failures, 0 leaks, ≤240 ms to confirm collection.
+
+### A plugin's own page in the menu
+
+`host.Ui.AddPage("title")` puts a sub-tab next to **Agent → Bridge** and returns an `IPluginPage`:
+`AddLabel` / `AddNote` / `AddButton` / `AddToggle` / `AddSlider`, plus `Clear` and `Remove`.
+`AddLabel` and `AddNote` return an `IPluginLabel` whose `SetText` updates that line in place — which
+is how a page shows live values. Elements stack in the order added, inside a scroll view; there is
+no layout to manage and a per-page cap (150) turns "add a row every frame" into one log line instead
+of a leak.
+
+Two things make this safe to hand to code that can vanish at any moment:
+
+- **The page is a retained model, not GameObjects.** So `AddPage` works before the menu has ever
+  been opened (the shell is built lazily on the first hotkey press), and pages survive
+  `RebuildUguiShellForTheme`, which destroys and rebuilds the entire window on a colour change.
+- **Every callback goes through a host-owned trampoline that is cut on unload.** A plugin's `Action`
+  captures the plugin instance; handing it straight to a `Button` would be the host holding the
+  plugin — the exact reference direction that makes a context uncollectible, and the nastiest
+  version of it, because the button sits there looking functional. The page and its sub-tab are
+  removed from `HostApi.RevokeAll`, so this happens whether or not the plugin cleaned up after
+  itself.
+
+Verified end to end: a plugin with a toggle, two buttons and a live label loaded, ticked 1974 times,
+and unloaded — `'sample' unloaded and collected after 1 GC pass(es)`, page and sub-tab gone.
 
 ---
 
@@ -471,9 +499,11 @@ This is a remote-code-execution channel into the game process. It is treated as 
   code writes whatever it likes, so requiring both for `plugin.load` was false granularity that only
   produced a confusing refusal for anyone who granted the scarier privilege alone.
 - `AllowWrites` / `AllowUnsafe` default to **off even with the marker present** — the marker
-  authorises the channel, not the privileges. They are turned on by a human, in
-  **Settings → Logging**, and that row only exists while the bridge is listening. Session-scoped
-  with no config key, so a privilege cannot survive a restart unnoticed.
+  authorises the channel, not the privileges. They are turned on by a human, in the menu's
+  **Agent → Bridge** page, and that whole tab only exists while the bridge is listening.
+  Session-scoped with no config key, so a privilege cannot survive a restart unnoticed. The two
+  checkboxes move together in both directions, because the op gate treats them as the ladder above:
+  showing "writes off" while unsafe was on would misdescribe what the bridge actually accepts.
 - No new IL2CPP `.text` patches: AGENTS.md §1 still holds.
 
 ---

@@ -229,7 +229,13 @@ namespace HeartopiaMod
             this.ProcessUguiShellRadarMainOnUpdate();
             this.ProcessUguiShellRadarSettingsOnUpdate();
             this.ProcessUguiShellMusicOnUpdate();
+            this.ProcessUguiShellMcpOnUpdate();
         }
+
+        // Implemented in HeartopiaComplete.UguiAgentContent.cs, which is #if FEATURE_MCP. An
+        // unimplemented partial method removes its CALL SITES too, so a non-MCP build costs nothing
+        // here — the same idiom HeartopiaComplete.Mcp.cs uses for the bridge's own frame hooks.
+        partial void ProcessUguiShellMcpOnUpdate();
 
         // Phase 2e: live re-sync of the shell scale while the (still-IMGUI) Settings→Main
         // "UI Scale" slider edits the shared persisted uiScale. Reading GetUiScale() every frame
@@ -424,7 +430,7 @@ namespace HeartopiaMod
                     this.L("Self"), this.L("Resource Gathering"), this.L("Features"),
                     this.L("New Features"), this.L("Radar"), this.L("Teleport"),
                     this.L("Bag / Warehouse"), this.L("Research"), this.L("Music"),
-                    this.L("Settings")
+                    this.L("Settings"), this.L("Agent")
                 };
                 string[] tabSubtitles = new string[]
                 {
@@ -433,7 +439,8 @@ namespace HeartopiaMod
                     this.L("World scanner"), this.L("Locations and travel"),
                     this.L("Bulk item tools"), this.L("Institute tools"),
                     this.L("Play .bin note tracks"),
-                    this.L("Menu, theme and hotkeys")
+                    this.L("Menu, theme and hotkeys"),
+                    this.L("MCP bridge and sandbox plugins")
                 };
                 string[][] subTabLabels = new string[][]
                 {
@@ -446,7 +453,9 @@ namespace HeartopiaMod
                     new string[0], // Bag / Warehouse — no sub-tabs
                     new string[0], // Research — no sub-tabs
                     new string[0], // Music — no sub-tabs
-                    new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging"), this.L("Game Keys") }
+                    new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging"), this.L("Game Keys") },
+                    new string[0]  // Agent — sub-tabs are built at RUNTIME (plugins come and go), so
+                                   // it takes the no-subs branch and owns its own rebuildable bar.
                 };
 
                 shell = new UguiShellHandle();
@@ -920,6 +929,16 @@ namespace HeartopiaMod
                             {
                                 this.BuildUguiShellMusicContent(container.transform, 0f, 0f, contentColW, contentH);
                             }
+#if FEATURE_MCP
+                            // Agent (HeartopiaComplete.UguiAgentContent.cs). Gated on tabUnlocked for
+                            // the same reason Music is: the builder is not free (it renders every
+                            // plugin page that already exists), and a tab the sidebar cannot reach
+                            // has nothing to render into.
+                            else if (i == UguiShellMcpTabIndex && tabUnlocked)
+                            {
+                                this.BuildUguiShellMcpContent(container.transform, 0f, 0f, contentColW, contentH, mainW);
+                            }
+#endif
                             // Every sub-less tab has a real builder above (the migration is
                             // complete); an unmatched tab would simply show an empty container.
                             shell.SubTabBars.Add(null);
@@ -1224,6 +1243,18 @@ namespace HeartopiaMod
             if (displayIndex == UguiShellMusicTabIndex)
             {
                 return BetaEnabled;
+            }
+            if (displayIndex == UguiShellMcpTabIndex)
+            {
+                // Same "fixed for the session" property the beta gate relies on: McpBridge.Listening
+                // is decided at startup from the marker file, and the shell is built lazily on the
+                // first hotkey press — long after. Without the marker (or without -p:Mcp=true) the
+                // tab exists as an empty container nothing can select, exactly like a locked tab.
+#if FEATURE_MCP
+                return McpBridge.Listening;
+#else
+                return false;
+#endif
             }
             return true;
         }

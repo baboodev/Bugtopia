@@ -36,6 +36,14 @@ namespace HeartopiaMod
         // indexed by display position, so a music-note glyph was inserted at 8 to match.
         private const int UguiShellMusicTabIndex = 8;           // Music (internal id 10)
         private const int UguiShellSettingsTabIndex = 9;        // Settings (internal id 7)
+
+        // Agent (HeartopiaComplete.UguiAgentContent.cs) — the MCP bridge's own tab, visible only
+        // while the bridge is listening. APPENDED after Settings rather than inserted before it, so
+        // that unlike the Music insertion above, not one existing display position moves: this tab
+        // comes and goes with a marker file and a build flag, and an index that shifts with either
+        // would put every constant in this file at the mercy of how the binary was compiled.
+        // It also belongs at the bottom on merit — it is a developer surface, not a feature.
+        private const int UguiShellMcpTabIndex = 10;            // Agent (internal id 11)
         private const int UguiShellSettingsMainSubIndex = 0;    // "Main" within Settings' subs (round 2)
         private const int UguiShellSettingsKeybindsSubIndex = 1; // "Keybinds" within Settings' subs — matches
                                                                  // settingsSubTab == 1 (HeartopiaComplete.cs:2424;

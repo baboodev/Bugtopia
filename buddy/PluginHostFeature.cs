@@ -522,6 +522,31 @@ namespace HeartopiaMod
 
             private EventsApi events;
 
+            public IUiApi Ui => this.ui ??= new UiApi(this.id);
+
+            private UiApi ui;
+
+            // Stateless apart from the id: the page objects themselves live in the mod (they are
+            // Unity-facing and must survive a theme rebuild), so this cannot become a second place
+            // that holds plugin delegates.
+            private sealed class UiApi : IUiApi
+            {
+                private readonly string pluginId;
+
+                internal UiApi(string pluginId)
+                {
+                    this.pluginId = pluginId;
+                }
+
+                public bool IsAvailable => HeartopiaComplete.Instance != null;
+
+                public IPluginPage AddPage(string title)
+                {
+                    HeartopiaComplete mod = HeartopiaComplete.Instance;
+                    return mod == null ? null : mod.AddMcpPluginPage(this.pluginId, title);
+                }
+            }
+
             // Carries the plugin id so RevokeAll can find exactly this plugin's handlers, and
             // nothing else: one plugin unloading must not silence another's subscriptions.
             private sealed class EventsApi : IEventsApi
@@ -759,6 +784,23 @@ namespace HeartopiaMod
 
                 this.coroutines.Clear();
                 this.state.Clear();
+
+                // Menu pages, and with them every click/toggle/slider callback the plugin handed
+                // over. A live Button holding a plugin delegate pins the load context just as surely
+                // as a coroutine iterator does — and unlike the coroutine it stays on screen looking
+                // functional, so this must run whether or not the plugin cleaned up after itself.
+                try
+                {
+                    int pages = HeartopiaComplete.Instance?.RemoveMcpPluginPages(this.id) ?? 0;
+                    if (pages > 0)
+                    {
+                        ModLogger.Msg("[Plugin:" + this.id + "] removed " + pages + " menu page(s).");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Warning("[Plugin:" + this.id + "] page removal failed: " + ex.Message);
+                }
 
                 // The engine keeps its registration forever — only this plugin's callbacks go. A
                 // handler left behind would be a plugin-typed delegate held by the host, i.e. the

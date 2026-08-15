@@ -8,7 +8,8 @@ namespace SamplePlugin
 {
     // Reference sandbox plugin. Exercises every part of the contract that matters for hot reload:
     // a Tick, a host-managed coroutine (the classic thing that pins a load context when it is not
-    // revoked), and a Call entry point for `plugin.call`.
+    // revoked), a page of its own controls in the menu's Agent tab, and a Call entry point for
+    // `plugin.call`.
     //
     // Edit, rebuild, `plugin.load` again with the same id — the host unloads the previous version
     // first. No game restart.
@@ -18,6 +19,8 @@ namespace SamplePlugin
         private long ticks;
         private long coroutineBeats;
         private DateTime loadedUtc;
+        private IPluginLabel liveLine;
+        private bool countTicks = true;
 
         public void Load(IHostApi api)
         {
@@ -29,16 +32,56 @@ namespace SamplePlugin
             // surviving iterator would keep this whole assembly's load context alive forever (the
             // iterator is a type from THIS assembly).
             this.host.StartCoroutine(this.Heartbeat());
+
+            this.BuildPage();
+        }
+
+        // The page is REMOVED FOR US on unload, callbacks and all — which is the only reason a
+        // button may safely close over `this`. Nothing here needs undoing in Unload().
+        private void BuildPage()
+        {
+            IPluginPage page = this.host.Ui.AddPage("Sample Probe");
+            if (page == null)
+            {
+                return; // mod shutting down
+            }
+
+            page.AddNote("Everything on this page belongs to the sample plugin. Unload it and the "
+                         + "page, its sub-tab and these handlers go with it.");
+            this.liveLine = page.AddLabel("ticks 0 · beats 0");
+            page.AddToggle("Count ticks", this.countTicks, v =>
+            {
+                this.countTicks = v;
+                this.host.Log("countTicks -> " + v);
+            });
+            page.AddButton("Log stats", () => this.host.Log(this.Stats()));
+            page.AddButton("Toast position", () =>
+            {
+                this.host.Toast(this.host.TryGetPlayerPosition(out Vector3 p)
+                    ? "at " + p.ToString("F1")
+                    : "no player anchor");
+            });
         }
 
         public void Tick()
         {
-            this.ticks++;
+            if (this.countTicks)
+            {
+                this.ticks++;
+            }
+
+            // SetText in place, never a new row: the host caps elements per page precisely because
+            // "add a line every frame" is the mistake this makes obvious.
+            if (this.liveLine != null && (this.ticks % 30) == 0)
+            {
+                this.liveLine.SetText("ticks " + this.ticks + " · beats " + this.coroutineBeats);
+            }
         }
 
         public void Unload()
         {
             this.host?.Log("unloading after " + this.ticks + " ticks, " + this.coroutineBeats + " beats");
+            this.liveLine = null;
             this.host = null;
         }
 

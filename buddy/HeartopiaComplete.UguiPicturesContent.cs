@@ -279,7 +279,18 @@ namespace HeartopiaMod
                     }
                 }
 
-                bool sane = h > 0f && h < 600f && !float.IsNaN(h) && !float.IsInfinity(h);
+                // BUG FIX (2026-08-15): the floor used to be `h > 0`, which is not the same test as
+                // "TMP actually laid this out". A label built on an inactive sub-tab has never
+                // Awoken, and TMP answers ~2px for it — a positive, finite, entirely believable
+                // number that sailed through this gate, so the caller placed a 6px-tall paragraph
+                // and the text was invisible. Found on the Agent tab's note, then confirmed on
+                // Settings → Logging's BepInEx mirror note, which has been clipped the same way
+                // since it shipped: this gate is why "ok=false lets the slow tick retry" never
+                // actually retried. One line of 12pt text cannot be under 8px, so anything smaller
+                // for a non-empty string is a measurement that has not happened yet, not a short
+                // paragraph — report it as such and let the caller keep its fallback.
+                float floor = string.IsNullOrEmpty(text) ? 0f : 8f;
+                bool sane = h > floor && h < 600f && !float.IsNaN(h) && !float.IsInfinity(h);
                 if (sane)
                 {
                     ok = true;
