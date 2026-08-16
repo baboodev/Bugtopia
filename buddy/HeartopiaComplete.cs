@@ -737,6 +737,7 @@ namespace HeartopiaMod
             this.ProcessAutoBubbleCollectOnUpdate();
             Breadcrumbs.Phase("ou.animskip");
             this.ProcessShowOffBypassOnUpdate();
+            this.ProcessEmoteUnlockOnUpdate();
             this.ProcessCraftAnimationSkipOnUpdate();
             this.ProcessTutorialBlockOnUpdate();
             this.ProcessRepairThrowAnimationTrimOnUpdate();

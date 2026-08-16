@@ -231,6 +231,7 @@ namespace HeartopiaMod
             data.bunnyHopEnabled = this.bunnyHopEnabled;
             data.analogMoveBridgeEnabled = this.analogMoveBridgeEnabled;
             data.skipShowOffAnimations = this.skipShowOffAnimations;
+            data.emoteUnlockEnabled = this.emoteUnlockEnabled;
             data.skipCraftDyeAnimations = this.skipCraftDyeAnimations;
             data.autoLearnRecipes = this.autoLearnRecipes;
             data.craftDirectSendEnabled = this.craftDirectSendEnabled;
@@ -577,6 +578,7 @@ namespace HeartopiaMod
             this.bunnyHopEnabled = data.bunnyHopEnabled;
             this.analogMoveBridgeEnabled = data.analogMoveBridgeEnabled;
             this.skipShowOffAnimations = data.skipShowOffAnimations;
+            this.emoteUnlockEnabled = data.emoteUnlockEnabled;
             this.skipCraftDyeAnimations = data.skipCraftDyeAnimations;
             this.autoLearnRecipes = data.autoLearnRecipes;
             this.craftDirectSendEnabled = data.craftDirectSendEnabled;

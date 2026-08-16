@@ -227,6 +227,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Skip Show Off", "Active"));
             }
 
+            if (this.emoteUnlockEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Emote Unlock", this.emoteUnlockStatus));
+            }
+
             if (this.skipCraftDyeAnimations)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Skip Craft/Dye Anim", this.craftAnimSkipStatus));

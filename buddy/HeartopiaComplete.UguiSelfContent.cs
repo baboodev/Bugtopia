@@ -101,6 +101,7 @@ namespace HeartopiaMod
             public Toggle AnalogMoveToggle;
             public GameObject AnalogMoveHint;
             public Toggle SkipShowOffToggle;
+            public Toggle EmoteUnlockToggle;
             public Toggle SkipCraftDyeToggle;
             public Toggle CraftDirectSendToggle;
             public Toggle BlockTutorialsToggle;
@@ -343,6 +344,10 @@ namespace HeartopiaMod
                 this.L("Skip Show Off animations"), this.skipShowOffAnimations,
                 new System.Action<bool>(this.OnUguiSelfSkipShowOffToggled));
 
+            handle.EmoteUnlockToggle = this.CreateUguiCheckbox(scrollContent, "EmoteUnlockToggle",
+                this.L("Unlock all emotes (panel + locked ones playable)"), this.emoteUnlockEnabled,
+                new System.Action<bool>(this.OnUguiSelfEmoteUnlockToggled));
+
             handle.SkipCraftDyeToggle = this.CreateUguiCheckbox(scrollContent, "SkipCraftDyeToggle",
                 this.L("Skip Craft / Dye animations"), this.skipCraftDyeAnimations,
                 new System.Action<bool>(this.OnUguiSelfSkipCraftDyeToggled));
@@ -578,6 +583,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.EmoteUnlockToggle != null)
+            {
+                PlaceUguiTopLeft(handle.EmoteUnlockToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.SkipCraftDyeToggle != null)
             {
                 PlaceUguiTopLeft(handle.SkipCraftDyeToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -646,6 +657,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CustomFovToggle, this.customCameraFOVEnabled);
                 this.SyncUguiToggleFromField(handle.AnalogMoveToggle, this.analogMoveBridgeEnabled);
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
+                this.SyncUguiToggleFromField(handle.EmoteUnlockToggle, this.emoteUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
@@ -1079,6 +1091,19 @@ namespace HeartopiaMod
                 return;
             }
             this.skipShowOffAnimations = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Emote Unlock installs/removes two Mono detours; the feature tick does that work, this only
+        // flips the flag so the toggle can never run native code from a UI callback.
+        private void OnUguiSelfEmoteUnlockToggled(bool value)
+        {
+            if (value == this.emoteUnlockEnabled)
+            {
+                return;
+            }
+
+            this.emoteUnlockEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

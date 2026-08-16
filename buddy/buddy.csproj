@@ -301,6 +301,7 @@
     <Compile Include="UnityLogMirrorSetting.cs" />
     <Compile Include="HookFreeDelegate.cs" />
     <Compile Include="InputRebindFeature.cs" />
+    <Compile Include="EmoteUnlockFeature.cs" />
     <Compile Include="GameKeyBindings.cs" />
     <Compile Include="CameraModeHotkeyGuard.cs" />
     <Compile Include="HeartopiaComplete.UguiGameKeysContent.cs" />

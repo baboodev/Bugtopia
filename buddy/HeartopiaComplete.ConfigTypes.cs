@@ -212,6 +212,7 @@ namespace HeartopiaMod
             public bool bunnyHopEnabled;
             public bool analogMoveBridgeEnabled;
             public bool skipShowOffAnimations;
+            public bool emoteUnlockEnabled;
             public bool skipCraftDyeAnimations;
             public bool autoLearnRecipes;
             public bool craftDirectSendEnabled;
