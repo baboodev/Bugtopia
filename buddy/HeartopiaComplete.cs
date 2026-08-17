@@ -37,6 +37,7 @@ namespace HeartopiaMod
         // Keybinds Management
         private KeyCode keyToggleMenu = KeyCode.Insert;
         private KeyCode keyToggleRadar = KeyCode.None;
+        private KeyCode keyActionPanel = KeyCode.None;
         private KeyCode keyAuraFarm = KeyCode.None;
         private KeyCode keyWaterWeedRadius = KeyCode.None;
         private KeyCode keyAutoFish = KeyCode.None;
@@ -784,6 +785,7 @@ namespace HeartopiaMod
             // shell never opened). Gated on questAssistantWindowVisible ALONE — its IMGUI twin has
             // no menu-state suppression to replicate.
             Breadcrumbs.Phase("ou.uguiquest");
+            this.ProcessUguiActionPanelOnUpdate();
             this.ProcessUguiQuestAssistantWindowOnUpdate();
             // Theme dirty-consumption + debounced SaveUiTheme flush (HeartopiaComplete.UiKit.cs).
             // Used to piggyback on EnsureThemeStyles at the top of OnGUI; with the IMGUI menu
@@ -859,6 +861,10 @@ namespace HeartopiaMod
                 {
                     this.ToggleUguiShell();
                     this.blockInputReleaseUntil = Time.unscaledTime + 0.18f;
+                }
+                if (this.TryGetModHotkeyDown(this.keyActionPanel))
+                {
+                    this.ToggleActionPanel();
                 }
                 if (this.TryGetModHotkeyDown(this.keyToggleRadar))
                 {

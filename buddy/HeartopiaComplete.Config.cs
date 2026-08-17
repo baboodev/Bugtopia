@@ -109,6 +109,7 @@ namespace HeartopiaMod
         {
             data.keyToggleMenu = (int)this.keyToggleMenu;
             data.keyToggleRadar = (int)this.keyToggleRadar;
+            data.keyActionPanel = (int)this.keyActionPanel;
             data.keyAuraFarm = (int)this.keyAuraFarm;
             data.keyWaterWeedRadius = (int)this.keyWaterWeedRadius;
             data.keyAutoFish = (int)this.keyAutoFish;
@@ -422,6 +423,7 @@ namespace HeartopiaMod
             if (data == null) return;
             this.keyToggleMenu = (KeyCode)data.keyToggleMenu;
             this.keyToggleRadar = (KeyCode)data.keyToggleRadar;
+            this.keyActionPanel = (KeyCode)data.keyActionPanel;
             this.keyAuraFarm = (KeyCode)data.keyAuraFarm;
             this.keyWaterWeedRadius = (KeyCode)data.keyWaterWeedRadius;
             this.keyAutoFish = (KeyCode)data.keyAutoFish;
@@ -918,6 +920,7 @@ namespace HeartopiaMod
                     {
                         if (line.Contains("keyToggleMenu")) this.keyToggleMenu = (KeyCode)GetJsonInt(line, "\"keyToggleMenu\":");
                         else if (line.Contains("keyToggleRadar")) this.keyToggleRadar = (KeyCode)GetJsonInt(line, "\"keyToggleRadar\":");
+                        else if (line.Contains("keyActionPanel")) this.keyActionPanel = (KeyCode)GetJsonInt(line, "\"keyActionPanel\":");
                         else if (line.Contains("keyAuraFarm")) this.keyAuraFarm = (KeyCode)GetJsonInt(line, "\"keyAuraFarm\":");
                         else if (line.Contains("keyAutoFishFarm") || line.Contains("keyAutoFishingTeleport")) this.keyAutoFishingTeleport = (KeyCode)GetJsonInt(line, line.Contains("keyAutoFishFarm") ? "\"keyAutoFishFarm\":" : "\"keyAutoFishingTeleport\":");
                         else if (line.Contains("keyAutoFish")) this.keyAutoFish = (KeyCode)GetJsonInt(line, "\"keyAutoFish\":");
@@ -1106,6 +1109,7 @@ namespace HeartopiaMod
         {
             this.keyToggleMenu = KeyCode.Insert;
             this.keyToggleRadar = KeyCode.None;
+            this.keyActionPanel = KeyCode.None;
             this.keyAuraFarm = KeyCode.None;
             this.keyWaterWeedRadius = KeyCode.None;
             this.keyAutoFish = KeyCode.None;
@@ -1236,6 +1240,7 @@ namespace HeartopiaMod
             {
                 case "Toggle Menu": this.keyToggleMenu = newKey; break;
                 case "Toggle Radar": this.keyToggleRadar = newKey; break;
+                case "Action Panel": this.keyActionPanel = newKey; break;
                 case "Aura Farm": this.keyAuraFarm = newKey; break;
                 case "Water + Weed Radius": this.keyWaterWeedRadius = newKey; break;
                 case "Auto Fish Farm (Auto Teleport)": this.keyAutoFishingTeleport = newKey; break;

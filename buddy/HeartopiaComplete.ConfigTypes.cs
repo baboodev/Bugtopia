@@ -47,6 +47,7 @@ namespace HeartopiaMod
         {
             public int keyToggleMenu;
             public int keyToggleRadar;
+            public int keyActionPanel;
             public int keyAuraFarm;
             public int keyWaterWeedRadius;
             public int keyAutoFish;

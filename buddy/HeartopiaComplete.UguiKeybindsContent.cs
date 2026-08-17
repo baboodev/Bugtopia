@@ -93,6 +93,7 @@ namespace HeartopiaMod
                 {
                     new UguiKeybindRowBinding("Toggle Menu", () => this.keyToggleMenu),
                     new UguiKeybindRowBinding("Toggle Radar", () => this.keyToggleRadar),
+                    new UguiKeybindRowBinding("Action Panel", () => this.keyActionPanel),
                     new UguiKeybindRowBinding("Bypass UI", () => this.keyBypassUI),
                     new UguiKeybindRowBinding("Disable All", () => this.keyDisableAll),
                     new UguiKeybindRowBinding("Inspect Player", () => this.keyInspectPlayer),

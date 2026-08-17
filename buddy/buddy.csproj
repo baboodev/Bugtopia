@@ -302,6 +302,7 @@
     <Compile Include="HookFreeDelegate.cs" />
     <Compile Include="InputRebindFeature.cs" />
     <Compile Include="EmoteUnlockFeature.cs" />
+    <Compile Include="ActionPanelFeature.cs" />
     <Compile Include="ForagingAnimationFeature.cs" />
     <Compile Include="GameKeyBindings.cs" />
     <Compile Include="CameraModeHotkeyGuard.cs" />
@@ -371,6 +372,7 @@
     <Compile Include="HeartopiaComplete.Beta.cs" />
     <Compile Include="HeartopiaComplete.UguiHomelandFarmContent.cs" />
     <Compile Include="HeartopiaComplete.UguiDailyQuestsContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiActionPanelContent.cs" />
     <Compile Include="HeartopiaComplete.UguiQuestAssistantWindowContent.cs" />
     <Compile Include="HeartopiaComplete.UguiFeaturesMainContent.cs" />
     <Compile Include="HeartopiaComplete.UguiFeaturesFoodRepairContent.cs" />
