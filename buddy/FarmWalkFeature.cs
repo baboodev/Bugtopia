@@ -94,7 +94,11 @@ namespace HeartopiaMod
         // 2026-08-16: 0.5 -> 0.8 on request. Still well inside the server's 2 m, and it widens the
         // height budget the walker can accept without the wider fallback below:
         // sqrt(0.8^2 - 0.25^2) = 0.76 m, up from 0.43.
-        private const float FarmWalkArrivalDistance = 0.8f;
+        // 2026-08-17: 0.8 -> 1.2 on request, because the walker was still hopping at nodes it could
+        // already collect from. The height budget is the reason: sqrt(1.2^2 - 0.25^2) = 1.17 m, and
+        // the ore nodes that triggered the hopping sit ~1.3 m off in Y (see the OrePositions table
+        // and TryRefineFarmWalkTargetHeight, which closes the rest). Still inside the server's 2 m.
+        private const float FarmWalkArrivalDistance = 1.2f;
 
         // The SERVER's rule, not ours: CollectAntiCheating.Distance is 2 m in 3-D, so 1.8 leaves a
         // margin. Used only to decide whether an approach that could not close the HEIGHT should be
@@ -387,6 +391,14 @@ namespace HeartopiaMod
         // farmWalkTrueTarget keeps the real node position: the cooldown stamp and the teleport
         // fallback must both address the NODE, never the offset aim point.
         private float farmWalkAimOffsetY;
+
+        // The node tables (OrePositions and friends) are hand-measured constants recording the BASE
+        // of the resource, and the terrain has moved under some of them: an Ore aim point routinely
+        // sits ~1.3 m below the rock the player ends up standing on. Once, per walk, close enough for
+        // the entity to be streamed in, the aim height is replaced with the resource's REAL y.
+        private bool farmWalkHeightRefined;
+        private const float FarmWalkHeightRefineRange = 8f;   // horizontal distance to try it at
+        private const float FarmWalkHeightRefineMatch = 3f;   // how near the table point the entity must be
         private Vector3 farmWalkTrueTarget;
         private bool farmWalkSkipToScan;
         // Has this walk ever cleared a corner? Gates the start-waypoint exclusion.
@@ -708,6 +720,7 @@ namespace HeartopiaMod
             this.farmWalkBackOffVerticalDir = 1;
             this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
             this.farmWalkProbeUsed = false;   // one probe sweep per walk
+            this.farmWalkHeightRefined = false; // one height refine per walk
             this.farmWalkHopBurstUsed = false; // one hop burst per walk
             this.farmWalkEverAdvanced = this.farmWalkCornerIndex > 0;
             this.farmWalkPrevVerticalHeld = this.farmWalkVerticalHeld;
@@ -1314,7 +1327,15 @@ namespace HeartopiaMod
             {
                 this.SteerFarmWalkToward(selfPos, corner);
             }
-            this.SampleFarmWalkProgress(selfPos, now);
+            // Before the sampler judges the approach, so the arrival/stall tests see the height the
+            // resource is really at rather than the table's.
+            this.TryRefineFarmWalkTargetHeight(selfPos);
+
+            if (this.SampleFarmWalkProgress(selfPos, now))
+            {
+                return true;
+            }
+
             this.ProcessFarmWalkVehicleDismount(selfPos);
             this.autoFarmStatus = "Walking to node (" + remaining.ToString("F0") + "m)...";
             return false;
@@ -1439,11 +1460,13 @@ namespace HeartopiaMod
 
         // Stuck detection is only a safety net for what the graph cannot know about: another player
         // in the doorway, a mesh/collision mismatch, a prop spawned since the path was authored.
-        private void SampleFarmWalkProgress(Vector3 selfPos, float now)
+        // Returns true when it ENDED the walk (arrival taken here), so the tick stops touching a
+        // finished walk in the same frame.
+        private bool SampleFarmWalkProgress(Vector3 selfPos, float now)
         {
             if (now < this.farmWalkNextStuckSampleAt)
             {
-                return;
+                return false;
             }
 
             this.farmWalkNextStuckSampleAt = now + FarmWalkStuckSampleInterval;
@@ -1457,7 +1480,7 @@ namespace HeartopiaMod
             if (progress >= FarmWalkStuckMinProgress)
             {
                 this.farmWalkStuckStrikes = 0;
-                return;
+                return false;
             }
 
             this.farmWalkStuckStrikes++;
@@ -1472,10 +1495,28 @@ namespace HeartopiaMod
             // lines, having given up 1 m short without attempting the one thing that might work.
             if (Distance3D(selfPos, this.farmWalkTarget) <= FarmWalkFinalApproachDistance)
             {
+                // Already collectable, and the only thing left is height we do not need. Jumping at
+                // it cannot help: the node's Y comes from a hand-measured table (OrePositions et al)
+                // that records the BASE of the rock, so the aim point sits under the surface the
+                // player is standing on — the hop lands exactly where it started and reads as the
+                // character trying to climb into the node. Take the arrival instead.
+                if (this.farmWalkAimOffsetY == 0f
+                    && HorizontalDistance(selfPos, this.farmWalkTarget) <= FarmWalkCollectDistance
+                    && Distance3D(selfPos, this.farmWalkTarget) <= FarmWalkServerCollectRadius)
+                {
+                    this.FinishFarmWalk("arrived "
+                        + HorizontalDistance(selfPos, this.farmWalkTarget).ToString("F2") + "m horizontally ("
+                        + Distance3D(selfPos, this.farmWalkTarget).ToString("F2") + "m 3-D, dy="
+                        + (this.farmWalkTarget.y - selfPos.y).ToString("F1")
+                        + "m) — inside the server's collect radius, not jumping at the height",
+                        teleport: false);
+                    return true;
+                }
+
                 if (this.farmWalkStuckStrikes < 2 && this.farmWalkJumpsUsed < FarmWalkMaxJumpsPerWalk)
                 {
                     this.TryFarmWalkJump("final approach");
-                    return;
+                    return false;
                 }
 
                 // Diagnostics on the vertical state. A stall here is either "we never asked to
@@ -1492,7 +1533,7 @@ namespace HeartopiaMod
                     if (!this.farmWalkHopBurstUsed)
                     {
                         this.BeginFarmWalkHopBurst(selfPos, now, stallDistance, this.farmWalkTarget);
-                        return;
+                        return false;
                     }
                 }
                 else if (!this.farmWalkProbeUsed)
@@ -1500,7 +1541,7 @@ namespace HeartopiaMod
                     // Underwater the 8-direction sweep stays: there the blocker really is geometry
                     // to swim around, and the player is already moving in three dimensions.
                     this.BeginFarmWalkProbe(selfPos, now, stallDistance, this.farmWalkTarget);
-                    return;
+                    return false;
                 }
 
                 bool swimResolved = this.TryGetFarmWalkSwimLocomotion(out IntPtr stallSwim);
@@ -1516,7 +1557,7 @@ namespace HeartopiaMod
                 this.FinishFarmWalk("final approach not walkable ("
                     + Distance3D(selfPos, this.farmWalkTarget).ToString("F1") + "m, dy="
                     + (this.farmWalkTarget.y - selfPos.y).ToString("F1") + "m)" + vertical, teleport: true);
-                return;
+                return true;
             }
 
             if (this.farmWalkStuckStrikes < FarmWalkStuckStrikeLimit)
@@ -1540,7 +1581,7 @@ namespace HeartopiaMod
                 }
 
                 this.farmWalkNextRepathAt = 0f;
-                return;
+                return false;
             }
 
             if (this.farmWalkStuckStrikes >= FarmWalkStuckStrikeLimit)
@@ -1561,7 +1602,7 @@ namespace HeartopiaMod
                     if (!this.farmWalkIsSwimming && !this.farmWalkHopBurstUsed)
                     {
                         this.BeginFarmWalkHopBurst(selfPos, now, Distance3D(selfPos, wedgeCorner), wedgeCorner);
-                        return;
+                        return false;
                     }
 
                     // UNDERWATER: the 8-direction sweep is the water-side equivalent, and it was
@@ -1572,7 +1613,7 @@ namespace HeartopiaMod
                     if (this.farmWalkIsSwimming && !this.farmWalkProbeUsed)
                     {
                         this.BeginFarmWalkProbe(selfPos, now, Distance3D(selfPos, wedgeCorner), wedgeCorner);
-                        return;
+                        return false;
                     }
                 }
 
@@ -1602,7 +1643,94 @@ namespace HeartopiaMod
                 }
 
                 this.FinishFarmWalk(detail, teleport: true);
+                return true;
             }
+
+            return false;
+        }
+
+        // Replace the aim height with the resource's REAL one, once per walk, when close enough for
+        // the entity to be streamed in.
+        //
+        // The node tables are hand-measured constants and their Y is the BASE of the resource, not
+        // the ground the player can stand on: the Ore entry at (-22.6, 20.1, 131.4) leaves the walk
+        // reporting dy=-1.3 m after the horizontal axis has closed, and the final approach then
+        // spends its jump budget trying to climb into a point buried under the rock. The live
+        // CollectableObjectComponent knows where the thing actually is, so ask it.
+        //
+        // Deliberately matched HORIZONTALLY: height is the axis under suspicion, so including it in
+        // the match would reject exactly the nodes worth correcting.
+        private void TryRefineFarmWalkTargetHeight(Vector3 selfPos)
+        {
+            if (this.farmWalkHeightRefined
+                || this.farmWalkAimOffsetY != 0f    // contamination standoff owns its own height
+                || HorizontalDistance(selfPos, this.farmWalkTarget) > FarmWalkHeightRefineRange)
+            {
+                return;
+            }
+
+            IntPtr collectable = this.FindAuraMonoClassInAllLoadedImages(
+                "CollectableObjectComponent", "XDTLevelAndEntity.Gameplay.Component.Gather");
+            if (collectable == IntPtr.Zero)
+            {
+                this.farmWalkHeightRefined = true;  // class is not here; do not retry every frame
+                return;
+            }
+
+            System.Collections.Generic.List<uint> pins = new System.Collections.Generic.List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(collectable,
+                        out System.Collections.Generic.List<IntPtr> nodes, pins)
+                    || nodes == null)
+                {
+                    return;     // enumeration failed — worth one more try next tick
+                }
+
+                this.farmWalkHeightRefined = true;
+
+                float bestSqr = FarmWalkHeightRefineMatch * FarmWalkHeightRefineMatch;
+                float bestY = 0f;
+                bool found = false;
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    if (!this.TryGetAuraMonoEntityPositionFromComponent(nodes[i], out Vector3 pos))
+                    {
+                        continue;
+                    }
+
+                    float d = HorizontalDistanceSqr(pos, this.farmWalkTarget);
+                    if (d < bestSqr)
+                    {
+                        bestSqr = d;
+                        bestY = pos.y;
+                        found = true;
+                    }
+                }
+
+                if (!found || Mathf.Abs(bestY - this.farmWalkTarget.y) < 0.25f)
+                {
+                    return;     // nothing near, or the table was already right
+                }
+
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": node height "
+                    + this.farmWalkTarget.y.ToString("F1") + "m -> " + bestY.ToString("F1")
+                    + "m from the live entity.");
+
+                this.farmWalkTarget.y = bestY;
+                this.farmWalkTrueTarget.y = bestY;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        private static float HorizontalDistanceSqr(Vector3 a, Vector3 b)
+        {
+            float dx = a.x - b.x;
+            float dz = a.z - b.z;
+            return (dx * dx) + (dz * dz);
         }
 
         // Hop an obstacle. Reuses BunnyHopFeature's Mono jump (OnJumpButton / SetJumpInput pulse on
