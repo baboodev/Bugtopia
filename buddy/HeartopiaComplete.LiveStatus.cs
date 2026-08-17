@@ -232,6 +232,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Emote Unlock", this.emoteUnlockStatus));
             }
 
+            if (this.foragingAnimEnabled && this.autoFarmActive)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Foraging Anim", this.foragingAnimStatus));
+            }
+
             if (this.skipCraftDyeAnimations)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Skip Craft/Dye Anim", this.craftAnimSkipStatus));

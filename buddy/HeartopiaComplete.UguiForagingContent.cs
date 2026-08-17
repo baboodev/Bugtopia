@@ -100,6 +100,7 @@ namespace HeartopiaMod
             public Toggle StealthToggle;          // Stealth Foraging (always visible)
             public GameObject StealthHintLabel;
             public Toggle WalkToggle;             // Walk to Nodes (always visible)
+            public Toggle ForagingAnimToggle;     // Play animations when watched (walk mode only)
             public GameObject WalkHintLabel;
             public Toggle WalkToAreaToggle;       // Walk to Zone Point (shown while Walk to Nodes is on)
             public GameObject WalkToAreaHintLabel;
@@ -314,6 +315,19 @@ namespace HeartopiaMod
                 : this.L("Priority Location: None");
         }
 
+        // Flipping this mid-run is honoured on the next node; the axe is only taken at run start, so
+        // enabling it while foraging leaves the swings unrendered until the next Start Foraging.
+        private void OnUguiForagingAnimToggled(bool value)
+        {
+            if (value == this.foragingAnimEnabled)
+            {
+                return;
+            }
+
+            this.foragingAnimEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
         private int ComputeUguiForagingLayoutSignature()
         {
             return (this.auraFarmEnabled ? 1 : 0)
@@ -487,6 +501,10 @@ namespace HeartopiaMod
             // Walk to Nodes (FarmWalkFeature.cs) — mutually exclusive with Stealth Foraging above,
             // which the handlers enforce in both directions. The speed row below only appears while
             // it is on, so an unused slider never occupies a line.
+            handle.ForagingAnimToggle = this.CreateUguiCheckbox(settings.transform, "ForagingAnimToggle",
+                this.L("Play gathering animations when a player is near"), this.foragingAnimEnabled,
+                new System.Action<bool>(this.OnUguiForagingAnimToggled));
+
             handle.WalkToggle = this.CreateUguiCheckbox(settings.transform, "WalkToggle",
                 this.L("Walk to Nodes"), this.farmWalkToNodeEnabled,
                 new System.Action<bool>(this.OnUguiForagingWalkToggled));
@@ -674,6 +692,8 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.WalkVehicleToggle != null ? handle.WalkVehicleToggle.gameObject : null, walkRows);
             SetUguiGoActive(handle.WalkVehicleHintLabel, walkRows);
 
+            SetUguiGoActive(handle.ForagingAnimToggle != null ? handle.ForagingAnimToggle.gameObject : null, walkRows);
+
             // The distance slider needs BOTH: walking on, and the vehicle actually in use.
             bool vehicleRow = walkRows && this.farmWalkUseVehicleEnabled;
             SetUguiGoActive(handle.WalkVehicleDistanceLabel, vehicleRow);
@@ -691,6 +711,12 @@ namespace HeartopiaMod
                 if (handle.WalkToAreaHintLabel != null)
                 {
                     PlaceUguiTopLeft(handle.WalkToAreaHintLabel, 286f, rowY, panelW - 298f, 28f);
+                }
+
+                rowY += 34f;
+                if (handle.ForagingAnimToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.ForagingAnimToggle.gameObject, 30f, rowY, 320f, 24f);
                 }
 
                 rowY += 34f;
@@ -850,6 +876,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AuraFarmToggle, this.auraFarmEnabled);
                 this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
                 this.SyncUguiToggleFromField(handle.WalkToggle, this.farmWalkToNodeEnabled);
+                this.SyncUguiToggleFromField(handle.ForagingAnimToggle, this.foragingAnimEnabled);
                 this.SyncUguiToggleFromField(handle.WalkToAreaToggle, this.farmWalkToAreaEnabled);
                 this.SyncUguiToggleFromField(handle.WalkVehicleToggle, this.farmWalkUseVehicleEnabled);
                 this.SyncUguiSelfLabelText(handle.WalkVehicleDistanceLabel, ref handle.WalkVehicleDistanceShown,

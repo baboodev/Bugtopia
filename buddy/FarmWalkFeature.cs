@@ -1997,6 +1997,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Decoration only: queues the gathering animation when someone is watching. It never
+            // gates the collect below, which Aura Farm owns.
+            this.NoteForagingAnimArrival(this.farmWalkTarget);
+
             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
             this.autoFarmTimer = 0f;
             this.autoCollectClickedSinceArrival = false;

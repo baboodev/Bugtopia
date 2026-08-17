@@ -1957,8 +1957,24 @@ namespace HeartopiaMod
 
         private void RunAuraCollectWait()
         {
+            // Stand still while the gathering animation still owes swings. Only the HOP is delayed:
+            // the aura keeps sending its collect commands throughout, and every confirmation below
+            // still lands — it is simply read a moment later. Without this the dwell ends ~2 s after
+            // arrival and a three-swing chop (~4.5 s, one whole clip per swing) never finishes.
+            // Bounded by ForagingAnimHoldBudget, so a wedged animator cannot stall the farm.
+            if (this.ShouldHoldFarmNodeForForagingAnim())
+            {
+                this.foragingAnimHoldSpent += Time.unscaledDeltaTime;
+                this.autoFarmStatus = "Collecting... playing the gathering animation";
+                return;
+            }
+
             float now = Time.unscaledTime;
-            float maxWait = Mathf.Max(4f, this.auraCollectWaitTimeout);
+
+            // The held time is not dwell time. autoFarmTimer runs through the hold, so without this
+            // the Collect Wait Max slider would be half spent before the collect is even judged, and
+            // a node that finished normally would report a timeout and get the SHORT retry stamp.
+            float maxWait = Mathf.Max(4f, this.auraCollectWaitTimeout) + this.foragingAnimHoldSpent;
             bool auraIdle = now - this.auraLastSuccessfulCommandAt >= 1.25f;
             bool markerFound;
             string nodeMarkerLabel;
@@ -3037,6 +3053,11 @@ namespace HeartopiaMod
                 this.currentPriorityLocation = this.GetActivePriorityLocation();
                 this.lastTeleportWasPriorityLocation = false;
                 this.priorityRecheckTimer = 0f; // Reset recheck timer
+                // Take the axe now, while we are still standing where the run began — the swing
+                // controller needs a tool in hand, and doing this per node would be a server round
+                // trip each time.
+                this.NoteForagingAnimRunStarted();
+
                 this.AutoFarmLog("Started. activePriorityLocations=" + this.activePriorityLocations.Count
                     + " currentPriorityLocation=" + (this.currentPriorityLocation.HasValue ? this.currentPriorityLocation.Value.ToString() : "none"));
 
@@ -3070,6 +3091,7 @@ namespace HeartopiaMod
             }
             else
             {
+                this.NoteForagingAnimRunStopped();   // give the axe back
                 this.farmState = HeartopiaComplete.AutoFarmState.Idle;
                 this.autoFarmStatus = "READY";
                 this.autoFarmTimer = 0f;
