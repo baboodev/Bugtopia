@@ -91,6 +91,11 @@ namespace HeartopiaMod
                 case "Raspberry": return 40502;
                 case "Stone": return 40021;
                 case "Ore": return 40022;
+                // 40033 Bamboo IS one of the 35 collectable-atlas sprites (docs/RADAR_GAME_MAP.md),
+                // so it pins as a MapResource. Pinning matters more here than for most: bamboo grows
+                // among trees, and the 3 m position match would hand it a Timber icon and cache that
+                // for every other bamboo.
+                case "Bamboo": return 40033;
                 // Daily-roaming advanced collectables: both drop items ARE in the collectable
                 // atlas, so pinning keeps them off the position-match (a 3 m neighbour tree/stone
                 // would otherwise poison the label cache with the wrong icon).
@@ -326,6 +331,13 @@ namespace HeartopiaMod
             public Vector3 Position;
             public bool OnCooldown;  // inCold
             public long ColdEndMs;   // coldEndTime (unix ms; 0 when warm/unreadable)
+            // Entity netId — the key CollectColdEvent is addressed by, so a node's position can be
+            // matched against the verdict the client broadcast for it. 0 when unreadable.
+            public uint NetId;
+            // Entity static id. Carried so a consumer can tell the DYNAMIC BUSH family (mushrooms,
+            // event plants) from trees/stone/berries without a second lookup: only the former needs
+            // the client's broadcast verdict, because only the former grows rather than cooling.
+            public int StaticId;
         }
 
         private readonly List<LiveCollectableCold> liveCollectableColds = new List<LiveCollectableCold>(128);
@@ -1257,6 +1269,71 @@ namespace HeartopiaMod
             }
         }
 
+        // CollectableObjectComponent.get_inCold, cached per component class. Resolved once rather
+        // than per entity: the scan runs over ~150 components every 2 s, and a name lookup walking
+        // the hierarchy for each one is the kind of cost that only shows up in a dense town.
+        private readonly Dictionary<IntPtr, IntPtr> mapResInColdMethods = new Dictionary<IntPtr, IntPtr>(4);
+
+        // Entity.GetNetId(). ⚠️ NOT a field read: Entity._netId is a STRUCT (SharedData.NetId), so
+        // TryGetMonoUInt32Member(entity, "netId") returns 0 for every entity — which is exactly what
+        // the scan's own "sample netId=" diagnostic had been printing all along.
+        private IntPtr mapResEntityNetIdMethod = IntPtr.Zero;
+        private bool mapResEntityNetIdTried;
+
+        private bool TryReadEntityNetId(IntPtr entityObj, out uint netId)
+        {
+            netId = 0u;
+            if (entityObj == IntPtr.Zero || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            if (!this.mapResEntityNetIdTried)
+            {
+                this.mapResEntityNetIdTried = true;
+                IntPtr entityClass = auraMonoObjectGetClass(entityObj);
+                if (entityClass != IntPtr.Zero)
+                {
+                    this.mapResEntityNetIdMethod = this.FindAuraMonoMethodOnHierarchy(entityClass, "GetNetId", 0);
+                }
+            }
+
+            if (this.mapResEntityNetIdMethod == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(this.mapResEntityNetIdMethod, entityObj, IntPtr.Zero, ref exc);
+            return exc == IntPtr.Zero && boxed != IntPtr.Zero && this.TryUnboxMonoUInt32(boxed, out netId);
+        }
+
+        private bool TryReadCollectableInCold(IntPtr componentClass, IntPtr comp, out bool inCold)
+        {
+            inCold = false;
+            if (componentClass == IntPtr.Zero || comp == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (!this.mapResInColdMethods.TryGetValue(componentClass, out IntPtr method))
+            {
+                // IntPtr.Zero is cached too — a build without the property must not be re-searched
+                // once per component per scan forever.
+                method = this.FindAuraMonoMethodOnHierarchy(componentClass, "get_inCold", 0);
+                this.mapResInColdMethods[componentClass] = method;
+            }
+
+            if (method == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(method, comp, IntPtr.Zero, ref exc);
+            return exc == IntPtr.Zero && boxed != IntPtr.Zero && this.TryUnboxMonoBoolean(boxed, out inCold);
+        }
+
         // One family. Returns the raw component count so the caller can report coverage.
         private int ScanOneGatherFamily(IntPtr componentClass)
         {
@@ -1345,17 +1422,63 @@ namespace HeartopiaMod
                                 liveColdEndMs = *(long*)(dataPtr + 0);
                                 int availableNum = *(int*)(dataPtr + 12);
 
-                                // Depleted = nothing left to take, or a cold window still running.
+                                // Fallback only — see below for why this is not the verdict.
                                 onCooldown = availableNum <= 0
                                     || (liveColdEndMs > 0L && liveColdEndMs > NowUnixMs());
                             }
+
+                            // ⚠️ THE VERDICT IS THE PROPERTY, NOT THE FIELD — AND NEITHER IS THE
+                            // WHOLE STORY. Measured 2026-08-19 with a probe reading both in the SAME
+                            // tick, on three objects all carrying a ~7 h future coldEndTime:
+                            //   (178.60, 22.67, -90.99)  end +25291s  inCold=True
+                            //   (188.84, 21.44, -78.43)  end +25095s  inCold=False -> picked by hand
+                            //   (174.20, 22.37, -72.03)  end +24546s  inCold=False -> picked by hand
+                            // A future coldEndTime is therefore a LEFTOVER, not a schedule, and
+                            // deriving the verdict from it made the farm skip resources that were
+                            // collectable right then. `inCold` is the game's own notion, so it is
+                            // what the verdict follows.
+                            //
+                            // ⚠️ BUT IT DOES NOT SEE THE COOLDOWN THE PLAYER SEES. The game draws a
+                            // radial CD ring on a spent mushroom (screenshot, same session) while
+                            // every field here reads pristine — five failed farm arrivals dumped
+                            // `inCold=False cdTimer=0 coldEnd=0 avail=3`, byte-identical to a
+                            // mushroom that collects fine. That state is not on this component at
+                            // all; it belongs to the ECS map-resource module
+                            // (XDT.Scene.Shared.World.MapResource.MapResourceProduceComponent
+                            // { id, totalNum, lastTime, createCode }, cf.
+                            // GmRefreshMapResourceCdNetworkCommand), which lives in a different
+                            // component store than the view components enumerated here.
+                            //
+                            // So this read is an improvement over the raw field, NOT the answer.
+                            // For the despawn families the honest signal is absence from the scan.
+                            if (this.TryReadCollectableInCold(componentClass, comp, out bool propertyCold))
+                            {
+                                onCooldown = propertyCold;
+
+                                // A warm object's coldEndTime is a leftover, not a schedule — the
+                                // three measurements above all carried one. Publishing it would let
+                                // any consumer that reaches for "how long is this parked" turn a
+                                // collectable resource into a seven-hour ban.
+                                if (!propertyCold)
+                                {
+                                    liveColdEndMs = 0L;
+                                }
+                            }
                         }
-                        this.liveCollectableColds.Add(new LiveCollectableCold { Position = pos, OnCooldown = onCooldown, ColdEndMs = liveColdEndMs });
+                        this.TryReadEntityNetId(entityObj, out uint entityNetId);
+                        this.liveCollectableColds.Add(new LiveCollectableCold
+                        {
+                            Position = pos,
+                            OnCooldown = onCooldown,
+                            ColdEndMs = liveColdEndMs,
+                            NetId = entityNetId,
+                            StaticId = staticId,
+                        });
 
                         if (!sampled)
                         {
                             sampled = true;
-                            this.TryGetMonoUInt32Member(entityObj, "netId", out sampleNetId);
+                            this.TryReadEntityNetId(entityObj, out sampleNetId);
                             sampleStaticId = staticId;
                             sampleItemTypeId = produceId;
                             sampleResId = this.mapResGetResIdMethods.Count;

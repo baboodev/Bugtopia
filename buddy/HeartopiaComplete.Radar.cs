@@ -573,6 +573,9 @@ namespace HeartopiaMod
                     return "tree";
                 case "Rare Tree":
                     return "rare_tree";
+                // Material.normalPrefabId of item 40033 (cn_tables Material table).
+                case "Bamboo":
+                    return "p_material_bamboo1";
                 case "Apple Tree":
                     return "p_fruit_apple";
                 case "Mandarin Tree":
@@ -596,6 +599,8 @@ namespace HeartopiaMod
                     return this.CreateRadarIconFallbackTexture(key, new Color(0.28f, 0.72f, 0.34f), new Color(0.43f, 0.24f, 0.08f), false, false, true);
                 case "Rare Tree":
                     return this.CreateRadarIconFallbackTexture(key, new Color(0.92f, 0.78f, 0.25f), new Color(0.43f, 0.24f, 0.08f), true, false, true);
+                case "Bamboo":
+                    return this.CreateRadarIconFallbackTexture(key, new Color(0.45f, 0.9f, 0.5f), new Color(0.16f, 0.45f, 0.2f), false, false, true);
                 case "Bubble":
                     return this.CreateRadarIconFallbackTexture(key, new Color(0.58f, 0.88f, 1f, 0.95f), new Color(0.24f, 0.56f, 0.94f, 0.85f), true, false, false);
                 case "Bird":
@@ -2190,10 +2195,11 @@ namespace HeartopiaMod
         // is the whole family of "final approach not walkable" / "under the node" failures on nodes
         // the walker reached perfectly.
         //
-        // ⚠️ COOLDOWN IS NOW AUTHORITATIVE. The arrays tracked depletion by INDEX
-        // (rockCooldowns[r]) — a scheme that only works while the point list is fixed and identical
-        // for everyone. entry.OnCooldown comes from the live component's own inCold/availableNum,
-        // so it is right even for resources drained by another player or before login.
+        // ⚠️ COOLDOWN IS NOW AUTHORITATIVE. Depletion used to be tracked by INDEX into those arrays
+        // (rockCooldowns[r] and fifteen sibling dictionaries, all deleted) — a scheme that only
+        // works while the point list is fixed and identical for everyone, and that could never see
+        // a resource drained by another player or before login. entry.OnCooldown comes from the
+        // live component's own inCold/availableNum, so it is simply right.
         //
         // ⚠️ SCOPE. The snapshot holds what is STREAMED around the player (~82 entities observed),
         // not the whole map. That is the correct set for walking and for a 120 m radar; it is NOT a
@@ -2346,7 +2352,7 @@ namespace HeartopiaMod
         {
             int drawn = 0;
             // HARVESTED sets, not the old hand-authored arrays — see HarvestedGatherCoordinates.cs.
-            // Same eight kinds, plus the two that never existed in source at all.
+            // The eight original kinds plus bamboo; mushrooms are deliberately absent — see below.
             drawn += this.MarkStaticFallbackSet(HarvestedStonePositions, this.showStoneRadar, "stone", origin, line, fill, maxRange);
             drawn += this.MarkStaticFallbackSet(HarvestedOrePositions, this.showOreRadar, "ore", origin, line, fill, maxRange);
             drawn += this.MarkStaticFallbackSet(HarvestedTreePositions, this.showTreeRadar, "tree", origin, line, fill, maxRange);
@@ -2356,7 +2362,22 @@ namespace HeartopiaMod
             drawn += this.MarkStaticFallbackSet(HarvestedBlueberryPositions, this.showBlueberryRadar, "blueberry", origin, line, fill, maxRange);
             drawn += this.MarkStaticFallbackSet(HarvestedRaspberryPositions, this.showRaspberryRadar, "raspberry", origin, line, fill, maxRange);
             drawn += this.MarkStaticFallbackSet(HarvestedBambooPositions, this.showBambooRadar, "bamboo", origin, line, fill, maxRange);
-            drawn += this.MarkStaticFallbackSet(HarvestedMushroomPositions, this.showMushroomRadar, "mushroom", origin, line, fill, maxRange);
+
+            // ⚠️ NO STATIC FALLBACK FOR MUSHROOMS, and the reason generalises: a harvested point is
+            // only a promise for species whose OBJECT STAYS PUT. Trees, stone, ore, berries and
+            // bamboo do — pick one and the entity remains, on cooldown, at the same coordinates, so
+            // a recorded position still names a real thing.
+            //
+            // Mushrooms do not. Measured 2026-08-19 over five hand-picks: every one ended
+            // `removed from the world` — no cooldown, the entity is deleted. So a harvested mushroom
+            // coordinate is a SPAWN POINT, and at any moment most spawn points are empty (one
+            // full-map pass found 64 mushrooms across five species, which is a sample of the places
+            // they can appear, not a list of where they are).
+            //
+            // Offering them anyway is worse than offering nothing: the farm walks tens of metres to
+            // a coordinate with nothing on it, and one run put 30 such points on the game map at
+            // once ("live scan empty — offered 59 candidate(s)"). The live scan is the only honest
+            // source for a species that comes and goes.
 
             if (drawn > 0 && !this.staticFallbackLogged)
             {

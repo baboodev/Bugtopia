@@ -492,12 +492,6 @@ namespace HeartopiaMod
 
         private void FinishCollectingCycle()
         {
-            if (this.autoCollectClickedSinceArrival)
-            {
-                this.AutoFarmLog("Collect cycle stamped cooldown for node " + this.lastNodePosition);
-                this.TryStampVisitedResourceNodeCooldown(this.lastNodePosition);
-            }
-
             // Priority flow:
             // If no collect happened in a priority cycle, cooldown that priority location immediately.
             if (this.lastTeleportWasPriorityLocation && this.currentPriorityLocation.HasValue)

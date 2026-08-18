@@ -214,6 +214,7 @@ namespace HeartopiaMod
                 case "Apple Tree":
                 case "Mandarin Tree":
                 case "Oak-Oak":
+                case "Bamboo":
                     return 0.725f;
                 case "Meteor":
                     return 0.8f;
@@ -453,6 +454,10 @@ namespace HeartopiaMod
                 case "Rare Tree":
                 case "Apple Tree":
                 case "Mandarin Tree":
+                // Bamboo only became visible when the live scan replaced the hardcoded arrays (the
+                // arrays never had a bamboo entry), so it was created by CreateMarker and then
+                // dropped here by both surfaces — the exact failure this comment warns about.
+                case "Bamboo":
                 case "Bubble":
                 case "Bird":
                 case "Player":
@@ -481,6 +486,7 @@ namespace HeartopiaMod
                 case "Apple Tree":
                 case "Mandarin Tree":
                 case "Oak-Oak":
+                case "Bamboo":      // a stalk clump is tree-tall, not bush-tall
                     return 2.8f;
                 case "Bird":
                     return 1.9f;
@@ -515,6 +521,7 @@ namespace HeartopiaMod
                 case "Apple Tree": return "AP";
                 case "Mandarin Tree": return "MD";
                 case "Tree": return "TR";
+                case "Bamboo": return "BM";
                 case "Fiddlehead": return "FD";
                 case "Tall Mustard": return "TM";
                 case "Mustard Greens": return "MG";
@@ -553,6 +560,9 @@ namespace HeartopiaMod
                 case "Rare Tree": return new Color(1f, 0.83f, 0.38f);
                 case "Apple Tree": return new Color(1f, 0.56f, 0.48f);
                 case "Mandarin Tree": return new Color(1f, 0.72f, 0.42f);
+                // Same green CreateMarker gives the wire marker, so one resource reads as one
+                // colour whichever surface it is on.
+                case "Bamboo": return new Color(0.45f, 0.9f, 0.5f);
                 case "Fiddlehead": return new Color(0.64f, 0.96f, 0.62f);
                 case "Tall Mustard": return new Color(0.82f, 0.98f, 0.52f);
                 case "Mustard Greens": return new Color(0.62f, 0.95f, 0.58f);

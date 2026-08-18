@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -673,11 +673,6 @@ namespace HeartopiaMod
                     this.autoCollectClickedSinceArrival = true;
                     this.auraLastSuccessfulCommandAt = now;
                     this.TryCaptureAuraCollectNodeOwner(ownerNetId, resourceNetId, targetAnchor);
-                    if (!isMeteor)
-                    {
-                        this.StampAuraFallbackNodeCooldown(ownerNetId, targetKind);
-                    }
-
                     this.auraNextAllowedByOwnerId[ownerNetId] = now + AuraPerTargetCooldown;
                 }
             }
@@ -907,151 +902,8 @@ namespace HeartopiaMod
             return false;
         }
 
-        private void StampAuraFallbackNodeCooldown(uint ownerNetId, AuraTargetKind targetKind)
-        {
-            object entity = this.TryGetAuraOwnerEntity(ownerNetId);
-            if (entity == null)
-            {
-                return;
-            }
 
-            Vector3 entityPosition;
-            if (!this.TryGetAuraEntityPosition(entity, out entityPosition))
-            {
-                return;
-            }
 
-            float bestSqr = 25f;
-            int bestIndex = -1;
-            float bestDuration = 0f;
-            string bestLabel = string.Empty;
-            Dictionary<int, float> bestCooldowns = null;
-            Dictionary<int, float> bestHideUntil = null;
-
-            if (targetKind == AuraTargetKind.Tree || targetKind == AuraTargetKind.Unknown)
-            {
-                this.TrySelectAuraCooldownStamp(entityPosition, TreePositions, this.treeCooldowns_res, this.treeHideUntil_res, this.treeCooldownDuration_res, LocalizationManager.Translate("Tree"), ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-                this.TrySelectAuraCooldownStamp(entityPosition, RareTreePositions, this.rareTreeCooldowns_res, this.rareTreeHideUntil_res, this.rareTreeCooldownDuration_res, LocalizationManager.Translate("Rare Tree"), ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-                this.TrySelectAuraCooldownStamp(entityPosition, AppleTreePositions, this.appleTreeCooldowns_res, this.appleTreeHideUntil_res, this.appleTreeCooldownDuration_res, LocalizationManager.Translate("Apple Tree"), ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-                this.TrySelectAuraCooldownStamp(entityPosition, OrangeTreePositions, this.orangeTreeCooldowns_res, this.orangeTreeHideUntil_res, this.orangeTreeCooldownDuration_res, LocalizationManager.Translate("Mandarin Tree"), ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            }
-
-            if (targetKind == AuraTargetKind.Stone || targetKind == AuraTargetKind.Unknown)
-            {
-                this.TrySelectAuraCooldownStamp(entityPosition, RockPositions, this.rockCooldowns, this.rockHideUntil, this.rockCooldownDuration, LocalizationManager.Translate("Stone"), ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-                this.TrySelectAuraCooldownStamp(entityPosition, OrePositions, this.oreCooldowns, this.oreHideUntil, this.oreCooldownDuration, LocalizationManager.Translate("Ore"), ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            }
-
-            if (targetKind == AuraTargetKind.Bush || targetKind == AuraTargetKind.Unknown)
-            {
-                float bestBushSqr = 144f;
-                this.TrySelectAuraBerryCooldownStamp(entityPosition, this.blueberryPositions, this.blueberryCooldowns, this.blueberryHideUntil, this.blueberryCooldownDuration, LocalizationManager.Translate("Blueberry"), ref bestBushSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-                this.TrySelectAuraBerryCooldownStamp(entityPosition, this.raspberryPositions, this.raspberryCooldowns, this.raspberryHideUntil, this.raspberryCooldownDuration, LocalizationManager.Translate("Raspberry"), ref bestBushSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            }
-
-            if (bestCooldowns == null || bestHideUntil == null || bestIndex < 0)
-            {
-                return;
-            }
-
-            float now = Time.unscaledTime;
-            float until = now + Math.Max(1f, bestDuration);
-            float hideUntil = now + 10f;
-            float existing;
-            if (!bestCooldowns.TryGetValue(bestIndex, out existing) || existing < until)
-            {
-                bestCooldowns[bestIndex] = until;
-            }
-            bestHideUntil[bestIndex] = hideUntil;
-
-            if (AuraFarmDebugLogs)
-            {
-                ModLogger.Msg("[AuraFarm] Fallback cooldown stamped: " + bestLabel + " #" + bestIndex + " (" + Math.Max(1f, bestDuration).ToString("F1") + "s)");
-            }
-        }
-
-        private void TrySelectAuraCooldownStamp(
-            Vector3 entityPosition,
-            Vector3[] candidates,
-            Dictionary<int, float> cooldowns,
-            Dictionary<int, float> hideUntil,
-            float duration,
-            string label,
-            ref float bestSqr,
-            ref int bestIndex,
-            ref float bestDuration,
-            ref string bestLabel,
-            ref Dictionary<int, float> bestCooldowns,
-            ref Dictionary<int, float> bestHideUntil)
-        {
-            int idx = this.FindClosestItemIndexLocal(entityPosition, candidates);
-            if (idx < 0)
-            {
-                return;
-            }
-
-            float sqr = (candidates[idx] - entityPosition).sqrMagnitude;
-            if (sqr >= bestSqr)
-            {
-                return;
-            }
-
-            bestSqr = sqr;
-            bestIndex = idx;
-            bestDuration = duration;
-            bestLabel = label;
-            bestCooldowns = cooldowns;
-            bestHideUntil = hideUntil;
-        }
-
-        private void TrySelectAuraBerryCooldownStamp(
-            Vector3 entityPosition,
-            Vector3[] candidates,
-            Dictionary<int, float> cooldowns,
-            Dictionary<int, float> hideUntil,
-            float duration,
-            string label,
-            ref float bestSqr,
-            ref int bestIndex,
-            ref float bestDuration,
-            ref string bestLabel,
-            ref Dictionary<int, float> bestCooldowns,
-            ref Dictionary<int, float> bestHideUntil)
-        {
-            if (candidates == null || candidates.Length == 0)
-            {
-                return;
-            }
-
-            const float berryMatchRadiusSqr = 144f;
-            bestSqr = Math.Min(bestSqr, berryMatchRadiusSqr);
-
-            int idx = -1;
-            float closestSqr = bestSqr;
-            for (int i = 0; i < candidates.Length; i++)
-            {
-                float dx = candidates[i].x - entityPosition.x;
-                float dz = candidates[i].z - entityPosition.z;
-                float sqr = dx * dx + dz * dz;
-                if (sqr < closestSqr)
-                {
-                    closestSqr = sqr;
-                    idx = i;
-                }
-            }
-
-            if (idx < 0)
-            {
-                return;
-            }
-
-            bestSqr = closestSqr;
-            bestIndex = idx;
-            bestDuration = duration;
-            bestLabel = label;
-            bestCooldowns = cooldowns;
-            bestHideUntil = hideUntil;
-        }
 
         private bool ResolveAuraFarmRuntimeMethods()
         {
@@ -1913,20 +1765,67 @@ namespace HeartopiaMod
             return AuraTargetKind.Unknown;
         }
 
+        // Kind of the resource standing at `position`. Last resort only: used when the collectable
+        // component's own resType string is unreadable.
+        //
+        // ⚠️ WHY THE HAND-SNAPPED ARRAYS ARE GONE. This used to walk eight hardcoded coordinate
+        // tables (238 points snapped by hand once). Such a point cannot know that an object moved,
+        // vanished or changed species after a patch, and anything outside the walked area was
+        // invisible to it — a resource 3 m away from where the table said classified as Unknown.
+        //
+        // LIVE FIRST, STATIC ONLY WHEN THE SCAN IS BLIND. The collectable scan already carries every
+        // streamed resource together with its ids, so it answers for anything actually loaded, by
+        // identity rather than by proximity to a guess. The harvested tables answer only when that
+        // snapshot is empty — same data recorded earlier, covering the whole map instead of the
+        // streamed bubble.
         private AuraTargetKind GetAuraTargetKindFromPosition(Vector3 position)
         {
             const float matchRadiusSqr = 25f;
-            float bestBush = this.GetAuraClosestDistanceSqr(position, this.blueberryPositions, matchRadiusSqr);
-            float bestRaspberry = this.GetAuraClosestDistanceSqr(position, this.raspberryPositions, matchRadiusSqr);
-            float bestTree = this.GetAuraClosestDistanceSqr(position, TreePositions, matchRadiusSqr);
-            float bestRareTree = this.GetAuraClosestDistanceSqr(position, RareTreePositions, matchRadiusSqr);
-            float bestAppleTree = this.GetAuraClosestDistanceSqr(position, AppleTreePositions, matchRadiusSqr);
-            float bestOrangeTree = this.GetAuraClosestDistanceSqr(position, OrangeTreePositions, matchRadiusSqr);
-            float bestRock = this.GetAuraClosestDistanceSqr(position, RockPositions, matchRadiusSqr);
-            float bestOre = this.GetAuraClosestDistanceSqr(position, OrePositions, matchRadiusSqr);
 
-            float bestBushDistance = Math.Min(bestBush, bestRaspberry);
-            float bestTreeDistance = Math.Min(Math.Min(bestTree, bestRareTree), Math.Min(bestAppleTree, bestOrangeTree));
+            if (this.mapResEntities.Count > 0)
+            {
+                float liveBestSqr = matchRadiusSqr;
+                AuraTargetKind liveKind = AuraTargetKind.Unknown;
+                for (int i = 0; i < this.mapResEntities.Count; i++)
+                {
+                    MapResEntity candidate = this.mapResEntities[i];
+                    float sqr = (candidate.Position - position).sqrMagnitude;
+                    if (sqr >= liveBestSqr)
+                    {
+                        continue;
+                    }
+
+                    AuraTargetKind kind = this.ClassifyGatherKind(candidate.ProduceId, candidate.StaticId);
+                    if (kind == AuraTargetKind.Unknown)
+                    {
+                        continue;
+                    }
+
+                    liveBestSqr = sqr;
+                    liveKind = kind;
+                }
+
+                if (liveKind != AuraTargetKind.Unknown)
+                {
+                    return liveKind;
+                }
+            }
+
+            float bestBush = this.GetAuraClosestDistanceSqr(position, HarvestedBlueberryPositions, matchRadiusSqr);
+            float bestRaspberry = this.GetAuraClosestDistanceSqr(position, HarvestedRaspberryPositions, matchRadiusSqr);
+            float bestMushroom = this.GetAuraClosestDistanceSqr(position, HarvestedMushroomPositions, matchRadiusSqr);
+            float bestTree = this.GetAuraClosestDistanceSqr(position, HarvestedTreePositions, matchRadiusSqr);
+            float bestRareTree = this.GetAuraClosestDistanceSqr(position, HarvestedRareTreePositions, matchRadiusSqr);
+            float bestAppleTree = this.GetAuraClosestDistanceSqr(position, HarvestedAppleTreePositions, matchRadiusSqr);
+            float bestOrangeTree = this.GetAuraClosestDistanceSqr(position, HarvestedOrangeTreePositions, matchRadiusSqr);
+            float bestBamboo = this.GetAuraClosestDistanceSqr(position, HarvestedBambooPositions, matchRadiusSqr);
+            float bestRock = this.GetAuraClosestDistanceSqr(position, HarvestedStonePositions, matchRadiusSqr);
+            float bestOre = this.GetAuraClosestDistanceSqr(position, HarvestedOrePositions, matchRadiusSqr);
+
+            float bestBushDistance = Math.Min(Math.Min(bestBush, bestRaspberry), bestMushroom);
+            float bestTreeDistance = Math.Min(
+                Math.Min(Math.Min(bestTree, bestRareTree), Math.Min(bestAppleTree, bestOrangeTree)),
+                bestBamboo);
             float bestStoneDistance = Math.Min(bestRock, bestOre);
             float bestDistance = Math.Min(bestBushDistance, Math.Min(bestTreeDistance, bestStoneDistance));
 
@@ -1946,6 +1845,49 @@ namespace HeartopiaMod
             }
 
             return AuraTargetKind.Stone;
+        }
+
+        // Scan identity -> aura kind. Two id spaces, because the game uses two: ordinary resources
+        // carry a produceId whose drop item names the species, while the dynamic bushes (mushrooms,
+        // event plants) carry none and are known only by their entity staticId. Same split the radar
+        // resolves markers through — see ResolveLandGatherMeshName / ResolveLandGatherMeshByStaticId.
+        // Deliberately toggle-blind: the radar resolvers return null for a switched-off type, which
+        // would silently degrade the farm's classification to Unknown.
+        private AuraTargetKind ClassifyGatherKind(int produceId, int staticId)
+        {
+            int itemId;
+            if (produceId > 0 && this.TryGetProduceItemId(produceId, out itemId) && itemId > 0)
+            {
+                switch (itemId)
+                {
+                    case 40021:                     // Stone
+                    case 40022:                     // Ore
+                        return AuraTargetKind.Stone;
+
+                    case 40501:                     // Blueberry
+                    case 40502:                     // Raspberry
+                        return AuraTargetKind.Bush;
+
+                    case 40001:                     // Branch
+                    case 40002:                     // Timber
+                    case 40003:                     // Quality Timber
+                    case 40004:                     // Rare Timber
+                    case 40006:                     // Roaming Oak Timber
+                    case 40033:                     // Bamboo — felled like a tree, not picked
+                    case 40101:                     // Apple
+                    case 40201:                     // Mandarin
+                        return AuraTargetKind.Tree;
+                }
+            }
+
+            // 130001-130018: the six mushroom species with their bizarre variants (Dynamicbush).
+            // 130019/21/23/25: the event foraging plants. All picked, so all Bush.
+            if (staticId >= 130001 && staticId <= 130025)
+            {
+                return AuraTargetKind.Bush;
+            }
+
+            return AuraTargetKind.Unknown;
         }
 
         private float GetAuraClosestDistanceSqr(Vector3 position, Vector3[] candidates, float defaultValue)

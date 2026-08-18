@@ -96,8 +96,8 @@ namespace HeartopiaMod
         // sqrt(0.8^2 - 0.25^2) = 0.76 m, up from 0.43.
         // 2026-08-17: 0.8 -> 1.2 on request, because the walker was still hopping at nodes it could
         // already collect from. The height budget is the reason: sqrt(1.2^2 - 0.25^2) = 1.17 m, and
-        // the ore nodes that triggered the hopping sit ~1.3 m off in Y (see the OrePositions table
-        // and TryRefineFarmWalkTargetHeight, which closes the rest). Still inside the server's 2 m.
+        // the ore nodes that triggered the hopping sit ~1.3 m off in Y (see
+        // TryRefineFarmWalkTargetHeight, which closes the rest). Still inside the server's 2 m.
         private const float FarmWalkArrivalDistance = 1.2f;
 
         // The SERVER's rule, not ours: CollectAntiCheating.Distance is 2 m in 3-D, so 1.8 leaves a
@@ -407,13 +407,25 @@ namespace HeartopiaMod
         // fallback must both address the NODE, never the offset aim point.
         private float farmWalkAimOffsetY;
 
-        // The node tables (OrePositions and friends) are hand-measured constants recording the BASE
-        // of the resource, and the terrain has moved under some of them: an Ore aim point routinely
-        // sits ~1.3 m below the rock the player ends up standing on. Once, per walk, close enough for
-        // the entity to be streamed in, the aim height is replaced with the resource's REAL y.
+        // A node's aim point is the resource's ANCHOR, which is its pivot — for a rock that is the
+        // base, while the player ends up standing on top of the collider: an Ore aim routinely sits
+        // ~1.3 m below where the character can actually stand. Once per walk, close enough for the
+        // entity to be streamed in, the aim height is replaced with the resource's REAL y.
+        // (Unchanged by the move off the hand-snapped tables: the harvested points were recorded
+        // from these same anchors, so the offset is a property of the anchor, not of stale data.)
         private bool farmWalkHeightRefined;
         private const float FarmWalkHeightRefineRange = 8f;   // horizontal distance to try it at
-        private const float FarmWalkHeightRefineMatch = 3f;   // how near the table point the entity must be
+        private const float FarmWalkHeightRefineMatch = 3f;   // how near the aim point the entity must be
+
+        // Last scan (liveCollectableScanCompletedAt) that still SAW this walk's node. -1 = never
+        // seen yet, which is the state a node keeps while it is outside the streamed bubble.
+        private float farmWalkTargetSeenAt = -1f;
+        // Inside this range, absence from the scan is conclusive on its own — no prior sighting needed.
+        private const float FarmWalkDrainedCloseDistance = 12f;
+        // Crossing this forces one fresh scan, so the approach is judged on current world state well
+        // before the last stretch rather than a scan interval into it.
+        private const float FarmWalkApproachVerifyDistance = 25f;
+        private bool farmWalkApproachScanForced;
         private Vector3 farmWalkTrueTarget;
         private bool farmWalkSkipToScan;
         // Has this walk ever cleared a corner? Gates the start-waypoint exclusion.
@@ -472,7 +484,7 @@ namespace HeartopiaMod
             }
 
             // Clear the skip stamp, or FindClosestAvailableNode would keep passing it over.
-            this.recentlyVisitedNodes.Remove(node);
+            this.ForgetVisitedNode(node);
             return true;
         }
 
@@ -742,6 +754,8 @@ namespace HeartopiaMod
             this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
             this.farmWalkProbeUsed = false;   // one probe sweep per walk
             this.farmWalkHeightRefined = false; // one height refine per walk
+            this.farmWalkTargetSeenAt = -1f;  // "seen present" is per-walk evidence, never carried over
+            this.farmWalkApproachScanForced = false; // one forced verification scan per walk
             this.farmWalkHopBurstUsed = false; // one hop burst per walk
             this.farmWalkEverAdvanced = this.farmWalkCornerIndex > 0;
             this.farmWalkPrevVerticalHeld = this.farmWalkVerticalHeld;
@@ -1036,6 +1050,22 @@ namespace HeartopiaMod
             if (!this.TryGetNavMeshSelfPosition(out Vector3 selfPos, out _))
             {
                 this.FinishFarmWalk("self position lost", teleport: true);
+                return true;
+            }
+
+            // FIRST, before anything else this tick decides.
+            //
+            // ⚠️ IT USED TO SIT FURTHER DOWN, just before the progress sampler, and that is the same
+            // as not running: a dozen early returns above it handle arrival, steering, stall
+            // recovery and re-pathing, so on a walk that is fighting geometry the check is reached
+            // on almost no ticks at all. Measured 2026-08-19 — a retry walk spent 16 s covering
+            // 30 m to a node that was COLD at selection and still COLD on arrival, through jumps,
+            // an unreachable start waypoint and three re-paths, and the guard never once ran.
+            //
+            // "Is this target still worth walking to" does not depend on any of that machinery, so
+            // it is answered before it.
+            if (this.TryAbandonDrainedFarmWalkTarget(selfPos))
+            {
                 return true;
             }
 
@@ -1401,7 +1431,7 @@ namespace HeartopiaMod
                 this.SteerFarmWalkToward(selfPos, corner);
             }
             // Before the sampler judges the approach, so the arrival/stall tests see the height the
-            // resource is really at rather than the table's.
+            // resource is really at rather than the aim point's.
             this.TryRefineFarmWalkTargetHeight(selfPos);
 
             if (this.SampleFarmWalkProgress(selfPos, now))
@@ -1569,10 +1599,10 @@ namespace HeartopiaMod
             if (Distance3D(selfPos, this.farmWalkTarget) <= FarmWalkFinalApproachDistance)
             {
                 // Already collectable, and the only thing left is height we do not need. Jumping at
-                // it cannot help: the node's Y comes from a hand-measured table (OrePositions et al)
-                // that records the BASE of the rock, so the aim point sits under the surface the
-                // player is standing on — the hop lands exactly where it started and reads as the
-                // character trying to climb into the node. Take the arrival instead.
+                // it cannot help: the node's Y is the resource ANCHOR, which for a rock is its base,
+                // so the aim point sits under the surface the player is standing on — the hop lands
+                // exactly where it started and reads as the character trying to climb into the node.
+                // Take the arrival instead.
                 if (this.farmWalkAimOffsetY == 0f
                     && HorizontalDistance(selfPos, this.farmWalkTarget) <= FarmWalkCollectDistance
                     && Distance3D(selfPos, this.farmWalkTarget) <= FarmWalkServerCollectRadius)
@@ -1742,61 +1772,186 @@ namespace HeartopiaMod
                 return;
             }
 
-            IntPtr collectable = this.FindAuraMonoClassInAllLoadedImages(
-                "CollectableObjectComponent", "XDTLevelAndEntity.Gameplay.Component.Gather");
-            if (collectable == IntPtr.Zero)
+            // Shared snapshot, not a private enumeration. This used to run its own full
+            // CollectableObjectComponent walk with its own pin list — the same component family the
+            // scan already enumerates every ~2 s for the radar, the map spots and the cold sync. One
+            // scan now answers all four, and the walker no longer opens a pinning window of its own
+            // (every pin site is a chance to leak one under an exception; the fewer, the better).
+            // RefreshCollectableScan is self-throttled, so calling it here costs nothing when a
+            // fresh snapshot already exists — which, during a farm run, it always does.
+            this.RefreshCollectableScan();
+            if (this.liveCollectableColds.Count == 0)
             {
-                this.farmWalkHeightRefined = true;  // class is not here; do not retry every frame
-                return;
+                return;     // nothing streamed yet — worth another try next tick
             }
 
-            System.Collections.Generic.List<uint> pins = new System.Collections.Generic.List<uint>();
-            try
+            this.farmWalkHeightRefined = true;
+
+            // liveCollectableColds, not mapResEntities: the unfiltered list carries EVERY positioned
+            // collectable, including the ones whose produce id never resolved. For a height fix the
+            // species is irrelevant — only "is a collectable standing here, and how high".
+            float bestSqr = FarmWalkHeightRefineMatch * FarmWalkHeightRefineMatch;
+            float bestY = 0f;
+            bool found = false;
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
             {
-                if (!this.TryAuraMonoGetComponentObjects(collectable,
-                        out System.Collections.Generic.List<IntPtr> nodes, pins)
-                    || nodes == null)
+                Vector3 pos = this.liveCollectableColds[i].Position;
+                float d = HorizontalDistanceSqr(pos, this.farmWalkTarget);
+                if (d < bestSqr)
                 {
-                    return;     // enumeration failed — worth one more try next tick
+                    bestSqr = d;
+                    bestY = pos.y;
+                    found = true;
                 }
-
-                this.farmWalkHeightRefined = true;
-
-                float bestSqr = FarmWalkHeightRefineMatch * FarmWalkHeightRefineMatch;
-                float bestY = 0f;
-                bool found = false;
-                for (int i = 0; i < nodes.Count; i++)
-                {
-                    if (!this.TryGetAuraMonoEntityPositionFromComponent(nodes[i], out Vector3 pos))
-                    {
-                        continue;
-                    }
-
-                    float d = HorizontalDistanceSqr(pos, this.farmWalkTarget);
-                    if (d < bestSqr)
-                    {
-                        bestSqr = d;
-                        bestY = pos.y;
-                        found = true;
-                    }
-                }
-
-                if (!found || Mathf.Abs(bestY - this.farmWalkTarget.y) < 0.25f)
-                {
-                    return;     // nothing near, or the table was already right
-                }
-
-                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": node height "
-                    + this.farmWalkTarget.y.ToString("F1") + "m -> " + bestY.ToString("F1")
-                    + "m from the live entity.");
-
-                this.farmWalkTarget.y = bestY;
-                this.farmWalkTrueTarget.y = bestY;
             }
-            finally
+
+            if (!found || Mathf.Abs(bestY - this.farmWalkTarget.y) < 0.25f)
             {
-                FreeAuraMonoPins(pins);
+                return;     // nothing near, or the aim was already right
             }
+
+            ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": node height "
+                + this.farmWalkTarget.y.ToString("F1") + "m -> " + bestY.ToString("F1")
+                + "m from the live entity.");
+
+            this.farmWalkTarget.y = bestY;
+            this.farmWalkTrueTarget.y = bestY;
+        }
+
+        // Stop closing on a resource that is provably no longer collectable.
+        //
+        // WHY. Reaching the last metre is the expensive part of a walk: it is where the jumps, the
+        // sidestep probes and the once-a-minute rescue teleport get spent. Spending all of that to
+        // stand on an empty patch of ground — because the aura drained the node while we were still
+        // walking, or another player took it — buys nothing, and the farm then burns a whole collect
+        // dwell there before moving on.
+        //
+        // TWO WAYS A RESOURCE STOPS BEING COLLECTABLE, and the live scan shows both:
+        //   • COOLDOWN family (trees, stone, ore, berries) — the entity stays and flips inCold.
+        //   • DESPAWN family (mushrooms and the other dynamic bushes) — the entity is REMOVED.
+        //     They never go cold, so waiting for a cooldown flag on them waits forever.
+        //
+        // ⚠️ ABSENCE ALONE IS NOT PROOF. A node outside the streamed bubble is absent too, and so is
+        // one the scan has simply not reached yet. Absence only counts once this walk has SEEN the
+        // node present in an earlier scan: seen, then missing from a LATER scan, is unambiguous.
+        private bool TryAbandonDrainedFarmWalkTarget(Vector3 selfPos)
+        {
+            if (this.farmWalkAimOffsetY != 0f        // contamination standoff: not a collectable
+                || this.autoFarmTargetIsBubble)      // bubbles are not in the collectable scan
+            {
+                return false;
+            }
+
+            float distance = Distance3D(selfPos, this.farmWalkTrueTarget);
+
+            // ⚠️ VERIFY BEFORE ARRIVAL, NOT ON ARRIVAL. The shared scan runs every 2 s, which at
+            // walking speed is ~9 m of travel, so a target that streamed in during the approach was
+            // judged a whole scan late — the 2026-08-19 log has a node picked at 6,8 m and only
+            // found cold at 0,3 m, one scan interval later. Crossing into range therefore forces
+            // ONE fresh scan (once per walk: the point is to have current state before the last
+            // stretch, not to re-enumerate every frame).
+            if (!this.farmWalkApproachScanForced && distance <= FarmWalkApproachVerifyDistance)
+            {
+                this.farmWalkApproachScanForced = true;
+                this.mapResNextScanAt = 0f;
+            }
+
+            // Self-throttled, so this costs nothing when a current snapshot already exists.
+            this.RefreshCollectableScan();
+            if (this.liveCollectableColds.Count == 0)
+            {
+                return false;
+            }
+
+            string why;
+            long coldEndMs = 0L;
+            if (this.TryGetLiveNodeColdState(this.farmWalkTrueTarget, 0f, out bool onCooldown, out coldEndMs))
+            {
+                this.farmWalkTargetSeenAt = this.liveCollectableScanCompletedAt;
+                if (!onCooldown)
+                {
+                    return false;   // the object itself says collectable — the only thing that does
+                }
+
+                // ⚠️ NO DISTANCE GATE HERE. The object is loaded and the game says it is spent;
+                // that is conclusive at 3 m and at 300 m alike, and there is nothing to gain by
+                // walking any further before believing it. Only the ABSENCE cases below need a
+                // distance rule, because "not in the scan" at range means "not streamed in".
+                // Name the SOURCE. The component and the client's broadcast verdict disagree often
+                // enough that "on cooldown" alone is not a diagnosis: one of them is a field that
+                // may simply have no data, the other is the number the game computed for that netId.
+                why = "went on cooldown while we walked" + this.DescribeFarmWalkColdSource(this.farmWalkTrueTarget);
+            }
+            else if (this.farmWalkTargetSeenAt >= 0f
+                && this.liveCollectableScanCompletedAt > this.farmWalkTargetSeenAt)
+            {
+                why = "was collected while we walked";
+            }
+            else if (distance <= FarmWalkDrainedCloseDistance)
+            {
+                // Never seen by this walk, but we are close enough that "not in the scan" can only
+                // mean "not there". The scan enumerates every loaded CollectableObjectComponent
+                // rather than a radius, so at this range a resource that exists is in it.
+                //
+                // This is the case a prior sighting cannot cover: a node that was already gone when
+                // the walk started. It happens with tour stops planned minutes earlier, and with the
+                // harvested static list, whose mushroom points are SPAWN POINTS — most of them stand
+                // empty at any moment, because dynamic bushes are not all up at once.
+                why = "is not there at all";
+            }
+            else
+            {
+                return false;   // too far to conclude anything from absence
+            }
+
+            // Park it for as long as it is actually unavailable: the server's own cooldown end when
+            // we have one, the standard cold fallback otherwise. A despawned dynamic bush respawns
+            // on its own schedule, so the fallback is the honest guess there.
+            this.StampVisitedNode(this.farmWalkTrueTarget, Time.unscaledTime + this.GetVisitedColdStampSeconds(coldEndMs));
+
+            // Straight back to the scan, NOT into the collect dwell. Without this the walk ended as
+            // a normal arrival and the farm still stood there for the full Collect Wait Max on a
+            // resource it had just proved was gone ("target was collected while we walked" at
+            // 01:04:21 followed by a 5,0s timeout at 01:04:26 — 2026-08-19 log).
+            this.farmWalkSkipToScan = true;
+
+            // teleport:false — there is nothing there to warp to. The visited stamp above is what
+            // sends FindClosestAvailableNode somewhere else.
+            // FinishFarmWalk prefixes farmWalkLabel itself; naming it again printed it twice.
+            this.FinishFarmWalk("target " + why + " (" + distance.ToString("F1")
+                + "m short) — moving to the next node instead of closing in", false);
+            return true;
+        }
+
+        // Which source called this node spent, and how fresh it is. Empty when only the component
+        // said so — that is the default and needs no annotation.
+        private string DescribeFarmWalkColdSource(Vector3 node)
+        {
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                Vector3 d = this.liveCollectableColds[i].Position - node;
+                if ((d.x * d.x) + (d.z * d.z) >= 2.25f)
+                {
+                    continue;
+                }
+
+                uint netId = this.liveCollectableColds[i].NetId;
+                if (netId == 0u || !this.collectColdByNetId.TryGetValue(netId, out CollectColdRecord r))
+                {
+                    return string.Empty;
+                }
+
+                long remaining = (r.EndUnixMs - NowUnixMs()) / 1000L;
+                if (remaining <= 0L)
+                {
+                    return string.Empty;
+                }
+
+                return " [client verdict: netId " + netId + " not ready for " + remaining
+                    + "s, heard " + (Time.unscaledTime - r.SeenAt).ToString("F0") + "s ago]";
+            }
+
+            return string.Empty;
         }
 
         private static float HorizontalDistanceSqr(Vector3 a, Vector3 b)
@@ -1910,7 +2065,7 @@ namespace HeartopiaMod
                 {
                     this.farmWalkHasLastReclaimed = false;
                     this.farmWalkHasSkippedNode = false;
-                    this.recentlyVisitedNodes[this.farmWalkTrueTarget] = skipNow + FarmWalkRepeatOffenderParkSeconds;
+                    this.StampVisitedNode(this.farmWalkTrueTarget, skipNow + FarmWalkRepeatOffenderParkSeconds);
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + reason + progress
                         + " — unreachable again after a reclaim, parking it for "
                         + (FarmWalkRepeatOffenderParkSeconds / 60f).ToString("0.#") + " min.");
@@ -1923,7 +2078,7 @@ namespace HeartopiaMod
                     this.farmWalkRetryState = 0;
                     this.farmWalkSkipToScan = true;
                     this.farmWalkNodeFailures.Remove(this.farmWalkTrueTarget);
-                    this.recentlyVisitedNodes[this.farmWalkTrueTarget] = skipNow + FarmWalkRepeatOffenderParkSeconds;
+                    this.StampVisitedNode(this.farmWalkTrueTarget, skipNow + FarmWalkRepeatOffenderParkSeconds);
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + reason + progress
                         + " — failed " + FarmWalkMaxNodeFailures + " times, parking it for "
                         + (FarmWalkRepeatOffenderParkSeconds / 60f).ToString("0.#") + " min.");
@@ -1945,7 +2100,7 @@ namespace HeartopiaMod
                 else if (this.farmWalkConsecutiveSkips < FarmWalkMaxConsecutiveSkips)
                 {
                     this.farmWalkConsecutiveSkips++;
-                    this.recentlyVisitedNodes[this.farmWalkTrueTarget] = Time.unscaledTime + FarmVisitedRetryStampSeconds;
+                    this.StampVisitedNode(this.farmWalkTrueTarget, Time.unscaledTime + FarmVisitedRetryStampSeconds);
                     this.farmWalkSkipToScan = true;
                     this.farmWalkHasSkippedNode = true;
                     this.farmWalkSkippedNode = this.farmWalkTrueTarget;
@@ -2184,7 +2339,7 @@ namespace HeartopiaMod
 
             this.farmWalkHasSkippedNode = false;
             this.farmWalkConsecutiveSkips = 0;
-            this.recentlyVisitedNodes.Remove(node);
+            this.ForgetVisitedNode(node);
 
             // Remember it, so a second failure on the same node parks it instead of reclaiming again.
             this.farmWalkLastReclaimedNode = node;

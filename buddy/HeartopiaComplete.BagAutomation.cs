@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -31,21 +31,6 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private int FindClosestItemIndexLocal(Vector3 playerPos, Vector3[] positions)
-        {
-            int result = -1;
-            float bestSqr = 25f; // 5 units
-            for (int i = 0; i < positions.Length; i++)
-            {
-                float sq = (positions[i] - playerPos).sqrMagnitude;
-                if (sq < bestSqr)
-                {
-                    bestSqr = sq;
-                    result = i;
-                }
-            }
-            return result;
-        }
 
         private bool IsBagAutomationActiveOrQueued()
         {

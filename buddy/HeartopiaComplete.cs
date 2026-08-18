@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -744,6 +744,8 @@ namespace HeartopiaMod
             this.ProcessTutorialBlockOnUpdate();
             this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
+            this.EnsureCollectColdRegistrations();
+            this.ProcessCollectColdSweepOnUpdate();
             this.ProcessAutoLearnRecipesOnUpdate();
             Breadcrumbs.Phase("ou.hud");
             this.ProcessPersistentHudOnUpdate();
@@ -1362,8 +1364,6 @@ namespace HeartopiaMod
             {
                 this.VacuumBirds();
             }
-            this.CheckManualBerryCollectionListeners();
-            this.SyncNearbyLiveResourceCooldowns();
             this.SyncLiveResourceColdStates();
             bool flag8 = this.isRadarActive;
             if (flag8)
@@ -1376,10 +1376,6 @@ namespace HeartopiaMod
                 }
                 this.UpdateMarkers();
                 this.UpdateRadarGroundRings();
-                if (this.isRadarActive)
-                {
-                    this.CleanupExpiredCooldowns();
-                }
             }
             this.ProcessGameMapSpotsOnUpdate();
             bool flag10 = this.autoFarmActive;
@@ -2520,51 +2516,6 @@ namespace HeartopiaMod
 
 
 
-        // Token: 0x0600000F RID: 15 RVA: 0x00003A9C File Offset: 0x00001C9C
-        private void CleanupExpiredCooldowns()
-        {
-            float now = Time.unscaledTime;
-            bool radarNeedsRefresh = false;
-            this.expiredBerryCooldownBuffer.Clear();
-            foreach (KeyValuePair<int, float> keyValuePair in this.blueberryCooldowns)
-            {
-                bool flag = now >= keyValuePair.Value;
-                if (flag)
-                {
-                    this.expiredBerryCooldownBuffer.Add(keyValuePair.Key);
-                }
-            }
-            for (int i = 0; i < this.expiredBerryCooldownBuffer.Count; i++)
-            {
-                int key = this.expiredBerryCooldownBuffer[i];
-                this.blueberryCooldowns.Remove(key);
-                this.blueberryHideUntil.Remove(key);
-                this.blueberryJustCollected.Remove(key);
-                radarNeedsRefresh = true;
-            }
-            this.expiredBerryCooldownBuffer.Clear();
-            foreach (KeyValuePair<int, float> keyValuePair2 in this.raspberryCooldowns)
-            {
-                bool flag2 = now >= keyValuePair2.Value;
-                if (flag2)
-                {
-                    this.expiredBerryCooldownBuffer.Add(keyValuePair2.Key);
-                }
-            }
-            for (int j = 0; j < this.expiredBerryCooldownBuffer.Count; j++)
-            {
-                int key2 = this.expiredBerryCooldownBuffer[j];
-                this.raspberryCooldowns.Remove(key2);
-                this.raspberryHideUntil.Remove(key2);
-                this.raspberryJustCollected.Remove(key2);
-                radarNeedsRefresh = true;
-            }
-            this.expiredBerryCooldownBuffer.Clear();
-            if (radarNeedsRefresh)
-            {
-                this.RunRadar();
-            }
-        }
 
 
 
@@ -2690,25 +2641,6 @@ namespace HeartopiaMod
         }
 
 
-        private void TrySelectNearestCooldownEntry(Vector3 entityPosition, Vector3[] candidates, Dictionary<int, float> cooldowns, Dictionary<int, float> hideUntil, ref Dictionary<int, float> bestCooldowns, ref Dictionary<int, float> bestHideUntil, ref int bestIndex, ref float bestSqr)
-        {
-            int index = this.FindClosestItemIndexLocal(entityPosition, candidates);
-            if (index < 0)
-            {
-                return;
-            }
-
-            float sqr = (candidates[index] - entityPosition).sqrMagnitude;
-            if (sqr >= bestSqr)
-            {
-                return;
-            }
-
-            bestSqr = sqr;
-            bestIndex = index;
-            bestCooldowns = cooldowns;
-            bestHideUntil = hideUntil;
-        }
 
 
 
@@ -4590,204 +4522,6 @@ namespace HeartopiaMod
             "Meteor / Starfall Exchange"
         };
 
-        // Hardcoded resource position arrays (ported from decompiled map data)
-        private static readonly Vector3[] RockPositions = new Vector3[]
-        {
-            new Vector3(-31.7f, 20.1f, 115.2f),
-            new Vector3(-10.3f, 21.4f, 107.6f),
-            new Vector3(15.3f, 21.5f, 102.1f),
-            new Vector3(47.9f, 21f, 96.7f),
-            new Vector3(66.9f, 21.8f, 91.5f),
-            new Vector3(66.7f, 20.5f, 138.9f),
-            new Vector3(16.4f, 21.4f, 146.2f),
-            new Vector3(-47.1f, 20f, 166.1f),
-            new Vector3(-133.4f, 21.5f, 63.9f),
-            new Vector3(-83.9f, 20.4f, 120.6f),
-            new Vector3(-130.2f, 22.4f, 41.2f),
-            new Vector3(-177f, 21.4f, 47.4f),
-            new Vector3(-123.9f, 21.8f, -2f),
-            new Vector3(-125.6f, 20f, -17.9f),
-            new Vector3(-119.1f, 19.9f, -45.2f),
-            new Vector3(-109.2f, 19.1f, -64f),
-            new Vector3(-95.9f, 20f, -79.4f),
-            new Vector3(95.9f, 23.4f, 70.6f),
-            new Vector3(142.1f, 23f, 66f),
-            new Vector3(97.4f, 22.7f, 50.6f)
-        };
-
-        private static readonly Vector3[] OrePositions = new Vector3[]
-        {
-            new Vector3(-152.3f, 21f, -86.1f),
-            new Vector3(-131.3f, 19.2f, -70.4f),
-            new Vector3(-169.3f, 19.9f, -34.2f),
-            new Vector3(-145.2f, 20.2f, -16.8f),
-            new Vector3(-175f, 20.4f, 6.4f),
-            new Vector3(-144.1f, 20.7f, 28f),
-            new Vector3(-178.4f, 21.4f, 66.3f),
-            new Vector3(-98.6f, 20.3f, 171f),
-            new Vector3(-74.1f, 20.1f, 149.6f),
-            new Vector3(-26.9f, 20f, 161.5f),
-            new Vector3(-22.6f, 20.1f, 131.4f),
-            new Vector3(21.2f, 21.6f, 146.2f),
-            new Vector3(35.3f, 21.2f, 127.2f),
-            new Vector3(80.8f, 20.5f, 135.8f),
-            new Vector3(141.5f, 23.1f, 78.5f),
-            new Vector3(142f, 23.2f, 27.8f),
-            new Vector3(130.8f, 21.6f, -6.6f),
-            new Vector3(141.6f, 21.9f, -37.9f),
-            new Vector3(110.5f, 20.9f, -63.4f),
-            new Vector3(115.4f, 20.6f, -106.7f)
-        };
-
-        // Hardcoded tree position arrays (ported from decompiled map data)
-        private static readonly Vector3[] TreePositions = new Vector3[]
-        {
-            new Vector3(139.7f, 21.7f, -44.3f),
-            new Vector3(144.5f, 22.2f, -42.1f),
-            new Vector3(145.2f, 22.3f, -44.1f),
-            new Vector3(141.8f, 21.8f, -49.3f),
-            new Vector3(152.2f, 21.2f, -50f),
-            new Vector3(156.8f, 21f, -38.4f),
-            new Vector3(161.7f, 21f, -35.7f),
-            new Vector3(160.8f, 21.1f, -32.6f),
-            new Vector3(178.4f, 21.7f, -6.1f),
-            new Vector3(183.2f, 22.5f, -13.3f),
-            new Vector3(198.2f, 17.5f, -23.4f),
-            new Vector3(200.2f, 17.3f, -22f),
-            new Vector3(198.9f, 17.6f, -17.1f),
-            new Vector3(171.6f, 21.3f, 6.5f),
-            new Vector3(183.9f, 24.2f, 16f),
-            new Vector3(190.4f, 24.1f, 22.4f),
-            new Vector3(190.4f, 25.9f, 30.1f),
-            new Vector3(170.449f,20.501f,-39.699f),
-            new Vector3(174.855f,20.990f,-36.675f),
-            new Vector3(173.392f,20.410f,-46.537f),
-            new Vector3(173.176f,20.615f,-48.654f),
-            new Vector3(179.145f,20.299f,-46.644f),
-            new Vector3(183.923f,19.960f,-37.363f),
-            new Vector3(191.932f,17.834f,-46.321f),
-            new Vector3(195.248f,17.604f,-38.141f),
-            new Vector3(197.057f,17.686f,-41.829f),
-            new Vector3(198.403f,17.369f,-44.197f),
-            new Vector3(198.888f,17.338f,-39.695f),
-            new Vector3(203.974f,15.249f,-39.667f),
-            new Vector3(209.787f,12.042f,-49.710f),
-            new Vector3(190.390f,19.568f,-19.386f),
-            new Vector3(196.372f,19.753f,7.629f),
-            new Vector3(197.307f,23.185f,14.063f),
-            new Vector3(198.850f,23.215f,12.024f),
-            new Vector3(206.653f,22.930f,12.314f),
-            new Vector3(211.267f,22.288f,15.947f),
-            new Vector3(209.340f,22.750f,19.160f),
-            new Vector3(204.159f,23.431f,21.673f),
-            new Vector3(207.259f,23.441f,33.904f),
-            new Vector3(204.171f,23.436f,36.241f),
-            new Vector3(207.511f,23.013f,40.964f),
-            new Vector3(197.897f,27.291f,32.530f),
-            new Vector3(196.316f,26.262f,38.628f),
-            new Vector3(191.472f,24.962f,48.498f),
-            new Vector3(194.644f,24.920f,52.629f),
-            new Vector3(193.433f,25.541f,54.969f),
-            new Vector3(190.077f,25.667f,55.608f)
-        };
-
-        private static readonly Vector3[] RareTreePositions = new Vector3[]
-        {
-            new Vector3(-91.5f, 20.4f, -83.1f),
-            new Vector3(-64.1f, 20.4f, -68.5f),
-            new Vector3(-123.1f, 27.3f, 100.8f),
-            new Vector3(56f, 23.7f, -70.4f),
-            new Vector3(-106.8f, 25.4f, 60.7f),
-            new Vector3(55.8f, 25.4f, 73.9f),
-            new Vector3(75.3f, 22.5f, 87.5f),
-            new Vector3(84.2f, 18.5f, -114.4f)
-        };
-
-        private static readonly Vector3[] AppleTreePositions = new Vector3[]
-        {
-            new Vector3(141.7f, 22.9f, 74.7f),
-            new Vector3(113.1f, 22.9f, 40.1f),
-            new Vector3(141.4f, 22.9f, 18f),
-            new Vector3(106f, 22.9f, 0.9f),
-            new Vector3(105.5f, 21.5f, -14.9f),
-            new Vector3(92.8f, 21.8f, -20.3f),
-            new Vector3(131.1f, 21.4f, -41.9f),
-            new Vector3(92.4f, 21.7f, -44.3f),
-            new Vector3(109.2f, 21.4f, -52.8f),
-            new Vector3(73.2f, 20.6f, -78f),
-            new Vector3(75.1f, 20.6f, -90.3f),
-            new Vector3(18.3f, 21.6f, 146.7f),
-            new Vector3(36.3f, 20.6f, 115.9f),
-            new Vector3(43.7f, 20.5f, 98.5f),
-            new Vector3(67.2f, 20.9f, 94.4f),
-            new Vector3(-16.1f, 22.9f, 103.0f),
-            new Vector3(8.5f, 23.2f, 97.2f),
-            new Vector3(28.7f, 22.7f, 96.4f),
-            new Vector3(75.5f, 20.7f, 93.4f),
-            new Vector3(63.2f, 20.6f, 139.7f),
-            new Vector3(94.2f, 22.3f, 55.6f),
-            new Vector3(98.1f, 23.1f, 75.3f),
-            new Vector3(97.4f, 22.9f, 46.3f),
-            new Vector3(94.2f, 22.4f, 29.1f),
-            new Vector3(94.7f, 22.6f, 6.3f),
-            new Vector3(84.7f, 20.8f, -65.5f),
-            new Vector3(125.1f, 21.2f, -89.6f)
-        };
-
-        private static readonly Vector3[] OrangeTreePositions = new Vector3[]
-        {
-            new Vector3(-107.4f, 19.1f, -67f),
-            new Vector3(-139.3f, 19.4f, -105.9f),
-            new Vector3(-159.4f, 20.2f, -64.3f),
-            new Vector3(-120.4f, 20.2f, -29.9f),
-            new Vector3(-123.6f, 20.2f, -22.8f),
-            new Vector3(-125.4f, 21.4f, -8.9f),
-            new Vector3(-121.1f, 22.2f, -6.1f),
-            new Vector3(-174f, 20.4f, 9.2f),
-            new Vector3(-155.7f, 20.8f, 30.5f),
-            new Vector3(-127.4f, 23f, 40.5f),
-            new Vector3(-131.6f, 22f, 69.8f),
-            new Vector3(-131.2f, 22.3f, 76.4f),
-            new Vector3(-95.8f, 20.6f, 118.4f),
-            new Vector3(-81.6f, 20.7f, 118.4f),
-            new Vector3(-67.1f, 20.4f, 139.4f),
-            new Vector3(-32.8f, 20.2f, 160.3f),
-            new Vector3(-36.1f, 20.2f, 115.5f),
-            new Vector3(-56.5f, 20.2f, 120.4f),
-            new Vector3(-65.5f, 21.0f, 120.2f),
-            new Vector3(-93.7f, 20.1f, 166.9f),
-            new Vector3(-114.2f, 20.3f, 128.9f),
-            new Vector3(-177.1f, 21.6f, 38.8f),
-            new Vector3(-126.4f, 22f, 23.5f),
-            new Vector3(-117.3f, 19.9f, -50.6f),
-            new Vector3(-134.5f, 19.2f, -66.4f),
-            new Vector3(-94.2f, 19.6f, -89.1f),
-            new Vector3(-92.8f, 19.3f, -95.2f)
-        };
-
-        public Dictionary<int, float> rockCooldowns = new Dictionary<int, float>();
-        public Dictionary<int, float> oreCooldowns = new Dictionary<int, float>();
-        public Dictionary<int, float> treeCooldowns_res = new Dictionary<int, float>();
-        public Dictionary<int, float> rareTreeCooldowns_res = new Dictionary<int, float>();
-        public Dictionary<int, float> appleTreeCooldowns_res = new Dictionary<int, float>();
-        public Dictionary<int, float> orangeTreeCooldowns_res = new Dictionary<int, float>();
-
-        public Dictionary<int, float> rockHideUntil = new Dictionary<int, float>();
-        public Dictionary<int, float> oreHideUntil = new Dictionary<int, float>();
-        public Dictionary<int, float> treeHideUntil_res = new Dictionary<int, float>();
-        public Dictionary<int, float> rareTreeHideUntil_res = new Dictionary<int, float>();
-        public Dictionary<int, float> appleTreeHideUntil_res = new Dictionary<int, float>();
-        public Dictionary<int, float> orangeTreeHideUntil_res = new Dictionary<int, float>();
-
-        public float rockCooldownDuration = 300f;
-        public float oreCooldownDuration = 300f;
-        public float treeCooldownDuration_res = 300f;
-        public float rareTreeCooldownDuration_res = 600f;
-        public float appleTreeCooldownDuration_res = 300f;
-        public float orangeTreeCooldownDuration_res = 300f;
-        private float nextLiveResourceCooldownSyncAt = 0f;
-        private float liveResourceCooldownSyncInterval = 1f;
-
         
         // Noclip/Flying Variables
         private bool noclipEnabled = false;
@@ -5082,49 +4816,6 @@ namespace HeartopiaMod
         private readonly Dictionary<uint, int> transferBatch = new Dictionary<uint, int>();
         private IntPtr transferMonoMoveBatchMethod = IntPtr.Zero;
 
-        // Token: 0x04000035 RID: 53
-        private Dictionary<int, float> blueberryCooldowns = new Dictionary<int, float>();
-        private readonly List<int> expiredBerryCooldownBuffer = new List<int>(32);
-
-        // Token: 0x04000036 RID: 54
-        private Dictionary<int, float> blueberryHideUntil = new Dictionary<int, float>();
-
-        // Token: 0x04000037 RID: 55
-        private Dictionary<int, float> blueberryJustCollected = new Dictionary<int, float>();
-
-        // Token: 0x04000038 RID: 56
-        private float blueberryCooldownDuration = 125f;
-
-        // Token: 0x0400003B RID: 59
-        private System.Action blueberryCollectListener = null;
-
-        // The hook-free il2cpp delegate built from the listener above. Cached because
-        // this button is re-wired every scan and RemoveListener matches by delegate
-        // OBJECT — a freshly built one would never match, so listeners would pile up.
-        private UnityEngine.Events.UnityAction blueberryCollectAction = null;
-        private const float ManualBerryListenerCheckInterval = 0.5f;
-        private float nextManualBerryListenerCheckAt = -999f;
-
-        // Token: 0x0400003C RID: 60
-        private Dictionary<int, float> raspberryCooldowns = new Dictionary<int, float>();
-
-        // Token: 0x0400003D RID: 61
-        private Dictionary<int, float> raspberryHideUntil = new Dictionary<int, float>();
-
-        // Token: 0x0400003E RID: 62
-        private Dictionary<int, float> raspberryJustCollected = new Dictionary<int, float>();
-
-        // Token: 0x0400003F RID: 63
-        private float raspberryCooldownDuration = 125f;
-
-        // Token: 0x04000042 RID: 66
-        private System.Action raspberryCollectListener = null;
-
-        // The hook-free il2cpp delegate built from the listener above. Cached because
-        // this button is re-wired every scan and RemoveListener matches by delegate
-        // OBJECT — a freshly built one would never match, so listeners would pile up.
-        private UnityEngine.Events.UnityAction raspberryCollectAction = null;
-
         // Token: 0x04000043 RID: 67
         private bool autoFarmActive = false;
 
@@ -5154,6 +4845,9 @@ namespace HeartopiaMod
 
         // Token: 0x04000049 RID: 73
         private Dictionary<Vector3, float> recentlyVisitedNodes = new Dictionary<Vector3, float>();
+        // When each recentlyVisitedNodes entry was written (Time.unscaledTime). Kept by
+        // StampVisitedNode / ForgetVisitedNode — never assign recentlyVisitedNodes directly.
+        private readonly Dictionary<Vector3, float> visitedNodeStampedAt = new Dictionary<Vector3, float>();
 
         // Token: 0x0400004B RID: 75
         private bool autoCollectClickedSinceArrival = false;
@@ -5181,7 +4875,23 @@ namespace HeartopiaMod
         // have to wait for the radar rescan pipeline.
         private uint auraCollectNodeOwnerNetId = 0U;
         private bool auraCollectNodeEntitySeen = false;
+        // The client's own per-resource verdict, harvested from every CollectColdEvent rather than
+        // only the one for the node being worked. Keyed by netId, which is how the event addresses
+        // it; the scan snapshot carries the same netId so a position can be looked up here.
+        internal struct CollectColdRecord
+        {
+            public long EndUnixMs;      // > now  =>  NOT collectable, whatever the component says
+            public int AvailableNum;
+            public float SeenAt;        // Time.unscaledTime, for staleness reporting
+        }
+
+        private readonly Dictionary<uint, CollectColdRecord> collectColdByNetId =
+            new Dictionary<uint, CollectColdRecord>(256);
+
         private float auraCollectNodeConfirmedAt = -1f;
+        // liveCollectableScanCompletedAt of the newest scan that still SAW the node being worked.
+        // -1 = no scan has seen it yet, which is also how a node reads while it streams in.
+        private float auraCollectNodeSeenPresentAt = -1f;
         private float auraNextCollectNodeProbeAt = 0f;
         private bool auraCollectNodeDiagLogged = false;
         private readonly HashSet<uint> auraCollectCaptureMissedOwners = new HashSet<uint>();
@@ -5240,105 +4950,6 @@ namespace HeartopiaMod
             { "Mustard Greens", new Vector3(-58.984f, 11.035f, -155.413f) },
             { "Blueberry", new Vector3(-114.2f, 20.1f, 142f) },
             { "Raspberry", new Vector3(-162.2f, 23.6f, 86.2f) }
-        };
-
-        // Token: 0x04000050 RID: 80
-        private Vector3[] blueberryPositions = new Vector3[]
-        {
-            new Vector3(-5.86f, 23.17f, 99.33f),
-            new Vector3(-14.15f, 22.26f, 105.27f),
-            new Vector3(-28.76f, 20.56f, 113.32f),
-            new Vector3(-40.26f, 20.28f, 115.89f),
-            new Vector3(-58.97f, 20.68f, 117.67f),
-            new Vector3(-65.91f, 20.14f, 123.47f),
-            new Vector3(-78.43f, 20.29f, 121.14f),
-            new Vector3(-93.45f, 20.52f, 118.26f),
-            new Vector3(21.94f, 22.14f, 98.96f),
-            new Vector3(37.23f, 20.74f, 100.19f),
-            new Vector3(47.98f, 21.6f, 94.41f),
-            new Vector3(64.27f, 21f, 94.7f),
-            new Vector3(76.87f, 20.5f, 97.59f),
-            new Vector3(80.03f, 20.47f, 108.47f),
-            new Vector3(74.95f, 20.64f, 137.79f),
-            new Vector3(45.61f, 20.67f, 141.06f),
-            new Vector3(24.01f, 21.66f, 146.53f),
-            new Vector3(9.77f, 21.48f, 147.94f),
-            new Vector3(-23.05f, 20.09f, 158.1f),
-            new Vector3(-44.83f, 19.96f, 164.72f),
-            new Vector3(97.88f, 22.73f, 52.9f),
-            new Vector3(100.22f, 22.88f, 43.81f),
-            new Vector3(97.27f, 23.1f, 67.74f),
-            new Vector3(121.26f, 23.08f, 84.34f),
-            new Vector3(137.91f, 23.15f, 82.24f),
-            new Vector3(142.78f, 22.95f, 63.66f),
-            new Vector3(123.6f, 22.89f, 43.15f),
-            new Vector3(96.94f, 22.82f, 28.91f),
-            new Vector3(97.84f, 22.82f, 18.08f),
-            new Vector3(97.85f, 22.83f, 7.06f),
-            new Vector3(103.39f, 22.97f, 1.14f),
-            new Vector3(110.07f, 21.81f, -11.87f),
-            new Vector3(124.84f, 22.04f, -4.28f),
-            new Vector3(93.88f, 21.75f, -22.81f),
-            new Vector3(89.69f, 21.88f, -30.47f),
-            new Vector3(93.98f, 21.57f, -41.11f),
-            new Vector3(89.38f, 20.78f, -58.92f),
-            new Vector3(82.51f, 20.87f, -63.06f),
-            new Vector3(75.68f, 20.65f, -76.41f),
-            new Vector3(76.12f, 20.53f, -86.39f),
-            new Vector3(-102.05f, 19.36f, -70.15f),
-            new Vector3(-96.11f, 19.69f, -77.12f),
-            new Vector3(-91.35f, 19.47f, -92.45f),
-            new Vector3(-111.74f, 19.18f, -60.99f),
-            new Vector3(-117.23f, 19.84f, -54.52f),
-            new Vector3(-118.64f, 19.95f, -42.71f),
-            new Vector3(-120.71f, 20.37f, -28.66f),
-            new Vector3(-123.18f, 19.91f, -26.54f),
-            new Vector3(-127.92f, 21.14f, -3.41f),
-            new Vector3(-129.59f, 20.66f, 27.85f),
-            new Vector3(-132.93f, 21.48f, 48.36f),
-            new Vector3(-131.08f, 21.88f, 66.78f),
-            new Vector3(-132.79f, 21.7f, 75.47f),
-            new Vector3(-135.89f, 23.12f, 86.09f),
-            new Vector3(-16.93f, 20.17f, 140.75f),
-            new Vector3(-68.31f, 20.36f, 143.23f),
-            new Vector3(-82.89f, 20.23f, 159.33f),
-            new Vector3(-97.04f, 20.14f, 165.01f),
-            new Vector3(-116.84f, 20.05f, 148.01f),
-            new Vector3(-112.68f, 20.21f, 124.94f),
-            new Vector3(-105.49f, 20.18f, 119.81f),
-            new Vector3(31.73f, 21.5f, 124.29f),
-            new Vector3(141.92f, 23.06f, 24.95f),
-            new Vector3(141.98f, 22.85f, 8.89f),
-            new Vector3(149.34f, 20.9f, -25.04f),
-            new Vector3(126.56f, 21.47f, -57.81f),
-            new Vector3(109.28f, 21.17f, -61.6f),
-            new Vector3(112.94f, 20.65f, -109.74f),
-            new Vector3(-125.76f, 21.13f, 5.11f),
-            new Vector3(-123.9f, 21.98f, 19.82f),
-            new Vector3(5.07f, 23.09f, 97.91f),
-            new Vector3(127.5f, 21.23f, -84.44f)
-        };
-
-        // Token: 0x04000051 RID: 81
-        private Vector3[] raspberryPositions = new Vector3[]
-        {
-            new Vector3(-168.1f, 20.1f, -44.82f),
-            new Vector3(-159.86f, 19.99f, -60.52f),
-            new Vector3(-135.03f, 18.95f, -70.75f),
-            new Vector3(-198.25f, 21.78f, -71.53f),
-            new Vector3(-124.88f, 19.07f, -113.42f),
-            new Vector3(-106.8f, 19.11f, -104.88f),
-            new Vector3(-153.52f, 20.7f, -15.07f),
-            new Vector3(-173.6f, 20.71f, -7.49f),
-            new Vector3(-189.19f, 20.02f, 8.1f),
-            new Vector3(-176.01f, 20.65f, 12.34f),
-            new Vector3(-201.96f, 19.37f, -18.05f),
-            new Vector3(-159.2f, 20.92f, 30.83f),
-            new Vector3(-178.5f, 21.6f, 43.58f),
-            new Vector3(-193.46f, 23.25f, 38.61f),
-            new Vector3(-177.76f, 21.35f, 68.47f),
-            new Vector3(-163.76f, 21.49f, 79.07f),
-            new Vector3(-160.83f, 19.05f, -103.41f)
         };
 
         // --- Custom Teleport Logic ---

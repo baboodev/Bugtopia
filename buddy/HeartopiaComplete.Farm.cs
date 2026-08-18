@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -108,352 +108,12 @@ namespace HeartopiaMod
             }
         }
 
-        // Token: 0x0600000B RID: 11 RVA: 0x00003648 File Offset: 0x00001848
-        private void MarkNearestBlueberryCollected()
-        {
-            Camera main = Camera.main;
-            Transform transform = (main != null) ? main.transform : null;
-            bool flag = transform == null;
-            if (!flag)
-            {
-                Vector3 position = transform.position;
-                int num = -1;
-                float num2 = float.MaxValue;
-                for (int i = 0; i < this.blueberryPositions.Length; i++)
-                {
-                    bool flag2 = this.blueberryCooldowns.ContainsKey(i) && Time.unscaledTime < this.blueberryCooldowns[i];
-                    if (!flag2)
-                    {
-                        bool flag3 = this.blueberryJustCollected.ContainsKey(i) && Time.unscaledTime < this.blueberryJustCollected[i];
-                        if (!flag3)
-                        {
-                            float num3 = Vector3.Distance(position, this.blueberryPositions[i]);
-                            bool flag4 = num3 < num2 && num3 < 5f;
-                            if (flag4)
-                            {
-                                num2 = num3;
-                                num = i;
-                            }
-                        }
-                    }
-                }
-                bool flag5 = num != -1;
-                if (flag5)
-                {
-                    float unscaledTime = Time.unscaledTime;
-                    this.blueberryJustCollected[num] = unscaledTime + 4f;
-                    this.blueberryCooldowns[num] = unscaledTime + this.blueberryCooldownDuration;
-                    this.blueberryHideUntil[num] = unscaledTime + 4f + 10f;
-                }
-            }
-        }
 
-        private void CheckManualBlueberryCollection(GameObject gameObject)
-        {
-            bool flag = gameObject != null && gameObject.activeInHierarchy;
-            if (flag)
-            {
-                Image component = gameObject.GetComponent<Image>();
-                bool flag2 = component != null && component.sprite != null && component.sprite.name.ToLower().Contains("interaction_8");
-                if (flag2)
-                {
-                    Button component2 = gameObject.GetComponent<Button>();
-                    bool flag3 = component2 != null;
-                    if (flag3)
-                    {
-                        if (this.blueberryCollectListener == null)
-                        {
-                            this.blueberryCollectListener = new System.Action(this.MarkNearestBlueberryCollected);
-                            this.blueberryCollectAction = HookFreeDelegate.ForVoid(this.blueberryCollectListener);
-                            if (this.blueberryCollectAction == null) { HookFreeDelegate.NoteFallback(); }
-                        }
-                        if (this.blueberryCollectAction != null)
-                        {
-                            component2.onClick.RemoveListener(this.blueberryCollectAction);
-                            component2.onClick.AddListener(this.blueberryCollectAction);
-                        }
-                        else
-                        {
-                            component2.onClick.RemoveListener(this.blueberryCollectListener);
-                            component2.onClick.AddListener(this.blueberryCollectListener);
-                        }
-                    }
-                }
-            }
-        }
 
-        // Token: 0x0600000D RID: 13 RVA: 0x0000386C File Offset: 0x00001A6C
-        private void MarkNearestRaspberryCollected()
-        {
-            Camera main = Camera.main;
-            Transform transform = (main != null) ? main.transform : null;
-            bool flag = transform == null;
-            if (!flag)
-            {
-                Vector3 position = transform.position;
-                int num = -1;
-                float num2 = float.MaxValue;
-                for (int i = 0; i < this.raspberryPositions.Length; i++)
-                {
-                    bool flag2 = this.raspberryCooldowns.ContainsKey(i) && Time.unscaledTime < this.raspberryCooldowns[i];
-                    if (!flag2)
-                    {
-                        bool flag3 = this.raspberryJustCollected.ContainsKey(i) && Time.unscaledTime < this.raspberryJustCollected[i];
-                        if (!flag3)
-                        {
-                            float num3 = Vector3.Distance(position, this.raspberryPositions[i]);
-                            bool flag4 = num3 < num2 && num3 < 5f;
-                            if (flag4)
-                            {
-                                num2 = num3;
-                                num = i;
-                            }
-                        }
-                    }
-                }
-                bool flag5 = num != -1;
-                if (flag5)
-                {
-                    float unscaledTime = Time.unscaledTime;
-                    this.raspberryJustCollected[num] = unscaledTime + 4f;
-                    this.raspberryCooldowns[num] = unscaledTime + this.raspberryCooldownDuration;
-                    this.raspberryHideUntil[num] = unscaledTime + 4f + 10f;
-                }
-            }
-        }
 
-        private void CheckManualRaspberryCollection(GameObject gameObject)
-        {
-            bool flag = gameObject != null && gameObject.activeInHierarchy;
-            if (flag)
-            {
-                Image component = gameObject.GetComponent<Image>();
-                bool flag2 = component != null && component.sprite != null;
-                if (flag2)
-                {
-                    string text = component.sprite.name.ToLower();
-                    bool flag3 = text.Contains("interaction_8");
-                    if (flag3)
-                    {
-                        Button component2 = gameObject.GetComponent<Button>();
-                        bool flag4 = component2 != null;
-                        if (flag4)
-                        {
-                            if (this.raspberryCollectListener == null)
-                            {
-                                this.raspberryCollectListener = new System.Action(this.MarkNearestRaspberryCollected);
-                            this.raspberryCollectAction = HookFreeDelegate.ForVoid(this.raspberryCollectListener);
-                            if (this.raspberryCollectAction == null) { HookFreeDelegate.NoteFallback(); }
-                            }
-                            if (this.raspberryCollectAction != null)
-                            {
-                                component2.onClick.RemoveListener(this.raspberryCollectAction);
-                                component2.onClick.AddListener(this.raspberryCollectAction);
-                            }
-                            else
-                            {
-                                component2.onClick.RemoveListener(this.raspberryCollectListener);
-                                component2.onClick.AddListener(this.raspberryCollectListener);
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
-        private void CheckManualBerryCollectionListeners()
-        {
-            if (!this.isRadarActive && !this.autoFarmActive && !this.auraFarmEnabled)
-            {
-                return;
-            }
 
-            float now = Time.unscaledTime;
-            if (now < this.nextManualBerryListenerCheckAt)
-            {
-                return;
-            }
 
-            this.nextManualBerryListenerCheckAt = now + ManualBerryListenerCheckInterval;
-            GameObject interactButton = GameObject.Find("GameApp/startup_root(Clone)/XDUIRoot/Bottom/TrackingPanel(Clone)/tracking_bar@w/tracking_common@list/IconsBarWidget(Clone)/root_visible@go@group/cells@t/cells@list/CommonIconForInteract(Clone)/root_visible@go/icon@img@btn");
-            this.CheckManualBlueberryCollection(interactButton);
-            this.CheckManualRaspberryCollection(interactButton);
-        }
-
-        private void SyncNearbyLiveResourceCooldowns()
-        {
-            // Only sync when farming features are active - NOT when just radar is enabled
-            // This prevents Mono API from activating when only Radar ESP is on
-            bool shouldSync = this.autoFarmActive || this.auraFarmEnabled;
-            if (!shouldSync)
-            {
-                return;
-            }
-
-            float nowUnscaled = Time.unscaledTime;
-            if (this.auraFarmEnabled && nowUnscaled - this.auraLastSuccessfulCommandAt < 0.75f)
-            {
-                return;
-            }
-
-            if (nowUnscaled < this.nextLiveResourceCooldownSyncAt)
-            {
-                return;
-            }
-
-            this.nextLiveResourceCooldownSyncAt = nowUnscaled + this.liveResourceCooldownSyncInterval;
-
-            if (!this.ResolveAuraFarmRuntimeMethods())
-            {
-                return;
-            }
-
-            this.auraOwnerTargetBuffer.Clear();
-            if (this.auraFarmEnabled)
-            {
-                this.CollectAuraOwnerTargets(this.auraOwnerTargetBuffer);
-            }
-            else
-            {
-                this.TryCollectAuraOwnerTargetsViaSphereQuery(this.auraOwnerTargetBuffer);
-                object interactSystem = this.GetAuraInteractSystemInstance();
-                this.TryCollectAuraOwnerTargetsViaCylinderScan(interactSystem, this.auraOwnerTargetBuffer);
-            }
-            if (this.auraOwnerTargetBuffer.Count == 0)
-            {
-                return;
-            }
-
-            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            foreach (uint ownerNetId in this.auraOwnerTargetBuffer)
-            {
-                object entity = this.TryGetAuraOwnerEntity(ownerNetId);
-                if (entity == null)
-                {
-                    continue;
-                }
-
-                object collectableObject = this.TryGetAuraEntityComponent(entity, this.auraCollectableObjectComponentType);
-                if (collectableObject == null)
-                {
-                    continue;
-                }
-
-                if (!this.TryGetAuraEntityPosition(entity, out Vector3 entityPosition))
-                {
-                    continue;
-                }
-
-                if (!this.TryReadLiveCollectableCooldown(collectableObject, out long coldEndTimeMs, out int availableNum, out string resTypeName))
-                {
-                    continue;
-                }
-
-                this.ApplyLiveResourceCooldownByPosition(entityPosition, coldEndTimeMs, availableNum, resTypeName, nowUnixMs, nowUnscaled);
-            }
-        }
-
-        // endAuthoritative: coldEndTimeMs is a REAL server end (entity read / CollectColdEvent) and
-        // may correct an existing stamp in BOTH directions. False = synthetic placeholder (the
-        // rolling 30s SyncLiveResourceColdStates emits when the entity's end is unreadable) — it
-        // may only bump a stamp UP, never shorten one (it used to stomp the 125-300s visit stamps
-        // down to 30s, re-exposing depleted nodes to the farm rotation within seconds).
-        private void ApplyLiveResourceCooldownByPosition(Vector3 entityPosition, long coldEndTimeMs, int availableNum, string resTypeName, long nowUnixMs, float nowUnscaled, bool endAuthoritative = true)
-        {
-            bool isOnCooldown = coldEndTimeMs > nowUnixMs;
-            bool isTreeType = resTypeName.IndexOf("Tree", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool isStoneType = resTypeName.IndexOf("Stone", StringComparison.OrdinalIgnoreCase) >= 0
-                || resTypeName.IndexOf("Meteroite", StringComparison.OrdinalIgnoreCase) >= 0
-                || resTypeName.IndexOf("Meteor", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool isBushType = resTypeName.IndexOf("Bush", StringComparison.OrdinalIgnoreCase) >= 0
-                || resTypeName.IndexOf("Berry", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (!isTreeType && !isStoneType && !isBushType)
-            {
-                AuraTargetKind fallbackKind = this.GetAuraTargetKindFromPosition(entityPosition);
-                isTreeType = fallbackKind == AuraTargetKind.Tree;
-                isStoneType = fallbackKind == AuraTargetKind.Stone;
-                isBushType = fallbackKind == AuraTargetKind.Bush;
-            }
-
-            if (!isTreeType && !isStoneType && !isBushType)
-            {
-                return;
-            }
-
-            Dictionary<int, float> targetCooldowns = null;
-            Dictionary<int, float> targetHideUntil = null;
-            int targetIndex = -1;
-            // Tight identification (2m): array points sit ~1m from their entity anchors; the old
-            // 5m radius let a cold entity of ANOTHER nearby resource stamp a warm node's slot.
-            float bestSqr = 4f;
-
-            if (isTreeType)
-            {
-                this.TrySelectNearestCooldownEntry(entityPosition, HeartopiaComplete.TreePositions, this.treeCooldowns_res, this.treeHideUntil_res, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-                this.TrySelectNearestCooldownEntry(entityPosition, HeartopiaComplete.RareTreePositions, this.rareTreeCooldowns_res, this.rareTreeHideUntil_res, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-                this.TrySelectNearestCooldownEntry(entityPosition, HeartopiaComplete.AppleTreePositions, this.appleTreeCooldowns_res, this.appleTreeHideUntil_res, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-                this.TrySelectNearestCooldownEntry(entityPosition, HeartopiaComplete.OrangeTreePositions, this.orangeTreeCooldowns_res, this.orangeTreeHideUntil_res, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-            }
-            else if (isStoneType)
-            {
-                this.TrySelectNearestCooldownEntry(entityPosition, HeartopiaComplete.RockPositions, this.rockCooldowns, this.rockHideUntil, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-                this.TrySelectNearestCooldownEntry(entityPosition, HeartopiaComplete.OrePositions, this.oreCooldowns, this.oreHideUntil, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-            }
-            else if (isBushType)
-            {
-                this.TrySelectNearestCooldownEntry(entityPosition, this.blueberryPositions, this.blueberryCooldowns, this.blueberryHideUntil, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-                this.TrySelectNearestCooldownEntry(entityPosition, this.raspberryPositions, this.raspberryCooldowns, this.raspberryHideUntil, ref targetCooldowns, ref targetHideUntil, ref targetIndex, ref bestSqr);
-            }
-
-            if (targetCooldowns == null || targetIndex < 0)
-            {
-                return;
-            }
-
-            if (isOnCooldown)
-            {
-                float secondsRemaining = Math.Max(0f, (float)(coldEndTimeMs - nowUnixMs) / 1000f);
-                float newUntil = nowUnscaled + secondsRemaining;
-                // A real server end overwrites unconditionally (corrects wrong long stamps DOWN so
-                // a ripe-again node re-enters the rotation on time); a synthetic placeholder end
-                // only bumps UP (never shortens the 125-300s visit stamps to its rolling 30s).
-                float existingUntil;
-                if (endAuthoritative
-                    || !targetCooldowns.TryGetValue(targetIndex, out existingUntil)
-                    || existingUntil < newUntil)
-                {
-                    targetCooldowns[targetIndex] = newUntil;
-                }
-                if (targetHideUntil != null)
-                {
-                    targetHideUntil[targetIndex] = nowUnscaled + 10f;
-                }
-            }
-            else if (availableNum != 0)
-            {
-                // Mid-drain flip-flop protection ONLY: a multi-charge bush reads WARM between its
-                // ~2.5s charge ticks while the aura drains it, so the send-time stamp of the node
-                // being worked must survive those reads. The old unscoped guard kept ANY active
-                // bush stamp against ANY warm read — a respawned (ready) bush whose slot kept
-                // getting refreshed by nearby collect activity then stayed hidden on the radar
-                // long after it was collectable. Everywhere else live-warm wins: clear the stamp.
-                float localUntil;
-                if (isBushType
-                    && this.autoFarmActive
-                    && this.farmState == HeartopiaComplete.AutoFarmState.Collecting
-                    && Vector3.Distance(entityPosition, this.lastNodePosition) < 3f
-                    && targetCooldowns.TryGetValue(targetIndex, out localUntil) && localUntil > nowUnscaled)
-                {
-                    return;
-                }
-
-                targetCooldowns.Remove(targetIndex);
-                if (targetHideUntil != null)
-                {
-                    targetHideUntil.Remove(targetIndex);
-                }
-            }
-        }
 
         // Token: 0x06000015 RID: 21 RVA: 0x00003ECC File Offset: 0x000020CC
         private void RunAutoFarmLogic()
@@ -757,7 +417,7 @@ namespace HeartopiaMod
                         bool flag3 = this.autoFarmTimer >= 5f;
                         if (flag3)
                         {
-                            this.recentlyVisitedNodes[this.lastNodePosition] = Time.unscaledTime + FarmVisitedRetryStampSeconds;
+                            this.StampVisitedNode(this.lastNodePosition, Time.unscaledTime + FarmVisitedRetryStampSeconds);
                             this.FinishCollectingCycle();
                         }
                         else
@@ -765,7 +425,7 @@ namespace HeartopiaMod
                             bool flag4 = this.autoFarmTimer >= 3f;
                             if (flag4)
                             {
-                                this.recentlyVisitedNodes[this.lastNodePosition] = Time.unscaledTime + FarmVisitedRetryStampSeconds;
+                                this.StampVisitedNode(this.lastNodePosition, Time.unscaledTime + FarmVisitedRetryStampSeconds);
                                 this.FinishCollectingCycle();
                             }
                             else
@@ -1203,11 +863,22 @@ namespace HeartopiaMod
         // node isn't lost for minutes. The old flat 15s expired faster than a 2-3-dead-node loop
         // takes, so the farm circled the same depleted trees/bushes indefinitely.
         private const float FarmVisitedRetryStampSeconds = 15f;
+        // How old a visited stamp must be before the warm-purge may overrule it. Longer than the
+        // retry stamp on purpose: a retry stamp expires on its own and never needs correcting.
+        private const float FarmVisitedPurgeMinAge = 30f;
         private const float FarmVisitedColdStampFallbackSeconds = 120f;
-        // Upper bound for the visited stamp: recentlyVisitedNodes is a BACKSTOP (the label cooldown
-        // dicts carry the authoritative long ends for daily resources), and unlike them it is only
-        // ever corrected by TIME — cap it so a bad end-time read can't silently park a node for
-        // hours. The live warm-purge in SyncLiveResourceColdStates clears it earlier anyway.
+        // Upper bound for the visited stamp.
+        //
+        // ⚠️ THIS WAS RAISED TO 8 h ON A WRONG READING AND IS BACK TO TEN MINUTES. The reasoning was
+        // "a picked mushroom's coldEndTime sits ~25 300 s out, so a ten-minute cap guarantees a
+        // revisit loop". Both halves were wrong: those 25 300 s were a LEFTOVER value the game's own
+        // `inCold` ignores, and a picked mushroom has no cooldown at all — it is removed from the
+        // world (measured over five hand-picks and five farm collects, 2026-08-19, every one
+        // `removed from the world`).
+        //
+        // So the original reason for a cap stands unchanged: recentlyVisitedNodes is a BACKSTOP, it
+        // is only ever corrected by TIME, and a bad end-time read must not be able to park a node
+        // for hours. The live warm-purge in SyncLiveResourceColdStates releases it earlier anyway.
         private const float FarmVisitedColdStampMaxSeconds = 600f;
 
         // Real cooldown end (unix ms) of the node being collected, captured from the drain-end
@@ -1218,6 +889,41 @@ namespace HeartopiaMod
         // to [retry, 10min]: long (daily) cooldowns are carried by the label cooldown dicts (which
         // live corrections CAN shorten); this per-position backstop stays bounded so a bad end-time
         // read can't park a node for hours (see FarmVisitedColdStampMaxSeconds).
+        // THE only way a visited stamp is written. It exists so the WHEN is recorded alongside the
+        // UNTIL: the warm-purge in SyncLiveResourceColdStates needs to tell a stamp that describes
+        // what the farm just did from one that has gone stale, and an expiry alone cannot.
+        private void StampVisitedNode(Vector3 node, float expiresAt)
+        {
+            // ⚠️ A NODE THE GAME SAYS IS COLD IS NEVER PARKED FOR LESS THAN ITS COOLDOWN.
+            //
+            // Every caller decides a duration from what IT knows, and several of them know nothing:
+            // the dwell timeout and the walk skip both fall back to the 15 s retry stamp. On a
+            // mushroom that is cold for seven hours that is a revisit every fifteen seconds, which
+            // is exactly what the 2026-08-19 probe caught — stamp expiring in 9 s on an entity with
+            // 25 307 s of cooldown left. Rather than repair each caller (and miss the next one), the
+            // floor is applied here, at the single point every stamp goes through.
+            //
+            // MAX, never overwrite: park and repeat-offender stamps are deliberately long and must
+            // not be shortened to a cooldown that happens to be nearer.
+            if (this.TryGetLiveNodeColdState(node, 0f, out bool nodeCold, out long nodeColdEndMs) && nodeCold)
+            {
+                float coldFloor = Time.unscaledTime + this.GetVisitedColdStampSeconds(nodeColdEndMs);
+                if (coldFloor > expiresAt)
+                {
+                    expiresAt = coldFloor;
+                }
+            }
+
+            this.recentlyVisitedNodes[node] = expiresAt;
+            this.visitedNodeStampedAt[node] = Time.unscaledTime;
+        }
+
+        private void ForgetVisitedNode(Vector3 node)
+        {
+            this.recentlyVisitedNodes.Remove(node);
+            this.visitedNodeStampedAt.Remove(node);
+        }
+
         private float GetVisitedColdStampSeconds(long coldEndUnixMs)
         {
             long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -1605,7 +1311,7 @@ namespace HeartopiaMod
         private void FinishContaminationCleanDwell(float now, string reason)
         {
             float stampSeconds = this.contaminationKillsThisNode > 0 ? 15f : 60f;
-            this.recentlyVisitedNodes[this.lastNodePosition] = now + stampSeconds;
+            this.StampVisitedNode(this.lastNodePosition, now + stampSeconds);
             this.AutoFarmLog($"Contamination dwell done at {this.lastNodePosition} (kills={this.contaminationKillsThisNode}, reason={reason}, stamp={stampSeconds:F0}s)");
             this.FinishCollectingCycle();
         }
@@ -1631,6 +1337,7 @@ namespace HeartopiaMod
             this.auraCollectNodeDiagLogged = false;
             this.auraCollectCaptureMissedOwners.Clear();
             this.auraCollectNodeAbsentTicks = 0;
+            this.auraCollectNodeSeenPresentAt = -1f;
             this.auraCollectSeenAvailByNetId.Clear();
             this.auraCollectOurNetIds.Clear();
             this.auraCollectLastBackpackAt = -1f;
@@ -1646,6 +1353,316 @@ namespace HeartopiaMod
         // the pick command targeted — the only build-independent, per-resource collect signal
         // (managed XDT* entity resolution is dead on this build, and cold bush shapes stay in
         // the axe-checker). CollectObjectShowEvent covers despawn-style objects.
+        // ⚠️ HOOK THIS AT WORLD-READY, NOT WHEN THE FARM ARMS — the difference decides whether the
+        // farm can answer "is that node worth walking to" at all.
+        //
+        // TrackModule.OnCreate() calls IDynamicMapItemService.UpdateAllColdTime() once at startup,
+        // which walks EVERY map-resource point, computes its verdict (for a dynamic bush, from
+        // DynamicBushGrowComponent.MaturityTime) and broadcasts one CollectColdEvent per resource.
+        // That single sweep is the only moment the client volunteers a verdict for resources nobody
+        // has touched — afterwards events fire only on CHANGE, which is why a probe that subscribed
+        // late measured verdicts for 6 of 59 nearby objects.
+        //
+        // The verdicts do not go stale: endUnixTimeMs is an ABSOLUTE instant, so "not ready until T"
+        // stays true however long ago it was heard.
+        internal bool RegisterCollectColdHookOnWorldReady()
+        {
+            this.collectColdByNetId.Clear();   // netIds are per-session
+            this.EnsureAuraCollectColdEventHook();
+            return true;
+        }
+
+        private bool collectColdWorldReadyRegistered;
+
+        // ⚠️ REGISTER THE HOOK EAGERLY, CLEAR THE LEDGER ON THE GATE — two different timings, and
+        // getting them the same way costs the startup sweep.
+        //
+        // Registering an event hook is METADATA ONLY and is safe at any time; it is the INSTALL that
+        // needs a live world, and ProcessGameEventHooksOnUpdate already performs it on the first
+        // tick after IsWorldReady. Doing the registration from a world-ready CALLBACK instead put it
+        // behind the gate's deferred-warmup phase — measured 2026-08-19: world ready at 04:02:16,
+        // hook installed at 04:02:18, and TrackModule's one-shot UpdateAllColdTime sweep had already
+        // gone by, leaving the ledger empty.
+        //
+        // The documented pre-world hazard is about INFLATING DispatchEvent<T> before a world exists
+        // ([[eventhook-preworld-inflate-abort]]); it does not apply to registration, and the install
+        // path keeps its own IsWorldReady gate.
+        private void EnsureCollectColdRegistrations()
+        {
+            if (this.collectColdWorldReadyRegistered)
+            {
+                return;
+            }
+
+            this.collectColdWorldReadyRegistered = true;
+            this.EnsureAuraCollectColdEventHook();
+            this.RegisterWorldReadyCallback("CollectColdLedger", this.RegisterCollectColdHookOnWorldReady);
+        }
+
+        // Driven from the same place the cold sync already runs, so it costs nothing when neither
+        // the radar nor the farm is on; its own 30 s throttle keeps the sweep rare.
+        private void ProcessCollectColdSweepOnUpdate()
+        {
+            if (!this.isRadarActive && !this.autoFarmActive)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+
+            // Any visible resource the ledger has never heard of means a new entity appeared — the
+            // regrowth case above. Pull the sweep forward instead of waiting out the interval.
+            if (now >= this.collectColdSweepEarliestAt && this.SnapshotHasUnknownNetId())
+            {
+                this.collectColdSweepEarliestAt = now + CollectColdSweepMinGap;
+                this.collectColdNextSweepAt = 0f;
+            }
+
+            this.TrySweepCollectColdLedger(now);
+
+            if (this.collectColdCoveragePendingAt >= 0f && now >= this.collectColdCoveragePendingAt)
+            {
+                this.collectColdCoveragePendingAt = -1f;
+                this.LogCollectColdCoverage();
+            }
+        }
+
+        // ── Ask the client to publish a verdict for EVERY map resource ───────────────────────────
+        //
+        // The ledger above is only as good as its coverage, and events alone do not provide it: the
+        // client volunteers a CollectColdEvent when a resource CHANGES, plus one sweep at startup
+        // (TrackModule.OnCreate -> UpdateAllColdTime) that lands before any hook of ours can be
+        // installed — measured, world ready 04:06:20, hook live 04:06:21, sweep already gone. A probe
+        // subscribing afterwards saw verdicts for 6 of 59 nearby objects.
+        //
+        // So we ask for the sweep ourselves. IDynamicMapItemService.UpdateAllColdTime() walks every
+        // map-resource point, computes each verdict (for a dynamic bush, from
+        // DynamicBushGrowComponent.MaturityTime — the same number that draws the growth ring the
+        // player sees) and broadcasts one event per resource. Measured in-game: one call produced
+        // 153 events and took the ledger from 2 to 66 entries, with verdicts for objects 10 m away
+        // that nobody had approached.
+        //
+        // ⚠️ WHY Get<T> AND NOT TryGet<T>. Both are generic and both need the same inflate, but
+        // Get<T>(bool) returns a REFERENCE and takes one value argument, while TryGet<T>(out T, bool)
+        // has an out parameter — and out parameters through AuraMono are only safe for reference
+        // types. Get is the shape that fits the rule instead of testing it.
+        //
+        // ⚠️ WORLD-READY ONLY. Inflating a generic method before the world exists is the documented
+        // abort (mono_metadata_get_generic_inst -> g_assert), so this never runs off the gate.
+        // ⚠️ SWEEP ON UNKNOWN NETIDS, NOT ON A CLOCK.
+        //
+        // A collected resource is REMOVED and a NEW entity grows in its place, with a NEW netId —
+        // measured on one spot across a single run: 14215718 -> 3630230 -> 3631959 -> 3696675. So the
+        // verdict held for the old netId describes an object that no longer exists, and the fresh
+        // one starts life unknown to the ledger. On a 30 s clock that gap is exactly when the farm
+        // walks over and finds a mushroom that is still growing.
+        //
+        // The snapshot already lists every visible netId, so an unknown one is a direct signal that
+        // the ledger is behind — sweeping on that closes the gap in about a second instead of thirty.
+        // The interval below is now only a floor between sweeps, not the trigger.
+        private const float CollectColdSweepInterval = 30f;
+        private const float CollectColdSweepMinGap = 3f;
+        private float collectColdNextSweepAt;
+        private IntPtr collectColdGetInflated = IntPtr.Zero;
+        private bool collectColdSweepUnavailable;
+
+        // WALK-SIDE ONLY: may the farm set off towards this node?
+        //
+        // Separate from TryGetLiveNodeColdState on purpose — see the note there. A dynamic bush
+        // (mushroom, event plant) that carries no broadcast verdict is UNCONFIRMED, and unconfirmed
+        // is not a reason to walk 20 m: picking one removes the entity and a NEW one grows in its
+        // place with a new netId, whose component reads exactly like a ripe one (inCold=False,
+        // coldEnd=0, avail=3). The client's verdict is the only thing that can tell them apart.
+        //
+        // Restricted to that family because the restriction is measured: with the sweep running,
+        // coverage was 3/3 on mushrooms but 77 of 117 on trees/stone/berries — those never get a
+        // broadcast, because UpdateAllColdTime only computes one where DynamicBushGrowComponent
+        // exists. Applying this to them would park half the map for nothing; their component test
+        // is sound and stays.
+        private bool IsFarmTargetUnconfirmed(Vector3 node, out int staticId)
+        {
+            staticId = 0;
+            float bestSqr = 2.25f;
+            uint netId = 0u;
+            bool found = false;
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                Vector3 d = this.liveCollectableColds[i].Position - node;
+                float sqr = (d.x * d.x) + (d.z * d.z);
+                if (sqr >= bestSqr)
+                {
+                    continue;
+                }
+
+                bestSqr = sqr;
+                found = true;
+                netId = this.liveCollectableColds[i].NetId;
+                staticId = this.liveCollectableColds[i].StaticId;
+            }
+
+            if (!found || staticId < 130001 || staticId > 130025)
+            {
+                return false;
+            }
+
+            return netId == 0u || !this.collectColdByNetId.ContainsKey(netId);
+        }
+
+        private float collectColdSweepEarliestAt;
+        private float collectColdCoveragePendingAt = -1f;
+
+        private bool SnapshotHasUnknownNetId()
+        {
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                uint netId = this.liveCollectableColds[i].NetId;
+                if (netId != 0u && !this.collectColdByNetId.ContainsKey(netId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // How many of the resources currently in view carry a verdict. This is the number that says
+        // whether "never walk to an unconfirmed node" is affordable, so it is logged rather than
+        // assumed — and it is logged only when it CHANGES, since it is stable most of the time.
+        private int collectColdLastCoverageLogged = -1;
+
+        private void LogCollectColdCoverage()
+        {
+            int known = 0, total = 0;
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                uint netId = this.liveCollectableColds[i].NetId;
+                if (netId == 0u)
+                {
+                    continue;
+                }
+
+                total++;
+                if (this.collectColdByNetId.ContainsKey(netId))
+                {
+                    known++;
+                }
+            }
+
+            int missing = total - known;
+            if (missing == this.collectColdLastCoverageLogged)
+            {
+                return;
+            }
+
+            this.collectColdLastCoverageLogged = missing;
+            ModLogger.Msg("[CollectCold] verdict coverage " + known + "/" + total
+                + " in view (" + missing + " unconfirmed), ledger=" + this.collectColdByNetId.Count);
+        }
+
+        private void TrySweepCollectColdLedger(float now)
+        {
+            if (this.collectColdSweepUnavailable || !this.IsWorldReady || now < this.collectColdNextSweepAt)
+            {
+                return;
+            }
+
+            this.collectColdNextSweepAt = now + CollectColdSweepInterval;
+
+            if (this.collectColdGetInflated == IntPtr.Zero && !this.TryResolveCollectColdSweep())
+            {
+                return;
+            }
+
+            // The service is a managed object: resolve it fresh each sweep rather than caching the
+            // pointer across frames, where the moving GC would invalidate it.
+            IntPtr boolArg = Marshal.AllocHGlobal(1);
+            try
+            {
+                Marshal.WriteByte(boolArg, 0, 0);   // isLogError: false — a miss must stay quiet
+                IntPtr service = this.InvokeCollectColdGet(boolArg);
+                if (service == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                IntPtr serviceClass = auraMonoObjectGetClass == null ? IntPtr.Zero : auraMonoObjectGetClass(service);
+                IntPtr update = serviceClass == IntPtr.Zero
+                    ? IntPtr.Zero
+                    : this.FindAuraMonoMethodOnHierarchy(serviceClass, "UpdateAllColdTime", 0);
+                if (update == IntPtr.Zero)
+                {
+                    this.collectColdSweepUnavailable = true;
+                    ModLogger.Msg("[CollectCold] UpdateAllColdTime not found on the resolved service — "
+                        + "ledger will fill from change events only.");
+                    return;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(update, service, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    this.collectColdSweepUnavailable = true;
+                    ModLogger.Msg("[CollectCold] UpdateAllColdTime threw — sweep disabled for this session.");
+                    return;
+                }
+
+                // The events land on the hook drain, i.e. next tick — so report coverage then, not
+                // now, or the number would always read one sweep behind.
+                this.collectColdCoveragePendingAt = Time.unscaledTime + 0.5f;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(boolArg);
+            }
+        }
+
+        private unsafe IntPtr InvokeCollectColdGet(IntPtr boolArg)
+        {
+            if (this.collectColdGetInflated == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = boolArg;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr service = auraMonoRuntimeInvoke(this.collectColdGetInflated, IntPtr.Zero, (IntPtr)args, ref exc);
+            return exc == IntPtr.Zero ? service : IntPtr.Zero;
+        }
+
+        private bool TryResolveCollectColdSweep()
+        {
+            IntPtr ecsService = this.FindAuraMonoClassInAllLoadedImages("EcsService", "XDTDataAndProtocol.ProtocolService");
+            IntPtr iface = this.FindAuraMonoClassInAllLoadedImages("IDynamicMapItemService", "EcsSystem.ClientSystem.Mapresource");
+            IntPtr openGet = ecsService == IntPtr.Zero
+                ? IntPtr.Zero
+                : this.FindAuraMonoMethodOnHierarchy(ecsService, "Get", 1);
+
+            if (ecsService == IntPtr.Zero || iface == IntPtr.Zero || openGet == IntPtr.Zero)
+            {
+                this.collectColdSweepUnavailable = true;
+                ModLogger.Msg("[CollectCold] sweep unavailable (EcsService=" + (ecsService != IntPtr.Zero)
+                    + " IDynamicMapItemService=" + (iface != IntPtr.Zero) + " Get=" + (openGet != IntPtr.Zero)
+                    + ") — ledger will fill from change events only.");
+                return false;
+            }
+
+            // Same inflate the event hooks use, and the same arity guard: a wrong method_inst hands
+            // the body a garbage pointer and takes the process down.
+            if (!this.TryInflateDispatchForEvent(openGet, iface, 1, out IntPtr inflated))
+            {
+                this.collectColdSweepUnavailable = true;
+                ModLogger.Msg("[CollectCold] could not inflate EcsService.Get<IDynamicMapItemService> — "
+                    + "ledger will fill from change events only.");
+                return false;
+            }
+
+            this.collectColdGetInflated = inflated;
+            ModLogger.Msg("[CollectCold] resource-verdict sweep armed (every "
+                + CollectColdSweepInterval.ToString("F0") + "s).");
+            return true;
+        }
+
         private void EnsureAuraCollectColdEventHook()
         {
             if (this.auraCollectColdHookRegistered)
@@ -1700,14 +1717,64 @@ namespace HeartopiaMod
         // never appear in events, so binding is done by the decrement pattern instead.
         private void OnAuraCollectColdEvent(GameEventSnapshot e)
         {
+            uint resourceNetId = e.ReadUInt32(0);
+            long endMs = (long)e.ReadUInt64(8);
+            int availableNum = e.ReadInt32(20);
+
+            // ⚠️ RECORD FIRST, GATE SECOND. This event is the CLIENT'S OWN verdict for one resource:
+            // ResourceProtocolManager.CmdUpdateCollectCold computes it (for a dynamic bush, from
+            // DynamicBushGrowComponent.MaturityTime — a mushroom GROWS, it does not cool) and
+            // broadcasts it keyed by netId. Everything below this point is about the node the farm
+            // is standing on, and the old early-return threw the other 800-odd verdicts away.
+            //
+            // Keeping them is what makes a target answerable BEFORE walking to it: the verdict for a
+            // node 30 m off arrives here on its own, with no approach and no polling. Measured over
+            // one run: 874 events, 149 distinct netIds.
+            if (resourceNetId != 0U)
+            {
+                // ⚠️ TWO EVENTS ARRIVE PER RESOURCE PER SWEEP, AND THE SECOND ONE LIES.
+                //
+                // UpdateAllColdTime's loop body sends both:
+                //     if (has DynamicBushGrowComponent)
+                //         CmdUpdateCollectCold(netId, ParseToUnix(grow.MaturityTime), growTime, ...);
+                //     UpdateResourcePoint(resourceId, netId);          // ← unconditional, sends again
+                // and UpdateResourcePoint recomputes from a filter keyed on the SELF player:
+                //     long num = 0L;
+                //     foreach (e2 in _groupedFilterByMapResource.GetEntities(selfRef, resourceId))
+                //         num = GetColdEndTime(e2, out total);
+                //     CmdUpdateCollectCold(netId, num, total, availableNum);
+                // When that filter yields nothing, num stays 0 and the resource is broadcast as
+                // READY — overwriting the maturity time sent a line earlier.
+                //
+                // Keeping only the LAST event is therefore wrong: a mushroom the player can watch
+                // growing (the ring is on screen, hand-collect refuses) was recorded as available,
+                // which is precisely the wrong direction for a farm that must not walk to it.
+                //
+                // So a zero may not erase a live maturity time from the SAME sweep. Across sweeps it
+                // still may — that is how a matured bush becomes available again — which is what the
+                // one-second window separates.
+                CollectColdRecord previous;
+                bool freshFutureExists = endMs <= 0L
+                    && this.collectColdByNetId.TryGetValue(resourceNetId, out previous)
+                    && previous.EndUnixMs > NowUnixMs()
+                    && Time.unscaledTime - previous.SeenAt < 1f;
+
+                if (!freshFutureExists)
+                {
+                    this.collectColdByNetId[resourceNetId] = new CollectColdRecord
+                    {
+                        EndUnixMs = endMs,
+                        AvailableNum = availableNum,
+                        SeenAt = Time.unscaledTime,
+                    };
+                }
+            }
+
             if (!this.autoFarmActive || !this.auraFarmEnabled)
             {
                 return;
             }
 
-            uint resourceNetId = e.ReadUInt32(0);
-            long endMs = (long)e.ReadUInt64(8);
-            int availableNum = e.ReadInt32(20);
             this.AutoFarmLog("CollectColdEvent netId=" + resourceNetId
                 + " endMs=" + endMs
                 + " availableNum=" + availableNum
@@ -1763,14 +1830,6 @@ namespace HeartopiaMod
                 this.auraCollectNodeColdEndMs = endMs;
             }
             this.AutoFarmLog($"Aura collect confirmed by CollectColdEvent (netId={resourceNetId}, endMs={endMs})");
-
-            // Stamp the REAL cooldown onto the node position so the radar/ESP marker flips on
-            // the next rescan instead of only after the hop.
-            try
-            {
-                this.ApplyLiveResourceCooldownByPosition(this.lastNodePosition, endMs, availableNum, string.Empty, nowUnixMs, Time.unscaledTime);
-            }
-            catch { }
         }
 
         private void OnAuraCollectObjectShowEvent(GameEventSnapshot e)
@@ -1991,7 +2050,7 @@ namespace HeartopiaMod
                 if (this.autoFarmTimer >= 1f && !markerFound)
                 {
                     this.AutoFarmLog($"Bubble collected/despawned after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
-                    this.recentlyVisitedNodes[this.lastNodePosition] = now + FarmVisitedRetryStampSeconds;
+                    this.StampVisitedNode(this.lastNodePosition, now + FarmVisitedRetryStampSeconds);
                     this.FinishCollectingCycle();
                     return;
                 }
@@ -1999,7 +2058,7 @@ namespace HeartopiaMod
                 if (this.autoFarmTimer >= 6f)
                 {
                     this.AutoFarmLog($"Bubble dwell capped after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker still present)");
-                    this.recentlyVisitedNodes[this.lastNodePosition] = now + FarmVisitedRetryStampSeconds;
+                    this.StampVisitedNode(this.lastNodePosition, now + FarmVisitedRetryStampSeconds);
                     this.FinishCollectingCycle();
                     return;
                 }
@@ -2045,20 +2104,60 @@ namespace HeartopiaMod
                 this.AutoFarmLog($"Aura collect confirmed by live scan (node flipped cold) after {this.autoFarmTimer:F1}s");
             }
 
-            // "The node exists locally" — the aura addressed an object ≤3m of it (capture) or a
-            // post-arrival scan contains its entity. While the destination is still streaming in
-            // after a long teleport NEITHER holds, and every confirm seen so far can only belong
-            // to already-loaded NEIGHBORS the aura swept in parallel — never hop on those.
-            bool nodePresent = this.auraCollectNodeOwnerNetId != 0U || liveNodeFound;
+            // DESPAWN-family confirm — the half the cooldown test cannot see.
+            //
+            // Mushrooms and the other dynamic bushes never go cold: picking one REMOVES the entity.
+            // So `liveNodeCold` stays false for them forever, the confirm above never fires, and the
+            // dwell ran out its full Collect Wait Max on every single one ("Aura collect wait timed
+            // out after 5,0s ... label=Mushroom, clicked=True" — 2026-08-19 log).
+            //
+            // ⚠️ ABSENCE NEEDS A PRIOR SIGHTING. A node still streaming in is absent too, which is
+            // exactly the case `nodePresent` below exists to protect. Seen by one post-arrival scan
+            // and missing from a LATER one is the unambiguous form, and it needs no id binding at
+            // all — which is what makes it work when the aura's capture grabbed the wrong object.
+            if (liveNodeFound)
+            {
+                this.auraCollectNodeSeenPresentAt = this.liveCollectableScanCompletedAt;
+            }
+            else if (this.auraCollectNodeConfirmedAt < 0f
+                && this.auraCollectNodeSeenPresentAt >= 0f
+                && this.liveCollectableScanCompletedAt > this.auraCollectNodeSeenPresentAt)
+            {
+                this.auraCollectNodeConfirmedAt = now;
+                this.AutoFarmLog($"Aura collect confirmed by live scan (node despawned) after {this.autoFarmTimer:F1}s");
+            }
+
+            // "The node exists locally" — the aura addressed an object ≤3m of it (capture), a
+            // post-arrival scan contains its entity, or one did until it was picked. While the
+            // destination is still streaming in after a long teleport NONE holds, and every confirm
+            // seen so far can only belong to already-loaded NEIGHBORS the aura swept in parallel —
+            // never hop on those.
+            bool nodePresent = this.auraCollectNodeOwnerNetId != 0U
+                || liveNodeFound
+                || this.auraCollectNodeSeenPresentAt >= 0f;
 
             if (this.auraCollectNodeConfirmedAt >= 0f && this.autoFarmTimer >= 0.5f && nodePresent)
             {
                 // The scan is the arbiter against neighbor-misbound event confirms: when a scan
                 // NEWER than the confirmation still sees the node warm, the confirm was for some
                 // other bush — hold until the node truly flips (or the timeout bounds it).
-                bool liveContradictsConfirm = liveNodeFound
-                    && !liveNodeCold
-                    && this.liveCollectableScanCompletedAt >= this.auraCollectNodeConfirmedAt + 0.2f;
+                // ⚠️ THE EVENT ALONE IS NOT PROOF THAT *THIS* NODE WAS DRAINED, so the hop waits for
+                // a scan that POSTDATES the confirmation and then believes the scan, not the event.
+                //
+                // The aura sprays its pick at every object in radius and the server answers for all
+                // of them, so a neighbour's drain (endMs=0 with availableNum==0) satisfies
+                // OnAuraCollectColdEvent's "first cold seen before any binding" clause and confirms
+                // OUR node. Measured 2026-08-19: three mushrooms the farm had "confirmed by
+                // CollectColdEvent" minutes earlier were still WARM in the live component read —
+                // never picked at all. The farm hopped, the stamp expired, and it walked back to a
+                // mushroom it believed it had already taken. That is the revisiting the user sees.
+                //
+                // Waiting costs at most one scan interval (~2 s) because the confirm already
+                // happened; the outer Collect Wait Max still bounds the whole dwell, and a
+                // despawn-family node simply reads absent, which is not a contradiction.
+                bool livePostConfirmScan =
+                    this.liveCollectableScanCompletedAt >= this.auraCollectNodeConfirmedAt + 0.2f;
+                bool liveContradictsConfirm = !livePostConfirmScan || (liveNodeFound && !liveNodeCold);
                 if (!liveContradictsConfirm)
                 {
                     // Hop 1s after the loot actually landed in the backpack (RefreshBackPackEvent);
@@ -2070,7 +2169,7 @@ namespace HeartopiaMod
                     {
                         this.AutoFarmLog($"Aura collect done after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (bagRefresh={(this.auraCollectLastBackpackAt >= 0f ? "yes" : "none")})");
                         // We just drained it — block for its real remaining cooldown.
-                        this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
+                        this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
                         this.FinishCollectingCycle();
                         return;
                     }
@@ -2081,9 +2180,11 @@ namespace HeartopiaMod
                 // timeout below stays as the outer bound.
                 if (this.autoFarmTimer < maxWait)
                 {
-                    this.autoFarmStatus = liveContradictsConfirm
-                        ? "Collecting... node still active"
-                        : "Collecting... securing loot";
+                    this.autoFarmStatus = !livePostConfirmScan
+                        ? "Collecting... verifying the node against the scan"
+                        : liveContradictsConfirm
+                            ? "Collecting... node still active"
+                            : "Collecting... securing loot";
                     return;
                 }
             }
@@ -2102,7 +2203,7 @@ namespace HeartopiaMod
             {
                 this.AutoFarmLog($"Aura node is live-cold (mono scan) after {this.autoFarmTimer:F1}s at {this.lastNodePosition} -> skipping");
                 // Proven server cooldown — block for its real remaining window.
-                this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
+                this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
                 this.FinishCollectingCycle();
                 return;
             }
@@ -2119,7 +2220,7 @@ namespace HeartopiaMod
                 {
                     this.AutoFarmLog($"Aura collect confirmed (marker cooldown) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
                     // Marker shows [CD] — proven cooldown, block for its known/fallback window.
-                    this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
+                    this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
                     this.FinishCollectingCycle();
                     return;
                 }
@@ -2132,7 +2233,7 @@ namespace HeartopiaMod
                 {
                     this.AutoFarmLog($"Aura collect confirmed (marker gone) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
                     // Collected (stamped nodes hide their marker) — real/fallback cooldown, not 15s.
-                    this.recentlyVisitedNodes[this.lastNodePosition] = now + this.GetVisitedColdStampSeconds(knownColdEndMs);
+                    this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
                     this.FinishCollectingCycle();
                     return;
                 }
@@ -2145,8 +2246,7 @@ namespace HeartopiaMod
                 this.AutoFarmLog($"Aura collect wait timed out after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker={markerState}, label={(string.IsNullOrEmpty(nodeMarkerLabel) ? "<none>" : nodeMarkerLabel)}, clicked={this.autoCollectClickedSinceArrival})");
                 // Cooldown evidence at timeout => real/fallback block; otherwise short retry (streaming lag).
                 bool timedOutCold = (markerFound && markerOnCooldown) || (liveNodeFound && liveNodeCold);
-                this.recentlyVisitedNodes[this.lastNodePosition] = now
-                    + (timedOutCold ? this.GetVisitedColdStampSeconds(knownColdEndMs) : FarmVisitedRetryStampSeconds);
+                this.StampVisitedNode(this.lastNodePosition, now + (timedOutCold ? this.GetVisitedColdStampSeconds(knownColdEndMs) : FarmVisitedRetryStampSeconds));
                 this.FinishCollectingCycle();
                 return;
             }
@@ -2209,12 +2309,13 @@ namespace HeartopiaMod
             return onCooldown;
         }
 
-        // Live authoritative cooldown layer: the mono collectable scan (position + inCold +
-        // coldEndTime, MapSpots.RefreshCollectableScan) synced into the radar's local cooldown
-        // dicts every ~2s while the radar or foraging runs. Gives true server cooldown states
-        // right after radar enable, so markers/ESP are correct and the foraging scanner skips
-        // already-cold nodes BEFORE teleporting. This replaces SyncNearbyLiveResourceCooldowns,
-        // whose managed entity resolution is dead on this build (XDT* types are Mono-only).
+        // Reconciles the farm's visited-node memory against the live collectable scan every ~2s
+        // while the radar or the farm runs.
+        //
+        // The scan itself is the cooldown truth (entry.OnCooldown, read from the component) and is
+        // consumed directly wherever a verdict is needed; nothing is copied into a side table any
+        // more. What still needs doing here is the one thing the scan cannot do by itself: evict
+        // nodes from recentlyVisitedNodes that the scan reports WARM.
         private void SyncLiveResourceColdStates()
         {
             if (!this.isRadarActive && !this.autoFarmActive)
@@ -2237,56 +2338,60 @@ namespace HeartopiaMod
                 return;
             }
 
-            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            // Live truth beats a STALE stamp: a node the scan sees WARM (collectable right now) must
+            // not stay parked in recentlyVisitedNodes — a wrong stamp there is corrected by nothing
+            // else (it only expires by time), and while nearby nodes sit wrongly blocked
+            // FindClosestAvailableNode returns null and the farm wanders the area-waypoint rotation
+            // ("jumps between empty loading spots").
+            //
+            // Two exemptions, both of them bugs this purge caused before they existed:
+            //
+            // ⚠️ THE NODE BEING WORKED (3 m of lastNodePosition). Right after our drain the server
+            // flip lags a beat, and a warm read would purge the fresh stamp -> bounce-back.
+            //
+            // ⚠️ EVERY FRESH STAMP, wherever the farm has since walked to. The 3 m exemption stops
+            // applying the moment the farm steps to the next node 5 m away, so the previous node's
+            // stamp was wiped by the very next scan and the farm went straight back to a node it had
+            // just worked (2026-08-19 log: collect times out at :04, same node re-targeted at :09).
+            // A stamp seconds old cannot be stale — it records what the farm just did. The age gate
+            // also narrows the purge to stamps LONGER than the retry stamp, which is exactly the
+            // class (120-600 s cold stamps) whose resource can be ripe again before it expires.
+            //
+            // ⚠️ AND IT ASKS BY IDENTITY, NOT PROXIMITY. This used to walk the scan and purge any
+            // stamp within 2 m of a warm entity — so in a mushroom clump a warm NEIGHBOUR cleared
+            // the stamp of the node we had just collected, and the farm walked back to an empty
+            // spot a minute later. TryGetLiveNodeColdState is the same tight identification the
+            // collect dwell uses, and for a despawned node it simply reports "not there", which is
+            // no evidence about it at all.
             List<Vector3> warmVisitedPurge = null;
-            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            foreach (KeyValuePair<Vector3, float> visited in this.recentlyVisitedNodes)
             {
-                LiveCollectableCold entry = this.liveCollectableColds[i];
-                bool endReadable = entry.ColdEndMs > nowUnixMs;
-                long endMs;
-                if (entry.OnCooldown)
+                if (Vector3.Distance(visited.Key, this.lastNodePosition) <= 3f)
                 {
-                    // Real end time when readable; otherwise a rolling 30s re-confirmed each scan.
-                    endMs = endReadable ? entry.ColdEndMs : nowUnixMs + 30000L;
-                }
-                else
-                {
-                    endMs = 0L;
+                    continue;
                 }
 
-                try
+                // No recorded age = written before this bookkeeping existed; treat it as old
+                // rather than immortal.
+                if (this.visitedNodeStampedAt.TryGetValue(visited.Key, out float stampedAt)
+                    && now - stampedAt < FarmVisitedPurgeMinAge)
                 {
-                    this.ApplyLiveResourceCooldownByPosition(entry.Position, endMs, entry.OnCooldown ? 0 : 1, string.Empty, nowUnixMs, now, endReadable);
-                }
-                catch
-                {
+                    continue;
                 }
 
-                // Live truth beats any stamp: a node the scan sees WARM (collectable right now) must
-                // not stay parked in recentlyVisitedNodes — a wrong/stale visited stamp there is
-                // corrected by nothing else (it only expires by time), and while nearby nodes sit
-                // wrongly blocked FindClosestAvailableNode returns null and the farm wanders the
-                // area-waypoint rotation ("jumps between empty loading spots"). The node currently
-                // being worked (3m of lastNodePosition) is exempt: right after our drain the server
-                // flip lags a beat and a warm read would purge the fresh stamp -> bounce-back.
-                if (!entry.OnCooldown && this.recentlyVisitedNodes.Count > 0
-                    && Vector3.Distance(entry.Position, this.lastNodePosition) > 3f)
+                if (!this.TryGetLiveNodeColdState(visited.Key, 0f, out bool visitedCold) || visitedCold)
                 {
-                    foreach (Vector3 visited in this.recentlyVisitedNodes.Keys)
-                    {
-                        if (Vector3.Distance(entry.Position, visited) < 2f)
-                        {
-                            (warmVisitedPurge ??= new List<Vector3>()).Add(visited);
-                        }
-                    }
+                    continue;
                 }
+
+                (warmVisitedPurge ??= new List<Vector3>()).Add(visited.Key);
             }
 
             if (warmVisitedPurge != null)
             {
                 for (int i = 0; i < warmVisitedPurge.Count; i++)
                 {
-                    this.recentlyVisitedNodes.Remove(warmVisitedPurge[i]);
+                    this.ForgetVisitedNode(warmVisitedPurge[i]);
                 }
             }
         }
@@ -2315,6 +2420,8 @@ namespace HeartopiaMod
 
             float bestSqr = 2.25f;
             bool found = false;
+            uint netId = 0u;
+            int staticId = 0;
             for (int i = 0; i < this.liveCollectableColds.Count; i++)
             {
                 Vector3 delta = this.liveCollectableColds[i].Position - nodePosition;
@@ -2328,9 +2435,54 @@ namespace HeartopiaMod
                 found = true;
                 onCooldown = this.liveCollectableColds[i].OnCooldown;
                 coldEndUnixMs = this.liveCollectableColds[i].ColdEndMs;
+                netId = this.liveCollectableColds[i].NetId;
+                staticId = this.liveCollectableColds[i].StaticId;
             }
 
-            return found;
+            if (!found)
+            {
+                return false;
+            }
+
+            // ⚠️ THE EVENT OVERRULES THE COMPONENT, ONE WAY ONLY.
+            //
+            // The two sources are not equally informative, and the asymmetry is measured, not
+            // assumed (2026-08-19):
+            //   • A component reading inCold=TRUE is reliable — every hand-picked resource flipped
+            //     it, and it reads True on objects the event table knows nothing about.
+            //   • A component reading inCold=FALSE proves nothing. Five farm arrivals in a row read
+            //     False and collected nothing, because the component's data is only written when
+            //     CmdUpdateCollectCold happens to fire for that netId — zeroes there mean "no data",
+            //     NOT "available". Reading them as "available" is what sent the farm to spent nodes.
+            //
+            // So a live verdict may only ever ADD a reason to skip, never clear one.
+            CollectColdRecord record = default(CollectColdRecord);
+            bool haveRecord = netId != 0u && this.collectColdByNetId.TryGetValue(netId, out record);
+            if (haveRecord && record.EndUnixMs > NowUnixMs())
+            {
+                onCooldown = true;
+                if (coldEndUnixMs <= 0L)
+                {
+                    coldEndUnixMs = record.EndUnixMs;
+                }
+
+                return true;
+            }
+
+            // ⚠️ "NO VERDICT" IS NOT DECIDED HERE, and that separation is load-bearing.
+            //
+            // This method answers "is the thing at this position spent", and TWO different questions
+            // read it:
+            //   • should the farm WALK to that node — there, an unknown state must count as "not
+            //     confirmed", or the farm sets off towards a mushroom that is still growing;
+            //   • is the node the farm is STANDING ON collected yet — there, the same unknown means
+            //     nothing, and treating it as "spent" corrupts the dwell's completion test.
+            //
+            // Folding the first rule in here broke the second: measured 2026-08-19, nine targets
+            // produced zero collects and six timeouts, against six collects in eleven before it.
+            // The walk-side rule now lives in IsFarmTargetUnconfirmed, where only the walk reads it.
+            _ = staticId;
+            return true;
         }
 
         // Token: 0x06000016 RID: 22 RVA: 0x0000459C File Offset: 0x0000279C
@@ -2362,7 +2514,7 @@ namespace HeartopiaMod
                 }
                 foreach (Vector3 key in list)
                 {
-                    this.recentlyVisitedNodes.Remove(key);
+                    this.ForgetVisitedNode(key);
                 }
 
                 // Scan for all enabled items
@@ -2730,80 +2882,7 @@ namespace HeartopiaMod
             return null;
         }
 
-        private void TryStampVisitedResourceNodeCooldown(Vector3 nodePosition)
-        {
-            float bestSqr = 9f;
-            int bestIndex = -1;
-            float bestDuration = 0f;
-            string bestLabel = string.Empty;
-            Dictionary<int, float> bestCooldowns = null;
-            Dictionary<int, float> bestHideUntil = null;
 
-            this.TrySelectVisitedResourceCooldown(nodePosition, HeartopiaComplete.TreePositions, this.treeCooldowns_res, this.treeHideUntil_res, this.treeCooldownDuration_res, "Tree", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            this.TrySelectVisitedResourceCooldown(nodePosition, HeartopiaComplete.RareTreePositions, this.rareTreeCooldowns_res, this.rareTreeHideUntil_res, this.rareTreeCooldownDuration_res, "Rare Tree", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            this.TrySelectVisitedResourceCooldown(nodePosition, HeartopiaComplete.AppleTreePositions, this.appleTreeCooldowns_res, this.appleTreeHideUntil_res, this.appleTreeCooldownDuration_res, "Apple Tree", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            this.TrySelectVisitedResourceCooldown(nodePosition, HeartopiaComplete.OrangeTreePositions, this.orangeTreeCooldowns_res, this.orangeTreeHideUntil_res, this.orangeTreeCooldownDuration_res, "Mandarin Tree", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            this.TrySelectVisitedResourceCooldown(nodePosition, HeartopiaComplete.RockPositions, this.rockCooldowns, this.rockHideUntil, this.rockCooldownDuration, "Stone", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            this.TrySelectVisitedResourceCooldown(nodePosition, HeartopiaComplete.OrePositions, this.oreCooldowns, this.oreHideUntil, this.oreCooldownDuration, "Ore", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            this.TrySelectVisitedResourceCooldown(nodePosition, this.blueberryPositions, this.blueberryCooldowns, this.blueberryHideUntil, this.blueberryCooldownDuration, "Blueberry", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-            this.TrySelectVisitedResourceCooldown(nodePosition, this.raspberryPositions, this.raspberryCooldowns, this.raspberryHideUntil, this.raspberryCooldownDuration, "Raspberry", ref bestSqr, ref bestIndex, ref bestDuration, ref bestLabel, ref bestCooldowns, ref bestHideUntil);
-
-            if (bestCooldowns == null || bestHideUntil == null || bestIndex < 0)
-            {
-                return;
-            }
-
-            float now = Time.unscaledTime;
-            float until = now + Math.Max(1f, bestDuration);
-            float hideUntil = now + 10f;
-
-            float existing;
-            if (!bestCooldowns.TryGetValue(bestIndex, out existing) || existing < until)
-            {
-                bestCooldowns[bestIndex] = until;
-            }
-
-            bestHideUntil[bestIndex] = hideUntil;
-            ModLogger.Msg($"[AutoFarm] Visit fallback cooldown stamped: {bestLabel} #{bestIndex} ({Math.Max(1f, bestDuration):F1}s)");
-            if (this.isRadarActive)
-            {
-                this.RunRadar();
-            }
-        }
-
-        private void TrySelectVisitedResourceCooldown(
-            Vector3 nodePosition,
-            Vector3[] candidates,
-            Dictionary<int, float> cooldowns,
-            Dictionary<int, float> hideUntil,
-            float duration,
-            string label,
-            ref float bestSqr,
-            ref int bestIndex,
-            ref float bestDuration,
-            ref string bestLabel,
-            ref Dictionary<int, float> bestCooldowns,
-            ref Dictionary<int, float> bestHideUntil)
-        {
-            int idx = this.FindClosestItemIndexLocal(nodePosition, candidates);
-            if (idx < 0)
-            {
-                return;
-            }
-
-            float sqr = (candidates[idx] - nodePosition).sqrMagnitude;
-            if (sqr >= bestSqr)
-            {
-                return;
-            }
-
-            bestSqr = sqr;
-            bestIndex = idx;
-            bestDuration = duration;
-            bestLabel = label;
-            bestCooldowns = cooldowns;
-            bestHideUntil = hideUntil;
-        }
 
         private bool HasAvailablePriorityNodeForLocation(Vector3 location)
         {
@@ -3043,6 +3122,7 @@ namespace HeartopiaMod
                 // 1) was reached seven times. -1 makes index 0 the first stop instead.
                 this.currentLocationIndex = -1;
                 this.recentlyVisitedNodes.Clear();
+                this.visitedNodeStampedAt.Clear();
                 this.cameraRotationAttempts = 0;
                 this.ResetContaminationDwellState();
                 this.ResetCorruptionCleanseState();

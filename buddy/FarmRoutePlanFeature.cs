@@ -470,6 +470,35 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                // ⚠️ УЖЕ СОБРАН. План строится по маркерам радара в момент планирования, а узел
+                // остывает мгновенно — и до этой проверки тур продолжал выдавать точку, с которой
+                // ресурс давно снят. Ферма шла к собранному грибу, и единственным, что её
+                // разворачивало, была проверка уже В ПУТИ (TryAbandonDrainedFarmWalkTarget), то
+                // есть после того, как игрок туда пошёл.
+                //
+                // Живой скан — тот же авторитет, которым пользуются сбор и FindClosestAvailableNode.
+                // Найдено и cold => снимаем из плана и штампуем НАСТОЯЩИМ остатком кулдауна, иначе
+                // TopUpFarmTour вернёт точку обратно на следующем же пополнении.
+                //
+                // Не найдено => никакого вывода: узел может быть просто вне зоны стрима.
+                if (this.TryGetLiveNodeColdState(stop, 0f, out bool stopCold, out long stopColdEndMs) && stopCold)
+                {
+                    this.StampVisitedNode(stop, now + this.GetVisitedColdStampSeconds(stopColdEndMs));
+                    this.farmTourStops.RemoveAt(i);
+                    continue;
+                }
+
+                // ⚠️ НЕПОДТВЕРЖДЁННЫЙ ДИНАМИЧЕСКИЙ КУСТ — не цель. Гриб на этом месте мог быть
+                // собран, и вместо него растёт новая сущность, чей компонент неотличим от спелой;
+                // знает об этом только вердикт клиента. Точка не штампуется как посещённая — она не
+                // занята, она неизвестна, и вернуться к ней надо сразу, как вердикт придёт (свип
+                // запускается по появлению незнакомого netId, то есть через секунду-другую).
+                if (this.IsFarmTargetUnconfirmed(stop, out _))
+                {
+                    this.farmTourStops.RemoveAt(i);
+                    continue;
+                }
+
                 foreach (KeyValuePair<Vector3, float> visited in this.recentlyVisitedNodes)
                 {
                     if (now < visited.Value && IsSameFarmTourStop(stop, visited.Key))

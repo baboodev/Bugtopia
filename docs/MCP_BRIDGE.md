@@ -321,6 +321,52 @@ reported at once so they can be fixed in one pass.
 
 Measured: 20 load→tick→call→unload cycles, 0 failures, 0 leaks, ≤240 ms to confirm collection.
 
+### Loading a built plugin from disk, without shipping base64
+
+`plugin.load` takes the assembly as **base64**, which is right for the protocol and wrong for the
+iteration loop: a 19 KB probe is ~25 000 characters, and paying that on every edit-build-reload cycle
+dwarfs the work itself. `game_eval` runs *inside* the game process, so it can read the file itself.
+
+Build the plugin, then reload it with a short snippet instead of a wall of base64:
+
+```bash
+dotnet build tools/YourPlugin/YourPlugin.csproj -c Release
+```
+
+```csharp
+// game_eval — usings: System.IO, System.Reflection
+string dir = @"C:\...\tools\YourPlugin\bin\Release\net6.0\";
+var hostType = typeof(HeartopiaMod.HeartopiaComplete).Assembly.GetType("HeartopiaMod.PluginHost");
+var flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+
+// Unload first, so this is a true hot reload rather than an "already loaded" refusal.
+try { hostType.GetMethod("TryUnload", flags).Invoke(null, new object[] { "yourid", null }); } catch { }
+
+object[] a = new object[] { "yourid", File.ReadAllBytes(dir + "YourPlugin.dll"),
+    File.Exists(dir + "YourPlugin.pdb") ? File.ReadAllBytes(dir + "YourPlugin.pdb") : null, null, null };
+bool ok = (bool)hostType.GetMethod("TryLoad", flags).Invoke(null, a);
+return "reloaded=" + ok + " error=" + (a[3] ?? "-");
+```
+
+Four things that will otherwise cost you a puzzled minute each:
+
+- **`PluginHost` lives in namespace `HeartopiaMod`, not `HeartopiaMod.Plugins`.** Only the *contract*
+  types are in `.Plugins`. `GetType("HeartopiaMod.Plugins.PluginHost")` returns null.
+- **Reflection is required even though the snippet compiles against the mod.** An eval snippet is its
+  own assembly, so it cannot see `internal` members — `PluginHost`, `IsWorldReady` and friends are
+  all invisible to a direct call and fine through reflection.
+- **Unload before load.** `TryLoad` refuses an id that is already loaded; the try/catch swallows the
+  "not loaded" case on the first run.
+- **Ship the pdb.** It is one extra `File.ReadAllBytes` and it turns plugin stack traces into line
+  numbers.
+
+This path skips nothing that `plugin.load` does — same validator, same collectible context, same
+unload verification. It only changes who reads the bytes. Everything else about the loop is unchanged:
+edit, `dotnet build`, run the snippet, and the previous version is gone within a frame.
+
+⚠️ `eval` is an **unsafe** op, so this needs unsafe enabled (Agent → Bridge). If it is off, use
+`plugin.load` with base64 — that is a write-tier op.
+
 ### A plugin's own page in the menu
 
 `host.Ui.AddPage("title")` puts a sub-tab next to **Agent → Bridge** and returns an `IPluginPage`:
