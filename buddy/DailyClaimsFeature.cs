@@ -132,9 +132,11 @@ namespace HeartopiaMod
 
         private IntPtr dailyClaimsAuraRedPointManagerClass = IntPtr.Zero;
 
-        // A (suitId, quantity-tier) pair from TablePediaSuitReward.
+        // One TablePediaSuitReward row: which suit, which quantity tier, and the ROW id — the last
+        // one matters because the client keys suit red-point nodes by row id, not by suitId.
         private struct DailyClaimsSuitRewardTier
         {
+            public int RowId;
             public int SuitId;
             public int Quantity;
         }
@@ -2201,7 +2203,8 @@ namespace HeartopiaMod
                     return;
                 }
 
-                tiers.Add(new DailyClaimsSuitRewardTier { SuitId = suitId, Quantity = quantity });
+                this.TryGetMonoIntMember(row, "id", out int rowId);
+                tiers.Add(new DailyClaimsSuitRewardTier { RowId = rowId, SuitId = suitId, Quantity = quantity });
             }, out status);
         }
 

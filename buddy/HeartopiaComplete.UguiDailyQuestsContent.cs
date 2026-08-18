@@ -191,7 +191,7 @@ namespace HeartopiaMod
             public string Status1Shown;
 
             // -------- Part 2: Daily Claims --------
-            public readonly GameObject[] ClaimsButtons = new GameObject[15]; // ONE shared 4-way gate
+            public readonly GameObject[] ClaimsButtons = new GameObject[17]; // ONE shared 4-way gate
             public Toggle AutoClaimToggle;        // opt-in, NOT on the busy gate (it only arms)
             public GameObject Status2Label;
             public string Status2Shown;
@@ -232,8 +232,8 @@ namespace HeartopiaMod
 
         // Static y anchors (file header cursor): the Quest Assistant button rows — everything
         // above status4 is built-once fixed.
-        private const float UguiDailyQuestsQaRow1Y = 712f;
-        private const float UguiDailyQuestsQaRow2Y = 752f;
+        private const float UguiDailyQuestsQaRow1Y = 780f;
+        private const float UguiDailyQuestsQaRow2Y = 820f;
 
         // ----------------------------------------------------------------------------------------
         // Busy conditions — the THREE EXACT source expressions (file header). Recomputed on
@@ -368,7 +368,7 @@ namespace HeartopiaMod
             // chrome (Animal Care's card mapping); h = 36 + 4x34 + 32 + 12 = 216 (:94).
             GameObject claimsCard = this.CreateUguiSettingsMainPanel(scrollContent, "ClaimsPanel",
                 this.L("DAILY CLAIMS"));
-            PlaceUguiTopLeft(claimsCard, 8f, 126f, panelW, 386f);
+            PlaceUguiTopLeft(claimsCard, 8f, 126f, panelW, 454f);
 
             // Inner metrics: full-width = innerW inside a 16px margin on BOTH sides, and the
             // half-pairs now share exactly that span with an 8px gutter, so every button in the
@@ -444,15 +444,29 @@ namespace HeartopiaMod
 
             // Auto-claim opt-in (DailyClaimsAutoClaimFeature.cs). A checkbox rather than a button:
             // it arms the event-driven sweep instead of performing one, and it persists.
+            // Sweep every red point the client currently has lit. Separate from Claim All Daily
+            // because it starts from the game's own "something is here" state rather than from our
+            // list of known reward kinds — it is what catches whatever arrived before the event
+            // detour could exist, and it reports the dots it cannot claim instead of hiding them.
+            handle.ClaimsButtons[15] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimRedPointsButton",
+                this.L("Claim Red Points"), new System.Action(this.OnUguiDailyQuestsClaimRedPointsClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[15], 16f, 308f, innerW, 28f);
+
+            // Mark-read is deliberately NOT part of any claim button: it clears "unread" markers that
+            // carry no reward, cannot be undone, and has no reward to confirm it worked.
+            handle.ClaimsButtons[16] = this.CreateUguiPrimaryButton(claimsCard.transform, "MarkRedPointsReadButton",
+                this.L("Mark Red Points Read"), new System.Action(this.OnUguiDailyQuestsMarkRedPointsReadClicked));
+            PlaceUguiTopLeft(handle.ClaimsButtons[16], 16f, 342f, innerW, 28f);
+
             handle.AutoClaimToggle = this.CreateUguiCheckbox(claimsCard.transform, "AutoClaimToggle",
                 this.L("Auto-Claim Rewards"), this.dailyClaimsAutoClaimEnabled,
                 new System.Action<bool>(this.OnUguiDailyQuestsAutoClaimToggled));
-            PlaceUguiTopLeft(handle.AutoClaimToggle.gameObject, 16f, 308f, innerW, 28f);
+            PlaceUguiTopLeft(handle.AutoClaimToggle.gameObject, 16f, 376f, innerW, 28f);
 
             // :147-150 — the full-width closer, btnH+4 = 32 tall (the source's 4px-taller row).
             handle.ClaimsButtons[14] = this.CreateUguiPrimaryButton(claimsCard.transform, "ClaimAllDailyButton",
                 this.L("Claim All Daily"), new System.Action(this.OnUguiDailyQuestsClaimAllClicked));
-            PlaceUguiTopLeft(handle.ClaimsButtons[14], 16f, 342f, innerW, 32f);
+            PlaceUguiTopLeft(handle.ClaimsButtons[14], 16f, 410f, innerW, 32f);
 
             bool claimsBusy = this.IsUguiDailyQuestsClaimsBusy();
             for (int i = 0; i < handle.ClaimsButtons.Length; i++)
@@ -465,7 +479,7 @@ namespace HeartopiaMod
             handle.Status2Label = this.CreateUguiLabel(scrollContent, "ClaimsStatus",
                 handle.Status2Shown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.Status2Label);
-            PlaceUguiTopLeft(handle.Status2Label, 8f, 518f, panelW, 40f);
+            PlaceUguiTopLeft(handle.Status2Label, 8f, 586f, panelW, 40f);
 
             // ==================== Part 3 — Bird Photo Submit ====================
 
@@ -473,7 +487,7 @@ namespace HeartopiaMod
             // source order kept).
             handle.BirdPhotoButton = this.CreateUguiPrimaryButton(scrollContent, "BirdPhotoButton",
                 this.L("Submit Bird Photo"), new System.Action(this.OnUguiDailyQuestsBirdPhotoClicked));
-            PlaceUguiTopLeft(handle.BirdPhotoButton, 8f, 562f, 240f, 32f);
+            PlaceUguiTopLeft(handle.BirdPhotoButton, 8f, 630f, 240f, 32f);
             this.SetUguiButtonInteractable(handle.BirdPhotoButton, !this.IsUguiDailyQuestsBirdPhotoBusy());
 
             // :574-576 — status.
@@ -481,7 +495,7 @@ namespace HeartopiaMod
             handle.Status3Label = this.CreateUguiLabel(scrollContent, "BirdPhotoStatus",
                 handle.Status3Shown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.Status3Label);
-            PlaceUguiTopLeft(handle.Status3Label, 8f, 602f, panelW, 28f);
+            PlaceUguiTopLeft(handle.Status3Label, 8f, 670f, panelW, 28f);
 
             // ==================== Part 4 — Quest Assistant ====================
 
@@ -490,7 +504,7 @@ namespace HeartopiaMod
             GameObject qaHeader = this.CreateUguiLabel(scrollContent, "QaHeader",
                 this.L("Quest Assistant"), 14f, headerColor, false);
             this.TrySetUguiLabelBold(qaHeader);
-            PlaceUguiTopLeft(qaHeader, 8f, 678f, 460f, 24f);
+            PlaceUguiTopLeft(qaHeader, 8f, 746f, 460f, 24f);
 
             // Row 1 — the source's own offsets fit the column (file header): :1238-1242 Dump
             // (themePrimaryButtonStyle → Primary, gated on !questAssistantBusy) and :1246-1249
@@ -976,6 +990,16 @@ namespace HeartopiaMod
 
         // Opt-in arm/disarm for the event-driven sweep — flag + persist, same shape as the Skip 5
         // Star toggle (no notification, guarded on an actual change).
+        private void OnUguiDailyQuestsClaimRedPointsClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsClaimRedPointsRoutine());
+        }
+
+        private void OnUguiDailyQuestsMarkRedPointsReadClicked()
+        {
+            this.StartDailyClaimsAction(this.DailyClaimsMarkRedPointsReadRoutine());
+        }
+
         private void OnUguiDailyQuestsAutoClaimToggled(bool value)
         {
             if (value == this.dailyClaimsAutoClaimEnabled)
