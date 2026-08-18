@@ -81,6 +81,99 @@ live in a folder of that name.
 
 ---
 
+## 2b. Reaching a SECOND machine (Ideapad) over SSH
+
+The bridge binds **loopback only**, so an SSH port-forward is the only way to reach a game running
+on another box. Setup used for `Ideapad.local`:
+
+```
+this machine                                    Ideapad.local
+────────────                                    ─────────────
+client ──▶ 127.0.0.1:8780 ──ssh -L──────────────▶ 127.0.0.1:<bridge port>  (8770-8774)
+                                                        │
+                                                  bugtopia.dll
+```
+
+**Local port is 8780, not 8770.** The game usually also runs on the local machine and already owns
+8770; a forward that tried to bind it would fail with the game running.
+
+### The keep-alive script
+
+`%LOCALAPPDATA%\BugtopiaMcpIdeapad\tunnel-ideapad.ps1` — run it once and leave it; it owns the
+forward and re-establishes it by itself.
+
+**Why it polls rather than just connecting once:** the bridge rotates its token and may pick a
+different port on every game launch, and **a game restart does not drop the ssh connection** — the
+forward stays up pointing at a dead port while the cached token goes stale, and every call then
+fails the handshake. The first version only re-read the endpoint on reconnect and was caught by
+exactly that, twice. So it re-reads the remote `endpoint.json` every 15 s: a token-only change is
+rewritten in place, a port change tears the forward down and rebuilds it.
+
+It mirrors the remote endpoint into `%LOCALAPPDATA%\BugtopiaMcpIdeapad\endpoint.json` with the
+**local** port and the **remote** token — that file is what a client should read.
+
+> No backtick line continuations anywhere in that script; they broke it once already.
+
+### On the Ideapad side
+
+1. `bugtopia.dll` deployed to its `BepInEx\plugins\`.
+2. The marker file `%USERPROFILE%\AppData\LocalLow\Bugtopia\mcp` — an **empty file** named `mcp`,
+   next to (not inside) the `McpBridge` folder the mod writes its runtime state into.
+3. Game running and past the login screen. The log then shows
+   `[Mcp] listening on 127.0.0.1:8770 — N ops registered`.
+
+### Talking to it
+
+Point `tools/BugtopiaMcp` at the mirrored endpoint, or speak the protocol directly — it is one
+NDJSON line per message over TCP, which is all a throwaway client needs when the MCP client itself
+is not connected:
+
+```python
+import json, os, socket
+ep = json.load(open(os.environ["LOCALAPPDATA"] + r"\BugtopiaMcpIdeapad\endpoint.json"))
+s = socket.create_connection(("127.0.0.1", ep["port"]), timeout=10)
+f = s.makefile("rwb")
+
+def send(obj):
+    f.write((json.dumps(obj) + "\n").encode()); f.flush()
+    return json.loads(f.readline().decode())
+
+send({"i": 0, "op": "hello", "a": {"proto": 1, "token": ep["token"]}})   # handshake first
+print(send({"i": 1, "op": "player.get", "a": {}}))
+```
+
+Every reply is `{"ok":true,"r":{…}}` or `{"ok":false,"e":{…}}`. `rpc.describe` lists every op with
+its argument schema.
+
+### Deploying to it
+
+```bash
+scp buddy/bin/BepInEx/Release/bugtopia.dll coderus@Ideapad.local:C:/Users/coderus/workplace/HH/BepInEx/plugins/bugtopia.dll
+```
+
+The DLL is **locked while the game runs**. Copy it to `bugtopia.dll.new` instead, then swap once the
+game closes — that keeps the transfer out of the critical path:
+
+```bash
+ssh coderus@Ideapad.local "move /Y C:\...\plugins\bugtopia.dll.new C:\...\plugins\bugtopia.dll"
+```
+
+Verify with a hash on both ends rather than trusting the copy (`Get-FileHash` on the far side).
+
+A **sandbox plugin needs no scp at all** — `plugin.load` takes the assembly as base64 over the
+bridge and hot-reloads it into the running game (§4b).
+
+### When it will not answer
+
+| Symptom | Cause |
+|---|---|
+| Handshake refused / connection closed immediately | Stale token — the game restarted. Re-read the mirrored `endpoint.json`; the poller refreshes it within 15 s |
+| Connects but every op fails | The forward points at the previous launch's port; the poller rebuilds it on the next tick |
+| Nothing on 8780 | The tunnel script is not running, or ssh could not authenticate (`-i ~/.ssh/lenovo`, `BatchMode=yes` hides the prompt) |
+| `'<id>' is not loaded` | Sandbox plugins do not survive a game restart — `plugin.load` them again |
+
+---
+
 ## 3. Tools (bridge side)
 
 | Tool | Op | Notes |

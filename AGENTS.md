@@ -34,7 +34,8 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | User-facing features / menu | [docs/FEATURES.md](docs/FEATURES.md) |
 | Inventory / `ItemNetPair` / bag pipelines | [docs/BACKPACK_AND_ITEMS.md](docs/BACKPACK_AND_ITEMS.md) |
 | Instrument WAV export (noteId ↔ Wwise subsong) | [docs/INSTRUMENT_SAMPLE_EXPORT.md](docs/INSTRUMENT_SAMPLE_EXPORT.md) |
-| **Asking the RUNNING game instead of the dumps** (type search, live field/method tables, entity enumeration, `eval`, screenshots) | [docs/MCP_BRIDGE.md](docs/MCP_BRIDGE.md) |
+| **Game actions / animations** (what makes one play, combo gates, which are safe to cast) | [docs/GAME_ACTIONS.md](docs/GAME_ACTIONS.md) |
+| **Asking the RUNNING game instead of the dumps** (type search, live field/method tables, entity enumeration, `eval`, screenshots) — and reaching a game on a **second machine** over SSH | [docs/MCP_BRIDGE.md](docs/MCP_BRIDGE.md) |
 
 **Rule:** Do not guess type names from memory. Copy **full namespaces** from decompilations or interop DLLs for the target game build.
 
