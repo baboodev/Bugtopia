@@ -676,6 +676,9 @@ namespace HeartopiaMod
                                                  IntPtr typeField, IntPtr idField,
                                                  int actionType, int maxId, string tableGetter)
         {
+            // Animation states already claimed by a LOWER id in this pass. See the skip below.
+            System.Collections.Generic.HashSet<string> claimedStates =
+                new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
             // TableData sits in the GLOBAL namespace, and its getters take TWO parameters —
             // GetSingleaction(int id, bool needException = false). Asking for arity 1 silently found
             // nothing, which skipped validation entirely and listed ids 161-400 / 184-400 that no
@@ -714,6 +717,24 @@ namespace HeartopiaMod
                 if (probeExc != IntPtr.Zero || row == IntPtr.Zero)
                 {
                     continue; // no such row on this build
+                }
+
+                // UNFINISHED ROWS. `Singleaction` ends with five entries (156-160: 战吼呐喊1/2, 思考,
+                // 观察, 部落庆祝舞) that have their own names but no art and no animation of their own:
+                // all five carry animStateName "Petty348", which belongs to id 155 可爱舞蹈6, and the
+                // panel's icon is the atlas sprite "singleaction_{id}" (AtlasSpriteUtility
+                // .GetSingleActionItemIcon), which was never drawn for them. Listing them gives the
+                // player five blank cells that all play somebody else's clip.
+                //
+                // The rule is data-driven rather than an id blacklist: skip a row whose animation
+                // state a LOWER id already claimed. It drops exactly those five today and stops
+                // filtering by itself if a patch ever finishes them. Read BEFORE the allocation
+                // below — `row` is a bare MonoObject* and the next allocation can move it.
+                if (this.TryGetMonoStringMember(row, "animStateName", out string animState)
+                    && !string.IsNullOrEmpty(animState)
+                    && !claimedStates.Add(animState))
+                {
+                    continue;
                 }
 
                 IntPtr boxed = auraMonoObjectNew(this.auraMonoRootDomain, componentClass);
