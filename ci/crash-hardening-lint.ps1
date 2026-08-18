@@ -29,7 +29,13 @@ $lintWarnings = New-Object System.Collections.Generic.List[string]
 # Fields that legitimately stay raw IntPtr (documented in the plan):
 #   warehouseAuraBagPanelTypeObj - MonoReflectionType; the runtime roots reflection objects
 #   in a domain-level cache, so it cannot be collected.
-$rawObjFieldAllowlist = @("warehouseAuraBagPanelTypeObj")
+#   emoteUnlockListObj - pinned by an explicit gchandle for its whole life (freed and zeroed
+#   together in the teardown), and the ONLY reader is EmoteUnlockListNative, a native detour body
+#   that must stay callback-free. AuraMonoObjectCache.TryGet re-reads the address through
+#   mono_gchandle_get_target, i.e. it would re-enter Mono from a reverse-pinvoke callback - the
+#   thing the hook is built to avoid. The cache is the right answer everywhere it can be called
+#   from managed code; here it is not callable.
+$rawObjFieldAllowlist = @("warehouseAuraBagPanelTypeObj", "emoteUnlockListObj")
 
 $files = Get-ChildItem $buddyDir -Filter *.cs -Recurse |
     Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }
