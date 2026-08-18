@@ -40,6 +40,10 @@ namespace HeartopiaMod
         private const int FarmWalkUnstickVehicleBackOff = 5;
         private const int FarmWalkUnstickVehicleSideStep = 6;
 
+        // Guards the mount round-trip window — see ShouldFarmWalkSummonVehicle.
+        private const float FarmWalkVehicleSummonCooldown = 5f;
+        private float farmWalkVehicleLastSummonAt = -999f;
+
         private int farmWalkVehicleUnstickRounds;
         private Vector3 farmWalkVehicleUnstickFrom;
         private int farmWalkVehicleSideSign = 1;
@@ -166,7 +170,16 @@ namespace HeartopiaMod
                 return false;
             }
 
-            return !this.IsFarmWalkRidingVehicle();
+            if (this.IsFarmWalkRidingVehicle())
+            {
+                return false;
+            }
+
+            // Mounting is a server round-trip, so IsFarmWalkRidingVehicle still answers "no" for a
+            // moment after a successful summon. Without this the next walk started inside that
+            // window and summoned again — the log showed "summoned 81104 and took the seat" three
+            // times back to back for one destination.
+            return Time.unscaledTime - this.farmWalkVehicleLastSummonAt >= FarmWalkVehicleSummonCooldown;
         }
 
         // Summon the favourite vehicle and take the driving seat. Returns false on any failure —
@@ -191,6 +204,7 @@ namespace HeartopiaMod
                 return false;
             }
 
+            this.farmWalkVehicleLastSummonAt = Time.unscaledTime;
             this.farmWalkVehicleOurs = true;
             this.farmWalkVehicleUnstickRounds = 0;
             ModLogger.Msg("[FarmVehicle] summoned " + staticId + " and took the seat for this haul.");

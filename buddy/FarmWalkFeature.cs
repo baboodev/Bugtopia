@@ -193,10 +193,25 @@ namespace HeartopiaMod
 
         private int farmWalkFutileRepaths;
 
-        // Waypoints proven unwalkable during THIS run. Survives between walks — the blockage is a
-        // property of the world, and re-learning it costs a whole walk each time. Cleared with the
-        // rest of the per-run state when the farm starts.
-        private readonly HashSet<int> farmWalkBlockedGraphNodes = new HashSet<int>();
+        // Waypoints proven unwalkable, mapped to the time their ban lifts. Survives between walks —
+        // the blockage is a property of the world, and re-learning it costs a whole walk each time.
+        //
+        // ⚠️ BANS MUST EXPIRE AND MUST BE CAPPED. As a permanent per-run set this ate the graph: a
+        // long session banned 696 of the 1745 land waypoints — 40%, concentrated exactly where the
+        // farm works — and then nothing could route at all, because the snap skips excluded nodes
+        // and found zero candidates within 60 m. The symptom was "Quest Walk jumps into the vehicle
+        // and goes nowhere", with "no graph node within 60m of an endpoint" underneath it.
+        //
+        // A ban is a heuristic about a moment, not a fact about the map: another player standing in
+        // a doorway, a prop, a mesh seam. Five minutes matches the node parking window.
+        private const float FarmWalkBlockedNodeTtl = 300f;
+
+        // Hard ceiling on how much of the graph may be off the table at once. Well under the ~1745
+        // land nodes, and small enough that a dense area still has somewhere to snap.
+        private const int FarmWalkMaxBlockedNodes = 48;
+
+        private readonly Dictionary<int, float> farmWalkBlockedGraphNodes = new Dictionary<int, float>();
+        private readonly List<int> farmWalkBlockedScratch = new List<int>();
 
         // Inside this horizontal radius the approach is treated as purely vertical and the move
         // axis is released. Deliberately tight: it exists only to stop the walker steering on a
@@ -626,9 +641,10 @@ namespace HeartopiaMod
             // walk each time — the 04:xx run failed four consecutive targets at corner 2 because
             // every route from that spot ran through the same blocked waypoint.
             this.farmWalkExcludedNodes.Clear();
-            foreach (int blocked in this.farmWalkBlockedGraphNodes)
+            this.PruneFarmWalkBlockedNodes();
+            foreach (KeyValuePair<int, float> blocked in this.farmWalkBlockedGraphNodes)
             {
-                this.farmWalkExcludedNodes.Add(blocked);
+                this.farmWalkExcludedNodes.Add(blocked.Key);
             }
 
             // Each walk gets its own budget of futile rebuilds. Carrying the tally over meant the
@@ -656,16 +672,26 @@ namespace HeartopiaMod
                 target.y += this.farmWalkAimOffsetY;
             }
 
+            // ⚠️ Every route-build failure from here on is logged UNCONDITIONALLY. They used to be
+            // silent — this one entirely, the two in TryBuildFarmWalkRoute behind AutoFarmLog — so
+            // "the walk simply never started" had no explanation anywhere. Quest Walk summoned a
+            // vehicle, printed nothing else, and went nowhere, and the log could not say which of
+            // the four causes it was.
             if (!this.EnsureTrackPathGraph())
             {
+                ModLogger.Msg("[FarmWalk] " + label + ": no waypoint graph (not built or unresolvable) — cannot route.");
                 return false;
             }
 
             if (!this.TryGetNavMeshSelfPosition(out Vector3 selfPos, out _))
             {
-                this.AutoFarmLog("[FarmWalk] self position unresolved — teleporting instead.");
+                ModLogger.Msg("[FarmWalk] " + label + ": self position unresolved — cannot route.");
                 return false;
             }
+
+            // Set BEFORE the route build, not after: the build's own failure lines print it, and
+            // assigning it later made them name the PREVIOUS walk's target.
+            this.farmWalkLabel = label ?? string.Empty;
 
             // Fresh walk, so the detour search is allowed once more.
             this.farmWalkDetourSearchDone = false;
@@ -681,10 +707,6 @@ namespace HeartopiaMod
             // farm ended up teleporting onto a node it was already standing 1.3 m from.
             bool alreadyInRange = Distance3D(selfPos, target) <= FarmWalkCollectDistance;
 
-            if (!alreadyInRange && this.ShouldFarmWalkSummonVehicle(selfPos, target))
-            {
-                this.TryFarmWalkSummonAndMount(); // failure means "walk it", never "abort"
-            }
             if (alreadyInRange)
             {
                 this.farmWalkCorners.Clear();
@@ -700,7 +722,6 @@ namespace HeartopiaMod
             this.farmWalkTarget = target;                              // aim point (may be offset)
             this.farmWalkTrueTarget = target;
             this.farmWalkTrueTarget.y -= this.farmWalkAimOffsetY;      // the node itself
-            this.farmWalkLabel = label ?? string.Empty;
             this.farmWalkActive = true;
             this.farmWalkStuckStrikes = 0;
             this.farmWalkLastSample = selfPos;
@@ -724,6 +745,20 @@ namespace HeartopiaMod
             this.farmWalkHopBurstUsed = false; // one hop burst per walk
             this.farmWalkEverAdvanced = this.farmWalkCornerIndex > 0;
             this.farmWalkPrevVerticalHeld = this.farmWalkVerticalHeld;
+
+            // Summon AFTER the route is committed, never before.
+            //
+            // It used to run ahead of TryBuildFarmWalkRoute, so a route that could not be built
+            // still left the player sitting in a freshly-summoned car with no walk to drive. Quest
+            // Walk showed it plainly: "summoned 81104 and took the seat" with no "walking Nm via N
+            // corners" line after it, three times in a row as the retry re-summoned each attempt —
+            // the hotkey put the player in a vehicle that then went nowhere.
+            //
+            // The vehicle is transport for a journey; whether the journey exists is decided first.
+            if (!alreadyInRange && this.ShouldFarmWalkSummonVehicle(selfPos, target))
+            {
+                this.TryFarmWalkSummonAndMount(); // failure means "walk it", never "abort"
+            }
 
             // Generous deadline: straight-line metres at the configured speed, tripled for detours,
             // plus a fixed allowance. Walking is meant to be slow; this only catches a wedge.
@@ -821,6 +856,37 @@ namespace HeartopiaMod
         // Snap both ends onto the graph, A*, then append the true target as the final corner (the
         // game's own GetPath2 does exactly this, so the last leg leaves the graph and ends on the
         // resource). A start node that is already behind us is dropped so the first step is forward.
+        // Drop bans whose time is up. Called before every merge, so an expired one never reaches
+        // the snap's exclusion set.
+        private void PruneFarmWalkBlockedNodes()
+        {
+            if (this.farmWalkBlockedGraphNodes.Count == 0)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            this.farmWalkBlockedScratch.Clear();
+            foreach (KeyValuePair<int, float> entry in this.farmWalkBlockedGraphNodes)
+            {
+                if (now >= entry.Value)
+                {
+                    this.farmWalkBlockedScratch.Add(entry.Key);
+                }
+            }
+
+            for (int i = 0; i < this.farmWalkBlockedScratch.Count; i++)
+            {
+                this.farmWalkBlockedGraphNodes.Remove(this.farmWalkBlockedScratch[i]);
+            }
+
+            if (this.farmWalkBlockedScratch.Count > 0)
+            {
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkBlockedScratch.Count
+                    + " waypoint ban(s) expired, " + this.farmWalkBlockedGraphNodes.Count + " still banned.");
+            }
+        }
+
         // Builds into a SCRATCH list and only commits on success. A mid-walk re-path that fails
         // must leave the route we are already following untouched — TryComputeTrackGraphPath clears
         // its output list up front, so writing straight into farmWalkCorners would empty the route
@@ -832,14 +898,16 @@ namespace HeartopiaMod
                 || !this.TryFindReachableTrackGraphNode(to, FarmWalkGraphSnapRadius, out int endIndex,
                     this.farmWalkExcludedEndNodes, "end"))
             {
-                this.AutoFarmLog("[FarmWalk] no graph node within " + FarmWalkGraphSnapRadius.ToString("F0")
-                    + "m of an endpoint — teleporting instead.");
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": no reachable graph node within "
+                    + FarmWalkGraphSnapRadius.ToString("F0") + "m of " + FormatNavMeshVector(from)
+                    + " or " + FormatNavMeshVector(to) + " — cannot route.");
                 return false;
             }
 
             if (!this.TryComputeTrackGraphPath(startIndex, endIndex, this.farmWalkScratchCorners))
             {
-                this.AutoFarmLog("[FarmWalk] A* found no route between the snapped nodes — teleporting instead.");
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": A* found no route between waypoints "
+                    + startIndex + " and " + endIndex + " — cannot route.");
                 return false;
             }
 
@@ -1274,16 +1342,21 @@ namespace HeartopiaMod
                             // identical blocked waypoint in the middle. Banning it for the rest of
                             // the run is both cheaper and more correct than abandoning resources
                             // that are perfectly reachable by another way round.
-                            if (this.TryFindNearestTrackGraphNode(corner, FarmWalkGraphSnapRadius,
-                                    out int blockedIndex, this.farmWalkBlockedGraphNodes)
-                                && this.farmWalkBlockedGraphNodes.Add(blockedIndex))
+                            if (this.farmWalkBlockedGraphNodes.Count < FarmWalkMaxBlockedNodes
+                                && this.TryFindNearestTrackGraphNode(corner, FarmWalkGraphSnapRadius,
+                                    out int blockedIndex, this.farmWalkExcludedNodes)
+                                && !this.farmWalkBlockedGraphNodes.ContainsKey(blockedIndex))
                             {
+                                this.farmWalkBlockedGraphNodes[blockedIndex] =
+                                    Time.unscaledTime + FarmWalkBlockedNodeTtl;
                                 this.farmWalkExcludedNodes.Add(blockedIndex);
                                 this.farmWalkFutileRepaths = 0;
                                 this.farmWalkNextRepathAt = 0f;
                                 ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": corner "
                                     + this.farmWalkCornerIndex + " is unwalkable — banning waypoint "
-                                    + blockedIndex + " for this run and routing around it.");
+                                    + blockedIndex + " for " + (FarmWalkBlockedNodeTtl / 60f).ToString("0.#")
+                                    + " min (" + this.farmWalkBlockedGraphNodes.Count + "/"
+                                    + FarmWalkMaxBlockedNodes + " banned) and routing around it.");
                                 return false;
                             }
 

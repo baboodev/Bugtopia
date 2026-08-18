@@ -3016,7 +3016,7 @@ namespace HeartopiaMod
                 this.farmWalkNodeFailures.Clear();
                 this.farmWalkLastRescueTeleportAt = 0f;
                 this.lastFarmNodeActivityAt = 0f;
-                this.farmWalkBlockedGraphNodes.Clear();
+                this.farmWalkBlockedGraphNodes.Clear();  // bans are per-run heuristics
 
                 // The tour is per-run too. Carrying one over means the next run opens with a plan
                 // built around wherever the player happened to be standing minutes ago.

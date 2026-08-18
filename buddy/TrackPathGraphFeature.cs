@@ -623,6 +623,21 @@ namespace HeartopiaMod
 
             if (this.trackGraphSnapCandidates.Count == 0)
             {
+                // ⚠️ STARVATION VALVE. Exclusions are a heuristic — banned waypoints, a retry's
+                // avoided endpoint — and a heuristic must never be able to make routing impossible.
+                // A long session banned 696 of 1745 waypoints, concentrated where the farm works,
+                // and every snap in that area then found zero candidates: "no graph node within
+                // 60m of an endpoint", forever, with the walker refusing to move at all.
+                //
+                // If the only thing standing between us and a route is our own exclusion list, drop
+                // it for this snap and say so.
+                if (excluded != null && excluded.Count > 0)
+                {
+                    ModLogger.Msg("[FarmWalk] " + endpointName + " snap starved by " + excluded.Count
+                        + " exclusion(s) — ignoring them for this route.");
+                    return this.TryFindNearestTrackGraphNode(position, maxDistance, out index, null);
+                }
+
                 return false;
             }
 
