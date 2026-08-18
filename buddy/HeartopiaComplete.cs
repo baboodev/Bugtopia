@@ -5009,6 +5009,9 @@ namespace HeartopiaMod
 
         // Token: 0x0400002E RID: 46
         private bool showOreRadar = false;
+        // Bamboo (item 40033). Surfaced by the live gather scan — the hardcoded arrays never had it,
+        // so before the scan replaced them this resource simply did not exist for the radar.
+        private bool showBambooRadar = false;
 
         // Token: 0x0400002E RID: 46
         private bool showBubbleRadar = false;

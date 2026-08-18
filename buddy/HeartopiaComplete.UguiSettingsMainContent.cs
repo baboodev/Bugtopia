@@ -163,6 +163,8 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogAutoSell, v => MasterLogAutoSell = v, "Auto Sell"),
                 new UguiLoggingToggleBinding(() => MasterLogRadarIconEsp, v => MasterLogRadarIconEsp = v, "Radar Icon ESP"),
                 new UguiLoggingToggleBinding(() => MasterLogMapSpots, v => MasterLogMapSpots = v, "Map Spots"),
+                new UguiLoggingToggleBinding(() => MasterLogGatherScan, v => MasterLogGatherScan = v, "Gather Scan"),
+                new UguiLoggingToggleBinding(() => MasterLogGatherHarvest, v => MasterLogGatherHarvest = v, "Gather Harvest (write coords)"),
                 new UguiLoggingToggleBinding(() => MasterLogBubbleRadar, v => MasterLogBubbleRadar = v, "Bubble Radar"),
                 new UguiLoggingToggleBinding(() => MasterLogAutoBuy, v => MasterLogAutoBuy = v, "Auto Buy"),
                 new UguiLoggingToggleBinding(() => MasterLogForceOpenShop, v => MasterLogForceOpenShop = v, "Force Open Shop"),

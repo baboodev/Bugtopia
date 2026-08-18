@@ -252,6 +252,10 @@ namespace HeartopiaMod
             public bool MasterLogAutoSell;
             public bool MasterLogRadarIconEsp;
             public bool MasterLogMapSpots;
+            // Defaults ON — one line per session, and it is the answer to "can the live scan replace
+            // the hardcoded arrays". An old Config.xml has no element, so the initializer holds.
+            public bool MasterLogGatherScan = true;
+            public bool MasterLogGatherHarvest;
             public bool MasterLogBubbleRadar;
             public bool MasterLogAutoBuy;
             public bool MasterLogForceOpenShop;

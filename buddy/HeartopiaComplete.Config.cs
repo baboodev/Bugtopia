@@ -268,6 +268,8 @@ namespace HeartopiaMod
             data.MasterLogAutoSell = MasterLogAutoSell;
             data.MasterLogRadarIconEsp = MasterLogRadarIconEsp;
             data.MasterLogMapSpots = MasterLogMapSpots;
+            data.MasterLogGatherScan = MasterLogGatherScan;
+            data.MasterLogGatherHarvest = MasterLogGatherHarvest;
             data.MasterLogBubbleRadar = MasterLogBubbleRadar;
             data.MasterLogAutoBuy = MasterLogAutoBuy;
             data.MasterLogForceOpenShop = MasterLogForceOpenShop;
@@ -622,6 +624,8 @@ namespace HeartopiaMod
             MasterLogAutoSell = data.MasterLogAutoSell;
             MasterLogRadarIconEsp = data.MasterLogRadarIconEsp;
             MasterLogMapSpots = data.MasterLogMapSpots;
+            MasterLogGatherScan = data.MasterLogGatherScan;
+            MasterLogGatherHarvest = data.MasterLogGatherHarvest;
             MasterLogBubbleRadar = data.MasterLogBubbleRadar;
             MasterLogAutoBuy = data.MasterLogAutoBuy;
             MasterLogForceOpenShop = data.MasterLogForceOpenShop;

@@ -28,6 +28,12 @@ namespace HeartopiaMod
         // sibling feature: off by default, switchable under Settings -> Logging.
         internal static bool MasterLogMapSpots = false;
 
+        // Separate from MasterLogMapSpots on purpose: that one turns on the whole map-diagnostic
+        // firehose, while this is a single once-per-session line — which gather component families
+        // resolved and how many entities each returned. That answer decides whether the live scan
+        // can replace the hardcoded coordinate arrays, so it defaults ON.
+        internal static bool MasterLogGatherScan = true;
+
         private void MapSpotsLog(string message)
         {
             if (!MasterLogMapSpots)
@@ -251,8 +257,51 @@ namespace HeartopiaMod
         private readonly Dictionary<ulong, uint> mapTrackInjectedTargetNet = new Dictionary<ulong, uint>(16);
 
         // Live collectable entities: world position + resource ENTITY static id (for the real item icon).
-        private IntPtr mapResCollectableClass = IntPtr.Zero;
-        private bool mapResClassResolveTried;
+        // ONE family. CollectableObjectComponent is a WRAPPER — it carries _proxy of type
+        // ICollectableObject — so it already contains every tree, stone and bush entity.
+        //
+        // ⚠️ DO NOT ADD THE CONCRETE TYPES BACK. I did, reasoning from the decompile that they were
+        // siblings with no common base, and the counts appeared to double from 41 to 82 — which
+        // read as "the scan now sees twice as much". It did not. Measured live through the MCP
+        // bridge:
+        //     wrapper=125  tree=95  bush=20  |  treeInWrapper=95  bushInWrapper=20
+        // 100% overlap. Every one of those extra entities was already in the wrapper enumeration,
+        // so the second pass added nothing but duplicates — every entity marked twice, every
+        // histogram bucket exactly x2.
+        //
+        // The remaining four (stone, advanced tree/stone, meteorite) returned false from the
+        // enumerator entirely.
+        // Every component family that carries a gatherable.
+        //
+        // CollectableObjectComponent (mushrooms, plants) was the only one scanned, which is why the
+        // land radar still drew trees, stone, ore and berries from hardcoded coordinate arrays —
+        // the live scan simply could not see them. Each of these is its own ViewComponent
+        // implementing ICollectableObject { int itemTypeID }, so there is no single base class to
+        // enumerate and no way to enumerate by the interface: ECS component lookup is by concrete
+        // type. Seven enumerations is the price of a real scan.
+        //
+        // ⚠️ Order matters only for the diagnostic counters; the snapshot is a flat union.
+        private static readonly string[] MapResGatherComponentNames =
+        {
+            "XDTLevelAndEntity.Gameplay.Component.Gather.CollectableObjectComponent",
+        };
+
+        // Resolved lazily, one slot per name above. A miss is retried every scan — the images load
+        // at different times and locking a failure on the first attempt would blind a whole family
+        // for the session.
+        private readonly IntPtr[] mapResGatherClasses = new IntPtr[MapResGatherComponentNames.Length];
+        private bool mapResGatherFamiliesLogged;
+
+        // CollectableObjectComponent._componentData is an inline CollectableObjectData at this byte
+        // offset. Read live from the running build, not from a dump.
+        private const int CollectableDataOffset = 72;
+
+        private static long NowUnixMs()
+        {
+            return (long)(System.DateTime.UtcNow - new System.DateTime(1970, 1, 1, 0, 0, 0, System.DateTimeKind.Utc)).TotalMilliseconds;
+        }
+        private readonly System.Text.StringBuilder mapResGatherBreakdown = new System.Text.StringBuilder();
+
         private float mapResNextScanAt;
         private bool mapResDiagLogged;
         private readonly List<MapResEntity> mapResEntities = new List<MapResEntity>(128);
@@ -1156,38 +1205,67 @@ namespace HeartopiaMod
             }
             this.mapResNextScanAt = now + MapResScanInterval;
 
-            if (this.mapResCollectableClass == IntPtr.Zero)
-            {
-                // Retry each scan until the image is loaded (do not lock on first miss).
-                this.mapResCollectableClass = this.FindAuraMonoClassByFullName(
-                    "XDTLevelAndEntity.Gameplay.Component.Gather.CollectableObjectComponent");
-                if (this.mapResCollectableClass == IntPtr.Zero)
-                {
-                    this.mapResCollectableClass = this.FindAuraMonoClassByFullName(
-                        "XDTLevelAndEntity.GamePlay.Component.Gather.CollectableObjectComponent");
-                }
-                if (this.mapResCollectableClass == IntPtr.Zero)
-                {
-                    if (!this.mapResClassResolveTried)
-                    {
-                        this.mapResClassResolveTried = true;
-                        this.MapSpotsLog("collectable scan: CollectableObjectComponent class NOT resolved (retrying)");
-                    }
-                    return;
-                }
-            }
-
             this.EnsureEntityResIdMethods();
             this.EnsureProduceMethod();
 
             this.mapResEntities.Clear();
             this.liveCollectableColds.Clear();
+
+            // One pass per gather family into the SAME snapshot — see MapResGatherComponentNames
+            // for why there has to be more than one.
+            int resolvedFamilies = 0;
+            int totalRaw = 0;
+            for (int f = 0; f < MapResGatherComponentNames.Length; f++)
+            {
+                if (this.mapResGatherClasses[f] == IntPtr.Zero)
+                {
+                    // Retry every scan until the image is loaded (never lock on the first miss).
+                    this.mapResGatherClasses[f] = this.FindAuraMonoClassByFullName(MapResGatherComponentNames[f]);
+                    if (this.mapResGatherClasses[f] == IntPtr.Zero)
+                    {
+                        this.mapResGatherClasses[f] = this.FindAuraMonoClassByFullName(
+                            MapResGatherComponentNames[f].Replace(".Gameplay.", ".GamePlay."));
+                    }
+                }
+
+                if (this.mapResGatherClasses[f] == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                resolvedFamilies++;
+                int famRaw = this.ScanOneGatherFamily(this.mapResGatherClasses[f]);
+                totalRaw += famRaw;
+                if (!this.mapResGatherFamiliesLogged)
+                {
+                    // Short name only — the namespace is identical for all seven.
+                    string shortName = MapResGatherComponentNames[f];
+                    int dot = shortName.LastIndexOf('.');
+                    this.mapResGatherBreakdown.Append(dot >= 0 ? shortName.Substring(dot + 1) : shortName)
+                        .Append('=').Append(famRaw).Append(' ');
+                }
+            }
+
+            this.liveCollectableScanCompletedAt = Time.unscaledTime;
+
+            if (MasterLogGatherScan && !this.mapResGatherFamiliesLogged && this.mapResEntities.Count > 0)
+            {
+                this.mapResGatherFamiliesLogged = true;
+                ModLogger.Msg("[MapSpots] gather scan: " + resolvedFamilies + "/" + MapResGatherComponentNames.Length
+                    + " component families resolved, raw=" + totalRaw
+                    + " usable=" + this.mapResEntities.Count + " | " + this.mapResGatherBreakdown.ToString().TrimEnd());
+            }
+        }
+
+        // One family. Returns the raw component count so the caller can report coverage.
+        private int ScanOneGatherFamily(IntPtr componentClass)
+        {
             // Pin the enumerated components, and each derived entity below, across their field reads:
             // GetEntityResId boxes its int return -> allocation -> the moving sgen GC may relocate an
             // unpinned component/entity mid-loop, and reading (or invoking on) a moved object crashes
             // hard (often with no WER dump). compPins is released once the loop is done.
             List<uint> compPins = new List<uint>();
-            if (!this.TryAuraMonoGetComponentObjects(this.mapResCollectableClass, out List<IntPtr> components, compPins) || components == null)
+            if (!this.TryAuraMonoGetComponentObjects(componentClass, out List<IntPtr> components, compPins) || components == null)
             {
                 FreeAuraMonoPins(compPins);
                 if (!this.mapResDiagLogged)
@@ -1195,7 +1273,7 @@ namespace HeartopiaMod
                     this.mapResDiagLogged = true;
                     this.MapSpotsLog("collectable scan: GetComponents returned null/false (class ok)");
                 }
-                return;
+                return 0;
             }
             if (components.Count == 0 && !this.mapResDiagLogged)
             {
@@ -1240,23 +1318,37 @@ namespace HeartopiaMod
                         int staticId = 0;
                         this.TryGetCollectableStaticIdViaAura(entityObj, out staticId);
                         this.TryGetMonoInt32Member(comp, "itemTypeID", out int produceId);
-                        // Authoritative depletion state straight from the live entity (the radar's own cooldown
-                        // tracking is local-only and misses resources already depleted by others / before login).
-                        // Some resource families never set inCold when drained — they only zero availableNum
-                        // (their shape also leaves the axe-checker) — so both count as depleted. availableNum
-                        // is trusted only on a successful read: the out param is 0 on failure too.
-                        bool onCooldown = this.TryGetMonoBoolMember(comp, "inCold", out bool inCold) && inCold;
-                        if (!onCooldown
-                            && this.TryGetMonoInt32Member(comp, "availableNum", out int liveAvailableNum)
-                            && liveAvailableNum == 0)
-                        {
-                            onCooldown = true;
-                        }
-
+                        // ⚠️ DEPLETION LIVES IN THE INLINE STRUCT, NOT ON THE COMPONENT.
+                        //
+                        // This used to read "inCold", "availableNum" and "coldEndTime" as members of
+                        // the component. Verified against the RUNNING build through the MCP bridge:
+                        //   CollectableObjectComponent fields: _componentData @72, itemTypeID @124, ...
+                        //   CollectableObjectData (valueType): coldEndTime @16, totalTime @24,
+                        //                                      availableNum @28, resType @32
+                        // "inCold" does not exist ANYWHERE — not on the component, not in the data.
+                        // So all three reads always failed and OnCooldown was permanently FALSE: the
+                        // "authoritative depletion state" this comment used to promise never once
+                        // fired. Nothing marked a drained resource; the radar's local index-keyed
+                        // cooldowns were doing the whole job.
+                        //
+                        // _componentData is INLINE, so a struct field's real offset is
+                        // 72 + (structOffset - 2*IntPtr.Size) — the header the boxed layout counts
+                        // but an inline field does not. Read back live: availableNum@84 = 3 on a
+                        // fresh bush, resType@88 = 1. Matches the field table exactly.
+                        bool onCooldown = false;
                         long liveColdEndMs = 0L;
-                        if (onCooldown && this.TryGetMonoUInt64Member(comp, "coldEndTime", out ulong coldEndRaw))
+                        if (comp != IntPtr.Zero)
                         {
-                            liveColdEndMs = (long)coldEndRaw;
+                            unsafe
+                            {
+                                byte* dataPtr = (byte*)comp.ToPointer() + CollectableDataOffset;
+                                liveColdEndMs = *(long*)(dataPtr + 0);
+                                int availableNum = *(int*)(dataPtr + 12);
+
+                                // Depleted = nothing left to take, or a cold window still running.
+                                onCooldown = availableNum <= 0
+                                    || (liveColdEndMs > 0L && liveColdEndMs > NowUnixMs());
+                            }
                         }
                         this.liveCollectableColds.Add(new LiveCollectableCold { Position = pos, OnCooldown = onCooldown, ColdEndMs = liveColdEndMs });
 
@@ -1274,6 +1366,20 @@ namespace HeartopiaMod
                             continue;
                         }
                         this.mapResEntities.Add(new MapResEntity { Position = pos, StaticId = staticId, ProduceId = produceId, OnCooldown = onCooldown });
+
+                        // Coordinate harvest (GatherCoordinateHarvestFeature.cs) — off unless the
+                        // Logging toggle asks for it. Resolves the item id the same way the radar
+                        // does so the file carries the identity, not just a position.
+                        if (MasterLogGatherHarvest)
+                        {
+                            int harvestItemId = 0;
+                            if (produceId > 0)
+                            {
+                                this.TryGetProduceItemId(produceId, out harvestItemId);
+                            }
+
+                            this.NoteGatherHarvest(pos, produceId, staticId, harvestItemId);
+                        }
                     }
                     finally
                     {
@@ -1286,8 +1392,6 @@ namespace HeartopiaMod
                 FreeAuraMonoPins(compPins);
             }
 
-            this.liveCollectableScanCompletedAt = Time.unscaledTime;
-
             if (!this.mapResDiagLogged && rawCount > 0)
             {
                 this.mapResDiagLogged = true;
@@ -1296,6 +1400,8 @@ namespace HeartopiaMod
                     + " | sample netId=" + sampleNetId + " resIdMethods=" + sampleResId
                     + " itemTypeId=" + sampleItemTypeId + " staticId=" + sampleStaticId);
             }
+
+            return rawCount;
         }
 
         // Scan live remote players (RemotePlayerComponent view components): world position + entity netId.

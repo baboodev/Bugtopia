@@ -1864,222 +1864,8 @@ namespace HeartopiaMod
             }
             Vector3 position = cam.transform.position;
             float radarDistanceLimit = Mathf.Max(25f, this.radarMaxDistance);
-            bool flag6 = this.showBlueberryRadar;
-            if (flag6)
-            {
-                float unscaledTime = Time.unscaledTime;
-                int j = 0;
-                while (j < this.blueberryPositions.Length)
-                {
-                    Vector3 vector = this.blueberryPositions[j];
-                    bool flag7 = Vector3.Distance(position, vector) <= radarDistanceLimit;
-                    if (flag7)
-                    {
-                        bool flag8 = this.blueberryHideUntil.ContainsKey(j) && unscaledTime < this.blueberryHideUntil[j];
-                        if (flag8)
-                        {
-                            float num = this.blueberryHideUntil[j] - 10f - 4f;
-                            float num2 = num + 4f;
-                            bool flag9 = unscaledTime >= num2;
-                            if (flag9)
-                            {
-                                goto IL_38F;
-                            }
-                        }
-                        bool flag10 = this.blueberryCooldowns.ContainsKey(j) && unscaledTime < this.blueberryCooldowns[j];
-                        bool flag11 = flag10 && (!this.blueberryHideUntil.ContainsKey(j) || unscaledTime >= this.blueberryHideUntil[j]);
-                        if (flag11)
-                        {
-                            this.CreateMarker(vector, "blueberry_cooldown", material, material2, null);
-                        }
-                        else
-                        {
-                            bool flag12 = !flag10;
-                            if (flag12)
-                            {
-                                this.CreateMarker(vector, "blueberry", material, material2, null);
-                            }
-                        }
-                    }
-                IL_38F:
-                    j++;
-                    continue;
-                }
-            }
-            bool flagRockScan = this.showStoneRadar;
-            if (flagRockScan)
-            {
-                float unscaledRock = Time.unscaledTime;
-                for (int r = 0; r < HeartopiaComplete.RockPositions.Length; r++)
-                {
-                    Vector3 rockPos = HeartopiaComplete.RockPositions[r];
-                    if (Vector3.Distance(position, rockPos) <= radarDistanceLimit)
-                    {
-                        bool onCD = this.rockCooldowns.ContainsKey(r) && unscaledRock < this.rockCooldowns[r];
-                        bool hidden = this.rockHideUntil.ContainsKey(r) && unscaledRock < this.rockHideUntil[r];
-                        if (onCD && (!this.rockHideUntil.ContainsKey(r) || unscaledRock >= this.rockHideUntil[r]))
-                        {
-                            this.CreateMarker(rockPos, "stone_cooldown", material, material2, null);
-                        }
-                        else if (!onCD && !hidden)
-                        {
-                            this.CreateMarker(rockPos, "stone", material, material2, null);
-                        }
-                    }
-                }
-            }
-            bool flagTreeScan = this.showTreeRadar;
-            if (flagTreeScan)
-            {
-                float unscaledTree = Time.unscaledTime;
-                for (int tIdx = 0; tIdx < HeartopiaComplete.TreePositions.Length; tIdx++)
-                {
-                    Vector3 treePos = HeartopiaComplete.TreePositions[tIdx];
-                    if (Vector3.Distance(position, treePos) <= radarDistanceLimit)
-                    {
-                        bool onCDt = this.treeCooldowns_res.ContainsKey(tIdx) && unscaledTree < this.treeCooldowns_res[tIdx];
-                        bool hiddent = this.treeHideUntil_res.ContainsKey(tIdx) && unscaledTree < this.treeHideUntil_res[tIdx];
-                        if (onCDt && (!this.treeHideUntil_res.ContainsKey(tIdx) || unscaledTree >= this.treeHideUntil_res[tIdx]))
-                        {
-                            this.CreateMarker(treePos, "tree_cooldown", material, material2, null);
-                        }
-                        else if (!onCDt && !hiddent)
-                        {
-                            this.CreateMarker(treePos, "tree", material, material2, null);
-                        }
-                    }
-                }
-            }
-            bool flagRareTreeScan = this.showRareTreeRadar;
-            if (flagRareTreeScan)
-            {
-                float unscaledRare = Time.unscaledTime;
-                for (int rt = 0; rt < HeartopiaComplete.RareTreePositions.Length; rt++)
-                {
-                    Vector3 rarePos = HeartopiaComplete.RareTreePositions[rt];
-                    if (Vector3.Distance(position, rarePos) <= radarDistanceLimit)
-                    {
-                        bool onCD = this.rareTreeCooldowns_res.ContainsKey(rt) && unscaledRare < this.rareTreeCooldowns_res[rt];
-                        bool hidden = this.rareTreeHideUntil_res.ContainsKey(rt) && unscaledRare < this.rareTreeHideUntil_res[rt];
-                        if (onCD && (!this.rareTreeHideUntil_res.ContainsKey(rt) || unscaledRare >= this.rareTreeHideUntil_res[rt]))
-                        {
-                            this.CreateMarker(rarePos, "rare_tree_cooldown", material, material2, null);
-                        }
-                        else if (!onCD && !hidden)
-                        {
-                            this.CreateMarker(rarePos, "rare_tree", material, material2, null);
-                        }
-                    }
-                }
-            }
-            bool flagAppleScan = this.showAppleTreeRadar;
-            if (flagAppleScan)
-            {
-                float unscaledApple = Time.unscaledTime;
-                for (int a = 0; a < HeartopiaComplete.AppleTreePositions.Length; a++)
-                {
-                    Vector3 applePos = HeartopiaComplete.AppleTreePositions[a];
-                    if (Vector3.Distance(position, applePos) <= radarDistanceLimit)
-                    {
-                        bool onCDa = this.appleTreeCooldowns_res.ContainsKey(a) && unscaledApple < this.appleTreeCooldowns_res[a];
-                        bool hid = this.appleTreeHideUntil_res.ContainsKey(a) && unscaledApple < this.appleTreeHideUntil_res[a];
-                        if (onCDa && (!this.appleTreeHideUntil_res.ContainsKey(a) || unscaledApple >= this.appleTreeHideUntil_res[a]))
-                        {
-                            this.CreateMarker(applePos, "apple_tree_cooldown", material, material2, null);
-                        }
-                        else if (!onCDa && !hid)
-                        {
-                            this.CreateMarker(applePos, "apple_tree", material, material2, null);
-                        }
-                    }
-                }
-            }
-            bool flagOrangeScan = this.showOrangeTreeRadar;
-            if (flagOrangeScan)
-            {
-                float unscaledOrange = Time.unscaledTime;
-                for (int oT = 0; oT < HeartopiaComplete.OrangeTreePositions.Length; oT++)
-                {
-                    Vector3 orangePos = HeartopiaComplete.OrangeTreePositions[oT];
-                    if (Vector3.Distance(position, orangePos) <= radarDistanceLimit)
-                    {
-                        bool onCDo = this.orangeTreeCooldowns_res.ContainsKey(oT) && unscaledOrange < this.orangeTreeCooldowns_res[oT];
-                        bool hidO = this.orangeTreeHideUntil_res.ContainsKey(oT) && unscaledOrange < this.orangeTreeHideUntil_res[oT];
-                        if (onCDo && (!this.orangeTreeHideUntil_res.ContainsKey(oT) || unscaledOrange >= this.orangeTreeHideUntil_res[oT]))
-                        {
-                            this.CreateMarker(orangePos, "orange_tree_cooldown", material, material2, null);
-                        }
-                        else if (!onCDo && !hidO)
-                        {
-                            this.CreateMarker(orangePos, "orange_tree", material, material2, null);
-                        }
-                    }
-                }
-            }
-            bool flagOreScan = this.showOreRadar;
-            if (flagOreScan)
-            {
-                float unscaledOre = Time.unscaledTime;
-                for (int o = 0; o < HeartopiaComplete.OrePositions.Length; o++)
-                {
-                    Vector3 orePos = HeartopiaComplete.OrePositions[o];
-                    if (Vector3.Distance(position, orePos) <= radarDistanceLimit)
-                    {
-                        bool onCD = this.oreCooldowns.ContainsKey(o) && unscaledOre < this.oreCooldowns[o];
-                        bool hidden = this.oreHideUntil.ContainsKey(o) && unscaledOre < this.oreHideUntil[o];
-                        if (onCD && (!this.oreHideUntil.ContainsKey(o) || unscaledOre >= this.oreHideUntil[o]))
-                        {
-                            this.CreateMarker(orePos, "ore_cooldown", material, material2, null);
-                        }
-                        else if (!onCD && !hidden)
-                        {
-                            this.CreateMarker(orePos, "ore", material, material2, null);
-                        }
-                    }
-                }
-            }
-            bool flag13 = this.showRaspberryRadar;
-            if (flag13)
-            {
-                float unscaledTime2 = Time.unscaledTime;
-                int k = 0;
-                while (k < this.raspberryPositions.Length)
-                {
-                    Vector3 vector2 = this.raspberryPositions[k];
-                    bool flag14 = Vector3.Distance(position, vector2) <= radarDistanceLimit;
-                    if (flag14)
-                    {
-                        bool flag15 = this.raspberryHideUntil.ContainsKey(k) && unscaledTime2 < this.raspberryHideUntil[k];
-                        if (flag15)
-                        {
-                            float num3 = this.raspberryHideUntil[k] - 10f - 4f;
-                            float num4 = num3 + 4f;
-                            bool flag16 = unscaledTime2 >= num4;
-                            if (flag16)
-                            {
-                                goto IL_4E9;
-                            }
-                        }
-                        bool flag17 = this.raspberryCooldowns.ContainsKey(k) && unscaledTime2 < this.raspberryCooldowns[k];
-                        bool flag18 = flag17 && (!this.raspberryHideUntil.ContainsKey(k) || unscaledTime2 >= this.raspberryHideUntil[k]);
-                        if (flag18)
-                        {
-                            this.CreateMarker(vector2, "raspberry_cooldown", material, material2, null);
-                        }
-                        else
-                        {
-                            bool flag19 = !flag17;
-                            if (flag19)
-                            {
-                                this.CreateMarker(vector2, "raspberry", material, material2, null);
-                            }
-                        }
-                    }
-                IL_4E9:
-                    k++;
-                    continue;
-                }
-            }
+            // Land gatherables: LIVE scan, not the old hardcoded arrays. See ScanLandGatherables.
+            this.ScanLandGatherables(position, material, material2, radarDistanceLimit);
             // -- Throttled GameObject scan for bubble / bird-fallback / fish-shadow / meteor radars --
             // FindObjectsOfType<GameObject>() is expensive. We throttle it to at most once every 2s
             // inside RunRadar. We intentionally do NOT cache the result in a class field:
@@ -2390,6 +2176,327 @@ namespace HeartopiaMod
         // 40601/40602/40603, "marked 11"), so it's off now.
         internal static bool MasterLogUnderwaterRadar = false;
 
+
+        // ── Live land gatherables (replaces the hardcoded coordinate arrays) ─────────────────────
+        //
+        // Item ids come from the game's own atlas dump, which the mod already prints on startup:
+        //   40001 Branch · 40002 Timber · 40003 Quality Timber · 40004 Rare Timber
+        //   40006 Roaming Oak Timber · 40021 Stone · 40022 Ore
+        //   40101 Apple · 40201 Mandarin · 40501 Blueberry · 40502 Raspberry
+        //
+        // ⚠️ WHY THIS REPLACES ARRAYS. The arrays were 238 coordinates snapped by hand once. They
+        // cannot know that an object moved, vanished or sank into geometry after a patch — the
+        // radar drew a marker anyway, the farm walked to it, and there was nothing to collect. That
+        // is the whole family of "final approach not walkable" / "under the node" failures on nodes
+        // the walker reached perfectly.
+        //
+        // ⚠️ COOLDOWN IS NOW AUTHORITATIVE. The arrays tracked depletion by INDEX
+        // (rockCooldowns[r]) — a scheme that only works while the point list is fixed and identical
+        // for everyone. entry.OnCooldown comes from the live component's own inCold/availableNum,
+        // so it is right even for resources drained by another player or before login.
+        //
+        // ⚠️ SCOPE. The snapshot holds what is STREAMED around the player (~82 entities observed),
+        // not the whole map. That is the correct set for walking and for a 120 m radar; it is NOT a
+        // replacement for farmLocations, which are zone anchors used to decide where to travel next
+        // and must stay hardcoded.
+        private void ScanLandGatherables(Vector3 origin, Material line, Material fill, float maxRange)
+        {
+            if (line == null || fill == null)
+            {
+                return;
+            }
+
+            // Shared snapshot + throttle with the map spots, the cold sync and the underwater radar.
+            this.RefreshCollectableScan();
+            if (this.mapResEntities == null || this.mapResEntities.Count == 0)
+            {
+                return;
+            }
+
+            float maxSqr = maxRange * maxRange;
+            int marked = 0;
+            for (int i = 0; i < this.mapResEntities.Count; i++)
+            {
+                MapResEntity entry = this.mapResEntities[i];
+                if ((entry.Position - origin).sqrMagnitude > maxSqr)
+                {
+                    continue;
+                }
+
+                // produceId -> dropped item; fall back to the entity staticId for families modelled
+                // with the item id directly. Same resolution order the underwater scan uses.
+                // Two different identities, and they must not be merged.
+                //
+                // Trees/bushes carry a produceId that maps to a real item: 101 -> 40001 Branch,
+                // 203/207 -> 40003 Quality Timber (resolved live, not guessed).
+                //
+                // ⚠️ MUSHROOMS CARRY itemTypeID = 0. They are identified by the ENTITY staticId
+                // instead — 130013 proved to be Penny Bun by matching a scanned position against
+                // the farm's own "node:Penny Bun ... target=(196,79, 18,07, -9,13)" log line. The
+                // old code merged the two by falling back to staticId and feeding both through one
+                // item-id table, so a mushroom could only ever come out unmapped.
+                int itemId = 0;
+                if (entry.ProduceId > 0)
+                {
+                    this.TryGetProduceItemId(entry.ProduceId, out itemId);
+                }
+
+                bool known;
+                string meshName = itemId > 0
+                    ? ResolveLandGatherMeshName(itemId, this, out known)
+                    : ResolveLandGatherMeshByStaticId(entry.StaticId, this, out known);
+                // ⚠️ Key on the RAW pair, not the resolved itemId. "130013" looked like one unmapped
+                // item; it is almost certainly an ENTITY staticId that 122 mushroom entities fall
+                // back to because their itemTypeID is 0 — and a histogram keyed on the merged value
+                // cannot show that, because the merge already threw the distinction away.
+                if (MasterLogGatherScan)
+                {
+                    // Show the RESOLVED item id too: "101/12" alone never revealed that produce 101
+                    // is Branch 40001, so every row needed a lookup elsewhere to mean anything.
+                    string key = entry.ProduceId + "/" + entry.StaticId
+                        + (itemId > 0 ? "=" + itemId : string.Empty);
+                    // ⚠️ Three outcomes, not two. "(none)" used to mean BOTH "this id is not in the
+                    // table" and "it is, but the toggle is off" — and one drive produced 852 rows of
+                    // it, unreadable, because the two cases are the opposite of each other: one is
+                    // work to do, the other is the user's own setting.
+                    string verdict = meshName ?? (known ? "(off)" : "(unmapped)");
+                    if (!this.landGatherIdHistogram.TryGetValue(key, out LandGatherIdStat stat))
+                    {
+                        stat = new LandGatherIdStat { Mesh = verdict };
+                        this.landGatherNewIds = true;
+                    }
+                    else if (!string.Equals(stat.Mesh, verdict, StringComparison.Ordinal))
+                    {
+                        // ⚠️ The verdict is NOT a property of the id — it depends on the toggles,
+                        // which the user flips between scans. Latching the first answer made the
+                        // whole histogram read "(none)" forever after one scan taken with the
+                        // radar switched off, while "marked 5" on the same line proved otherwise.
+                        stat.Mesh = verdict;
+                        this.landGatherNewIds = true;
+                    }
+
+                    stat.Count++;
+                    this.landGatherIdHistogram[key] = stat;
+                }
+
+                if (meshName == null)
+                {
+                    continue;
+                }
+
+                this.CreateMarker(entry.Position, entry.OnCooldown ? meshName + "_cooldown" : meshName,
+                    line, fill, null);
+                marked++;
+            }
+
+            // ⚠️ Histogram, not just a count. The first run reported "marked 204 of 206", which looked
+            // like success but could not be: the id table below has no mushroom ids, yet 104 of the
+            // 206 entities were CollectableObjectComponent (mushrooms and plants). Either the ids
+            // resolve somewhere unexpected or those markers are wrong — a bare count cannot tell
+            // the difference, so print every distinct id and where it landed.
+            // Re-prints whenever a NEW id turns up, not once per session: walking into a mushroom
+            // area after starting in a forest is exactly when the table needs checking, and a
+            // latched one-shot said nothing at all about it.
+            if (MasterLogGatherScan && this.landGatherNewIds)
+            {
+                this.landGatherNewIds = false;
+                System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                foreach (KeyValuePair<string, LandGatherIdStat> kv in this.landGatherIdHistogram)
+                {
+                    sb.Append(kv.Key).Append("->").Append(kv.Value.Mesh)
+                        .Append('x').Append(kv.Value.Count).Append(' ');
+                }
+
+                ModLogger.Msg("[MapSpots] land radar: marked " + marked + " of " + this.mapResEntities.Count
+                    + " | " + sb.ToString().TrimEnd());
+            }
+
+            // ── Static fallback: only when the live scan found NOTHING to collect ────────────────
+            //
+            // The live scan sees only what has STREAMED IN around the player. That is the right set
+            // while there is anything there — the entities are real, their depletion state is real,
+            // and they include types the hand-authored arrays never had. But when the area is empty
+            // (everything picked, or nothing streamed yet) the farm is left with no candidate at
+            // all and relocates, when a perfectly good node may be sitting 200 m away.
+            //
+            // ⚠️ THE ARRAYS ARE NOT A SECOND OPINION — they are a LAST resort. They are hand-snapped
+            // coordinates that cannot know an object moved, vanished or sank into geometry after a
+            // patch; running them alongside the live scan would re-introduce exactly the phantom
+            // nodes phase 2 removed. Hence: consulted ONLY at marked == 0, and only for positions
+            // BEYOND the live coverage, so a live-empty patch of ground is never papered over with
+            // a stale marker sitting right where the scan just looked.
+            //
+            // ⚠️ These coordinates cannot be refreshed from the design tables. All 913 tables were
+            // searched (5674 columns) for a known resource position: zero hits. Placement lives in
+            // the Unity scene, not the tables. The way to extend this list is the Gather Harvest
+            // toggle (GatherCoordinateHarvestFeature.cs), which writes real scanned positions.
+            if (marked == 0)
+            {
+                this.MarkStaticFallbackGatherables(origin, line, fill, maxRange);
+            }
+        }
+
+        // Live coverage radius. Inside this the live scan is authoritative and the static list must
+        // stay out of the way; only candidates further out are worth offering.
+        private const float StaticFallbackMinDistance = 60f;
+
+        private bool staticFallbackLogged;
+
+        private void MarkStaticFallbackGatherables(Vector3 origin, Material line, Material fill, float maxRange)
+        {
+            int drawn = 0;
+            // HARVESTED sets, not the old hand-authored arrays — see HarvestedGatherCoordinates.cs.
+            // Same eight kinds, plus the two that never existed in source at all.
+            drawn += this.MarkStaticFallbackSet(HarvestedStonePositions, this.showStoneRadar, "stone", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedOrePositions, this.showOreRadar, "ore", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedTreePositions, this.showTreeRadar, "tree", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedRareTreePositions, this.showRareTreeRadar, "rare_tree", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedAppleTreePositions, this.showAppleTreeRadar, "apple_tree", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedOrangeTreePositions, this.showOrangeTreeRadar, "orange_tree", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedBlueberryPositions, this.showBlueberryRadar, "blueberry", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedRaspberryPositions, this.showRaspberryRadar, "raspberry", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedBambooPositions, this.showBambooRadar, "bamboo", origin, line, fill, maxRange);
+            drawn += this.MarkStaticFallbackSet(HarvestedMushroomPositions, this.showMushroomRadar, "mushroom", origin, line, fill, maxRange);
+
+            if (drawn > 0 && !this.staticFallbackLogged)
+            {
+                this.staticFallbackLogged = true;
+                ModLogger.Msg("[MapSpots] land radar: live scan empty — offered " + drawn
+                    + " candidate(s) from the static list beyond "
+                    + StaticFallbackMinDistance.ToString("F0") + "m.");
+            }
+        }
+
+        private int MarkStaticFallbackSet(Vector3[] positions, bool enabled, string meshName,
+            Vector3 origin, Material line, Material fill, float maxRange)
+        {
+            if (!enabled || positions == null)
+            {
+                return 0;
+            }
+
+            float minSqr = StaticFallbackMinDistance * StaticFallbackMinDistance;
+            float maxSqr = maxRange * maxRange;
+            int drawn = 0;
+            for (int i = 0; i < positions.Length; i++)
+            {
+                float sqr = (positions[i] - origin).sqrMagnitude;
+                if (sqr < minSqr || sqr > maxSqr)
+                {
+                    continue;
+                }
+
+                this.CreateMarker(positions[i], meshName, line, fill, null);
+                drawn++;
+            }
+
+            return drawn;
+        }
+
+        private bool landGatherNewIds;
+        // produceId/staticId -> where it landed and how many carry it.
+        private struct LandGatherIdStat
+        {
+            public string Mesh;
+            public int Count;
+        }
+
+        private readonly Dictionary<string, LandGatherIdStat> landGatherIdHistogram = new Dictionary<string, LandGatherIdStat>();
+
+        // ENTITY staticId -> marker mesh, for the families whose itemTypeID is 0.
+        //
+        // Read from the decrypted design tables (tools/HeartopiaTables, table `Dynamicbush`), NOT
+        // guessed. I had assigned species from the arithmetic of five observed ids, then 130010
+        // appeared between two of them and I called the pattern broken. It was not — the table
+        // shows the layout exactly:
+        //
+        //   130001 平菇丛   Oyster Mushroom      _dynamicBushType 1  (base)
+        //   130002-04       变种平菇丛1-3        type 2              (bizarre variants)
+        //   130005 香菇丛   Shiitake             type 1
+        //   130006-08       变种香菇丛1-3        type 2
+        //   130009 口蘑丛   Button Mushroom      type 1
+        //   130010-12       变种口蘑丛1-3        type 2   <-- the "anomaly"
+        //   130013 牛肝菌丛 Penny Bun            type 1
+        //   130014-16       变种牛肝菌丛1-3      type 2
+        //   130017 松露丛   Black Truffle        type 1
+        //   130018 松茸丛   Matsutake            type 3
+        //
+        // Base species really are 130001 + 4n; the three ids after each are its bizarre variants.
+        // Every species I had guessed turned out right — but only by luck, and one look at the
+        // table would have settled it before any of the guessing.
+        //
+        // 130019/21/23/25 are the event foraging plants, which already have their own toggles.
+        // 42001 is 橡走走 Oak-Oak — a daily roamer owned by RoamingCollectableFinderFeature, so it
+        // is deliberately NOT handled here.
+        private static string ResolveLandGatherMeshByStaticId(int staticId, HeartopiaComplete self, out bool known)
+        {
+            known = true;
+            switch (staticId)
+            {
+                // Mushrooms: base species and its three bizarre variants share one toggle.
+                case 130001: case 130002: case 130003: case 130004:
+                    return self.showOysterMushroomRadar || self.showMushroomRadar ? "mushroom" : null;
+                case 130005: case 130006: case 130007: case 130008:
+                    return self.showShiitakeRadar || self.showMushroomRadar ? "mushroom" : null;
+                case 130009: case 130010: case 130011: case 130012:
+                    return self.showButtonMushroomRadar || self.showMushroomRadar ? "mushroom" : null;
+                case 130013: case 130014: case 130015: case 130016:
+                    return self.showPennyBunRadar || self.showMushroomRadar ? "mushroom" : null;
+                case 130017:
+                    return self.showTruffleRadar || self.showMushroomRadar ? "mushroom" : null;
+
+                // Matsutake has no dedicated toggle of its own — master switch only.
+                case 130018:
+                    return self.showMushroomRadar ? "mushroom" : null;
+
+                // Event foraging plants (their toggles already exist).
+                case 130019: return self.showFiddleheadRadar ? "fiddlehead" : null;
+                case 130021: return self.showTallMustardRadar ? "tallmustard" : null;
+                case 130023: return self.showBurdockRadar ? "burdock" : null;
+                case 130025: return self.showMustardGreensRadar ? "mustardgreens" : null;
+            }
+
+            known = false;
+            return null;
+        }
+
+        // itemId -> marker mesh, gated by the same toggles the array loops used. Static so the
+        // mapping stays one table rather than a chain buried in the scan loop.
+        private static string ResolveLandGatherMeshName(int itemId, HeartopiaComplete self, out bool known)
+        {
+            switch (itemId)
+            {
+                case 40021: case 40022: case 40501: case 40502:
+                case 40101: case 40201: case 40004: case 40033:
+                case 40001: case 40002: case 40003: case 40006:
+                    known = true;
+                    break;
+                default:
+                    known = false;
+                    break;
+            }
+
+            switch (itemId)
+            {
+                case 40021: return self.showStoneRadar ? "stone" : null;
+                case 40022: return self.showOreRadar ? "ore" : null;
+                case 40501: return self.showBlueberryRadar ? "blueberry" : null;
+                case 40502: return self.showRaspberryRadar ? "raspberry" : null;
+                case 40101: return self.showAppleTreeRadar ? "apple_tree" : null;
+                case 40201: return self.showOrangeTreeRadar ? "orange_tree" : null;
+                case 40033: return self.showBambooRadar ? "bamboo" : null;
+                case 40004: return self.showRareTreeRadar ? "rare_tree" : null;
+
+                // Ordinary timber: several drop ids, one marker.
+                case 40001:
+                case 40002:
+                case 40003:
+                case 40006:
+                    return self.showTreeRadar ? "tree" : null;
+            }
+
+            return null;
+        }
         private void ScanUnderwaterGatherables(Vector3 origin, Material line, Material fill, float maxRange)
         {
             if (!this.showGlasswortRadar && !this.showSeaGrapeRadar && !this.showWakameRadar)
@@ -2599,8 +2706,16 @@ namespace HeartopiaMod
                                     bgColor = new Color(0.35f, 0.18f, 0.05f, 0.85f);
                                 }
 
-                                bool flagTree = meshName == "tree" || meshName == "tree_cooldown";
-                                if (flagTree)
+                                bool flagBamboo = meshName == "bamboo" || meshName == "bamboo_cooldown";
+                                if (flagBamboo)
+                                {
+                                    text2 = "Bamboo";
+                                    icon = "?";
+                                    // Green, distinct from the blue timber markers standing next to it.
+                                    endColor = new Color(0.45f, 0.9f, 0.5f);
+                                    bgColor = new Color(0.08f, 0.34f, 0.12f, 0.86f);
+                                }
+                                else if (meshName == "tree" || meshName == "tree_cooldown")
                                 {
                                     text2 = "Tree";
                                     icon = "?";

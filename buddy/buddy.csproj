@@ -333,6 +333,8 @@
     <Compile Include="FarmWalkRadarFocusFeature.cs" />
     <Compile Include="FarmWalkVehicleFeature.cs" />
     <Compile Include="FarmRoutePlanFeature.cs" />
+    <Compile Include="GatherCoordinateHarvestFeature.cs" />
+    <Compile Include="HarvestedGatherCoordinates.cs" />
     <Compile Include="Breadcrumbs.cs" />
     <Compile Include="MonoAssemblyDump.cs" />
     <Compile Include="HeartopiaComplete.cs" />

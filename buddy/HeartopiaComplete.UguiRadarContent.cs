@@ -530,6 +530,7 @@ namespace HeartopiaMod
         {
             List<string> selected = new List<string>();
             if (this.showTreeRadar) selected.Add("Trees");
+            if (this.showBambooRadar) selected.Add("Bamboo");
             if (this.showRareTreeRadar) selected.Add("Rare Trees");
             if (this.showAppleTreeRadar) selected.Add("Apple Trees");
             if (this.showOrangeTreeRadar) selected.Add("Mandarin Trees");
@@ -675,6 +676,7 @@ namespace HeartopiaMod
                         new UguiRadarOptionBinding { Label = "Rare Trees", Get = () => this.showRareTreeRadar, Set = v => this.showRareTreeRadar = v },
                         new UguiRadarOptionBinding { Label = "Apple Trees", Get = () => this.showAppleTreeRadar, Set = v => this.showAppleTreeRadar = v },
                         new UguiRadarOptionBinding { Label = "Mandarin Trees", Get = () => this.showOrangeTreeRadar, Set = v => this.showOrangeTreeRadar = v },
+                        new UguiRadarOptionBinding { Label = "Bamboo", Get = () => this.showBambooRadar, Set = v => this.showBambooRadar = v },
                     },
                     AfterChanged = this.ApplyUguiRadarStandardGroupTail
                 },
@@ -1138,6 +1140,7 @@ namespace HeartopiaMod
             this.showRareTreeRadar = true;
             this.showAppleTreeRadar = true;
             this.showOrangeTreeRadar = true;
+            this.showBambooRadar = true;
             this.showOakOakRadar = true;
             this.showFluoriteRadar = true;
             this.showBubbleRadar = true;
@@ -1185,6 +1188,7 @@ namespace HeartopiaMod
             this.showRareTreeRadar = false;
             this.showAppleTreeRadar = false;
             this.showOrangeTreeRadar = false;
+            this.showBambooRadar = false;
             this.showOakOakRadar = false;
             this.showFluoriteRadar = false;
             this.showBubbleRadar = false;
