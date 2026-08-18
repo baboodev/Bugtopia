@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -2221,6 +2221,10 @@ namespace HeartopiaMod
 
             float maxSqr = maxRange * maxRange;
             int marked = 0;
+            // Drawn nothing because the resource is not collectable right now (cold, or a bush still
+            // growing, or a bush with no verdict yet) — reported so "marked 4 of 142" never has to be
+            // guessed at again.
+            int hidden = 0;
             for (int i = 0; i < this.mapResEntities.Count; i++)
             {
                 MapResEntity entry = this.mapResEntities[i];
@@ -2290,8 +2294,22 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                this.CreateMarker(entry.Position, entry.OnCooldown ? meshName + "_cooldown" : meshName,
-                    line, fill, null);
+                // ⚠️ NOT COLLECTABLE => NO MARKER AT ALL, not a "_cooldown" one.
+                //
+                // Drawing spent resources in a dimmed variant made sense while a cooldown was the
+                // only thing that could be wrong with a node. It is wrong for the dynamic bushes: a
+                // mushroom that is still GROWING reads inCold=False on its component, so it was
+                // drawn as an ordinary available marker — and everything downstream believed it, the
+                // game map included. Hiding it here removes it from the ESP, from the game-map
+                // track sync and from the farm's candidate set in one place, because all three read
+                // these markers.
+                if (this.IsGatherableHiddenFromMarkers(entry.NetId, entry.StaticId, entry.OnCooldown))
+                {
+                    hidden++;
+                    continue;
+                }
+
+                this.CreateMarker(entry.Position, meshName, line, fill, null);
                 marked++;
             }
 
@@ -2313,7 +2331,7 @@ namespace HeartopiaMod
                         .Append('x').Append(kv.Value.Count).Append(' ');
                 }
 
-                ModLogger.Msg("[MapSpots] land radar: marked " + marked + " of " + this.mapResEntities.Count
+                ModLogger.Msg("[MapSpots] land radar: marked " + marked + " (hid " + hidden + " not collectable) of " + this.mapResEntities.Count
                     + " | " + sb.ToString().TrimEnd());
             }
 

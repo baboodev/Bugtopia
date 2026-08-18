@@ -1479,6 +1479,36 @@ namespace HeartopiaMod
         // broadcast, because UpdateAllColdTime only computes one where DynamicBushGrowComponent
         // exists. Applying this to them would park half the map for nothing; their component test
         // is sound and stays.
+        // Should this resource be drawn at all?
+        //
+        // The radar used to draw a spent resource with a "_cooldown" mesh, which was right when the
+        // only thing that could be wrong with a node was a cooldown. It is not right for a dynamic
+        // bush: a mushroom that is GROWING reads inCold=False on its component, so it was drawn as
+        // ordinary and available, and both the map and the farm treated it as a destination.
+        //
+        // Marker visibility therefore asks the same three questions the walk does:
+        //   • the component says spent                       -> hide
+        //   • the client's verdict says not ready yet        -> hide (this is the growth case)
+        //   • dynamic bush with no verdict at all            -> hide, it is UNCONFIRMED
+        // The last one hides a bush for the second or two before the sweep answers for it, which is
+        // the correct trade: a marker that may be a growing stub is worse than a marker that appears
+        // a moment late.
+        internal bool IsGatherableHiddenFromMarkers(uint netId, int staticId, bool componentCold)
+        {
+            if (componentCold)
+            {
+                return true;
+            }
+
+            CollectColdRecord record = default(CollectColdRecord);
+            if (netId != 0u && this.collectColdByNetId.TryGetValue(netId, out record))
+            {
+                return record.EndUnixMs > NowUnixMs();
+            }
+
+            return staticId >= 130001 && staticId <= 130025;
+        }
+
         private bool IsFarmTargetUnconfirmed(Vector3 node, out int staticId)
         {
             staticId = 0;

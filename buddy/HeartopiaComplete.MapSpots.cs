@@ -321,7 +321,10 @@ namespace HeartopiaMod
             public Vector3 Position;
             public int StaticId;     // entity static id (works as icon for mushroom-type gathers)
             public int ProduceId;    // CollectableObjectComponent.itemTypeID -> TableMapResourceProduce
-            public bool OnCooldown;  // CollectableObjectComponent.inCold (authoritative; depleted resource)
+            public bool OnCooldown;  // CollectableObjectComponent.inCold (component's own view)
+            // Entity netId — the key the client's CollectColdEvent verdict is addressed by. Needed
+            // here because inCold alone cannot see a dynamic bush that is GROWING.
+            public uint NetId;
         }
 
         // Parallel lightweight snapshot of EVERY positioned collectable (no id filter): the
@@ -992,7 +995,19 @@ namespace HeartopiaMod
                                 + " type=" + (type == MapTrackTypeMapResource ? "MapResource" : "Furniture"));
                         }
                     }
-                    else if (didMatch)
+                    // ⚠️ IDENTIFICATION RADIUS, NOT THE LOOSE ONE, FOR THE ICON.
+                    //
+                    // This used to resolve from any match inside the 3 m radius, and the moment a
+                    // resource is picked that is a lie: the entity vanishes, the nearest survivor is
+                    // whatever grows a metre or two away, and the marker takes ITS icon for the beat
+                    // before the marker itself is removed. Reported as a mushroom briefly turning
+                    // into a tree on the map after collecting it.
+                    //
+                    // The cooldown drop above already uses the tight radius for exactly this reason
+                    // ("IDENTIFICATION, not proximity"); the icon has the same requirement and only
+                    // ever had the loose one by omission. Beyond it, keep whatever icon the marker
+                    // already had rather than borrowing a neighbour's.
+                    else if (didMatch && resMatchSqr <= MapResCooldownMatchSqr)
                     {
                         // Resolve the collectable-atlas icon id. Priority:
                         //  1) produce drop-item id WITH a collectable sprite (materials: timber/stone/fruit).
@@ -1488,7 +1503,15 @@ namespace HeartopiaMod
                         {
                             continue;
                         }
-                        this.mapResEntities.Add(new MapResEntity { Position = pos, StaticId = staticId, ProduceId = produceId, OnCooldown = onCooldown });
+                        this.TryReadEntityNetId(entityObj, out uint mapResNetId);
+                        this.mapResEntities.Add(new MapResEntity
+                        {
+                            Position = pos,
+                            StaticId = staticId,
+                            ProduceId = produceId,
+                            OnCooldown = onCooldown,
+                            NetId = mapResNetId,
+                        });
 
                         // Coordinate harvest (GatherCoordinateHarvestFeature.cs) — off unless the
                         // Logging toggle asks for it. Resolves the item id the same way the radar
