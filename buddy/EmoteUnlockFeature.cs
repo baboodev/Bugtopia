@@ -676,9 +676,6 @@ namespace HeartopiaMod
                                                  IntPtr typeField, IntPtr idField,
                                                  int actionType, int maxId, string tableGetter)
         {
-            // Animation states already claimed by a LOWER id in this pass. See the skip below.
-            System.Collections.Generic.HashSet<string> claimedStates =
-                new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
             // TableData sits in the GLOBAL namespace, and its getters take TWO parameters —
             // GetSingleaction(int id, bool needException = false). Asking for arity 1 silently found
             // nothing, which skipped validation entirely and listed ids 161-400 / 184-400 that no
@@ -719,20 +716,23 @@ namespace HeartopiaMod
                     continue; // no such row on this build
                 }
 
-                // UNFINISHED ROWS. `Singleaction` ends with five entries (156-160: 战吼呐喊1/2, 思考,
-                // 观察, 部落庆祝舞) that have their own names but no art and no animation of their own:
-                // all five carry animStateName "Petty348", which belongs to id 155 可爱舞蹈6, and the
-                // panel's icon is the atlas sprite "singleaction_{id}" (AtlasSpriteUtility
-                // .GetSingleActionItemIcon), which was never drawn for them. Listing them gives the
-                // player five blank cells that all play somebody else's clip.
+                // UNFINISHED ROWS — the ones the artists have not drawn yet.
                 //
-                // The rule is data-driven rather than an id blacklist: skip a row whose animation
-                // state a LOWER id already claimed. It drops exactly those five today and stops
-                // filtering by itself if a patch ever finishes them. Read BEFORE the allocation
-                // below — `row` is a bare MonoObject* and the next allocation can move it.
-                if (this.TryGetMonoStringMember(row, "animStateName", out string animState)
-                    && !string.IsNullOrEmpty(animState)
-                    && !claimedStates.Add(animState))
+                // The panel's cell icon is an atlas sprite named after the id
+                // (AtlasSpriteUtility.GetSingleActionItemIcon -> "singleaction_{id}", which
+                // DynamicAtlasProxy loads as "ui_item_normal_singleaction_{id}"). A row whose sprite
+                // was never shipped comes up as a blank cell, and in practice its animator state is
+                // missing too, so it plays whatever the controller falls back to — the last row that
+                // does have a clip. That is the "five blank buttons that all play the same thing" at
+                // the end of the list.
+                //
+                // ResManager.HasAsset is a synchronous index lookup, so this costs one dictionary hit
+                // per id and needs no atlas load.
+                //
+                // FAILS OPEN, unlike the table probe above: if the resolver is unavailable the answer
+                // is "unknown", and dropping every row on an unknown would empty the panel — far
+                // worse than listing a few blanks.
+                if (!this.EmoteUnlockRowHasIcon(actionType, id))
                 {
                     continue;
                 }
@@ -761,6 +761,39 @@ namespace HeartopiaMod
             }
 
             return added;
+        }
+
+        // Is the panel's cell icon for this row actually shipped?
+        //
+        // Sprite names come from AtlasSpriteUtility — "singleaction_{id}" and "expression_{id}"
+        // (999 is "expression_like"). BuildGameIconLoadKey adds the atlas prefix the dynamic
+        // NormalItem atlas loads them under, so that literal stays in the icon pipeline where the
+        // rest of the mod already keeps it.
+        //
+        // True when the check cannot be made at all — see the caller: unknown must not mean "drop".
+        private bool EmoteUnlockRowHasIcon(int actionType, int id)
+        {
+            if (!this.EnsureGameIconResManager())
+            {
+                return true;
+            }
+
+            string sprite;
+            if (actionType == EmoteUnlockTypeSingleAction)
+            {
+                sprite = "singleaction_" + id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (actionType == EmoteUnlockTypeExpression)
+            {
+                sprite = "expression_"
+                    + (id == 999 ? "like" : id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                return true;
+            }
+
+            return this.GameIconHasAsset(BuildGameIconLoadKey(sprite));
         }
 
         // Inflating List<T> for a game struct has one working route in this mod: build it through the
