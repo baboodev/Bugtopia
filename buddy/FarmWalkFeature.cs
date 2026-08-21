@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -43,10 +43,11 @@ namespace HeartopiaMod
         // acceleration curve does not overshoot into an orbit around the point.
         private const float FarmWalkCornerReachDistance = 1.2f;
 
-        // Arrival is measured in 3-D against the SERVER's rule, not in XZ.
+        // Arrival is measured in 3-D, not in XZ.
         //
-        // CollectAntiCheating.Distance is 2 m and the server measures the real separation, so an
-        // XZ-only test silently fails on any resource that is not at the player's feet: the first
+        // What decides whether a gather happens is the Aura Farm's own reach, and the aura measures
+        // the real separation — so an XZ-only test silently fails on any resource that is not at
+        // the player's feet: the first
         // coastal run stopped 5.7 m XZ from an oyster sitting 3.8 m up a rock — 6.8 m apart in 3-D.
         // The aura's own scan radius (AuraDirectScanRadius, 8 m) is far looser and hides this; the
         // server just drops the collect, and per project memory those rejections are SILENT, so the
@@ -64,10 +65,9 @@ namespace HeartopiaMod
         // 0.25 m — walk essentially ONTO the node, the way the teleport path used to land.
         //
         // Reasoning from the in-game runs: at 1.5 m the walker reported "arrived 1,29m" and then
-        // "arrived 1,29m" again on the SAME oyster, i.e. it stopped in range of the server's 2 m
-        // rule but the collect still did not happen, so the farm re-scanned and re-targeted the
-        // same node forever. Being inside the anti-cheat radius is evidently necessary but not
-        // sufficient — the gather itself wants to be on top of the resource. Anything the walker
+        // "arrived 1,29m" again on the SAME oyster — it stopped where it believed the collect would
+        // work and the collect still did not happen, so the farm re-scanned and re-targeted the same
+        // node forever. Anything the walker
         // cannot quite close now trips the not-closing timeout and gets a very short final hop,
         // which is a strictly better failure than looping on an uncollectable node.
         //
@@ -91,20 +91,33 @@ namespace HeartopiaMod
         // underneath it — "horizontally there, vertically short" — is what drives the final dive
         // onto a sea grape and what reports an unreachable ledge on land. Testing 3-D alone would
         // skip straight past it.
-        // 2026-08-16: 0.5 -> 0.8 on request. Still well inside the server's 2 m, and it widens the
+        // 2026-08-16: 0.5 -> 0.8 on request. Still well inside the aura's reach, and it widens the
         // height budget the walker can accept without the wider fallback below:
         // sqrt(0.8^2 - 0.25^2) = 0.76 m, up from 0.43.
         // 2026-08-17: 0.8 -> 1.2 on request, because the walker was still hopping at nodes it could
         // already collect from. The height budget is the reason: sqrt(1.2^2 - 0.25^2) = 1.17 m, and
         // the ore nodes that triggered the hopping sit ~1.3 m off in Y (see
-        // TryRefineFarmWalkTargetHeight, which closes the rest). Still inside the server's 2 m.
+        // TryRefineFarmWalkTargetHeight, which closes the rest). Still inside the aura's reach.
         private const float FarmWalkArrivalDistance = 1.2f;
 
-        // The SERVER's rule, not ours: CollectAntiCheating.Distance is 2 m in 3-D, so 1.8 leaves a
-        // margin. Used only to decide whether an approach that could not close the HEIGHT should be
-        // abandoned — walking cannot fix a 1.2 m drop, but the game will still accept the gather
-        // from there, and skipping it loses the resource for nothing.
-        private const float FarmWalkServerCollectRadius = 1.8f;
+        // ⚠️ THIS IS THE AURA FARM'S TRIGGER RADIUS. 1.5 m, measured in game 2026-08-20.
+        //
+        // It was 1.8 m for a while, taken from a comment that claimed a 2 m server anti-cheat rule.
+        // No such rule governs this: what collects a resource is the aura, and an arrival at 1,76 m
+        // collected nothing at all.
+        //
+        // 1.4 leaves a little margin under the radius. Used to decide whether an approach that could
+        // not close the HEIGHT should be abandoned — walking cannot fix a 1.2 m drop, but the aura
+        // still fires from there, and skipping it loses the resource for nothing.
+        private const float FarmWalkAuraReach = 1.5f;
+        private const float FarmWalkAuraReachFallback = 1.4f;
+
+        // Where the walker STOPS on a good approach: inside the reach with room to spare, so that
+        // an anchor height that is off by a few decimetres, or a last-moment drift, cannot push the
+        // finished walk outside it. Driving all the way to FarmWalkCollectDistance (0.25 m) is what
+        // made the last metre the expensive part of every walk; stopping at the edge of the reach
+        // (1.76 m) collected nothing at all. This is the middle that does both jobs.
+        private const float FarmWalkCollectStandoff = 1.1f;
 
         // Steering smoothing. The raw desired direction can swing hard when a corner is cleared or
         // a re-path lands, and the character turns to face wherever it is driven — so feeding the
@@ -251,21 +264,10 @@ namespace HeartopiaMod
         private const int FarmWalkUnstickProbing = 3;
         private const int FarmWalkUnstickHopBurst = 4;
 
-        // On-foot escalation when a single jump was not enough: reverse briefly for a run-up, then
-        // chain jumps while pushing at the node. Re-jumping on each landing is what makes a hop
-        // carry — one standing jump clears a kerb, a chained series clears a ledge.
-        // Retreat far enough to TURN AROUND and still have a run-up. The steering is rate-limited
-        // to 360 deg/s, so a 180 degree reversal alone eats ~0.5 s of travel; a short back-off was
-        // being consumed entirely by the turn, leaving the player jumping from a standstill.
-        // Measured by DISTANCE from where we wedged, with the timeout only as a guard.
-        private const float FarmWalkHopBurstBackOffDistance = 5f;
-        private const float FarmWalkHopBurstBackOffTimeout = 3f;
-        // Start jumping once 2/3 of the way back in — i.e. within this fraction of the retreat
-        // distance from the obstacle. Late enough to be at full speed, early enough that the arc
-        // still has clearance to carry ONTO the ledge rather than into its face.
-        private const float FarmWalkHopBurstJumpAtFraction = 1f / 3f;
-        private const float FarmWalkHopBurstSeconds = 5f;
-        private const float FarmWalkHopBurstMinInterval = 0.2f;
+        // The retreat-and-chain burst that used to live here is gone. It reversed five metres and
+        // then pushed at the node while pulsing the jump — and pushing INTO a blocker suppresses the
+        // jump outright (measured: 43 pulses, 0.16 m of path, grounded 100% the whole time). What
+        // replaced it is the apex escape further down, whose numbers are recorded beside it.
 
         // Final-approach probe: when the walker is close but wedged, sweep the eight compass
         // directions one at a time, each followed by a vertical attempt, looking for the gap in
@@ -297,7 +299,7 @@ namespace HeartopiaMod
         // matching, cooldown stamping and the dwell are all unaffected.
         private const float FarmWalkContaminationStandoff = 3f;
 
-        // How far off the AIM POINT a standoff approach may finish. Not the server's collect rule —
+        // How far off the AIM POINT a standoff approach may finish. Not the aura's reach —
         // that governs plain nodes only. See the arrival test for why this is a judgement call.
         private const float FarmWalkStandoffArrivalDistance = 4f;
 
@@ -314,6 +316,20 @@ namespace HeartopiaMod
         // The off-corridor distance below mirrors the game's own live deviateDis (16 sqr).
         private const float FarmWalkRepathInterval = 12f;
         private const float FarmWalkCorridorTolerance = 4f;
+
+        // How much shorter a rebuilt route must be to count as progress rather than a reshuffle.
+        // Half a metre is under the noise of re-snapping both ends and well under the spacing of the
+        // waypoint graph, so it passes real improvements and rejects the 3<->5 corner flip.
+        private const float FarmWalkRepathMustGain = 0.5f;
+
+        // ⚠️ A FLOOR UNDER EVERY REBUILD, whatever the cause. "Not closing" stays true until the
+        // route actually improves, and a waypoint ban used to clear the re-path timer outright, so
+        // the two together ran at frame rate: twelve rebuilds and SIX waypoint bans inside one and a
+        // half seconds, taking the ban list from 37/48 to 42/48 — and those bans last five minutes,
+        // so the damage outlives the walk that caused it.
+        //
+        // One second is far below the cadence anything legitimate needs and far above frame time.
+        private const float FarmWalkRepathMinGap = 1f;
 
         // Stuck detection: sample this often, and treat less than this much ground covered while a
         // move axis is being applied as a strike. Three strikes escalate to the teleport fallback.
@@ -346,6 +362,7 @@ namespace HeartopiaMod
         private Vector3 farmWalkTarget;
         private string farmWalkLabel = string.Empty;
         private float farmWalkNextRepathAt;
+        private float farmWalkLastRepathAt;
         private float farmWalkNextStuckSampleAt;
         private Vector3 farmWalkLastSample;
         // Start of the leg currently being walked (previous corner, or where the route was built).
@@ -367,6 +384,22 @@ namespace HeartopiaMod
         // still far out horizontally.
         private bool farmWalkHoldHorizontalForClimb;
         private bool farmWalkDeferDescent;
+
+        // Latched once this walk has had to unstick: the deferral is a comfort optimisation and is
+        // never allowed to be the reason a walk fails twice.
+        private bool farmWalkDescentDeferGivenUp;
+
+        // ⚠️ THE DEFER THRESHOLD NEEDS HYSTERESIS LIKE EVERY OTHER ONE HERE.
+        //
+        // deferrableDrop was a bare comparison against FarmWalkMaxDeferredDescent, and a walk that
+        // settles NEAR that line does not sit still: dy jitters by a decimetre and flips the rule
+        // every second. Each flip releases the dive input and presses it again, so the descent
+        // never lasts long enough to move the body, and the log fills with the same line:
+        //     17:32:20 diving 5,1m   17:32:21 diving 5,0m   17:32:22 diving 5,0m
+        //     ... 25 of them in 40 s, dy still 5,0m, three unstick rounds burned ...
+        // Depth ENGAGE/RELEASE already carry a band (0.35 / 0.12) for exactly this reason; the
+        // ceiling did not, and pinned the player at one depth with the obstacle in front of it.
+        private const float FarmWalkDeferDescentHysteresis = 0.75f;
         private float farmWalkClimbFirstUntil;
         // Sprint state: how much route is left this frame, and the swim-dash attempt throttle.
         private float farmWalkRouteRemainingCache;
@@ -584,6 +617,11 @@ namespace HeartopiaMod
         private int farmWalkVerticalHeld;
         private int farmWalkPrevVerticalHeld;
         private float farmWalkVerticalAssertedAt;
+
+        // Height and time at which the current dive/surface hold was pressed — the yardstick the
+        // next log line uses to say whether the hold actually moved anything.
+        private float farmWalkDepthAssertFrom = float.NaN;
+        private float farmWalkDepthAssertStartedAt;
         // Underwater unstick sequence: phase, where the back-off started, and the phase deadline.
         private int farmWalkUnstickPhase;
         private Vector3 farmWalkUnstickFrom;
@@ -599,13 +637,35 @@ namespace HeartopiaMod
         // dive/surface, axis ordering, the ascend unstick — is gated on it; land has no such axis.
         private bool farmWalkIsSwimming;
         // On-foot hop-burst state.
-        private bool farmWalkHopBurstUsed;
+        // ⚠️ A BUDGET, NOT A FLAG. One escape per walk was harmless while the escape did nothing;
+        // now that it works it is the binding constraint. A walk climbed its ledge with the first —
+        // "+0,95m closer, +3,35m up, airborne 70%, cleared it" — and then gave up two metres from
+        // the target, on level ground, because there was no second one left:
+        //     final approach not walkable (2,0m, dy=-0,1m) ... jumps are spent, taking the teleport
+        // Three is enough for a ledge, a lip and a last-metre kerb, and still bounded — each escape
+        // has its own 22 s cap, so the worst case stays inside the walk's own patience.
+        private int farmWalkHopBurstsUsed;
+        private bool farmWalkEscapePressBarren;
+        private bool farmWalkEscapeWon;
+        private float farmWalkEscapeSimpleUntil, farmWalkEscapeSimpleJumpAt;
+        private Vector3 farmWalkEscapeSteerDir;
         private float farmWalkHopBurstUntil;
-        private float farmWalkLastHopAt;
         // Where we wedged: the retreat measures away from it, the run-up measures back toward it.
         private Vector3 farmWalkHopAnchor;
-        private bool farmWalkHopRetreating;
-        private float farmWalkHopRetreatUntil;
+        private int farmWalkEscapeStage;
+        private float farmWalkEscapePressSide;
+        private Vector3 farmWalkEscapePressDir;
+        private Vector3 farmWalkEscapePressFrom, farmWalkEscapePressSample;
+        private float farmWalkEscapePressSampleAt;
+        private float farmWalkEscapeStageSince;
+        private int farmWalkEscapeHeading;
+        private int farmWalkEscapeRepeats;
+        private Vector3 farmWalkEscapeAttemptFrom;
+        private float farmWalkEscapeAttemptUntil;
+        private int farmWalkEscapeHops, farmWalkEscapeHopsRefused;
+        private int farmWalkEscapeFrames, farmWalkEscapeAirFrames;
+        private int farmWalkApexPhase;
+        private float farmWalkApexPhaseSince;
         private IntPtr farmSwimLocomotionClass;
         private IntPtr farmSwimSetVerticalMethod;
         private int farmWalkStuckStrikes;
@@ -707,6 +767,13 @@ namespace HeartopiaMod
 
             // Fresh walk, so the detour search is allowed once more.
             this.farmWalkDetourSearchDone = false;
+            this.farmWalkDescentDeferGivenUp = false;
+            this.farmWalkBubbleNextResyncAt = 0f;
+            this.farmWalkBubbleTouchingSince = -1f;
+            this.farmWalkBubbleId = 0;
+            this.farmWalkBubbleNextLogAt = 0f;
+            this.farmWalkBubbleDrift = 0f;
+            this.farmWalkDepthAssertFrom = float.NaN;
 
             // Vehicle for any long haul, not just a zone move. The node hops on this map run
             // 77-104 m routinely, which is the same distance the vehicle was added for — the only
@@ -739,6 +806,7 @@ namespace HeartopiaMod
             this.farmWalkLastSample = selfPos;
             this.farmWalkNextStuckSampleAt = Time.unscaledTime + FarmWalkStuckSampleInterval;
             this.farmWalkNextRepathAt = Time.unscaledTime + FarmWalkRepathInterval;
+            this.farmWalkLastRepathAt = Time.unscaledTime;
             this.farmWalkBestDistance = this.ComputeFarmWalkRouteRemaining(selfPos);
             this.farmWalkBestAt = Time.unscaledTime;
             this.farmWalkDySample = Mathf.Abs(target.y - selfPos.y);
@@ -756,7 +824,8 @@ namespace HeartopiaMod
             this.farmWalkHeightRefined = false; // one height refine per walk
             this.farmWalkTargetSeenAt = -1f;  // "seen present" is per-walk evidence, never carried over
             this.farmWalkApproachScanForced = false; // one forced verification scan per walk
-            this.farmWalkHopBurstUsed = false; // one hop burst per walk
+            this.farmWalkHopBurstsUsed = 0;
+            this.farmWalkEscapePressBarren = false;
             this.farmWalkEverAdvanced = this.farmWalkCornerIndex > 0;
             this.farmWalkPrevVerticalHeld = this.farmWalkVerticalHeld;
 
@@ -1074,9 +1143,93 @@ namespace HeartopiaMod
 
             float distance3D = Distance3D(selfPos, this.farmWalkTarget);
 
-            // Arrived once we are within FarmWalkCollectDistance of the node in 3-D. The horizontal
-            // test is the gate rather than the verdict — see the constant for why it has to stay.
-            if (remaining <= FarmWalkCollectDistance)
+            // ⚠️ THE COLLECT RADIUS IS THE DESTINATION, NOT THE NODE.
+            //
+            // The walker used to close to FarmWalkCollectDistance (0.25 m) before calling it an
+            // arrival, which is a target the locomotion cannot hold: it overshoots, gets turned
+            // around, and the last metre becomes the expensive part of every walk — the same last
+            // metre that produced the depth limit cycle and the four-leg probes underwater.
+            //
+            // The aura fires out to FarmWalkAuraReach, so anything inside it collects exactly as
+            // well as standing on top of the node. Standoff aims (contamination) and bubbles keep
+            // their own rules below — one is deliberately offset, the other is caught rather than
+            // approached.
+            if (this.farmWalkAimOffsetY == 0f
+                && !this.FarmWalkTargetIsBubble
+                && distance3D <= FarmWalkCollectStandoff)
+            {
+                this.FinishFarmWalk("arrived " + remaining.ToString("F2") + "m horizontally ("
+                    + distance3D.ToString("F2") + "m 3-D) — inside the "
+                    + FarmWalkAuraReach.ToString("0.#") + "m aura reach, not walking further in",
+                    teleport: false);
+                return true;
+            }
+
+            // ⚠️ A BUBBLE IS NOT "ARRIVED AT", IT IS POPPED.
+            //
+            // Measured through the bridge, one bubble sampled twice a few seconds apart:
+            //     (80.82, -30.62, -77.87) -> (77.47, -30.62, -83.73)   6.75 m of XZ, dy exactly 0
+            // It drifts at roughly swimming speed and holds its depth. Against that, the 0.25 m
+            // horizontal arrival gate is unreachable — the walker would circle it until the walk
+            // timed out — and the coordinate the farm planned against is metres stale by arrival
+            // (the 17:35 run aimed at (70.85, -30.62, -80.71) for the bubble now six metres away).
+            //
+            // So the proof of arrival is the bubble VANISHING: swim into it and let the touch pop
+            // it. The radius below only keeps the walker on top of it; the grace is the backstop
+            // for a bubble that will not pop, and hands over to the dwell, which has its own
+            // completion test and its own cap.
+            if (this.FarmWalkTargetIsBubble)
+            {
+                // IDENTITY, NOT PROXIMITY. "No bubble at the place we stopped" is true of every
+                // bubble a second after we stop, because it drifts - and the dwell used exactly
+                // that test, so it reported four collects in one minute that never happened. The
+                // only question that means anything is whether THIS bubble still exists.
+                if (this.farmWalkBubbleId != 0 && !this.IsBubbleStillLive(this.farmWalkBubbleId))
+                {
+                    this.FinishFarmWalk("bubble popped after "
+                        + this.farmWalkBubbleDrift.ToString("F1") + "m of chasing", teleport: false);
+                    return true;
+                }
+
+                // Still there, so keep swimming into it. The dwell cannot chase, so handing over
+                // while the bubble is alive just parks the player and lets it drift away. The touch
+                // timer only decides when to call this one uncatchable and move on.
+                if (distance3D <= FarmWalkBubbleTouchDistance)
+                {
+                    if (this.farmWalkBubbleTouchingSince < 0f)
+                    {
+                        this.farmWalkBubbleTouchingSince = now;
+                    }
+                    else if (now - this.farmWalkBubbleTouchingSince >= FarmWalkBubbleTouchGrace)
+                    {
+                        this.FinishFarmWalk("inside " + distance3D.ToString("F2") + "m of the bubble for "
+                            + FarmWalkBubbleTouchGrace.ToString("F1")
+                            + "s and it is STILL THERE - this one will not pop from here",
+                            teleport: false);
+                        return true;
+                    }
+                }
+                else
+                {
+                    this.farmWalkBubbleTouchingSince = -1f;
+                }
+
+                // AND THEN FALL THROUGH. This block DECIDES ARRIVAL; it is not the tick. An early
+                // return here skipped everything below it - the chase itself, the depth drive, the
+                // steering, the corner advance, the re-path - so a bubble walk sat completely inert
+                // and the farm moved on eleven seconds later without one line in between. The
+                // generic arrival test is already gated off for bubbles further down; that gate is
+                // the whole mechanism, and nothing else here may be skipped.
+            }
+
+            // ⚠️ AND THE ORDINARY ARRIVAL MUST NOT PRE-EMPT IT. The block above only ENDS a bubble
+            // walk on its own terms (popped, or held on it long enough); otherwise it falls through
+            // — and 0.25 m of a still-drifting bubble satisfied the generic test in the very frame
+            // the walker got there, so the grace never once elapsed:
+            //     node:Bubble: arrived 0,21m horizontally (0,22m 3-D) from the aim point
+            //     AutoFarm: Bubble dwell capped after 6,0s (marker still present)
+            // A bubble is finished by popping, not by proximity.
+            if (remaining <= FarmWalkCollectDistance && !this.FarmWalkTargetIsBubble)
             {
                 // Two different questions, so two different tolerances.
                 //
@@ -1084,7 +1237,7 @@ namespace HeartopiaMod
                 // half a metre of the resource in every axis, not half a metre in the plane with
                 // up to 1.8 m of unclosed height.
                 //
-                // Standoff (contamination): the server's collect rule does not apply — the repair
+                // Standoff (contamination): the aura's reach does not apply — the repair
                 // kit is thrown, the aim point is deliberately 3 m off the node, and being closer
                 // is not better. But "no check at all" was wrong too: the bypass short-circuited on
                 // farmWalkAimOffsetY alone, and distance3D is measured against the AIM POINT (not
@@ -1117,21 +1270,20 @@ namespace HeartopiaMod
                 {
                     // ...but "not as close as we wanted" is not the same as "cannot collect".
                     //
-                    // The server's own rule is CollectAntiCheating.Distance = 2 m measured in 3-D,
-                    // so a node 1.2 m below the player with the horizontal closed is a perfectly
-                    // legal gather. Failing it throws away a resource the game would have handed
-                    // over — and the 04:59 run did exactly that on Penny Bun and Ore at dy = -1.1
-                    // to -1.5 m, every one of them inside the server's radius.
+                    // The aura measures 3-D, so a node a metre below the player with the
+                    // horizontal closed is still within reach. Failing it throws away a resource the
+                    // aura would have taken — and the 04:59 run did exactly that on Penny Bun and
+                    // Ore at dy = -1.1 to -1.5 m, every one of them inside the radius.
                     //
                     // FarmWalkArrivalDistance stays the target the walker aims for; this is the
                     // wider "the collect will still work from here" fallback that decides whether
                     // to give up. Logged distinctly so the compromise is never invisible.
-                    if (distance3D <= FarmWalkServerCollectRadius)
+                    if (distance3D <= FarmWalkAuraReachFallback)
                     {
                         this.FinishFarmWalk("arrived " + remaining.ToString("F2") + "m horizontally ("
                             + distance3D.ToString("F2") + "m 3-D, dy="
                             + (this.farmWalkTarget.y - selfPos.y).ToString("F1")
-                            + "m) — height not closed, but inside the server's collect radius",
+                            + "m) — height not closed, but still inside the aura reach",
                             teleport: false);
                         return true;
                     }
@@ -1155,6 +1307,9 @@ namespace HeartopiaMod
             // Decide the axis order for this frame (see FarmWalkDescendHoldDistance). Suspended
             // entirely during an unstick, which owns both axes while it runs.
             // Same aim the depth control uses, so the defer / climb-hold decisions agree with it.
+            // Before anything reads the aim: a bubble target has moved since the last frame.
+            this.UpdateFarmWalkBubbleChase(selfPos, now);
+
             float dyNow = this.ResolveFarmWalkDepthAim().y - selfPos.y;
             bool unsticking = this.farmWalkUnstickPhase != FarmWalkUnstickIdle;
             // BOTH are swimming-only. On land there is no vertical axis to order: the player
@@ -1177,10 +1332,22 @@ namespace HeartopiaMod
             // A deep node wants a DIAGONAL: descend while travelling, so the approach arrives at
             // roughly the right depth. Only shallow drops are worth flattening out to keep the
             // traverse off the floor, which is what the defer was for in the first place.
-            bool deferrableDrop = dyNow > -FarmWalkMaxDeferredDescent;
+            //
+            // Entering the deferral takes a drop clearly INSIDE the ceiling; leaving it takes one
+            // clearly past it. Straddling the line is what pinned the walker (see the constant).
+            if (unsticking)
+            {
+                this.farmWalkDescentDeferGivenUp = true;
+            }
+
+            float deferCeiling = this.farmWalkDeferDescent
+                ? FarmWalkMaxDeferredDescent + FarmWalkDeferDescentHysteresis
+                : FarmWalkMaxDeferredDescent - FarmWalkDeferDescentHysteresis;
+            bool deferrableDrop = dyNow > -deferCeiling;
             this.farmWalkDeferDescent = deferrableDrop
                 && this.farmWalkIsSwimming
                 && !unsticking
+                && !this.farmWalkDescentDeferGivenUp
                 && dyNow < -FarmWalkDepthEngageTolerance
                 && remaining > FarmWalkDescendHoldDistance;
 
@@ -1246,6 +1413,13 @@ namespace HeartopiaMod
                 if (this.IsFarmWalkDepthClosing(selfPos, now))
                 {
                     this.farmWalkBestAt = now; // vertical progress IS progress
+                }
+                else if (this.farmWalkHopBurstsUsed < FarmWalkMaxHopBursts && !this.farmWalkIsSwimming)
+                {
+                    // Same reason as the other two sites: a lone impulse under a held axis does not
+                    // lift the body. Underwater keeps its own ladder, which was measured separately.
+                    this.BeginFarmWalkHopBurst(selfPos, now,
+                        Distance3D(selfPos, this.farmWalkTarget), this.farmWalkTarget);
                 }
                 else
                 {
@@ -1320,9 +1494,35 @@ namespace HeartopiaMod
             bool offCorridor = DistanceToWalkLeg(selfPos, this.farmWalkLegStart, corner) > FarmWalkCorridorTolerance;
             bool notClosing = now - this.farmWalkBestAt >= FarmWalkNoClosingTimeout * 0.5f;
             bool safetyDue = now >= this.farmWalkNextRepathAt;
+
+            // ⚠️ NEVER REBUILD THE ROUTE UNDER A RUNNING ESCAPE. The escape captured its aim when it
+            // began and measures every hop against that point; swapping the corner list mid-flight
+            // moves the goalposts and resets the corner index, so a sequence that was gaining metres
+            // suddenly reads as going nowhere. One run rebuilt twice inside a single escape and then
+            // gave up on a node the escape had just brought fifteen metres closer.
+            //
+            // The escape is bounded — FarmWalkEscapeBudget, and a per-heading cap inside it — so
+            // waiting it out costs at most a few seconds, and the safety cadence fires the moment it
+            // hands back.
+            if (this.farmWalkUnstickPhase != FarmWalkUnstickIdle)
+            {
+                offCorridor = false;
+                notClosing = false;
+                safetyDue = false;
+            }
+
+            // Never twice within the floor, however good the reason.
+            if (now - this.farmWalkLastRepathAt < FarmWalkRepathMinGap)
+            {
+                offCorridor = false;
+                notClosing = false;
+                safetyDue = false;
+            }
+
             if (offCorridor || notClosing || safetyDue)
             {
                 this.farmWalkNextRepathAt = now + FarmWalkRepathInterval;
+                this.farmWalkLastRepathAt = now;
                 int cornersBefore = this.farmWalkCorners.Count;
                 Vector3 firstBefore = this.farmWalkCorners.Count > 0 ? this.farmWalkCorners[0] : Vector3.zero;
                 if (this.TryBuildFarmWalkRoute(selfPos, this.farmWalkTarget) && this.farmWalkCorners.Count > 0)
@@ -1336,17 +1536,39 @@ namespace HeartopiaMod
                     // Say WHY and WHAT CHANGED. A silent rebuild is what made this take a week to
                     // spot: the walk-begin line prints one route and the walker then follows a
                     // succession of unlogged others.
+                    float rebuiltRemaining = this.ComputeFarmWalkRouteRemaining(selfPos);
+                    bool routeImproved = routeChanged
+                        && rebuiltRemaining < this.farmWalkBestDistance - FarmWalkRepathMustGain;
+
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": re-pathed ("
                         + (offCorridor ? "off corridor" : notClosing ? "not closing" : "safety cadence")
                         + "): " + cornersBefore + " -> " + this.farmWalkCorners.Count
                         + " corners, now at " + this.farmWalkCornerIndex
-                        + (routeChanged ? string.Empty : " (IDENTICAL)") + ".");
+                        + (!routeChanged ? " (IDENTICAL)"
+                            : routeImproved ? " (" + (this.farmWalkBestDistance - rebuiltRemaining).ToString("F1") + "m shorter)"
+                            : " (RESHUFFLED, no shorter)") + ".");
 
-                    if (routeChanged)
+                    // ⚠️ DIFFERENT IS NOT THE SAME AS BETTER.
+                    //
+                    // Re-baselining on any change made the walk immortal a second way, through the
+                    // branch the earlier guard does not cover. The graph has two attractors here and
+                    // each rebuild flips between them, so the route is never IDENTICAL and the futile
+                    // counter never grows:
+                    //     re-pathed (safety cadence): 3 -> 5 corners
+                    //     shortcut removed 2 corner(s), 3 left
+                    //     re-pathed (off corridor):   5 -> 3 corners
+                    // — every nine seconds, for as long as anyone watched. And since "not closing" is
+                    // measured from farmWalkBestAt, each flip restarted the clock that is supposed to
+                    // end the walk.
+                    //
+                    // So the test is whether the new route is genuinely SHORTER. A rebuild that only
+                    // reshuffles corners carries no information, exactly like an identical one, and
+                    // is counted as futile — which lets the waypoint-ban path below do its job.
+                    if (routeImproved)
                     {
-                        // A different route has a different length, so the previous best is not
+                        // A shorter route has a different length, so the previous best is not
                         // comparable — re-baseline rather than reading the change as lost progress.
-                        this.farmWalkBestDistance = this.ComputeFarmWalkRouteRemaining(selfPos);
+                        this.farmWalkBestDistance = rebuiltRemaining;
                         this.farmWalkBestAt = now;
                         this.farmWalkFutileRepaths = 0;
                     }
@@ -1381,7 +1603,10 @@ namespace HeartopiaMod
                                     Time.unscaledTime + FarmWalkBlockedNodeTtl;
                                 this.farmWalkExcludedNodes.Add(blockedIndex);
                                 this.farmWalkFutileRepaths = 0;
-                                this.farmWalkNextRepathAt = 0f;
+
+                                // Soon, but not this frame. Zeroing it is what let a ban trigger the
+                                // rebuild that produced the next ban, six deep in a second and a half.
+                                this.farmWalkNextRepathAt = now + FarmWalkRepathMinGap;
                                 ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": corner "
                                     + this.farmWalkCornerIndex + " is unwalkable — banning waypoint "
                                     + blockedIndex + " for " + (FarmWalkBlockedNodeTtl / 60f).ToString("0.#")
@@ -1419,7 +1644,35 @@ namespace HeartopiaMod
             bool sinkingOnTarget = this.farmWalkVerticalHeld < 0
                 && remaining <= FarmWalkVerticalOnlyRadius
                 && Mathf.Abs(dyNow) > FarmWalkVerticalOnlyMinDrop;
-            if (this.farmWalkHoldHorizontalForClimb || sinkingOnTarget)
+            // ⚠️ AN ESCAPE OWNS THE AXIS OUTRIGHT. Steering here during one is not a second opinion,
+            // it is the thing that breaks it: the apex hop releases the axis to launch, and this line
+            // put it straight back, pressed at the corner — which is to say, into the obstacle. A
+            // jump taken with the axis held into a blocker does not leave the ground at all, measured
+            // both in the probe and here:
+            //     apex hop 45 deg -> 0,00m closer, 0,00m up, 3 hop(s), airborne 0%
+            // Three impulses accepted by the game per attempt, on three headings, and the body never
+            // left the floor once.
+            //
+            // It also means the metres those attempts appeared to win in earlier runs were this
+            // steering walking to the corner, not the hops — the escape had never actually run.
+            //
+            // ⚠️ THE HOP BURST, AND ONLY IT. Every OTHER unstick takes its direction from INSIDE
+            // SteerFarmWalkToward — backing off reverses `delta` there, the underwater probe swaps
+            // in its leg heading there, the vehicle unstick asks
+            // TryGetFarmWalkVehicleUnstickDirection there. Gating them all out of this call did not
+            // hand them the axis, it left them with no way to push at all, and they went on
+            // measuring an obstacle they were no longer swimming away from:
+            //     probe leg 1/4 (180 deg) swam 0,0m of 5m (blocked this way too)
+            //     probe leg 2/4  (90 deg) swam 0,0m of 5m (blocked this way too)
+            //     probe leg 3/4 (270 deg) swam 0,0m of 5m (blocked this way too)
+            //     probe leg 4/4   (0 deg) swam 0,0m of 5m (blocked this way too)
+            // Four directions, four times zero — and the moment the probe gave up, the walk
+            // re-pathed and swam to the node in four seconds. The water was never blocked.
+            if (this.farmWalkUnstickPhase == FarmWalkUnstickHopBurst)
+            {
+                // This one drives the axis itself, frame by frame, and must not be second-guessed.
+            }
+            else if (this.farmWalkHoldHorizontalForClimb || sinkingOnTarget)
             {
                 this.TryClearGameMoveAxis();
                 this.autoFarmStatus = sinkingOnTarget
@@ -1434,7 +1687,28 @@ namespace HeartopiaMod
             // resource is really at rather than the aim point's.
             this.TryRefineFarmWalkTargetHeight(selfPos);
 
-            if (this.SampleFarmWalkProgress(selfPos, now))
+            // ⚠️ THE SAMPLER MUST NOT JUDGE AN ESCAPE THAT IS ALREADY RUNNING.
+            //
+            // An apex hop stands still ON PURPOSE for about 0.4 s of every cycle — no axis while it
+            // launches and waits for the top of the arc — and the sampler's window is 0.6 s against
+            // 0.15 m. The window fits inside that pause, reads 0.00 m and scores a strike, so the
+            // escape gets abandoned in the middle of working:
+            //     apex hop 0 deg -> +7,15m closer — repeating
+            //     apex hop 0 deg -> +5,79m closer — repeating
+            //     apex hop 0 deg -> +2,57m closer — repeating
+            //     stuck (0,00m in 0,6s) ... skipping to the next nearest node
+            // — fifteen metres of progress thrown away by the detector that was supposed to notice
+            // the walk was stuck.
+            //
+            // The escape has its own success test, its own per-heading budget and its own overall
+            // cap; a second opinion here can only ever cut it short. Re-baseline the sampler as we
+            // go so it starts clean the moment the escape hands back.
+            if (this.farmWalkUnstickPhase != FarmWalkUnstickIdle)
+            {
+                this.farmWalkLastSample = selfPos;
+                this.farmWalkNextStuckSampleAt = now + FarmWalkStuckSampleInterval;
+            }
+            else if (this.SampleFarmWalkProgress(selfPos, now))
             {
                 return true;
             }
@@ -1469,11 +1743,11 @@ namespace HeartopiaMod
             }
             // Backing off an obstacle: drive the opposite way. Reversed BEFORE smoothing, so the
             // turn sweeps rather than snapping, exactly like any other direction change.
-            else if (this.farmWalkUnstickPhase == FarmWalkUnstickBackingOff
-                || (this.farmWalkUnstickPhase == FarmWalkUnstickHopBurst && this.farmWalkHopRetreating))
+            else if (this.farmWalkUnstickPhase == FarmWalkUnstickBackingOff)
             {
-                // Hop burst reverses only while retreating, then drives at the node again so the
-                // run-up and its chained jumps carry INTO it rather than away.
+                // No hop-burst case here any more: that escape never reaches this method (see the
+                // gate at the call site) and it has had no retreat leg since it was rewritten
+                // around the press.
                 delta = -delta;
             }
             else if (this.farmWalkUnstickPhase == FarmWalkUnstickProbing)
@@ -1555,6 +1829,18 @@ namespace HeartopiaMod
                 return speed;
             }
 
+            // NEVER EASE OFF AT A BUBBLE. The ramp exists so the locomotion does not overshoot a
+            // node that is standing still. A bubble is not standing still - it travels at about the
+            // speed we swim - so easing off inside two metres simply matches its speed and the gap
+            // stops closing. Measured twice, at the same number both times:
+            //     on the bubble (0,56m 3-D) for 2,0s and it has not popped
+            //     on the bubble (0,57m 3-D) for 2,0s and it has not popped
+            // That is not a wall, it is an equilibrium between our reduced speed and its steady one.
+            if (this.FarmWalkTargetIsBubble)
+            {
+                return speed;
+            }
+
             float slow = Mathf.Min(FarmWalkSlowApproachSpeed, speed);
             float t = Mathf.Clamp01((distance - FarmWalkCollectDistance)
                 / Mathf.Max(0.01f, FarmWalkSlowApproachDistance - FarmWalkCollectDistance));
@@ -1605,20 +1891,40 @@ namespace HeartopiaMod
                 // Take the arrival instead.
                 if (this.farmWalkAimOffsetY == 0f
                     && HorizontalDistance(selfPos, this.farmWalkTarget) <= FarmWalkCollectDistance
-                    && Distance3D(selfPos, this.farmWalkTarget) <= FarmWalkServerCollectRadius)
+                    && Distance3D(selfPos, this.farmWalkTarget) <= FarmWalkAuraReachFallback)
                 {
                     this.FinishFarmWalk("arrived "
                         + HorizontalDistance(selfPos, this.farmWalkTarget).ToString("F2") + "m horizontally ("
                         + Distance3D(selfPos, this.farmWalkTarget).ToString("F2") + "m 3-D, dy="
                         + (this.farmWalkTarget.y - selfPos.y).ToString("F1")
-                        + "m) — inside the server's collect radius, not jumping at the height",
+                        + "m) — inside the aura reach, not jumping at the height",
                         teleport: false);
                     return true;
                 }
 
-                if (this.farmWalkStuckStrikes < 2 && this.farmWalkJumpsUsed < FarmWalkMaxJumpsPerWalk)
+                // ⚠️ NOT TryFarmWalkJump. That fires a lone impulse while the walker is still
+                // steering at the node — the axis pressed into whatever is in the way — and a jump
+                // taken like that never leaves the ground: measured at "3 hop(s), airborne 0%,
+                // 0.00m up" on three headings, and in the probe as 43 pulses buying 0.16 m of
+                // travel. It burned the four-jump budget without the body once being airborne, and
+                // the walk then teleported "because jumps are spent".
+                //
+                // The apex escape is the same move done properly: it owns the axis, releases before
+                // the launch, steers at the top of the arc, and repeats what pays. A final approach
+                // that is 6.5 m out and 4.0 m up is exactly the case the probe cleared with it.
+                //
+                // ON FOOT ONLY. Every stage of it — the running jump, the press, the apex hops —
+                // is built on leaving the ground and landing again, and underwater there is no
+                // ground: the jump is refused, the phase waits for a touchdown that never comes,
+                // and the escape holds the axis at zero for its full twenty-two second budget. It
+                // also pre-empted the water's own ladder, which lives just below, so a dive that
+                // stalled got a silent no-op instead of the 8-direction sweep.
+                if (!this.farmWalkIsSwimming
+                    && this.farmWalkHopBurstsUsed < FarmWalkMaxHopBursts
+                    && this.farmWalkStuckStrikes < 2)
                 {
-                    this.TryFarmWalkJump("final approach");
+                    this.BeginFarmWalkHopBurst(selfPos, now,
+                        Distance3D(selfPos, this.farmWalkTarget), this.farmWalkTarget);
                     return false;
                 }
 
@@ -1633,7 +1939,7 @@ namespace HeartopiaMod
                 // jumps carry further and higher than the single hop already tried.
                 if (!this.farmWalkIsSwimming)
                 {
-                    if (!this.farmWalkHopBurstUsed)
+                    if (this.farmWalkHopBurstsUsed < FarmWalkMaxHopBursts)
                     {
                         this.BeginFarmWalkHopBurst(selfPos, now, stallDistance, this.farmWalkTarget);
                         return false;
@@ -1665,9 +1971,21 @@ namespace HeartopiaMod
 
             if (this.farmWalkStuckStrikes < FarmWalkStuckStrikeLimit)
             {
-                // Try to hop whatever is in the way (fence, kerb, root) and force a fresh route
-                // before giving up on walking. Both are cheap and either can rescue the walk.
-                this.TryFarmWalkJump("stuck");
+                // Hop whatever is in the way (fence, kerb, root) and force a fresh route before
+                // giving up on walking. Both are cheap and either can rescue the walk.
+                //
+                // The apex escape rather than a lone impulse, for the reason recorded at the final
+                // approach above: an impulse sent while the walker holds the axis at the corner does
+                // not lift the body at all.
+                // On foot only, for the reason given at the final approach: underwater this is a
+                // twenty-two second stall that also swallows the strike the water ladder needs.
+                if (!this.farmWalkIsSwimming && this.farmWalkHopBurstsUsed < FarmWalkMaxHopBursts)
+                {
+                    this.BeginFarmWalkHopBurst(selfPos, now,
+                        Distance3D(selfPos, this.farmWalkTarget), this.farmWalkCornerIndex < this.farmWalkCorners.Count
+                            ? this.farmWalkCorners[this.farmWalkCornerIndex]
+                            : this.farmWalkTarget);
+                }
 
                 // Still on the FIRST corner means we cannot even reach the waypoint the route
                 // snapped onto — it is behind whatever is blocking us. Two of the last run's four
@@ -1702,7 +2020,7 @@ namespace HeartopiaMod
                 if (this.farmWalkCornerIndex < this.farmWalkCorners.Count)
                 {
                     Vector3 wedgeCorner = this.farmWalkCorners[this.farmWalkCornerIndex];
-                    if (!this.farmWalkIsSwimming && !this.farmWalkHopBurstUsed)
+                    if (!this.farmWalkIsSwimming && this.farmWalkHopBurstsUsed < FarmWalkMaxHopBursts)
                     {
                         this.BeginFarmWalkHopBurst(selfPos, now, Distance3D(selfPos, wedgeCorner), wedgeCorner);
                         return false;
@@ -1763,6 +2081,80 @@ namespace HeartopiaMod
         //
         // Deliberately matched HORIZONTALLY: height is the axis under suspicion, so including it in
         // the match would reject exactly the nodes worth correcting.
+        // ==========================================================================================
+        // BUBBLE TARGETS ARE A CHASE, NOT A WALK TO A COORDINATE.
+        //
+        // Every other farm target stands still, so the position picked at planning time is the
+        // position on arrival. A bubble drifts the whole way there, and the walker was steering at
+        // where it USED to be — arriving at an empty patch of water and reporting the bubble gone.
+        //
+        // So the aim is re-read from the radar's live tracking every tick, and inside the closing
+        // range the radar is forced to re-sync rather than waiting out its idle cadence. Each
+        // re-aim logs the drift, which is the number that says whether the chase is keeping up.
+        private const float FarmWalkBubbleMatchRadius = 8f;        // how far the same bubble may have drifted
+        private const float FarmWalkBubbleRetargetStep = 0.35f;    // re-aim once it has moved this far
+        private const float FarmWalkBubbleResyncRange = 20f;       // force fresh reads inside this
+        private const float FarmWalkBubbleResyncInterval = 0.4f;
+        private const float FarmWalkBubbleTouchDistance = 1.5f;    // judgement call: the game's pop radius is unmeasured
+        private const float FarmWalkBubbleTouchGrace = 2f;
+        private float farmWalkBubbleTouchingSince = -1f;
+        private int farmWalkBubbleId;
+        private float farmWalkBubbleNextResyncAt;
+        private float farmWalkBubbleNextLogAt;
+        private float farmWalkBubbleDrift;
+
+        internal bool FarmWalkTargetIsBubble =>
+            string.Equals(this.farmWalkDwellLabel, "Bubble", StringComparison.Ordinal);
+
+        private void UpdateFarmWalkBubbleChase(Vector3 selfPos, float now)
+        {
+            if (!this.FarmWalkTargetIsBubble)
+            {
+                return;
+            }
+
+            float distance = Distance3D(selfPos, this.farmWalkTarget);
+            if (distance <= FarmWalkBubbleResyncRange && now >= this.farmWalkBubbleNextResyncAt)
+            {
+                this.farmWalkBubbleNextResyncAt = now + FarmWalkBubbleResyncInterval;
+                this.ForceBubbleRadarResync();
+            }
+
+            if (!this.TryGetLiveBubblePosition(this.farmWalkTarget, FarmWalkBubbleMatchRadius, out Vector3 live, out int liveId))
+            {
+                // Nothing tracked near the aim. Not a verdict on its own — the bubble may simply be
+                // outside the marker range — so the ordinary walk rules decide what happens next.
+                return;
+            }
+
+            this.farmWalkBubbleId = liveId;
+            float moved = Distance3D(live, this.farmWalkTarget);
+            this.farmWalkBubbleDrift += moved;
+            if (moved < FarmWalkBubbleRetargetStep)
+            {
+                return;
+            }
+
+            this.farmWalkTarget = live;
+            this.farmWalkTrueTarget = live;
+            if (this.farmWalkCorners.Count > 0)
+            {
+                // The route's last corner IS the target (see TryBuildFarmWalkRoute) — move it with
+                // the aim or the walker steers at the stale one all the way down the route.
+                this.farmWalkCorners[this.farmWalkCorners.Count - 1] = live;
+            }
+
+            // Throttled: at 0.4 s resyncs a chatty bubble would fill the ring by itself.
+            if (now >= this.farmWalkBubbleNextLogAt)
+            {
+                this.farmWalkBubbleNextLogAt = now + 2f;
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": bubble moved "
+                    + moved.ToString("F2") + "m (drift " + this.farmWalkBubbleDrift.ToString("F1")
+                    + "m this walk) — re-aiming at " + live.ToString("F1") + ", "
+                    + distance.ToString("F1") + "m out.");
+            }
+        }
+
         private void TryRefineFarmWalkTargetHeight(Vector3 selfPos)
         {
             if (this.farmWalkHeightRefined
@@ -1836,8 +2228,39 @@ namespace HeartopiaMod
         // node present in an earlier scan: seen, then missing from a LATER scan, is unambiguous.
         private bool TryAbandonDrainedFarmWalkTarget(Vector3 selfPos)
         {
+            // ⚠️ CONTAMINATION HAS ITS OWN AUTHORITY, AND IT WAS NEVER ASKED.
+            //
+            // A pollutant is not a collectable, so the scan below can never see it — which is why
+            // the standoff is exempted a few lines down. That exemption then meant NOTHING could
+            // call a contamination walk off, and a spot cleaned by hand stayed a destination:
+            //     18:35:00-18:35:29  thirty seconds of thrashing 1,4 m short, four probe legs,
+            //                        three unstick rounds, then the rescue teleport
+            //     18:35:30  Contamination dwell done (kills=0, reason=area clear)
+            // The farm found out on arrival what the radar's own live scan already knew — that scan
+            // drops a pollutant the moment it reads isCleaned, and it runs several times a second.
+            if (string.Equals(this.farmWalkDwellLabel, "Contaminated", StringComparison.Ordinal)
+                && !this.IsContaminationStillActionable(this.farmWalkTrueTarget, out bool contaminationKnown)
+                && contaminationKnown)
+            {
+                this.StampVisitedNode(this.farmWalkTrueTarget, Time.unscaledTime + FarmVisitedRetryStampSeconds);
+                this.farmWalkSkipToScan = true;
+                this.FinishFarmWalk("already clean — the live pollutant scan has nothing here ("
+                    + Distance3D(selfPos, this.farmWalkTrueTarget).ToString("F1")
+                    + "m short) — moving to the next node", false);
+                return true;
+            }
+
+            // ⚠️ THE WALK'S OWN LABEL, NOT THE DWELL FLAG. autoFarmTargetIsBubble is set by
+            // BeginFarmNodeDwell — that is, ON ARRIVAL — so throughout the approach it still holds
+            // whatever the PREVIOUS node set, and the bubble exemption below was never in force
+            // while it was needed. Every bubble walk died at the absence gate instead:
+            //     node:Bubble: target is not there at all (12,0m short) — moving to the next node
+            // twice in three seconds, which is the "stops 10 m out and turns away" the player sees.
+            // farmWalkDwellLabel is set at Begin and is correct for the whole walk.
             if (this.farmWalkAimOffsetY != 0f        // contamination standoff: not a collectable
-                || this.autoFarmTargetIsBubble)      // bubbles are not in the collectable scan
+                || this.FarmWalkTargetIsBubble       // bubbles are not in the collectable scan
+                || this.autoFarmTargetIsBubble
+                || this.farmWalkPendingCleanse)      // a cleansing coral is a trigger, not a resource
             {
                 return false;
             }
@@ -2203,6 +2626,14 @@ namespace HeartopiaMod
             if (this.farmWalkSkipToScan)
             {
                 this.farmWalkSkipToScan = false;
+
+                // A cleanse walk that never arrived must not be allowed to re-fire on the next
+                // frame — see NoteCorruptionCleanseWalkAborted for what that costs.
+                if (cleanseWalk)
+                {
+                    this.NoteCorruptionCleanseWalkAborted();
+                }
+
                 this.farmState = HeartopiaComplete.AutoFarmState.ScanningForNodes;
                 this.autoFarmTimer = 0f;
                 this.autoFarmStatus = "Node unreachable, finding another...";
@@ -2652,114 +3083,661 @@ namespace HeartopiaMod
             }
         }
 
-        // `aim` is what the burst is trying to reach — the node on a final approach, the current
+        // ==========================================================================================
+        // On-foot escape: press to a wedge, then hop with the steer taken AT THE APEX, repeating
+        // whatever pays. Every number here was measured in-game rather than chosen.
+        //
+        //   HOLDING THE AXIS INTO A BLOCKER SUPPRESSES THE JUMP. Pressed against an obstacle, 43
+        //   pulses over 15 s moved the body 0.16 m of path and never left the ground (grounded 100%
+        //   throughout). Releasing the axis, jumping, and only steering once airborne moved it
+        //   4.15 m over 26 pulses with grounded down to 32%. The old burst pushed and pulsed in the
+        //   same frame, so against anything solid it was driving the suppressed mode.
+        //
+        //   THE STEER MUST WAIT FOR THE APEX. Same spot, same heading, three timings: axis applied
+        //   with the jump gained +0.11 m of height, at lift-off +0.36 m, at the apex +4.00 m and
+        //   +3.67 m on a repeat. Tenfold, and it depends on nothing else.
+        //
+        //   45 DEGREES, NOT THE PERPENDICULAR. Headings that carried the body out were 0 and +/-45
+        //   (+1.24 m, +2.45 m closer); +/-90 measured about +0.31 m.
+        //
+        //   A CLIMB IS A SEQUENCE. One apex hop takes one step of it: run by hand, the same action
+        //   five times running took a walker 21.0 m -> 13.4 m. The first two of those gained only
+        //   +0.52 m and +0.60 m — under any sensible success bar — so the unit of judgement has to
+        //   be the sequence, and a repetition that buys HEIGHT counts even when it loses ground.
+        //
+        //   PRESS FIRST, AND ONLY WHERE THERE IS A WEDGE. The same apex sweep from the raw block
+        //   point failed on all nine headings; from a wedge found by pressing at 45 degrees its
+        //   first heading gained +3.90 m and the walk arrived 3.5 s later. A press that never moves
+        //   the body is not a wedge, it is a wall against the shoulder — that side is abandoned.
+        // ==========================================================================================
+        private const float FarmWalkEscapePressMaxDistance = 3.5f;
+
+        // A press that gets this far without wedging has proved there is no obstacle. Just under the
+        // press's own budget, so only a run that went the distance counts.
+        private const float FarmWalkEscapePressOpenGround = 3f;
+        private const float FarmWalkEscapePressMinSeconds = 1f;
+        private const float FarmWalkEscapePressTimeout = 6f;
+        private const float FarmWalkEscapePressSampleEvery = 0.3f;
+        private const float FarmWalkEscapePressCrept = 0.1f;
+
+        // Apex of the measured arc is ~0.42 s (peak +1.42 m, MotionConfig JumpingHighest 1.30 plus
+        // the launch); 0.4 s puts the steer just under it.
+        private const float FarmWalkEscapeApexDelay = 0.4f;
+        private const float FarmWalkEscapeLandGrace = 0.35f;
+
+        private const float FarmWalkEscapeAttemptSeconds = 1.8f;
+        // Both were a shade too strict, and a heading was dropped for missing them by nothing:
+        //     apex hop 45 -> +0,30m closer, +0,52m up — next heading
+        // while it was still climbing half a metre per hop. Half a metre of height is real progress
+        // on a climb; a quarter metre of ground is more than the noise on a landing.
+        private const float FarmWalkEscapeRepeatCloser = 0.25f;
+        private const float FarmWalkEscapeRepeatRise = 0.5f;
+        private const int FarmWalkEscapeMaxRepeats = 6;
+        private const float FarmWalkEscapeWin = 1f;
+        private const float FarmWalkEscapeBudget = 22f;
+        private const int FarmWalkMaxHopBursts = 3;
+
+        private static readonly float[] FarmWalkEscapeHeadings = { 45f, -45f, 0f };
+
+        // The plain thing first: run at it and jump, the way a player clears a kerb without thinking
+        // about it. Against a solid blocker this is the SUPPRESSED mode — the axis is held into the
+        // obstacle through the arc and the body does not leave the ground (measured: 43 impulses,
+        // 0.16 m of travel, grounded 100%) — but most obstacles are not solid blockers, they are a
+        // kerb, a root or a step, and one and a half seconds settles it. Only when this fails is the
+        // press-and-apex apparatus worth its ten-odd seconds.
+        private const int FarmWalkEscapeStageSimpleJump = 3;
+        private const float FarmWalkEscapeSimpleSeconds = 1.5f;
+        private const float FarmWalkEscapeSimpleJumpInterval = 0.35f;
+
+        private const int FarmWalkEscapeStagePress = 0;
+        private const int FarmWalkEscapeStageHop = 1;
+
+
+        // `aim` is what the escape is trying to reach — the node on a final approach, the current
         // corner on a mid-route wedge. Progress is judged against it, so a hop that clears the
         // obstacle in front of us counts even when the node is still fifty metres away.
         private void BeginFarmWalkHopBurst(Vector3 selfPos, float now, float distance, Vector3 aim)
         {
-            this.farmWalkHopBurstUsed = true;
+            this.farmWalkHopBurstsUsed++;
+
+            // ⚠️ A CAR CANNOT JUMP, AND THIS ESCAPE IS NOTHING BUT JUMPING.
+            //
+            // The vehicle has its own ladder — reverse, then pull out sideways, twice, then get out
+            // and continue on foot — and it used to be reached from TryFarmWalkJump. Then all three
+            // land call sites were rerouted here, to the apex escape, and nothing was left pointing
+            // at the driver's one: TryFarmWalkJump now only runs once the hop-burst budget is spent,
+            // so a wedged vehicle spent three escapes and the better part of a minute pogoing before
+            // it ever tried reversing.
+            //
+            // Delegating here rather than at each call site keeps the rule in one place — a new
+            // escape site cannot forget it, the way the underwater guard was forgotten twice.
+            if (this.IsFarmWalkRidingVehicle())
+            {
+                if (this.TryGetNavMeshSelfPosition(out Vector3 vehiclePos, out _))
+                {
+                    this.BeginFarmWalkVehicleUnstick(vehiclePos, now, "wedged at " + distance.ToString("F1") + "m");
+                    return;
+                }
+
+                // Position unreadable: do not fall through into a jump ladder the vehicle cannot
+                // perform. Get out and let the next tick escape on foot.
+                ModLogger.Msg("[FarmVehicle] wedged but the position did not resolve — getting out.");
+                this.TryFarmWalkDismount("wedged, position unreadable");
+                this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
+                return;
+            }
+
+            // Backstop for the guard every caller is supposed to carry. Underwater the whole escape
+            // is inert — no ground to launch from, no landing to end a phase — so it would sit out
+            // its budget with the axis released while the water ladder waited its turn. Counted,
+            // not silent: the burst is spent so this cannot re-arm every tick, and the line names
+            // the leak if a new call site ever forgets the guard.
+            if (this.farmWalkIsSwimming)
+            {
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel
+                    + ": apex escape asked for underwater at " + distance.ToString("F1")
+                    + "m — refused, that ladder is for dry land.");
+                this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
+                return;
+            }
+
+            this.farmWalkEscapeWon = false;
             this.farmWalkUnstickPhase = FarmWalkUnstickHopBurst;
-            this.farmWalkProbeBestDistance = distance; // shared "did this help?" baseline
             this.farmWalkHopBurstAim = aim;
             this.farmWalkHopAnchor = selfPos;
-            this.farmWalkHopRetreating = true;
-            this.farmWalkHopRetreatUntil = now + FarmWalkHopBurstBackOffTimeout;
-            this.farmWalkHopBurstUntil = now + FarmWalkHopBurstBackOffTimeout + FarmWalkHopBurstSeconds;
+            this.farmWalkHopBurstUntil = now + FarmWalkEscapeBudget;
+
+            // ⚠️ PRESS TO A WEDGE FIRST, THEN HOP FROM IT. This is the order the standalone probe
+            // measured on clean data, at the very obstacle this walk keeps failing at:
+            //     apex sweep from the raw block point   9 headings, every one negative, best -0.19 m
+            //     press 45 deg -> wedge at 1.1-1.5 m
+            //       then apex-steer 45 deg              +3.90 m of height, ARRIVED 3.5 s later
+            // Neither half does it alone: the press moves nothing by itself (grounded 100%, no jump)
+            // and the sweep from the open goes backwards.
+            //
+            // An earlier version of this file hopped first, on the strength of numbers taken from
+            // the mod's own logs — and those were worthless: the walker's ordinary steering ran in
+            // the same frames and owned the axis, so every "press ran 3.79 m" and every "+6 m hop"
+            // was that steering, not the escape. Do not reorder these stages again from mod logs
+            // taken before the axis-ownership fix.
+            // Always start with the ordinary jump; the press (or, if it has already proved barren in
+            // this walk, the apex hops) is what happens when that does not clear it.
+            this.farmWalkEscapeStage = FarmWalkEscapeStageSimpleJump;
+            this.farmWalkEscapeSimpleUntil = now + FarmWalkEscapeSimpleSeconds;
+            this.farmWalkEscapeSimpleJumpAt = 0f;
+            this.farmWalkEscapePressSide = this.farmWalkEscapePressBarren ? 0f : 45f;
+            this.farmWalkEscapeAttemptFrom = selfPos;
+            this.farmWalkEscapeSteerDir = Vector3.zero;
+            this.farmWalkEscapeAttemptUntil = now + FarmWalkEscapeAttemptSeconds;
+            this.farmWalkEscapeHops = 0;
+            this.farmWalkEscapeHopsRefused = 0;
+            this.farmWalkEscapeFrames = 0;
+            this.farmWalkEscapeAirFrames = 0;
+            this.farmWalkEscapePressFrom = selfPos;
+            this.farmWalkEscapePressSample = selfPos;
+            this.farmWalkEscapePressSampleAt = now;
+            this.farmWalkEscapeStageSince = now;
+            this.farmWalkEscapeHeading = 0;
+            this.farmWalkEscapeRepeats = 0;
+            this.farmWalkApexPhase = 0;
+            this.farmWalkApexPhaseSince = now;
+
+            Vector3 toAimAtStart = aim - selfPos;
+            toAimAtStart.y = 0f;
+            toAimAtStart = toAimAtStart.sqrMagnitude > 0.0001f ? toAimAtStart.normalized : Vector3.forward;
+            this.farmWalkEscapePressDir = Quaternion.Euler(0f, 45f, 0f) * toAimAtStart;
+
             ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": wedged at " + distance.ToString("F1")
-                + "m on foot — retreating " + FarmWalkHopBurstBackOffDistance.ToString("0.#")
-                + "m, then running in and hopping from "
-                + (FarmWalkHopBurstBackOffDistance * FarmWalkHopBurstJumpAtFraction).ToString("0.#") + "m out.");
+                + "m on foot — escape " + this.farmWalkHopBurstsUsed + "/" + FarmWalkMaxHopBursts
+                + ": trying a plain running jump first.");
         }
 
-        // Drives the on-foot burst: a short reverse for the run-up, then jump on every landing
-        // while the steering keeps pushing at the node. Ends early once the target gets closer.
+        // Run at the obstacle and jump, holding the axis the whole way — the ordinary move. Ends on
+        // the shared success test like any other stage, or hands over to the press when its second
+        // and a half is up.
+        private void UpdateFarmWalkEscapeSimpleJump(Vector3 selfPos, float now, Vector3 aimDir)
+        {
+            this.ApplyFarmWalkMoveAxis(aimDir, 1f);
+
+            bool grounded = true, sliding = false;
+            try
+            {
+                if (this.TryReadBunnyHopSurfaceState(out bool g, out bool sl))
+                {
+                    grounded = g;
+                    sliding = sl;
+                }
+            }
+            catch
+            {
+                grounded = true;
+            }
+
+            if ((grounded || sliding) && now - this.farmWalkEscapeSimpleJumpAt >= FarmWalkEscapeSimpleJumpInterval)
+            {
+                this.farmWalkEscapeSimpleJumpAt = now;
+                this.farmWalkEscapeHops++;
+                try
+                {
+                    if (!this.TryBunnyHopJumpViaMono())
+                    {
+                        this.farmWalkEscapeHopsRefused++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Msg("[FarmWalk] plain jump threw: " + ex.GetType().Name + ": " + ex.Message);
+                }
+            }
+
+            if (now < this.farmWalkEscapeSimpleUntil)
+            {
+                return;
+            }
+
+            float gained = HorizontalDistance(this.farmWalkHopAnchor, this.farmWalkHopBurstAim)
+                - HorizontalDistance(selfPos, this.farmWalkHopBurstAim);
+            ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": plain running jump -> "
+                + gained.ToString("+0.00;-0.00; 0.00") + "m closer, "
+                + (selfPos.y - this.farmWalkHopAnchor.y).ToString("+0.00;-0.00; 0.00") + "m up, "
+                + this.farmWalkEscapeHops + " jump(s)"
+                + (this.farmWalkEscapeHopsRefused > 0 ? " (" + this.farmWalkEscapeHopsRefused + " REFUSED)" : string.Empty)
+                + " — " + (this.farmWalkEscapePressBarren
+                    ? "apex-hopping from here."
+                    : "pressing 45 deg for a corner."));
+
+            this.farmWalkEscapeStage = this.farmWalkEscapePressBarren
+                ? FarmWalkEscapeStageHop
+                : FarmWalkEscapeStagePress;
+            this.farmWalkEscapeStageSince = now;
+            this.farmWalkEscapeAttemptFrom = selfPos;
+            this.farmWalkEscapeSteerDir = Vector3.zero;
+            this.farmWalkEscapeAttemptUntil = now + FarmWalkEscapeAttemptSeconds;
+            this.farmWalkEscapeHops = 0;
+            this.farmWalkEscapeHopsRefused = 0;
+            this.farmWalkEscapeFrames = 0;
+            this.farmWalkEscapeAirFrames = 0;
+            this.farmWalkApexPhase = 0;
+            this.farmWalkApexPhaseSince = now;
+            this.farmWalkEscapePressFrom = selfPos;
+            this.farmWalkEscapePressSample = selfPos;
+            this.farmWalkEscapePressSampleAt = now;
+            this.farmWalkEscapePressSide = 45f;
+            this.farmWalkEscapePressDir = Quaternion.Euler(0f, 45f, 0f) * aimDir;
+        }
+
+        // The press leg. Ends when the body stops creeping (that is the wedge), when it has run far
+        // enough that there is plainly nothing to wedge against, or when it never moved at all.
+        private bool UpdateFarmWalkEscapePress(Vector3 selfPos, float now)
+        {
+            // ⚠️ FIXED DIRECTION. Recomputing it from the live bearing to the aim every frame turns
+            // "press at 45 degrees" into an arc AROUND the aim as that bearing swings — and an arc
+            // has nothing to run into. That is why every press on this node reported "no wedge, it
+            // just runs on" after three or four metres: it was never pressing, it was circling.
+            this.ApplyFarmWalkMoveAxis(this.farmWalkEscapePressDir, 1f);
+
+            if (now - this.farmWalkEscapePressSampleAt < FarmWalkEscapePressSampleEvery)
+            {
+                return false;
+            }
+
+            float crept = HorizontalDistance(selfPos, this.farmWalkEscapePressSample);
+            float ran = HorizontalDistance(selfPos, this.farmWalkEscapePressFrom);
+            this.farmWalkEscapePressSample = selfPos;
+            this.farmWalkEscapePressSampleAt = now;
+
+            bool elapsed = now - this.farmWalkEscapeStageSince >= FarmWalkEscapePressMinSeconds;
+            bool wedged = elapsed && crept < FarmWalkEscapePressCrept;
+            bool overrun = ran >= FarmWalkEscapePressMaxDistance
+                || now - this.farmWalkEscapeStageSince >= FarmWalkEscapePressTimeout;
+            if (!wedged && !overrun)
+            {
+                return false;
+            }
+
+            // A press that never moved is a wall, not a corner: that side has nothing to offer and
+            // repeating it would be a second of pressing followed by hops on the spot.
+            bool useless = ran < 0.3f || overrun;
+
+            // ⚠️ "RAN FREE" AND "HIT A WALL" ARE OPPOSITE FINDINGS, and this used to treat them as
+            // one. A press that covers its whole four metres at 45 degrees without wedging is proof
+            // that the body is in the OPEN — there is nothing here to climb, and hopping is theatre:
+            //     plain running jump -> +4,54m closer, +1,92m up, 2 jump(s)
+            //     pressed  45 deg for 1,2s, 4,28m — no wedge, it just runs on.
+            //     pressed -45 deg for 1,2s, 4,12m — no wedge, it just runs on.
+            //     escape has cleared it at 45 deg — carrying on while it still pays.
+            // Two free runs, then a hop series, on flat ground where the walker was never blocked.
+            // Whatever stalled the walk was not geometry in front of us, so the escape has nothing
+            // to solve; hand back and let the ordinary walk continue.
+            bool ranFree = ran >= FarmWalkEscapePressOpenGround;
+            if (ranFree)
+            {
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": pressed "
+                    + this.farmWalkEscapePressSide.ToString("F0") + " deg and ran " + ran.ToString("F2")
+                    + "m without wedging — nothing is blocking us, ending the escape.");
+                this.farmWalkEscapePressBarren = true;
+                this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
+                this.TryClearGameMoveAxis();
+                this.farmWalkStuckStrikes = 0;
+                this.farmWalkLastSample = selfPos;
+                this.farmWalkNextStuckSampleAt = now + FarmWalkStuckSampleInterval;
+                this.farmWalkBestAt = now;      // the walk was never stuck; do not let it time out on this
+                return true;
+            }
+            ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": pressed "
+                + this.farmWalkEscapePressSide.ToString("F0") + " deg for "
+                + (now - this.farmWalkEscapeStageSince).ToString("F1") + "s, " + ran.ToString("F2")
+                + "m — " + (useless
+                    ? (ran < 0.3f ? "NEVER STARTED, that side is a wall" : "no wedge, it just runs on")
+                    : "wedged, hopping from here") + ".");
+
+            if (!useless)
+            {
+                // Drop the press axis the instant the wedge is found: leaving it set for even one
+                // frame is enough to swallow the first hop, since that is the frame the hop launches
+                // on.
+                this.TryClearGameMoveAxis();
+
+                // Re-anchor: the hops that follow are judged on what THEY achieve from the wedge,
+                // not on paying off the walk that got here.
+                // The side is spent: without this, hops that fail from the wedge fall back into
+                // pressing the SAME 45 degrees again from the new spot, over and over until the
+                // budget runs out.
+                this.farmWalkEscapePressSide = this.farmWalkEscapePressSide > 0f ? -45f : 0f;
+                this.farmWalkHopAnchor = selfPos;
+                this.farmWalkEscapeStage = FarmWalkEscapeStageHop;
+                this.farmWalkEscapeStageSince = now;
+                this.farmWalkEscapeHeading = 0;
+                this.farmWalkEscapeRepeats = 0;
+                this.farmWalkEscapeAttemptFrom = selfPos;
+                this.farmWalkEscapeSteerDir = Vector3.zero;
+                this.farmWalkEscapeAttemptUntil = now + FarmWalkEscapeAttemptSeconds;
+                this.farmWalkApexPhase = 0;
+                this.farmWalkApexPhaseSince = now;
+                return false;
+            }
+
+            // Try the mirror side once, then give up on pressing and hop from where we stand.
+            if (this.farmWalkEscapePressSide > 0f)
+            {
+                Vector3 toAim = this.farmWalkHopBurstAim - selfPos;
+                toAim.y = 0f;
+                toAim = toAim.sqrMagnitude > 0.0001f ? toAim.normalized : Vector3.forward;
+
+                this.farmWalkEscapePressSide = -45f;
+                this.farmWalkEscapePressFrom = selfPos;
+                this.farmWalkEscapePressSample = selfPos;
+                this.farmWalkEscapePressSampleAt = now;
+                this.farmWalkEscapePressDir = Quaternion.Euler(0f, -45f, 0f) * toAim;
+                this.farmWalkEscapeStageSince = now;
+                return false;
+            }
+
+            // Both sides pressed and neither gave a corner. Hop from here anyway — weak is not
+            // nothing — but ⚠️ DO NOT re-anchor.
+            //
+            // Re-taking the anchor here looked fair ("the hops should not pay for the presses'
+            // wandering") and produced fake victories instead: the presses put the body 4 m + 4 m off
+            // the block point, the hops recovered a metre of that against the NEW anchor, and the
+            // escape announced "cleared it" three times running while the walk advanced 21,1 -> 20,5
+            // -> 20,3 m. Eight tenths of a metre for three escapes and twenty seconds.
+            //
+            // What the walk needs to know is whether it got past the obstacle, and that is measured
+            // from where it was blocked. Paying off a debt is not progress.
+            this.farmWalkEscapePressBarren = true;
+            this.farmWalkEscapePressSide = 0f;
+            this.farmWalkEscapeStage = FarmWalkEscapeStageHop;
+            this.farmWalkEscapeStageSince = now;
+            this.farmWalkEscapeHeading = 0;
+            this.farmWalkEscapeRepeats = 0;
+            this.farmWalkEscapeAttemptFrom = selfPos;
+            this.farmWalkEscapeSteerDir = Vector3.zero;
+            this.farmWalkEscapeAttemptUntil = now + FarmWalkEscapeAttemptSeconds;
+            this.farmWalkEscapeHops = 0;
+            this.farmWalkEscapeHopsRefused = 0;
+            this.farmWalkEscapeFrames = 0;
+            this.farmWalkEscapeAirFrames = 0;
+            this.farmWalkApexPhase = 0;
+            this.farmWalkApexPhaseSince = now;
+            return false;
+        }
+
+
+        // One apex hop: stand still, launch, wait for the top, and only then steer. Returns the
+        // direction to drive this frame, or zero while the body must stay unsteered.
+        // The heading a hop attempt steers on, FROZEN IN WORLD SPACE for the whole attempt.
+        //
+        // ⚠️ NEVER rotate a LIVE bearing by the heading. Chasing a point while holding a constant
+        // angle off the bearing to it is not a diagonal, it is a CIRCLE: the direction turns with
+        // you, and the body orbits the aim at a fixed radius. The escape's aim is often the current
+        // corner, two or three metres away, where one lap takes about six seconds — so the walker
+        // spent whole escapes hopping round and round the corner, the log reading gain, stall, lose
+        // (+1.43 m, +0.06 m, -0.38 m) with airborne at 85%. Closer in it is worse: the bearing rate
+        // blows up near the point itself, and the heading whips through every direction at once.
+        //
+        // Straight ahead is exempt and stays live — pursuit at zero offset IS a straight line, and
+        // a live bearing keeps homing after a hop shoves the body sideways.
+        private void AimFarmWalkEscapeAttempt(Vector3 selfPos, float heading)
+        {
+            Vector3 toAim = this.farmWalkHopBurstAim - selfPos;
+            toAim.y = 0f;
+            toAim = toAim.sqrMagnitude > 0.0001f ? toAim.normalized : Vector3.forward;
+            this.farmWalkEscapeSteerDir = Quaternion.Euler(0f, heading, 0f) * toAim;
+        }
+
+        private Vector3 FarmWalkApexHopSteer(float now, Vector3 dir, bool grounded, bool sliding)
+        {
+            bool onGround = grounded || sliding;
+
+            if (this.farmWalkApexPhase == 0)
+            {
+                if (onGround)
+                {
+                    // ⚠️ RELEASE BEFORE THE IMPULSE, NOT AFTER. The caller decides what to do with
+                    // the axis only once this method returns, so an impulse sent here goes out while
+                    // the axis still holds LAST frame's value — the final frame of the press, or the
+                    // previous hop's steer. Pressed into the very corner we just wedged against, that
+                    // suppresses the jump outright:
+                    //     apex hop  45 deg -> airborne 0%    (same heading as the press)
+                    //     apex hop -45 deg -> airborne 41%, 69%
+                    //     apex hop   0 deg -> airborne 25%
+                    // The heading that matched the press direction never left the ground once.
+                    this.TryClearGameMoveAxis();
+
+                    this.farmWalkEscapeHops++;
+                    try
+                    {
+                        if (!this.TryBunnyHopJumpViaMono())
+                        {
+                            this.farmWalkEscapeHopsRefused++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        this.farmWalkEscapeHopsRefused++;
+                        ModLogger.Msg("[FarmWalk] apex hop threw: " + ex.GetType().Name + ": " + ex.Message);
+                    }
+
+                    this.farmWalkApexPhase = 1;
+                    this.farmWalkApexPhaseSince = now;
+                }
+
+                return Vector3.zero;
+            }
+
+            if (this.farmWalkApexPhase == 1)
+            {
+                // ⚠️ WAIT THE FULL DELAY. This used to advance early once the body was airborne,
+                // which put the steer in at about 0.2 s — halfway UP the arc, not at the top of it.
+                // The apex of the measured jump is ~0.42 s (peak +1.42 m), and steering before it is
+                // a different move with different results: the probe measured the same heading at
+                // +4.00 m of height when the axis went in at the apex and +0.36 m when it went in at
+                // lift-off. The delay is the whole technique; there is no shortcut worth taking.
+                if (now - this.farmWalkApexPhaseSince >= FarmWalkEscapeApexDelay)
+                {
+                    this.farmWalkApexPhase = 2;
+                    this.farmWalkApexPhaseSince = now;
+                }
+
+                return Vector3.zero;
+            }
+
+            // Touchdown ends the steer. Holding it through the landing means the NEXT impulse goes
+            // out with the axis already pressed into the obstacle for a third of a second — the same
+            // suppression, just moved from the first hop of a series to every later one. Release on
+            // contact, and only then take the settle time before launching again.
+            if (onGround)
+            {
+                if (now - this.farmWalkApexPhaseSince >= FarmWalkEscapeLandGrace)
+                {
+                    this.farmWalkApexPhase = 0;
+                    this.farmWalkApexPhaseSince = now;
+                }
+
+                return Vector3.zero;
+            }
+
+            return dir;
+        }
+
+        // Drives the escape: press to a wedge, then apex hops on 45 / -45 / 0, repeating a heading
+        // while it keeps buying ground or height.
         private void UpdateFarmWalkHopBurst(Vector3 selfPos, float now)
         {
             if (now >= this.farmWalkHopBurstUntil)
             {
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": escape budget spent.");
                 this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
                 return;
             }
 
-            float fromAnchor = HorizontalDistance(selfPos, this.farmWalkHopAnchor);
+            Vector3 aimDir = this.farmWalkHopBurstAim - selfPos;
+            aimDir.y = 0f;
+            aimDir = aimDir.sqrMagnitude > 0.0001f ? aimDir.normalized : Vector3.forward;
 
-            // Retreat phase: keep reversing until there is room to turn AND run up. Ends on
-            // distance; the timeout only covers being blocked backwards too.
-            if (this.farmWalkHopRetreating)
+            if (this.farmWalkEscapeStage == FarmWalkEscapeStageSimpleJump)
             {
-                if (fromAnchor >= FarmWalkHopBurstBackOffDistance || now >= this.farmWalkHopRetreatUntil)
+                this.UpdateFarmWalkEscapeSimpleJump(selfPos, now, aimDir);
+                return;
+            }
+
+            if (this.farmWalkEscapeStage == FarmWalkEscapeStagePress)
+            {
+                this.UpdateFarmWalkEscapePress(selfPos, now);
+                return;
+            }
+
+
+            bool grounded = true, sliding = false;
+            try
+            {
+                if (this.TryReadBunnyHopSurfaceState(out bool g, out bool sl))
                 {
-                    this.farmWalkHopRetreating = false;
-
-                    // Unconditional: behind AutoFarmLog this line never printed, so a hop burst that
-                    // failed left no way to tell a blocked retreat (short distance, timed out) from
-                    // geometry that simply cannot be jumped (full retreat, still no clearance).
-                    ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": retreated "
-                        + fromAnchor.ToString("F1") + "m of " + FarmWalkHopBurstBackOffDistance.ToString("F1")
-                        + "m (" + (fromAnchor >= FarmWalkHopBurstBackOffDistance ? "clear" : "TIMED OUT — backing off is blocked too")
-                        + "), running in.");
+                    grounded = g;
+                    sliding = sl;
                 }
+            }
+            catch
+            {
+                grounded = true;
+            }
 
+            this.farmWalkEscapeFrames++;
+            if (!(grounded || sliding))
+            {
+                this.farmWalkEscapeAirFrames++;
+            }
+
+            float heading = FarmWalkEscapeHeadings[this.farmWalkEscapeHeading % FarmWalkEscapeHeadings.Length];
+            if (heading != 0f && this.farmWalkEscapeSteerDir.sqrMagnitude < 0.0001f)
+            {
+                this.AimFarmWalkEscapeAttempt(selfPos, heading);
+            }
+
+            Vector3 steer = this.FarmWalkApexHopSteer(now,
+                heading != 0f ? this.farmWalkEscapeSteerDir : aimDir, grounded, sliding);
+            if (steer != Vector3.zero)
+            {
+                this.ApplyFarmWalkMoveAxis(steer, 1f);
+            }
+            else
+            {
+                this.TryClearGameMoveAxis();
+            }
+
+            // Cleared it? Judged landed and horizontally, against the aim, from where the escape
+            // began — a hop peaks 1.42 m, so a 3-D test would call the top of every arc a success.
+            // ⚠️ DO NOT STOP AT THE FIRST METRE OF A CLIMB IN PROGRESS.
+            //
+            // Success used to end the escape the instant it was met — mid-attempt, mid-series. The
+            // walker then walked, met the same slope a second later, and started a fresh escape: one
+            // climb arrived in the log as three, one or two hops each, 21,1 -> 19,9 -> 17,6 m over
+            // twenty-five seconds, and the walk gave up anyway. The bar says "this escape has earned
+            // its keep", not "there is nothing left to gain".
+            //
+            // So the win is REMEMBERED and the series carries on; the escape ends when an attempt
+            // stops paying, and reports everything it took.
+            if ((grounded || sliding)
+                && HorizontalDistance(this.farmWalkHopAnchor, this.farmWalkHopBurstAim)
+                    - HorizontalDistance(selfPos, this.farmWalkHopBurstAim) >= FarmWalkEscapeWin)
+            {
+                if (!this.farmWalkEscapeWon)
+                {
+                    this.farmWalkEscapeWon = true;
+                    ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": escape has cleared it at "
+                        + heading.ToString("F0") + " deg — "
+                        + (HorizontalDistance(this.farmWalkHopAnchor, this.farmWalkHopBurstAim)
+                            - HorizontalDistance(selfPos, this.farmWalkHopBurstAim)).ToString("+0.00;-0.00; 0.00")
+                        + "m closer, " + (selfPos.y - this.farmWalkHopAnchor.y).ToString("+0.00;-0.00; 0.00")
+                        + "m up so far — carrying on while it still pays.");
+                }
+            }
+
+
+            // Attempts end on the ground, never mid-arc: the gain arrives on the landing, and a
+            // window that closes in flight writes off the hop that was working.
+            if (now < this.farmWalkEscapeAttemptUntil || !(grounded || sliding))
+            {
                 return;
             }
 
-            if (Distance3D(selfPos, this.farmWalkHopBurstAim) < this.farmWalkProbeBestDistance - FarmWalkProbeProgress)
-            {
-                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": bunny-hop cleared it.");
-                this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
+            float closer = HorizontalDistance(this.farmWalkEscapeAttemptFrom, this.farmWalkHopBurstAim)
+                - HorizontalDistance(selfPos, this.farmWalkHopBurstAim);
+            float rise = selfPos.y - this.farmWalkEscapeAttemptFrom.y;
+            bool paid = closer >= FarmWalkEscapeRepeatCloser || rise >= FarmWalkEscapeRepeatRise;
+            float airborneShare = this.farmWalkEscapeFrames > 0
+                ? 100f * this.farmWalkEscapeAirFrames / this.farmWalkEscapeFrames
+                : 0f;
 
-                // The wedge is behind us, so the strike counter that brought us here is stale.
-                // Leaving it at the limit sends the very next sample straight back to the give-up
-                // branch, and with farmWalkHopBurstUsed now set the walk would end immediately —
-                // a successful hop would look identical to a failed one.
+            float fromAnchor = HorizontalDistance(this.farmWalkHopAnchor, this.farmWalkHopBurstAim)
+                - HorizontalDistance(selfPos, this.farmWalkHopBurstAim);
+            ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": apex hop " + heading.ToString("F0")
+                + " deg -> " + closer.ToString("+0.00;-0.00; 0.00") + "m closer this go, "
+                + fromAnchor.ToString("+0.00;-0.00; 0.00") + "m since the escape began, "
+                + rise.ToString("+0.00;-0.00; 0.00") + "m up, " + this.farmWalkEscapeHops + " hop(s)"
+                + (this.farmWalkEscapeHopsRefused > 0 ? " (" + this.farmWalkEscapeHopsRefused + " REFUSED)" : string.Empty)
+                + ", airborne " + airborneShare.ToString("F0") + "%"
+                + (paid ? " — repeating." : " — next heading."));
+
+            if (paid && this.farmWalkEscapeRepeats < FarmWalkEscapeMaxRepeats)
+            {
+                this.farmWalkEscapeRepeats++;
+            }
+            else if (this.farmWalkEscapeWon)
+            {
+                // Earned its metre and has now stopped paying: hand back with the whole tally.
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": escape done at "
+                    + heading.ToString("F0") + " deg — " + fromAnchor.ToString("+0.00;-0.00; 0.00")
+                    + "m closer, " + (selfPos.y - this.farmWalkHopAnchor.y).ToString("+0.00;-0.00; 0.00")
+                    + "m up since it began, airborne " + airborneShare.ToString("F0") + "%.");
+                this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
                 this.farmWalkStuckStrikes = 0;
                 this.farmWalkLastSample = selfPos;
                 this.farmWalkNextStuckSampleAt = now + FarmWalkStuckSampleInterval;
                 return;
             }
-
-            // Hold the run-up until 2/3 of the way back in, so the jump is taken at speed with the
-            // arc still able to carry ONTO the ledge instead of into its face.
-            if (fromAnchor > FarmWalkHopBurstBackOffDistance * FarmWalkHopBurstJumpAtFraction)
+            else
             {
-                return;
-            }
-
-            // Jump on each landing. Reading grounded is what turns a single hop into a chain —
-            // firing blind mid-air is swallowed and the player never leaves the ground twice.
-            if (now - this.farmWalkLastHopAt < FarmWalkHopBurstMinInterval)
-            {
-                return;
-            }
-
-            bool grounded = true;
-            try
-            {
-                if (this.TryReadBunnyHopSurfaceState(out bool isGrounded, out bool isSliding))
+                this.farmWalkEscapeRepeats = 0;
+                this.farmWalkEscapeHeading++;
+                if (this.farmWalkEscapeHeading >= FarmWalkEscapeHeadings.Length)
                 {
-                    grounded = isGrounded || isSliding;
+                    ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel
+                        + ": every apex heading tried; " + fromAnchor.ToString("+0.00;-0.00; 0.00")
+                        + "m closer since the escape began, needed "
+                        + FarmWalkEscapeWin.ToString("F1") + "m"
+                        + (this.farmWalkEscapePressSide != 0f
+                            ? " — pressing " + this.farmWalkEscapePressSide.ToString("F0") + " deg for a corner."
+                            : "."));
+
+                    // Hops from this wedge are spent. If the other side has not been pressed yet,
+                    // go and find its corner; otherwise the escape is done.
+                    if (this.farmWalkEscapePressSide != 0f)
+                    {
+                        this.farmWalkEscapeStage = FarmWalkEscapeStagePress;
+                        this.farmWalkEscapePressFrom = selfPos;
+                        this.farmWalkEscapePressSample = selfPos;
+                        this.farmWalkEscapePressSampleAt = now;
+                        this.farmWalkEscapePressDir =
+                            Quaternion.Euler(0f, this.farmWalkEscapePressSide, 0f) * aimDir;
+                        this.farmWalkEscapeStageSince = now;
+                        return;
+                    }
+
+                    this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
+                    return;
                 }
             }
-            catch
-            {
-                grounded = true; // reader unavailable: fall back to interval-paced hops
-            }
 
-            if (!grounded)
-            {
-                return;
-            }
-
-            this.farmWalkLastHopAt = now;
-            try
-            {
-                this.TryBunnyHopJumpViaMono();
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[FarmWalk] hop-burst jump threw: " + ex.GetType().Name + ": " + ex.Message);
-                this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
-            }
+            this.farmWalkEscapeAttemptFrom = selfPos;
+            this.farmWalkEscapeSteerDir = Vector3.zero;
+            this.farmWalkEscapeAttemptUntil = now + FarmWalkEscapeAttemptSeconds;
+            this.farmWalkEscapeHops = 0;
+            this.farmWalkEscapeHopsRefused = 0;
+            this.farmWalkEscapeFrames = 0;
+            this.farmWalkEscapeAirFrames = 0;
+            this.farmWalkApexPhase = 0;
+            this.farmWalkApexPhaseSince = now;
         }
 
         // `aim` is what the sweep is trying to reach — the node on a final approach, the current
@@ -2878,9 +3856,23 @@ namespace HeartopiaMod
                 // also log a "surfacing"/"diving" pair every time it engages and releases.
                 if (!clearingObstacle)
                 {
+                    // ⚠️ SAY WHAT THE PREVIOUS HOLD BOUGHT. Twenty-five bare "diving 5,0m" lines in
+                    // forty seconds read as a descent in progress; they were a descent that never
+                    // started, and nothing in the log said so. The gain since the last assertion is
+                    // the one number that separates the two.
+                    string gained = string.Empty;
+                    if (!float.IsNaN(this.farmWalkDepthAssertFrom))
+                    {
+                        gained = " (last hold moved " + (selfPos.y - this.farmWalkDepthAssertFrom).ToString("+0.00;-0.00; 0.00")
+                            + "m in " + (now - this.farmWalkDepthAssertStartedAt).ToString("F1") + "s)";
+                    }
+
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + (want > 0 ? "surfacing" : "diving")
-                        + " " + Mathf.Abs(dy).ToString("F1") + "m.");
+                        + " " + Mathf.Abs(dy).ToString("F1") + "m" + gained + ".");
                 }
+
+                this.farmWalkDepthAssertFrom = selfPos.y;
+                this.farmWalkDepthAssertStartedAt = now;
             }
 
             this.farmWalkVerticalHeld = want;
@@ -3282,7 +4274,7 @@ namespace HeartopiaMod
         }
 
         // Steering and corner logic stay horizontal (the walker cannot climb, so height is noise
-        // there), but anything compared against the server's collect rule must be 3-D.
+        // there), but anything compared against the aura's reach must be 3-D.
         private static float Distance3D(Vector3 a, Vector3 b)
         {
             return (a - b).magnitude;

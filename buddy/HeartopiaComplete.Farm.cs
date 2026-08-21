@@ -1,4 +1,4 @@
-using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -162,6 +162,14 @@ namespace HeartopiaMod
                             break;
                         }
 
+                        // Standing over the loot the last node dropped (see FinishCollectingCycle).
+                        // After the repair gate on purpose — a repair in progress outranks it.
+                        if (Time.unscaledTime < this.farmLootHoldUntil)
+                        {
+                            this.autoFarmStatus = "Picking up the drop...";
+                            break;
+                        }
+
                         // Corrupted debuff (buff 610) + Contamination radar: park at the nearest
                         // cleansing coral until it clears. Repair still wins (gate above); an
                         // in-flight Collecting dwell is never interrupted (this state only).
@@ -217,23 +225,22 @@ namespace HeartopiaMod
                                     // Walk-to-node mode (FarmWalkFeature.cs): walk the route the
                                     // Track line follows instead of hopping. Falls through to the
                                     // teleport below whenever no route exists.
-                                    if (this.TryBeginFarmWalk(activeAreaPriorityNode.Value, "node:priority-active", true, null))
+                                    string activePriorityLabel = this.lastFoundPriorityNodeLabel;
+                                    if (this.TryBeginFarmWalk(activeAreaPriorityNode.Value, "node:priority-active", true, activePriorityLabel))
                                     {
                                         this.lastTeleportWasPriorityLocation = true;
                                         this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
                                         this.autoFarmTimer = 0f;
                                         break;
                                     }
-                                    // Priority nodes are plants (never contamination) — pass no label.
-                                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(activeAreaPriorityNode.Value, null),
+                                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(activeAreaPriorityNode.Value, activePriorityLabel),
                                         "node:priority-active", activeAreaPriorityNode.Value);
                                     this.lastTeleportWasPriorityLocation = true;
                                     this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
                                     this.autoFarmTimer = 0f;
                                     this.autoCollectClickedSinceArrival = false;
                                     this.cameraRotationAttempts = 0;
-                                    this.ResetContaminationDwellState(); // priority nodes are plants
-                                    this.ArmAuraCollectWait(true);
+                                    this.BeginFarmNodeDwell(activePriorityLabel);
                                     break;
                                 }
                             }
@@ -249,7 +256,8 @@ namespace HeartopiaMod
                                 + " mappedArea=" + (this.lastFoundPriorityNodeLocation.HasValue ? this.lastFoundPriorityNodeLocation.Value.ToString() : "none")
                                 + " distance=" + distance.ToString("F1"));
                             this.lastNodePosition = priorityNode.Value;
-                            if (this.TryBeginFarmWalk(priorityNode.Value, "node:priority-visible", true, null))
+                            string visiblePriorityLabel = this.lastFoundPriorityNodeLabel;
+                            if (this.TryBeginFarmWalk(priorityNode.Value, "node:priority-visible", true, visiblePriorityLabel))
                             {
                                 if (this.lastFoundPriorityNodeLocation.HasValue)
                                 {
@@ -260,8 +268,7 @@ namespace HeartopiaMod
                                 this.autoFarmTimer = 0f;
                                 break;
                             }
-                            // Priority nodes are plants (never contamination) — pass no label.
-                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(priorityNode.Value, null),
+                            this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(priorityNode.Value, visiblePriorityLabel),
                                 "node:priority-visible", priorityNode.Value);
                             if (this.lastFoundPriorityNodeLocation.HasValue)
                             {
@@ -272,8 +279,7 @@ namespace HeartopiaMod
                             this.autoFarmTimer = 0f;
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
-                            this.ResetContaminationDwellState(); // priority nodes are plants
-                            this.ArmAuraCollectWait(true);
+                            this.BeginFarmNodeDwell(visiblePriorityLabel);
                             break;
                         }
 
@@ -2077,9 +2083,22 @@ namespace HeartopiaMod
             // standing longer will not pop it — hop with the short retry stamp.
             if (this.autoFarmTargetIsBubble)
             {
-                if (this.autoFarmTimer >= 1f && !markerFound)
+                // A BUBBLE IS NOT A PLACE. markerFound asks "is there a marker where we stopped",
+                // which was a fair question while every marker stood still; it is not one now that
+                // markers follow the bubble. A bubble travelling at swimming speed clears the spot
+                // within about a second, so this branch declared a collect on EVERY bubble it ever
+                // dwelt on — four in one minute at 18:00, each "collected/despawned after 1,0s",
+                // none of them real.
+                //
+                // The chase knows which bubble it was on. Ask after that one by name; the marker
+                // test survives only as the fallback for a dwell that never went through a walk.
+                bool chased = this.farmWalkBubbleId != 0;
+                bool gone = chased ? !this.IsBubbleStillLive(this.farmWalkBubbleId) : !markerFound;
+
+                if (this.autoFarmTimer >= 1f && gone)
                 {
-                    this.AutoFarmLog($"Bubble collected/despawned after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
+                    this.AutoFarmLog($"Bubble collected/despawned after {this.autoFarmTimer:F1}s at {this.lastNodePosition}"
+                        + (chased ? $" (bubble {this.farmWalkBubbleId} is gone)" : " (no marker left, identity unknown)"));
                     this.StampVisitedNode(this.lastNodePosition, now + FarmVisitedRetryStampSeconds);
                     this.FinishCollectingCycle();
                     return;
@@ -2087,7 +2106,8 @@ namespace HeartopiaMod
 
                 if (this.autoFarmTimer >= 6f)
                 {
-                    this.AutoFarmLog($"Bubble dwell capped after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker still present)");
+                    this.AutoFarmLog($"Bubble dwell capped after {this.autoFarmTimer:F1}s at {this.lastNodePosition}"
+                        + (chased ? $" — bubble {this.farmWalkBubbleId} is STILL ALIVE" : " (marker still present)"));
                     this.StampVisitedNode(this.lastNodePosition, now + FarmVisitedRetryStampSeconds);
                     this.FinishCollectingCycle();
                     return;
@@ -2712,6 +2732,7 @@ namespace HeartopiaMod
         private Vector3? FindClosestVisiblePriorityNode(Vector3 playerPos, float currentTime)
         {
             this.lastFoundPriorityNodeLocation = null;
+            this.lastFoundPriorityNodeLabel = string.Empty;
             // Check if any priorities are enabled
             bool hasPriorities = this.priorityOysterMushroom || this.priorityButtonMushroom || this.priorityPennyBun ||
                                 this.priorityShiitake || this.priorityTruffle || this.priorityFiddlehead || this.priorityTallMustard || this.priorityBurdock || this.priorityMustardGreens || this.priorityBlueberry ||
@@ -2806,6 +2827,7 @@ namespace HeartopiaMod
                         closestDistance = distance;
                         closestPriority = child.position;
                         this.lastFoundPriorityNodeLocation = mappedPriorityLocation;
+                        this.lastFoundPriorityNodeLabel = markerLabel;
                     }
                 }
             }
@@ -2816,6 +2838,7 @@ namespace HeartopiaMod
         private Vector3? FindClosestPriorityNodeForLocation(Vector3 priorityLocation, Vector3 playerPos, bool requireVisibleOnScreen)
         {
             this.lastFoundPriorityNodeLocation = priorityLocation;
+            this.lastFoundPriorityNodeLabel = string.Empty;
             if (!this.isRadarActive || this.radarContainer == null)
             {
                 return null;
@@ -2890,6 +2913,7 @@ namespace HeartopiaMod
                 {
                     closestDistance = distance;
                     closestPriority = child.position;
+                    this.lastFoundPriorityNodeLabel = markerLabel;
                 }
             }
 
@@ -3026,64 +3050,6 @@ namespace HeartopiaMod
                 || this.showTruffleRadar;
         }
 
-        private bool ShouldShowForageMesh(string forageText)
-        {
-            if (forageText.Contains("pleurotus"))
-            {
-                return this.showMushroomRadar || this.showOysterMushroomRadar;
-            }
-
-            if (forageText.Contains("tricholoma"))
-            {
-                return this.showMushroomRadar || this.showButtonMushroomRadar;
-            }
-
-            if (forageText.Contains("boletus"))
-            {
-                return this.showMushroomRadar || this.showPennyBunRadar;
-            }
-
-            if (forageText.Contains("shiitake"))
-            {
-                return this.showMushroomRadar || this.showShiitakeRadar;
-            }
-
-            if (forageText.Contains("truffle"))
-            {
-                return this.showMushroomRadar || this.showTruffleRadar;
-            }
-
-            // Underwater gatherables are owned by the live ECS scan (ScanUnderwaterGatherablesAura),
-            // never by this BRG mesh path — explicitly ignore them here so a wakame mesh that happens
-            // to flow through the dynamicbush batch isn't mislabeled as a mushroom.
-            if (forageText.Contains("seaasparagus") || forageText.Contains("glasswort")
-                || forageText.Contains("seagrape") || forageText.Contains("wakame"))
-            {
-                return false;
-            }
-
-            if (forageText.Contains("fiddlehead") || forageText.Contains("fiddle") || forageText.Contains("fern") || forageText.Contains("pterid") || forageText.Contains("bracken"))
-            {
-                return this.showFiddleheadRadar;
-            }
-
-            if (forageText.Contains("burdock"))
-            {
-                return this.showBurdockRadar;
-            }
-
-            if (forageText.Contains("shepherdspurse") || ((forageText.Contains("mustard") && forageText.Contains("green"))) || forageText.Contains("mustard greens") || forageText.Contains("mustardgreens") || forageText.Contains("mustard_green") || forageText.Contains("mustardgreen") || forageText.Contains("greens"))
-            {
-                return this.showMustardGreensRadar;
-            }
-
-            if (forageText.Contains("tall mustard") || forageText.Contains("tallmustard") || forageText.Contains("mustard"))
-            {
-                return this.showTallMustardRadar;
-            }
-
-            return this.showMushroomRadar;
-        }
 
         private void ToggleAutoFarm()
         {

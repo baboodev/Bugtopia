@@ -1,4 +1,4 @@
-using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -2955,6 +2955,8 @@ namespace HeartopiaMod
             this.bubbleRadarTrackedPositions.Clear();
             this.bubbleRadarSnapshotPositions.Clear();
             this.bubbleRadarSceneTargets.Clear();
+            this.bubbleLiveObjects.Clear();
+            this.bubbleLiveBindMisses.Clear();
             this.bubbleRadarLastSeenAt.Clear();
             this.bubbleRadarSeenIds.Clear();
             this.bubbleRadarDebugNextLogAt.Clear();
@@ -3902,6 +3904,14 @@ namespace HeartopiaMod
         private readonly Dictionary<int, Vector3> bubbleRadarTrackedPositions = new Dictionary<int, Vector3>();
         private readonly Dictionary<int, Vector3> bubbleRadarSnapshotPositions = new Dictionary<int, Vector3>();
         private readonly Dictionary<int, GameObject> bubbleRadarSceneTargets = new Dictionary<int, GameObject>();
+
+        // bubbleId -> the scene object that IS that bubble. Unlike bubbleRadarSceneTargets (keyed by
+        // Unity instance id, and so never findable by the marker sync that asks for it by bubbleId)
+        // this is keyed the way every caller asks. See ResolveBubbleLiveObjects for what it fixes.
+        private readonly Dictionary<int, GameObject> bubbleLiveObjects = new Dictionary<int, GameObject>();
+        private readonly List<KeyValuePair<GameObject, Vector3>> bubbleLiveScanBuffer = new List<KeyValuePair<GameObject, Vector3>>();
+        private readonly Dictionary<int, int> bubbleLiveBindMisses = new Dictionary<int, int>();
+        private readonly List<int> bubbleLiveEvictBuffer = new List<int>();
         private readonly Dictionary<int, float> bubbleRadarLastSeenAt = new Dictionary<int, float>();
         private readonly HashSet<int> bubbleRadarSeenIds = new HashSet<int>();
         private readonly List<IntPtr> bubbleRadarAuraComponentsBuffer = new List<IntPtr>(96);
@@ -4934,6 +4944,12 @@ namespace HeartopiaMod
         private float priorityRecheckTimer = 0f;
         private Vector3? currentPriorityLocation = null;
         private Vector3? lastFoundPriorityNodeLocation = null;
+
+        // Canonical marker label of that same node. The priority branches used to pass null instead,
+        // on the assumption that a priority node is always a plant — which "Bubble" and "Insect"
+        // are not. With no label the dwell never learned the target was a bubble and waited out the
+        // full aura collect for something the aura cannot collect.
+        private string lastFoundPriorityNodeLabel = string.Empty;
         private bool lastTeleportWasPriorityLocation = false;
 
         // --- STATIC LOOT LOCATIONS FOR PRIORITIES ---

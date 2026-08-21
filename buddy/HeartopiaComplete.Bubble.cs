@@ -52,6 +52,110 @@ namespace HeartopiaMod
                 "XDTLevelAndEntity.BaseSystem.EntitiesManager.EntityRemoveEvent", 32, this.OnBubbleEntityRemoveEvent);
         }
 
+        // Where the radar currently believes a bubble is, nearest to `near`. Tracked positions are
+        // refreshed from the live scene object each marker sync, so this is the drifting bubble's
+        // CURRENT place, not the one the farm planned against.
+        internal bool TryGetLiveBubblePosition(Vector3 near, float maxDistance, out Vector3 position)
+        {
+            return this.TryGetLiveBubblePosition(near, maxDistance, out position, out _);
+        }
+
+        // bubbleId comes back too, because "is this bubble still here" cannot be answered by
+        // position: a drifting bubble leaves any fixed point within a second or two, and reading
+        // that as "it popped" is how the farm reported four collects it never made.
+        internal bool TryGetLiveBubblePosition(Vector3 near, float maxDistance, out Vector3 position, out int bubbleId)
+        {
+            position = Vector3.zero;
+            bubbleId = 0;
+            float bestSqr = maxDistance * maxDistance;
+            bool found = false;
+
+            // The bound scene objects first: they are the bubble itself, read this frame. The two
+            // dictionaries below are only as fresh as the last marker sync.
+            //
+            // ⚠️ Read the object inline rather than through TryGetBubbleLivePosition — that one
+            // PRUNES dead entries, and pruning the dictionary being enumerated throws.
+            foreach (KeyValuePair<int, GameObject> live in this.bubbleLiveObjects)
+            {
+                GameObject go = live.Value;
+                if (go == null)
+                {
+                    continue;
+                }
+
+                Vector3 livePos;
+                try
+                {
+                    if (!go.activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    livePos = go.transform.position;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (livePos == Vector3.zero)
+                {
+                    continue;
+                }
+
+                float liveSqr = (livePos - near).sqrMagnitude;
+                if (liveSqr < bestSqr)
+                {
+                    bestSqr = liveSqr;
+                    position = livePos;
+                    bubbleId = live.Key;
+                    found = true;
+                }
+            }
+
+            if (found)
+            {
+                return true;
+            }
+
+            foreach (KeyValuePair<int, Vector3> tracked in this.bubbleRadarTrackedPositions)
+            {
+                float sqr = (tracked.Value - near).sqrMagnitude;
+                if (sqr < bestSqr)
+                {
+                    bestSqr = sqr;
+                    position = tracked.Value;
+                    found = true;
+                }
+            }
+
+            if (found)
+            {
+                return true;
+            }
+
+            foreach (KeyValuePair<int, Vector3> snap in this.bubbleRadarSnapshotPositions)
+            {
+                float sqr = (snap.Value - near).sqrMagnitude;
+                if (sqr < bestSqr)
+                {
+                    bestSqr = sqr;
+                    position = snap.Value;
+                    found = true;
+                }
+            }
+
+            return found;
+        }
+
+        // Make the next marker sync run now instead of on its interval. A bubble the walker is
+        // closing on has to be re-read far more often than the radar's idle cadence.
+        internal void ForceBubbleRadarResync()
+        {
+            this.bubbleRadarForceRefresh = true;
+            this.nextBubbleMarkerSyncAt = -999f;
+        }
+
         private void OnBubbleEntityRemoveEvent(GameEventSnapshot e)
         {
             if (!this.showBubbleRadar || !this.bubbleRadarHasLastSyncOrigin)
@@ -317,6 +421,228 @@ namespace HeartopiaMod
             }
 
             return false;
+        }
+
+        // ==========================================================================================
+        // FOLLOWING A BUBBLE, RATHER THAN REMEMBERING WHERE IT APPEARED.
+        //
+        // Measured 2026-08-20 with the BubbleProbe plugin, one live bubble in the scene:
+        //     live=(76.0, -30.6, -83.5)
+        //     radar tracked  11.14m off (77.0, -30.6, -72.4)
+        //     spawn snapshot 11.14m off (77.0, -30.6, -72.4)      sceneTargets=0
+        //
+        // Tracked and snapshot were byte-identical and eleven metres wrong, because the marker sync
+        // only re-reads a bubble's transform when bubbleRadarSceneTargets has an entry for it — and
+        // that dictionary is keyed by Unity INSTANCE ID while the sync looks it up by BUBBLE ID (a
+        // netId). The two key spaces never meet, so the branch was dead and every bubble stayed
+        // frozen at the position it spawned at. The farm then walked to that ghost, arrived 0.21 m
+        // from it, and the dwell capped with "marker still present".
+        //
+        // The fix is to hold the GameObject itself, keyed the way the sync asks for it. Binding
+        // happens ONCE per bubble, by proximity, while the recorded position is still fresh — at
+        // spawn that position IS the bubble, so a tight radius is safe; the two only diverge
+        // afterwards. From then on the object is followed directly, at the cost of a transform read.
+        private const float BubbleLiveResolveRadius = 5f;
+        private const float BubbleLiveResolveInterval = 1f;
+        private const int BubbleLiveBindMissLimit = 3;
+        private float bubbleLiveResolveNextAt;
+
+        // The live transform of a bubble already bound to its scene object.
+        internal bool TryGetBubbleLivePosition(int bubbleId, out Vector3 position)
+        {
+            position = Vector3.zero;
+            if (!this.bubbleLiveObjects.TryGetValue(bubbleId, out GameObject go))
+            {
+                return false;
+            }
+
+            if (go == null)
+            {
+                this.bubbleLiveObjects.Remove(bubbleId);
+                return false;
+            }
+
+            try
+            {
+                if (!go.activeInHierarchy)
+                {
+                    this.bubbleLiveObjects.Remove(bubbleId);
+                    return false;
+                }
+
+                position = go.transform.position;
+                return position != Vector3.zero;
+            }
+            catch
+            {
+                this.bubbleLiveObjects.Remove(bubbleId);
+                return false;
+            }
+        }
+
+        // Is this exact bubble still in the world? The only honest completion test for a chase.
+        internal bool IsBubbleStillLive(int bubbleId)
+        {
+            return bubbleId != 0 && this.TryGetBubbleLivePosition(bubbleId, out _);
+        }
+
+        // Binds every bubble that has no object yet to the nearest live one. ONE scene walk for all
+        // of them, throttled, and skipped entirely when nothing is unbound — this is the expensive
+        // half, and after the first pass there is normally nothing left to do.
+        private void ResolveBubbleLiveObjects(Dictionary<int, Vector3> known)
+        {
+            if (known == null || known.Count == 0)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.bubbleLiveResolveNextAt)
+            {
+                return;
+            }
+
+            bool anyUnbound = false;
+            foreach (KeyValuePair<int, Vector3> entry in known)
+            {
+                if (!this.bubbleLiveObjects.TryGetValue(entry.Key, out GameObject bound) || bound == null)
+                {
+                    anyUnbound = true;
+                    break;
+                }
+            }
+
+            if (!anyUnbound)
+            {
+                return;
+            }
+
+            this.bubbleLiveResolveNextAt = now + BubbleLiveResolveInterval;
+
+            Vector3 scanOrigin = this.bubbleRadarLastSyncOrigin;
+            bool haveOrigin = this.bubbleRadarHasLastSyncOrigin;
+
+            GameObject[] all;
+            try
+            {
+                all = UnityEngine.Object.FindObjectsOfType<GameObject>();
+            }
+            catch
+            {
+                return;
+            }
+
+            if (all == null)
+            {
+                return;
+            }
+
+            // Collect the live bubbles once, then match against that; the alternative is a full
+            // scene walk per unbound bubble.
+            this.bubbleLiveScanBuffer.Clear();
+            for (int i = 0; i < all.Length; i++)
+            {
+                GameObject candidate = all[i];
+                try
+                {
+                    if (!this.IsUsableBubbleSceneObject(candidate))
+                    {
+                        continue;
+                    }
+
+                    Vector3 pos = candidate.transform.position;
+                    if (pos == Vector3.zero)
+                    {
+                        continue;
+                    }
+
+                    this.bubbleLiveScanBuffer.Add(new KeyValuePair<GameObject, Vector3>(candidate, pos));
+                }
+                catch
+                {
+                    // Objects can be destroyed mid-walk; skipping one is not a failure.
+                }
+            }
+
+            // NO EARLY RETURN ON AN EMPTY SCAN. "The scene has no bubbles" is not a reason to skip
+            // the pass — it is the strongest evidence there is that everything still tracked is a
+            // ghost, and skipping here is what let two of them sit on the radar forever.
+            int newlyBound = 0;
+            this.bubbleLiveEvictBuffer.Clear();
+            foreach (KeyValuePair<int, Vector3> entry in known)
+            {
+                if (this.bubbleLiveObjects.TryGetValue(entry.Key, out GameObject existing) && existing != null)
+                {
+                    continue;
+                }
+
+                float bestSqr = BubbleLiveResolveRadius * BubbleLiveResolveRadius;
+                GameObject best = null;
+                for (int i = 0; i < this.bubbleLiveScanBuffer.Count; i++)
+                {
+                    float sqr = (this.bubbleLiveScanBuffer[i].Value - entry.Value).sqrMagnitude;
+                    if (sqr < bestSqr)
+                    {
+                        bestSqr = sqr;
+                        best = this.bubbleLiveScanBuffer[i].Key;
+                    }
+                }
+
+                if (best != null)
+                {
+                    this.bubbleLiveObjects[entry.Key] = best;
+                    this.bubbleLiveBindMisses.Remove(entry.Key);
+                    newlyBound++;
+                    continue;
+                }
+
+                // A BUBBLE WITH NO OBJECT, SCAN AFTER SCAN, IS NOT A BUBBLE.
+                //
+                // Measured 2026-08-20: the world held zero bubbles (scene scan and the bridge agreed)
+                // while the radar still drew two, at 146 m and 135 m from the player — both beyond
+                // the tour's 120 m range, so the farm had no candidates at all and sat in "Scanning
+                // for nodes" with nothing to do. They survived because the retain rule keeps a
+                // distant marker on the theory that it is merely streamed out.
+                //
+                // An unbindable entry also costs: it keeps ResolveBubbleLiveObjects finding
+                // something unbound, so the full scene walk re-runs every second, forever.
+                //
+                // Several consecutive scans, not one: at a world load the entries can legitimately
+                // exist a moment before their objects do.
+                int misses;
+                this.bubbleLiveBindMisses.TryGetValue(entry.Key, out misses);
+                misses++;
+                this.bubbleLiveBindMisses[entry.Key] = misses;
+
+                // ⚠️ ABSENCE IS ONLY PROOF NEARBY. Far out, "no object" means streamed out, which is
+                // exactly what the existing retain rule says — so the eviction borrows its distance
+                // rather than inventing a second opinion. A distant entry keeps counting misses and
+                // is dropped the moment the player is close enough for its absence to mean anything.
+                bool closeEnoughToBeSure = !haveOrigin
+                    || (entry.Value - scanOrigin).sqrMagnitude
+                        < BubbleRadarSceneMissingRetainMinDistance * BubbleRadarSceneMissingRetainMinDistance;
+                if (misses >= BubbleLiveBindMissLimit && closeEnoughToBeSure)
+                {
+                    this.bubbleLiveEvictBuffer.Add(entry.Key);
+                }
+            }
+
+            for (int i = 0; i < this.bubbleLiveEvictBuffer.Count; i++)
+            {
+                int ghost = this.bubbleLiveEvictBuffer[i];
+                this.RemoveBubbleTrackedMarker(ghost);
+                this.bubbleRadarSnapshotPositions.Remove(ghost);
+                this.bubbleLiveBindMisses.Remove(ghost);
+                this.bubbleLiveObjects.Remove(ghost);
+            }
+
+            if (newlyBound > 0 || this.bubbleLiveEvictBuffer.Count > 0)
+            {
+                this.BubbleRadarLogThrottled("live-bind",
+                    "bound " + newlyBound + ", dropped " + this.bubbleLiveEvictBuffer.Count
+                    + " ghost(s) with no scene object, out of " + this.bubbleLiveScanBuffer.Count
+                    + " live and " + known.Count + " known.", 5f);
+            }
         }
 
         private bool TryGetAllSpawnedBubblePositionsSceneScan(Dictionary<int, Vector3> positions, out string status)

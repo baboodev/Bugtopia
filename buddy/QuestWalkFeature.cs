@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -436,9 +436,47 @@ namespace HeartopiaMod
                 + (portal ? " — this point is a TELEPORT: expecting a world change, then a new track" : string.Empty));
         }
 
+        // ⚠️ SOME TRACK POINTS CARRY NO HEIGHT. The game stores a few of them with Position.y left at
+        // exactly 0 — XZ only — and everything downstream then reasons about a destination at sea
+        // level. One walk logged
+        //     target=(-95,97, 0,00, 197,56)   dyAim=-24,4m dyNode=-24,4m
+        // with the player standing at y 24.4: the walker believed the point was twenty-four metres
+        // BELOW it, so the 3-D arrival test (1.8 m) could never pass, the vertical logic aimed down,
+        // and the on-foot escape was handed a cliff to descend that no jump can solve. The point was
+        // in fact above.
+        //
+        // A y of exactly 0 is the signature; real heights in this world are metres away from it. Take
+        // the height from the nearest waypoint of the track graph instead — those positions are real
+        // — and fall back to the player's own height, which is a far better guess than sea level.
+        private Vector3 RepairQuestWalkAimHeight(Vector3 aim)
+        {
+            if (Mathf.Abs(aim.y) > 0.001f)
+            {
+                return aim;
+            }
+
+            if (this.TryGetNearestTrackGraphNodePosition(aim, 120f, out Vector3 nodePos))
+            {
+                ModLogger.Msg("[QuestWalk] track point has no height (y=0) — taking "
+                    + nodePos.y.ToString("F1") + "m from the nearest waypoint "
+                    + Vector3.Distance(new Vector3(aim.x, nodePos.y, aim.z), nodePos).ToString("F1") + "m away.");
+                aim.y = nodePos.y;
+                return aim;
+            }
+
+            if (this.TryGetLocalPlayerPosition(out Vector3 me))
+            {
+                ModLogger.Msg("[QuestWalk] track point has no height (y=0) and no waypoint nearby — "
+                    + "using the player's own height " + me.y.ToString("F1") + "m.");
+                aim.y = me.y;
+            }
+
+            return aim;
+        }
+
         private void BeginQuestWalkLeg()
         {
-            this.questWalkAim = this.questWalkTrack.Target;
+            this.questWalkAim = this.RepairQuestWalkAimHeight(this.questWalkTrack.Target);
             this.questWalkRadius = QuestWalkRadiusFor(this.questWalkTrack);
             this.questWalkCandidateReads = 0;
             this.questWalkParked = false;

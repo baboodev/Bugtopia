@@ -1407,6 +1407,11 @@ namespace HeartopiaMod
             float maxBubbleRangeSqr = maxBubbleRange * maxBubbleRange;
             this.bubbleRadarSeenIds.Clear();
 
+            // Bind anything new to its scene object first, so the loop below has something to read
+            // a CURRENT position from. Without this every bubble stays at its spawn coordinate for
+            // its whole life (measured 11.14 m of error — see ResolveBubbleLiveObjects).
+            this.ResolveBubbleLiveObjects(this.bubbleRadarSnapshotPositions);
+
             foreach (int bubbleId in this.bubbleRadarSnapshotPositions.Keys.ToArray())
             {
                 Vector3 bubblePos = this.bubbleRadarSnapshotPositions[bubbleId];
@@ -1432,6 +1437,13 @@ namespace HeartopiaMod
                     bubblePos = bubbleTarget.transform.position;
                     this.bubbleRadarSnapshotPositions[bubbleId] = bubblePos;
                 }
+                else if (this.TryGetBubbleLivePosition(bubbleId, out Vector3 livePos))
+                {
+                    // The path that actually fires: bubbleRadarSceneTargets is keyed by instance id
+                    // and the lookup above asks by bubbleId, so it has never hit once.
+                    bubblePos = livePos;
+                    this.bubbleRadarSnapshotPositions[bubbleId] = bubblePos;
+                }
 
                 if ((scanOrigin - bubblePos).sqrMagnitude > maxBubbleRangeSqr)
                 {
@@ -1444,6 +1456,21 @@ namespace HeartopiaMod
 
                 if (this.trackedBubbleMarkers.TryGetValue(bubbleId, out GameObject existingMarker) && existingMarker != null)
                 {
+                    // The marker was placed once, at creation. A drifting bubble leaves it behind —
+                    // and the farm reads marker positions, so the stale one is what it walks to.
+                    try
+                    {
+                        if (existingMarker.transform.position != bubblePos)
+                        {
+                            existingMarker.transform.position = bubblePos;
+                        }
+                    }
+                    catch
+                    {
+                        // A marker destroyed between the lookup and the move: the cleanup pass below
+                        // drops it on this same tick.
+                    }
+
                     continue;
                 }
 
@@ -2111,37 +2138,19 @@ namespace HeartopiaMod
                                     // found here — GetMeshName returns the Unity MESH asset name, not the
                                     // prefab name, so a prefab-name substring never matches. They are handled
                                     // by ScanUnderwaterGatherablesAura (live ECS scan, called below) instead.
-                                    bool flag31 = forageText.Contains("dynamicbush");
-                                    if (flag31)
-                                    {
-                                        if (!this.ShouldShowForageMesh(forageText))
-                                        {
-                                            continue;
-                                        }
-                                        Il2CppFieldInfo field4 = object7.GetIl2CppType().GetField("blocks", bindingFlags);
-                                        Il2CppObject object8 = (field4 != null) ? field4.GetValue(object7) : null;
-                                        bool flag32 = object8 != null;
-                                        if (flag32)
-                                        {
-                                            int num7 = object8.GetIl2CppType().GetProperty("Count").GetValue(object8).Unbox<int>();
-                                            for (int num8 = 0; num8 < num7; num8++)
-                                            {
-                                                Il2CppObject boxedBlockIndex = this.BoxInt(num8);
-                                                Il2CppObject block = object8.GetIl2CppType().GetMethod("get_Item").Invoke(object8, new Il2CppReferenceArray<Il2CppObject>(new Il2CppObject[]
-                                                {
-                                                    boxedBlockIndex
-                                                }));
-                                                Vector3 blockPos = this.GetBlockPos(block, bindingFlags);
-                                                string item = $"{blockPos.x:F1}{blockPos.z:F1}";
-                                                bool flag33 = !hashSet.Contains(item);
-                                                if (flag33)
-                                                {
-                                                    hashSet.Add(item);
-                                                    this.CreateMarker(blockPos, meshName, material, material2, null);
-                                                }
-                                            }
-                                        }
-                                    }
+                                    // ⚠️ THE DYNAMIC-BUSH FAMILY IS OWNED BY THE LIVE SCAN, NOT BY THIS PATH.
+                                    //
+                                    // This BRG mesh walk used to draw mushrooms and the event plants
+                                    // too, and ScanLandGatherables draws them from the live components
+                                    // — so every one of them got TWO markers on the same spot, with
+                                    // two different labels ("Button" from the mesh name here,
+                                    // "Mushroom" from the scan) and therefore two icons on the game
+                                    // map. Reported as doubled markers.
+                                    //
+                                    // The live scan is the one that must win: it carries the entity
+                                    // netId, so it can tell a ripe bush from one that is still
+                                    // GROWING and hide the latter. This path sees only a mesh and
+                                    // would happily mark a growing stub forever.
                                 }
                                 catch (System.Exception ex)
                                 {
@@ -2324,15 +2333,28 @@ namespace HeartopiaMod
             if (MasterLogGatherScan && this.landGatherNewIds)
             {
                 this.landGatherNewIds = false;
+                // ⚠️ ONLY THE NEW IDS. This printed the entire histogram on every new id, and the
+                // histogram only grows — walking through a forest turned one log line into six
+                // thousand characters and emptied the ring buffer of everything else. The trigger
+                // is "a new id turned up"; the new ids are therefore the whole message.
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                int fresh = 0;
                 foreach (KeyValuePair<string, LandGatherIdStat> kv in this.landGatherIdHistogram)
                 {
+                    if (this.landGatherLoggedIds.Contains(kv.Key))
+                    {
+                        continue;
+                    }
+
+                    this.landGatherLoggedIds.Add(kv.Key);
+                    fresh++;
                     sb.Append(kv.Key).Append("->").Append(kv.Value.Mesh)
                         .Append('x').Append(kv.Value.Count).Append(' ');
                 }
 
                 ModLogger.Msg("[MapSpots] land radar: marked " + marked + " (hid " + hidden + " not collectable) of " + this.mapResEntities.Count
-                    + " | " + sb.ToString().TrimEnd());
+                    + " | " + fresh + " new id(s) of " + this.landGatherIdHistogram.Count
+                    + ": " + sb.ToString().TrimEnd());
             }
 
             // ── Static fallback: only when the live scan found NOTHING to collect ────────────────
@@ -2441,6 +2463,7 @@ namespace HeartopiaMod
         }
 
         private readonly Dictionary<string, LandGatherIdStat> landGatherIdHistogram = new Dictionary<string, LandGatherIdStat>();
+        private readonly HashSet<string> landGatherLoggedIds = new HashSet<string>();
 
         // ENTITY staticId -> marker mesh, for the families whose itemTypeID is 0.
         //
@@ -2470,19 +2493,28 @@ namespace HeartopiaMod
         private static string ResolveLandGatherMeshByStaticId(int staticId, HeartopiaComplete self, out bool known)
         {
             known = true;
+
+            // ⚠️ SPECIES NAMES, NOT A GENERIC "mushroom".
+            //
+            // CreateMarker derives the label, icon and colour by looking for these substrings
+            // (pleurotus/tricholoma/boletus/shiitake/truffle), and the marker geometry is always a
+            // primitive quad — the string is never used to load an asset, so naming it after the
+            // species is free. Returning a generic "mushroom" here is what made this scan and the
+            // BRG mesh scan disagree about the same object: one produced "Mushroom", the other
+            // "Button", and the map ended up with two markers on one spot.
             switch (staticId)
             {
                 // Mushrooms: base species and its three bizarre variants share one toggle.
                 case 130001: case 130002: case 130003: case 130004:
-                    return self.showOysterMushroomRadar || self.showMushroomRadar ? "mushroom" : null;
+                    return self.showOysterMushroomRadar || self.showMushroomRadar ? "p_gather_pleurotus_00" : null;
                 case 130005: case 130006: case 130007: case 130008:
-                    return self.showShiitakeRadar || self.showMushroomRadar ? "mushroom" : null;
+                    return self.showShiitakeRadar || self.showMushroomRadar ? "p_gather_shiitake_00" : null;
                 case 130009: case 130010: case 130011: case 130012:
-                    return self.showButtonMushroomRadar || self.showMushroomRadar ? "mushroom" : null;
+                    return self.showButtonMushroomRadar || self.showMushroomRadar ? "p_gather_tricholoma_00" : null;
                 case 130013: case 130014: case 130015: case 130016:
-                    return self.showPennyBunRadar || self.showMushroomRadar ? "mushroom" : null;
+                    return self.showPennyBunRadar || self.showMushroomRadar ? "p_gather_boletus_00" : null;
                 case 130017:
-                    return self.showTruffleRadar || self.showMushroomRadar ? "mushroom" : null;
+                    return self.showTruffleRadar || self.showMushroomRadar ? "p_gather_truffle_00" : null;
 
                 // Matsutake has no dedicated toggle of its own — master switch only.
                 case 130018:

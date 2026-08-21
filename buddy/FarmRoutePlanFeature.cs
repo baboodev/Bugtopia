@@ -1,3 +1,4 @@
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -57,7 +58,27 @@ namespace HeartopiaMod
         private const int FarmTourTwoOptPasses = 4;
 
         // Точки дальше этого от игрока в тур не берём: тур должен покрывать зону, а не карту.
-        private const float FarmTourMaxStopRange = 120f;
+        //
+        // Было 120 м — и стояло это ради переезда между зонами: после телепорта старый план описывал
+        // место, где нас больше нет, и тянул игрока обратно. С тех пор эту задачу закрыли точно, в
+        // трёх местах сразу — сброс тура на любом `area:*` телепорте (единственная точка, через
+        // которую проходят все телепорты фермы), на приходе в зону пешком и на переключении фермы.
+        // Отсечка по расстоянию осталась вторым, грубым рубежом за ту же самую оборону.
+        //
+        // Стоила она при этом реального: с одним включённым видом ресурса и ближайшим маркером в
+        // 135 м ферма вставала в «Scanning for nodes» навсегда и молчала об этом (замер 2026-08-20:
+        // две метки Bubble на 146 и 135 м, кандидатов 0). Плюс асимметрия — у телепортного режима
+        // предела нет вообще, так что ходячий был строже без причины.
+        //
+        // 300 м — это примерно минута плавания: всё ещё зона, а не карта. Дедлайн прохода это
+        // выдерживает: clamp(прямая × 3 + 15, 20, 300) даёт на таком плече полные 300 с. Число
+        // точек ограничено отдельно (FarmTourMaxStops), так что на стоимость 2-opt это не влияет.
+        //
+        // ⚠️ Для ДРЕЙФУЮЩЕЙ цели такое плечо бессмысленно по существу: бабл идёт около 1.5 м/с и за
+        // минуту уходит метров на девяносто или лопается. Отдельного, короткого предела для
+        // расходных целей здесь пока нет — если погоня начнёт уходить в никуда, ограничивать надо
+        // по природе цели, а не по расстоянию.
+        private const float FarmTourMaxStopRange = 300f;
 
         private readonly List<FarmTourStop> farmTourStops = new List<FarmTourStop>();
         private readonly List<FarmTourStop> farmTourCandidates = new List<FarmTourStop>();
@@ -120,6 +141,35 @@ namespace HeartopiaMod
             return cam != null ? cam.transform.position : Vector3.zero;
         }
 
+        // ⚠️ ПУЗЫРЬ НЕЛЬЗЯ ПЛАНИРОВАТЬ — ЕГО МОЖНО ТОЛЬКО ВЗЯТЬ СЕЙЧАС.
+        //
+        // Тур — это маршрут: точка встаёт туда, где она дешевле всего вписывается между соседями,
+        // и до неё доходит очередь. Для гриба это правильно, он никуда не денется. Пузырь же
+        // дрейфует и лопается сам по себе, а в план его вставляло ровно так же — в середину
+        // сорока восьми точек. Пока обход доходил до этого места, пузыря давно не было, и со
+        // стороны это выглядело так, будто ходячий режим пузыри вообще не замечает. Режим с
+        // телепортом их брал: там цель выбирает FindClosestAvailableNode, то есть всегда БЛИЖАЙШУЮ.
+        //
+        // Отсюда правило: расходная цель не встаёт в очередь, она берётся головой.
+        private static bool IsTransientFarmTourStop(string label)
+        {
+            return string.Equals(label, "Bubble", StringComparison.Ordinal);
+        }
+
+        // Есть ли этот пункт всё ещё среди кандидатов последнего скана.
+        private bool HasFreshFarmTourCandidateAt(Vector3 stop)
+        {
+            for (int i = 0; i < this.farmTourCandidates.Count; i++)
+            {
+                if (IsSameFarmTourStop(stop, this.farmTourCandidates[i].Position))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static bool IsSameFarmTourStop(Vector3 a, Vector3 b)
         {
             return (a - b).sqrMagnitude < FarmTourSameStopDistance * FarmTourSameStopDistance;
@@ -143,10 +193,19 @@ namespace HeartopiaMod
 
             // Отсеиваем дальние и дубли внутри самой выборки: один ресурс может дать несколько
             // маркеров (радар и подводный скан рисуют своё), а тур должен видеть его один раз.
+            float nearestDropped = float.MaxValue;
+            string nearestDroppedLabel = null;
             for (int i = this.farmTourCandidates.Count - 1; i >= 0; i--)
             {
                 Vector3 pos = this.farmTourCandidates[i].Position;
-                bool drop = FarmTourDistance(origin, pos) > FarmTourMaxStopRange;
+                float range = FarmTourDistance(origin, pos);
+                bool drop = range > FarmTourMaxStopRange;
+                if (drop && range < nearestDropped)
+                {
+                    nearestDropped = range;
+                    nearestDroppedLabel = this.farmTourCandidates[i].Label;
+                }
+
                 if (!drop)
                 {
                     for (int j = 0; j < i; j++)
@@ -165,8 +224,30 @@ namespace HeartopiaMod
                 }
             }
 
+            // ⚠️ AN IDLE FARM MUST SAY WHY IT IS IDLE.
+            //
+            // With only one resource kind enabled and every one of them out of range, the farm sits
+            // in "Scanning for nodes..." indefinitely and the log says NOTHING — there is no line
+            // for a candidate that was found and then discarded. Measured 2026-08-20: two Bubble
+            // markers at 146 m and 135 m, tour range 120 m, candidates 0, and no way to tell that
+            // apart from "the radar sees nothing" without attaching a debugger.
+            if (this.farmTourCandidates.Count == 0 && nearestDroppedLabel != null)
+            {
+                float now = Time.unscaledTime;
+                if (now >= this.farmTourRangeComplaintAt)
+                {
+                    this.farmTourRangeComplaintAt = now + FarmTourRangeComplaintInterval;
+                    ModLogger.Msg("[FarmTour] nothing in range: nearest is " + nearestDroppedLabel
+                        + " at " + nearestDropped.ToString("F0") + "m, and the tour only takes stops within "
+                        + FarmTourMaxStopRange.ToString("F0") + "m. Move closer or enable another resource.");
+                }
+            }
+
             return this.farmTourCandidates.Count > 0;
         }
+
+        private const float FarmTourRangeComplaintInterval = 20f;
+        private float farmTourRangeComplaintAt;
 
         // Полная перестройка. Вызывается на старте сбора и когда тур опустел.
         private bool RebuildFarmTour(Vector3 origin)
@@ -430,6 +511,31 @@ namespace HeartopiaMod
             // Ближайшая точка почти всегда достижима просто потому, что она рядом. План при этом
             // никуда не девается: список тот же, пополняется так же, чистится так же — меняется
             // только правило выбора головы.
+            // Расходные цели — вперёд всей очереди, ближайшая из них.
+            int transientPick = -1;
+            float transientBest = float.MaxValue;
+            for (int i = 0; i < this.farmTourStops.Count; i++)
+            {
+                if (!IsTransientFarmTourStop(this.farmTourStops[i].Label))
+                {
+                    continue;
+                }
+
+                float d = FarmTourDistance(origin, this.farmTourStops[i].Position);
+                if (d < transientBest)
+                {
+                    transientBest = d;
+                    transientPick = i;
+                }
+            }
+
+            if (transientPick >= 0)
+            {
+                position = this.farmTourStops[transientPick].Position;
+                label = this.farmTourStops[transientPick].Label;
+                return true;
+            }
+
             int pick = 0;
             if (this.farmTourVerticalCost)
             {
@@ -484,6 +590,24 @@ namespace HeartopiaMod
                 if (this.TryGetLiveNodeColdState(stop, 0f, out bool stopCold, out long stopColdEndMs) && stopCold)
                 {
                     this.StampVisitedNode(stop, now + this.GetVisitedColdStampSeconds(stopColdEndMs));
+                    this.farmTourStops.RemoveAt(i);
+                    continue;
+                }
+
+                // ⚠️ ЛОПНУВШИЙ ПУЗЫРЬ ОСТАЁТСЯ В ПЛАНЕ НАВСЕГДА, если его отсюда не убрать.
+                //
+                // Остальные пункты снимает живой скан коллектаблов, но пузырь в него не попадает
+                // вовсе (он не коллектабл), так что для него «остыл» не наступает никогда. Пункт
+                // от исчезнувшего пузыря переживал бы весь тур: ходок дошёл бы до пустого места,
+                // выждал таймаут и только тогда отметил его посещённым — по одному проходу
+                // впустую на каждый лопнувший пузырь.
+                //
+                // Судим по кандидатам последнего скана, и только когда они есть: пустой список
+                // означает «скан ещё не собран», а не «маркеров нет».
+                if (this.farmTourCandidates.Count > 0
+                    && IsTransientFarmTourStop(this.farmTourStops[i].Label)
+                    && !this.HasFreshFarmTourCandidateAt(stop))
+                {
                     this.farmTourStops.RemoveAt(i);
                     continue;
                 }

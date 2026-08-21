@@ -513,7 +513,20 @@ namespace HeartopiaMod
             this.lastTeleportWasPriorityLocation = false;
             this.farmState = HeartopiaComplete.AutoFarmState.ScanningForNodes;
             this.autoFarmTimer = 0f;
+
+            // Give the drops a moment to be picked up before running off. The farm went straight
+            // back to scanning the instant the node reported collected, and the loot that the
+            // gather had just spilled was left behind.
+            //
+            // ⚠️ THIS IS A HOLD, NOT A CONFIRMATION. Nothing here watches an item actually reach the
+            // bag — it simply stands still for a moment. If pickup turns out to need walking ONTO
+            // the drops rather than standing near them, this window will not be enough and the fix
+            // belongs somewhere else entirely.
+            this.farmLootHoldUntil = Time.unscaledTime + FarmLootHoldSeconds;
         }
+
+        private const float FarmLootHoldSeconds = 1.5f;
+        private float farmLootHoldUntil;
 
         public void OnToastDetected(string msg)
         {

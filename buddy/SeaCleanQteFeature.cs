@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -152,6 +152,39 @@ namespace HeartopiaMod
         // ground. "point" = sub-area spawn point, free in the water column -> the temporary ones
         // that read as floating in the air. Unknown falls back to the hosted offset, which is the
         // conservative one (a dive, like every other stealth hop).
+        private float seaCleanContaminatedScanAt = -1f;
+        private Vector3 seaCleanContaminatedScanOrigin;
+        private float seaCleanContaminatedScanRange;
+        private const float ContaminatedScanFreshSeconds = 3f;
+        private const float ContaminatedScanEdgeMargin = 10f;
+
+        // Is there still something to clean at this spot?
+        //
+        // `known` is the load-bearing half. The index holds only pollutants that are NOT cleaned,
+        // NOT hidden and NOT player-hosted, and it is rebuilt from scratch on every radar pass — so
+        // an absence is meaningful, but only when a pass has actually run recently AND the point is
+        // comfortably inside the range that pass covered. Outside either, we know nothing, and the
+        // caller must keep going rather than assume the node is spent.
+        internal bool IsContaminationStillActionable(Vector3 nodePosition, out bool known)
+        {
+            known = false;
+            if (this.seaCleanContaminatedScanAt < 0f
+                || Time.unscaledTime - this.seaCleanContaminatedScanAt > ContaminatedScanFreshSeconds)
+            {
+                return false;
+            }
+
+            // Margin, so a pollutant sitting right on the scan boundary is never called gone.
+            float margin = Mathf.Max(0f, this.seaCleanContaminatedScanRange - ContaminatedScanEdgeMargin);
+            if ((nodePosition - this.seaCleanContaminatedScanOrigin).sqrMagnitude > margin * margin)
+            {
+                return false;
+            }
+
+            known = true;
+            return this.TryGetContaminatedAnchorClass(nodePosition, out _);
+        }
+
         internal bool TryGetContaminatedAnchorClass(Vector3 nodePosition, out bool hosted)
         {
             hosted = true;
@@ -1101,6 +1134,14 @@ namespace HeartopiaMod
                         AuraMonoPinFree(entityPin);
                     }
                 }
+
+                // Stamped only on a pass that actually enumerated: an empty index means "nothing
+                // actionable is left" ONLY if a scan reached this point. Without the stamp the two
+                // are indistinguishable, and reading a stale or never-run index as "all clean"
+                // would abandon every contamination walk.
+                this.seaCleanContaminatedScanAt = Time.unscaledTime;
+                this.seaCleanContaminatedScanOrigin = origin;
+                this.seaCleanContaminatedScanRange = maxRange;
             }
             finally
             {

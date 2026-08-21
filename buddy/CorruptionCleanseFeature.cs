@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -50,6 +50,7 @@ namespace HeartopiaMod
         private const float CorruptionCleanseConfirmTimeoutSeconds = 10f;   // per candidate area
         private const float CorruptionCleanseTotalTimeoutSeconds = 120f;    // whole cleanse run
         private const float CorruptionCleanseRetriggerBlockSeconds = 300f;  // after timeout/exhaust
+        private const float CorruptionCleanseWalkAbortBlockSeconds = 3f;    // after a walk gave up short
         private const float CorruptionCleanseHoldRadiusMeters = 6f;         // XZ drift before re-teleport
         private const float CorruptionCleanseReteleportMinIntervalSeconds = 2f;
         private const float CorruptionBuffPollIntervalSeconds = 7f;         // event-miss safety net
@@ -976,6 +977,24 @@ namespace HeartopiaMod
 
             this.CorruptionCleanseTeleportTo(center);
             return false;
+        }
+
+        // A cleanse walk ended WITHOUT reaching the coral (the walker skipped the target, ran out of
+        // route, or gave up). Nothing else arms a block on that path: the farm drops straight back
+        // to ScanningForNodes, TryBeginCorruptionCleanse sees the buff still active and starts the
+        // very same walk again — on the SAME frame. Measured at ~60 restarts a second, the distance
+        // frozen at 11,6 m through hundreds of cycles because no walk ever lived long enough to move
+        // the body, and the log ring filled with nothing else.
+        //
+        // A short floor, not the 300 s give-up penalty: the coral is still worth another try, just
+        // not this frame.
+        internal void NoteCorruptionCleanseWalkAborted()
+        {
+            float blockedUntil = Time.unscaledTime + CorruptionCleanseWalkAbortBlockSeconds;
+            if (blockedUntil > this.corruptionCleanseRetriggerBlockedUntil)
+            {
+                this.corruptionCleanseRetriggerBlockedUntil = blockedUntil;
+            }
         }
 
         // The walk reached the coral: resume the cleanse wait where the teleport used to leave it.

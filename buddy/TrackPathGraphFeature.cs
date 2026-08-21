@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace HeartopiaMod
@@ -539,6 +539,41 @@ namespace HeartopiaMod
 
         private readonly System.Collections.Generic.List<TrackGraphSnapCandidate> trackGraphSnapCandidates
             = new System.Collections.Generic.List<TrackGraphSnapCandidate>();
+
+        // The position of the nearest waypoint, for callers that want a real HEIGHT rather than a
+        // node index — some game track points arrive with Position.y = 0 and need one.
+        private bool TryGetNearestTrackGraphNodePosition(Vector3 position, float maxDistance, out Vector3 nodePosition)
+        {
+            nodePosition = Vector3.zero;
+            if (!this.trackGraphReady || this.trackGraphPositions == null)
+            {
+                return false;
+            }
+
+            // Matched on XZ only: a point whose height is missing must not be compared by height.
+            Vector3[] positions = this.trackGraphPositions;
+            float bestSqr = maxDistance * maxDistance;
+            int best = -1;
+            for (int i = 0; i < positions.Length; i++)
+            {
+                float dx = positions[i].x - position.x;
+                float dz = positions[i].z - position.z;
+                float sqr = (dx * dx) + (dz * dz);
+                if (sqr < bestSqr)
+                {
+                    bestSqr = sqr;
+                    best = i;
+                }
+            }
+
+            if (best < 0)
+            {
+                return false;
+            }
+
+            nodePosition = positions[best];
+            return true;
+        }
 
         private bool TryFindNearestTrackGraphNode(Vector3 position, float maxDistance, out int index,
             System.Collections.Generic.HashSet<int> excluded = null)

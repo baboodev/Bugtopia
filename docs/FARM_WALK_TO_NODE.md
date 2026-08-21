@@ -439,5 +439,8 @@ foreach (node in _neighbours)
 | `HeartopiaComplete.Radar.cs` | отсечка в `CreateMarker`, сохранение линии между сканами |
 | `HeartopiaComplete.UguiForagingContent.cs` | тумблер и взаимоисключимость |
 
+**Пошаговый разбор выбора маршрута** — со всеми ветками, порогами и измерениями, которыми они
+получены: `docs/FARM_WALK_ROUTING.md`.
+
 **Логи:** `[FarmWalk]`, `[TrackGraph]`, `[FarmTeleport]` — все безусловные.
 ⚠️ Не прятать за `MasterLog*`: за эту сессию флаг-гейт трижды скрывал причину бага.
