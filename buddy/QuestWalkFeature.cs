@@ -84,7 +84,10 @@ namespace HeartopiaMod
         // Read by IsOutOfBoundsGuardRequested through FarmWalkRunActive — see the note there.
         internal bool questWalkFollowing;
 
-        internal string questWalkStatus = "Idle.";
+        // Null until the walker has something to say — the page turns that into a localized
+        // "Idle." below. A field initializer cannot call this.L(), so the default has to be
+        // produced at the display site or it ships English in every language.
+        internal string questWalkStatus;
 
         private Vector3 questWalkAim;
         private float questWalkRadius = QuestWalkArrivePoint;
@@ -946,7 +949,7 @@ namespace HeartopiaMod
         {
             if (!this.questWalkFollowing)
             {
-                return this.questWalkStatus ?? "Idle.";
+                return this.questWalkStatus ?? this.L("Idle.");
             }
 
             QuestWalkTrack t = this.questWalkTrack;

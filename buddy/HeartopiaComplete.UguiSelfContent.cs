@@ -1595,7 +1595,7 @@ namespace HeartopiaMod
                     JumpTuningFormatValue(this.jumpTuningFallSpeedLimit));
             }
 
-            this.AddMenuNotification("Jump values reset to defaults", new Color(0.45f, 0.85f, 1f));
+            this.AddMenuNotification(this.L("Jump values reset to defaults"), new Color(0.45f, 0.85f, 1f));
             try { this.SaveKeybinds(false); } catch { }
         }
 

@@ -447,7 +447,7 @@ namespace HeartopiaMod
             this.SetGameSpeed(1f);
             this.autoFarmStatus = "Stopped: friend entered town";
             ModLogger.Msg("[StealthBlock] Friend entered the town — surfaced and stopped the farm.");
-            this.AddMenuNotification("Friend joined — farm stopped", new Color(1f, 0.75f, 0.45f));
+            this.AddMenuNotification(this.L("Friend joined — farm stopped"), new Color(1f, 0.75f, 0.45f));
         }
 
         // Releases whose grace expired (or everything, when the feature is switched off).
