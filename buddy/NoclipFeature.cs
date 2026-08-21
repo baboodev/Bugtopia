@@ -80,6 +80,13 @@ namespace HeartopiaMod
         private AuraMonoObjectCache cachedNoclipPlayerObj;
         private AuraMonoObjectCache cachedNoclipPlayerMoveObj;
         private float noclipPlayerResolveRetryAt;
+        private float noclipSelfAnchorWarnAt;
+        private float noclipFootHoldSeedLogAt;
+        private float noclipPassengerProbeRetryAt;
+
+        // How far the p_player_skeleton(Clone) GameObject may sit from the self entity before we
+        // treat it as somebody else's skeleton. Same threshold the auto-fishing cast facing uses.
+        private const float NoclipSelfAnchorAgreementMeters = 2.5f;
 
         private void EnsureNoclipVehicleAuraMono(bool logIfPending = false)
         {
@@ -306,7 +313,11 @@ namespace HeartopiaMod
 
             this.cachedNoclipVehicleComponentObj.TryGet(out IntPtr vehicleComponentObj);
             this.cachedNoclipVehicleControllerObj.TryGet(out IntPtr vehicleControllerObj);
-            if (vehicleComponentObj == IntPtr.Zero && this.IsPlayerDrivingVehicle())
+
+            // Re-resolve only when there is an override to undo (the cache can be dropped by a world
+            // epoch bump mid-flight). This method runs EVERY frame while noclip is off, so probing
+            // the vehicle manager here for a state we never set was per-frame Mono work for nothing.
+            if (vehicleComponentObj == IntPtr.Zero && this.noclipVehicleDrivingOverrideActive)
             {
                 this.TryResolveNoclipVehicleContext(out vehicleComponentObj, out vehicleControllerObj, out _);
             }
@@ -384,8 +395,13 @@ namespace HeartopiaMod
             }
 
             this.ClearNoclipVehicleOverride();
-            GameObject player = GetPlayer();
-            if (player == null)
+
+            // The self Mono player is the world gate here (its cache carries the world epoch): no
+            // resolve means no world yet, or AuraMono is down, or the component died. Dropping the
+            // hold there is deliberate — keeping a position from the previous world would drive us
+            // back to it the moment the drive path returns. Replaces the old GetPlayer() null
+            // check, which gated on a GameObject that may not even be ours.
+            if (!this.TryEnsureNoclipPlayerDriveObjects(out _, out _))
             {
                 this.noclipFootHoldValid = false;
                 return;
@@ -397,11 +413,9 @@ namespace HeartopiaMod
             // collision sweep) and ResetMove() zeroes accumulated gravity, so the per-frame
             // call pins the hover with no Transform.position setter patch. entity.position
             // feeds TrySendSelfTransform, so the server sees it like normal movement.
-            if (!this.noclipFootHoldValid)
+            if (!this.noclipFootHoldValid && !this.TrySeedNoclipFootHold())
             {
-                this.noclipFootHoldPosition = player.transform.position;
-                this.noclipFootHoldRotation = Quaternion.Euler(0f, player.transform.eulerAngles.y, 0f);
-                this.noclipFootHoldValid = true;
+                return;
             }
 
             Vector3 playerMoveDirection = this.BuildNoclipMoveDirection();
@@ -425,6 +439,114 @@ namespace HeartopiaMod
                 this.noclipFootHoldPosition = newPosition;
                 this.StreamNoclipPlayerTransform();
             }
+        }
+
+        // Seeds the foot hover. The anchor MUST come from the same self object the drive writes
+        // to: TryDrivePlayerNoclipTransformMono teleports the real self component to whatever it is
+        // handed, with no collision check, and TrySendSelfTransform then posts it to the server.
+        // The old seed read GetPlayer().transform.position — GameObject.Find("p_player_skeleton
+        // (Clone)"), first ACTIVE match, a name every remote player shares — so a stranger standing
+        // next to us was enough to warp us onto them on the first noclip frame
+        // (memory/player-resolve-and-input-block; identical shape to the 2026-08-12 fishing bug).
+        // The skeleton is now only a cross-check: its yaw is taken only once it proves to be ours.
+        private bool TrySeedNoclipFootHold()
+        {
+            if (!this.TryGetNoclipSelfAnchorPose(out Vector3 selfPos, out Quaternion selfRot, out bool hasSelfRot, out string source))
+            {
+                if (Time.unscaledTime >= this.noclipSelfAnchorWarnAt)
+                {
+                    this.noclipSelfAnchorWarnAt = Time.unscaledTime + 5f;
+                    ModLogger.Warning("[Noclip] foot hover not seeded: no self anchor (self entity position unreadable). "
+                        + "Refusing to seed from p_player_skeleton(Clone) — it can be another player.");
+                }
+
+                return false;
+            }
+
+            GameObject skeleton = GetPlayer();
+            float drift = -1f;
+            bool skeletonIsOurs = false;
+            if (skeleton != null)
+            {
+                Vector3 skeletonPos = skeleton.transform.position;
+                drift = new Vector2(skeletonPos.x - selfPos.x, skeletonPos.z - selfPos.z).magnitude;
+                skeletonIsOurs = drift <= NoclipSelfAnchorAgreementMeters;
+            }
+
+            this.noclipFootHoldPosition = selfPos;
+            if (skeletonIsOurs)
+            {
+                this.noclipFootHoldRotation = Quaternion.Euler(0f, skeleton.transform.eulerAngles.y, 0f);
+            }
+            else if (hasSelfRot)
+            {
+                this.noclipFootHoldRotation = Quaternion.Euler(0f, selfRot.eulerAngles.y, 0f);
+            }
+            else
+            {
+                Camera facingCamera = Camera.main;
+                if (facingCamera != null)
+                {
+                    this.noclipFootHoldRotation = Quaternion.Euler(0f, facingCamera.transform.eulerAngles.y, 0f);
+                }
+            }
+
+            this.noclipFootHoldValid = true;
+
+            if (skeleton != null && !skeletonIsOurs)
+            {
+                // This is the exact condition that used to teleport us onto a stranger, so it goes
+                // to the log every time it is seen (throttled to one line per 5 s).
+                if (Time.unscaledTime >= this.noclipSelfAnchorWarnAt)
+                {
+                    this.noclipSelfAnchorWarnAt = Time.unscaledTime + 5f;
+                    ModLogger.Warning("[Noclip] p_player_skeleton(Clone) is NOT ours: " + drift.ToString("F1")
+                        + "m from the self entity (skeleton " + skeleton.transform.position.ToString("F1")
+                        + ", self " + selfPos.ToString("F1") + " via " + source + "). Seeded the hover from the self entity.");
+                }
+            }
+            else if (Time.unscaledTime >= this.noclipFootHoldSeedLogAt)
+            {
+                this.noclipFootHoldSeedLogAt = Time.unscaledTime + 5f;
+                ModLogger.Msg("[Noclip] foot hover seeded at " + selfPos.ToString("F1") + " via " + source
+                    + (drift >= 0f ? " (skeleton drift " + drift.ToString("F2") + "m)" : " (no skeleton object)"));
+            }
+
+            return true;
+        }
+
+        // Self world pose for the hover, read off BasePlayerComponent.entity — the very object the
+        // drive invokes on, so anchor and write target are one player by construction. Fallback is
+        // the walker's self reader (InteractSystem.player / EntityUtil.GetSelfPlayer), which is also
+        // Mono-side and self-only. No GameObject path: see TrySeedNoclipFootHold.
+        private bool TryGetNoclipSelfAnchorPose(out Vector3 position, out Quaternion rotation, out bool hasRotation, out string source)
+        {
+            position = Vector3.zero;
+            rotation = Quaternion.identity;
+            hasRotation = false;
+            source = "none";
+
+            if (this.TryEnsureNoclipPlayerDriveObjects(out IntPtr playerObj, out _)
+                && playerObj != IntPtr.Zero
+                && this.TryGetMonoObjectMember(playerObj, "entity", out IntPtr entityObj)
+                && entityObj != IntPtr.Zero
+                && this.TryGetMonoVector3Member(entityObj, "position", out position)
+                && IsFiniteVector(position))
+            {
+                hasRotation = this.TryGetMonoQuaternionMember(entityObj, "rotation", out rotation);
+                source = "self-entity";
+                return true;
+            }
+
+            position = Vector3.zero;
+            if (this.TryGetNavMeshSelfPosition(out position, out string walkerSource) && IsFiniteVector(position))
+            {
+                source = walkerSource;
+                return true;
+            }
+
+            position = Vector3.zero;
+            return false;
         }
 
         private void ProcessNoclipVehicleOnLateUpdate()
@@ -656,6 +778,57 @@ namespace HeartopiaMod
             this.ApplyNoclipVehicleFacing(vehicleComponentObj, anchorPosition, faceRot, flatDir);
         }
 
+        // Resolves (and caches) the self BasePlayerComponent plus its PlayerMoveComponent — the
+        // pair every foot-noclip write goes through, and the pair the hover seed reads its anchor
+        // from, so the two can never end up on different players. TryGetAuraMonoLocalPlayerObject
+        // walks Character.character.Player, which is genuinely self; the cache carries the world
+        // epoch, so it fails closed across a world change.
+        private bool TryEnsureNoclipPlayerDriveObjects(out IntPtr playerObj, out IntPtr moveObj)
+        {
+            playerObj = IntPtr.Zero;
+            moveObj = IntPtr.Zero;
+
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            if (this.cachedNoclipPlayerObj.TryGet(out playerObj)
+                && playerObj != IntPtr.Zero
+                && this.cachedNoclipPlayerMoveObj.TryGet(out moveObj)
+                && moveObj != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            playerObj = IntPtr.Zero;
+            moveObj = IntPtr.Zero;
+            if (Time.unscaledTime < this.noclipPlayerResolveRetryAt)
+            {
+                return false;
+            }
+
+            if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj)
+                || playerObj == IntPtr.Zero
+                || !this.TryGetBunnyHopMonoMoveComponent(playerObj, out moveObj)
+                || moveObj == IntPtr.Zero)
+            {
+                // Failure throttle: don't re-walk the character/player members every frame
+                // while the world is loading.
+                this.noclipPlayerResolveRetryAt = Time.unscaledTime + 1f;
+                playerObj = IntPtr.Zero;
+                moveObj = IntPtr.Zero;
+                return false;
+            }
+
+            this.cachedNoclipPlayerObj.Set(playerObj);
+            this.cachedNoclipPlayerMoveObj.Set(moveObj);
+            return true;
+        }
+
         // Drives the self player's position AND facing through the game's OWN embedded-Mono move
         // component (image XDTLevelAndEntity, invisible to the IL2CPP .text surface). Ladder:
         // PlayerMoveComponent.SetPositionAndRotation(pos, rot, worldSpace) →
@@ -667,37 +840,9 @@ namespace HeartopiaMod
         // Replaces the Transform.position/rotation setter prefixes (anti-cheat surface #4).
         private unsafe bool TryDrivePlayerNoclipTransformMono(Vector3 pos, Quaternion faceRot, bool hasFlatDir, Vector3 flatDir)
         {
-            if (!this.EnsureAuraMonoApiReady()
-                || !this.AttachAuraMonoThread()
-                || auraMonoRuntimeInvoke == null
-                || auraMonoObjectGetClass == null)
+            if (!this.TryEnsureNoclipPlayerDriveObjects(out IntPtr playerObj, out IntPtr moveObj))
             {
                 return false;
-            }
-
-            if (!this.cachedNoclipPlayerObj.TryGet(out IntPtr playerObj)
-                || playerObj == IntPtr.Zero
-                || !this.cachedNoclipPlayerMoveObj.TryGet(out IntPtr moveObj)
-                || moveObj == IntPtr.Zero)
-            {
-                if (Time.unscaledTime < this.noclipPlayerResolveRetryAt)
-                {
-                    return false;
-                }
-
-                if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj)
-                    || playerObj == IntPtr.Zero
-                    || !this.TryGetBunnyHopMonoMoveComponent(playerObj, out moveObj)
-                    || moveObj == IntPtr.Zero)
-                {
-                    // Failure throttle: don't re-walk the character/player members every frame
-                    // while the world is loading.
-                    this.noclipPlayerResolveRetryAt = Time.unscaledTime + 1f;
-                    return false;
-                }
-
-                this.cachedNoclipPlayerObj.Set(playerObj);
-                this.cachedNoclipPlayerMoveObj.Set(moveObj);
             }
 
             IntPtr moveClass = auraMonoObjectGetClass(moveObj);
@@ -958,15 +1103,20 @@ namespace HeartopiaMod
             vehicleControllerObj = IntPtr.Zero;
             vehiclePosition = NoclipFeature.OverrideVehicleTarget;
 
-            if (!this.IsPlayerDrivingVehicle())
-            {
-                return false;
-            }
-
+            // No IsPlayerDrivingVehicle() pre-gate: the two resolves below ARE the check, and the
+            // gate only duplicated the driver invoke every frame.
             vehicleComponentObj = this.TryGetSelfEntityVehicleComponentMono();
-            if (vehicleComponentObj == IntPtr.Zero)
+            if (vehicleComponentObj == IntPtr.Zero && Time.unscaledTime >= this.noclipPassengerProbeRetryAt)
             {
                 vehicleComponentObj = this.TryGetSelfPassengerVehicleComponentMono();
+                if (vehicleComponentObj == IntPtr.Zero)
+                {
+                    // On foot this whole method runs every frame while noclip is on, and the
+                    // passenger probe costs a self-netId resolve plus two invokes. Back off a
+                    // quarter second between misses; boarding is still noticed in <=250 ms, and a
+                    // hit is never throttled, so an actual passenger ride resolves every frame.
+                    this.noclipPassengerProbeRetryAt = Time.unscaledTime + 0.25f;
+                }
             }
 
             if (vehicleComponentObj == IntPtr.Zero)
@@ -979,6 +1129,11 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Mono only. The old fallback asked whether GetPlayer().transform had a parent, but that
+        // GameObject is GameObject.Find("p_player_skeleton(Clone)") and remote players share the
+        // name — a stranger sitting in a vehicle read as "we are driving", which pushed teleports
+        // down the vehicle-warp path and made them fail with "vehicle warp unavailable".
+        // The passenger component is checked too, so dropping the fallback loses no real case.
         private bool IsPlayerDrivingVehicle()
         {
             try
@@ -988,13 +1143,13 @@ namespace HeartopiaMod
                     return true;
                 }
 
+                return this.TryGetSelfPassengerVehicleComponentMono() != IntPtr.Zero;
             }
             catch
             {
             }
 
-            GameObject player = GetPlayer();
-            return player != null && player.transform.parent != null;
+            return false;
         }
 
         private unsafe IntPtr TryGetSelfEntityVehicleComponentMono()
