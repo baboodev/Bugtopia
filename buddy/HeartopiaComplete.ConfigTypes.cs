@@ -214,6 +214,7 @@ namespace HeartopiaMod
             public bool analogMoveBridgeEnabled;
             public bool skipShowOffAnimations;
             public bool emoteUnlockEnabled;
+            public bool friendInteractUnlockEnabled;
             public bool foragingAnimEnabled;
             public bool skipCraftDyeAnimations;
             public bool autoLearnRecipes;

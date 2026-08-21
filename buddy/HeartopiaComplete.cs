@@ -787,6 +787,7 @@ namespace HeartopiaMod
             // shell never opened). Gated on questAssistantWindowVisible ALONE — its IMGUI twin has
             // no menu-state suppression to replicate.
             Breadcrumbs.Phase("ou.uguiquest");
+            this.ProcessFriendInteractUnlockOnUpdate();
             this.ProcessUguiActionPanelOnUpdate();
             this.ProcessUguiQuestAssistantWindowOnUpdate();
             // Theme dirty-consumption + debounced SaveUiTheme flush (HeartopiaComplete.UiKit.cs).

@@ -304,6 +304,7 @@
     <Compile Include="EmoteUnlockFeature.cs" />
     <Compile Include="ActionPanelFeature.cs" />
     <Compile Include="ForagingAnimationFeature.cs" />
+    <Compile Include="FriendInteractUnlockFeature.cs" />
     <Compile Include="GameKeyBindings.cs" />
     <Compile Include="CameraModeHotkeyGuard.cs" />
     <Compile Include="HeartopiaComplete.UguiGameKeysContent.cs" />

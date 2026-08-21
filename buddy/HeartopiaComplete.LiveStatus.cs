@@ -232,6 +232,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Emote Unlock", this.emoteUnlockStatus));
             }
 
+            if (this.friendInteractUnlockEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Duo Unlock", this.friendInteractUnlockStatus));
+            }
+
             if (this.foragingAnimEnabled && this.autoFarmActive)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Foraging Anim", this.foragingAnimStatus));

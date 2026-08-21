@@ -102,6 +102,7 @@ namespace HeartopiaMod
             public GameObject AnalogMoveHint;
             public Toggle SkipShowOffToggle;
             public Toggle EmoteUnlockToggle;
+            public Toggle FriendInteractUnlockToggle;
             public Toggle SkipCraftDyeToggle;
             public Toggle CraftDirectSendToggle;
             public Toggle BlockTutorialsToggle;
@@ -348,6 +349,10 @@ namespace HeartopiaMod
                 this.L("Unlock all emotes (panel + locked ones playable)"), this.emoteUnlockEnabled,
                 new System.Action<bool>(this.OnUguiSelfEmoteUnlockToggled));
 
+            handle.FriendInteractUnlockToggle = this.CreateUguiCheckbox(scrollContent, "FriendInteractUnlockToggle",
+                this.L("Unlock all two-person interactions"), this.friendInteractUnlockEnabled,
+                new System.Action<bool>(this.OnUguiSelfFriendInteractUnlockToggled));
+
             handle.SkipCraftDyeToggle = this.CreateUguiCheckbox(scrollContent, "SkipCraftDyeToggle",
                 this.L("Skip Craft / Dye animations"), this.skipCraftDyeAnimations,
                 new System.Action<bool>(this.OnUguiSelfSkipCraftDyeToggled));
@@ -589,6 +594,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.FriendInteractUnlockToggle != null)
+            {
+                PlaceUguiTopLeft(handle.FriendInteractUnlockToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.SkipCraftDyeToggle != null)
             {
                 PlaceUguiTopLeft(handle.SkipCraftDyeToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -658,6 +669,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AnalogMoveToggle, this.analogMoveBridgeEnabled);
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
                 this.SyncUguiToggleFromField(handle.EmoteUnlockToggle, this.emoteUnlockEnabled);
+                this.SyncUguiToggleFromField(handle.FriendInteractUnlockToggle, this.friendInteractUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
@@ -1104,6 +1116,25 @@ namespace HeartopiaMod
             }
 
             this.emoteUnlockEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Turning it ON patches the table on the next tick; turning it OFF cannot un-patch (the
+        // rows are already rewritten), so it takes effect from the next world load.
+        private void OnUguiSelfFriendInteractUnlockToggled(bool value)
+        {
+            if (value == this.friendInteractUnlockEnabled)
+            {
+                return;
+            }
+
+            this.friendInteractUnlockEnabled = value;
+            this.friendInteractUnlockTried = false;
+            if (!value)
+            {
+                this.friendInteractUnlockStatus = "Off — already-patched rows stay open until the next world load.";
+            }
+
             try { this.SaveKeybinds(false); } catch { }
         }
 
