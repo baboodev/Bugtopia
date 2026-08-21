@@ -41,7 +41,14 @@ public static class ModLogger
     //
     // Allocated on demand: without the `%LocalLow%/Bugtopia/mcp` marker, EnableRing() is never
     // called, the array is never created, and every log call costs one bool test.
-    private const int RingCapacity = 256;
+    // ⚠️ 256 LINES IS TWENTY SECONDS. That is what it held in practice: the farm alone writes three
+    // or four lines a second, and every request to "look at the log" arrived after the interesting
+    // part had already been overwritten — a livelock, a pair of teleports and a whole bubble walk
+    // were each lost that way. A filtered tail can only find what is still in the ring.
+    //
+    // 4096 lines is about five minutes of a chatty run and costs well under a megabyte of strings,
+    // allocated only when the MCP marker file turns the ring on at all.
+    private const int RingCapacity = 4096;
     private static readonly object RingLock = new object();
     private static string[] _ring;
     private static int _ringNext;

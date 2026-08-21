@@ -678,11 +678,17 @@ namespace HeartopiaMod
 
             this.trackGraphSnapCandidates.Sort((a, b) => a.DistanceSqr.CompareTo(b.DistanceSqr));
 
+            // The ground test is for the player's end, on land. See IsTrackGraphSnapWalkable.
+            bool groundChecked = string.Equals(endpointName, "start", System.StringComparison.Ordinal)
+                && !this.farmWalkIsSwimming;
+
             int probes = System.Math.Min(this.trackGraphSnapCandidates.Count, FarmWalkSnapMaxProbes);
             for (int i = 0; i < probes; i++)
             {
                 int candidate = this.trackGraphSnapCandidates[i].Index;
-                if (this.IsFarmWalkLineClear(position, positions[candidate], this.farmWalkMaskPassable))
+                if (this.IsFarmWalkLineClear(position, positions[candidate], this.farmWalkMaskPassable)
+                    && this.IsTrackGraphSnapWalkable(position, positions[candidate], groundChecked,
+                        out _))
                 {
                     index = candidate;
                     if (i > 0)
@@ -699,12 +705,34 @@ namespace HeartopiaMod
                         {
                             this.lastTrackGraphSnapVerdict = verdict;
                             ModLogger.Msg("[FarmWalk] " + endpointName + " snap skipped " + i
-                                + " blocked node(s); took one "
+                                + " node(s)" + (groundChecked ? " the ground could not carry us to" : " blocked")
+                                + "; took one "
                                 + Mathf.Sqrt(this.trackGraphSnapCandidates[i].DistanceSqr).ToString("F1") + "m out.");
                         }
                     }
 
                     return true;
+                }
+            }
+
+            // ⚠️ STARVATION VALVE AGAIN, for the ground test this time. A stricter filter must not
+            // be able to leave the walker with nothing: if no candidate survives it, fall back to
+            // the line-of-sight rule that was here before and say which one answered.
+            if (groundChecked)
+            {
+                for (int i = 0; i < probes; i++)
+                {
+                    int candidate = this.trackGraphSnapCandidates[i].Index;
+                    if (this.IsFarmWalkLineClear(position, positions[candidate], this.farmWalkMaskPassable))
+                    {
+                        index = candidate;
+                        ModLogger.Msg("[FarmWalk] " + endpointName
+                            + " snap: no node the ground can carry us to among the " + probes
+                            + " nearest — falling back to the line-of-sight pick ("
+                            + Mathf.Sqrt(this.trackGraphSnapCandidates[i].DistanceSqr).ToString("F1")
+                            + "m out).");
+                        return true;
+                    }
                 }
             }
 
@@ -717,10 +745,75 @@ namespace HeartopiaMod
             return true;
         }
 
+        // ⚠️ NEAREST IS NOT REACHABLE, AND A LINECAST CANNOT TELL THE DIFFERENCE.
+        //
+        // The snap took whichever node was closest and had a clear Passable line to it. Measured
+        // three times running at (-213, 11.7, -12.4): the closest node, 980 at 7.1 m, sits 4.5 m up
+        // a rise whose ground steps 1.15 m — beyond a stepOffset of 0.15 m, so walking simply cannot
+        // — while node 978, 9.5 m away, is dead level (max step 0.01 m). The walk began with a leg
+        // out of the world it stood in, wedged, and spent five jumps to move one centimetre.
+        //
+        // A ray and a sphere sweep both fly over a rise when the ends differ in height; only the
+        // GROUND answers this. So the accepted candidate now has to be one the ground carries us to.
+        //
+        // Only for the player's end and only on land: the destination end is a resource or a track
+        // point where the last leg is the walker's own problem, and underwater there is no "ground"
+        // to walk along in the first place.
+        private const float TrackGraphSnapGroundStep = 0.5f;    // a slope walking takes in its stride
+        private const float TrackGraphSnapSampleStep = 1.5f;
+
+        private bool IsTrackGraphSnapWalkable(Vector3 from, Vector3 to, bool enabled, out string why)
+        {
+            why = string.Empty;
+            if (!enabled)
+            {
+                return true;
+            }
+
+            if (!this.EnsureFarmWalkSweepResolved() || !this.TryGetFarmWalkSweepController(out IntPtr ctrl))
+            {
+                return true;    // no oracle, no opinion
+            }
+
+            float length = Distance3D(from, to);
+            int steps = Mathf.Clamp(Mathf.CeilToInt(length / TrackGraphSnapSampleStep), 1, 24);
+            float previousY = 0f;
+            bool havePrevious = false;
+
+            for (int i = 0; i <= steps; i++)
+            {
+                Vector3 at = Vector3.Lerp(from, to, (float)i / steps);
+                if (!this.TryFindFarmWalkSurface(ctrl, at, out float surfaceY))
+                {
+                    continue;   // open air or water — reported elsewhere, never a verdict here
+                }
+
+                if (havePrevious && surfaceY - previousY > TrackGraphSnapGroundStep)
+                {
+                    why = "the ground steps up " + (surfaceY - previousY).ToString("F2") + "m";
+                    return false;
+                }
+
+                previousY = surfaceY;
+                havePrevious = true;
+            }
+
+            return true;
+        }
+
         // A* over the snapshot, same shape as the game's AStar.GetPath: corner list from start node
         // to end node. The caller appends the true target as the final corner (GetPath2 does
         // exactly that) so the walk finishes at the resource, not at the last waypoint.
-        private bool TryComputeTrackGraphPath(int startIndex, int endIndex, System.Collections.Generic.List<Vector3> corners)
+        // ⚠️ A* NEVER SAW THE BAN LIST. It walks trackGraphNeighbours and nothing else, so a banned
+        // waypoint went on appearing in the middle of every route it produced — the exclusions only
+        // ever filtered the SNAP, i.e. which node a route starts and ends at.
+        //
+        // That made banning an interior waypoint a no-op, and it showed: the leg audit banned the
+        // node at a blocked corner, re-ran the search, got the same corner back, and banned the
+        // NEXT-nearest node for the same leg. Two waypoints gone, the route unchanged.
+        private bool TryComputeTrackGraphPath(int startIndex, int endIndex,
+            System.Collections.Generic.List<Vector3> corners,
+            System.Collections.Generic.HashSet<int> excluded = null)
         {
             corners.Clear();
             if (!this.trackGraphReady || startIndex < 0 || endIndex < 0)
@@ -792,8 +885,11 @@ namespace HeartopiaMod
                 for (int n = 0; n < links.Length; n++)
                 {
                     int next = links[n];
-                    if (closed[next])
+                    if (closed[next] || (excluded != null && next != endIndex && excluded.Contains(next)))
                     {
+                        // endIndex is exempt: it is where the caller asked to go, and refusing to
+                        // arrive because the destination node is banned would fail the whole route
+                        // rather than route around anything.
                         continue;
                     }
 

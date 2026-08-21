@@ -26,8 +26,19 @@ namespace HeartopiaMod
         internal const float FarmWalkVehicleDismountCeiling = 20f;
         internal float farmWalkVehicleDismountDistance = 10f;
 
+        // Set when the vehicle was left because it could not get past something, cleared as soon as
+        // we are back in one (or the walk ends). See TryRemountFarmWalkVehicle.
+        private bool farmWalkVehicleLeftForObstacle;
+        private Vector3 farmWalkVehicleLeftAt;
+
+        // How far past the obstacle counts as "past it". Short: the point is that the wedge is
+        // behind us, not that we have walked the rest of the way.
+        private const float FarmWalkVehicleRemountClearance = 8f;
+
         // Освобождение в транспорте: назад, потом вбок, по 5 м каждое.
-        private const float FarmWalkVehicleBackOffDistance = 5f;
+        // 2 м, не 5: машина откатывается ровно настолько, чтобы освободить нос для разворота.
+        // Пять метров — это уже манёвр, который сам может во что-нибудь упереться (правило 3.2).
+        private const float FarmWalkVehicleBackOffDistance = 2f;
         private const float FarmWalkVehicleSideStepDistance = 5f;
 
         // Два круга «назад + вбок». Не помогло — слезаем и переходим на пешую лестницу.
@@ -293,6 +304,12 @@ namespace HeartopiaMod
                     + " reverse-and-sidestep rounds did not clear it — getting out and continuing on foot.");
                 this.TryFarmWalkDismount("stuck in the vehicle");
                 this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
+
+                // Remember WHY we got out. Rule 3.3: the vehicle was abandoned for one obstacle,
+                // not because the haul was over — so once the obstacle is behind us and there is
+                // still a vehicle's worth of distance left, we get back in.
+                this.farmWalkVehicleLeftForObstacle = true;
+                this.TryGetNavMeshSelfPosition(out this.farmWalkVehicleLeftAt, out _);
                 return;
             }
 
@@ -365,6 +382,56 @@ namespace HeartopiaMod
                 + Distance3D(selfPos, areaPos).ToString("F0") + "m"
                 + (this.IsFarmWalkRidingVehicle() ? " by vehicle" : " on foot") + ".");
             return true;
+        }
+
+        // Rule 3.3: back in the vehicle once the obstacle is behind us.
+        //
+        // The threshold is the SAME one that decided to mount in the first place
+        // (farmWalkVehicleMinDistance): if the remaining haul would have been worth a vehicle at the
+        // start, it is worth one now. Anything shorter and the summon round-trip costs more than it
+        // saves — which is exactly the judgement that constant already encodes.
+        internal void TryRemountFarmWalkVehicle(Vector3 selfPos)
+        {
+            if (!this.farmWalkVehicleLeftForObstacle)
+            {
+                return;
+            }
+
+            // Still fighting the same obstacle, or already riding: nothing to do.
+            if (this.farmWalkUnstickPhase != FarmWalkUnstickIdle || this.IsFarmWalkRidingVehicle())
+            {
+                return;
+            }
+
+            // Far enough from where we got out that the wedge is genuinely behind us. Without this
+            // the summon fires while the player is still against the obstacle and the vehicle wedges
+            // on it again immediately.
+            if (Distance3D(selfPos, this.farmWalkVehicleLeftAt) < FarmWalkVehicleRemountClearance)
+            {
+                return;
+            }
+
+            if (!this.ShouldFarmWalkSummonVehicle(selfPos, this.farmWalkTarget))
+            {
+                // Either the rest is too short to be worth a vehicle, or we are swimming, or the
+                // summon is on cooldown. The first of those is permanent for this walk; the others
+                // resolve on their own, so the flag stays set and this runs again.
+                if (Distance3D(selfPos, this.farmWalkTarget) < this.farmWalkVehicleMinDistance)
+                {
+                    this.farmWalkVehicleLeftForObstacle = false;
+                    ModLogger.Msg("[FarmVehicle] obstacle cleared, but only "
+                        + Distance3D(selfPos, this.farmWalkTarget).ToString("F0")
+                        + "m left — walking the rest.");
+                }
+
+                return;
+            }
+
+            this.farmWalkVehicleLeftForObstacle = false;
+            ModLogger.Msg("[FarmVehicle] obstacle cleared with "
+                + Distance3D(selfPos, this.farmWalkTarget).ToString("F0")
+                + "m still to go — getting back in.");
+            this.TryFarmWalkSummonAndMount();
         }
 
         // Ticked from the walk loop: get out BEFORE the destination, not on top of it. Applies to

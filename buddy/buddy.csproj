@@ -329,6 +329,7 @@
     <Compile Include="NavMeshWalkFeature.cs" />
     <Compile Include="TrackPathGraphFeature.cs" />
     <Compile Include="FarmWalkFeature.cs" />
+    <Compile Include="FarmWalkGeometryFeature.cs" />
     <Compile Include="QuestWalkFeature.cs" />
     <Compile Include="FarmWalkTrackCompareFeature.cs" />
     <Compile Include="FarmWalkRadarFocusFeature.cs" />

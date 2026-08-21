@@ -93,6 +93,10 @@ namespace HeartopiaMod
         private int questWalkEpoch = -1;
         private bool questWalkWaitingForWorld;
         private float questWalkTrackLostAt;
+
+        // Set once the game's route has been judged unwalkable for this destination. The injection
+        // re-runs on every path update, so without this the rejected route returns immediately.
+        private bool questWalkGameRouteRejected;
         private float questWalkNextStartAt;
         private float questWalkNextRetargetAt;
         private Vector3 questWalkCandidate;
@@ -184,6 +188,7 @@ namespace HeartopiaMod
             this.questWalkParked = false;
             this.questWalkNextStartAt = 0f;
             this.questWalkTrackLostAt = 0f;
+            this.questWalkGameRouteRejected = false;
             this.questWalkErrorCount = 0;
             this.questWalkEpoch = AuraMonoWorldEpoch;
 
@@ -516,6 +521,19 @@ namespace HeartopiaMod
                 return -1;
             }
 
+            // ⚠️ ONCE REJECTED, STAY REJECTED — AND THAT MEANS NOT INJECTING AT ALL.
+            //
+            // The latch only guarded the AUDIT, not the injection: the corners were overwritten with
+            // the game's route first and judged afterwards. So the very next path update — and the
+            // game updates its route every few seconds — put the rejected straight line back over
+            // the route we had just built to go around. The log said "routed around it: 5 corners of
+            // our own" while the character walked the straight one, because by then it was walking
+            // the straight one again.
+            if (this.questWalkGameRouteRejected)
+            {
+                return -1;
+            }
+
             int start = 1;
             if (this.TryGetLocalPlayerPosition(out Vector3 me))
             {
@@ -550,8 +568,80 @@ namespace HeartopiaMod
                 this.farmWalkRouteRemainingCache = remaining;
             }
 
+            // ⚠️ THE GAME'S ROUTE IS NOT CHECKED BY ANYONE EITHER.
+            //
+            // It arrives whole and bypasses TryBuildFarmWalkRoute, so the leg passability test added
+            // there never sees it — and the game's route has the same defect. Audited 2026-08-21 on
+            // a live quest walk:
+            //     leg 0: 13.2m  WALL: the ground steps up 2.13m at 2.4m along  sweep=BLOCKED
+            //            | rises -0.4m over the leg
+            // 2.13 m against a jump that peaks at 1.42 m, on a leg that DESCENDS overall — so not a
+            // slope read as a wall, but real geometry across the path.
+            //
+            // There is no waypoint to ban here (these are the game's spline points, not graph nodes),
+            // so the remedy is different: drop the game's route and build our own, which does know
+            // how to route around a banned node. The latch matters — the injection is re-run every
+            // time the game's path updates, and without it the rejected route would come straight
+            // back on the next tick.
+            if (!this.questWalkGameRouteRejected
+                && this.TryGetLocalPlayerPosition(out Vector3 auditFrom)
+                && this.FindFirstImpassableFarmWalkLeg(auditFrom, this.farmWalkCorners, out string legDetail,
+                    includeFirstLeg: true) >= 0)
+            {
+                this.questWalkGameRouteRejected = true;
+                ModLogger.Msg("[QuestWalk] the game's route is not walkable — " + legDetail
+                    + ". Building our own instead.");
+
+                if (this.TryBuildFarmWalkRoute(auditFrom, this.questWalkAim))
+                {
+                    float rebased = this.ComputeFarmWalkRouteRemaining(auditFrom);
+                    this.farmWalkBestDistance = rebased;
+                    this.farmWalkRouteRemainingCache = rebased;
+                    ModLogger.Msg("[QuestWalk] routed around it: " + this.farmWalkCorners.Count
+                        + " corners of our own.");
+                    return this.farmWalkCorners.Count;
+                }
+
+                // Nothing better on offer. Keep the game's route — a blocked route the escape ladder
+                // can chew on beats no route at all — and say so rather than failing quietly.
+                ModLogger.Msg("[QuestWalk] no route of our own either — keeping the game's blocked one.");
+                this.InjectQuestWalkRouteCorners();
+            }
+
             ModLogger.Msg("[QuestWalk] injected the game's route: " + this.farmWalkCorners.Count + " corners.");
             return this.farmWalkCorners.Count;
+        }
+
+        // The corner-filling half of the injection on its own, so the fallback can put the game's
+        // route back after TryBuildFarmWalkRoute has overwritten the corner list and failed.
+        private void InjectQuestWalkRouteCorners()
+        {
+            int start = 1;
+            if (this.TryGetLocalPlayerPosition(out Vector3 me))
+            {
+                int nearest = 0;
+                float best = float.MaxValue;
+                for (int i = 0; i < this.questWalkGamePath.Count; i++)
+                {
+                    float d = (this.questWalkGamePath[i] - me).sqrMagnitude;
+                    if (d < best)
+                    {
+                        best = d;
+                        nearest = i;
+                    }
+                }
+
+                start = nearest + 1;
+            }
+
+            this.farmWalkCorners.Clear();
+            for (int i = start; i < this.questWalkGamePath.Count; i++)
+            {
+                this.farmWalkCorners.Add(this.questWalkGamePath[i]);
+            }
+
+            this.farmWalkCorners.Add(this.questWalkAim);
+            this.farmWalkCornerIndex = 0;
         }
 
         // A "collect" quest tracks a SPECIFIC nearby entity, and the game re-picks the nearest as

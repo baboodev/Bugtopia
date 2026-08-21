@@ -123,7 +123,12 @@ namespace HeartopiaMod
 
         private void RefreshFarmTourCostModel()
         {
-            this.farmTourVerticalCost = this.TryGetFarmWalkSwimLocomotion(out _);
+            // ⚠️ TWO SOURCES, EITHER WILL DO. Resolving the swim locomotion is a Mono call that can
+            // come back empty for a frame — and when it did, the whole underwater rule below
+            // silently reverted to "take the head of the plan", which is how the farm ended up
+            // swimming to a stop 38 m away while nearer ones sat unvisited. The walker's own
+            // swimming flag is the cheap second opinion and is right whenever it is set.
+            this.farmTourVerticalCost = this.farmWalkIsSwimming || this.TryGetFarmWalkSwimLocomotion(out _);
         }
 
         // Откуда меряем маршрут. Камера — не игрок: под водой она висит позади и выше, и с 3-D
@@ -551,6 +556,39 @@ namespace HeartopiaMod
                 }
             }
 
+            // Walking pays for distance; a teleport does not. So only walk mode measures routes —
+            // and only over the few nearest, ordered by the straight line that is already known.
+            if (this.farmWalkToNodeEnabled)
+            {
+                // ⚠️ THE NEAREST FOUR, NOT THE FIRST FOUR. This used to take the tour head plus
+                // stops 0, 1, 2 IN PLAN ORDER and only then sort them by distance — so on land,
+                // where the head is index 0, the "shortlist of the nearest" was simply the first
+                // four stops of the planned circuit. After nearest-neighbour and 2-opt that order
+                // is a route, not a distance ranking, and its fourth entry can be across the map.
+                // The ranking then chose the best of four arbitrary stops and called it nearest.
+                this.farmRouteShortlist.Clear();
+                for (int i = 0; i < this.farmTourStops.Count; i++)
+                {
+                    this.farmRouteShortlist.Add(i);
+                }
+
+                this.farmRouteShortlist.Sort((x, y) =>
+                    FarmTourDistance(origin, this.farmTourStops[x].Position)
+                        .CompareTo(FarmTourDistance(origin, this.farmTourStops[y].Position)));
+
+                if (this.farmRouteShortlist.Count > FarmRouteRankMaxMeasured)
+                {
+                    this.farmRouteShortlist.RemoveRange(FarmRouteRankMaxMeasured,
+                        this.farmRouteShortlist.Count - FarmRouteRankMaxMeasured);
+                }
+
+                int byRoute = this.PickFarmTourStopByRoute(origin, this.farmRouteShortlist);
+                if (byRoute >= 0)
+                {
+                    pick = byRoute;
+                }
+            }
+
             position = this.farmTourStops[pick].Position;
             label = this.farmTourStops[pick].Label;
             return true;
@@ -632,6 +670,297 @@ namespace HeartopiaMod
                     }
                 }
             }
+        }
+
+        // ⚠️ UNDERWATER, "NEAREST" HAS TO BE RE-ASKED WHILE SWIMMING, NOT ONLY AT THE START.
+        //
+        // The head of the tour is chosen when a walk begins and then left alone on purpose — a
+        // target that moves under the walker is what made routes thrash. On land that is right: the
+        // walker follows corners and passes nothing it could have taken instead.
+        //
+        // A swim is different. It is a straight line through open water, thirty or forty metres of
+        // it, and the plan was made before any of it happened — so the player sails past resources
+        // that were not the nearest when they set off and are now five metres away.
+        //
+        // The switch is deliberately hard to trigger: a candidate has to be BOTH a good few metres
+        // nearer AND a fraction of what is left, and only while there is real distance still to
+        // swim. Anything looser turns a swim into a tour of second thoughts.
+        private const float FarmSwimRetargetInterval = 2f;
+        private const float FarmSwimRetargetMinRemaining = 12f;
+        private const float FarmSwimRetargetMinGain = 6f;
+        private const float FarmSwimRetargetFraction = 0.6f;
+        private float farmSwimRetargetNextAt;
+
+        private bool TryRetargetNearerSwimNode(Vector3 selfPos, float now)
+        {
+            if (!this.farmWalkIsSwimming
+                || !this.farmWalkLabel.StartsWith("node:", StringComparison.Ordinal)
+                || this.farmWalkUnstickPhase != FarmWalkUnstickIdle
+                || this.farmTourStops.Count == 0)
+            {
+                return false;
+            }
+
+            if (now < this.farmSwimRetargetNextAt)
+            {
+                return false;
+            }
+
+            this.farmSwimRetargetNextAt = now + FarmSwimRetargetInterval;
+
+            float remaining = Distance3D(selfPos, this.farmWalkTrueTarget);
+            if (remaining < FarmSwimRetargetMinRemaining)
+            {
+                return false;   // close enough that switching would just waste the approach
+            }
+
+            float bestDistance = float.MaxValue;
+            Vector3 best = Vector3.zero;
+            bool found = false;
+            for (int i = 0; i < this.farmTourStops.Count; i++)
+            {
+                Vector3 stop = this.farmTourStops[i].Position;
+                if (IsSameFarmTourStop(stop, this.farmWalkTrueTarget))
+                {
+                    continue;
+                }
+
+                float d = Distance3D(selfPos, stop);
+                if (d < bestDistance)
+                {
+                    bestDistance = d;
+                    best = stop;
+                    found = true;
+                }
+            }
+
+            if (!found
+                || bestDistance > remaining * FarmSwimRetargetFraction
+                || remaining - bestDistance < FarmSwimRetargetMinGain)
+            {
+                return false;
+            }
+
+            ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": passing a nearer node — "
+                + bestDistance.ToString("F1") + "m away against " + remaining.ToString("F1")
+                + "m still to swim; taking that one instead.");
+
+            // Not stamped as visited: the target we are leaving is perfectly good, it is simply
+            // further. It goes back into the plan and gets collected on the way through.
+            this.farmWalkSkipToScan = true;
+            this.FinishFarmWalk("a nearer node is " + bestDistance.ToString("F1")
+                + "m away — switching to it", false);
+            _ = best;
+            return true;
+        }
+
+        // ⚠️ NEAREST BY ROUTE, NOT BY COORDINATES.
+        //
+        // Every pick in this file ranked candidates with FarmTourDistance — a straight line between
+        // two points. That is the right metric for a teleport, which costs the same from anywhere,
+        // and the wrong one for walking: a node ten metres away on the far side of a rock loses to
+        // one twenty metres away across open ground, and the straight line cannot tell them apart.
+        // It also cannot tell that a candidate is unreachable at all, which is how the farm kept
+        // selecting nodes whose route build then failed.
+        //
+        // So the shortlist is still made by straight line — it is free, and a candidate cannot be
+        // near by route while being far in space — but the WINNER is chosen by measuring the route
+        // to each of the few nearest. Bounded to FarmRouteRankCandidates: this runs on every scan,
+        // and measuring forty nodes to pick one would cost more than the walk saves.
+        // ⚠️ NOT A SHORTLIST ANY MORE — A BOUND.
+        //
+        // This was 4 "to keep the cost sane", a number picked without measuring the cost and with no
+        // reason to believe the fifth candidate could not win. It can: on land the fifth-nearest is
+        // routinely the one across an open field while the first four sit behind a fence.
+        //
+        // A route is never SHORTER than its straight line. So once the best measured route is no
+        // longer than the straight-line distance to the next candidate, nothing further can beat it
+        // — every remaining candidate is already further away in a straight line than the winner is
+        // by road. Candidates are walked in straight-line order, so that test ends the search
+        // correctly rather than arbitrarily, and usually after two or three measurements.
+        //
+        // The cap that remains is a backstop against a pathological field, not the policy.
+        private const int FarmRouteRankMaxMeasured = 12;
+        private readonly List<Vector3> farmRouteMeasureCorners = new List<Vector3>();
+        private readonly List<int> farmRouteShortlist = new List<int>();
+
+        // Length of the route the walker would actually drive, or false when there is none.
+        //
+        // ⚠️ MEASURE WHAT THE BUILDER BUILDS. An earlier version snapped with the cheap nearest-node
+        // rule and summed the RAW A* output — which is not a route the walk would ever drive. The
+        // builder snaps to the nearest REACHABLE node and then SHORTCUTS the path, and shortcutting
+        // is exactly what removes the graph's zig-zag. Skipping both overestimated every candidate,
+        // unevenly, and produced numbers that were not comparable to each other:
+        //     34m away costs 266m to travel   /   35m away costing 261m
+        // Seven times the straight line, for a swim the walker would have taken in one leg.
+        //
+        // The start snap is resolved ONCE per pick and passed in: every candidate starts from the
+        // same place, so paying for it four times bought nothing but log noise.
+        private bool TryMeasureFarmRouteLength(Vector3 from, int startIndex, Vector3 to, out float length)
+        {
+            length = 0f;
+
+            // Underwater a clear line is the route — no graph involved, so its length is the line.
+            if (this.farmWalkIsSwimming && this.IsFarmWalkDirectSwimClear(from, to, out _))
+            {
+                length = Distance3D(from, to);
+                return true;
+            }
+
+            if (startIndex < 0
+                || !this.TryFindNearestTrackGraphNode(to, FarmWalkGraphSnapRadius, out int endIndex,
+                    this.farmWalkExcludedEndNodes)
+                || !this.TryComputeTrackGraphPath(startIndex, endIndex, this.farmRouteMeasureCorners,
+                    this.farmWalkExcludedNodes))
+            {
+                return false;
+            }
+
+            // The same two steps the builder takes before committing: the target becomes the final
+            // corner, then the path is straightened.
+            this.farmRouteMeasureCorners.Add(to);
+            this.ShortcutFarmWalkRoute(from, this.farmRouteMeasureCorners);
+
+            Vector3 previous = from;
+            for (int i = 0; i < this.farmRouteMeasureCorners.Count; i++)
+            {
+                length += Distance3D(previous, this.farmRouteMeasureCorners[i]);
+                previous = this.farmRouteMeasureCorners[i];
+            }
+
+            return true;
+        }
+
+        // The shortlist's best by measured route. Returns the index into farmTourStops, or -1 when
+        // nothing could be measured — in which case the caller keeps its straight-line pick rather
+        // than refusing to walk.
+        private int PickFarmTourStopByRoute(Vector3 origin, List<int> shortlist)
+        {
+            int best = -1;
+            float bestLength = float.MaxValue;
+            float bestStraight = float.MaxValue;
+
+            // One reachable snap for the whole pick — the builder's rule, paid for once.
+            if (!this.TryFindReachableTrackGraphNode(origin, FarmWalkGraphSnapRadius,
+                    out int startIndex, this.farmWalkExcludedNodes, "start"))
+            {
+                startIndex = -1;
+            }
+
+            // ⚠️ AN UNMEASURABLE CANDIDATE IS NOT AN UNREACHABLE ONE.
+            //
+            // This used to DROP any candidate whose route would not measure. Underwater that is most
+            // of them: the direct-swim check is capped at 50 m, past which it falls to a graph of 86
+            // nodes that frequently has no path — and a near node whose straight line happens to be
+            // blocked lands in the same bucket. The farm then picked the far node that happened to
+            // measure, and called it "nearest by route":
+            //     taking a stop 48m away (48m to walk) over one 30m away
+            //     taking a stop 31m away (48m to walk) over one 13m away
+            // Thirteen metres discarded for forty-eight. That is not a routing decision, it is a
+            // measurement gap wearing one.
+            //
+            // So an unmeasured candidate keeps its place, ranked by straight line with a penalty —
+            // it may need to go round, and that costs something, but not its whole candidacy. If it
+            // really is unreachable the walk fails and rule 0.6 parks it, which is exactly the
+            // mechanism that exists for that.
+            // ⚠️ A ROUTE SEVERAL TIMES THE STRAIGHT LINE IS NOT A ROUTE, IT IS A SPARSE GRAPH.
+            //
+            // Measured 2026-08-22 underwater: a stop 34 m away "costs 266 m to travel", another 35 m
+            // away "261 m". The walker will never drive those — underwater it swims the straight
+            // line and lets the escape ladder deal with whatever is in the way; the 260 m is what
+            // A* makes of 86 nodes strung 20-30 m apart. Believing it hands the pick to whichever
+            // far node happens to sit near a waypoint.
+            //
+            // So an implausible measurement is treated as no measurement at all.
+            const float implausibleFactor = 3f;
+
+            // ⚠️ AND A MARGIN, or the winner is decided by noise. The same run picked a stop 48 m
+            // away over one 39 m away to save TWO metres of route — inside the error of a ranking
+            // that snaps to the nearest node rather than the reachable one. Overriding "nearest"
+            // has to be worth something.
+            const float routeMarginFactor = 0.8f;
+            const float routeMarginMinimum = 5f;
+
+            const float unmeasuredPenalty = 1.5f;
+            float runnerUpLength = float.MaxValue;
+            bool bestMeasured = false;
+
+            int measuredCount = 0;
+            for (int i = 0; i < shortlist.Count; i++)
+            {
+                Vector3 stop = this.farmTourStops[shortlist[i]].Position;
+                float straight = Distance3D(origin, stop);
+
+                // The bound: nothing from here on can beat what we already have, because a route is
+                // never shorter than its straight line and the list is in straight-line order.
+                if (best >= 0 && bestLength <= straight)
+                {
+                    break;
+                }
+
+                measuredCount++;
+                bool measured = this.TryMeasureFarmRouteLength(origin, startIndex, stop, out float routeLength);
+                if (measured && routeLength > straight * implausibleFactor)
+                {
+                    measured = false;
+                }
+
+                if (!measured)
+                {
+                    routeLength = straight * unmeasuredPenalty;
+                }
+
+                if (i == 0)
+                {
+                    runnerUpLength = routeLength;
+                }
+
+                if (i == 0 || routeLength < bestLength)
+                {
+                    bestLength = routeLength;
+                    bestStraight = straight;
+                    bestMeasured = measured;
+                    best = shortlist[i];
+                }
+            }
+
+            // The nearest keeps the pick unless the winner is better by a real margin.
+            if (best >= 0 && best != shortlist[0]
+                && bestLength > runnerUpLength * routeMarginFactor - routeMarginMinimum)
+            {
+                best = shortlist[0];
+            }
+
+            if (best >= 0 && best != shortlist[0])
+            {
+                // Both sides of the comparison, or the line is unreadable: the version that printed
+                // only the winner's route against the runner-up's STRAIGHT distance read as nonsense
+                // ("31m away, 48m to walk, beat one 13m away") and hid the real cause for a day.
+                ModLogger.Msg("[FarmTour] nearest by route, not by line: "
+                    + bestStraight.ToString("F0") + "m away costs " + bestLength.ToString("F0")
+                    + "m to travel" + (bestMeasured ? string.Empty : " (estimated)")
+                    + ", against " + Distance3D(origin, this.farmTourStops[shortlist[0]].Position)
+                        .ToString("F0") + "m away costing " + runnerUpLength.ToString("F0")
+                    + "m (" + measuredCount + " of " + shortlist.Count + " measured).");
+            }
+
+            return best;
+        }
+
+        // Is there anything else worth going to? Rule 0.2: a teleport is allowed only when the walk
+        // has spent its budget AND this is the only target — if the plan still holds another stop,
+        // switching to it is both cheaper and quieter than a warp.
+        private bool HasAnotherFarmTourStop(Vector3 exceptThis)
+        {
+            for (int i = 0; i < this.farmTourStops.Count; i++)
+            {
+                if (!IsSameFarmTourStop(this.farmTourStops[i].Position, exceptThis))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         internal void ResetFarmTour()

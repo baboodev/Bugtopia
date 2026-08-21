@@ -347,11 +347,22 @@ namespace HeartopiaMod
                             this.lastNodePosition = vector.Value;
                             if (this.TryBeginFarmWalk(vector.Value, "node:" + (scanNodeLabel ?? "unlabelled"), false, scanNodeLabel))
                             {
+                                this.NoteFarmWalkRouteSucceeded();
                                 this.lastTeleportWasPriorityLocation = false;
                                 this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
                                 this.autoFarmTimer = 0f;
                                 break;
                             }
+
+                            // Unroutable: take another node rather than warping to this one.
+                            if (this.farmWalkToNodeEnabled
+                                && this.TryDeferUnroutableFarmNode(vector.Value, scanNodeLabel))
+                            {
+                                this.autoFarmStatus = "No route there — trying another node...";
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
+
                             this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(vector.Value, scanNodeLabel),
                                 "node:" + (scanNodeLabel ?? "unlabelled"), vector.Value);
                             this.lastTeleportWasPriorityLocation = false;
@@ -757,9 +768,19 @@ namespace HeartopiaMod
                             if (this.TryBeginFarmWalk(vector2.Value, "node:" + (waitingNodeLabel ?? "unlabelled"),
                                     false, waitingNodeLabel))
                             {
+                                this.NoteFarmWalkRouteSucceeded();
                                 this.lastNodePosition = vector2.Value;
                                 this.lastTeleportWasPriorityLocation = false;
                                 this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
+
+                            // Unroutable: take another node rather than warping to this one.
+                            if (this.farmWalkToNodeEnabled
+                                && this.TryDeferUnroutableFarmNode(vector2.Value, waitingNodeLabel))
+                            {
+                                this.autoFarmStatus = "No route there — trying another node...";
                                 this.autoFarmTimer = 0f;
                                 break;
                             }
@@ -2281,6 +2302,9 @@ namespace HeartopiaMod
                 // to already-loaded neighbors and the node's mesh simply isn't there yet.
                 if (!markerFound && this.autoCollectClickedSinceArrival && this.auraCollectNodeOwnerNetId != 0U)
                 {
+                    // The narrowing found a distance that works: this kind keeps it, and the next
+                    // stubborn node starts its own budget from scratch.
+                    this.farmWalkStandoffRetries = 0;
                     this.AutoFarmLog($"Aura collect confirmed (marker gone) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
                     // Collected (stamped nodes hide their marker) — real/fallback cooldown, not 15s.
                     this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
@@ -2293,6 +2317,42 @@ namespace HeartopiaMod
             if (this.autoFarmTimer >= maxWait)
             {
                 string markerState = markerFound ? (markerOnCooldown ? "cooldown" : "available") : "none";
+                // ⚠️ A TIMEOUT WITH THE MARKER STILL AVAILABLE IS A MEASUREMENT, NOT JUST A FAILURE.
+                //
+                // The walker stops at a stand-off rather than driving into the node, and that
+                // distance is a single number for every resource — which is wrong: measured
+                // 2026-08-22, Raspberry, Ore, Stone and Mandarin Tree all collected from ~1.05 m
+                // while a Button mushroom at 1.03 m timed out with its marker still showing.
+                //
+                // Rather than guess a number per resource, learn it: a kind that failed from the
+                // stand-off gets a tighter one for the rest of the session. One timeout buys a
+                // permanent fix for that kind, and nothing is assumed about the kinds that work.
+                if (!string.IsNullOrEmpty(nodeMarkerLabel) && markerState == "available"
+                    && this.farmWalkStandoffRetries < FarmWalkMaxStandoffSteps
+                    && this.TryNarrowFarmWalkStandoff(nodeMarkerLabel, out float wasStandoff,
+                        out float nowStandoff))
+                {
+                    this.farmWalkStandoffRetries++;
+                    ModLogger.Msg("[FarmWalk] '" + nodeMarkerLabel + "' did not collect from "
+                        + wasStandoff.ToString("0.0#") + "m — stepping in to "
+                        + nowStandoff.ToString("0.0#") + "m and trying this same node again ("
+                        + this.farmWalkStandoffRetries + "/" + FarmWalkMaxStandoffSteps + ").");
+
+                    // ⚠️ THE SAME NODE, NOW. Learning a number and walking away from the node that
+                    // taught it means the lesson costs a resource every time, and a number that is
+                    // still too far costs another. Step in and try again here.
+                    if (this.TryBeginFarmWalk(this.lastNodePosition, "node:" + nodeMarkerLabel,
+                            false, nodeMarkerLabel))
+                    {
+                        this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                        this.autoFarmTimer = 0f;
+                        return;
+                    }
+
+                    // No route back to a node we are standing next to: fall through and give up on
+                    // it the ordinary way rather than pretending the retry happened.
+                }
+
                 this.AutoFarmLog($"Aura collect wait timed out after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker={markerState}, label={(string.IsNullOrEmpty(nodeMarkerLabel) ? "<none>" : nodeMarkerLabel)}, clicked={this.autoCollectClickedSinceArrival})");
                 // Cooldown evidence at timeout => real/fallback block; otherwise short retry (streaming lag).
                 bool timedOutCold = (markerFound && markerOnCooldown) || (liveNodeFound && liveNodeCold);
