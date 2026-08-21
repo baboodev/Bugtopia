@@ -346,7 +346,10 @@ namespace HeartopiaMod
             }
             allOk &= this.GameLodProbe("BrgManager class", brgClass != IntPtr.Zero, GameLodPtr(brgClass));
 
-            IntPtr areaPriorityClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.BaseSystem.RenderPriorityManager.AreaPriorityManager");
+            // 2026-08-20: the RenderPriorityManager namespace was folded into the rewritten
+            // RenderingManager; the class itself is unchanged. Only this probe hardcodes the
+            // name — the functional path takes the class off the live object, so it never broke.
+            IntPtr areaPriorityClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.BaseSystem.RenderingManager.Strategy.AreaPriorityManager");
             allOk &= this.GameLodProbe("AreaPriorityManager class", areaPriorityClass != IntPtr.Zero, GameLodPtr(areaPriorityClass));
             allOk &= this.GameLodProbe("AreaPriorityManager.UpdateGlobalLodBias(1)",
                 areaPriorityClass != IntPtr.Zero && this.FindAuraMonoMethodOnHierarchy(areaPriorityClass, "UpdateGlobalLodBias", 1) != IntPtr.Zero);
