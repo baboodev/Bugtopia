@@ -1,6 +1,6 @@
 # Game Events — Full List (generated)
 
-Auto-generated from `ilspy-dumps/` — every `struct ... : IEvent`. Total: 1498 types.
+Auto-generated from `ilspy-dumps/` — every `struct ... : IEvent`. Total: 1540 types.
 Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.md).
 
 
@@ -12,7 +12,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 
 - `UpdatePing`
 
-## ScriptsRefactory.DataAndProtocol.Events (179)
+## ScriptsRefactory.DataAndProtocol.Events (183)
 
 - `AccountLogoutEvent`
 - `AlertBlindBoxRewardEvent`
@@ -59,6 +59,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `FlauntActionWithNetIdEvent`
 - `FlowerBedCancelChangeFlowerEvent`
 - `FlowerBedChangeFlowerEvent`
+- `FriendshipDressingEndedActionEvent`
 - `GMSetBirdPhotoCoverEvent`
 - `GMSetPettyDurationDebugEvent`
 - `GPUFishFlockLevelUpdatedEvent`
@@ -155,6 +156,9 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `SeaCycleDailyTaskUpdatedEvent`
 - `SeaCycleExpChangedNotifyEvent`
 - `SeaCycleLevelUpdatedEvent`
+- `SeaCycleMainlineAcceptResultEvent`
+- `SeaCycleMainlineChainUpdatedEvent`
+- `SeaCycleMainlineSkipResultEvent`
 - `SeaCycleUpgradeResultEvent`
 - `SearchTagEvent`
 - `SelfRoomIncreaseTimeSuccessEvent`
@@ -206,7 +210,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 
 - `SwitchMainLevel`
 
-## XDTDataAndProtocol.Events (843)
+## XDTDataAndProtocol.Events (870)
 
 - `AchievementToast`
 - `ActivityEndEvent`
@@ -327,6 +331,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `CertificationLevelUpEvent`
 - `ChangeCustomClothDressingState`
 - `ChangePhotoTypeEvent`
+- `ChangePhotoTypeRequestEvent`
 - `ChatMessageSendResult`
 - `ChatTypingUpdate`
 - `ChatTypingUpdateUI`
@@ -379,6 +384,16 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `EmojiFeedBackSuccessEvent`
 - `EnableClickBlankEvent`
 - `EnablePanelBlankEvent`
+- `EncoreBpActivateTierResultEvent`
+- `EncoreBpBuyLevelResultEvent`
+- `EncoreBpClosedEvent`
+- `EncoreBpCurrentStateUpdatedEvent`
+- `EncoreBpGetCycleRewardResultEvent`
+- `EncoreBpGetRewardResultEvent`
+- `EncoreBpProgressUpdatedEvent`
+- `EncoreBpRewardStateUpdatedEvent`
+- `EncoreBpUpdatedEvent`
+- `EncoreBpUseVoucherResultEvent`
 - `EnterBuildCompetitionEvent`
 - `EnterHobbyEvent`
 - `EnterModeEvent`
@@ -476,6 +491,20 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `HomelandUpgradableEvent`
 - `HomelandUpgradeEventUI`
 - `HostFullyCleanedEvent`
+- `HotAirBalloonBellEvent`
+- `HotAirBalloonDepartureEvent`
+- `HotAirBalloonEggTriggeredEvent`
+- `HotAirBalloonFlyingStateEvent`
+- `HotAirBalloonGroundLockEvent`
+- `HotAirBalloonHitEvent`
+- `HotAirBalloonLandedEvent`
+- `HotAirBalloonLandingEvent`
+- `HotAirBalloonPhaseChangedEvent`
+- `HotAirBalloonPreDepartureEvent`
+- `HotAirBalloonReadyEvent`
+- `HotAirBalloonResetEvent`
+- `HotAirBalloonVfxEvent`
+- `HotAirBalloonWindEvent`
 - `HousePutAreaUnlockUpdate`
 - `InAndOutFieldEvent`
 - `InformAimResult`
@@ -604,6 +633,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `OpenGiftCommandEvent`
 - `OpenGiftReceiveRewardEvent`
 - `OpenGiftResultEvent`
+- `OpenGiftSuccessEvent`
 - `OpenWebEvent`
 - `OperationMailContentEvent`
 - `OrderTaskTipEvent`
@@ -846,6 +876,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `SelfBuildingStateUpdateEvent`
 - `SelfLeavePartyEvent`
 - `SelfPartyChangedEvent`
+- `SelfieCompositionMirrorEvent`
 - `SendGiftResultEvent`
 - `SetBakeFakeGIEvent`
 - `SetBrgFollowTarget`
@@ -1052,7 +1083,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `WildAnimalVisitEvent`
 - `WishingMeteorEvent`
 
-## XDTDataAndProtocol.Events.GameSetting (15)
+## XDTDataAndProtocol.Events.GameSetting (14)
 
 - `SetAutoRemediationEvent`
 - `SetCameraModeEvent`
@@ -1067,7 +1098,6 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `SetSeaHorizonLookAtEvent`
 - `SetSeaVerticalLookAtEvent`
 - `SetSeaViewRangeEvent`
-- `SetSoundVolumeEvent`
 - `SetViewRangeEvent`
 
 ## XDTDataAndProtocol.Events.Player (14)
@@ -1230,9 +1260,24 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 
 - `CraftRecipeDataRefreshEvent`
 
+## XDTGameSystem.GameplaySystem.DressingUp (8)
+
+- `FriendshipDressingCloseRequestedEvent`
+- `FriendshipDressingOpenRequestedEvent`
+- `FriendshipDressingPresetsChangedEvent`
+- `FriendshipDressingPreviewActionEvent`
+- `FriendshipDressingRequestFailedEvent`
+- `FriendshipDressingSessionChangedEvent`
+- `FriendshipDressingShowItemEvent`
+- `FriendshipDressingWardrobeChangedEvent`
+
 ## XDTGameSystem.GameplaySystem.Fps (1)
 
 - `DynamicFrameRateInfoEvent`
+
+## XDTGameSystem.GameplaySystem.GameActivity (1)
+
+- `FengwuHuiMengTrackRequestedEvent`
 
 ## XDTGameSystem.GameplaySystem.Navigation (2)
 
@@ -1243,7 +1288,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 
 - `SocialReportUpdateEvent`
 
-## XDTGameSystem.UI (316)
+## XDTGameSystem.UI (319)
 
 - `AchievementToastShowEvent`
 - `AchievementUnlockedNotifyEvent`
@@ -1255,10 +1300,11 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `ActivityJoinRequestTipEvent`
 - `ActivityMlpResonanceListOpenRequestedEvent`
 - `ActivityMlpTreeOpenEvent`
+- `ActorAvatarDisplayPanelOpenEvent`
 - `AdoptPetOpenEvent`
 - `AlbumPickerRequestedEvent`
 - `AlertBPPayRewardEvent`
-- `AlertConfirmRewardOpenRequestedEvent`
+- `AlertConfirmItemsOpenRequestedEvent`
 - `AlertEvaluateOpenRequestedEvent`
 - `AlertLotteryRewardEvent`
 - `AlertPaymentRequestedEvent`
@@ -1409,6 +1455,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `LoadingPanelFadeInFinishedQueryEvent`
 - `LoadingPanelLoadingEndQueryEvent`
 - `LoadingProgressUpdatedEvent`
+- `LoadingStageUpdatedEvent`
 - `LoginOpenRequestedEvent`
 - `MailViewCloseEvent`
 - `MainCameraClosedQueryEvent`
@@ -1445,6 +1492,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `PartySelfStartedNoticeRequestedEvent`
 - `PartyStartingNoticeRequestedEvent`
 - `PayShopOpenRequestedEvent`
+- `PetAvatarDisplayPanelOpenEvent`
 - `PetBathFinishedEvent`
 - `PetBathStartedEvent`
 - `PetBoardingPreOpenEvent`
