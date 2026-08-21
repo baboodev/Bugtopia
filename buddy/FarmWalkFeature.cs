@@ -2257,10 +2257,27 @@ namespace HeartopiaMod
             //     node:Bubble: target is not there at all (12,0m short) — moving to the next node
             // twice in three seconds, which is the "stops 10 m out and turns away" the player sees.
             // farmWalkDwellLabel is set at Begin and is correct for the whole walk.
-            if (this.farmWalkAimOffsetY != 0f        // contamination standoff: not a collectable
-                || this.FarmWalkTargetIsBubble       // bubbles are not in the collectable scan
-                || this.autoFarmTargetIsBubble
-                || this.farmWalkPendingCleanse)      // a cleansing coral is a trigger, not a resource
+            // ⚠️ ONLY A RESOURCE MAY BE JUDGED BY THE RESOURCE SCAN. Stated as a POSITIVE test,
+            // because the list of exceptions was wrong three times running: contamination, then the
+            // cleansing coral, then bubbles — each found the same way, by a walk livelocking against
+            // a rule that could never be satisfied.
+            //
+            // A quest point was the fourth, and it is the reason this is now inverted rather than
+            // extended again. A quest track point is a PLACE; nothing about it will ever appear in
+            // the collectable scan, so the absence rule was true on arrival every single time:
+            //     14:58:31  quest:8000060: walking 10,7m via 2 corners
+            //     14:58:31  quest:8000060: target is not there at all (11,1m short)
+            //     14:58:33  quest:8000060: walking 10,7m via 2 corners
+            //     14:58:33  quest:8000060: target is not there at all (11,1m short)
+            //     ... every two seconds, the distance frozen at 11,1 m, the body never moving ...
+            // and an earlier stretch of the same run reached 1,4 m before the rule threw it away.
+            //
+            // Farm nodes are labelled "node:*" (including "node:priority-*" and "node:retry");
+            // "quest:", "cleanse:" and "area:" are destinations, not things that can be collected.
+            if (!this.farmWalkLabel.StartsWith("node:", StringComparison.Ordinal)
+                || this.farmWalkAimOffsetY != 0f    // contamination standoff: aimed off the node
+                || this.FarmWalkTargetIsBubble      // bubbles are not in the collectable scan
+                || this.autoFarmTargetIsBubble)
             {
                 return false;
             }
