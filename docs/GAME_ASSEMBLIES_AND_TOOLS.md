@@ -287,12 +287,14 @@ foreach ($dll in Get-ChildItem "$Src\*.dll" | Sort-Object Name) {
 }
 ```
 
-Optional — compare with a previous tree after a game patch (file list + content hash per assembly):
+Compare with a previous tree after a game patch — **use the scripted pipeline**, which also
+archives the old tree as a baseline and cross-checks the removals against `buddy/`:
 
-```powershell
-# Produces tools/ilspy-diff-summary.json (added / removed / changed .cs per assembly)
-# Run a small compare script or diff ilspy-dumps-old vs ilspy-dumps manually.
+```bash
+python tools/gameupdate/hcode.py diff --old <work>/old --detail
 ```
+
+See [GAME_UPDATE_PIPELINE.md](GAME_UPDATE_PIPELINE.md) for the full flow and its gotchas.
 
 ### IL2CPP tree (separate command)
 
@@ -300,10 +302,24 @@ Mono `ilspy-dumps/` and IL2CPP `gameassembly-dumps/` are **different inputs**. F
 
 ### Practical workflow after a game patch
 
-1. Clear `%LocalLow%/Bugtopia/DecryptedAssemblies/`, launch game, enter world, wait **≥ 60 s**.
-2. Run the **per-assembly** `ilspycmd` loop above into repo `ilspy-dumps/`.
-3. Regenerate **BepInEx/MelonLoader interop** from the game install ([below](#generating-bepinex--melonloader-interop-correct-method)).
-4. Diff critical types (`ItemNetPair`, `WebRequestUtility`, feature-specific commands) against the previous `ilspy-dumps/`.
+**Offline (preferred — no game launch needed):**
+
+```bash
+python tools/gameupdate/hcode.py run --write-events
+```
+
+This decodes from `%LocalLow%/xd/Heartopia/DotnetAssemblies` with `tools/XdUnpack`, verifies
+ILSpy is byte-stable against an unchanged module, decompiles, diffs, promotes, and then runs the
+three regression checks (binding audit, UI paths, events). Full description and every gotcha:
+[GAME_UPDATE_PIPELINE.md](GAME_UPDATE_PIPELINE.md).
+
+Afterwards:
+1. Re-decode the design tables — `python tools/gameupdate/htablediff.py run` — because row schemas
+   are parsed from the freshly promoted `ilspy-dumps/EcsClient/Table*.cs`.
+2. Regenerate **BepInEx/MelonLoader interop** from the game install ([below](#generating-bepinex--melonloader-interop-correct-method)).
+
+**Runtime dumper route (legacy fallback):** clear `%LocalLow%/Bugtopia/DecryptedAssemblies/`,
+launch the game, enter the world, wait **≥ 60 s**, then run the per-assembly `ilspycmd` loop above.
 
 ---
 
