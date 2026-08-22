@@ -48,15 +48,20 @@ namespace HeartopiaMod
         // auraMonoCompileMethod delegate is declared void, so resolve our own IntPtr-returning one.
         private delegate IntPtr EventHookCompileMethodDelegate(IntPtr method);
 
-        // Distinct event types we can hook concurrently. Raised 16 -> 32 after the pool ran out in a
-        // real session (AutoEatRepair 5 + ForceLocomotion 4 + NetCook 3 + AutoSell/fishing/PetPlay/...
-        // exceeded 16, and NetCook's EntityRemoveEvent registration was refused). Slots are cheap —
-        // a few small static arrays; a NativeDetour is only installed per event type actually
-        // registered, never per empty slot.
+        // Distinct event types we can hook concurrently. Raised 16 -> 32 -> 48 -> 96, every step after
+        // the pool ran out in a real session. 48 died on a full-feature run: the headless pet-play
+        // pack (TeaseCatStartResult/TeaseCatEnd/CatPlayExit/CatPlayPromote/PetTeaseQteResult/
+        // PetTeaseEndResult) was refused wholesale, so My Pets -> Play had no end signal and hung
+        // until its watchdog while the game's own result panel popped unsuppressed.
+        // 96 covers the 84 distinct event names the features register in total (recounted 2026-08-23)
+        // — and the budget is "distinct names registered over the WHOLE session", not "hooked right
+        // now", because slots are never released. Slots are cheap: a few small static arrays; a
+        // NativeDetour is only installed per event type actually registered, never per empty slot.
         // MUST equal the number of static EventSlotBody/EventNetIdSlotBody methods below (each detour
         // slot needs its own unmanaged-callable body with a compile-time slot index). If this exceeds
         // the body count, slots past the array length throw IndexOutOfRange at install time.
-        private const int MaxEventHookSlots = 48;
+        // Hard ceiling 255: the dispatch ring stores the slot index in a byte (eventRingSlot).
+        private const int MaxEventHookSlots = 96;
         private const int EventPayloadCap = 64;     // max struct bytes snapshotted per dispatch
 
         // Read-only view over a snapshotted event payload, handed to handlers on the main thread.
@@ -256,7 +261,13 @@ namespace HeartopiaMod
 
             if (this.gameEventHookSlotCount >= MaxEventHookSlots)
             {
-                ModLogger.Msg("[EventHook] slot pool exhausted (" + MaxEventHookSlots + "); cannot hook " + eventFullName);
+                // A refused hook degrades its feature SILENTLY (the caller only sees `false`), so this
+                // has to be loud: the 2026-08-23 "My Pets -> Play never ends" bug was six pet-play
+                // hooks refused here at 48/48 while every other log line looked healthy.
+                ModLogger.Warning("[EventHook] slot pool exhausted (" + this.gameEventHookSlotCount + "/"
+                    + MaxEventHookSlots + "); cannot hook " + eventFullName
+                    + " — the feature that asked for it will run without this event (raise MaxEventHookSlots"
+                    + " and add matching EventSlotBody/EventNetIdSlotBody thunks). Slots are never released.");
                 return false;
             }
 
@@ -611,7 +622,8 @@ namespace HeartopiaMod
             return AuraMonoMethodParamCountIs(inflatedMethod, (uint)expectedParamCount);
         }
 
-        // ---- Native detour bodies. 16 fixed static thunks (no closures) routing to RouteEventSlot.
+        // ---- Native detour bodies. MaxEventHookSlots fixed static thunks (no closures) routing to
+        // RouteEventSlot.
         // MUST NOT throw across the boundary, allocate, or call into Mono/Il2Cpp/Unity. They only
         // Marshal.Copy the payload into a reused buffer and forward via the trampoline. ----
 
@@ -628,7 +640,19 @@ namespace HeartopiaMod
             EventSlotBody32, EventSlotBody33, EventSlotBody34, EventSlotBody35,
             EventSlotBody36, EventSlotBody37, EventSlotBody38, EventSlotBody39,
             EventSlotBody40, EventSlotBody41, EventSlotBody42, EventSlotBody43,
-            EventSlotBody44, EventSlotBody45, EventSlotBody46, EventSlotBody47
+            EventSlotBody44, EventSlotBody45, EventSlotBody46, EventSlotBody47,
+            EventSlotBody48, EventSlotBody49, EventSlotBody50, EventSlotBody51,
+            EventSlotBody52, EventSlotBody53, EventSlotBody54, EventSlotBody55,
+            EventSlotBody56, EventSlotBody57, EventSlotBody58, EventSlotBody59,
+            EventSlotBody60, EventSlotBody61, EventSlotBody62, EventSlotBody63,
+            EventSlotBody64, EventSlotBody65, EventSlotBody66, EventSlotBody67,
+            EventSlotBody68, EventSlotBody69, EventSlotBody70, EventSlotBody71,
+            EventSlotBody72, EventSlotBody73, EventSlotBody74, EventSlotBody75,
+            EventSlotBody76, EventSlotBody77, EventSlotBody78, EventSlotBody79,
+            EventSlotBody80, EventSlotBody81, EventSlotBody82, EventSlotBody83,
+            EventSlotBody84, EventSlotBody85, EventSlotBody86, EventSlotBody87,
+            EventSlotBody88, EventSlotBody89, EventSlotBody90, EventSlotBody91,
+            EventSlotBody92, EventSlotBody93, EventSlotBody94, EventSlotBody95
         };
 
         private static void EventSlotBody0(IntPtr p) => RouteEventSlot(0, p);
@@ -679,6 +703,54 @@ namespace HeartopiaMod
         private static void EventSlotBody45(IntPtr p) => RouteEventSlot(45, p);
         private static void EventSlotBody46(IntPtr p) => RouteEventSlot(46, p);
         private static void EventSlotBody47(IntPtr p) => RouteEventSlot(47, p);
+        private static void EventSlotBody48(IntPtr p) => RouteEventSlot(48, p);
+        private static void EventSlotBody49(IntPtr p) => RouteEventSlot(49, p);
+        private static void EventSlotBody50(IntPtr p) => RouteEventSlot(50, p);
+        private static void EventSlotBody51(IntPtr p) => RouteEventSlot(51, p);
+        private static void EventSlotBody52(IntPtr p) => RouteEventSlot(52, p);
+        private static void EventSlotBody53(IntPtr p) => RouteEventSlot(53, p);
+        private static void EventSlotBody54(IntPtr p) => RouteEventSlot(54, p);
+        private static void EventSlotBody55(IntPtr p) => RouteEventSlot(55, p);
+        private static void EventSlotBody56(IntPtr p) => RouteEventSlot(56, p);
+        private static void EventSlotBody57(IntPtr p) => RouteEventSlot(57, p);
+        private static void EventSlotBody58(IntPtr p) => RouteEventSlot(58, p);
+        private static void EventSlotBody59(IntPtr p) => RouteEventSlot(59, p);
+        private static void EventSlotBody60(IntPtr p) => RouteEventSlot(60, p);
+        private static void EventSlotBody61(IntPtr p) => RouteEventSlot(61, p);
+        private static void EventSlotBody62(IntPtr p) => RouteEventSlot(62, p);
+        private static void EventSlotBody63(IntPtr p) => RouteEventSlot(63, p);
+        private static void EventSlotBody64(IntPtr p) => RouteEventSlot(64, p);
+        private static void EventSlotBody65(IntPtr p) => RouteEventSlot(65, p);
+        private static void EventSlotBody66(IntPtr p) => RouteEventSlot(66, p);
+        private static void EventSlotBody67(IntPtr p) => RouteEventSlot(67, p);
+        private static void EventSlotBody68(IntPtr p) => RouteEventSlot(68, p);
+        private static void EventSlotBody69(IntPtr p) => RouteEventSlot(69, p);
+        private static void EventSlotBody70(IntPtr p) => RouteEventSlot(70, p);
+        private static void EventSlotBody71(IntPtr p) => RouteEventSlot(71, p);
+        private static void EventSlotBody72(IntPtr p) => RouteEventSlot(72, p);
+        private static void EventSlotBody73(IntPtr p) => RouteEventSlot(73, p);
+        private static void EventSlotBody74(IntPtr p) => RouteEventSlot(74, p);
+        private static void EventSlotBody75(IntPtr p) => RouteEventSlot(75, p);
+        private static void EventSlotBody76(IntPtr p) => RouteEventSlot(76, p);
+        private static void EventSlotBody77(IntPtr p) => RouteEventSlot(77, p);
+        private static void EventSlotBody78(IntPtr p) => RouteEventSlot(78, p);
+        private static void EventSlotBody79(IntPtr p) => RouteEventSlot(79, p);
+        private static void EventSlotBody80(IntPtr p) => RouteEventSlot(80, p);
+        private static void EventSlotBody81(IntPtr p) => RouteEventSlot(81, p);
+        private static void EventSlotBody82(IntPtr p) => RouteEventSlot(82, p);
+        private static void EventSlotBody83(IntPtr p) => RouteEventSlot(83, p);
+        private static void EventSlotBody84(IntPtr p) => RouteEventSlot(84, p);
+        private static void EventSlotBody85(IntPtr p) => RouteEventSlot(85, p);
+        private static void EventSlotBody86(IntPtr p) => RouteEventSlot(86, p);
+        private static void EventSlotBody87(IntPtr p) => RouteEventSlot(87, p);
+        private static void EventSlotBody88(IntPtr p) => RouteEventSlot(88, p);
+        private static void EventSlotBody89(IntPtr p) => RouteEventSlot(89, p);
+        private static void EventSlotBody90(IntPtr p) => RouteEventSlot(90, p);
+        private static void EventSlotBody91(IntPtr p) => RouteEventSlot(91, p);
+        private static void EventSlotBody92(IntPtr p) => RouteEventSlot(92, p);
+        private static void EventSlotBody93(IntPtr p) => RouteEventSlot(93, p);
+        private static void EventSlotBody94(IntPtr p) => RouteEventSlot(94, p);
+        private static void EventSlotBody95(IntPtr p) => RouteEventSlot(95, p);
 
         private static void RouteEventSlot(int slot, IntPtr eventPtr)
         {
@@ -700,7 +772,7 @@ namespace HeartopiaMod
             }
         }
 
-        // ---- Per-netId native bodies. 16 fixed static thunks routing to RouteEventNetIdSlot.
+        // ---- Per-netId native bodies. MaxEventHookSlots fixed static thunks routing to RouteEventNetIdSlot.
         // Same boundary rules as the global bodies; they additionally carry the dispatch netId. ----
 
         private static readonly DispatchEventByNetIdHookDelegate[] EventNetIdSlotBodies =
@@ -716,7 +788,19 @@ namespace HeartopiaMod
             EventNetIdSlotBody32, EventNetIdSlotBody33, EventNetIdSlotBody34, EventNetIdSlotBody35,
             EventNetIdSlotBody36, EventNetIdSlotBody37, EventNetIdSlotBody38, EventNetIdSlotBody39,
             EventNetIdSlotBody40, EventNetIdSlotBody41, EventNetIdSlotBody42, EventNetIdSlotBody43,
-            EventNetIdSlotBody44, EventNetIdSlotBody45, EventNetIdSlotBody46, EventNetIdSlotBody47
+            EventNetIdSlotBody44, EventNetIdSlotBody45, EventNetIdSlotBody46, EventNetIdSlotBody47,
+            EventNetIdSlotBody48, EventNetIdSlotBody49, EventNetIdSlotBody50, EventNetIdSlotBody51,
+            EventNetIdSlotBody52, EventNetIdSlotBody53, EventNetIdSlotBody54, EventNetIdSlotBody55,
+            EventNetIdSlotBody56, EventNetIdSlotBody57, EventNetIdSlotBody58, EventNetIdSlotBody59,
+            EventNetIdSlotBody60, EventNetIdSlotBody61, EventNetIdSlotBody62, EventNetIdSlotBody63,
+            EventNetIdSlotBody64, EventNetIdSlotBody65, EventNetIdSlotBody66, EventNetIdSlotBody67,
+            EventNetIdSlotBody68, EventNetIdSlotBody69, EventNetIdSlotBody70, EventNetIdSlotBody71,
+            EventNetIdSlotBody72, EventNetIdSlotBody73, EventNetIdSlotBody74, EventNetIdSlotBody75,
+            EventNetIdSlotBody76, EventNetIdSlotBody77, EventNetIdSlotBody78, EventNetIdSlotBody79,
+            EventNetIdSlotBody80, EventNetIdSlotBody81, EventNetIdSlotBody82, EventNetIdSlotBody83,
+            EventNetIdSlotBody84, EventNetIdSlotBody85, EventNetIdSlotBody86, EventNetIdSlotBody87,
+            EventNetIdSlotBody88, EventNetIdSlotBody89, EventNetIdSlotBody90, EventNetIdSlotBody91,
+            EventNetIdSlotBody92, EventNetIdSlotBody93, EventNetIdSlotBody94, EventNetIdSlotBody95
         };
 
         private static void EventNetIdSlotBody0(uint n, IntPtr p) => RouteEventNetIdSlot(0, n, p);
@@ -767,6 +851,54 @@ namespace HeartopiaMod
         private static void EventNetIdSlotBody45(uint n, IntPtr p) => RouteEventNetIdSlot(45, n, p);
         private static void EventNetIdSlotBody46(uint n, IntPtr p) => RouteEventNetIdSlot(46, n, p);
         private static void EventNetIdSlotBody47(uint n, IntPtr p) => RouteEventNetIdSlot(47, n, p);
+        private static void EventNetIdSlotBody48(uint n, IntPtr p) => RouteEventNetIdSlot(48, n, p);
+        private static void EventNetIdSlotBody49(uint n, IntPtr p) => RouteEventNetIdSlot(49, n, p);
+        private static void EventNetIdSlotBody50(uint n, IntPtr p) => RouteEventNetIdSlot(50, n, p);
+        private static void EventNetIdSlotBody51(uint n, IntPtr p) => RouteEventNetIdSlot(51, n, p);
+        private static void EventNetIdSlotBody52(uint n, IntPtr p) => RouteEventNetIdSlot(52, n, p);
+        private static void EventNetIdSlotBody53(uint n, IntPtr p) => RouteEventNetIdSlot(53, n, p);
+        private static void EventNetIdSlotBody54(uint n, IntPtr p) => RouteEventNetIdSlot(54, n, p);
+        private static void EventNetIdSlotBody55(uint n, IntPtr p) => RouteEventNetIdSlot(55, n, p);
+        private static void EventNetIdSlotBody56(uint n, IntPtr p) => RouteEventNetIdSlot(56, n, p);
+        private static void EventNetIdSlotBody57(uint n, IntPtr p) => RouteEventNetIdSlot(57, n, p);
+        private static void EventNetIdSlotBody58(uint n, IntPtr p) => RouteEventNetIdSlot(58, n, p);
+        private static void EventNetIdSlotBody59(uint n, IntPtr p) => RouteEventNetIdSlot(59, n, p);
+        private static void EventNetIdSlotBody60(uint n, IntPtr p) => RouteEventNetIdSlot(60, n, p);
+        private static void EventNetIdSlotBody61(uint n, IntPtr p) => RouteEventNetIdSlot(61, n, p);
+        private static void EventNetIdSlotBody62(uint n, IntPtr p) => RouteEventNetIdSlot(62, n, p);
+        private static void EventNetIdSlotBody63(uint n, IntPtr p) => RouteEventNetIdSlot(63, n, p);
+        private static void EventNetIdSlotBody64(uint n, IntPtr p) => RouteEventNetIdSlot(64, n, p);
+        private static void EventNetIdSlotBody65(uint n, IntPtr p) => RouteEventNetIdSlot(65, n, p);
+        private static void EventNetIdSlotBody66(uint n, IntPtr p) => RouteEventNetIdSlot(66, n, p);
+        private static void EventNetIdSlotBody67(uint n, IntPtr p) => RouteEventNetIdSlot(67, n, p);
+        private static void EventNetIdSlotBody68(uint n, IntPtr p) => RouteEventNetIdSlot(68, n, p);
+        private static void EventNetIdSlotBody69(uint n, IntPtr p) => RouteEventNetIdSlot(69, n, p);
+        private static void EventNetIdSlotBody70(uint n, IntPtr p) => RouteEventNetIdSlot(70, n, p);
+        private static void EventNetIdSlotBody71(uint n, IntPtr p) => RouteEventNetIdSlot(71, n, p);
+        private static void EventNetIdSlotBody72(uint n, IntPtr p) => RouteEventNetIdSlot(72, n, p);
+        private static void EventNetIdSlotBody73(uint n, IntPtr p) => RouteEventNetIdSlot(73, n, p);
+        private static void EventNetIdSlotBody74(uint n, IntPtr p) => RouteEventNetIdSlot(74, n, p);
+        private static void EventNetIdSlotBody75(uint n, IntPtr p) => RouteEventNetIdSlot(75, n, p);
+        private static void EventNetIdSlotBody76(uint n, IntPtr p) => RouteEventNetIdSlot(76, n, p);
+        private static void EventNetIdSlotBody77(uint n, IntPtr p) => RouteEventNetIdSlot(77, n, p);
+        private static void EventNetIdSlotBody78(uint n, IntPtr p) => RouteEventNetIdSlot(78, n, p);
+        private static void EventNetIdSlotBody79(uint n, IntPtr p) => RouteEventNetIdSlot(79, n, p);
+        private static void EventNetIdSlotBody80(uint n, IntPtr p) => RouteEventNetIdSlot(80, n, p);
+        private static void EventNetIdSlotBody81(uint n, IntPtr p) => RouteEventNetIdSlot(81, n, p);
+        private static void EventNetIdSlotBody82(uint n, IntPtr p) => RouteEventNetIdSlot(82, n, p);
+        private static void EventNetIdSlotBody83(uint n, IntPtr p) => RouteEventNetIdSlot(83, n, p);
+        private static void EventNetIdSlotBody84(uint n, IntPtr p) => RouteEventNetIdSlot(84, n, p);
+        private static void EventNetIdSlotBody85(uint n, IntPtr p) => RouteEventNetIdSlot(85, n, p);
+        private static void EventNetIdSlotBody86(uint n, IntPtr p) => RouteEventNetIdSlot(86, n, p);
+        private static void EventNetIdSlotBody87(uint n, IntPtr p) => RouteEventNetIdSlot(87, n, p);
+        private static void EventNetIdSlotBody88(uint n, IntPtr p) => RouteEventNetIdSlot(88, n, p);
+        private static void EventNetIdSlotBody89(uint n, IntPtr p) => RouteEventNetIdSlot(89, n, p);
+        private static void EventNetIdSlotBody90(uint n, IntPtr p) => RouteEventNetIdSlot(90, n, p);
+        private static void EventNetIdSlotBody91(uint n, IntPtr p) => RouteEventNetIdSlot(91, n, p);
+        private static void EventNetIdSlotBody92(uint n, IntPtr p) => RouteEventNetIdSlot(92, n, p);
+        private static void EventNetIdSlotBody93(uint n, IntPtr p) => RouteEventNetIdSlot(93, n, p);
+        private static void EventNetIdSlotBody94(uint n, IntPtr p) => RouteEventNetIdSlot(94, n, p);
+        private static void EventNetIdSlotBody95(uint n, IntPtr p) => RouteEventNetIdSlot(95, n, p);
 
         private static void RouteEventNetIdSlot(int slot, uint netId, IntPtr eventPtr)
         {

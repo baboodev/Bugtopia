@@ -63,6 +63,8 @@ namespace HeartopiaMod
         private int petPlayHeadlessCatAnswerCount = 0;
         private int petPlayHeadlessCatLastExitReason = -1;
         private bool petPlayHeadlessCatHooksRegistered = false;
+        // > 0 while the post-session UI suppression grace window is still running (-1 = not pending).
+        private float petPlayHeadlessCatSuppressUntil = -1f;
         private IntPtr petPlayAuraMeowBeginTeaseMethod = IntPtr.Zero;
         private IntPtr petPlayAuraMeowCancelTeaseMethod = IntPtr.Zero;
 
@@ -301,6 +303,10 @@ namespace HeartopiaMod
 
         private void UpdatePetPlayAutomation()
         {
+            // Runs before the "nothing active" bail-out: the grace window outlives the session it
+            // belongs to, and leaving it latched would keep the game's cat-play panels suppressed.
+            this.TickHeadlessCatSuppressionGrace();
+
             bool headlessCatActive = this.petPlayHeadlessCatState != PetPlayHeadlessCatState.Idle;
             bool headlessDogActive = this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle;
             bool headlessWashActive = this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle;
@@ -564,6 +570,17 @@ namespace HeartopiaMod
             this.EnsurePetPlayEventHooks();
             this.EnsureHeadlessCatEventHooks();
 
+            // TeaseCatEndEvent is the ONLY natural end signal for a headless session, and the two
+            // suppressed UI events are the only thing keeping CatPlayResultPanel off the screen. If
+            // the hook pool refused them the session silently runs to its 45s watchdog and the game's
+            // "Playtime Ended" panel pops — say so out loud (not through the gated PetPlayLog).
+            if (!this.IsGameEventHookInstalled(TeaseCatEndEventName))
+            {
+                ModLogger.Warning("[PetPlay] Headless cat play: TeaseCatEndEvent hook is NOT installed"
+                    + " (event-hook slot pool exhausted) — the session cannot end on its own and the"
+                    + " game's result panel cannot be suppressed.");
+            }
+
             this.petPlayHeadlessCatNetId = catNetId;
             this.petPlayHeadlessCatAnswerCount = 0;
             this.petPlayHeadlessCatLastExitReason = -1;
@@ -602,7 +619,11 @@ namespace HeartopiaMod
             uint endedNetId = this.petPlayHeadlessCatNetId;
             this.petPlayHeadlessCatState = PetPlayHeadlessCatState.Idle;
             this.petPlayHeadlessCatNetId = 0U;
-            this.SetHeadlessCatUiSuppression(false);
+            // Hold the UI suppression a few seconds past the session instead of dropping it here: on
+            // the CancelTease paths (Stop / watchdog / start timeout) a non-Cancel finish may already
+            // be in flight from the server, and that exit event opens CatPlayResultPanel the moment it
+            // is forwarded. UpdatePetPlayAutomation lifts the suppression when the window expires.
+            this.petPlayHeadlessCatSuppressUntil = Time.unscaledTime + PetPlayHeadlessCatSuppressGraceSeconds;
             if (endedNetId != 0U)
             {
                 this.SetPetCareMessage(endedNetId, status);
@@ -631,8 +652,25 @@ namespace HeartopiaMod
         // reads the payload before deciding whether to forward).
         private void SetHeadlessCatUiSuppression(bool on)
         {
+            this.petPlayHeadlessCatSuppressUntil = -1f;
             this.SetGameEventHookSuppressForward(CatPlayExitForUiEventName, on);
             this.SetGameEventHookSuppressForward(CatPlayPromoteForUiEventName, on);
+        }
+
+        // Trailing-event grace window: a session ended with CancelTease can still be answered by the
+        // server with a real finish (Quit/MaxFailed/…), whose CatPlayExitForUiEvent would pop the
+        // result panel. Keep suppressing for this long after the FSM goes Idle.
+        private const float PetPlayHeadlessCatSuppressGraceSeconds = 5f;
+
+        private void TickHeadlessCatSuppressionGrace()
+        {
+            if (this.petPlayHeadlessCatSuppressUntil < 0f
+                || Time.unscaledTime < this.petPlayHeadlessCatSuppressUntil)
+            {
+                return;
+            }
+
+            this.SetHeadlessCatUiSuppression(false);
         }
 
         private void OnTeaseCatStartResultEvent(GameEventSnapshot e)
@@ -678,8 +716,21 @@ namespace HeartopiaMod
         // Suppressed from the UI while headless — we still read the finish reason for the summary.
         private void OnCatPlayExitForUiEvent(GameEventSnapshot e)
         {
-            if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Idle
-                || e.ReadUInt32(0) != this.petPlayHeadlessCatNetId)
+            if (this.petPlayHeadlessCatState == PetPlayHeadlessCatState.Idle)
+            {
+                if (this.petPlayHeadlessCatSuppressUntil >= 0f)
+                {
+                    // Server finished the session after we cancelled it — the grace window ate the
+                    // panel. Worth a line: this is the trace that told us the cancel path races.
+                    this.PetPlayLog("Headless cat play: late exit event (reason "
+                        + FormatMeowTeaseFinishReason(e.ReadInt32(28)) + ") arrived after the session"
+                        + " closed - result panel suppressed by the grace window.");
+                }
+
+                return;
+            }
+
+            if (e.ReadUInt32(0) != this.petPlayHeadlessCatNetId)
             {
                 return;
             }

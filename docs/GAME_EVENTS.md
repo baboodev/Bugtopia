@@ -156,7 +156,11 @@ Registration is idempotent per event name (re-registering adds another handler t
 detour). Install is lazy: the engine retries each frame from `ProcessGameEventHooksOnUpdate` until
 AuraMono + `XDTGame.Core.EventCenter` + the event's image are loaded, then splices the detour.
 `IsGameEventHookInstalled(name)` reports when a detour is live (for an event-flag-with-poll-fallback
-pattern). Cap: `MaxEventHookSlots` (16) concurrent event types. Reference consumers:
+pattern). Cap: `MaxEventHookSlots` (96) distinct event types **per session** — slots are never
+released, so the budget is every name registered over the run, not what is hooked right now.
+A refused registration only returns `false` and logs a warning: the feature keeps running
+without that event (this is how "My Pets -> Play never ends" happened at the old cap of 48).
+Reference consumers:
 [`InstrumentHotkeyGuardFeature`](../buddy/InstrumentHotkeyGuardFeature.cs) (global) and
 [`PetPlayFeature`](../buddy/PetPlayFeature.cs) (cat = global, dog = per-netId).
 
@@ -201,7 +205,7 @@ both run on the Unity main thread, so the ring is single-threaded in practice.
 Each event type needs its own inflated `DispatchEvent<T>` + detour. Hooking hundreds at once is a
 process-crash risk: per-type gsharedvt ABI roulette (some `T` may compile to shared code with a
 hidden arg → signature mismatch → AV), mass JIT of every instantiation, and high-frequency bodies on
-per-frame events. The engine caps at `MaxEventHookSlots` (16) concurrent hooks for this reason. Hook
+per-frame events. The engine caps at `MaxEventHookSlots` (96) concurrent hooks for this reason. Hook
 the specific events a feature needs; use `MasterLogGameEvents` to discover/verify payloads first.
 
 ### Verified reusable events & payload layouts
