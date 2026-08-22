@@ -90,6 +90,10 @@ namespace HeartopiaMod
         // дрейф, и разницу, которая набегает от простого движения игрока.
         private const float FarmTourTransientSwitchMargin = 25f;
 
+        // Расстояние, на котором «скан его не видит» уже означает «его нет», а не «не дострелил».
+        // Сущности стримятся по близости, поэтому у узла в этих пределах вопрос стрима не стоит.
+        private const float FarmTourAbsenceProofRange = 30f;
+
         private readonly List<FarmTourStop> farmTourStops = new List<FarmTourStop>();
         private readonly List<FarmTourStop> farmTourCandidates = new List<FarmTourStop>();
 
@@ -662,6 +666,19 @@ namespace HeartopiaMod
             }
 
             float now = Time.unscaledTime;
+
+            // Сколько коллектаблов живой скан видит вокруг игрока прямо сейчас. Это доказательство
+            // того, что скан в этом месте работает — только при нём отсутствие узла что-то значит.
+            int nearbyLive = 0;
+            for (int k = 0; k < this.liveCollectableColds.Count; k++)
+            {
+                if (FarmTourDistance(origin, this.liveCollectableColds[k].Position)
+                    <= FarmTourAbsenceProofRange)
+                {
+                    nearbyLive++;
+                }
+            }
+
             for (int i = this.farmTourStops.Count - 1; i >= 0; i--)
             {
                 Vector3 stop = this.farmTourStops[i].Position;
@@ -685,10 +702,37 @@ namespace HeartopiaMod
                 // TopUpFarmTour вернёт точку обратно на следующем же пополнении.
                 //
                 // Не найдено => никакого вывода: узел может быть просто вне зоны стрима.
-                if (this.TryGetLiveNodeColdState(stop, 0f, out bool stopCold, out long stopColdEndMs) && stopCold)
+                if (this.TryGetLiveNodeColdState(stop, 0f, out bool stopCold, out long stopColdEndMs))
                 {
-                    this.StampVisitedNode(stop, now + this.GetVisitedColdStampSeconds(stopColdEndMs));
+                    if (stopCold)
+                    {
+                        this.StampVisitedNode(stop, now + this.GetVisitedColdStampSeconds(stopColdEndMs));
+                        this.farmTourStops.RemoveAt(i);
+                        continue;
+                    }
+                }
+                else if (nearbyLive > 0 && FarmTourDistance(origin, stop) <= FarmTourAbsenceProofRange)
+                {
+                    // ⚠️ ОТСУТСТВИЕ РЯДОМ — ЭТО ТОЖЕ ОТВЕТ.
+                    //
+                    // Выше сказано «не найдено => никакого вывода», и для дальнего узла это верно:
+                    // он может быть просто не в зоне стрима. Но у узла в двух шагах от игрока
+                    // стриминг под сомнением не стоит, и «скан его не видит» означает ровно одно —
+                    // его там больше нет.
+                    //
+                    // Без этой ветки собранный гриб оставался в плане до тех пор, пока ходок не
+                    // придёт на пустое место и не отсидит таймаут: ферма бежала к грибу, которого
+                    // нет уже и на радаре.
+                    //
+                    // Защита от ложного вывода — nearbyLive: заключение делается ТОЛЬКО когда скан
+                    // видит рядом хоть один другой коллектабл. Иначе «пусто» значило бы «скан сюда
+                    // не достаёт» или «семейство этого вида не перечисляется», и правило вычистило
+                    // бы весь план целиком.
+                    this.StampVisitedNode(stop, now + FarmVisitedRetryStampSeconds);
                     this.farmTourStops.RemoveAt(i);
+                    ModLogger.Msg("[FarmTour] dropped a stop at " + FormatNavMeshVector(stop)
+                        + ": the live scan sees " + nearbyLive + " collectable(s) within "
+                        + FarmTourAbsenceProofRange.ToString("F0") + "m of us but not this one.");
                     continue;
                 }
 

@@ -712,7 +712,8 @@ namespace HeartopiaMod
 
             // Parked, not banned: the graph may reach it from somewhere else entirely, and the walk
             // that gets us near will make that true. Short enough that a lap of the area retries it.
-            this.StampVisitedNode(node, Time.unscaledTime + FarmWalkRouteFailStampSeconds);
+            this.StampVisitedNode(node, Time.unscaledTime + FarmWalkRouteFailStampSeconds,
+                approachFailure: true);
             ModLogger.Msg("[FarmWalk] no route to " + (label ?? "the node") + " at "
                 + FormatNavMeshVector(node) + " — parking it for "
                 + FarmWalkRouteFailStampSeconds.ToString("F0") + "s and taking the next node instead ("
@@ -2642,7 +2643,8 @@ namespace HeartopiaMod
                 && !this.IsContaminationStillActionable(this.farmWalkTrueTarget, out bool contaminationKnown)
                 && contaminationKnown)
             {
-                this.StampVisitedNode(this.farmWalkTrueTarget, Time.unscaledTime + FarmVisitedRetryStampSeconds);
+                this.StampVisitedNode(this.farmWalkTrueTarget, Time.unscaledTime + FarmVisitedRetryStampSeconds,
+                    approachFailure: true);
                 this.farmWalkSkipToScan = true;
                 this.FinishFarmWalk("already clean — the live pollutant scan has nothing here ("
                     + Distance3D(selfPos, this.farmWalkTrueTarget).ToString("F1")
@@ -2905,7 +2907,8 @@ namespace HeartopiaMod
                 {
                     this.farmWalkHasLastReclaimed = false;
                     this.farmWalkHasSkippedNode = false;
-                    this.StampVisitedNode(this.farmWalkTrueTarget, skipNow + FarmWalkRepeatOffenderParkSeconds);
+                    this.StampVisitedNode(this.farmWalkTrueTarget, skipNow + FarmWalkRepeatOffenderParkSeconds,
+                        approachFailure: true);
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + reason + progress
                         + " — unreachable again after a reclaim, parking it for "
                         + (FarmWalkRepeatOffenderParkSeconds / 60f).ToString("0.#") + " min.");
@@ -2918,7 +2921,8 @@ namespace HeartopiaMod
                     this.farmWalkRetryState = 0;
                     this.farmWalkSkipToScan = true;
                     this.farmWalkNodeFailures.Remove(this.farmWalkTrueTarget);
-                    this.StampVisitedNode(this.farmWalkTrueTarget, skipNow + FarmWalkRepeatOffenderParkSeconds);
+                    this.StampVisitedNode(this.farmWalkTrueTarget, skipNow + FarmWalkRepeatOffenderParkSeconds,
+                        approachFailure: true);
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + reason + progress
                         + " — failed " + FarmWalkMaxNodeFailures + " times, parking it for "
                         + (FarmWalkRepeatOffenderParkSeconds / 60f).ToString("0.#") + " min.");
@@ -2946,7 +2950,8 @@ namespace HeartopiaMod
                 else if (this.farmWalkConsecutiveSkips < FarmWalkMaxConsecutiveSkips)
                 {
                     this.farmWalkConsecutiveSkips++;
-                    this.StampVisitedNode(this.farmWalkTrueTarget, Time.unscaledTime + FarmVisitedRetryStampSeconds);
+                    this.StampVisitedNode(this.farmWalkTrueTarget, Time.unscaledTime + FarmVisitedRetryStampSeconds,
+                        approachFailure: true);
                     this.farmWalkSkipToScan = true;
                     this.farmWalkHasSkippedNode = true;
                     this.farmWalkSkippedNode = this.farmWalkTrueTarget;

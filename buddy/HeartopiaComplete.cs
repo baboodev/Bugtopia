@@ -4865,6 +4865,16 @@ namespace HeartopiaMod
         // StampVisitedNode / ForgetVisitedNode — never assign recentlyVisitedNodes directly.
         private readonly Dictionary<Vector3, float> visitedNodeStampedAt = new Dictionary<Vector3, float>();
 
+        // ⚠️ ДВА РАЗНЫХ ФАКТА ЖИЛИ ПОД ОДНИМ ИМЕНЕМ. В recentlyVisitedNodes попадает и «узел на
+        // кулдауне до момента T» — утверждение о МИРЕ, со сроком из самой сущности, — и «ходок сюда
+        // не дошёл» — эвристика ПРОГОНА. Рестарт фермы чистил обе, поэтому остывший гриб снова
+        // считался доступным и ферма шла его проверять ногами: замер 04:55:56 — 131 м до зоны,
+        // опустошённой четырьмя минутами ранее.
+        //
+        // Здесь отмечаются ТОЛЬКО штампы второго вида, чтобы сброс прогона снимал их и не трогал
+        // кулдауны.
+        private readonly HashSet<Vector3> approachFailureStamps = new HashSet<Vector3>();
+
         // Token: 0x0400004B RID: 75
         private bool autoCollectClickedSinceArrival = false;
 

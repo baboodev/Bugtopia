@@ -86,6 +86,16 @@ returns to the plan. **[J]**
 **0.7** In walk mode the target is chosen by **route length**, not by straight line. Teleport mode
 keeps the straight line: a warp costs the same from anywhere. **[J]**
 
+**0.6-stamps** ⭐ **A run reset clears bans, never cooldowns.** `recentlyVisitedNodes` carried two
+different facts under one name: "this node is cold until T", which is a statement about the WORLD
+with an expiry read from the entity itself, and "the walker could not get here", which is a
+heuristic of the RUN. Stop/Start wiped both, so a resource the farm had just drained counted as
+available again and the farm walked back to check it on foot — measured 04:55:56, a 131 m haul to a
+zone emptied four minutes earlier, which then reported nothing and moved on.
+
+Only stamps raised because the node could not be REACHED are cleared: no route, repeat-offender
+park, walk skip. Everything a collect or a cooldown produced survives the toggle. **[M]**
+
 **0.7-hold** ⭐ **A target, once chosen, is held.** The head of the tour is not re-picked while a
 walk to it is running. Consumable targets (bubbles) were re-ranked by straight line from the
 player's CURRENT position on every call, so walking towards one changed the distances to both and

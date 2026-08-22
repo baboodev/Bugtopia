@@ -988,6 +988,14 @@ namespace HeartopiaMod
         // what the farm just did from one that has gone stale, and an expiry alone cannot.
         private void StampVisitedNode(Vector3 node, float expiresAt)
         {
+            this.StampVisitedNode(node, expiresAt, approachFailure: false);
+        }
+
+        // approachFailure: штамп поставлен потому, что до узла НЕ УДАЛОСЬ ДОЙТИ (нет маршрута,
+        // повторный отказ, пропуск прохода). Такие снимаются на старте прогона; кулдауны ресурсов
+        // и факты о мире — нет.
+        private void StampVisitedNode(Vector3 node, float expiresAt, bool approachFailure)
+        {
             // ⚠️ A NODE THE GAME SAYS IS COLD IS NEVER PARKED FOR LESS THAN ITS COOLDOWN.
             //
             // Every caller decides a duration from what IT knows, and several of them know nothing:
@@ -1010,12 +1018,43 @@ namespace HeartopiaMod
 
             this.recentlyVisitedNodes[node] = expiresAt;
             this.visitedNodeStampedAt[node] = Time.unscaledTime;
+            if (approachFailure)
+            {
+                this.approachFailureStamps.Add(node);
+            }
+            else
+            {
+                // Кулдаун поверх бана: узел больше не «недоступен», он просто остыл.
+                this.approachFailureStamps.Remove(node);
+            }
         }
 
         private void ForgetVisitedNode(Vector3 node)
         {
             this.recentlyVisitedNodes.Remove(node);
             this.visitedNodeStampedAt.Remove(node);
+            this.approachFailureStamps.Remove(node);
+        }
+
+        // Сброс прогона снимает ТОЛЬКО баны за недоступность. Кулдаун гриба не знает, что игрок
+        // нажал Stop, и стирать его значит послать ферму проверять ногами то, что она сама только
+        // что собрала.
+        private void ClearApproachFailureStamps()
+        {
+            if (this.approachFailureStamps.Count == 0)
+            {
+                return;
+            }
+
+            foreach (Vector3 node in this.approachFailureStamps)
+            {
+                this.recentlyVisitedNodes.Remove(node);
+                this.visitedNodeStampedAt.Remove(node);
+            }
+
+            ModLogger.Msg("[FarmWalk] cleared " + this.approachFailureStamps.Count
+                + " unreachable-node ban(s); resource cooldowns kept.");
+            this.approachFailureStamps.Clear();
         }
 
         private float GetVisitedColdStampSeconds(long coldEndUnixMs)
@@ -3245,8 +3284,7 @@ namespace HeartopiaMod
                 // being restarted often, it was reached once in an entire log while Oyster (index
                 // 1) was reached seven times. -1 makes index 0 the first stop instead.
                 this.currentLocationIndex = -1;
-                this.recentlyVisitedNodes.Clear();
-                this.visitedNodeStampedAt.Clear();
+                this.ClearApproachFailureStamps();
                 this.cameraRotationAttempts = 0;
 
                 // ⚠️ ON START AS WELL AS ON STOP, and not out of caution. A run does not always
