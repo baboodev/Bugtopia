@@ -21,6 +21,35 @@ written directly — the server must see ordinary travel. **[M]**
 **0.2** A teleport is an emergency exit, not a means of travel. Permitted **only** when the walk has
 spent its budget **and** this is the only target.
 
+**0.2a** ⭐ **Never teleport to a target the router can reach.** Every destination is offered to the
+router first, and the teleport is what is left when no route can be built — not a shortcut taken
+because the previous walk gave up.
+
+"the walk gave up" and "there is no way there" are different facts, and confusing them is what this
+rule exists to stop. Measured 2026-08-23: a walk reached **0.3 m** from the end of its route and quit
+only because the bubble hung 2.2 m overhead — nothing to do with the route. Ninety seconds later the
+skip-reclaim branch warped 40 m to that same node, which the graph could route to perfectly well.
+
+Applies to **every** destination without exception — node reclaims, priority-location moves, and the
+farm's own startup positioning. Before this, `Walk to Zone Point` meant "walk between farm zones,
+except when the priority list moves you", and switching the farm on warped you to the priority
+location with no attempt at all. **[M]**
+
+**0.2a-audit** Nine teleport sites in the farm and two in the walker. All nine farm sites now offer
+the destination to the router first. The two in the walker — `node:walk-rescue` and
+`node:walk-fallback` — fire only after a walk has RUN and failed, which is the emergency exit 0.2
+allows and not an exception to 0.2a. Any new `FarmTeleportTo` belongs in one of those two shapes.
+
+⚠️ A walk branch must do **the same bookkeeping the teleport did**. Arriving on foot is still
+arriving: `currentPriorityLocation` is what the collect cycle reads to decide whether a location
+keeps its slot, and `lastTeleportWasPriorityLocation` gates that check at all — its name is
+historical and means "this cycle belongs to a priority location", not "we warped". The first cut of
+0.2a broke out of the switch before both assignments. **[M]**
+
+**0.2b** The escape hatch for 0.2a is a **failure ladder**, not an exception: a node that fails again
+within the repeat-offender window of a reclaim is parked for five minutes rather than reclaimed a
+second time. Without that, "walk if a route exists" is a livelock — the route exists every time. **[M]**
+
 **0.3** Exactly one owner writes the axis each frame. While an apex escape runs, ordinary steering
 stays silent; every other unstick phase, conversely, takes its direction from **inside** the
 steering. **[M]**

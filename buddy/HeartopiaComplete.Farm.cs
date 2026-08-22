@@ -197,6 +197,27 @@ namespace HeartopiaMod
                                 float distance = Vector3.Distance(Camera.main.transform.position, recheckLocation.Value);
                                 this.autoFarmStatus = $"Rechecking priority location ({distance:F0}m)...";
                                 this.AutoFarmLog("Periodic priority recheck -> location " + recheckLocation.Value + " distance=" + distance.ToString("F1"));
+                                // ⚠️ SAME RULE AS THE ZONE MOVE BELOW: a destination the walker can
+                                // route to is not warped to. This site used to teleport whatever the
+                                // Walk to Zone Point switch said, which made the switch mean "walk
+                                // between farm zones, except when the priority list moves you".
+                                if (this.farmWalkToAreaEnabled
+                                    && this.TryBeginFarmWalkToArea(recheckLocation.Value, "priority location"))
+                                {
+                                    // ⚠️ THE SAME BOOKKEEPING THE TELEPORT DOES. Arriving on foot is
+                                    // still arriving: currentPriorityLocation is what the collect
+                                    // cycle reads to decide whether this location keeps its slot,
+                                    // and lastTeleportWasPriorityLocation gates that check at all —
+                                    // its name is historical, it means "this cycle belongs to a
+                                    // priority location", not "we warped".
+                                    this.currentPriorityLocation = recheckLocation;
+                                    this.lastTeleportWasPriorityLocation = true;
+                                    this.autoFarmStatus = "Walking to the priority location...";
+                                    this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                    this.autoFarmTimer = 0f;
+                                    break;
+                                }
+
                                 this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(recheckLocation.Value),
                                     "area:priority-recheck", recheckLocation.Value);
                                 this.currentPriorityLocation = recheckLocation;
@@ -290,6 +311,21 @@ namespace HeartopiaMod
                             float distance = Vector3.Distance(Camera.main.transform.position, priorityLocation.Value);
                             this.autoFarmStatus = $"Going to priority location ({distance:F0}m)...";
                             this.AutoFarmLog("Priority location fallback -> " + priorityLocation.Value + " distance=" + distance.ToString("F1"));
+                            // ⚠️ SAME RULE AS THE ZONE MOVE BELOW: a destination the walker can
+                            // route to is not warped to. This site used to teleport whatever the
+                            // Walk to Zone Point switch said, which made the switch mean "walk
+                            // between farm zones, except when the priority list moves you".
+                            if (this.farmWalkToAreaEnabled
+                                && this.TryBeginFarmWalkToArea(priorityLocation.Value, "priority location"))
+                            {
+                                this.currentPriorityLocation = priorityLocation;
+                                this.lastTeleportWasPriorityLocation = true;
+                                this.autoFarmStatus = "Walking to the priority location...";
+                                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
+
                             this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(priorityLocation.Value),
                                 "area:priority-fallback", priorityLocation.Value);
                             this.currentPriorityLocation = priorityLocation;
@@ -383,10 +419,41 @@ namespace HeartopiaMod
                         else if (this.TryConsumeFarmWalkSkippedNode(out Vector3 skippedNode, out string skippedLabel))
                         {
                             // Nothing else here, and the only reason this one is not a candidate is
-                            // that the walker just skipped it. Take it back with a teleport rather
-                            // than relocating the whole area (FarmWalkFeature.cs explains why).
-                            ModLogger.Msg("[FarmWalk] no other node in range — taking back the skipped one at "
-                                + FormatNavMeshVector(skippedNode) + ".");
+                            // that the walker just skipped it.
+                            //
+                            // ⚠️ A ROUTE THAT EXISTS IS NOT ALLOWED TO BE WARPED PAST. This branch
+                            // used to teleport unconditionally, on the reasoning that the walker had
+                            // just given up on this node — but "the walk gave up" and "there is no
+                            // way there" are different facts. Measured 2026-08-23: the walk reached
+                            // 0.3 m of the end of its route and quit because the bubble hung 2.2 m
+                            // overhead, which says nothing about the route being unwalkable. Ninety
+                            // seconds later this branch warped 40 m to a node the graph could route
+                            // to perfectly well.
+                            //
+                            // So ask the router first. Only when it cannot build a route at all is
+                            // the teleport the thing that is left.
+                            //
+                            // Livelock is already handled a layer down: a node that fails again
+                            // within FarmWalkRepeatOffenderWindow of a reclaim is parked for five
+                            // minutes rather than reclaimed a second time.
+                            if (this.farmWalkToNodeEnabled
+                                && this.TryBeginFarmWalk(skippedNode, "node:skip-reclaim", false, skippedLabel))
+                            {
+                                this.NoteFarmWalkRouteSucceeded();
+                                ModLogger.Msg("[FarmWalk] no other node in range — walking back to the "
+                                    + "skipped one at " + FormatNavMeshVector(skippedNode)
+                                    + " (a route exists, so this is not a teleport).");
+                                this.lastNodePosition = skippedNode;
+                                this.lastTeleportWasPriorityLocation = false;
+                                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                this.autoFarmStatus = "Walking back to the skipped node...";
+                                break;
+                            }
+
+                            ModLogger.Msg("[FarmWalk] no other node in range and no route to the skipped "
+                                + "one at " + FormatNavMeshVector(skippedNode)
+                                + " — taking it back with a teleport.");
                             this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(skippedNode, skippedLabel),
                                 "node:skip-reclaim", skippedNode);
                             this.lastNodePosition = skippedNode;
@@ -3199,12 +3266,30 @@ namespace HeartopiaMod
 
                 if (this.currentPriorityLocation.HasValue)
                 {
-                    this.AutoFarmLog("Startup routing to priority location " + this.currentPriorityLocation.Value);
-                    this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(this.currentPriorityLocation.Value),
-                        "area:startup-priority", this.currentPriorityLocation.Value);
-                    this.lastTeleportWasPriorityLocation = true;
-                    this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
-                    this.autoFarmStatus = "Going to priority location...";
+                    // Startup is the last site that warped unconditionally, and it had the weakest
+                    // excuse: the farm has just been switched on, so there is no failed walk behind
+                    // it — only a destination and no attempt to reach it. Same rule as everywhere
+                    // else, and the same fallback when the router cannot answer (the track graph may
+                    // not be loaded yet at this moment, in which case the teleport still happens).
+                    if (this.farmWalkToAreaEnabled
+                        && this.TryBeginFarmWalkToArea(this.currentPriorityLocation.Value, "priority location"))
+                    {
+                        this.AutoFarmLog("Startup walking to priority location "
+                            + this.currentPriorityLocation.Value + " (a route exists, so no teleport).");
+                        this.lastTeleportWasPriorityLocation = true;
+                        this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                        this.autoFarmStatus = "Walking to the priority location...";
+                    }
+                    else
+                    {
+                        this.AutoFarmLog("Startup routing to priority location "
+                            + this.currentPriorityLocation.Value + " — no route, teleporting.");
+                        this.FarmTeleportTo(this.ApplyForagingAreaTeleportOffset(this.currentPriorityLocation.Value),
+                            "area:startup-priority", this.currentPriorityLocation.Value);
+                        this.lastTeleportWasPriorityLocation = true;
+                        this.farmState = HeartopiaComplete.AutoFarmState.WaitingForPriorityArea;
+                        this.autoFarmStatus = "Going to priority location...";
+                    }
                 }
                 else
                 {
