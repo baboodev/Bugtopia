@@ -470,6 +470,13 @@ namespace HeartopiaMod
                 return 0;
             }
 
+            // RedPointUtility's map is compiled into the build, so the answer never changes within a
+            // session — cache it and stop paying an invoke per node.
+            if (this.dailyClaimsRedPointTypeByEnum.TryGetValue(redPointEnum, out int cached))
+            {
+                return cached;
+            }
+
             if (this.dailyClaimsAuraRedPointUtilityClass == IntPtr.Zero)
             {
                 this.dailyClaimsAuraRedPointUtilityClass = this.FindAuraMonoClassByFullName(
@@ -504,7 +511,21 @@ namespace HeartopiaMod
             }
 
             // RedPointType.Unknow is -1; treat anything non-positive as "no server type".
-            return this.TryUnboxMonoInt32(boxed, out int typeValue) && typeValue > 0 ? typeValue : 0;
+            int resolved = this.TryUnboxMonoInt32(boxed, out int typeValue) && typeValue > 0 ? typeValue : 0;
+            this.dailyClaimsRedPointTypeByEnum[redPointEnum] = resolved;
+            return resolved;
+        }
+
+        // TablePediaSuitRewards for the current sweep, walked at most once.
+        private List<DailyClaimsSuitRewardTier> DailyClaimsSweepSuitTiers()
+        {
+            if (!this.dailyClaimsSweepSuitTiersLoaded)
+            {
+                this.dailyClaimsSweepSuitTiersLoaded = true;
+                this.DailyClaimsTryCollectSuitRewardTiers(this.dailyClaimsSweepSuitTiers, out _);
+            }
+
+            return this.dailyClaimsSweepSuitTiers;
         }
 
         // Claim whatever a single red point stands for. Returns false when the kind has no claim
@@ -517,6 +538,26 @@ namespace HeartopiaMod
         private const int DailyClaimsRedPointEnumPartyFestivalTaskCanSubmit = 803;
         private const int DailyClaimsRedPointEnumPartyOfficialTaskCanSubmit = 804;
         private const int DailyClaimsRedPointEnumActivityFreeReward = 20788;
+
+        // Nodes walked between frame hand-backs when nothing is being sent. Only bounds frame time —
+        // it is not command pacing, because no command is going out on those iterations.
+        private const int DailyClaimsSweepFrameChunk = 64;
+
+        // Read commands are "mark as seen", and the game itself emits them in bulk — PictorialTabNode
+        // .Read() folds every child into ONE command, ReadAllRedPointByType sends one per type. So
+        // mark-read paces per CHUNK rather than per node; at 0.05 s each, per-node spacing cost 16 s
+        // for the 319 nodes of the first live run.
+        private const int DailyClaimsMarkReadChunk = 8;
+
+        // client enum -> server RedPointType, resolved through RedPointUtility once per distinct
+        // enum. The map is baked into the build, so this is a pure cache; it removed one AuraMono
+        // invoke per node from both sweeps.
+        private readonly Dictionary<int, int> dailyClaimsRedPointTypeByEnum = new Dictionary<int, int>();
+
+        // TablePediaSuitRewards, collected once per sweep. Both the suit CLAIM and the suit CLEAR
+        // need these rows, and each was re-walking all 922 of them (pinned) for every suit node.
+        private readonly List<DailyClaimsSuitRewardTier> dailyClaimsSweepSuitTiers = new List<DailyClaimsSuitRewardTier>();
+        private bool dailyClaimsSweepSuitTiersLoaded;
 
         // targetId -> dreamType, built once per sweep from TableDreamTaskTypes.
         private readonly Dictionary<int, int> dailyClaimsDreamTypeByTarget = new Dictionary<int, int>();
@@ -734,6 +775,7 @@ namespace HeartopiaMod
         internal IEnumerator DailyClaimsClaimRedPointsRoutine()
         {
             this.dailyClaimsLastStatus = "Sweeping red points...";
+            float sweepStartedAt = Time.realtimeSinceStartup;
 
             List<DailyClaimsRedPointNode> nodes = new List<DailyClaimsRedPointNode>();
             if (!this.DailyClaimsCollectActiveRedPoints(nodes, out string collectStatus))
@@ -747,6 +789,8 @@ namespace HeartopiaMod
             // update would silently claim the wrong target.
             this.dailyClaimsDreamTypeByTarget.Clear();
             this.dailyClaimsSweepSubmittedTaskIds.Clear();
+            this.dailyClaimsSweepSuitTiers.Clear();
+            this.dailyClaimsSweepSuitTiersLoaded = false;
 
             List<string> lines = new List<string> { "--- red point sweep (" + collectStatus + ") ---" };
             int claimed = 0;
@@ -765,14 +809,24 @@ namespace HeartopiaMod
                     // back from the server type (several enums share one type).
                     this.DailyClaimsAutoClearRedPoint(serverType, id, enumValue);
                     lines.Add("claimed " + what + " [enum=" + enumValue + " type=" + serverType + "] " + status);
-                }
-                else
-                {
-                    unmapped++;
-                    lines.Add("LEFT enum=" + enumValue + " id=" + id + " type=" + serverType + " (" + status + ")");
+
+                    // Pace on COMMANDS, not on nodes. The spacing exists so a sweep never fires a
+                    // burst of reward commands — a node that sent nothing needs none of it. On the
+                    // first live run 314 of 319 nodes fell through to LEFT and still waited 150 ms
+                    // each, which is where 48 s of the sweep went.
+                    yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
+                    continue;
                 }
 
-                yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
+                unmapped++;
+                lines.Add("LEFT enum=" + enumValue + " id=" + id + " type=" + serverType + " (" + status + ")");
+
+                // Still hand a frame back periodically: the walk itself is cheap, but a few hundred
+                // table/AuraMono reads in one frame is a visible hitch.
+                if ((i + 1) % DailyClaimsSweepFrameChunk == 0)
+                {
+                    yield return null;
+                }
             }
 
             if (nodes.Count == 0)
@@ -781,7 +835,8 @@ namespace HeartopiaMod
             }
 
             this.dailyClaimsLastStatus = "Red points: claimed=" + claimed + " left=" + unmapped
-                + " of " + nodes.Count;
+                + " of " + nodes.Count
+                + " in " + (Time.realtimeSinceStartup - sweepStartedAt).ToString("0.0") + "s";
             this.DailyClaimsLog(this.dailyClaimsLastStatus);
             this.DailyClaimsLog(string.Join("\n", lines.ToArray()));
             yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
@@ -854,10 +909,61 @@ namespace HeartopiaMod
             return exc == IntPtr.Zero;
         }
 
+        // One chunk of the mark-read walk. SYNCHRONOUS on purpose: RedPointManager is resolved inside
+        // each helper call and never survives a frame boundary (CI lint W1), and keeping the whole
+        // chunk in one frame is what lets the spacing move from per-node to per-chunk.
+        private void DailyClaimsMarkReadChunkStep(
+            List<DailyClaimsRedPointNode> nodes,
+            int start,
+            int count,
+            Dictionary<int, int> perEnum,
+            List<string> lines,
+            ref int read,
+            ref int failed)
+        {
+            int end = Math.Min(start + count, nodes.Count);
+            for (int i = start; i < end; i++)
+            {
+                int enumValue = nodes[i].EnumValue;
+                int id = nodes[i].Id;
+                bool ok;
+
+                // Daily tabs are the one kind Read() cannot serve: no server type to delete by and
+                // no Read() override, so the game clears them through their own activity command.
+                if (enumValue == DailyClaimsRedPointEnumActivityDailyTab
+                    || enumValue == DailyClaimsRedPointEnumActivityNewDay)
+                {
+                    ok = this.TryDailyClaimsClearActivityDailyTab(id, out string tabStatus);
+                    if (!ok)
+                    {
+                        lines.Add("daily tab id=" + id + " NOT cleared: " + tabStatus);
+                    }
+                }
+                else
+                {
+                    // Straight into the game's own polymorphic Read(). No special casing — the node
+                    // subclass knows which subsystem command it needs.
+                    ok = this.TryDailyClaimsReadRedPoint(enumValue, id);
+                }
+
+                if (ok)
+                {
+                    read++;
+                    perEnum.TryGetValue(enumValue, out int n);
+                    perEnum[enumValue] = n + 1;
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+        }
+
         // The button: walk every lit node, mark read what CAN be marked, report the rest.
         internal IEnumerator DailyClaimsMarkRedPointsReadRoutine()
         {
             this.dailyClaimsLastStatus = "Marking red points read...";
+            float markStartedAt = Time.realtimeSinceStartup;
 
             List<DailyClaimsRedPointNode> nodes = new List<DailyClaimsRedPointNode>();
             if (!this.DailyClaimsCollectActiveRedPoints(nodes, out string collectStatus))
@@ -872,46 +978,11 @@ namespace HeartopiaMod
             int read = 0;
             int failed = 0;
 
-            for (int i = 0; i < nodes.Count; i++)
+            // A chunk at a time, with the spacing between chunks rather than between nodes.
+            for (int start = 0; start < nodes.Count; start += DailyClaimsMarkReadChunk)
             {
-                int enumValue = nodes[i].EnumValue;
-                int id = nodes[i].Id;
-
-                // Daily tabs are the one kind Read() cannot serve: no server type to delete by and
-                // no Read() override, so the game clears them through their own activity command.
-                if (enumValue == DailyClaimsRedPointEnumActivityDailyTab
-                    || enumValue == DailyClaimsRedPointEnumActivityNewDay)
-                {
-                    if (this.TryDailyClaimsClearActivityDailyTab(id, out string tabStatus))
-                    {
-                        read++;
-                        perEnum.TryGetValue(enumValue, out int tabCount);
-                        perEnum[enumValue] = tabCount + 1;
-                    }
-                    else
-                    {
-                        failed++;
-                        lines.Add("daily tab id=" + id + " NOT cleared: " + tabStatus);
-                    }
-
-                    yield return ModWait.Realtime(DailyClaimsBulkCommandSpacingSeconds);
-                    continue;
-                }
-
-                // One call per node, straight into the game's own polymorphic Read(). No special
-                // casing here at all — the node subclass knows which subsystem command it needs.
-                if (this.TryDailyClaimsReadRedPoint(enumValue, id))
-                {
-                    read++;
-                    perEnum.TryGetValue(enumValue, out int n);
-                    perEnum[enumValue] = n + 1;
-                }
-                else
-                {
-                    failed++;
-                }
-
-                // Same pacing rule as every other sweep — no bursts.
+                this.DailyClaimsMarkReadChunkStep(nodes, start, DailyClaimsMarkReadChunk,
+                    perEnum, lines, ref read, ref failed);
                 yield return ModWait.Realtime(DailyClaimsBulkCommandSpacingSeconds);
             }
 
@@ -926,7 +997,8 @@ namespace HeartopiaMod
             lines.Add("read=" + read + " failed=" + failed + " [" + string.Join(", ", byEnum.ToArray()) + "]");
 
             this.dailyClaimsLastStatus = "Mark read: " + read + " of " + nodes.Count
-                + (failed > 0 ? (" (" + failed + " failed)") : string.Empty);
+                + (failed > 0 ? (" (" + failed + " failed)") : string.Empty)
+                + " in " + (Time.realtimeSinceStartup - markStartedAt).ToString("0.0") + "s";
             this.DailyClaimsLog(this.dailyClaimsLastStatus);
             this.DailyClaimsLog(string.Join("\n", lines.ToArray()));
             yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
@@ -1098,8 +1170,7 @@ namespace HeartopiaMod
             {
                 int cleared = 0;
                 int rows = 0;
-                List<DailyClaimsSuitRewardTier> tiers = new List<DailyClaimsSuitRewardTier>();
-                if (this.DailyClaimsTryCollectSuitRewardTiers(tiers, out _))
+                List<DailyClaimsSuitRewardTier> tiers = this.DailyClaimsSweepSuitTiers();
                 {
                     for (int i = 0; i < tiers.Count; i++)
                     {
@@ -1523,10 +1594,10 @@ namespace HeartopiaMod
 
         private void DailyClaimsAutoClaimSuitTiers(int suitId)
         {
-            List<DailyClaimsSuitRewardTier> tiers = new List<DailyClaimsSuitRewardTier>();
-            if (!this.DailyClaimsTryCollectSuitRewardTiers(tiers, out string tableStatus))
+            List<DailyClaimsSuitRewardTier> tiers = this.DailyClaimsSweepSuitTiers();
+            if (tiers.Count == 0)
             {
-                this.DailyClaimsAutoReport(false, "suit " + suitId, tableStatus);
+                this.DailyClaimsAutoReport(false, "suit " + suitId, "TablePediaSuitRewards unavailable");
                 return;
             }
 
