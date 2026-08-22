@@ -86,6 +86,20 @@ returns to the plan. **[J]**
 **0.7** In walk mode the target is chosen by **route length**, not by straight line. Teleport mode
 keeps the straight line: a warp costs the same from anywhere. **[J]**
 
+**0.7-hold** ⭐ **A target, once chosen, is held.** The head of the tour is not re-picked while a
+walk to it is running. Consumable targets (bubbles) were re-ranked by straight line from the
+player's CURRENT position on every call, so walking towards one changed the distances to both and
+the choice flipped. Measured 02:55–02:57: A → B → A → B, each switch discarding a built route; two
+minutes produced no collect at all, and the one bubble that disappeared popped on its own.
+
+Nothing logged an error, because nothing was wrong by any single check — which is why this reads as
+"it is just walking" until the targets are listed side by side.
+
+Switching is allowed only when the new candidate is nearer by a **margin** (25 m), never by any
+amount: bubbles drift ~1.5 m/s and the player's own movement changes both distances every tick, so
+an unmargined comparison oscillates by construction. The hold is released when the target leaves the
+stop list — collected, popped, parked or pruned — which every one of those paths already does. **[M]**
+
 **0.7a** The measurement must **reproduce the builder**, not approximate it: the same reachable start
 snap, the same corner shortcutting. Otherwise it compares numbers that are not comparable — raw A\*
 output over a sparse graph reported "34 m away costs 266 m to travel" for a swim the walker would

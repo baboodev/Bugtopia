@@ -80,6 +80,16 @@ namespace HeartopiaMod
         // по природе цели, а не по расстоянию.
         private const float FarmTourMaxStopRange = 300f;
 
+        // Голова тура среди расходных целей, удерживаемая между вызовами. Без неё выбор
+        // пересчитывается каждый тик и маршрут переигрывается на каждом шаге игрока.
+        private Vector3 farmTourTransientLock;
+        private bool farmTourHasTransientLock;
+
+        // Насколько ближе должна быть новая расходная цель, чтобы бросить текущую. Баблы дрейфуют
+        // ~1,5 м/с и стоят десятками метров друг от друга, поэтому запас должен перекрывать и
+        // дрейф, и разницу, которая набегает от простого движения игрока.
+        private const float FarmTourTransientSwitchMargin = 25f;
+
         private readonly List<FarmTourStop> farmTourStops = new List<FarmTourStop>();
         private readonly List<FarmTourStop> farmTourCandidates = new List<FarmTourStop>();
 
@@ -517,13 +527,37 @@ namespace HeartopiaMod
             // никуда не девается: список тот же, пополняется так же, чистится так же — меняется
             // только правило выбора головы.
             // Расходные цели — вперёд всей очереди, ближайшая из них.
+            //
+            // ⚠️ И ОДНА РАЗ ВЫБРАННАЯ — ДЕРЖИТСЯ. Этот блок пересчитывал ближайшую на КАЖДОМ
+            // вызове, по прямой от текущей позиции игрока. Пока игрок идёт к баблу B, расстояния
+            // до A и B меняются оба, и голова тура перещёлкивается туда-сюда. Замерено 02:55-02:57:
+            //
+            //     02:55:29 → A (-119,44 … 248,25)
+            //     02:56:35 → B (-136,59 … 299,68)
+            //     02:56:58 → A          ← обратно
+            //     02:57:11 → B          ← снова обратно
+            //
+            // Каждое переключение выбрасывало построенный маршрут и строило новый: за две минуты
+            // ни один бабл не собран, единственный исчезнувший лопнул сам. Формально ошибки нет
+            // нигде — ни бана, ни телепорта, — поэтому в логе это и выглядело как «просто идёт».
+            //
+            // Лечится удержанием: пока выбранная цель ещё в списке, она и остаётся головой.
+            // Переключение разрешено только когда новая ближе на ЗАПАС, а не на любую величину —
+            // иначе дрейф бабла (~1,5 м/с) сам по себе будет перещёлкивать выбор.
             int transientPick = -1;
             float transientBest = float.MaxValue;
+            int lockedIndex = -1;
             for (int i = 0; i < this.farmTourStops.Count; i++)
             {
                 if (!IsTransientFarmTourStop(this.farmTourStops[i].Label))
                 {
                     continue;
+                }
+
+                if (this.farmTourHasTransientLock
+                    && IsSameFarmTourStop(this.farmTourTransientLock, this.farmTourStops[i].Position))
+                {
+                    lockedIndex = i;
                 }
 
                 float d = FarmTourDistance(origin, this.farmTourStops[i].Position);
@@ -534,10 +568,36 @@ namespace HeartopiaMod
                 }
             }
 
+            // Цель, на которую мы уже нацелились, исчезла из списка — собрана, лопнула или
+            // выпала по таймауту. Только тогда выбор делается заново.
+            if (this.farmTourHasTransientLock && lockedIndex < 0)
+            {
+                this.farmTourHasTransientLock = false;
+            }
+
+            if (lockedIndex >= 0)
+            {
+                float lockedDistance = FarmTourDistance(origin, this.farmTourStops[lockedIndex].Position);
+                if (transientPick >= 0 && transientPick != lockedIndex
+                    && transientBest + FarmTourTransientSwitchMargin < lockedDistance)
+                {
+                    ModLogger.Msg("[FarmTour] switching target: " + transientBest.ToString("F0")
+                        + "m beats the one we were walking to at " + lockedDistance.ToString("F0")
+                        + "m by more than the " + FarmTourTransientSwitchMargin.ToString("F0")
+                        + "m margin.");
+                }
+                else
+                {
+                    transientPick = lockedIndex;
+                }
+            }
+
             if (transientPick >= 0)
             {
                 position = this.farmTourStops[transientPick].Position;
                 label = this.farmTourStops[transientPick].Label;
+                this.farmTourTransientLock = position;
+                this.farmTourHasTransientLock = true;
                 return true;
             }
 
@@ -970,6 +1030,7 @@ namespace HeartopiaMod
             this.farmCandidateSink = null;
             this.farmTourBuilt = false;
             this.farmTourPlannedCount = 0;
+            this.farmTourHasTransientLock = false;
         }
     }
 }
