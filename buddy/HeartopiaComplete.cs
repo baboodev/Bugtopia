@@ -597,6 +597,10 @@ namespace HeartopiaMod
         public void OnUpdate()
         {
             Breadcrumbs.Tick("OnUpdate");
+            // FPS Watchdog (FpsWatchdogFeature.cs). FIRST line of the tick and last line before
+            // ou.end, so the mod's self-cost measurement spans the whole of OnUpdate. Begin also
+            // grades the PREVIOUS frame's delta and is what emits the hitch / drop log lines.
+            this.BeginFpsWatchdogFrame();
             // One-shot (MelonSceneHookCleanup.cs): remove the two permanent inline hooks MelonLoader
             // writes into GameAssembly.dll's .text for its scene callbacks. Runs here because under
             // MelonLoader this very callback is driven by SM_Component, so reaching this line proves
@@ -1427,6 +1431,7 @@ namespace HeartopiaMod
                 catch (Exception ex) { this.puzzleNetBreaker.Failure("PuzzleNet", ex, farmTickNow); }
             }
             this.UpdateVisualDebugEsp();
+            this.EndFpsWatchdogFrame();
             Breadcrumbs.Drop("ou.end");
         }
 
@@ -4987,6 +4992,11 @@ namespace HeartopiaMod
         {
             // Final word on the injection gates before the process goes away (InjectionGateCanary.cs).
             InjectionGateCanary.SampleOnShutdown();
+
+            // Unhook the phase observer and close the watchdog's log file (FpsWatchdogFeature.cs).
+            // First, so a drop still open at shutdown gets its closing line written before the rest
+            // of teardown gets a chance to throw.
+            this.ShutdownFpsWatchdog();
 
             // Close the agent bridge first: it owns background threads and a bound port, and any
             // in-flight call must be answered rather than left to time out against a dying process.

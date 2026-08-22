@@ -201,6 +201,9 @@ namespace HeartopiaMod
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
             data.fpsBypassTarget = this.fpsBypassTarget;
+            data.fpsWatchdogDisabled = !this.fpsWatchdogEnabled; // inverted on purpose — see ConfigTypes
+            data.fpsWatchdogHitchMs = this.fpsWatchdogHitchMs;
+            data.fpsWatchdogLowFps = this.fpsWatchdogLowFps;
             data.lodOverrideMode = this.lodOverrideMode;
             data.lodCustomBias = this.lodCustomBias;
             data.lodCustomMaxLevel = this.lodCustomMaxLevel;
@@ -300,6 +303,7 @@ namespace HeartopiaMod
             data.MasterLogInputMap = MasterLogInputMap;
             data.MasterLogPartyAutoDecline = MasterLogPartyAutoDecline;
             data.MasterLogActivityAutoDecline = MasterLogActivityAutoDecline;
+            data.MasterLogFpsWatchdog = MasterLogFpsWatchdog;
             // chatTranslateVerboseLog is deliberately NOT persisted — it is a diagnostic that
             // floods the log, so it always starts OFF and must be re-armed per session.
             data.autoIceSkatingEnabled = this.autoIceSkatingEnabled;
@@ -550,6 +554,9 @@ namespace HeartopiaMod
             this.gameSpeed = data.gameSpeed;
             this.fpsBypassEnabled = data.fpsBypassEnabled;
             this.fpsBypassTarget = Mathf.Clamp(data.fpsBypassTarget <= 0 ? 144 : data.fpsBypassTarget, 30, 360);
+            this.fpsWatchdogEnabled = !data.fpsWatchdogDisabled; // inverted on purpose — see ConfigTypes
+            this.fpsWatchdogHitchMs = Mathf.Clamp(data.fpsWatchdogHitchMs <= 0 ? 120 : data.fpsWatchdogHitchMs, 40, 1000);
+            this.fpsWatchdogLowFps = Mathf.Clamp(data.fpsWatchdogLowFps <= 0 ? 30 : data.fpsWatchdogLowFps, 10, 120);
             this.lodOverrideMode = Mathf.Clamp(data.lodOverrideMode, 0, 3);
             this.lodCustomBias = Mathf.Clamp(data.lodCustomBias <= 0f ? 1f : data.lodCustomBias, 0.25f, 16f);
             this.lodCustomMaxLevel = Mathf.Clamp(data.lodCustomMaxLevel, 0, 4);
@@ -657,6 +664,7 @@ namespace HeartopiaMod
             MasterLogInputMap = data.MasterLogInputMap;
             MasterLogPartyAutoDecline = data.MasterLogPartyAutoDecline;
             MasterLogActivityAutoDecline = data.MasterLogActivityAutoDecline;
+            MasterLogFpsWatchdog = data.MasterLogFpsWatchdog;
             this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
             this.autoIceSkatingMinUltimateScore = Mathf.Clamp(data.autoIceSkatingMinUltimateScore, 0, AutoIceSkatingMinUltimateScoreSliderMax);
@@ -1176,6 +1184,10 @@ namespace HeartopiaMod
             this.fpsBypassEnabled = false;
             this.fpsBypassTarget = 144;
             this.ApplyFpsBypass(false);
+            this.fpsWatchdogEnabled = true;
+            this.fpsWatchdogHitchMs = 120;
+            this.fpsWatchdogLowFps = 30;
+            this.ResetFpsWatchdogState();
             this.lodOverrideMode = 0;
             this.lodCustomBias = 1f;
             this.lodCustomMaxLevel = 0;

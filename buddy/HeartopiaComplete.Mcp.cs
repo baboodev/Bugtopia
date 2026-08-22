@@ -219,6 +219,11 @@ namespace HeartopiaMod
             w.Num("unscaledTime", Time.unscaledTime);
             float dt = Time.unscaledDeltaTime;
             w.Num("fps", dt > 0.0001f ? 1f / dt : 0f);
+            // FPS Watchdog (FpsWatchdogFeature.cs). The raw `fps` above is one frame and says
+            // nothing about stability; these are the smoothed reading, the baseline it is judged
+            // against, and how much of the last frame the mod itself cost.
+            w.Str("fpsWatchdog", this.BuildFpsWatchdogSummaryText());
+            w.Num("modFrameMs", this.fpsWatchdogModMs);
             w.EndObject();
 
             w.BeginObject("mcp");

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -116,7 +116,7 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Settings → Logging (47 MasterLog* toggles, session-only — see HeartopiaComplete.Logging.cs)
+        // Settings → Logging (48 MasterLog* toggles, session-only — see HeartopiaComplete.Logging.cs)
         // SESSION-ONLY IS LOAD-BEARING, NOT AN OVERSIGHT: none of these are in KeybindConfigData and
         // neither PopulateKeybindConfig nor ApplyKeybindConfig touches them, so every launch starts
         // from the compiled defaults below. Twelve of them default to TRUE, so turning one off lasts
@@ -193,7 +193,8 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogWorldStage, v => MasterLogWorldStage = v, "World Stage"),
                 new UguiLoggingToggleBinding(() => MasterLogInputMap, v => MasterLogInputMap = v, "Input Map"),
                 new UguiLoggingToggleBinding(() => MasterLogPartyAutoDecline, v => MasterLogPartyAutoDecline = v, "Party Auto-Decline"),
-                new UguiLoggingToggleBinding(() => MasterLogActivityAutoDecline, v => MasterLogActivityAutoDecline = v, "Event Auto-Decline")
+                new UguiLoggingToggleBinding(() => MasterLogActivityAutoDecline, v => MasterLogActivityAutoDecline = v, "Event Auto-Decline"),
+                new UguiLoggingToggleBinding(() => MasterLogFpsWatchdog, v => MasterLogFpsWatchdog = v, "FPS Watchdog (verbose)")
             };
         }
 
@@ -419,6 +420,12 @@ namespace HeartopiaMod
             public Toggle FpsToggle;
             public GameObject FpsTargetLabel;       // only visible while FPS Bypass is on
             public Slider FpsSlider;
+            public Toggle FpsWatchToggle;
+            public GameObject FpsWatchHitchLabel;   // the three below: only while the watchdog is on
+            public Slider FpsWatchHitchSlider;
+            public GameObject FpsWatchLowLabel;
+            public Slider FpsWatchLowSlider;
+            public GameObject FpsWatchStatusLabel;
             public GameObject LodTitleLabel;
             public readonly List<GameObject> LodModeButtons = new List<GameObject>();
             public readonly List<Image> LodModeButtonBgs = new List<Image>();
@@ -616,6 +623,26 @@ namespace HeartopiaMod
                 30f, 360f, this.fpsBypassTarget, true,
                 new System.Action<float>(this.OnUguiSettingsMainFpsTargetChanged));
 
+            // FPS Watchdog (FpsWatchdogFeature.cs) — a monitor with its own per-machine thresholds,
+            // not a verbose-tracing switch, so it sits under the FPS block rather than in the
+            // Logging tab (which carries only the MasterLog* on/off flags).
+            handle.FpsWatchToggle = this.CreateUguiCheckbox(performance.transform, "FpsWatchToggle",
+                this.L("FPS Watchdog (log drops)"), this.fpsWatchdogEnabled,
+                new System.Action<bool>(this.OnUguiSettingsMainFpsWatchdogChanged));
+
+            handle.FpsWatchHitchLabel = this.CreateUguiBodyLabel(performance.transform, "FpsWatchHitchLabel",
+                this.LF("Hitch threshold: {0} ms", this.fpsWatchdogHitchMs), 13f);
+            handle.FpsWatchHitchSlider = this.CreateUguiSlider(performance.transform, "FpsWatchHitchSlider",
+                40f, 1000f, this.fpsWatchdogHitchMs, true,
+                new System.Action<float>(this.OnUguiSettingsMainFpsWatchdogHitchChanged));
+            handle.FpsWatchLowLabel = this.CreateUguiBodyLabel(performance.transform, "FpsWatchLowLabel",
+                this.LF("Sustained drop below: {0} FPS", this.fpsWatchdogLowFps), 13f);
+            handle.FpsWatchLowSlider = this.CreateUguiSlider(performance.transform, "FpsWatchLowSlider",
+                10f, 120f, this.fpsWatchdogLowFps, true,
+                new System.Action<float>(this.OnUguiSettingsMainFpsWatchdogLowFpsChanged));
+            handle.FpsWatchStatusLabel = this.CreateUguiMutedLabel(performance.transform, "FpsWatchStatus",
+                this.BuildUguiSettingsMainFpsWatchdogStatusText(), 12f);
+
             handle.LodTitleLabel = this.CreateUguiBodyLabel(performance.transform, "LodTitle", this.L("LOD Override"), 13f);
             for (int i = 0; i < LodOverrideModeLabels.Length; i++)
             {
@@ -665,7 +692,16 @@ namespace HeartopiaMod
             return (this.notificationsEnabled ? 1 : 0)
                  | (this.customDisplayIdEnabled ? 2 : 0)
                  | (this.fpsBypassEnabled ? 4 : 0)
-                 | ((this.lodOverrideMode == LodOverrideModeCustom) ? 8 : 0);
+                 | ((this.lodOverrideMode == LodOverrideModeCustom) ? 8 : 0)
+                 | (this.fpsWatchdogEnabled ? 16 : 0);
+        }
+
+        // Live one-liner under the watchdog toggle: the smoothed rate, the baseline it is judged
+        // against, and where the events are being written. Refreshed on the 0.5s slow-sync tick.
+        private string BuildUguiSettingsMainFpsWatchdogStatusText()
+        {
+            // The path stays outside the translated part: it is a literal filename, not prose.
+            return this.LF("Watchdog: {0}", this.BuildFpsWatchdogSummaryText()) + "  ·  Logs/fps-watchdog.log";
         }
 
         private string BuildUguiSettingsMainLodStatusText()
@@ -683,6 +719,7 @@ namespace HeartopiaMod
             bool notifOn = this.notificationsEnabled;
             bool customId = this.customDisplayIdEnabled;
             bool fpsOn = this.fpsBypassEnabled;
+            bool watchdogOn = this.fpsWatchdogEnabled;
             bool lodCustom = this.lodOverrideMode == LodOverrideModeCustom;
 
             const float pad = 12f;
@@ -801,6 +838,39 @@ namespace HeartopiaMod
                     PlaceUguiTopLeft(handle.FpsSlider.gameObject, 200f, py, panelW - 200f - 24f, 20f);
                 }
                 py += 30f;
+            }
+            if (handle.FpsWatchToggle != null) { PlaceUguiTopLeft(handle.FpsWatchToggle.gameObject, 16f, py, innerW, 24f); }
+            py += 30f;
+            SetUguiGoActive(handle.FpsWatchHitchLabel, watchdogOn);
+            SetUguiGoActive(handle.FpsWatchHitchSlider != null ? handle.FpsWatchHitchSlider.gameObject : null, watchdogOn);
+            SetUguiGoActive(handle.FpsWatchLowLabel, watchdogOn);
+            SetUguiGoActive(handle.FpsWatchLowSlider != null ? handle.FpsWatchLowSlider.gameObject : null, watchdogOn);
+            SetUguiGoActive(handle.FpsWatchStatusLabel, watchdogOn);
+            if (watchdogOn)
+            {
+                if (handle.FpsWatchHitchLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.FpsWatchHitchLabel, 16f, py, 180f, 20f);
+                }
+                if (handle.FpsWatchHitchSlider != null)
+                {
+                    PlaceUguiTopLeft(handle.FpsWatchHitchSlider.gameObject, 200f, py, panelW - 200f - 24f, 20f);
+                }
+                py += 30f;
+                if (handle.FpsWatchLowLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.FpsWatchLowLabel, 16f, py, 180f, 20f);
+                }
+                if (handle.FpsWatchLowSlider != null)
+                {
+                    PlaceUguiTopLeft(handle.FpsWatchLowSlider.gameObject, 200f, py, panelW - 200f - 24f, 20f);
+                }
+                py += 30f;
+                if (handle.FpsWatchStatusLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.FpsWatchStatusLabel, 16f, py, innerW, 20f);
+                }
+                py += 26f;
             }
             if (handle.LodTitleLabel != null) { PlaceUguiTopLeft(handle.LodTitleLabel, 16f, py, innerW, 20f); }
             py += 28f;
@@ -936,9 +1006,11 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.ShowOverlayToggle, this.showStatusOverlay);
                 this.SyncUguiToggleFromField(handle.BlockInputToggle, this.blockGameUiWhenMenuOpen);
                 this.SyncUguiToggleFromField(handle.FpsToggle, this.fpsBypassEnabled);
+                this.SyncUguiToggleFromField(handle.FpsWatchToggle, this.fpsWatchdogEnabled);
 
                 // Conditional sections (notification position row / custom-ID readout / FPS slider /
-                // LOD custom sliders) — relayout only when the packed visibility state changes.
+                // watchdog thresholds / LOD custom sliders) — relayout only when the packed
+                // visibility state changes.
                 int signature = this.ComputeUguiSettingsMainLayoutSignature();
                 if (signature != handle.LayoutSignature)
                 {
@@ -1003,6 +1075,20 @@ namespace HeartopiaMod
             {
                 handle.FpsSlider.SetValueWithoutNotify(this.fpsBypassTarget);
             }
+
+            this.SetUguiLabelText(handle.FpsWatchHitchLabel, this.LF("Hitch threshold: {0} ms", this.fpsWatchdogHitchMs));
+            if (handle.FpsWatchHitchSlider != null
+                && Mathf.RoundToInt(handle.FpsWatchHitchSlider.value) != this.fpsWatchdogHitchMs)
+            {
+                handle.FpsWatchHitchSlider.SetValueWithoutNotify(this.fpsWatchdogHitchMs);
+            }
+            this.SetUguiLabelText(handle.FpsWatchLowLabel, this.LF("Sustained drop below: {0} FPS", this.fpsWatchdogLowFps));
+            if (handle.FpsWatchLowSlider != null
+                && Mathf.RoundToInt(handle.FpsWatchLowSlider.value) != this.fpsWatchdogLowFps)
+            {
+                handle.FpsWatchLowSlider.SetValueWithoutNotify(this.fpsWatchdogLowFps);
+            }
+            this.SetUguiLabelText(handle.FpsWatchStatusLabel, this.BuildUguiSettingsMainFpsWatchdogStatusText());
 
             this.SetUguiLabelText(handle.LodBiasLabel, this.LF("LOD bias: {0:0.##}", this.lodCustomBias));
             if (handle.LodBiasSlider != null && Mathf.Abs(handle.LodBiasSlider.value - this.lodCustomBias) > 0.001f)
@@ -1312,6 +1398,58 @@ namespace HeartopiaMod
             if (handle != null)
             {
                 this.SetUguiLabelText(handle.FpsTargetLabel, this.LF("Target Max FPS: {0}", this.fpsBypassTarget));
+            }
+        }
+
+        // FPS Watchdog toggle. SetFpsWatchdogEnabled owns the teardown (close an open drop, unhook
+        // the phase observer) and the re-arm, so this only persists and reports.
+        private void OnUguiSettingsMainFpsWatchdogChanged(bool value)
+        {
+            if (value == this.fpsWatchdogEnabled)
+            {
+                return;
+            }
+            this.SetFpsWatchdogEnabled(value);
+            this.SaveKeybinds(false);
+            this.AddMenuNotification(
+                value ? this.L("FPS Watchdog Enabled") : this.L("FPS Watchdog Disabled"),
+                value ? new Color(0.55f, 0.88f, 1f) : new Color(0.88f, 0.6f, 0.6f));
+        }
+
+        // Both threshold sliders re-arm the detector: the smoothing and the drop state machine were
+        // filled under the OLD bar, so keeping them would judge the next few seconds by a mix of the
+        // two settings.
+        private void OnUguiSettingsMainFpsWatchdogHitchChanged(float value)
+        {
+            int ms = Mathf.Clamp(Mathf.RoundToInt(value), 40, 1000);
+            if (ms == this.fpsWatchdogHitchMs)
+            {
+                return;
+            }
+            this.fpsWatchdogHitchMs = ms;
+            this.ResetFpsWatchdogState();
+            this.SaveKeybinds(false);
+            UguiShellSettingsMainHandle handle = this.uguiShellSettingsMain;
+            if (handle != null)
+            {
+                this.SetUguiLabelText(handle.FpsWatchHitchLabel, this.LF("Hitch threshold: {0} ms", this.fpsWatchdogHitchMs));
+            }
+        }
+
+        private void OnUguiSettingsMainFpsWatchdogLowFpsChanged(float value)
+        {
+            int fps = Mathf.Clamp(Mathf.RoundToInt(value), 10, 120);
+            if (fps == this.fpsWatchdogLowFps)
+            {
+                return;
+            }
+            this.fpsWatchdogLowFps = fps;
+            this.ResetFpsWatchdogState();
+            this.SaveKeybinds(false);
+            UguiShellSettingsMainHandle handle = this.uguiShellSettingsMain;
+            if (handle != null)
+            {
+                this.SetUguiLabelText(handle.FpsWatchLowLabel, this.LF("Sustained drop below: {0} FPS", this.fpsWatchdogLowFps));
             }
         }
 

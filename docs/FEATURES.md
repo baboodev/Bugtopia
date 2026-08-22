@@ -1417,12 +1417,69 @@ Sections typically include:
 | Localization | Language: en, es, zh-CN, pt-BR |
 | Notifications | Enable, screen position (9 positions) |
 | Overlay | Status overlay toggle |
-| Performance | FPS bypass; LOD override (game default / better / performance / custom bias & max level) |
+| Performance | FPS bypass; **FPS Watchdog** (see below); LOD override (game default / better / performance / custom bias & max level) |
 | Misc | Restore defaults, export-related options |
 
 Config persisted to `%LocalLow%/Bugtopia/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, and the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30).
 
 Separate legacy-compatible JSON fragments still loaded line-by-line for some keys in older migration path.
+
+### FPS Watchdog (Settings → Main → Performance)
+
+Frame-time monitor. Writes a log line every time the frame rate degrades, so "it stutters sometimes"
+becomes a timestamped number with context instead of a bisection session. **Default ON**;
+implementation `FpsWatchdogFeature.cs`.
+
+Two detectors, because the two failures look nothing alike:
+
+| Detector | Fires when | Default |
+|---|---|---|
+| **Hitch** | one frame takes longer than the threshold — an asset load, a GC pause, a blocking IO call, a scan that walked too many entities in one tick | ≥ **120 ms** (slider 40–1000) |
+| **Sustained drop** | the smoothed rate sits under a floor for ≥ 0.5 s — a crowded map, an automation loop that now costs real time every frame | below **max(30 fps, 60% of this machine's baseline)** (slider 10–120) |
+
+The floor takes whichever of the two bars is *higher*: on a 144 fps rig a slide to 45 fps is a real
+regression an absolute floor of 30 would never see, and on a 35 fps rig the relative test alone would
+fire constantly. The baseline is a slow EMA that **excludes** hitch and in-drop frames, so an anomaly
+can never quietly become the new normal.
+
+A drop logs on **entry** as well as on recovery. That is deliberate: a drop that ends in a freeze or a
+crash never reaches the recovery line, and the entry line is then the only evidence it happened.
+Long drops also emit a "still ongoing" line every 10 s.
+
+**Attribution — was it the mod?** Every line carries how many milliseconds of that frame `OnUpdate`
+itself spent, and which stretch of it was the most expensive. The section boundaries are the
+`Breadcrumbs.Phase()` markers `OnUpdate` already carries (`ou.lod`, `ou.uguishell`, `ou.dailyclaims`,
+…), borrowed through `Breadcrumbs.PhaseObserver` — no new call sites, and one
+`Stopwatch.GetTimestamp()` (~25 ns) per marker. Caveat when reading the output: a section is measured
+from its own marker to the next one, so it includes that marker's breadcrumb file write.
+
+```
+[FpsWatch] hitch 214 ms (4.7 fps) [+3 more since the last line] | mod 3.21 ms (worst ou.uguishell 2.90 ms) | now 41.2 fps, baseline 59.7 | Town scene 1 | pos 123.4,12.0,-45.6
+[FpsWatch] DROP START fps 22.4 (floor 35.8, baseline 59.7) | mod 1.10 ms | Town scene 1 | pos ...
+[FpsWatch] DROP END (recovered) after 12.3 s | avg 21.8 fps, min 9.1 fps, worst frame 190 ms, 268 frames | mod avg 1.44 ms peak 11.20 ms (worst ou.hud 8.10 ms) | baseline 59.7 | ...
+[FpsWatch] 60s window: avg 58.4 fps, 1% low 31.2 fps, worst frame 132 ms | 12 hitches, 1 drops (8.4 s) | mod avg 0.90 ms peak 14.10 ms (worst ou.dailyclaims 6.20 ms)
+```
+
+Other behaviour worth knowing:
+
+- **Output goes to both sinks, always** — the mod log (what an agent tails live) and
+  `%LocalLow%/Bugtopia/Logs/fps-watchdog.log`, which survives the loader log and is the file to
+  attach to a stutter report. It appends across sessions and is reset once it passes 4 MB.
+- **Rate limited**, and that is load-bearing: hitches arrive in bursts, and a line per hitch would
+  turn a 200 ms stall into a 2 s one. At most one hitch line every 2 s; everything suppressed in
+  between is counted and reported on the next line that gets through (`[+N more…]`).
+- **Suppressed during loading screens, world transitions and the login level**, plus a 3 s grace
+  while streaming settles — otherwise every zone change would report a "drop".
+- **The 60 s summary only prints when there is something to say** (a hitch, a drop, or a 1% low under
+  70% of the average); an otherwise clean session gets one anchor line every 5 minutes. The 1% low
+  comes from a frame-time histogram, so there is no per-frame sample buffer and no sort.
+- **`Settings → Logging → "FPS Watchdog (verbose)"`** adds the full per-section table on every hitch
+  and every window. The event lines themselves are *never* gated on it.
+- Changing either threshold re-arms the detector (the smoothing was filled under the old bar).
+- Live reading is also on the MCP `env` payload as `runtime.fpsWatchdog` / `runtime.modFrameMs`.
+
+Cost when enabled: a handful of float ops, one timestamp pair and one array clear per frame. When
+disabled: two bool tests per frame, and the phase observer is unhooked.
 
 ---
 
@@ -1443,13 +1500,13 @@ Rebind by clicking the button in Settings and pressing a new key. Mouse buttons 
 
 ## Master Log Switches (Settings → Logging)
 
-Verbose logging is controlled by **47 `internal static bool MasterLog*` flags**, declared next to the
+Verbose logging is controlled by **48 `internal static bool MasterLog*` flags**, declared next to the
 subsystems they trace (most in `HeartopiaComplete.cs`, the rest in the feature file that uses them).
 No rebuild is needed to change one: every flag has a checkbox in **Settings → Logging**, driven from
 the single `BuildUguiLoggingToggleBindings()` array in `HeartopiaComplete.UguiSettingsMainContent.cs`
 — adding a new flag means adding one entry there, or it silently has no UI.
 
-**All 47 default to `false` and are persisted** (`KeybindConfigData`, saved in
+**All 48 default to `false` and are persisted** (`KeybindConfigData`, saved in
 `PopulateKeybindConfig`, restored in `ApplyKeybindConfig` — field names match the flags 1:1, so the
 XML is greppable). A config written before they existed simply lacks the elements, which deserialize
 to `false` — the same as the compiled default, so old and new configs agree.

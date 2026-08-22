@@ -13,7 +13,7 @@ namespace HeartopiaMod
         private const float LoggingTabRowHeight = 30f;
         // Guards against a binding being added without the row area growing to fit it — the builder
         // logs a mismatch. Keep in sync with BuildUguiLoggingToggleBindings.
-        private const int LoggingTabRowCount = 47;
+        private const int LoggingTabRowCount = 48;
 
 
     }

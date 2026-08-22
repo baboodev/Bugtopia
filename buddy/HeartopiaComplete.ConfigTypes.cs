@@ -181,6 +181,14 @@ namespace HeartopiaMod
             public float gameSpeed;
             public bool fpsBypassEnabled;
             public int fpsBypassTarget;
+            // FPS Watchdog (FpsWatchdogFeature.cs). SAVED INVERTED, and that is deliberate: the
+            // watchdog defaults ON, but this class has no constructor, so every bool an existing
+            // Config.xml does not carry deserializes to false. Persisting "enabled" would silently
+            // switch the watchdog off for every user who already has a config; persisting
+            // "disabled" makes the missing element mean exactly what it should — still on.
+            public bool fpsWatchdogDisabled;
+            public int fpsWatchdogHitchMs;
+            public int fpsWatchdogLowFps;
             public int lodOverrideMode;
             public float lodCustomBias;
             public int lodCustomMaxLevel;
@@ -286,6 +294,7 @@ namespace HeartopiaMod
             public bool MasterLogInputMap;
             public bool MasterLogPartyAutoDecline;
             public bool MasterLogActivityAutoDecline;
+            public bool MasterLogFpsWatchdog;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             public bool autoIceSkatingOnlyX2Ultimate = true;

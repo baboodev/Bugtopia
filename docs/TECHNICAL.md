@@ -148,6 +148,39 @@ BepInEx requires `ModCoroutines.SetHost(this)` in `HeartopiaBehaviour.Awake` bef
 | `OnLateUpdate` | Mouse-look camera, position monitor debug, camera override frames, custom FOV |
 | `OnGUI` | Full mod menu, radar overlay, resource ESP, notifications, status overlay |
 
+`OnUpdate` is bracketed by `BeginFpsWatchdogFrame()` / `EndFpsWatchdogFrame()` — the first and last
+statements in the body — so the watchdog measures the mod's own cost across the whole tick. `End` is
+deliberately **not** in a `finally`: an exception escaping `OnUpdate` is its own (already logged)
+problem, and the next `Begin` simply reopens the frame.
+
+#### FPS Watchdog (`FpsWatchdogFeature.cs`)
+
+Frame-time monitor: hitch detector (single frame over a threshold) + sustained-drop state machine
+(smoothed rate under `max(absolute floor, 60% of the session baseline)` for ≥ 0.5 s, with hysteresis
+on the way out). Every event goes to the mod log **and** to
+`%LocalLow%/Bugtopia/Logs/fps-watchdog.log`. User-facing behaviour and the log formats are in
+[FEATURES.md § FPS Watchdog](./FEATURES.md#fps-watchdog-settings--main--performance); the parts that
+matter when touching the frame loop:
+
+- **Sampling is gated on the world-ready view.** `!IsWorldReady || IsWorldLoadingScreenVisible`
+  stands the detector down entirely and clears the smoothing, then a 3 s grace runs while streaming
+  settles. Without that, every zone change reports a multi-second "drop" and the baseline EMA is
+  poisoned by the loading screen's frame deltas.
+- **The baseline excludes its own anomalies.** Hitch frames and in-drop frames never feed the slow
+  EMA, or a sustained regression would quietly become the new "normal" and the relative floor would
+  chase it down.
+- **Section attribution reuses `Breadcrumbs.Phase()`.** `Breadcrumbs.PhaseObserver` is an
+  `Action<string>` hook (`Breadcrumbs.cs`), null whenever the watchdog is off. The watchdog installs
+  its own delegate and treats each marker as a section boundary, so the ~24 markers `OnUpdate`
+  already carries become a per-frame cost table for one `Stopwatch.GetTimestamp()` each. The
+  observer runs **before** `Phase`'s own early-out, so attribution still works when breadcrumb file
+  IO is unavailable, and it ignores calls from any thread other than the one that installed it
+  (Breadcrumbs also runs a background hang watchdog).
+  **If you add a phase marker, it becomes a watchdog section for free — nothing else to wire.**
+- Section names are matched by reference against the interned literals the call sites pass, with a
+  `string.Equals` fallback; the table holds 64 names and folds anything beyond that into the last
+  slot rather than growing.
+
 ---
 
 ## Hooking game code (no Harmony patches)

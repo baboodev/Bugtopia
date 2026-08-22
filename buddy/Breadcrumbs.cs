@@ -151,8 +151,21 @@ namespace HeartopiaMod
         // Sub-frame marker. Cheap enough to sprinkle through a single OnUpdate: one fixed-size record
         // written in place, no allocation. Refreshes the heartbeat and _lastArea too, so a hang that
         // freezes between two Drops now gets named by the watchdog at phase resolution.
+        // FPS Watchdog attribution hook (FpsWatchdogFeature.cs). The phase markers already fence off
+        // every stretch of OnUpdate, so the watchdog borrows them as section boundaries instead of
+        // adding a second set of call sites. Null whenever the watchdog is off — the cost of the
+        // hook is then one null test per marker. Called BEFORE the early-out on purpose: the marker
+        // set is meaningful even when breadcrumb file IO is unavailable.
+        internal static Action<string> PhaseObserver;
+
         public static void Phase(string area)
         {
+            Action<string> observer = PhaseObserver;
+            if (observer != null)
+            {
+                try { observer(area); } catch { }
+            }
+
             if (!PhaseEnabled || _disabled || _phaseStream == null)
             {
                 return;
