@@ -11,7 +11,14 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         private static bool DailyClaimsLogsEnabled => MasterLogDailyClaims;
-        private const float DailyClaimsActionDelaySeconds = 0.65f;
+        // Trailing gap after a routine finishes. Every one of the 14 routines ends with this, and
+        // Claim All chains twelve of them, so at the original 0.65 s it spent ~8 s doing nothing but
+        // waiting — on top of each routine's own internal pacing, and even for routines that sent
+        // no command at all. Its only real job is to keep the last command of one routine from
+        // landing in the same frame as the first command of the next, which is exactly what
+        // DailyClaimsCommandSpacingSeconds already governs INSIDE a routine — so it is now the same
+        // interval rather than four times it.
+        private const float DailyClaimsActionDelaySeconds = 0.15f;
 
         // Spacing between the individual sends of a multi-command sweep. The festival-reward and
         // collection sweeps fan out to 7 and 17 commands respectively; firing that many server RPCs
