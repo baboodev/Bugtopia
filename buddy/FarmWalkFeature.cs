@@ -2270,6 +2270,9 @@ namespace HeartopiaMod
             if (progress >= FarmWalkStuckMinProgress)
             {
                 this.farmWalkStuckStrikes = 0;
+
+                // Real movement is also what tells the vehicle its last obstacle is behind it.
+                this.NoteFarmWalkVehicleProgress(selfPos);
                 return false;
             }
 
@@ -2822,7 +2825,7 @@ namespace HeartopiaMod
             // so its escape is the driver's one — reverse, then pull out sideways. Two rounds, and
             // then the vehicle IS the obstacle: BeginFarmWalkVehicleUnstick gets out on the third
             // call and the on-foot ladder below takes over from the next block.
-            if (this.IsFarmWalkRidingVehicle())
+            if (this.IsFarmWalkVehicleSteering())
             {
                 if (this.TryGetNavMeshSelfPosition(out Vector3 vehiclePos, out _))
                 {
@@ -3235,6 +3238,7 @@ namespace HeartopiaMod
 
             // Vehicle: a summon cooldown and a half-finished dismount from the last run.
             this.farmWalkVehicleLastSummonAt = 0f;
+            this.farmWalkVehicleLastDismountAt = -999f;
             this.farmWalkVehicleLeftForObstacle = false;
             this.farmWalkVehicleUnstickRounds = 0;
             this.farmWalkVehicleSideSign = 1;
@@ -3655,7 +3659,7 @@ namespace HeartopiaMod
             //
             // Delegating here rather than at each call site keeps the rule in one place — a new
             // escape site cannot forget it, the way the underwater guard was forgotten twice.
-            if (this.IsFarmWalkRidingVehicle())
+            if (this.IsFarmWalkVehicleSteering())
             {
                 if (this.TryGetNavMeshSelfPosition(out Vector3 vehiclePos, out _))
                 {

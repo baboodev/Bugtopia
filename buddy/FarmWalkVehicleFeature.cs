@@ -53,9 +53,71 @@ namespace HeartopiaMod
 
         // Guards the mount round-trip window — see ShouldFarmWalkSummonVehicle.
         private const float FarmWalkVehicleSummonCooldown = 5f;
+
+        // ⚠️ THE MIRROR OF THE SUMMON WINDOW, AND IT WAS MISSING.
+        //
+        // Mounting is a server round-trip, so IsFarmWalkRidingVehicle answers "no" for a moment
+        // after a successful summon — that is what the cooldown above guards. Getting OUT is the
+        // same round-trip in the other direction: it answers "yes" for a moment after a dismount.
+        //
+        // Nothing guarded that side, so the escape ladder — which checks "am I driving?" first —
+        // saw a vehicle that was no longer there and started ANOTHER reverse-and-sidestep round on
+        // a player standing on their own feet. Measured 05:37:04, one second apart:
+        //     dismounted from netId 2336382 (stuck in the vehicle).
+        //     wedged (not closing) — round 1/2: reversing 2m, then 5m to the right.
+        // which is precisely what the dismount exists to prevent: the comment on
+        // BeginFarmWalkVehicleUnstick says it gets out so the ON-FOOT ladder (jumps, hop burst,
+        // probe) can have it, and then the car's manoeuvre took the frame anyway.
+        private const float FarmWalkVehicleDismountSettle = 2f;
+        private float farmWalkVehicleLastDismountAt = -999f;
+
+        // "Is the vehicle what the escape should act on?" — riding AND past the dismount round-trip.
+        // Every escape site asks THIS, never IsFarmWalkRidingVehicle directly.
+        internal bool IsFarmWalkVehicleSteering()
+        {
+            return this.IsFarmWalkRidingVehicle()
+                && Time.unscaledTime - this.farmWalkVehicleLastDismountAt >= FarmWalkVehicleDismountSettle;
+        }
         private float farmWalkVehicleLastSummonAt = -999f;
 
         private int farmWalkVehicleUnstickRounds;
+
+        // ⚠️ THE ROUND BUDGET IS PER OBSTACLE, NOT PER RIDE.
+        //
+        // The counter was zeroed on mount and on dismount and nowhere else, so it accumulated over
+        // a whole haul: two unrelated obstacles, cleared successfully and tens of metres apart,
+        // spent both rounds and the third wedge threw the driver out. Measured over one 270 m haul:
+        //     05:36:28  wedged at 270,7m - round 1/2 ... side-stepped 5,0m of 5m (clear).
+        //     05:36:39  wedged at 232,7m - round 2/2 ... side-stepped 5,0m of 5m (clear).
+        //     05:37:04  2 reverse-and-sidestep rounds did not clear it - getting out.
+        // Thirty-eight metres of driving between the two, so BOTH rounds had in fact cleared it and
+        // the message announcing otherwise was simply false.
+        //
+        // Driving well past where the manoeuvre started is proof the obstacle is behind us, and the
+        // budget belongs to the next one. The threshold has to clear the manoeuvre itself, which is
+        // 2 m back plus 5 m sideways.
+        private const float FarmWalkVehicleUnstickClearedDistance = 15f;
+
+        // Called from the walker's progress sample - the one place that already knows the body is
+        // moving - so this cannot drift out of step with what "progress" means elsewhere.
+        internal void NoteFarmWalkVehicleProgress(Vector3 selfPos)
+        {
+            if (this.farmWalkVehicleUnstickRounds <= 0 || !this.IsFarmWalkRidingVehicle())
+            {
+                return;
+            }
+
+            if (Distance3D(selfPos, this.farmWalkVehicleUnstickFrom)
+                < FarmWalkVehicleUnstickClearedDistance)
+            {
+                return;
+            }
+
+            ModLogger.Msg("[FarmVehicle] drove "
+                + Distance3D(selfPos, this.farmWalkVehicleUnstickFrom).ToString("F0")
+                + "m clear of the last wedge - the round budget goes back to the next obstacle.");
+            this.farmWalkVehicleUnstickRounds = 0;
+        }
         private Vector3 farmWalkVehicleUnstickFrom;
         private int farmWalkVehicleSideSign = 1;
 
@@ -283,6 +345,7 @@ namespace HeartopiaMod
                 args[1] = (IntPtr)(&reason);
                 auraMonoRuntimeInvoke(this.farmWalkVehicleGetOffMethod, IntPtr.Zero, (IntPtr)args, ref exc);
                 this.farmWalkVehicleOurs = false;
+                this.farmWalkVehicleLastDismountAt = Time.unscaledTime;
                 ModLogger.Msg("[FarmVehicle] dismounted from netId " + netId + " (" + why + ").");
             }
             catch (Exception ex)

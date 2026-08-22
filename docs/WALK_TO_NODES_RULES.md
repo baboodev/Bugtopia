@@ -315,6 +315,29 @@ there had never been an obstacle. **[M]**
 
 ## 3. In a vehicle
 
+**3.0-budget** ⚠️ **The reverse-and-sidestep budget belongs to an OBSTACLE, not to a ride.** The
+round counter was zeroed on mount and on dismount and nowhere else, so two unrelated obstacles tens
+of metres apart spent both rounds and the third wedge threw the driver out — while the log itself
+showed each manoeuvre finishing `(clear)` and 38 m of driving in between, i.e. both rounds had
+worked and the message saying they had not was false. Driving clear of where the manoeuvre started
+(15 m, comfortably past the 2 m + 5 m of the manoeuvre itself) returns the budget. **[M]**
+
+**3.0-settle** ⚠️ **Mounting and dismounting are both server round-trips, and BOTH need a settle
+window.** The summon side has always had one: `IsFarmWalkRidingVehicle` answers "no" for a moment
+after a successful mount, and without a cooldown the next walk summoned again. The dismount side had
+none, so it answers "yes" for a moment after getting out — and the escape ladder, which asks "am I
+driving?" first, ran another reverse-and-sidestep round on a player standing on their own feet.
+Measured 05:37:04, one second apart:
+
+```
+dismounted from netId 2336382 (stuck in the vehicle).
+wedged (not closing) - round 1/2: reversing 2m, then 5m to the right.
+```
+
+That is exactly what the dismount exists to prevent — it gets out so the ON-FOOT ladder can have the
+obstacle. Escape sites ask `IsFarmWalkVehicleSteering()`, never `IsFarmWalkRidingVehicle()`. **[M]**
+
+
 **3.1** A car does not jump. The apex escape does not apply to it at all, and the delegation sits
 **inside** `BeginFarmWalkHopBurst` so that a new call site cannot forget. **[M]**
 
