@@ -1500,27 +1500,35 @@ Rebind by clicking the button in Settings and pressing a new key. Mouse buttons 
 
 ## Master Log Switches (Settings → Logging)
 
-Verbose logging is controlled by **48 `internal static bool MasterLog*` flags**, declared next to the
-subsystems they trace (most in `HeartopiaComplete.cs`, the rest in the feature file that uses them).
-No rebuild is needed to change one: every flag has a checkbox in **Settings → Logging**, driven from
-the single `BuildUguiLoggingToggleBindings()` array in `HeartopiaComplete.UguiSettingsMainContent.cs`
-— adding a new flag means adding one entry there, or it silently has no UI.
+Verbose logging is controlled by `static bool MasterLog*` flags, declared next to the subsystems
+they trace (most in `HeartopiaComplete.cs`, the rest in the feature file that uses them). **50 of
+them have a checkbox** in **Settings → Logging**, driven from the single
+`BuildUguiLoggingToggleBindings()` array in `HeartopiaComplete.UguiSettingsMainContent.cs` — adding a
+new flag means adding one entry there, or it silently has no UI. (`LoggingTabRowCount` in
+`HeartopiaComplete.Logging.cs` pins that count; a mismatch is logged when the tab is built.)
 
-**All 48 default to `false` and are persisted** (`KeybindConfigData`, saved in
-`PopulateKeybindConfig`, restored in `ApplyKeybindConfig` — field names match the flags 1:1, so the
-XML is greppable). A config written before they existed simply lacks the elements, which deserialize
-to `false` — the same as the compiled default, so old and new configs agree.
+**All 50 are persisted** (`KeybindConfigData`, saved in `PopulateKeybindConfig`, restored in
+`ApplyKeybindConfig` — field names match the flags 1:1, so the XML is greppable). Because the tab's
+Set lambdas are bare field setters, the save is committed by the checkbox wrapper in
+`BuildUguiShellSettingsLoggingContent`; a binding added without it changes the flag in memory and
+reverts at the next launch.
 
-Previously the whole set was session-only and thirteen flags shipped `true`, so a flag you switched
-off came back on at the next launch. That is fixed; the trade-off is the opposite one — a flag left
-on now stays on across restarts and will keep writing to the log until you turn it off.
+**49 default to `false`; `MasterLogGatherScan` defaults `true`.** A config written before a flag
+existed simply lacks the element, and XmlSerializer then leaves whatever the config field's own
+initialiser set — which is why `KeybindConfigData.MasterLogGatherScan` carries `= true` as well.
+That is the pattern to copy for any future default-ON setting; the missing element means "compiled
+default", not "false".
 
-Two deliberate exceptions that are **not** in this set and stay session-only:
+Previously the whole set was session-only, so a flag you switched off came back on at the next
+launch. That is fixed; the trade-off is the opposite one — a flag left on now stays on across
+restarts and will keep writing to the log until you turn it off.
+
+Flags that are **not** reachable from the tab and stay session-only:
 
 | Flag | Why |
 |---|---|
-| `chatTranslateVerboseLog` | prints a line per chat message; explicitly skipped in `PopulateKeybindConfig` |
-| `MasterLogTutorialBlock` | has no Logging-tab entry and still defaults `true` |
+| `chatTranslateVerboseLog` | prints a line per chat message; explicitly skipped in `PopulateKeybindConfig` and forced `false` in `ApplyKeybindConfig` |
+| nine `MasterLog*` flags with no row | never given a binding, so neither persisted nor switchable at runtime: `ActionPanel`, `AutoLearn`, `CraftAnimSkip`, `CraftDirectSend`, `EmoteUnlock`, `ForagingAnim`, `MusicPlayer`, `RepairThrowTrim`, `TutorialBlock` — the last still defaults `true` |
 
 ---
 

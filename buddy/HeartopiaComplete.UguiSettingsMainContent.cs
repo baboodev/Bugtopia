@@ -116,17 +116,36 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Settings → Logging (48 MasterLog* toggles, session-only — see HeartopiaComplete.Logging.cs)
-        // SESSION-ONLY IS LOAD-BEARING, NOT AN OVERSIGHT: none of these are in KeybindConfigData and
-        // neither PopulateKeybindConfig nor ApplyKeybindConfig touches them, so every launch starts
-        // from the compiled defaults below. Twelve of them default to TRUE, so turning one off lasts
-        // only until the next restart. Same rationale as chatTranslateVerboseLog's explicit
-        // exclusion: a verbose flag left on silently floods the log forever.
+        // Settings → Logging (50 MasterLog* toggles — see HeartopiaComplete.Logging.cs)
+        //
+        // THE STATE IS PERSISTED. Every flag below has a same-named bool on KeybindConfigData
+        // (HeartopiaComplete.ConfigTypes.cs), written by PopulateKeybindConfig and restored by
+        // ApplyKeybindConfig — the names match 1:1, so the XML is greppable. Two consequences worth
+        // knowing before editing this array:
+        //   * Each row's Set lambda is a bare field setter with nowhere to hook a save, so the
+        //     checkbox wrapper in BuildUguiShellSettingsLoggingContent commits the config itself.
+        //     A binding added without going through that wrapper "works" until the next launch and
+        //     then silently reverts.
+        //   * A flag left ON stays on across restarts and keeps writing until it is turned off.
+        //     That is the deliberate trade for the older behaviour, where the whole set was
+        //     session-only and a flag switched OFF came back on at the next launch.
+        //
+        // Compiled defaults: 49 false, one TRUE — MasterLogGatherScan. It keeps its `true` against a
+        // config written before the field existed because the CONFIG field carries the initialiser
+        // too (`public bool MasterLogGatherScan = true;`): XmlSerializer runs field initialisers and
+        // then overwrites only the elements actually present in the XML, so a missing element means
+        // "compiled default", not "false".
+        //
+        // Not in this array, and therefore unreachable from the tab: chatTranslateVerboseLog (a
+        // per-message diagnostic — deliberately skipped in PopulateKeybindConfig and forced false in
+        // ApplyKeybindConfig, because a verbose flag left on silently floods the log forever), plus
+        // nine MasterLog* flags that were never given a row and so are neither persisted nor
+        // switchable at runtime; MasterLogTutorialBlock is one of them and still defaults TRUE.
         // ----------------------------------------------------------------------------------------
 
-        // One binding per MasterLog* flag — get/set lambdas instead of 39 hand-written toggle
-        // blocks, so a field/label mismatch cannot hide in copy-paste. Pairs and ORDER are copied
-        // exactly from DrawLoggingTab (HeartopiaComplete.Logging.cs:58-96).
+        // One binding per MasterLog* flag — get/set lambdas instead of 50 hand-written toggle
+        // blocks, so a field/label mismatch cannot hide in copy-paste. Pairs and ORDER date back to
+        // the IMGUI DrawLoggingTab this replaced (deleted with the rest of the IMGUI menu).
         private struct UguiLoggingToggleBinding
         {
             public Func<bool> Get;
