@@ -113,6 +113,32 @@ failing the route, not routing around an obstacle. **[M]**
 **1.5** Edge audit: every leg is checked by the sweep **and** the ground profile. An impassable leg →
 ban the waypoint it ends at, and rebuild. No more than **2** attempts per build.
 
+**1.5a** The sweep runs at **two heights**: the capsule's centre (0.63 m) and knee height
+(**0.30 m** = stepOffset + radius). One sphere in the middle is not a player — a rail or kerb below
+0.48 m passes under it and reports clear, and the player walks into it. **[M]**
+
+**1.5b** A leg is passable only when it is passable **in both directions**. Confirmed in game
+2026-08-22: standing against a barrier, walking away from it is free while walking into it from open
+ground is blocked, because the sphere is built **at the origin** and a collider it already touches
+there is discarded by the cast. A leg that begins beside a wall therefore reports clear and the walk
+hits that wall on its first step. **[M]**
+
+**1.5c** Both directions of that comparison must be **levelled** — the oracle lifts only its origin
+(radius + 0.05), so the raw two directions are different tilted segments and their disagreement is
+the call, not the world. Pre-lower the origin by the same amount. Measured with and without: 228
+asymmetric edges vs 229, so the tilt does not explain the result — but it has to be removed before
+that can be said. **[M]**
+
+**1.5d** Only a **near-level** leg (rise ≤ 0.5 m) is rejected for being one-way. Asymmetry appears on
+any slope for a harmless reason — from the lower end the sphere already rests on the ground — and
+unfiltered that gave **229** asymmetric edges against **2** once level ground was required. Steeper
+disagreements are logged, never banned. **[J]**
+
+**1.5e** A **solid column** — no height in the span where the capsule fits — standing in a leg makes
+it impassable. This is the shape the barriers on the shore and on the rope bridge take, and neither
+has a collider to find. ⚠️ Solid at the TOP is not a solid column: rejecting on that alone bans every
+leg passing under a bridge deck or an arch. Keep descending until free air is found. **[M]**
+
 **1.6** A ban is **never** issued on leg zero: it starts at the player and speaks about where they
 are standing, not about the graph. Eight false bans in six seconds came from exactly that. **[M]**
 
@@ -303,7 +329,16 @@ controller never settles and oscillates. Not fixed.
 **5.1** Judging passability by the sweep **alone** or the ray **alone**: both fly over terrain when
 the ends differ in height. The ground profile decides. **[M]**
 
-**5.2** Reading "no ground" as "no way through". **[M]**
+**5.2** Reading "no ground" as "no way through". **[M]** An empty column is air **or** water and
+nothing here separates them; a column where the capsule fits **nowhere** is a different answer
+entirely (1.5e), and folding the two together is what hid every wall the collider table cannot see.
+
+**5.2a** Testing passability in **one direction only**. It cannot see a one-way barrier, which is
+what the game's own collision query produces wherever a sweep starts against something. **[M]**
+
+**5.2b** Treating the collider table as the authority on obstacles. Measured twice with the player
+pressed against a barrier: **zero** blocking colliders within 4–5 m. Terrain and built structures
+are not in it. Use it to NAME what was hit, never to decide whether something is there. **[M]**
 
 **5.3** Banning a waypoint on a leg that starts at the player. **[M]**
 

@@ -204,7 +204,8 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryFarmWalkSweepLeg(IntPtr ctrl, Vector3 from, Vector3 to, out bool passable)
+        private unsafe bool TryFarmWalkSweepLeg(IntPtr ctrl, Vector3 from, Vector3 to,
+            out bool passable, float liftOverride = -1f)
         {
             passable = true;
             if (this.farmWalkSweepMethod == IntPtr.Zero || ctrl == IntPtr.Zero
@@ -216,7 +217,9 @@ namespace HeartopiaMod
 
             // The standing centre of the capsule, so the sphere sweeps at chest height rather than
             // through the floor. Both ends: the method lifts only its own origin.
-            float lift = (FarmWalkSweepCapsuleHeight * 0.5f) + FarmWalkSweepCapsuleRadius;
+            float lift = liftOverride >= 0f
+                ? liftOverride
+                : (FarmWalkSweepCapsuleHeight * 0.5f) + FarmWalkSweepCapsuleRadius;
             Vector3 a = new Vector3(from.x, from.y + lift, from.z);
             Vector3 b = new Vector3(to.x, to.y + lift, to.z);
 
@@ -273,9 +276,30 @@ namespace HeartopiaMod
                 && this.TryUnboxMonoBoolean(result, out fits);
         }
 
+        // ⚠️ THE ORACLE LIFTS ONLY ITS ORIGIN, by radius+0.05, so A->B and B->A are NOT the same
+        // segment — each is tilted the other way, and a step at one end clips one and misses the
+        // other. Comparing the two raw directions therefore reports an asymmetry that belongs to
+        // the CALL, not to the world.
+        //
+        // Pre-lowering the origin by exactly that lift cancels it: after the oracle raises it back,
+        // both directions travel the identical line. Measured with and without on the same ground:
+        // 228 asymmetric edges vs 229, i.e. the tilt does NOT explain the one-way results — but it
+        // has to be removed before that statement can be made at all.
+        private const float FarmWalkSweepOriginLift = 0.20f;   // radius 0.15 + the method's own 0.05
+
+        private bool TryFarmWalkSweepLegLevelled(IntPtr ctrl, Vector3 from, Vector3 to,
+            out bool passable)
+        {
+            return this.TryFarmWalkSweepLeg(ctrl,
+                new Vector3(from.x, from.y - FarmWalkSweepOriginLift, from.z), to, out passable);
+        }
+
         private const float FarmWalkSweepCapsuleRadius = 0.15f;
         private const float FarmWalkSweepCapsuleHeight = 0.96f;
 
+        // ⚠️ DIRECTIONAL ON PURPOSE — a and b are packed in order, never sorted. Since a leg can
+        // be passable one way and not the other, folding both directions onto one key would store
+        // whichever answer arrived first and hand it back for the opposite question.
         private static long FarmWalkSweepKey(Vector3 a, Vector3 b)
         {
             long ax = (long)Mathf.Round(a.x * 10f), az = (long)Mathf.Round(a.z * 10f);
@@ -298,6 +322,14 @@ namespace HeartopiaMod
         // is the GROUND: sample the surface along the leg and look at the step between samples.
         // Coarser than the probe's 0.4 m (this runs inside route building, not on a button) and
         // cached per leg, so a re-path every second costs nothing after the first build.
+        // Above this the leg is a slope, and a slope is asymmetric for reasons that have
+        // nothing to do with a barrier. Same number the rules use for a walkable step per sample.
+        private const float FarmWalkOneWayMaxRise = 0.5f;
+
+        // stepOffset 0.15 + the sphere's own radius, i.e. the lowest height at which an obstacle is
+        // still something the controller will NOT climb over by itself.
+        private const float FarmWalkSweepKneeLift = 0.30f;
+
         private const float FarmWalkProfileStep = 1.5f;
         private const float FarmWalkProfileSpanUp = 3f;
         // Deep enough to find the ground under a ledge or a bank. At 4 m a leg over any real drop
@@ -343,6 +375,65 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // ⚠️ PASSABLE ONE WAY IS NOT PASSABLE. Confirmed in game 2026-08-22, standing against a
+            // barrier: walking away from it is free while walking into it from open ground is
+            // blocked. The cause is in the query itself — the sphere is built AT THE ORIGIN and a
+            // collider it already touches there is discarded by the cast — so a leg that BEGINS
+            // next to a wall reports clear and the walk then runs into that wall on its first step.
+            //
+            // Every sweep in this file was single-direction until now, which is exactly why such a
+            // wall read as ordinary open ground.
+            //
+            // [J] Only a near-level leg is REJECTED on this. Asymmetry appears on any slope for a
+            // harmless reason (from the lower end the sphere already rests on the ground), and on
+            // the probe's grid that produced 229 asymmetric edges against 2 once level ground was
+            // required. 0.5 m is the slope the rules already call walkable per sample; above it the
+            // disagreement is logged and the leg is left alone rather than banned on a guess.
+            // ⚠️ BOTH SIDES OF THE COMPARISON MUST BE LEVELLED. The forward sweep above is the
+            // walker's own test and stays exactly as it is — it is what the walk will actually do —
+            // but comparing THAT against a levelled reverse reintroduces the tilt this file just
+            // went to the trouble of cancelling, and the difference would be the call, not a wall.
+            // So the one-way question is asked of two levelled sweeps, separately from the verdict.
+            bool oneWay = this.TryFarmWalkSweepLegLevelled(ctrl, from, to, out bool fwdLevel)
+                && this.TryFarmWalkSweepLegLevelled(ctrl, to, from, out bool backOk)
+                && fwdLevel != backOk;
+            if (oneWay)
+            {
+                float rise = Mathf.Abs(to.y - from.y);
+                if (rise <= FarmWalkOneWayMaxRise)
+                {
+                    passable = false;
+                    why = fwdLevel
+                        ? "ONE-WAY: passable towards the target but not back, on level ground"
+                        : "ONE-WAY: blocked towards the target though the way back is open";
+                    this.farmWalkSweepCache[key] = false;
+                    return true;
+                }
+
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": leg to " + FormatNavMeshVector(to)
+                    + " is one-way (" + (fwdLevel ? "forward clear, back blocked"
+                        : "forward blocked, back clear") + ") but rises " + rise.ToString("F2")
+                    + "m — height can explain that, so it is NOT being banned.");
+            }
+
+            // ⚠️ ONE HEIGHT IS NOT THE PLAYER. The default sweep runs at the capsule's centre,
+            // 0.63 m, where a sphere of radius 0.15 occupies 0.48-0.78 m. A rail, a kerb or a low
+            // fence at knee height passes UNDER it and reports clear, while the player — who is a
+            // capsule from the floor to 0.96 m, not a ball in the middle — walks straight into it.
+            //
+            // So the leg is also swept at the height the walker's own step logic gives up at:
+            // stepOffset + radius, just above what the controller climbs by itself. Anything that
+            // blocks THAT is something the walk has to go around.
+            if (this.TryFarmWalkSweepLeg(ctrl, from, to, out bool lowOk, FarmWalkSweepKneeLift)
+                && !lowOk)
+            {
+                passable = false;
+                why = "blocked at knee height (" + FarmWalkSweepKneeLift.ToString("F2")
+                    + "m) though clear at chest height";
+                this.farmWalkSweepCache[key] = false;
+                return true;
+            }
+
             float length = Distance3D(from, to);
             int steps = Mathf.Clamp(Mathf.CeilToInt(length / FarmWalkProfileStep), 1, 24);
             float previousY = 0f;
@@ -352,8 +443,20 @@ namespace HeartopiaMod
             for (int i = 0; i <= steps; i++)
             {
                 Vector3 at = Vector3.Lerp(from, to, (float)i / steps);
-                if (!this.TryFindFarmWalkSurface(ctrl, at, out float surfaceY))
+                if (!this.TryFindFarmWalkSurface(ctrl, at, out float surfaceY, out byte column))
                 {
+                    if (column == FarmWalkColumnSolid)
+                    {
+                        // A wall face standing in the leg. This is the one the collider table
+                        // cannot see: measured twice with the player pressed against a barrier,
+                        // zero blocking colliders within 4-5 m both times.
+                        passable = false;
+                        why = "a solid column blocks the leg at "
+                            + (length * i / steps).ToString("F1") + "m along (no height fits there)";
+                        this.farmWalkSweepCache[key] = false;
+                        return true;
+                    }
+
                     // ⚠️ NO GROUND IS NOT A VERDICT — IT CANNOT BE, FROM HERE.
                     //
                     // An empty column means open air OR water, and nothing available distinguishes
@@ -401,19 +504,48 @@ namespace HeartopiaMod
 
         // The highest height at this XZ where the capsule fits with something solid beneath it —
         // the same search the GeoProbe grid uses, at a coarser resolution.
+        // ⚠️ "NO SURFACE" WAS THREE DIFFERENT ANSWERS WEARING ONE HAT.
+        //
+        // This returned false when the column was SOLID at every height, when it was EMPTY at every
+        // height, and when the oracle simply did not answer — and the caller folded all three into
+        // "no ground here, carry on". They could not be more different:
+        //
+        //   Solid    the capsule fits NOWHERE in the column. Next to somewhere you can stand, that
+        //            is the FACE OF A WALL, and it is the shape the barriers on the shore and on
+        //            the rope bridge take — neither of which has a collider to find.
+        //   Void     nothing solid anywhere below. Open air OR water, and nothing here can tell
+        //            them apart, so it stays what it always was: reported, never ruled on (5.2).
+        //   NoAnswer the oracle failed. Silence, not a verdict.
+        private const byte FarmWalkColumnSurface = 0;
+        private const byte FarmWalkColumnSolid = 1;
+        private const byte FarmWalkColumnVoid = 2;
+        private const byte FarmWalkColumnNoAnswer = 3;
+
         private bool TryFindFarmWalkSurface(IntPtr ctrl, Vector3 at, out float surfaceY)
         {
+            return this.TryFindFarmWalkSurface(ctrl, at, out surfaceY, out _);
+        }
+
+        private bool TryFindFarmWalkSurface(IntPtr ctrl, Vector3 at, out float surfaceY,
+            out byte column)
+        {
             surfaceY = 0f;
+            column = FarmWalkColumnNoAnswer;
             float top = at.y + FarmWalkProfileSpanUp;
             float bottom = at.y - FarmWalkProfileSpanDown;
 
-            if (!this.TryFarmWalkCapsuleFits(ctrl, new Vector3(at.x, top, at.z), out bool freeAtTop)
-                || !freeAtTop)
+            // ⚠️ SOLID AT THE TOP IS NOT A SOLID COLUMN. Rejecting as soon as the top sample is
+            // blocked would ban every leg that passes UNDER something — a bridge deck, an arch, an
+            // overhanging rock — where the player walks through perfectly well. A column only
+            // counts as solid when the capsule fits at NO height in the whole span, so the search
+            // keeps descending until it finds free air and only then looks for the floor below it.
+            if (!this.TryFarmWalkCapsuleFits(ctrl, new Vector3(at.x, top, at.z), out bool freeAtTop))
             {
                 return false;
             }
 
             float freeY = top;
+            bool seenFree = freeAtTop;
             for (float y = top - 0.5f; y >= bottom; y -= 0.5f)
             {
                 if (!this.TryFarmWalkCapsuleFits(ctrl, new Vector3(at.x, y, at.z), out bool free))
@@ -424,7 +556,13 @@ namespace HeartopiaMod
                 if (free)
                 {
                     freeY = y;
+                    seenFree = true;
                     continue;
+                }
+
+                if (!seenFree)
+                {
+                    continue;   // still inside whatever occupies the top; keep going down
                 }
 
                 float lo = y, hi = freeY;
@@ -447,9 +585,14 @@ namespace HeartopiaMod
                 }
 
                 surfaceY = hi;
+                column = FarmWalkColumnSurface;
                 return true;
             }
 
+            // Nothing free anywhere in the span: there is no height at which a player fits here.
+            // That is the face of a wall. Free the whole way down instead is a void — air or water,
+            // and this cannot tell which, so it stays a report rather than a verdict.
+            column = seenFree ? FarmWalkColumnVoid : FarmWalkColumnSolid;
             return false;
         }
 
