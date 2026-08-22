@@ -60,9 +60,15 @@ namespace HeartopiaMod
     //    h=44, caption y+4 / value y+21 centered; status text 12/88 w-24 h=44 wrapped).
     //
     // SNOW SCULPTING source nuances verified against the branch, replayed exactly:
-    //  - The toggle label literal is "? Auto Snow Sculpture" — byte-verified U+003F U+0020 ...:
-    //    a plain ASCII question mark + space, NOT a mangled Unicode glyph. Reproduced
-    //    character-for-character (through L, same as the source's DrawSwitchToggle path).
+    //  - The toggle label used to read "? Auto Snow Sculpture". That ? really is U+003F in
+    //    the branch we ported from, and it was reproduced faithfully - but the branch was
+    //    ALREADY WRONG. The localization tables carried "❄️ Auto Snow Sculpture"
+    //    translated into all five languages right beside it, so the ? is a mangled snowflake
+    //    and someone had patched the TABLE to match the mangling instead of fixing the label.
+    //    The emoji is not restorable either: LiberationSans SDF is pinned for Latin and draws
+    //    no pictographs, and no other live label in the mod uses one - the tables hold only
+    //    ★ ✓ →. So the label is the plain "Auto Snow Sculpture" key, which already
+    //    existed, is already translated, and is the name the keybind row uses for this feature.
     //  - Header goes through this.L ("AUTO SNOW SCULPTURE", :1032, bare GUI.skin.label →
     //    body-label role); the toggle is flag-only + a 2-color notification (:1036-1039,
     //    unlocalized message "Auto Snow Sculpture Enabled/Disabled", green/red) — no method
@@ -499,10 +505,10 @@ namespace HeartopiaMod
                 this.L("AUTO SNOW SCULPTURE"), 13f);
             PlaceUguiTopLeft(header, 8f, 8f, 360f, 30f);
 
-            // -------- Toggle (:1034-1039 — the byte-verified "? Auto Snow Sculpture" literal,
-            // ASCII '?' + space; see file header. Flag-only + notification, 360x30) --------
+            // -------- Toggle (:1034-1039 — the "? " prefix is dropped; see the file header.
+            // Flag-only + notification, 360x30) --------
             handle.AutoToggle = this.CreateUguiCheckbox(scrollContent, "AutoSnow",
-                this.L("? Auto Snow Sculpture"), this.autoSnowEnabled,
+                this.L("Auto Snow Sculpture"), this.autoSnowEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesSnowAutoToggled));
             PlaceUguiTopLeft(handle.AutoToggle.gameObject, 8f, 48f, 360f, 30f);
 
