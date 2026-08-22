@@ -3183,6 +3183,61 @@ namespace HeartopiaMod
         // teleports to a FARM-LOCATION waypoint, potentially across the map. One unreachable sea
         // grape sent the run 121 m to "Sea Area 1". Hopping the last few metres onto the awkward
         // node is enormously less disruptive than abandoning the area.
+        // ⭐ ONE PLACE THAT MAKES A RUN A FRESH RUN.
+        //
+        // Most walker state is already re-armed per WALK, inside TryBeginFarmWalk — the escape
+        // ladder, the probe, the sweep cache, the edge-audit bans. What this clears is the layer
+        // ABOVE that: things which deliberately outlive a single walk so that repeated failures can
+        // be recognised, and which therefore also outlive Stop Foraging unless somebody clears them.
+        //
+        // Audited 2026-08-23 by walking every farmWalk*/farmTour* field and subtracting what the
+        // toggle, TryBeginFarmWalk and AbortFarmWalk already touch. Everything below survived both.
+        // The symptom of a miss is a run that opens mid-argument: a node parked because the PREVIOUS
+        // session gave up on it, a deadlock teleport fired on the third node because the skip
+        // counter still held two from before, a stand-off already narrowed for a kind whose geometry
+        // was somewhere else entirely.
+        internal void ResetFarmWalkRunState()
+        {
+            // The skip/reclaim ladder. Each of these exists to remember a failure ACROSS walks, so
+            // each is exactly what must not cross a run boundary.
+            this.farmWalkHasSkippedNode = false;
+            this.farmWalkSkippedNode = Vector3.zero;
+            this.farmWalkSkippedNodeLabel = null;
+            this.farmWalkHasLastReclaimed = false;
+            this.farmWalkLastReclaimedNode = Vector3.zero;
+            this.farmWalkLastReclaimedAt = -999f;
+            this.farmWalkReclaimNotBefore = 0f;
+            this.farmWalkConsecutiveSkips = 0;
+            this.farmWalkSkipToScan = false;
+
+            // Route-failure counter: at FarmWalkMaxRouteFailures it stops parking nodes and takes
+            // the teleport instead, so a stale count starts the run closer to warping.
+            this.farmWalkRouteFailures = 0;
+
+            // A retry queued by the previous run would otherwise be the first thing the new one does.
+            this.farmWalkRetryState = 0;
+            this.farmWalkRetryNode = Vector3.zero;
+            this.farmWalkRetryLabel = null;
+            this.farmWalkRetryAvoidEndNode = -1;
+
+            // ⚠️ THE LEARNED STAND-OFFS GO TOO. This is real knowledge — 0.4a/0.4b buy each entry
+            // with a collect that timed out — and dropping it costs one re-learn per kind. It is
+            // cleared anyway, on purpose: the number was learned from ONE node's geometry, a fresh
+            // run is usually somewhere else, and a stand-off narrowed for the wrong place fails
+            // silently by never collecting. Re-learning is one node; a wrong value is every node.
+            this.farmWalkKindStandoff.Clear();
+            this.farmWalkStandoffRetries = 0;
+
+            // Vehicle: a summon cooldown and a half-finished dismount from the last run.
+            this.farmWalkVehicleLastSummonAt = 0f;
+            this.farmWalkVehicleLeftForObstacle = false;
+            this.farmWalkVehicleUnstickRounds = 0;
+            this.farmWalkVehicleSideSign = 1;
+
+            // Log throttle, so the first oversized-range complaint of a run is not swallowed.
+            this.farmTourRangeComplaintAt = 0f;
+        }
+
         private bool TryConsumeFarmWalkSkippedNode(out Vector3 node, out string label)
         {
             node = this.farmWalkSkippedNode;

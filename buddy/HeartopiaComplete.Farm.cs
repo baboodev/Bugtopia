@@ -3219,6 +3219,7 @@ namespace HeartopiaMod
                 this.farmWalkLastRescueTeleportAt = 0f;
                 this.lastFarmNodeActivityAt = 0f;
                 this.farmWalkBlockedGraphNodes.Clear();  // bans are per-run heuristics
+                this.ResetFarmWalkRunState();
 
                 // The tour is per-run too. Carrying one over means the next run opens with a plan
                 // built around wherever the player happened to be standing minutes ago.
@@ -3247,6 +3248,17 @@ namespace HeartopiaMod
                 this.recentlyVisitedNodes.Clear();
                 this.visitedNodeStampedAt.Clear();
                 this.cameraRotationAttempts = 0;
+
+                // ⚠️ ON START AS WELL AS ON STOP, and not out of caution. A run does not always
+                // follow a stop of this feature: the very first Start after a launch, and a start
+                // that follows a world change or a crash, both reach here with whatever the last
+                // session left behind. Clearing in one place only means "clean slate" holds for the
+                // common path and quietly fails for exactly the cases where stale state is likeliest.
+                this.ResetFarmWalkRunState();
+                this.farmWalkNodeFailures.Clear();
+                this.farmWalkBlockedGraphNodes.Clear();
+                this.farmWalkLastRescueTeleportAt = 0f;
+                this.ResetFarmTour();
                 this.ResetContaminationDwellState();
                 this.ResetCorruptionCleanseState();
                 this.ResetNavMeshProbeState();
