@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,6 +11,11 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         private static bool DailyClaimsLogsEnabled => MasterLogDailyClaims;
+        // Growth levels that carry a gift, keyed by EntityType (cat/dog). A null value is a cached
+        // "could not work it out" — see DailyClaimsPetGiftLevels.
+        private readonly Dictionary<int, HashSet<int>> dailyClaimsPetGiftLevels =
+            new Dictionary<int, HashSet<int>>(2);
+
         // Trailing gap after a routine finishes. Every one of the 14 routines ends with this, and
         // Claim All chains twelve of them, so at the original 0.65 s it spent ~8 s doing nothing but
         // waiting — on top of each routine's own internal pacing, and even for routines that sent
@@ -2146,6 +2151,324 @@ namespace HeartopiaMod
                 new[] { "id" },
                 new[] { staticId },
                 out status);
+        }
+
+        // Pet growth gifts. The red point is keyed by the PET's netId (PetManualPanel registers it
+        // as (PetGrownGift, (int)petNetId)) and says only "something is owed on this pet" — never
+        // which level. PetGrowthInfoTipPanel works that out itself: a level is claimable when the
+        // pet's growth value has reached its threshold AND the level is not already in
+        // PetGrowthPointComponent.Rewards. Reproduce exactly that gate instead of firing at all 15
+        // table levels, so a dot is only cleared for gifts that were genuinely owed.
+        //
+        // PetSystem.GetGrowthLevel(entityType, growth) already collapses the threshold walk into the
+        // highest level reached, which also sidesteps TableMeowGrowthLevel.needGrowth — yet another
+        // public int PROPERTY over a private ushort, the trap that made BP Loop read cycleNeed=0.
+        // Levels are 1..15 and contiguous in both the cat and dog tables (read live from the running
+        // build), so every level at or below the current one is a candidate.
+        //
+        // AuraMono only: PetSystem, PetProtocolManager and the command struct are embedded-Mono
+        // types with no interop counterpart.
+        private unsafe bool TryClaimDailyClaimsPetGrowthRewards(int petNetId, out string status)
+        {
+            status = "pet growth: not attempted";
+            if (petNetId <= 0)
+            {
+                status = "pet growth: bad netId " + petNetId;
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                status = "pet growth: AuraMono unavailable";
+                return false;
+            }
+
+            IntPtr petSystemClass = this.FindAuraMonoClassByFullName("XDTGameSystem.GameplaySystem.Pet.PetSystem");
+            if (petSystemClass == IntPtr.Zero)
+            {
+                petSystemClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                    "XDTGameSystem.GameplaySystem.Pet", "PetSystem");
+            }
+
+            if (petSystemClass == IntPtr.Zero
+                || !this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Pet.PetSystem", out IntPtr petSystem)
+                || petSystem == IntPtr.Zero)
+            {
+                status = "pet growth: PetSystem unavailable";
+                return false;
+            }
+
+            // GetPetComponentData has a 1-arg (netId) and a 2-arg (type, netId) overload; the 1-arg
+            // one resolves the type itself, which is the path the panel takes.
+            IntPtr getPetData = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "GetPetComponentData", 1);
+            IntPtr getGrowthLevel = this.FindAuraMonoMethodOnHierarchy(petSystemClass, "GetGrowthLevel", 2);
+            if (getPetData == IntPtr.Zero || getGrowthLevel == IntPtr.Zero)
+            {
+                status = "pet growth: PetSystem method(s) unavailable";
+                return false;
+            }
+
+            uint netId = (uint)petNetId;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* petArgs = stackalloc IntPtr[1];
+            petArgs[0] = (IntPtr)(&netId);
+            IntPtr petData = auraMonoRuntimeInvoke(getPetData, petSystem, (IntPtr)petArgs, ref exc);
+            if (exc != IntPtr.Zero || petData == IntPtr.Zero)
+            {
+                status = "pet growth: GetPetComponentData failed exc=0x" + exc.ToInt64().ToString("X");
+                return false;
+            }
+
+            int growthValue;
+            int entityType;
+            uint readBackNetId;
+
+            // PetComponentData is a struct, so the invoke handed back a BOXED copy. Pin it across the
+            // member reads: this sgen build moves objects, and animalComponentData is read as an
+            // address INSIDE that box.
+            uint petPin = AuraMonoPinNew(petData);
+            try
+            {
+                if (!this.TryGetMonoIntMember(petData, "chemistry", out growthValue))
+                {
+                    status = "pet growth: chemistry unreadable";
+                    return false;
+                }
+
+                if (!this.TryGetMonoObjectMember(petData, "animalComponentData", out IntPtr animalData)
+                    || animalData == IntPtr.Zero)
+                {
+                    status = "pet growth: animalComponentData unreadable";
+                    return false;
+                }
+
+                if (!this.TryGetMonoIntMember(animalData, "entityType", out entityType)
+                    || !this.TryGetMonoUInt32Member(animalData, "netId", out readBackNetId))
+                {
+                    status = "pet growth: entityType/netId unreadable";
+                    return false;
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(new List<uint> { petPin });
+            }
+
+            // A pet the client holds no data for comes back as a default struct, and claiming against
+            // that would be a guess dressed up as a gate.
+            if (readBackNetId != netId)
+            {
+                status = "pet growth: no client data for netId " + petNetId + " (got " + readBackNetId + ")";
+                return false;
+            }
+
+            int growthEntityType = entityType;
+            int growthChemistry = growthValue;
+            IntPtr* levelArgs = stackalloc IntPtr[2];
+            levelArgs[0] = (IntPtr)(&growthEntityType);
+            levelArgs[1] = (IntPtr)(&growthChemistry);
+            exc = IntPtr.Zero;
+            IntPtr boxedLevel = auraMonoRuntimeInvoke(getGrowthLevel, petSystem, (IntPtr)levelArgs, ref exc);
+            if (exc != IntPtr.Zero || !this.TryUnboxMonoInt32(boxedLevel, out int growthLevel) || growthLevel <= 0)
+            {
+                status = "pet growth: GetGrowthLevel returned nothing (type=" + entityType
+                    + " growth=" + growthValue + ")";
+                return false;
+            }
+
+            HashSet<int> taken = new HashSet<int>();
+            if (!this.TryCollectDailyClaimsPetGrowthTakenLevels(netId, taken, out string takenStatus))
+            {
+                // Not knowing what is already claimed is NOT a licence to re-send: the gate is
+                // "reached AND not taken", and half of it would be missing.
+                status = "pet growth: " + takenStatus;
+                return false;
+            }
+
+            // Level 1 has an EMPTY reward array in both shipped tables — the tip panel's own
+            // "is there anything here" test is `levelItem.Item3.Length != 0`, and the server answers
+            // a take on such a level with PetGrowthGiftTakeResult.NoRewards. Skip them so the count
+            // in the status line is gifts actually claimed, not commands fired.
+            HashSet<int> giftLevels = this.DailyClaimsPetGiftLevels(entityType);
+
+            int sent = 0;
+            for (int level = 1; level <= growthLevel; level++)
+            {
+                if (taken.Contains(level) || (giftLevels != null && !giftLevels.Contains(level)))
+                {
+                    continue;
+                }
+
+                Dictionary<string, object> fields = new Dictionary<string, object>(2, StringComparer.Ordinal)
+                {
+                    { "Pet", netId },
+                    { "Level", level },
+                };
+
+                if (!this.TryAuraSendCommand(
+                        "XDT.Scene.Shared.Modules.Pet.PetGrowthGiftTakeNetworkCommand",
+                        fields,
+                        AuraChannelReliable,
+                        true,
+                        out string sendStatus))
+                {
+                    status = "pet growth " + petNetId + " level " + level + " send failed: " + sendStatus
+                        + " (claimed " + sent + " before it)";
+                    return sent > 0;
+                }
+
+                sent++;
+            }
+
+            status = "pet " + petNetId + " growth=" + growthValue + " level=" + growthLevel
+                + " already-taken=" + taken.Count + " claimed=" + sent;
+            return sent > 0;
+        }
+
+        // Which growth levels carry a gift at all, per pet kind, walked at most once per session
+        // (the table is compiled into the build, so the answer cannot change inside one). Returns
+        // null — meaning "gate unknown, do not filter" — when the walk cannot be done, so a missing
+        // export degrades to the old send-and-let-the-server-say-no behaviour instead of silently
+        // claiming nothing.
+        private HashSet<int> DailyClaimsPetGiftLevels(int entityType)
+        {
+            if (this.dailyClaimsPetGiftLevels.TryGetValue(entityType, out HashSet<int> cached))
+            {
+                return cached;
+            }
+
+            // EntityType.cat = 400, EntityType.dog = 410. Anything else has no growth table.
+            string tableName = entityType == 400
+                ? "TableMeowGrowthLevels"
+                : (entityType == 410 ? "TableDogGrowthLevels" : null);
+            if (tableName == null || auraMonoArrayLength == null)
+            {
+                this.dailyClaimsPetGiftLevels[entityType] = null;
+                return null;
+            }
+
+            HashSet<int> levels = new HashSet<int>();
+            bool walked = this.DailyClaimsForEachTableRow(tableName, row =>
+            {
+                if (!this.TryGetMonoIntMember(row, "id", out int level) || level <= 0)
+                {
+                    return;
+                }
+
+                // Only the array LENGTH is read here — no enumeration, no mono allocation, per the
+                // callback contract on DailyClaimsForEachTableRow.
+                if (this.TryGetMonoObjectMember(row, "reward", out IntPtr rewardArray)
+                    && rewardArray != IntPtr.Zero
+                    && (int)auraMonoArrayLength(rewardArray).ToUInt64() > 0)
+                {
+                    levels.Add(level);
+                }
+            }, out string walkStatus);
+
+            HashSet<int> result = walked && levels.Count > 0 ? levels : null;
+            if (result == null)
+            {
+                this.DailyClaimsLog(tableName + " gift-level gate unavailable (" + walkStatus
+                    + "); pet growth will send unfiltered.");
+            }
+
+            this.dailyClaimsPetGiftLevels[entityType] = result;
+            return result;
+        }
+
+        // PetGrowthPointComponent.Rewards, through the protocol manager's own accessor. Returns false
+        // only when the list exists but could not be walked — an EMPTY list is a real answer (a pet
+        // that has never had a gift taken), and TryEnumerateAuraMonoCollectionItems reports empty and
+        // failed identically, so the count is read first.
+        private unsafe bool TryCollectDailyClaimsPetGrowthTakenLevels(
+            uint netId,
+            HashSet<int> taken,
+            out string status)
+        {
+            status = "taken levels unavailable";
+            IntPtr protocolClass = this.FindAuraMonoClassByFullName(
+                "XDTDataAndProtocol.ProtocolService.Pet.PetProtocolManager");
+            if (protocolClass == IntPtr.Zero)
+            {
+                protocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                    "XDTDataAndProtocol.ProtocolService.Pet", "PetProtocolManager");
+            }
+
+            if (protocolClass == IntPtr.Zero)
+            {
+                status = "PetProtocolManager class unavailable";
+                return false;
+            }
+
+            IntPtr getGrowthReward = this.FindAuraMonoMethodOnHierarchy(protocolClass, "GetGrowthReward", 1);
+            if (getGrowthReward == IntPtr.Zero)
+            {
+                status = "GetGrowthReward unavailable";
+                return false;
+            }
+
+            uint netIdValue = netId;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&netIdValue);
+            IntPtr listObj = auraMonoRuntimeInvoke(getGrowthReward, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                status = "GetGrowthReward threw exc=0x" + exc.ToInt64().ToString("X");
+                return false;
+            }
+
+            // null == the pet is not ours, or has no growth component yet. Nothing has been taken.
+            if (listObj == IntPtr.Zero)
+            {
+                status = "no reward list (nothing taken)";
+                return true;
+            }
+
+            uint listPin = AuraMonoPinNew(listObj);
+            List<uint> itemPins = new List<uint>();
+            try
+            {
+                int count = -1;
+                IntPtr listClass = auraMonoObjectGetClass != null ? auraMonoObjectGetClass(listObj) : IntPtr.Zero;
+                if (listClass != IntPtr.Zero)
+                {
+                    IntPtr getCount = this.FindAuraMonoMethodOnHierarchy(listClass, "get_Count", 0);
+                    if (getCount != IntPtr.Zero)
+                    {
+                        count = this.GetAuraMonoIntCount(listObj, getCount);
+                    }
+                }
+
+                if (count == 0)
+                {
+                    status = "nothing taken yet";
+                    return true;
+                }
+
+                List<IntPtr> items = new List<IntPtr>();
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, itemPins))
+                {
+                    status = "reward list unreadable (count=" + count + ")";
+                    return false;
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (this.TryUnboxMonoInt32(items[i], out int level) && level > 0)
+                    {
+                        taken.Add(level);
+                    }
+                }
+
+                status = "taken=" + taken.Count;
+                return true;
+            }
+            finally
+            {
+                FreeAuraMonoPins(itemPins);
+                FreeAuraMonoPins(new List<uint> { listPin });
+            }
         }
 
         // ==========================================================================================

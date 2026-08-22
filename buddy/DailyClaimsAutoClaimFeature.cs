@@ -53,6 +53,10 @@ namespace HeartopiaMod
         private const int DailyClaimsRedPointTypeTownGuides = 7100;
         private const int DailyClaimsRedPointTypeTownGuideNewNodeTask = 7101;
         private const int DailyClaimsRedPointTypeTownGuidesGrowth = 7200;
+        // PetGrownGift on the client (RedPointEnum 40012), PetGrowthGift on the server — same
+        // number, and RedPointUtility maps one to the other. PetManualPanel registers it as
+        // (PetGrownGift, (int)petNetId), so IdParam here is the PET's netId, not a reward id.
+        private const int DailyClaimsRedPointTypePetGrowthGift = 40012;
         private const int DailyClaimsRedPointTypePictorialTypeReward = 9000;
         private const int DailyClaimsRedPointTypePictorialSuitReward = 9001;
         private const int DailyClaimsRedPointTypePictorialAllSuitReward = 9002;
@@ -123,6 +127,7 @@ namespace HeartopiaMod
         private readonly List<int> dailyClaimsAutoCertIds = new List<int>(16);
         private readonly List<int> dailyClaimsAutoIssueIds = new List<int>(8);
         private readonly List<int> dailyClaimsAutoActivityIds = new List<int>(8);
+        private readonly List<int> dailyClaimsAutoPetNetIds = new List<int>(4);
         private bool dailyClaimsAutoPendingTownGuide;
         private bool dailyClaimsAutoPendingMail;
         private float dailyClaimsAutoMailEchoUntil;
@@ -280,6 +285,10 @@ namespace HeartopiaMod
 
                 case DailyClaimsRedPointTypeActivityForOperation:
                     DailyClaimsAutoEnqueue(this.dailyClaimsAutoActivityIds, idParam);
+                    break;
+
+                case DailyClaimsRedPointTypePetGrowthGift:
+                    DailyClaimsAutoEnqueue(this.dailyClaimsAutoPetNetIds, idParam);
                     break;
 
                 case DailyClaimsRedPointTypeTownGuides:
@@ -743,6 +752,10 @@ namespace HeartopiaMod
                     this.DailyClaimsAutoClaimActivity(id);
                     status = "activity swept";
                     return true;
+
+                case DailyClaimsRedPointTypePetGrowthGift:
+                    what = "pet growth " + id;
+                    return this.TryClaimDailyClaimsPetGrowthRewards(id, out status);
 
                 case DailyClaimsRedPointTypeTownGuides:
                 case DailyClaimsRedPointTypeTownGuideNewNodeTask:
@@ -1364,6 +1377,22 @@ namespace HeartopiaMod
                 return true;
             }
 
+            if (DailyClaimsAutoTakeFirst(this.dailyClaimsAutoPetNetIds, out int petNetId))
+            {
+                // One pet, every growth level it has reached and not yet taken. The gift red point
+                // is server-owned, so clearing it here is only honest because the claim gate below
+                // is the same one the game's own tip panel uses to enable the button.
+                Breadcrumbs.Phase("dc.petgrowth");
+                bool ok = this.TryClaimDailyClaimsPetGrowthRewards(petNetId, out string status);
+                if (ok)
+                {
+                    this.DailyClaimsAutoClearRedPoint(DailyClaimsRedPointTypePetGrowthGift, petNetId, 0);
+                }
+
+                this.DailyClaimsAutoReport(ok, "pet growth " + petNetId, status);
+                return true;
+            }
+
             // --- flag-driven claims --------------------------------------------------------------
             // The pending flag is kept (not consumed) while the min-interval backstop holds it off,
             // so a claim that is merely too early is DELAYED rather than dropped, and the drain
@@ -1662,7 +1691,8 @@ namespace HeartopiaMod
                 + this.dailyClaimsAutoAllSuitIds.Count
                 + this.dailyClaimsAutoCertIds.Count
                 + this.dailyClaimsAutoIssueIds.Count
-                + this.dailyClaimsAutoActivityIds.Count;
+                + this.dailyClaimsAutoActivityIds.Count
+                + this.dailyClaimsAutoPetNetIds.Count;
 
             return "Auto-claim on (hooks=" + (this.dailyClaimsAutoHooksRegistered ? "live" : "pending")
                 + ", claimed=" + this.dailyClaimsAutoClaimedCount
