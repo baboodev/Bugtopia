@@ -10,7 +10,12 @@ namespace HeartopiaMod
 
         private static bool enabled = false;
         private static float catchCooldown = 1.5f;
-        private static float scanRange = 50f;
+        // Scan-range bounds. The ceiling dropped 100 -> 12 m on 2026-08-23; public so the UGUI
+        // slider (HeartopiaComplete.UguiInsectsContent.cs) and the config migration
+        // (HeartopiaComplete.Config.cs) read the same numbers the setter clamps to.
+        public const float ScanRangeMin = 1f;
+        public const float ScanRangeMax = 12f;
+        private static float scanRange = ScanRangeMax;
         private static int batchSize = 3;
         private static bool teleportEnabled = true;
         private static bool pauseTeleportOnRepairEnabled = false;
@@ -198,7 +203,7 @@ namespace HeartopiaMod
         public static float GetCatchCooldown() => catchCooldown;
         public static void SetCatchCooldown(float v) { catchCooldown = Mathf.Clamp(v, 0.2f, 10f); }
         public static float GetScanRange() => scanRange;
-        public static void SetScanRange(float v) { scanRange = Mathf.Clamp(v, 1f, 100f); }
+        public static void SetScanRange(float v) { scanRange = Mathf.Clamp(v, ScanRangeMin, ScanRangeMax); }
         public static int GetBatchSize() => batchSize;
         public static void SetBatchSize(int v) { batchSize = Mathf.Clamp(v, 1, 10); }
         public static bool GetTeleportEnabled() => teleportEnabled;

@@ -718,7 +718,17 @@ namespace HeartopiaMod
             }
             if (data.insectScanRange > 0f)
             {
-                InsectNetFarm.SetScanRange(data.insectScanRange);
+                // Migration (2026-08-23): the scan-range ceiling dropped 100 -> 12 m, so a config
+                // written by an older build can carry a value the slider can no longer produce.
+                // SetScanRange clamps it anyway (that is what migrates the value); this only
+                // reports the adjustment, and the clamped number is written back on the next save.
+                // The legacy line parser below rides on the same setter clamp.
+                float migratedInsectScanRange = Mathf.Clamp(data.insectScanRange, InsectNetFarm.ScanRangeMin, InsectNetFarm.ScanRangeMax);
+                if (migratedInsectScanRange != data.insectScanRange)
+                {
+                    ModLogger.Msg($"[Config] Migrated insectScanRange {data.insectScanRange:F1} -> {migratedInsectScanRange:F1} (allowed range {InsectNetFarm.ScanRangeMin:F0}-{InsectNetFarm.ScanRangeMax:F0} m).");
+                }
+                InsectNetFarm.SetScanRange(migratedInsectScanRange);
             }
             if (data.autoFishFishShadowDetectRange > 0f)
             {

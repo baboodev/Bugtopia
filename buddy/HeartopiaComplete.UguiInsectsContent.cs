@@ -142,10 +142,11 @@ namespace HeartopiaMod
                     Get = () => InsectNetFarm.GetCatchCooldown(),
                     Set = v => InsectNetFarm.SetCatchCooldown(v)
                 },
-                // InsectNetFarm.cs:318-328.
+                // Bounds come straight off InsectNetFarm's own clamp constants (ceiling 12 m
+                // since 2026-08-23) so the knob can never produce a value the setter rejects.
                 new UguiInsectsSliderBinding
                 {
-                    LabelFormat = "Scan Range: {0:F0}m", Min = 1f, Max = 100f,
+                    LabelFormat = "Scan Range: {0:F0}m", Min = InsectNetFarm.ScanRangeMin, Max = InsectNetFarm.ScanRangeMax,
                     Decimals = 0, IsInteger = false,
                     Get = () => InsectNetFarm.GetScanRange(),
                     Set = v => InsectNetFarm.SetScanRange(v)
