@@ -246,11 +246,18 @@ namespace HeartopiaMod
             int redPointType = e.ReadInt32(0);
             int idParam = e.ReadInt32(4);
 
+            // Not every kind puts its subject in IdParam. ClientRedPointSystem.ToRedPointType
+            // carries entity-scoped kinds (Pet, PetGrowthGift, PetLearnedMotion, PartyCanJoin,
+            // NewFriend) in NetId with IdParam left at 0 — reading only IdParam there yields 0 and
+            // silently claims nothing.
+            uint netIdParam = e.ReadUInt32(12);
+
             // Traced unconditionally: this is the only way to see WHICH red-point kinds the game
             // actually raises on this account, including the ones the switch below drops on the
             // floor — the surfaces that keep a dot after auto-claim are exactly the kinds that never
             // appear here, or appear under a type the switch has no case for.
-            this.DailyClaimsLog("redpoint event type=" + redPointType + " id=" + idParam + " add=true");
+            this.DailyClaimsLog("redpoint event type=" + redPointType + " id=" + idParam
+                + " netId=" + netIdParam + " add=true");
 
             switch (redPointType)
             {
@@ -288,7 +295,17 @@ namespace HeartopiaMod
                     break;
 
                 case DailyClaimsRedPointTypePetGrowthGift:
-                    DailyClaimsAutoEnqueue(this.dailyClaimsAutoPetNetIds, idParam);
+                    // PetGrowthRedPointNetworkSchema -> (PetGrowthGift, idParam: 0, netId: the pet).
+                    // The pet is in NetId; IdParam is always 0 for this kind.
+                    if (netIdParam != 0u)
+                    {
+                        DailyClaimsAutoEnqueue(this.dailyClaimsAutoPetNetIds, (int)netIdParam);
+                    }
+                    else
+                    {
+                        this.DailyClaimsLog("pet growth red point arrived with no netId (id=" + idParam
+                            + ") — nothing to claim against.");
+                    }
                     break;
 
                 case DailyClaimsRedPointTypeTownGuides:
