@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -2649,8 +2649,12 @@ namespace HeartopiaMod
                     this.FinishHeadlessWash("Pet is already clean - wash unavailable.");
                     break;
                 case 3:
+                    this.FinishHeadlessWash("Pet is busy - wash unavailable.");
+                    break;
                 case 4:
-                    this.FinishHeadlessWash("Pet or player is busy - wash unavailable.");
+                    // The player, not the pet — so switching pets will not help. Usually a bath
+                    // session left open by an earlier start whose reply never arrived.
+                    this.FinishHeadlessWash("Player is busy - wash unavailable.");
                     break;
                 case 5:
                     this.FinishHeadlessWash("No player stamina for washing.");
@@ -2717,7 +2721,14 @@ namespace HeartopiaMod
             {
                 if (now - this.petPlayHeadlessWashPhaseSentAt > 6f)
                 {
-                    this.FinishHeadlessWash("Wash start timeout (no server response).");
+                    // Giving up is not enough: a Begin the server accepted but whose reply we never
+                    // saw leaves the session OPEN, and every later Begin then answers PetOccupying /
+                    // PlayerOccupying — for EVERY pet, because it is the player that stays busy.
+                    // Observed 2026-08-23: one silent start wedged washing for both pets until a
+                    // Cancel was sent by hand. The game's own PetBathStartCommand does exactly this,
+                    // firing PetBathingCancel from its RPC timeout callback.
+                    this.TryInvokePetBathingCancel(this.petPlayHeadlessWashNetId);
+                    this.FinishHeadlessWash("Wash start timeout (no server response) - session cancelled.");
                 }
             }
             else if (this.petPlayHeadlessWashState == PetPlayHeadlessWashState.Rounds)
