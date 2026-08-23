@@ -522,6 +522,7 @@ namespace HeartopiaMod
             List<string> selected = new List<string>();
             if (this.showStoneRadar) selected.Add("Stones");
             if (this.showOreRadar) selected.Add("Ores");
+            if (this.showBranchRadar) selected.Add("Branches");
             return this.GetRadarSelectionSummary(selected);
         }
 
@@ -660,6 +661,9 @@ namespace HeartopiaMod
                     {
                         new UguiRadarOptionBinding { Label = "Stones", Get = () => this.showStoneRadar, Set = v => this.showStoneRadar = v },
                         new UguiRadarOptionBinding { Label = "Ores", Get = () => this.showOreRadar, Set = v => this.showOreRadar = v },
+                        // Bush branches (item 40001). Here rather than under Trees: they drop from
+                        // bushes, and they are by far the most numerous node type in a forest.
+                        new UguiRadarOptionBinding { Label = "Branches", Get = () => this.showBranchRadar, Set = v => this.showBranchRadar = v },
                     },
                     AfterChanged = this.ApplyUguiRadarStandardGroupTail
                 },
@@ -1136,6 +1140,7 @@ namespace HeartopiaMod
             this.showRaspberryRadar = true;
             this.showStoneRadar = true;
             this.showOreRadar = true;
+            this.showBranchRadar = true;
             this.showTreeRadar = true;
             this.showRareTreeRadar = true;
             this.showAppleTreeRadar = true;
@@ -1184,6 +1189,7 @@ namespace HeartopiaMod
             this.showRaspberryRadar = false;
             this.showStoneRadar = false;
             this.showOreRadar = false;
+            this.showBranchRadar = false;
             this.showTreeRadar = false;
             this.showRareTreeRadar = false;
             this.showAppleTreeRadar = false;

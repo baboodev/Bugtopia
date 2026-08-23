@@ -615,6 +615,8 @@ namespace HeartopiaMod
                             bool flag11 = this.IsAnyMushroomRadarEnabled();
                             bool flag12 = this.showBlueberryRadar || this.showRaspberryRadar;
                             bool flagTree = this.showTreeRadar;
+                            // Branch bushes grow among the trees, so they ride the same waypoints.
+                            bool flagBranch = this.showBranchRadar;
                             bool flagRareTree = this.showRareTreeRadar;
                             bool flagAppleTree = this.showAppleTreeRadar;
                             bool flagMandarinTree = this.showOrangeTreeRadar;
@@ -666,7 +668,7 @@ namespace HeartopiaMod
                                             {
                                                 flag13 = true;
                                             }
-                                            else if (farmLocation2.Type == "tree" && flagTree)
+                                            else if (farmLocation2.Type == "tree" && (flagTree || flagBranch))
                                             {
                                                 flag13 = true;
                                             }
@@ -2817,6 +2819,10 @@ namespace HeartopiaMod
                                                 flag9 = true;
                                             }
                                             else if (markerLabel.Contains("Ore") && this.showOreRadar)
+                                            {
+                                                flag9 = true;
+                                            }
+                                            else if (markerLabel.Contains("Branch") && this.showBranchRadar)
                                             {
                                                 flag9 = true;
                                             }

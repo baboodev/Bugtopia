@@ -4756,6 +4756,10 @@ namespace HeartopiaMod
 
         // Token: 0x0400002D RID: 45
         private bool showStoneRadar = false;
+        // Item 40001 is 灌木枝 / "Branch" — a BUSH product, not timber. It used to share
+        // showTreeRadar with 40002/40003/40006, which is why every berry-less bush drew a
+        // timber marker. Its own toggle now, under Resources.
+        private bool showBranchRadar = false;
 
         // Token: 0x0400002E RID: 46
         private bool showOreRadar = false;

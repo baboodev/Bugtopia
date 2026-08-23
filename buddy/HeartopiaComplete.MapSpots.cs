@@ -85,6 +85,7 @@ namespace HeartopiaMod
             {
                 case "Tree": return 40002;          // Timber
                 case "Rare Tree": return 40004;     // Rare Timber (the headline tier)
+                case "Branch": return 40001;        // 灌木枝 — the bush drop, NOT timber
                 case "Apple Tree": return 40101;    // Apple
                 case "Mandarin Tree": return 40201; // Mandarin
                 case "Blueberry": return 40501;

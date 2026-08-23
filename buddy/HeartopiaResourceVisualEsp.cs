@@ -458,6 +458,10 @@ namespace HeartopiaMod
                 // arrays never had a bamboo entry), so it was created by CreateMarker and then
                 // dropped here by both surfaces — the exact failure this comment warns about.
                 case "Bamboo":
+                // Branch (item 40001) — a bush product, split out of the timber group. Adding the
+                // label to CreateMarker is not enough: a marker that is not ALSO listed here is
+                // built and then dropped, which is the failure the Bamboo comment above records.
+                case "Branch":
                 case "Bubble":
                 case "Bird":
                 case "Player":
@@ -521,6 +525,7 @@ namespace HeartopiaMod
                 case "Apple Tree": return "AP";
                 case "Mandarin Tree": return "MD";
                 case "Tree": return "TR";
+                case "Branch": return "BR";
                 case "Bamboo": return "BM";
                 case "Fiddlehead": return "FD";
                 case "Tall Mustard": return "TM";
@@ -557,6 +562,8 @@ namespace HeartopiaMod
                 case "Stone": return new Color(0.72f, 0.76f, 0.82f);
                 case "Ore": return new Color(0.95f, 0.72f, 0.44f);
                 case "Tree": return new Color(0.58f, 0.92f, 0.78f);
+                // Same warm brown CreateMarker gives the wire marker.
+                case "Branch": return new Color(0.78f, 0.62f, 0.36f);
                 case "Rare Tree": return new Color(1f, 0.83f, 0.38f);
                 case "Apple Tree": return new Color(1f, 0.56f, 0.48f);
                 case "Mandarin Tree": return new Color(1f, 0.72f, 0.42f);

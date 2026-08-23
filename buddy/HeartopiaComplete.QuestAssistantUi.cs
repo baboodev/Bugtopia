@@ -1733,6 +1733,7 @@ namespace HeartopiaMod
         private void QuestAssistantClearOwnedRadarLootToggles()
         {
             this.showTreeRadar = false;
+            this.showBranchRadar = false;
             this.showRareTreeRadar = false;
             this.showStoneRadar = false;
             this.showOreRadar = false;
@@ -1752,16 +1753,18 @@ namespace HeartopiaMod
         }
 
         // Ids/fields verified against docs/RADAR_GAME_MAP.md's known collectable atlas and the actual
-        // showXRadar field declarations in HeartopiaComplete.cs. 40001/40002 (Branch/Timber) and
-        // 40003/40004/40006 (Quality/Rare/Roaming Oak Timber) don't have per-item fields — they share
-        // the coarser showTreeRadar/showRareTreeRadar toggles (multiple ids -> one category, still
-        // correct, just not per-item granular). 40026 Flawless Fluorite, 40033 Bamboo, 40301 Coconut,
+        // showXRadar field declarations in HeartopiaComplete.cs. 40001 (Branch) now has its own
+        // showBranchRadar; 40002 (Timber) and 40003/40004/40006 (Quality/Rare/Roaming Oak Timber)
+        // still share the coarser showTreeRadar/showRareTreeRadar toggles (multiple ids -> one
+        // category, still correct, just not per-item granular). 40026 Flawless Fluorite, 40033 Bamboo, 40301 Coconut,
         // and 48006 Matsutake have no dedicated field found — left unmapped (best-effort).
         private bool QuestAssistantTryEnableRadarForItem(int itemStaticId)
         {
             switch (itemStaticId)
             {
                 case 40001:
+                    this.showBranchRadar = true;
+                    return true;
                 case 40002:
                     this.showTreeRadar = true;
                     return true;

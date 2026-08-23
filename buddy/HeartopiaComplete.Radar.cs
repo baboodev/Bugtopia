@@ -569,6 +569,11 @@ namespace HeartopiaMod
                     return "p_material_wood3";
                 case "Flawless Fluorite":
                     return "p_material_stone3";
+                // Material.normalPrefabId of item 40001 (cn_tables Material table) — same
+                // ui_item_normal_* family as the stone/bamboo keys above, so the direct loader
+                // fetches it like any other radar icon.
+                case "Branch":
+                    return "p_material_branch";
                 case "Tree":
                     return "tree";
                 case "Rare Tree":
@@ -601,6 +606,8 @@ namespace HeartopiaMod
                     return this.CreateRadarIconFallbackTexture(key, new Color(0.92f, 0.78f, 0.25f), new Color(0.43f, 0.24f, 0.08f), true, false, true);
                 case "Bamboo":
                     return this.CreateRadarIconFallbackTexture(key, new Color(0.45f, 0.9f, 0.5f), new Color(0.16f, 0.45f, 0.2f), false, false, true);
+                case "Branch":
+                    return this.CreateRadarIconFallbackTexture(key, new Color(0.80f, 0.64f, 0.38f), new Color(0.36f, 0.24f, 0.10f), false, false, true);
                 case "Bubble":
                     return this.CreateRadarIconFallbackTexture(key, new Color(0.58f, 0.88f, 1f, 0.95f), new Color(0.24f, 0.56f, 0.94f, 0.85f), true, false, false);
                 case "Bird":
@@ -2558,8 +2565,11 @@ namespace HeartopiaMod
                 case 40033: return self.showBambooRadar ? "bamboo" : null;
                 case 40004: return self.showRareTreeRadar ? "rare_tree" : null;
 
+                // 40001 is 灌木枝 / "Branch" — what a plain bush drops. It is NOT timber and
+                // does not come from trees; grouping it here is what put a log icon on every bush.
+                case 40001: return self.showBranchRadar ? "branch" : null;
+
                 // Ordinary timber: several drop ids, one marker.
-                case 40001:
                 case 40002:
                 case 40003:
                 case 40006:
@@ -2785,6 +2795,14 @@ namespace HeartopiaMod
                                     // Green, distinct from the blue timber markers standing next to it.
                                     endColor = new Color(0.45f, 0.9f, 0.5f);
                                     bgColor = new Color(0.08f, 0.34f, 0.12f, 0.86f);
+                                }
+                                else if (meshName == "branch" || meshName == "branch_cooldown")
+                                {
+                                    text2 = "Branch";
+                                    icon = "?";
+                                    // Warm brown, deliberately unlike the blue timber markers.
+                                    endColor = new Color(0.78f, 0.62f, 0.36f);
+                                    bgColor = new Color(0.30f, 0.20f, 0.08f, 0.86f);
                                 }
                                 else if (meshName == "tree" || meshName == "tree_cooldown")
                                 {
