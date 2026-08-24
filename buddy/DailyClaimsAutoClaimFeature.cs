@@ -129,6 +129,13 @@ namespace HeartopiaMod
         private readonly List<int> dailyClaimsAutoActivityIds = new List<int>(8);
         private readonly List<int> dailyClaimsAutoPetNetIds = new List<int>(4);
         private bool dailyClaimsAutoPendingTownGuide;
+
+        // Auto mark-read. Auto-claim only ever CLAIMED, so a "seen" marker — a learned pet pose, a
+        // new recipe, a wardrobe item — fell into the switch default, was logged as unhandled and
+        // stayed lit forever. Those carry no reward at all; the game clears them when the player
+        // LOOKS at the thing, and RedPointManager.ReadRedPoint is that same act.
+        private bool dailyClaimsAutoPendingMarkRead;
+        private float dailyClaimsAutoMarkReadNextAllowedAt;
         private bool dailyClaimsAutoPendingMail;
         private float dailyClaimsAutoMailEchoUntil;
         private float dailyClaimsAutoMailNextAllowedAt;
@@ -221,6 +228,11 @@ namespace HeartopiaMod
             this.dailyClaimsAutoCatchUpWhalefall = true;
             this.dailyClaimsAutoPendingTownGuide = true;
             this.dailyClaimsAutoPendingMail = true;
+
+            // The markers that matter most arrive in the pre-world burst, which the event detour
+            // structurally cannot see (installing it that early is what aborted the process three
+            // times). One pass at world-ready is what clears that backlog.
+            this.dailyClaimsAutoPendingMarkRead = true;
             return true;
         }
 
@@ -317,9 +329,13 @@ namespace HeartopiaMod
 
                 default:
                     // Everything else (ordinary quests, cosmetics-unlocked markers, social pings) is
-                    // either not a claim or not ours — see the file header. Logged so an unhandled
-                    // type that keeps a dot alive is visible rather than invisible.
-                    this.DailyClaimsLog("redpoint event type=" + redPointType + " NOT HANDLED (no claim mapped)");
+                    // either not a claim or not ours — see the file header. Not a reward, so there is
+                    // nothing to claim: queue a mark-read pass instead of leaving the dot lit. Still
+                    // logged, because a kind that SHOULD have been claimable has to stay visible in
+                    // the trace rather than disappearing quietly into the mark-read bucket.
+                    this.DailyClaimsLog("redpoint event type=" + redPointType
+                        + " no claim mapped — queued for mark-read");
+                    this.dailyClaimsAutoPendingMarkRead = true;
                     break;
             }
         }
@@ -574,6 +590,11 @@ namespace HeartopiaMod
         // mark-read paces per CHUNK rather than per node; at 0.05 s each, per-node spacing cost 16 s
         // for the 319 nodes of the first live run.
         private const int DailyClaimsMarkReadChunk = 8;
+
+        // Auto mark-read pacing. The pass walks _nodeDic, so it is the same cost as the manual
+        // button — rare and capped rather than per-event.
+        private const float DailyClaimsAutoMarkReadMinIntervalSeconds = 12f;
+        private const int DailyClaimsAutoMarkReadPerPass = 40;
 
         // client enum -> server RedPointType, resolved through RedPointUtility once per distinct
         // enum. The map is baked into the build, so this is a pure cache; it removed one AuraMono
@@ -1470,6 +1491,135 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // --- mark-read, LAST ------------------------------------------------------------------
+            // Deliberately below every claim: a claimable dot must be claimed, never merely hidden.
+            if (this.dailyClaimsAutoPendingMarkRead
+                && Time.realtimeSinceStartup >= this.dailyClaimsAutoMarkReadNextAllowedAt)
+            {
+                this.dailyClaimsAutoPendingMarkRead = false;
+                this.dailyClaimsAutoMarkReadNextAllowedAt =
+                    Time.realtimeSinceStartup + DailyClaimsAutoMarkReadMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.markread");
+                int markRead = this.DailyClaimsAutoMarkSeenMarkersRead(out string markStatus, out bool more);
+                if (more)
+                {
+                    // Hit the per-pass cap — keep going on the next interval instead of walking a
+                    // few hundred nodes in one frame.
+                    this.dailyClaimsAutoPendingMarkRead = true;
+                }
+
+                this.DailyClaimsAutoReport(markRead > 0, "mark read (" + markRead + ")", markStatus);
+                return true;
+            }
+
+            return false;
+        }
+
+        // One mark-read pass over the lit nodes. SYNCHRONOUS: RedPointManager is resolved inside each
+        // helper and no raw pointer survives a frame boundary (CI lint W1), so the pass is capped
+        // instead of chunked across yields.
+        //
+        // The node id is never derived from the event, and that is the whole point. A learned pose is
+        // stored under a SYNTHETIC index: RedPointManager.OnUpdateRedpoint routes CatInteraction
+        // through UpdateRedPointDataGenericKey(enum, (long)netId * 1000 + idParam), which allocates a
+        // sequential _genericIndex and keeps the real key in _int2Key — wiped by ClearData() on every
+        // level load. Only _nodeDic knows the id ReadRedPoint wants, so the pass reads it from there.
+        private int DailyClaimsAutoMarkSeenMarkersRead(out string status, out bool more)
+        {
+            more = false;
+            List<DailyClaimsRedPointNode> nodes = new List<DailyClaimsRedPointNode>();
+            if (!this.DailyClaimsCollectActiveRedPoints(nodes, out status))
+            {
+                return 0;
+            }
+
+            int read = 0;
+            int skipped = 0;
+            int failed = 0;
+            int i = 0;
+            for (; i < nodes.Count; i++)
+            {
+                if (read >= DailyClaimsAutoMarkReadPerPass)
+                {
+                    more = true;
+                    break;
+                }
+
+                int enumValue = nodes[i].EnumValue;
+                int id = nodes[i].Id;
+                if (this.DailyClaimsRedPointHasClaimMapping(enumValue, this.DailyClaimsToRedPointType(enumValue)))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                bool ok;
+                if (enumValue == DailyClaimsRedPointEnumActivityDailyTab
+                    || enumValue == DailyClaimsRedPointEnumActivityNewDay)
+                {
+                    // No server type to delete by and no Read() override — the game clears these
+                    // through their own activity command, same as the manual button does.
+                    ok = this.TryDailyClaimsClearActivityDailyTab(id, out _);
+                }
+                else
+                {
+                    ok = this.TryDailyClaimsReadRedPoint(enumValue, id);
+                }
+
+                if (ok)
+                {
+                    read++;
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+
+            status = "read=" + read + " skipped=" + skipped + " failed=" + failed
+                + " of " + nodes.Count + (more ? " (more next pass)" : string.Empty);
+            return read;
+        }
+
+        // Does the CLAIM path know this kind? Anything it does must be left alone by the mark-read
+        // pass: reading the dot would not lose the reward server-side, but it would lose the only
+        // signal that one is waiting, which is exactly the trade the separate manual button exists
+        // to keep explicit.
+        //
+        // KEEP IN SYNC with DailyClaimsTryClaimForRedPoint — every kind it dispatches on belongs
+        // here. A kind missing from this list is a reward the auto pass would quietly hide.
+        private bool DailyClaimsRedPointHasClaimMapping(int clientEnum, int serverType)
+        {
+            switch (clientEnum)
+            {
+                case DailyClaimsRedPointEnumDreamTypeReward:
+                case DailyClaimsRedPointEnumPartyFestivalTaskCanSubmit:
+                case DailyClaimsRedPointEnumPartyOfficialTaskCanSubmit:
+                case DailyClaimsRedPointEnumActivityFreeReward:
+                    return true;
+
+                // Not dispatched by the claim switch, but the task queue submits these on its own
+                // schedule — reading the dot first would hide a mission that is still pending.
+                case DailyClaimsRedPointEnumActivityTaskReward:
+                    return true;
+            }
+
+            switch (serverType)
+            {
+                case DailyClaimsRedPointTypeBattlePassTaskCanSubmit:
+                case DailyClaimsRedPointTypeSeriesReward:
+                case DailyClaimsRedPointTypePictorialTypeReward:
+                case DailyClaimsRedPointTypePictorialAllSuitReward:
+                case DailyClaimsRedPointTypeCollectCertification:
+                case DailyClaimsRedPointTypePictorialSuitReward:
+                case DailyClaimsRedPointTypeActivityForOperation:
+                case DailyClaimsRedPointTypePetGrowthGift:
+                case DailyClaimsRedPointTypeTownGuides:
+                case DailyClaimsRedPointTypeTownGuideNewNodeTask:
+                case DailyClaimsRedPointTypeTownGuidesGrowth:
+                    return true;
+            }
+
             return false;
         }
 
@@ -1713,7 +1863,9 @@ namespace HeartopiaMod
 
             return "Auto-claim on (hooks=" + (this.dailyClaimsAutoHooksRegistered ? "live" : "pending")
                 + ", claimed=" + this.dailyClaimsAutoClaimedCount
-                + ", queued=" + queued + "). " + this.dailyClaimsAutoLastStatus;
+                + ", queued=" + queued
+                + (this.dailyClaimsAutoPendingMarkRead ? ", mark-read pending" : string.Empty)
+                + "). " + this.dailyClaimsAutoLastStatus;
         }
     }
 }
