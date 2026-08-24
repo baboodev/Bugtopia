@@ -2,6 +2,8 @@
 
 Automation and utility mod for [Heartopia](https://store.steampowered.com/app/heartopia). Supports **MelonLoader** or **BepInEx IL2CPP** (build once per loader — use **only one** in the game).
 
+**Updates:** [Telegram channel @bugtopiamod](https://t.me/bugtopiamod)
+
 ## Quick start
 
 1. Install [MelonLoader](https://melonloader.co/download.html) **or** [BepInEx](https://docs.bepinex.dev/) for Heartopia.
