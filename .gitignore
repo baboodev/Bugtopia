@@ -32,6 +32,9 @@ scratch
 
 # Local research tooling and notes — kept out of the repo on purpose, not published.
 # (Game-data decryption/unpacking pipelines, dump readers, generated indexes, session notes.)
+# Throwaway sandbox-plugin probe for docs/plans/2026-08-23-aura-farm-radius.md — scaffolding,
+# not a deliverable: it reaches into the mod's private members by reflection.
+tools/AuraRadiusProbe
 tools/HeartopiaTables
 tools/XdUnpack
 tools/gameupdate
