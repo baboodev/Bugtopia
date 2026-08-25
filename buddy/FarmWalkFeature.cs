@@ -430,6 +430,13 @@ namespace HeartopiaMod
         private Vector3 farmWalkTarget;
         private string farmWalkLabel = string.Empty;
         private float farmWalkNextRepathAt;
+
+        // Сколько раз ходок ПЕРЕСТРОИЛ МАРШРУТ САМ. Растёт только на корректирующей перестройке —
+        // той, которой он обходит препятствие. Нужен QuestWalk: тот следит за числом углов, а число
+        // углов одинаково меняется и когда маршрут прислала игра, и когда ходок обошёл стену. Без
+        // этого счётчика второе принималось за первое, и обход затирался обратно тем же маршрутом,
+        // который в стену и упёрся.
+        internal int farmWalkOwnRouteSeq;
         private float farmWalkLastRepathAt;
         private float farmWalkNextStuckSampleAt;
         private Vector3 farmWalkLastSample;
@@ -1032,6 +1039,30 @@ namespace HeartopiaMod
                 Vector3 lastWaypoint = this.farmWalkDetourCorners[this.farmWalkDetourCorners.Count - 2];
                 if (!this.IsFarmWalkLineClear(lastWaypoint, to, this.farmWalkMaskPassable))
                 {
+                    continue;
+                }
+
+                // ⚠️ AUDIT THE DETOUR — IT IS THE ONE ROUTE THAT NEEDS IT MOST.
+                //
+                // Everything above tested exactly one leg: the last waypoint to the target. The leg
+                // the swimmer ACTUALLY takes first, from where they stand to corner 0, was never
+                // looked at — in a route whose entire reason for existing is that the straight line
+                // is blocked. And committing here returns straight out of the route builder, so the
+                // normal edge audit further down never sees a detour either.
+                //
+                // Measured 02:42:52, a Glasswort 2.6 m away: beeline correctly refused, detour built,
+                // first corner 10 m below through a wall, swimmer drove into it and repeated every
+                // four seconds. A 10 m dive is perfectly normal — the wall in front of it was not.
+                //
+                // includeFirstLeg: true, because leg 0 is precisely the question here. The audit
+                // still refuses to BAN a waypoint on leg 0 (rule 1.6); testing and banning are
+                // different things.
+                int detourBlocked = this.FindFirstImpassableFarmWalkLeg(from, this.farmWalkDetourCorners,
+                    out string detourWhy, includeFirstLeg: true);
+                if (detourBlocked >= 0)
+                {
+                    ModLogger.Msg("[FarmWalk] detour attempt " + (attempt + 1) + " rejected: leg "
+                        + detourBlocked + " — " + detourWhy + ".");
                     continue;
                 }
 
@@ -1850,6 +1881,9 @@ namespace HeartopiaMod
             {
                 this.farmWalkNextRepathAt = now + FarmWalkRepathInterval;
                 this.farmWalkLastRepathAt = now;
+
+                // Отсюда и ниже маршрут наш собственный, кто бы ни владел им до сих пор.
+                this.farmWalkOwnRouteSeq++;
                 int cornersBefore = this.farmWalkCorners.Count;
                 Vector3 firstBefore = this.farmWalkCorners.Count > 0 ? this.farmWalkCorners[0] : Vector3.zero;
                 if (this.TryBuildFarmWalkRoute(selfPos, this.farmWalkTarget) && this.farmWalkCorners.Count > 0)
@@ -3006,8 +3040,39 @@ namespace HeartopiaMod
         // player driving into a wall.
         private void AbortFarmWalk()
         {
+            this.AbortFarmWalk(keepVehicle: false);
+        }
+
+        // keepVehicle: the caller is replacing this walk with another one RIGHT NOW, to the same
+        // journey's destination. The seat belongs to the haul, not to a particular aim point.
+        //
+        // ⚠️ Without this a quest point that shifts twenty metres cost a full dismount and re-summon
+        // with a hundred and seventy metres still to drive. Measured 00:34:08-00:34:14:
+        //     walking 199,5m via 24 corners, target=(29,02, 22,33, 96,38)
+        //     summoned 81009 and took the seat for this haul.
+        //     walking 169,4m via 19 corners, target=(8,80, 22,93, 97,09)
+        //     dismounted from netId 4150159 (walk aborted).
+        // Six seconds in the car, and the re-summon that follows is another server round-trip plus
+        // the mount window before anything moves again.
+        private void AbortFarmWalk(bool keepVehicle)
+        {
             if (!this.farmWalkActive)
             {
+                // ⚠️ МЕСТО В ТРАНСПОРТЕ ПЕРЕЖИВАЕТ ХОДЬБУ, И ВЫЙТИ ИЗ НЕГО БЫЛО НЕКОМУ.
+                //
+                // Ранний выход стоял ДО высадки, а keepVehicle:true оставляет игрока в машине с
+                // farmWalkActive=false. Если следующий отрезок не построился (конец вне графа,
+                // предел банов, не резолвится своя позиция), высаживать становилось нечему:
+                // ShouldFarmWalkSummonVehicle видит, что мы уже едем, ProcessFarmWalkVehicleDismount
+                // не работает без ходьбы, а StopQuestWalk упирался ровно в эту строку. Пользователь
+                // выключал режим и оставался сидеть в вызванной модом машине.
+                //
+                // Просьба «отпусти всё» должна отпускать всё, даже когда ходьбы уже нет.
+                if (this.farmWalkVehicleOurs && !keepVehicle)
+                {
+                    this.TryFarmWalkDismount("walk aborted (nothing was walking)");
+                }
+
                 return;
             }
 
@@ -3019,7 +3084,7 @@ namespace HeartopiaMod
             this.farmWalkPendingCleanse = false;
             this.farmWalkPendingArea = false;
             this.farmWalkVehicleLeftForObstacle = false;   // never leaks into the next walk
-            if (this.farmWalkVehicleOurs)
+            if (this.farmWalkVehicleOurs && !keepVehicle)
             {
                 this.TryFarmWalkDismount("walk aborted");
             }

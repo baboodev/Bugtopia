@@ -100,6 +100,25 @@ namespace HeartopiaMod
         // Set once the game's route has been judged unwalkable for this destination. The injection
         // re-runs on every path update, so without this the rejected route returns immediately.
         private bool questWalkGameRouteRejected;
+
+        // ⚠️ СЫРАЯ точка трека, из которой построен текущий прицел. Сравнивать «цель сдвинулась»
+        // надо С НЕЙ, а не с questWalkAim: прицел проходит через RepairQuestWalkAimHeight, и для
+        // точки с y=0 починка поднимает его на реальную высоту — в замеренном случае на 24,4 м.
+        // Сравнение сырой цели с починенным прицелом давало эти 24,4 м ВСЕГДА, то есть тест
+        // «сдвинулась» был вечно истинным, и раз в 8 секунд шло перецеливание на ту же самую точку.
+        //
+        // Само по себе это лишь холостая работа, но каждый цикл заново вызывает TryBeginFarmWalk,
+        // а тот обнуляет прыжковый бюджет, счётчик застреваний и farmWalkDeadline. Лимиты, которые
+        // обязаны прервать заклинивший отрезок, не успевали накопиться НИ РАЗУ.
+        private Vector3 questWalkAimSource;
+
+        // Точка назначения, для которой маршрут игры был отвергнут. Защёлка обещает «for this
+        // destination» — значит и жить она должна ровно до смены назначения, а не до конца сессии.
+        private Vector3 questWalkRejectedFor;
+
+        // Значение farmWalkOwnRouteSeq на момент последней инъекции. Если оно с тех пор выросло —
+        // углы поменял САМ ХОДОК, обходя препятствие, и возвращать поверх этого маршрут игры нельзя.
+        private int questWalkInjectedAtRouteSeq;
         private float questWalkNextStartAt;
         private float questWalkNextRetargetAt;
         private Vector3 questWalkCandidate;
@@ -278,8 +297,22 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.questWalkErrorCount++;
-                this.questWalkStatus = this.LF("Error ({0}/3): {1}", this.questWalkErrorCount.ToString(), ex.Message);
                 ModLogger.Msg("[QuestWalk] tick error (" + this.questWalkErrorCount + "/3, disabled at 3): " + ex.Message);
+
+                // ⚠️ ЗАМОЛЧАТЬ — НЕ ЗНАЧИТ ОСТАНОВИТЬСЯ. Раньше на третьей ошибке тик просто
+                // переставал выполняться, и это оставляло персонажа БЕГУЩИМ: ось движения stateful,
+                // игра держит последнее заданное значение стика до явного отпускания, а отпускает
+                // его только TryClearGameMoveAxis — из FinishFarmWalk и AbortFarmWalk, то есть
+                // изнутри RunFarmWalkTick, до которого защёлка и не пускает. Вдобавок
+                // questWalkFollowing оставался true, а через него FarmWalkRunActive держал
+                // выключенной защиту от вылета за границу мира. Персонаж уходил в последнюю
+                // заданную сторону, и спасал только хоткей.
+                if (this.questWalkErrorCount >= 3)
+                {
+                    this.StopQuestWalk("3 tick errors");
+                }
+
+                this.questWalkStatus = this.LF("Error ({0}/3): {1}", this.questWalkErrorCount.ToString(), ex.Message);
             }
         }
 
@@ -291,6 +324,13 @@ namespace HeartopiaMod
             this.questWalkTrack = default(QuestWalkTrack);
             this.questWalkParked = false;
             this.questWalkAim = Vector3.zero;
+            this.questWalkAimSource = Vector3.zero;
+
+            // Отказ был вынесен маршруту СТАРОГО мира. В новом ни одного маршрута ещё не судили,
+            // а защёлка молча выключала их все — во всех мирах цепочки квестов до конца сессии,
+            // хотя выбор пункта по-прежнему предпочитал те, у которых маршрут игры есть.
+            this.questWalkGameRouteRejected = false;
+            this.questWalkRejectedFor = Vector3.zero;
             this.questWalkCandidateReads = 0;
             this.questWalkInjectedCorners = -1;
             this.questWalkLastCornerCount = -1;
@@ -376,10 +416,14 @@ namespace HeartopiaMod
             if (this.questWalkTrack.Valid && this.ShouldReaimQuestWalk(now))
             {
                 ModLogger.Msg("[QuestWalk] re-aiming: target moved "
-                    + Vector3.Distance(this.questWalkTrack.Target, this.questWalkAim).ToString("F1")
+                    + Vector3.Distance(this.questWalkTrack.Target, this.questWalkAimSource).ToString("F1")
                     + "m -> " + FormatNavMeshVector(this.questWalkTrack.Target));
                 this.questWalkNextRetargetAt = now + QuestWalkRetargetCooldown;
-                this.AbortFarmWalk();
+
+                // Same journey, new aim — keep the seat. The next leg starts immediately, and if it
+                // is still long enough to be worth driving, throwing the vehicle away here only to
+                // summon it again is pure round-trip.
+                this.AbortFarmWalk(keepVehicle: true);
                 this.BeginQuestWalkLeg();
                 return;
             }
@@ -401,11 +445,38 @@ namespace HeartopiaMod
                 if (corners != this.questWalkInjectedCorners && this.questWalkInjectedCorners > 0
                     && this.questWalkTrack.HasGameRoute && this.questWalkGamePath.Count > 1)
                 {
-                    int n = this.InjectQuestWalkRoute();
-                    if (n > 0)
+                    // ⚠️ ЧИСЛО УГЛОВ МЕНЯЮТ ДВОЕ, И ПУТАТЬ ИХ НЕЛЬЗЯ.
+                    //
+                    // Комментарий выше верен буквально — углы меняются только на перестройке, — но
+                    // перестраивают маршрут не только присылкой из игры. Ходок перестраивает его
+                    // САМ, когда сошёл с коридора или перестал приближаться, и именно так он
+                    // обходит препятствие. Раньше это читалось как «игра прислала новый маршрут», и
+                    // обход возвращался к тому маршруту, который в стену и упёрся: ходок обходит —
+                    // мы затираем — он обходит снова. Исправление, которое он умеет сделать, не
+                    // жило и кадра, а отрезок заканчивался только телепортом, то есть нарушением
+                    // правила 0.2a.
+                    //
+                    // Отодвигание farmWalkNextRepathAt на строке выше от этого не спасало: оно
+                    // гасит ТОЛЬКО периодическую перестройку (safetyDue), а обход идёт по причинам
+                    // offCorridor и notClosing, которые им не гасятся вовсе.
+                    //
+                    // Обошёл — значит маршрут теперь его. Отдаём отрезок ходоку целиком: перестаём
+                    // считать маршрут своим и перестаём давить его собственную перестройку.
+                    if (this.farmWalkOwnRouteSeq != this.questWalkInjectedAtRouteSeq)
                     {
-                        this.questWalkInjectedCorners = n;
-                        this.questWalkLastCornerCount = n;
+                        this.questWalkInjectedCorners = -1;
+                        ModLogger.Msg("[QuestWalk] the walker re-routed around something ("
+                            + corners + " corners of its own) — leaving its route alone.");
+                    }
+                    else
+                    {
+                        int n = this.InjectQuestWalkRoute();
+                        if (n > 0)
+                        {
+                            this.questWalkInjectedCorners = n;
+                            this.questWalkInjectedAtRouteSeq = this.farmWalkOwnRouteSeq;
+                            this.questWalkLastCornerCount = n;
+                        }
                     }
                 }
             }
@@ -472,7 +543,7 @@ namespace HeartopiaMod
                 return aim;
             }
 
-            if (this.TryGetLocalPlayerPosition(out Vector3 me))
+            if (this.TryGetNavMeshSelfPosition(out Vector3 me, out _))
             {
                 ModLogger.Msg("[QuestWalk] track point has no height (y=0) and no waypoint nearby — "
                     + "using the player's own height " + me.y.ToString("F1") + "m.");
@@ -484,7 +555,17 @@ namespace HeartopiaMod
 
         private void BeginQuestWalkLeg()
         {
+            this.questWalkAimSource = this.questWalkTrack.Target;
             this.questWalkAim = this.RepairQuestWalkAimHeight(this.questWalkTrack.Target);
+
+            // Находка 6: назначение сменилось — прошлый отказ к нему больше не относится.
+            if (this.questWalkGameRouteRejected
+                && Vector3.Distance(this.questWalkAim, this.questWalkRejectedFor) > 2f)
+            {
+                this.questWalkGameRouteRejected = false;
+                ModLogger.Msg("[QuestWalk] new destination — the game's route may be tried again.");
+            }
+
             this.questWalkRadius = QuestWalkRadiusFor(this.questWalkTrack);
             this.questWalkCandidateReads = 0;
             this.questWalkParked = false;
@@ -506,6 +587,7 @@ namespace HeartopiaMod
                 if (n > 0)
                 {
                     this.questWalkInjectedCorners = n;
+                    this.questWalkInjectedAtRouteSeq = this.farmWalkOwnRouteSeq;
                 }
             }
 
@@ -517,6 +599,14 @@ namespace HeartopiaMod
         // ⚠️ ENTRY IS THE NEAREST POINT, NOT ZERO (rule 2). The resample also stops short of the
         // real target (its loop ends at t = 0.98), so the aim point is appended — which is exactly
         // what the game's own GetPath2 does.
+        // ⚠️ ВСЯ ГЕОМЕТРИЯ ЗДЕСЬ МЕРЯЕТСЯ ОТ TryGetNavMeshSelfPosition, НЕ ОТ GetPlayer().
+        //
+        // TryGetLocalPlayerPosition резолвит игрока через GameObject.Find("p_player_skeleton(Clone)")
+        // с кэшем на секунду, а имя объекта у всех игроков одинаковое — вернуться может СОСЕД. Про
+        // это написано открытым текстом в NavMeshWalkFeature, и ходок поэтому пользуется мониторной
+        // сущностью игрока. QuestWalk мерил чужим телом: у квестового NPC, где чужие стоят всегда,
+        // это давало «Прибыли (0,8 м)» с парковкой, пока настоящий персонаж был в сорока метрах, и
+        // травило точку входа в маршрут — тот самый разворот из правила 2.
         private int InjectQuestWalkRoute()
         {
             if (this.questWalkGamePath.Count == 0)
@@ -538,7 +628,7 @@ namespace HeartopiaMod
             }
 
             int start = 1;
-            if (this.TryGetLocalPlayerPosition(out Vector3 me))
+            if (this.TryGetNavMeshSelfPosition(out Vector3 me, out _))
             {
                 int nearest = 0;
                 float best = float.MaxValue;
@@ -562,9 +652,20 @@ namespace HeartopiaMod
             this.farmWalkCorners.Add(this.questWalkAim);
             this.farmWalkCornerIndex = 0;
 
+            // ⚠️ §1a.2: КАЖДЫЙ построитель маршрута ставит farmWalkLegStart. Инъекция — тоже
+            // построитель. Без этой строки коридор мерялся от угла ПРЕДЫДУЩЕГО маршрута (его
+            // ставит переход через угол, FarmWalkFeature.cs), то есть от отрезка, которого больше
+            // нет: на резком повороте игрок оказывался «вне коридора», ходок делал лишнюю
+            // перестройку, детектор числа углов возвращал инъекцию обратно, и пара холостых
+            // перестроек капала в farmWalkFutileRepaths — прямиком к бану путевых точек.
+            if (this.TryGetNavMeshSelfPosition(out Vector3 legFrom, out _))
+            {
+                this.farmWalkLegStart = legFrom;
+            }
+
             // The progress baselines were computed from the route just thrown away. Re-base with the
             // SAME formula, or the "not approaching" detector fires on the difference.
-            if (this.TryGetLocalPlayerPosition(out Vector3 here))
+            if (this.TryGetNavMeshSelfPosition(out Vector3 here, out _))
             {
                 float remaining = this.ComputeFarmWalkRouteRemaining(here);
                 this.farmWalkBestDistance = remaining;
@@ -587,11 +688,12 @@ namespace HeartopiaMod
             // time the game's path updates, and without it the rejected route would come straight
             // back on the next tick.
             if (!this.questWalkGameRouteRejected
-                && this.TryGetLocalPlayerPosition(out Vector3 auditFrom)
+                && this.TryGetNavMeshSelfPosition(out Vector3 auditFrom, out _)
                 && this.FindFirstImpassableFarmWalkLeg(auditFrom, this.farmWalkCorners, out string legDetail,
                     includeFirstLeg: true) >= 0)
             {
                 this.questWalkGameRouteRejected = true;
+                this.questWalkRejectedFor = this.questWalkAim;
                 ModLogger.Msg("[QuestWalk] the game's route is not walkable — " + legDetail
                     + ". Building our own instead.");
 
@@ -620,7 +722,7 @@ namespace HeartopiaMod
         private void InjectQuestWalkRouteCorners()
         {
             int start = 1;
-            if (this.TryGetLocalPlayerPosition(out Vector3 me))
+            if (this.TryGetNavMeshSelfPosition(out Vector3 me, out _))
             {
                 int nearest = 0;
                 float best = float.MaxValue;
@@ -645,6 +747,17 @@ namespace HeartopiaMod
 
             this.farmWalkCorners.Add(this.questWalkAim);
             this.farmWalkCornerIndex = 0;
+
+            // ⚠️ §1a.2: КАЖДЫЙ построитель маршрута ставит farmWalkLegStart. Инъекция — тоже
+            // построитель. Без этой строки коридор мерялся от угла ПРЕДЫДУЩЕГО маршрута (его
+            // ставит переход через угол, FarmWalkFeature.cs), то есть от отрезка, которого больше
+            // нет: на резком повороте игрок оказывался «вне коридора», ходок делал лишнюю
+            // перестройку, детектор числа углов возвращал инъекцию обратно, и пара холостых
+            // перестроек капала в farmWalkFutileRepaths — прямиком к бану путевых точек.
+            if (this.TryGetNavMeshSelfPosition(out Vector3 legFrom, out _))
+            {
+                this.farmWalkLegStart = legFrom;
+            }
         }
 
         // A "collect" quest tracks a SPECIFIC nearby entity, and the game re-picks the nearest as
@@ -659,7 +772,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (Vector3.Distance(this.questWalkTrack.Target, this.questWalkAim) <= QuestWalkRetargetDistance)
+            if (Vector3.Distance(this.questWalkTrack.Target, this.questWalkAimSource) <= QuestWalkRetargetDistance)
             {
                 this.questWalkCandidateReads = 0;
                 return false;
@@ -693,7 +806,7 @@ namespace HeartopiaMod
         // WORLD, where height is a real axis rather than terrain noise (rule 5).
         private float QuestWalkDistance(Vector3 to)
         {
-            if (!this.TryGetLocalPlayerPosition(out Vector3 me))
+            if (!this.TryGetNavMeshSelfPosition(out Vector3 me, out _))
             {
                 return -1f;
             }

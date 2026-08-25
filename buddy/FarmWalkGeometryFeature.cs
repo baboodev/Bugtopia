@@ -367,6 +367,13 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Underwater the sweep is the ONLY valid test here. The knee sweep below asks about an
+            // obstacle the walker's step logic would not climb, and the ground profile asks whether
+            // the floor is walkable — a swimmer has neither a step nor a floor, and running them
+            // would reject every leg over open water. That asymmetry is why this whole method was
+            // gated off while swimming; the gate is now on the parts that deserve it.
+            bool swimming = this.farmWalkIsSwimming;
+
             if (!sweepOk)
             {
                 passable = false;
@@ -424,13 +431,21 @@ namespace HeartopiaMod
             // So the leg is also swept at the height the walker's own step logic gives up at:
             // stepOffset + radius, just above what the controller climbs by itself. Anything that
             // blocks THAT is something the walk has to go around.
-            if (this.TryFarmWalkSweepLeg(ctrl, from, to, out bool lowOk, FarmWalkSweepKneeLift)
+            if (!swimming
+                && this.TryFarmWalkSweepLeg(ctrl, from, to, out bool lowOk, FarmWalkSweepKneeLift)
                 && !lowOk)
             {
                 passable = false;
                 why = "blocked at knee height (" + FarmWalkSweepKneeLift.ToString("F2")
                     + "m) though clear at chest height";
                 this.farmWalkSweepCache[key] = false;
+                return true;
+            }
+
+            if (swimming)
+            {
+                // Sweep passed and there is no floor to profile: that is the whole verdict.
+                this.farmWalkSweepCache[key] = true;
                 return true;
             }
 
@@ -616,7 +631,19 @@ namespace HeartopiaMod
         {
             detail = string.Empty;
             string reason = string.Empty;
-            if (corners == null || corners.Count < 2 || this.farmWalkIsSwimming)
+            // ⚠️ THE WHOLE AUDIT USED TO BE OFF UNDERWATER, and nothing said why.
+            //
+            // The reason was almost certainly the ground profile: a swimmer has no floor, so the
+            // step test would reject every leg over open water. But that is an argument against the
+            // PROFILE, not against the sweep — "can this body pass from A to B" is exactly the
+            // question when swimming, and it was the one nobody asked.
+            //
+            // Consequence, measured 02:42:52 with a Glasswort 2.6 m away: the straight line was
+            // correctly refused as blocked, a three-corner detour was built to go around, and its
+            // first leg — the one the swimmer actually takes — was never tested for the very wall
+            // the detour exists to avoid. The swimmer drove into it, backed off, and repeated every
+            // four seconds.
+            if (corners == null || corners.Count < 2)
             {
                 return -1;
             }

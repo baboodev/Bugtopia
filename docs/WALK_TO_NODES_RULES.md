@@ -146,6 +146,28 @@ refusal is forbidden — over one session it masked a real defect as "all clear"
 stuck detectors. Those timers measure failure, not a pause: eighteen seconds of standing in a repair
 aura, exactly as instructed, once ended in a rescue teleport. **[M]**
 
+**0.13** Every position the walker or its drivers measure comes from the **self player entity**, never
+from `GetLocalPlayer()` / `GameObject.Find("p_player_skeleton(Clone)")`. Remote players share that
+object name and the first match wins, so near a quest NPC — where strangers always stand — the driver
+measures one body while steering another: "arrived (0.8 m)" with the real character forty metres out.
+
+**0.14** A failure latch that stops *driving* must also stop the *walk*. The injected move axis is
+stateful — the game holds the last value until something releases it, and every release site sits
+inside the tick the latch just disabled. Freezing the driver alone leaves the character running in
+the last steered direction with the out-of-bounds guard still suppressed. **[M]**
+
+**0.15** A component that hands the walker a route from outside must be able to tell **its own
+injection from the walker's correction**. Both change the corner count, so counting corners cannot
+distinguish them; carry a sequence the walker bumps when it re-paths itself. Without it the walker's
+route around an obstacle is overwritten by the route that hit the obstacle, every frame, and the leg
+can only end by teleport — rule 0.2a breached from the outside. **[M]**
+
+**0.12** A stop leaves the plan when the *latest scan's candidate list* no longer holds a marker
+there — never on the strength of the collectable cold-scan alone. That scan covers only the seven
+`MapResGather` families, so pollution and bubbles are missing from it *by construction*, and reading
+their absence as "already collected" drops every contaminated target the moment the player swims
+within proof range. Judge every kind by the same list that produced it. **[M]**
+
 ---
 
 ## 1. Building a route
@@ -191,6 +213,24 @@ disagreements are logged, never banned. **[J]**
 it impassable. This is the shape the barriers on the shore and on the rope bridge take, and neither
 has a collider to find. ⚠️ Solid at the TOP is not a solid column: rejecting on that alone bans every
 leg passing under a bridge deck or an arch. Keep descending until free air is found. **[M]**
+
+**1.5f** ⭐ **The audit runs underwater too — the SWEEP does.** It used to be switched off entirely
+while swimming, with no comment saying why. The reason can only have been the ground profile: a
+swimmer has no floor, so the step test would refuse every leg over open water. That is an argument
+against the profile, not against the sweep — "can this body pass from A to B" is exactly the
+question when swimming, and it was the one nobody asked. Swimming now skips the knee sweep and the
+ground profile and keeps the sweep. **[M]**
+
+**1.5g** ⭐ **A detour is audited before it is committed**, with `includeFirstLeg: true`. The builder
+tested exactly one leg — last waypoint to target — and never the leg the walker actually takes
+first, in the one route whose entire reason for existing is that the straight line is blocked.
+Committing also returns straight out of the route builder, so the ordinary edge audit never saw a
+detour either, on land or under water.
+
+Measured 02:42:52, a Glasswort 2.6 m away: beeline correctly refused as blocked, three-corner detour
+built, first corner 10 m down through a wall, swimmer drove into it, backed off, repeated every four
+seconds. ⚠️ A 10 m dive is NORMAL and must not be "fixed" — a proportionality bound on detour length
+was tried here and was wrong. The wall in front of the dive was the defect. **[M]**
 
 **1.6** A ban is **never** issued on leg zero: it starts at the player and speaks about where they
 are standing, not about the graph. Eight false bans in six seconds came from exactly that. **[M]**
@@ -314,6 +354,14 @@ there had never been an obstacle. **[M]**
 ---
 
 ## 3. In a vehicle
+
+**3.0-seat** ⚠️ **The seat belongs to the JOURNEY, not to an aim point.** Aborting a walk dismounts,
+which is right when the walk is over and wrong when it is being replaced in the same breath. A quest
+point that shifted twenty metres cost a dismount and a re-summon with a hundred and seventy metres
+still to drive — six seconds in the car, and the re-summon is another server round-trip plus the
+mount window before anything moves. `AbortFarmWalk(keepVehicle: true)` is for a caller that starts
+the next leg immediately; the arrival dismount is distance-driven, so a short new leg still gets
+out by itself. **[M]**
 
 **3.0-budget** ⚠️ **The reverse-and-sidestep budget belongs to an OBSTACLE, not to a ride.** The
 round counter was zeroed on mount and on dismount and nowhere else, so two unrelated obstacles tens

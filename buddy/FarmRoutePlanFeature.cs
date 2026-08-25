@@ -667,18 +667,6 @@ namespace HeartopiaMod
 
             float now = Time.unscaledTime;
 
-            // Сколько коллектаблов живой скан видит вокруг игрока прямо сейчас. Это доказательство
-            // того, что скан в этом месте работает — только при нём отсутствие узла что-то значит.
-            int nearbyLive = 0;
-            for (int k = 0; k < this.liveCollectableColds.Count; k++)
-            {
-                if (FarmTourDistance(origin, this.liveCollectableColds[k].Position)
-                    <= FarmTourAbsenceProofRange)
-                {
-                    nearbyLive++;
-                }
-            }
-
             for (int i = this.farmTourStops.Count - 1; i >= 0; i--)
             {
                 Vector3 stop = this.farmTourStops[i].Position;
@@ -711,28 +699,38 @@ namespace HeartopiaMod
                         continue;
                     }
                 }
-                else if (nearbyLive > 0 && FarmTourDistance(origin, stop) <= FarmTourAbsenceProofRange)
+                else if (this.farmTourCandidates.Count > 0
+                    && !IsTransientFarmTourStop(this.farmTourStops[i].Label)
+                    && FarmTourDistance(origin, stop) <= FarmTourAbsenceProofRange
+                    && !this.HasFreshFarmTourCandidateAt(stop))
                 {
-                    // ⚠️ ОТСУТСТВИЕ РЯДОМ — ЭТО ТОЖЕ ОТВЕТ.
+                    // ⚠️ ОТСУТСТВИЕ РЯДОМ — ЭТО ТОЖЕ ОТВЕТ, НО СУДИТЬ НАДО ПО КАНДИДАТАМ СКАНА.
                     //
                     // Выше сказано «не найдено => никакого вывода», и для дальнего узла это верно:
-                    // он может быть просто не в зоне стрима. Но у узла в двух шагах от игрока
-                    // стриминг под сомнением не стоит, и «скан его не видит» означает ровно одно —
-                    // его там больше нет.
+                    // он может быть просто не в зоне стрима. У узла в двух шагах стриминг под
+                    // сомнением не стоит, и его отсутствие означает, что его там больше нет.
+                    // Без этой ветки собранный гриб оставался в плане, пока ходок не придёт на
+                    // пустое место и не отсидит таймаут.
                     //
-                    // Без этой ветки собранный гриб оставался в плане до тех пор, пока ходок не
-                    // придёт на пустое место и не отсидит таймаут: ферма бежала к грибу, которого
-                    // нет уже и на радаре.
+                    // ⚠️ НО СУДЬЯ ЗДЕСЬ — НЕ ХОЛОДНЫЙ СКАН. Первая версия спрашивала
+                    // TryGetLiveNodeColdState, а он знает только семь семейств MapResGather. Грязь
+                    // (Contaminated) в них не входит вовсе — как и пузырь, — поэтому для неё
+                    // «не найдено» это НОРМА, и правило снимало бы с плана каждую загрязнённую
+                    // точку, к которой игрок подплыл ближе тридцати метров.
                     //
-                    // Защита от ложного вывода — nearbyLive: заключение делается ТОЛЬКО когда скан
-                    // видит рядом хоть один другой коллектабл. Иначе «пусто» значило бы «скан сюда
-                    // не достаёт» или «семейство этого вида не перечисляется», и правило вычистило
-                    // бы весь план целиком.
+                    // Кандидаты последнего скана знают про все виды маркеров одинаково, и ветка
+                    // пузыря ниже давно судит именно по ним. Тот же судья, тот же смысл, без
+                    // привязки к виду ресурса.
+                    //
+                    // Расходные цели (пузырь) сюда не заходят: они дрейфуют, и штамп
+                    // «посещено» по СТАРОЙ позиции для них лишний. Их снимает ветка ниже —
+                    // тем же судьёй, но без штампа.
                     this.StampVisitedNode(stop, now + FarmVisitedRetryStampSeconds);
                     this.farmTourStops.RemoveAt(i);
                     ModLogger.Msg("[FarmTour] dropped a stop at " + FormatNavMeshVector(stop)
-                        + ": the live scan sees " + nearbyLive + " collectable(s) within "
-                        + FarmTourAbsenceProofRange.ToString("F0") + "m of us but not this one.");
+                        + ": the scan lists " + this.farmTourCandidates.Count
+                        + " marker(s) but none there, and it is only "
+                        + FarmTourDistance(origin, stop).ToString("F0") + "m away.");
                     continue;
                 }
 
