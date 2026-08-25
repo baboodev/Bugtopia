@@ -76,6 +76,8 @@ namespace HeartopiaMod
 
             public Toggle BypassToggle;           // "Hide UI + Player (Client Side)" — flag only
             public Toggle HideJumpToggle;
+            public Toggle NoCollisionPlayerToggle;
+            public Toggle NoCollisionVehicleToggle;
             public Toggle PersistentHudToggle;
             public Toggle BunnyHopToggle;
             public Toggle BirdVacuumToggle;       // flag only (source has no save/notification)
@@ -216,6 +218,12 @@ namespace HeartopiaMod
             handle.BunnyHopToggle = this.CreateUguiCheckbox(scrollContent, "BunnyHopToggle",
                 this.L("Bunny Hop (hold Space)"), this.bunnyHopEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesMainBunnyHopToggled));
+            handle.NoCollisionPlayerToggle = this.CreateUguiCheckbox(scrollContent, "NoCollisionPlayerToggle",
+                this.L("Walk through invisible barriers"), this.noCollisionPlayerEnabled,
+                new System.Action<bool>(this.OnUguiFeaturesMainNoCollisionPlayerToggled));
+            handle.NoCollisionVehicleToggle = this.CreateUguiCheckbox(scrollContent, "NoCollisionVehicleToggle",
+                this.L("Drive through invisible barriers"), this.noCollisionVehicleEnabled,
+                new System.Action<bool>(this.OnUguiFeaturesMainNoCollisionVehicleToggled));
             handle.BirdVacuumToggle = this.CreateUguiCheckbox(scrollContent, "BirdVacuumToggle",
                 this.L("Bird Vacuum (Client Side)"), this.birdVacuumEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesMainBirdVacuumToggled));
@@ -301,6 +309,16 @@ namespace HeartopiaMod
             if (handle.BunnyHopToggle != null)
             {
                 PlaceUguiTopLeft(handle.BunnyHopToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.NoCollisionPlayerToggle != null)
+            {
+                PlaceUguiTopLeft(handle.NoCollisionPlayerToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            if (handle.NoCollisionVehicleToggle != null)
+            {
+                PlaceUguiTopLeft(handle.NoCollisionVehicleToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
             if (handle.BirdVacuumToggle != null)
@@ -404,6 +422,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.HideJumpToggle, this.hideJumpButtonEnabled);
                 this.SyncUguiToggleFromField(handle.PersistentHudToggle, this.persistentHudEnabled);
                 this.SyncUguiToggleFromField(handle.BunnyHopToggle, this.bunnyHopEnabled);
+                this.SyncUguiToggleFromField(handle.NoCollisionPlayerToggle, this.noCollisionPlayerEnabled);
+                this.SyncUguiToggleFromField(handle.NoCollisionVehicleToggle, this.noCollisionVehicleEnabled);
                 this.SyncUguiToggleFromField(handle.BirdVacuumToggle, this.birdVacuumEnabled);
                 this.SyncUguiToggleFromField(handle.FastBubbleGenToggle, this.fastBubbleGenEnabled);
                 this.SyncUguiToggleFromField(handle.BubbleSpawnAtPlayerToggle, this.bubbleSpawnAtPlayerEnabled);
@@ -452,6 +472,33 @@ namespace HeartopiaMod
         private void OnUguiFeaturesMainBypassToggled(bool value)
         {
             this.bypassEnabled = value;
+        }
+
+        // Обе галки только ставят намерение — применяет его ProcessNoCollisionOnUpdate, по
+        // разнице желаемого и уже применённого. Дёргать матрицу прямо отсюда нельзя: галку можно
+        // щёлкнуть до того, как AuraMono поднялась, и тогда вызов молча не состоится, а поле уже
+        // сказало бы «включено» — ровно та рассинхронизация, из-за которой вернуть коллизию потом
+        // будет нечем.
+        private void OnUguiFeaturesMainNoCollisionPlayerToggled(bool value)
+        {
+            if (value == this.noCollisionPlayerEnabled)
+            {
+                return;
+            }
+
+            this.noCollisionPlayerEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiFeaturesMainNoCollisionVehicleToggled(bool value)
+        {
+            if (value == this.noCollisionVehicleEnabled)
+            {
+                return;
+            }
+
+            this.noCollisionVehicleEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
         }
 
         // Gui.cs:444-451.
@@ -605,6 +652,8 @@ namespace HeartopiaMod
         {
             this.bypassEnabled = false;
             this.hideJumpButtonEnabled = false;
+            this.noCollisionPlayerEnabled = false;
+            this.noCollisionVehicleEnabled = false;
             this.cachedJumpButtonGo = null;
             this.persistentHudEnabled = false;
             this.bunnyHopEnabled = false;

@@ -728,6 +728,7 @@ namespace HeartopiaMod
             this.ProcessUgcTextureCacheFeatureOnUpdate();
             Breadcrumbs.Phase("ou.locomotion");
             this.ProcessHideJumpButtonOnUpdate();
+            this.ProcessNoCollisionOnUpdate();
             this.ProcessBunnyHopOnUpdate();
             this.ProcessForceLocomotionOnUpdate();
             this.ProcessForceSwimInputOnUpdate();
@@ -5011,6 +5012,11 @@ namespace HeartopiaMod
             // First, so a drop still open at shutdown gets its closing line written before the rest
             // of teardown gets a chance to throw.
             this.ShutdownFpsWatchdog();
+
+            // Вернуть матрицу столкновений. Она ПЕРЕЖИВАЕТ смену мира (измерено: epoch 3 -> 5),
+            // значит пережила бы и выгрузку мода — оставленная выключенной, она осталась бы такой
+            // до конца игровой сессии, и вернуть её было бы уже некому (NoCollisionFeature.cs).
+            try { this.ReleaseNoCollision(); } catch { }
 
             // Close the agent bridge first: it owns background threads and a bound port, and any
             // in-flight call must be answered rather than left to time out against a dying process.

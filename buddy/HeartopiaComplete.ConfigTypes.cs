@@ -218,6 +218,8 @@ namespace HeartopiaMod
             public bool customCameraFOVEnabled;
             public float cameraFOV;
             public bool hideJumpButtonEnabled;
+            public bool noCollisionPlayerEnabled;
+            public bool noCollisionVehicleEnabled;
             public bool bunnyHopEnabled;
             public bool analogMoveBridgeEnabled;
             public bool skipShowOffAnimations;

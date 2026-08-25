@@ -443,6 +443,7 @@
     <Compile Include="FpsWatchdogFeature.cs" />
     <Compile Include="UgcTextureCacheFeature.cs" />
     <Compile Include="HideJumpButtonFeature.cs" />
+    <Compile Include="NoCollisionFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
     <Compile Include="TutorialBlockFeature.cs" />
     <Compile Include="PartyAutoDeclineFeature.cs" />

@@ -232,6 +232,8 @@ namespace HeartopiaMod
             data.customCameraFOVEnabled = this.customCameraFOVEnabled;
             data.cameraFOV = this.cameraFOV;
             data.hideJumpButtonEnabled = this.hideJumpButtonEnabled;
+            data.noCollisionPlayerEnabled = this.noCollisionPlayerEnabled;
+            data.noCollisionVehicleEnabled = this.noCollisionVehicleEnabled;
             data.bunnyHopEnabled = this.bunnyHopEnabled;
             data.analogMoveBridgeEnabled = this.analogMoveBridgeEnabled;
             data.skipShowOffAnimations = this.skipShowOffAnimations;
@@ -588,6 +590,8 @@ namespace HeartopiaMod
             this.customCameraFOVEnabled = data.customCameraFOVEnabled;
             this.cameraFOV = data.cameraFOV;
             this.hideJumpButtonEnabled = data.hideJumpButtonEnabled;
+            this.noCollisionPlayerEnabled = data.noCollisionPlayerEnabled;
+            this.noCollisionVehicleEnabled = data.noCollisionVehicleEnabled;
             this.bunnyHopEnabled = data.bunnyHopEnabled;
             this.analogMoveBridgeEnabled = data.analogMoveBridgeEnabled;
             this.skipShowOffAnimations = data.skipShowOffAnimations;
@@ -989,6 +993,8 @@ namespace HeartopiaMod
                         else if (line.Contains("customCameraFOVEnabled")) this.customCameraFOVEnabled = GetJsonInt(line, "\"customCameraFOVEnabled\":") != 0;
                         else if (line.Contains("cameraFOV")) this.cameraFOV = GetJsonFloat(line, "\"cameraFOV\":");
                         else if (line.Contains("hideJumpButtonEnabled")) this.hideJumpButtonEnabled = GetJsonInt(line, "\"hideJumpButtonEnabled\":") != 0;
+                        else if (line.Contains("noCollisionPlayerEnabled")) this.noCollisionPlayerEnabled = GetJsonInt(line, "\"noCollisionPlayerEnabled\":") != 0;
+                        else if (line.Contains("noCollisionVehicleEnabled")) this.noCollisionVehicleEnabled = GetJsonInt(line, "\"noCollisionVehicleEnabled\":") != 0;
                         else if (line.Contains("bunnyHopEnabled")) this.bunnyHopEnabled = GetJsonInt(line, "\"bunnyHopEnabled\":") != 0;
                         else if (line.Contains("analogMoveBridgeEnabled")) this.analogMoveBridgeEnabled = GetJsonInt(line, "\"analogMoveBridgeEnabled\":") != 0;
                         else if (line.Contains("skipShowOffAnimations")) this.skipShowOffAnimations = GetJsonInt(line, "\"skipShowOffAnimations\":") != 0;
