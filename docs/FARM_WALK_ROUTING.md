@@ -332,11 +332,22 @@ Three places where the order is critical, each proven by a failure:
 
 **Repeat what pays:**
 ```
-closer >= 0.25 m                              → repeat the heading (up to 6 times)
-rise >= 0.5 m AND we are still below the aim  → repeat as well
-otherwise                                     → next heading
-headings exhausted                            → press from the other side, or end the escape
+before the win:  closer >= 0.25 m, OR a climb          → repeat the heading (up to 6 times)
+after the win:   only a climb                          → repeat
+a climb means:   rise >= 0.5 m AND still below the aim
+otherwise                                              → next heading
+headings exhausted                                     → press from the other side, or end the escape
 ```
+
+⚠️ **Once the obstacle is behind us, only a climb keeps hopping alive.** The escape exists to get
+*past* something, not to travel; travelling is the walker's job and it does it better, because a hop
+is ballistic and cannot be stopped in the air. Measured on `node:Oyster` (a resource ~5 m up): the
+obstacle was cleared on the first group, then hops 2 and 3 were pure horizontal travel across the top
+(`+1,86m closer, +0,77m up`, `+0,98m closer, +1,66m up`) and hop 4 came off the far edge —
+`+0,33m closer, **-1,51m up**` — while still counting as paid, because a third of a metre of ground
+clears the threshold on its own. The walk then read 7,6 m out against its best of 3,3 m and spent its
+two remaining escapes. Handing back after the win keeps the reason the carry-on exists (an immediate
+exit used to chop one climb into three escapes) and drops only the part the walker should be doing.
 
 ⚠️ **Height pays only while there is height worth gaining.** The rule was a bare OR, so a hop that
 gained nothing on the ground kept a heading alive on altitude alone, and nothing checked that the

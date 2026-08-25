@@ -3687,12 +3687,22 @@ namespace HeartopiaMod
         private const float FarmWalkEscapeRepeatCloser = 0.25f;
         private const float FarmWalkEscapeRepeatRise = 0.5f;
 
-        // ⚠️ HOW FAR ABOVE THE TARGET HEIGHT STOPS COUNTING AS PROGRESS.
+        // ⚠️ WHERE CLIMBING STOPS BEING PROGRESS: when the target is within reach ABOVE us.
         //
-        // Anchored to the aura's own 3-D reach: once we are this far over the aim, another metre
-        // of altitude cannot bring the collect any closer even standing directly above it. Below
-        // it, climbing is genuine progress towards a raised resource and must keep paying.
-        private const float FarmWalkEscapeRiseCeiling = FarmWalkAuraReachFallback;
+        // The first version put this at +FarmWalkAuraReachFallback, i.e. 1.4 m OVER the aim, on the
+        // reasoning that higher than that cannot help. True, but that is where height starts to
+        // HURT — it stops HELPING far earlier. Once the resource is closer than the aura's reach
+        // vertically, no amount of further climbing improves anything; whatever is left is ground.
+        //
+        // Measured on node:Oyster, an oyster 3,63 m above the anchor. The first attempt climbed
+        // +2,77 m and left the player essentially level with it — the obstacle was behind us and
+        // the job was done. With the ceiling at +1.4 the series ran two more attempts, +0,79 m and
+        // +1,66 m, finishing 1,6 m OVER the target: three useful jumps and four wasted ones, and a
+        // perch to climb back down from.
+        //
+        // So the line is the reach BELOW the aim, not above it. While the target is further up
+        // than the aura can span, climbing is the point of the escape; inside that, it is over.
+        private const float FarmWalkEscapeRiseCeiling = -FarmWalkAuraReachFallback;
         private const int FarmWalkEscapeMaxRepeats = 6;
         private const float FarmWalkEscapeWin = 1f;
         private const float FarmWalkEscapeBudget = 22f;
@@ -4269,13 +4279,64 @@ namespace HeartopiaMod
             // to among the 12 nearest" — and the distance to the node had gone from this walk's
             // best of 3,2m out to 7,6m.
             //
-            // Climbing towards a raised resource is real progress and still pays. Climbing PAST
-            // it is not: above the aura's reach no further altitude can help, so from there only
-            // ground counts.
+            // Climbing towards a raised resource is real progress and still pays — but only while
+            // the resource is still out of vertical reach. The moment it is closer than the aura
+            // can span, more height buys nothing and only ground counts.
             float aboveAim = selfPos.y - this.farmWalkHopBurstAim.y;
             bool climbStillHelps = aboveAim < FarmWalkEscapeRiseCeiling;
-            bool paid = closer >= FarmWalkEscapeRepeatCloser
-                || (climbStillHelps && rise >= FarmWalkEscapeRepeatRise);
+            bool climbing = climbStillHelps && rise >= FarmWalkEscapeRepeatRise;
+
+            // ⚠️ ONCE THE OBSTACLE IS BEHIND US, ONLY A CLIMB KEEPS HOPPING ALIVE.
+            //
+            // The escape exists to get PAST something, not to travel. Travelling is the walker's
+            // job and it does it better: a hop is ballistic, it cannot be stopped in the air, and
+            // on top of a rock that is how the player goes over the far edge.
+            //
+            // Measured on node:Oyster, a resource sitting ~5 m up. The obstacle was cleared on the
+            // first group of hops:
+            //     apex hop 45 -> +0,02m closer, +2,78m up  — repeating
+            //     escape has cleared it — +1,23m closer, +3,24m up — carrying on
+            //     apex hop 45 -> +1,86m closer, +0,77m up  — repeating
+            //     apex hop 45 -> +0,98m closer, +1,66m up  — repeating
+            //     apex hop 45 -> +0,33m closer, -1,51m up  — repeating   <- came off the top
+            //     apex hop 45 -> -0,47m closer, +0,12m up  — next heading
+            // Hops 2 and 3 were pure horizontal travel across the top, and hop 4 fell a metre and
+            // a half off it while STILL counting as paid, because a third of a metre of ground is
+            // over the threshold on its own. The walk then read 7,6 m out against its best of
+            // 3,3 m and burned its two remaining escapes.
+            //
+            // So: before the win either metric may pay — we are still trying to get past the
+            // thing. After it, only a climb that is still climbing. This keeps the reason the
+            // carry-on exists at all (an immediate exit used to chop one climb into three
+            // escapes) while handing horizontal progress back to the walker, which steers.
+            bool paid = this.farmWalkEscapeWon
+                ? climbing
+                : (closer >= FarmWalkEscapeRepeatCloser || climbing);
+
+            // ⚠️ THE REASON IS DERIVED FROM THE SAME TERMS, NOT GUESSED FROM THE NUMBERS.
+            //
+            // The first version assembled it from a separate combination of thresholds and got it
+            // wrong on the very first live run: a hop that ended the series at +1,74m of climb was
+            // reported as "the climb has levelled off", when what actually stopped it was being
+            // over the target. A log line that explains an outcome with the wrong cause is worse
+            // than one that says nothing.
+            string stopReason = string.Empty;
+            if (!paid)
+            {
+                if (rise >= FarmWalkEscapeRepeatRise && !climbStillHelps)
+                {
+                    stopReason = aboveAim >= 0f
+                        ? " (still climbing, but already " + aboveAim.ToString("F1")
+                            + "m OVER the target — height no longer counts)"
+                        : " (the target is only " + (-aboveAim).ToString("F1")
+                            + "m up now, inside the aura's reach — the rest is ground)";
+                }
+                else if (this.farmWalkEscapeWon && closer >= FarmWalkEscapeRepeatCloser)
+                {
+                    stopReason = " (obstacle cleared and the climb has levelled off — the rest is"
+                        + " ground the walker should cover)";
+                }
+            }
             float airborneShare = this.farmWalkEscapeFrames > 0
                 ? 100f * this.farmWalkEscapeAirFrames / this.farmWalkEscapeFrames
                 : 0f;
@@ -4288,12 +4349,9 @@ namespace HeartopiaMod
                 + rise.ToString("+0.00;-0.00; 0.00") + "m up, " + this.farmWalkEscapeHops + " hop(s)"
                 + (this.farmWalkEscapeHopsRefused > 0 ? " (" + this.farmWalkEscapeHopsRefused + " REFUSED)" : string.Empty)
                 + ", airborne " + airborneShare.ToString("F0") + "%"
-                // Not flag-gated, and it names the reason: "stopped for no ground gain" and
-                // "stopped because the climb is already over the target" look identical in the
-                // numbers, and only one of them means the escape did its job.
-                + (!climbStillHelps && rise >= FarmWalkEscapeRepeatRise && closer < FarmWalkEscapeRepeatCloser
-                    ? " (already " + aboveAim.ToString("F1") + "m above the target — height no longer counts)"
-                    : string.Empty)
+                // Not flag-gated: "no ground gain", "already over the target" and "the climb has
+                // levelled off" are three different outcomes that look identical in the numbers.
+                + stopReason
                 + (paid ? " — repeating." : " — next heading."));
 
             if (paid && this.farmWalkEscapeRepeats < FarmWalkEscapeMaxRepeats)
