@@ -165,8 +165,9 @@ namespace HeartopiaMod
             // teleporting (FarmWalkFeature.cs). Mutually exclusive with Stealth Foraging, and
             // forces game speed to 1x for the run. Default false = vanilla hops.
             public bool farmWalkToNodeEnabled;
-            // "Compare Game Track" — просить игру строить свой маршрут к тому же узлу и логировать
-            // расхождение. Диагностика; сбивает ручной трек игрока, поэтому по умолчанию выкл.
+            // "Compare Game Track" — ask the game to route to the same node itself and log where
+            // the two differ. Diagnostic only; it clears the player's own manual track, so it is
+            // off by default.
             public bool farmWalkTrackCompareEnabled;
             // "Walk to Zone Point" — travel to the next farm area on foot instead of the area:*
             // teleport. Independent of the vehicle switch below.

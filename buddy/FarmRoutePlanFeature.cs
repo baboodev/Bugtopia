@@ -4,35 +4,36 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Планировщик обхода узлов ("тур").
+    // The node-tour planner.
     //
-    // ЗАЧЕМ. Раньше ферма на каждом скане брала БЛИЖАЙШИЙ узел. Для телепорта это было неважно —
-    // прыжок стоит одинаково откуда угодно. Для ходьбы жадный выбор разваливается: ближайший узел
-    // уводит в тупик, обратный путь считается заново, и маршрут дёргается. Плюс список кандидатов
-    // пересобирался с нуля каждые 2 секунды, поэтому цель могла смениться на середине прохода.
+    // WHY. The farm used to take the NEAREST node on every scan. For teleporting that did not
+    // matter — a hop costs the same from anywhere. For walking, a greedy pick falls apart: the
+    // nearest node leads into a dead end, the way back is recomputed, and the route jitters. On top
+    // of that the candidate list was rebuilt from scratch every 2 seconds, so the target could
+    // change in the middle of a walk.
     //
-    // ЧТО ДЕЛАЕМ. Один раз строим последовательность точек, дальше только:
-    //   * идём к ГОЛОВЕ списка,
-    //   * собранную голову удаляем,
-    //   * новые точки ВСТАВЛЯЕМ, ничего не пересобирая.
+    // WHAT WE DO. Build the sequence once, then only:
+    //   * walk to the HEAD of the list,
+    //   * drop the head once it is collected,
+    //   * INSERT new points without rebuilding anything.
     //
-    // АЛГОРИТМ. Это открытый коммивояжёр (маршрут без возврата в начало). Классическая пара для
-    // задач такого размера:
-    //   1. Ближайший сосед — быстрая начальная последовательность (в среднем ~25% хуже оптимума);
-    //   2. 2-opt — разворот отрезка, если это укорачивает маршрут (доводит примерно до ~5%).
-    // Обе O(n²) на проход, при n ≤ FarmTourMaxStops это десятки микросекунд.
+    // ALGORITHM. This is an open travelling salesman (a route with no return to the start). The
+    // classic pair for problems this size:
+    //   1. Nearest neighbour — a quick initial sequence (about 25% worse than optimal on average);
+    //   2. 2-opt — reverse a segment when that shortens the route (brings it to roughly 5%).
+    // Both are O(n²) per pass; at n ≤ FarmTourMaxStops that is tens of microseconds.
     //
-    // Новые точки добавляются ДЕШЁВОЙ ВСТАВКОЙ: ищем позицию i, минимизирующую
+    // New points are added by CHEAPEST INSERTION: find the position i that minimises
     //     d(t[i-1], p) + d(p, t[i]) − d(t[i-1], t[i])
-    // — то есть куда точку впихнуть, чтобы маршрут вырос меньше всего. Существующий порядок при
-    // этом не меняется, а значит цель прохода не может «переехать» под ногами.
+    // — that is, where the point can be squeezed in so the route grows least. The existing order is
+    // left alone, which means the current walk's target cannot move out from under it.
     //
-    // ⚠️ Голова тура НЕ ТРОГАЕТСЯ, пока идёт проход. 2-opt работает только с хвостом (индексы ≥ 1),
-    // иначе оптимизация переставит текущую цель и ходок развернётся — ровно та болезнь, из-за
-    // которой маршрут «перестраивался туда-сюда».
+    // ⚠️ THE TOUR HEAD IS NOT TOUCHED while a walk is running. 2-opt works on the tail only
+    // (indices ≥ 1); otherwise the optimiser reorders the current target and the walker turns
+    // around — exactly the illness behind "the route kept rebuilding back and forth".
     //
-    // ⚠️ Расстояния горизонтальные. Ходьба не меняет высоту, и учёт Y делал соседние по земле точки
-    // «далёкими» только потому, что одна из них на скале.
+    // ⚠️ Distances are horizontal. Walking does not change height, and counting Y made points that
+    // are neighbours on the ground read as "far" purely because one of them sits on a rock.
     public partial class HeartopiaComplete
     {
         internal readonly struct FarmTourStop
@@ -47,58 +48,61 @@ namespace HeartopiaMod
             }
         }
 
-        // Столько точек хватает на любую зону сбора, и 2-opt на них считается мгновенно.
+        // Enough points for any gathering area, and 2-opt over them is instant.
         private const int FarmTourMaxStops = 48;
 
-        // Две точки ближе этого — один и тот же ресурс. Тот же порог, что у скана
-        // (recentlyVisitedNodes сверяется по 2 м), чтобы дубли не расходились между системами.
+        // Two points closer than this are the same resource. The same threshold the scan uses
+        // (recentlyVisitedNodes matches within 2 m), so duplicates cannot diverge between systems.
         private const float FarmTourSameStopDistance = 2f;
 
-        // Сколько проходов 2-opt делать. Улучшение почти всё выбирается за первые два.
+        // How many 2-opt passes to run. Almost all of the gain comes out in the first two.
         private const int FarmTourTwoOptPasses = 4;
 
-        // Точки дальше этого от игрока в тур не берём: тур должен покрывать зону, а не карту.
+        // Points further than this from the player do not join the tour: a tour should cover an
+        // area, not the map.
         //
-        // Было 120 м — и стояло это ради переезда между зонами: после телепорта старый план описывал
-        // место, где нас больше нет, и тянул игрока обратно. С тех пор эту задачу закрыли точно, в
-        // трёх местах сразу — сброс тура на любом `area:*` телепорте (единственная точка, через
-        // которую проходят все телепорты фермы), на приходе в зону пешком и на переключении фермы.
-        // Отсечка по расстоянию осталась вторым, грубым рубежом за ту же самую оборону.
+        // It was 120 m, and it stood there for the move between areas: after a teleport the old plan
+        // described a place we are no longer in and dragged the player back. That job has since been
+        // closed properly in three places at once — the tour resets on any `area:*` teleport (the one
+        // point every farm teleport passes through), on arriving in an area on foot, and on toggling
+        // the farm. The distance cut-off stayed as a second, blunt line of the same defence.
         //
-        // Стоила она при этом реального: с одним включённым видом ресурса и ближайшим маркером в
-        // 135 м ферма вставала в «Scanning for nodes» навсегда и молчала об этом (замер 2026-08-20:
-        // две метки Bubble на 146 и 135 м, кандидатов 0). Плюс асимметрия — у телепортного режима
-        // предела нет вообще, так что ходячий был строже без причины.
+        // It cost real things meanwhile: with a single resource kind enabled and the nearest marker
+        // 135 m out, the farm sat in "Scanning for nodes" forever and said nothing about it
+        // (measured 2026-08-20: two Bubble markers at 146 and 135 m, zero candidates). It was also
+        // asymmetric — the teleport mode has no limit at all, so the walking one was stricter for no
+        // reason.
         //
-        // 300 м — это примерно минута плавания: всё ещё зона, а не карта. Дедлайн прохода это
-        // выдерживает: clamp(прямая × 3 + 15, 20, 300) даёт на таком плече полные 300 с. Число
-        // точек ограничено отдельно (FarmTourMaxStops), так что на стоимость 2-opt это не влияет.
+        // 300 m is roughly a minute of swimming: still an area, not the map. The walk deadline takes
+        // it: clamp(straight line × 3 + 15, 20, 300) gives the full 300 s on a haul that long. The
+        // number of points is capped separately (FarmTourMaxStops), so 2-opt's cost is unaffected.
         //
-        // ⚠️ Для ДРЕЙФУЮЩЕЙ цели такое плечо бессмысленно по существу: бабл идёт около 1.5 м/с и за
-        // минуту уходит метров на девяносто или лопается. Отдельного, короткого предела для
-        // расходных целей здесь пока нет — если погоня начнёт уходить в никуда, ограничивать надо
-        // по природе цели, а не по расстоянию.
+        // ⚠️ For a DRIFTING target a haul like that is meaningless in principle: a bubble moves at
+        // about 1.5 m/s and in a minute is ninety metres away or has burst. There is no separate,
+        // shorter limit for consumable targets here yet — if the chase starts going nowhere, the
+        // bound has to come from the nature of the target, not from distance.
         private const float FarmTourMaxStopRange = 300f;
 
-        // Голова тура среди расходных целей, удерживаемая между вызовами. Без неё выбор
-        // пересчитывается каждый тик и маршрут переигрывается на каждом шаге игрока.
+        // The tour head among consumable targets, held between calls. Without it the pick is
+        // recomputed every tick and the route is replayed on every step the player takes.
         private Vector3 farmTourTransientLock;
         private bool farmTourHasTransientLock;
 
-        // Насколько ближе должна быть новая расходная цель, чтобы бросить текущую. Баблы дрейфуют
-        // ~1,5 м/с и стоят десятками метров друг от друга, поэтому запас должен перекрывать и
-        // дрейф, и разницу, которая набегает от простого движения игрока.
+        // How much nearer a new consumable target must be before the current one is dropped. Bubbles
+        // drift at ~1.5 m/s and sit tens of metres apart, so the margin has to cover both the drift
+        // and the difference that accrues from the player simply moving.
         private const float FarmTourTransientSwitchMargin = 25f;
 
-        // Расстояние, на котором «скан его не видит» уже означает «его нет», а не «не дострелил».
-        // Сущности стримятся по близости, поэтому у узла в этих пределах вопрос стрима не стоит.
+        // The range at which "the scan does not see it" already means "it is not there" rather than
+        // "it did not reach". Entities stream by proximity, so for a node this close streaming is
+        // not in question.
         private const float FarmTourAbsenceProofRange = 30f;
 
         private readonly List<FarmTourStop> farmTourStops = new List<FarmTourStop>();
         private readonly List<FarmTourStop> farmTourCandidates = new List<FarmTourStop>();
 
-        // Приёмник для FindClosestAvailableNode: пока он не null, скан складывает СЮДА каждого
-        // подходящего кандидата. Так фильтр меток/кулдаунов остаётся ровно в одном месте.
+        // The sink for FindClosestAvailableNode: while it is non-null the scan drops every eligible
+        // candidate in HERE. That keeps the label/cooldown filter in exactly one place.
         private List<FarmTourStop> farmCandidateSink;
 
         private bool farmTourBuilt;
@@ -112,15 +116,17 @@ namespace HeartopiaMod
         // Refreshed once per plan / top-up: is the farm currently swimming?
         private bool farmTourVerticalCost;
 
-        // ⚠️ Горизонтально НА СУШЕ, полностью в 3-D ПОД ВОДОЙ.
+        // ⚠️ Horizontal ON LAND, fully 3-D UNDERWATER.
         //
-        // На суше ходьба не меняет высоту, и учёт Y отталкивал соседние по земле точки только
-        // потому, что одна из них на скале, — это была верная причина считать плоско.
+        // On land walking does not change height, and counting Y pushed apart points that are
+        // neighbours on the ground purely because one of them sits on a rock — a sound reason to
+        // measure flat.
         //
-        // Под водой всё наоборот: погружение И ЕСТЬ перемещение, а разброс глубин там больше
-        // разброса по горизонтали (в прогоне −36…−74 м). Плоская метрика объявляла соседями точки,
-        // между которыми двадцать метров вертикали, и порядок обхода выглядел случайным. В логе это
-        // видно буквально: `walking 9,7m` — и тут же `diving 19,6m`, `wedged at 20,6m`.
+        // Underwater it is the other way round: descending IS travel, and the spread of depths there
+        // exceeds the spread across the horizontal (−36…−74 m in one run). The flat metric declared
+        // points neighbours with twenty metres of vertical between them, and the visiting order
+        // looked random. The log shows it literally: `walking 9,7m` followed immediately by
+        // `diving 19,6m`, `wedged at 20,6m`.
         private float FarmTourDistance(Vector3 a, Vector3 b)
         {
             float dx = a.x - b.x;
@@ -145,10 +151,10 @@ namespace HeartopiaMod
             this.farmTourVerticalCost = this.farmWalkIsSwimming || this.TryGetFarmWalkSwimLocomotion(out _);
         }
 
-        // Откуда меряем маршрут. Камера — не игрок: под водой она висит позади и выше, и с 3-D
-        // метрикой этот сдвиг искажает выбор первой точки сильнее всего, ровно там, где цена
-        // ошибки максимальна. Камера остаётся запасным вариантом на случай, если позиция игрока
-        // не разрешилась.
+        // Where the route is measured from. The camera is not the player: underwater it hangs behind
+        // and above, and with the 3-D metric that offset distorts the choice of the first point most
+        // of all — exactly where the cost of a wrong pick is highest. The camera stays as the
+        // fallback for when the player's position does not resolve.
         internal Vector3 ResolveFarmTourOrigin()
         {
             if (this.TryGetNavMeshSelfPosition(out Vector3 selfPos, out _))
@@ -160,22 +166,23 @@ namespace HeartopiaMod
             return cam != null ? cam.transform.position : Vector3.zero;
         }
 
-        // ⚠️ ПУЗЫРЬ НЕЛЬЗЯ ПЛАНИРОВАТЬ — ЕГО МОЖНО ТОЛЬКО ВЗЯТЬ СЕЙЧАС.
+        // ⚠️ A BUBBLE CANNOT BE PLANNED FOR — IT CAN ONLY BE TAKEN NOW.
         //
-        // Тур — это маршрут: точка встаёт туда, где она дешевле всего вписывается между соседями,
-        // и до неё доходит очередь. Для гриба это правильно, он никуда не денется. Пузырь же
-        // дрейфует и лопается сам по себе, а в план его вставляло ровно так же — в середину
-        // сорока восьми точек. Пока обход доходил до этого места, пузыря давно не было, и со
-        // стороны это выглядело так, будто ходячий режим пузыри вообще не замечает. Режим с
-        // телепортом их брал: там цель выбирает FindClosestAvailableNode, то есть всегда БЛИЖАЙШУЮ.
+        // A tour is a route: a point goes where it fits most cheaply between its neighbours, and its
+        // turn comes round eventually. For a mushroom that is right, it is not going anywhere. A
+        // bubble, though, drifts and bursts on its own, and it was being inserted exactly the same
+        // way — into the middle of forty-eight points. By the time the tour reached that place the
+        // bubble was long gone, and from outside it looked as though the walking mode did not notice
+        // bubbles at all. The teleport mode did take them: there the target comes from
+        // FindClosestAvailableNode, which is always the NEAREST.
         //
-        // Отсюда правило: расходная цель не встаёт в очередь, она берётся головой.
+        // Hence the rule: a consumable target does not join the queue, it is taken as the head.
         private static bool IsTransientFarmTourStop(string label)
         {
             return string.Equals(label, "Bubble", StringComparison.Ordinal);
         }
 
-        // Есть ли этот пункт всё ещё среди кандидатов последнего скана.
+        // Whether this stop is still among the last scan's candidates.
         private bool HasFreshFarmTourCandidateAt(Vector3 stop)
         {
             for (int i = 0; i < this.farmTourCandidates.Count; i++)
@@ -194,7 +201,7 @@ namespace HeartopiaMod
             return (a - b).sqrMagnitude < FarmTourSameStopDistance * FarmTourSameStopDistance;
         }
 
-        // Собрать кандидатов через обычный скан. Возвращает false, если радар не готов.
+        // Collect candidates through the ordinary scan. Returns false when the radar is not ready.
         private bool TryCollectFarmTourCandidates(Vector3 origin)
         {
             // Every ordering decision below depends on this, so resolve it before any of them.
@@ -210,8 +217,9 @@ namespace HeartopiaMod
                 this.farmCandidateSink = null;
             }
 
-            // Отсеиваем дальние и дубли внутри самой выборки: один ресурс может дать несколько
-            // маркеров (радар и подводный скан рисуют своё), а тур должен видеть его один раз.
+            // Drop the far ones and the duplicates within the sample itself: one resource can produce
+            // several markers (the radar and the underwater scan each draw their own), and the tour
+            // must see it once.
             float nearestDropped = float.MaxValue;
             string nearestDroppedLabel = null;
             for (int i = this.farmTourCandidates.Count - 1; i >= 0; i--)
@@ -268,7 +276,7 @@ namespace HeartopiaMod
         private const float FarmTourRangeComplaintInterval = 20f;
         private float farmTourRangeComplaintAt;
 
-        // Полная перестройка. Вызывается на старте сбора и когда тур опустел.
+        // A full rebuild. Called when gathering starts and when the tour has run empty.
         private bool RebuildFarmTour(Vector3 origin)
         {
             if (!this.TryCollectFarmTourCandidates(origin))
@@ -278,7 +286,7 @@ namespace HeartopiaMod
 
             this.farmTourStops.Clear();
 
-            // 1. Ближайший сосед от игрока.
+            // 1. Nearest neighbour, starting from the player.
             List<FarmTourStop> pool = new List<FarmTourStop>(this.farmTourCandidates);
             Vector3 cursor = origin;
             while (pool.Count > 0 && this.farmTourStops.Count < FarmTourMaxStops)
@@ -300,7 +308,7 @@ namespace HeartopiaMod
                 pool.RemoveAt(best);
             }
 
-            // 2. 2-opt по всему туру — прохода ещё нет, голову двигать можно.
+            // 2. 2-opt over the whole tour — no walk is running yet, so the head may move.
             float before = this.MeasureFarmTour(origin);
             this.ImproveFarmTourWithTwoOpt(origin, 0);
             float after = this.MeasureFarmTour(origin);
@@ -316,7 +324,7 @@ namespace HeartopiaMod
             return this.farmTourStops.Count > 0;
         }
 
-        // Длина открытого маршрута: игрок -> первая -> ... -> последняя.
+        // Length of the open route: player -> first -> ... -> last.
         private float MeasureFarmTour(Vector3 origin)
         {
             if (this.farmTourStops.Count == 0)
@@ -333,8 +341,8 @@ namespace HeartopiaMod
             return total;
         }
 
-        // 2-opt: разворачиваем отрезок [i..j], если так короче. lockedPrefix задаёт, сколько точек
-        // с начала трогать нельзя (1, пока к голове идёт проход).
+        // 2-opt: reverse the segment [i..j] when that is shorter. lockedPrefix says how many points
+        // from the start must not be touched (1 while a walk to the head is running).
         private void ImproveFarmTourWithTwoOpt(Vector3 origin, int lockedPrefix)
         {
             int n = this.farmTourStops.Count;
@@ -354,8 +362,8 @@ namespace HeartopiaMod
                     {
                         Vector3 c = this.farmTourStops[j].Position;
 
-                        // Открытый маршрут: у последней точки нет преемника, разворот хвоста
-                        // оценивается только по входящему ребру.
+                        // Open route: the last point has no successor, so reversing the tail is judged
+                        // on the incoming edge alone.
                         float delta;
                         if (j == n - 1)
                         {
@@ -373,10 +381,10 @@ namespace HeartopiaMod
                             this.farmTourStops.Reverse(i, j - i + 1);
                             improved = true;
 
-                            // ⚠️ b теперь протух: после разворота на позиции i лежит бывшая t[j].
-                            // Продолжать внутренний цикл со старым b — считать дельты по маршруту,
-                            // которого больше нет, и 2-opt начнёт УХУДШАТЬ тур. Выходим и берём
-                            // свежие a/b на следующем i.
+                            // ⚠️ b is stale now: after the reversal position i holds what used to be
+                            // t[j]. Continuing the inner loop with the old b means computing deltas
+                            // against a route that no longer exists, and 2-opt starts making the tour
+                            // WORSE. Break out and take fresh a/b on the next i.
                             break;
                         }
                     }
@@ -389,8 +397,8 @@ namespace HeartopiaMod
             }
         }
 
-        // Пополнение: новые кандидаты вставляются дешёвой вставкой, порядок существующих сохраняется.
-        // lockedPrefix защищает точку, к которой уже идёт проход.
+        // Top-up: new candidates go in by cheapest insertion, and the order of the existing ones is
+        // preserved. lockedPrefix protects the point a walk is already heading for.
         private void TopUpFarmTour(Vector3 origin, int lockedPrefix)
         {
             if (!this.farmTourBuilt || !this.TryCollectFarmTourCandidates(origin))
@@ -474,36 +482,36 @@ namespace HeartopiaMod
 
             if (added > 0)
             {
-                // ⚠️ НИКАКОГО 2-opt при пополнении — только вставка.
+                // ⚠️ NO 2-opt ON A TOP-UP — insertion only.
                 //
-                // Я его здесь запускал, рассуждая «голова заперта, хвост трогать можно». Голова
-                // действительно не двигалась, но 2-opt решает ОТКРЫТУЮ задачу, и её оптимум резко
-                // зависит от точки старта. Точка старта — игрок, а он смещается после каждого
-                // сбора. Поэтому на каждом пополнении оптимизатор законно находил другой ответ и
-                // разворачивал остаток маршрута целиком.
+                // It was run here on the reasoning "the head is locked, the tail is fair game". The
+                // head did indeed stay put, but 2-opt solves the OPEN problem, and its optimum
+                // depends sharply on the starting point. The starting point is the player, and the
+                // player moves after every collect. So on each top-up the optimiser legitimately
+                // found a different answer and reversed the whole remainder of the route.
                 //
-                // В логе это читается по z: 51 → 41 → 16 → 6 → 1, потом обратно 16 → 24 → 40 → 66,
-                // потом снова назад 73 → 51 → 21. Игрок вычёсывал зону в одну сторону, разворачивался
-                // и шёл обратно — «плавает туда-сюда».
+                // In the log it reads off z: 51 → 41 → 16 → 6 → 1, then back 16 → 24 → 40 → 66, then
+                // back again 73 → 51 → 21. The player combed the area one way, turned around and
+                // walked back — "swimming back and forth".
                 //
-                // Вставка сама по себе порядок не переставляет, поэтому маршрут остаётся связным.
-                // Полный 2-opt делается один раз, при построении плана. Это ровно то, что просил
-                // пользователь: отсортировать заранее, дальше только пополнять.
+                // Insertion on its own does not reorder anything, so the route stays coherent. The
+                // full 2-opt runs once, when the plan is built. That is exactly what was asked for:
+                // sort it up front, then only top it up.
                 ModLogger.Msg("[FarmTour] +" + added + " new stop(s), " + this.farmTourStops.Count
                     + " pending, " + this.MeasureFarmTour(origin).ToString("F0") + "m total.");
             }
         }
 
-        // Голова тура. Строит план, если его ещё нет.
+        // The tour head. Builds the plan if there is not one yet.
         private bool TryGetNextFarmTourStop(Vector3 origin, out Vector3 position, out string label)
         {
             position = Vector3.zero;
             label = string.Empty;
 
-            // Единственное место, где точки уходят из плана. Любая система, отметившая узел в
-            // recentlyVisitedNodes — сбор, пропуск, парковка на 5 минут, спасательный телепорт —
-            // тем самым автоматически вычёркивает его отсюда. Развешивать вызовы удаления по всем
-            // этим веткам значило бы гарантированно забыть одну.
+            // The only place points leave the plan. Any system that marks a node in
+            // recentlyVisitedNodes — a collect, a skip, a five-minute park, a rescue teleport —
+            // strikes it from here automatically by doing so. Hanging removal calls off all of those
+            // branches would guarantee forgetting one.
             this.PruneFarmTourStops(origin);
 
             if (!this.farmTourBuilt || this.farmTourStops.Count == 0)
@@ -519,35 +527,37 @@ namespace HeartopiaMod
                 return false;
             }
 
-            // ПОД ВОДОЙ — всегда ближайшая, а не следующая по плану.
+            // UNDERWATER — always the nearest, never the next in the plan.
             //
-            // Планировать обход имеет смысл там, где леги предсказуемы. Под водой они не такие:
-            // граф путевых точек здесь 86 узлов против 1745 на суше, перегоны между ними по
-            // 20-30 м прямой, и каждый третий упирается в рельеф. Порядок, посчитанный по
-            // расстояниям, ничего не стоит, если половина переходов в нём не проходима, а цена
-            // ошибки — заклинивший проход с четырьмя отступами.
+            // Planning a tour makes sense where the legs are predictable. Underwater they are not:
+            // the waypoint graph here has 86 nodes against 1745 on land, the hops between them run
+            // 20-30 m in a straight line, and every third one runs into terrain. An order computed
+            // from distances is worth nothing when half its transitions are impassable, and the cost
+            // of a wrong pick is a wedged walk with four retreats.
             //
-            // Ближайшая точка почти всегда достижима просто потому, что она рядом. План при этом
-            // никуда не девается: список тот же, пополняется так же, чистится так же — меняется
-            // только правило выбора головы.
-            // Расходные цели — вперёд всей очереди, ближайшая из них.
+            // The nearest point is almost always reachable simply because it is close. The plan does
+            // not go anywhere meanwhile: same list, topped up the same way, pruned the same way —
+            // only the rule for picking the head changes.
+            // Consumable targets jump the whole queue; the nearest of them wins.
             //
-            // ⚠️ И ОДНА РАЗ ВЫБРАННАЯ — ДЕРЖИТСЯ. Этот блок пересчитывал ближайшую на КАЖДОМ
-            // вызове, по прямой от текущей позиции игрока. Пока игрок идёт к баблу B, расстояния
-            // до A и B меняются оба, и голова тура перещёлкивается туда-сюда. Замерено 02:55-02:57:
+            // ⚠️ AND ONCE PICKED IT IS HELD. This block used to recompute the nearest on EVERY call,
+            // by straight line from the player's current position. While the player swims toward
+            // bubble B the distances to A and B both change, and the tour head flips back and forth.
+            // Measured 02:55-02:57:
             //
             //     02:55:29 → A (-119,44 … 248,25)
             //     02:56:35 → B (-136,59 … 299,68)
-            //     02:56:58 → A          ← обратно
-            //     02:57:11 → B          ← снова обратно
+            //     02:56:58 → A          ← back again
+            //     02:57:11 → B          ← and back once more
             //
-            // Каждое переключение выбрасывало построенный маршрут и строило новый: за две минуты
-            // ни один бабл не собран, единственный исчезнувший лопнул сам. Формально ошибки нет
-            // нигде — ни бана, ни телепорта, — поэтому в логе это и выглядело как «просто идёт».
+            // Every switch threw away the route just built and built another: in two minutes not one
+            // bubble was collected, and the only one that vanished burst by itself. Formally nothing
+            // failed anywhere — no ban, no teleport — which is why in the log it merely looked like
+            // "it is walking".
             //
-            // Лечится удержанием: пока выбранная цель ещё в списке, она и остаётся головой.
-            // Переключение разрешено только когда новая ближе на ЗАПАС, а не на любую величину —
-            // иначе дрейф бабла (~1,5 м/с) сам по себе будет перещёлкивать выбор.
+            // The cure is holding on: while the chosen target is still in the list, it stays the
+            // head. Switching is allowed only when a new one is nearer by a MARGIN rather than by
+            // any amount at all — otherwise a bubble's drift (~1.5 m/s) flips the pick on its own.
             int transientPick = -1;
             float transientBest = float.MaxValue;
             int lockedIndex = -1;
@@ -572,8 +582,8 @@ namespace HeartopiaMod
                 }
             }
 
-            // Цель, на которую мы уже нацелились, исчезла из списка — собрана, лопнула или
-            // выпала по таймауту. Только тогда выбор делается заново.
+            // The target we had already committed to is gone from the list — collected, burst, or
+            // timed out. Only then is the pick made again.
             if (this.farmTourHasTransientLock && lockedIndex < 0)
             {
                 this.farmTourHasTransientLock = false;
@@ -671,25 +681,25 @@ namespace HeartopiaMod
             {
                 Vector3 stop = this.farmTourStops[i].Position;
 
-                // Вне зоны. Ферма переезжает между зонами телепортом (area:*), и без этого тур
-                // после переезда продолжал бы тянуть игрока обратно к устрицам за 100+ метров.
+                // Out of range. The farm moves between areas by teleport (area:*), and without this
+                // the tour would keep dragging the player back to oysters 100+ m away after a move.
                 if (FarmTourDistance(origin, stop) > FarmTourMaxStopRange)
                 {
                     this.farmTourStops.RemoveAt(i);
                     continue;
                 }
 
-                // ⚠️ УЖЕ СОБРАН. План строится по маркерам радара в момент планирования, а узел
-                // остывает мгновенно — и до этой проверки тур продолжал выдавать точку, с которой
-                // ресурс давно снят. Ферма шла к собранному грибу, и единственным, что её
-                // разворачивало, была проверка уже В ПУТИ (TryAbandonDrainedFarmWalkTarget), то
-                // есть после того, как игрок туда пошёл.
+                // ⚠️ ALREADY COLLECTED. The plan is built from radar markers at planning time, while a
+                // node goes cold instantly — and until this check the tour kept handing out a point
+                // whose resource had long been taken. The farm walked to a harvested mushroom, and the
+                // only thing that turned it around was the check made EN ROUTE
+                // (TryAbandonDrainedFarmWalkTarget), i.e. after the player had already set off.
                 //
-                // Живой скан — тот же авторитет, которым пользуются сбор и FindClosestAvailableNode.
-                // Найдено и cold => снимаем из плана и штампуем НАСТОЯЩИМ остатком кулдауна, иначе
-                // TopUpFarmTour вернёт точку обратно на следующем же пополнении.
+                // The live scan is the same authority the collector and FindClosestAvailableNode use.
+                // Found and cold => drop it from the plan and stamp it with the REAL remaining
+                // cooldown, or TopUpFarmTour will put the point straight back on the next top-up.
                 //
-                // Не найдено => никакого вывода: узел может быть просто вне зоны стрима.
+                // Not found => no conclusion: the node may simply be outside the streaming range.
                 if (this.TryGetLiveNodeColdState(stop, 0f, out bool stopCold, out long stopColdEndMs))
                 {
                     if (stopCold)
@@ -704,27 +714,27 @@ namespace HeartopiaMod
                     && FarmTourDistance(origin, stop) <= FarmTourAbsenceProofRange
                     && !this.HasFreshFarmTourCandidateAt(stop))
                 {
-                    // ⚠️ ОТСУТСТВИЕ РЯДОМ — ЭТО ТОЖЕ ОТВЕТ, НО СУДИТЬ НАДО ПО КАНДИДАТАМ СКАНА.
+                    // ⚠️ ABSENCE NEARBY IS AN ANSWER TOO — BUT THE JUDGE MUST BE THE SCAN CANDIDATES.
                     //
-                    // Выше сказано «не найдено => никакого вывода», и для дальнего узла это верно:
-                    // он может быть просто не в зоне стрима. У узла в двух шагах стриминг под
-                    // сомнением не стоит, и его отсутствие означает, что его там больше нет.
-                    // Без этой ветки собранный гриб оставался в плане, пока ходок не придёт на
-                    // пустое место и не отсидит таймаут.
+                    // Above it says "not found => no conclusion", and for a distant node that is
+                    // right: it may simply be outside the streaming range. For a node two steps away
+                    // streaming is not in doubt, and its absence means it is no longer there.
+                    // Without this branch a harvested mushroom stayed in the plan until the walker
+                    // arrived at an empty spot and sat out the timeout.
                     //
-                    // ⚠️ НО СУДЬЯ ЗДЕСЬ — НЕ ХОЛОДНЫЙ СКАН. Первая версия спрашивала
-                    // TryGetLiveNodeColdState, а он знает только семь семейств MapResGather. Грязь
-                    // (Contaminated) в них не входит вовсе — как и пузырь, — поэтому для неё
-                    // «не найдено» это НОРМА, и правило снимало бы с плана каждую загрязнённую
-                    // точку, к которой игрок подплыл ближе тридцати метров.
+                    // ⚠️ BUT THE JUDGE HERE IS NOT THE COLD SCAN. The first version asked
+                    // TryGetLiveNodeColdState, and that knows only the seven MapResGather families.
+                    // Pollution (Contaminated) is not among them at all — nor is a bubble — so for it
+                    // "not found" is NORMAL, and the rule would have dropped every contaminated point
+                    // the player swam within thirty metres of.
                     //
-                    // Кандидаты последнего скана знают про все виды маркеров одинаково, и ветка
-                    // пузыря ниже давно судит именно по ним. Тот же судья, тот же смысл, без
-                    // привязки к виду ресурса.
+                    // The last scan's candidates know every kind of marker alike, and the bubble
+                    // branch below has judged by them all along. Same judge, same meaning, with no
+                    // tie to the kind of resource.
                     //
-                    // Расходные цели (пузырь) сюда не заходят: они дрейфуют, и штамп
-                    // «посещено» по СТАРОЙ позиции для них лишний. Их снимает ветка ниже —
-                    // тем же судьёй, но без штампа.
+                    // Consumable targets (bubbles) do not come through here: they drift, and a
+                    // "visited" stamp on their OLD position is pointless. The branch below removes
+                    // them — same judge, but without the stamp.
                     this.StampVisitedNode(stop, now + FarmVisitedRetryStampSeconds);
                     this.farmTourStops.RemoveAt(i);
                     ModLogger.Msg("[FarmTour] dropped a stop at " + FormatNavMeshVector(stop)
@@ -734,16 +744,16 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                // ⚠️ ЛОПНУВШИЙ ПУЗЫРЬ ОСТАЁТСЯ В ПЛАНЕ НАВСЕГДА, если его отсюда не убрать.
+                // ⚠️ A BURST BUBBLE STAYS IN THE PLAN FOREVER unless it is removed here.
                 //
-                // Остальные пункты снимает живой скан коллектаблов, но пузырь в него не попадает
-                // вовсе (он не коллектабл), так что для него «остыл» не наступает никогда. Пункт
-                // от исчезнувшего пузыря переживал бы весь тур: ходок дошёл бы до пустого места,
-                // выждал таймаут и только тогда отметил его посещённым — по одному проходу
-                // впустую на каждый лопнувший пузырь.
+                // Every other stop is removed by the live collectable scan, but a bubble never enters
+                // that scan at all (it is not a collectable), so "went cold" never happens for it. A
+                // stop from a vanished bubble would outlive the whole tour: the walker would arrive at
+                // an empty spot, wait out the timeout and only then mark it visited — one wasted walk
+                // per burst bubble.
                 //
-                // Судим по кандидатам последнего скана, и только когда они есть: пустой список
-                // означает «скан ещё не собран», а не «маркеров нет».
+                // Judge by the last scan's candidates, and only when there are any: an empty list
+                // means "the scan has not been collected yet", not "there are no markers".
                 if (this.farmTourCandidates.Count > 0
                     && IsTransientFarmTourStop(this.farmTourStops[i].Label)
                     && !this.HasFreshFarmTourCandidateAt(stop))
@@ -752,11 +762,12 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                // ⚠️ НЕПОДТВЕРЖДЁННЫЙ ДИНАМИЧЕСКИЙ КУСТ — не цель. Гриб на этом месте мог быть
-                // собран, и вместо него растёт новая сущность, чей компонент неотличим от спелой;
-                // знает об этом только вердикт клиента. Точка не штампуется как посещённая — она не
-                // занята, она неизвестна, и вернуться к ней надо сразу, как вердикт придёт (свип
-                // запускается по появлению незнакомого netId, то есть через секунду-другую).
+                // ⚠️ AN UNCONFIRMED DYNAMIC BUSH IS NOT A TARGET. The mushroom here may have been
+                // collected and a new entity growing in its place, one whose component is
+                // indistinguishable from a ripe one; only the client's verdict knows. The point is not
+                // stamped as visited — it is not taken, it is unknown, and we must return to it as
+                // soon as the verdict arrives (the sweep is triggered by an unfamiliar netId showing
+                // up, i.e. a second or two later).
                 if (this.IsFarmTargetUnconfirmed(stop, out _))
                 {
                     this.farmTourStops.RemoveAt(i);

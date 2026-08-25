@@ -431,11 +431,11 @@ namespace HeartopiaMod
         private string farmWalkLabel = string.Empty;
         private float farmWalkNextRepathAt;
 
-        // Сколько раз ходок ПЕРЕСТРОИЛ МАРШРУТ САМ. Растёт только на корректирующей перестройке —
-        // той, которой он обходит препятствие. Нужен QuestWalk: тот следит за числом углов, а число
-        // углов одинаково меняется и когда маршрут прислала игра, и когда ходок обошёл стену. Без
-        // этого счётчика второе принималось за первое, и обход затирался обратно тем же маршрутом,
-        // который в стену и упёрся.
+        // How many times the walker RE-PATHED ON ITS OWN. It only rises on a corrective re-path —
+        // the kind it uses to route around an obstacle. QuestWalk needs it: that one watches the
+        // corner count, and the count changes identically whether the game sent a new route or the
+        // walker went around a wall. Without this counter the second was taken for the first, and
+        // the detour was overwritten by the very route that had hit the wall.
         internal int farmWalkOwnRouteSeq;
         private float farmWalkLastRepathAt;
         private float farmWalkNextStuckSampleAt;
@@ -977,8 +977,8 @@ namespace HeartopiaMod
             // Always logged, not behind the AutoFarmLog flag: one line per node hop (the same
             // cadence as [ForagingTp]) is what makes a wedged walk diagnosable at all — the first
             // build's freeze was invisible precisely because this line was flag-gated off.
-            // Диагностика: попросить игру построить свой маршрут к тому же узлу (no-op, пока
-            // тумблер Compare Game Track выключен).
+            // Diagnostic: ask the game to route to the same node itself (a no-op while the
+            // Compare Game Track switch is off).
             this.RequestGameTrackForWalk(target);
 
             ModLogger.Msg("[FarmWalk] " + label + ": walking " + straight.ToString("F1") + "m via "
@@ -1842,7 +1842,7 @@ namespace HeartopiaMod
             // the depth control follows the current corner:
             //     diving 17,6m / surfacing 1,1m / diving 17,6m / surfacing 2,1m ...
             // — the aim alternating between two corners of two different routes, the player bobbing
-            // in place. "Кружится, маршрут перестраивается постоянно" is exactly this.
+            // in place. "It circles, the route keeps rebuilding" is exactly this.
             //
             // Three real causes remain, and the safety cadence is now long enough to be a backstop
             // rather than a driver:
@@ -1882,7 +1882,7 @@ namespace HeartopiaMod
                 this.farmWalkNextRepathAt = now + FarmWalkRepathInterval;
                 this.farmWalkLastRepathAt = now;
 
-                // Отсюда и ниже маршрут наш собственный, кто бы ни владел им до сих пор.
+                // From here down the route is our own, whoever owned it until now.
                 this.farmWalkOwnRouteSeq++;
                 int cornersBefore = this.farmWalkCorners.Count;
                 Vector3 firstBefore = this.farmWalkCorners.Count > 0 ? this.farmWalkCorners[0] : Vector3.zero;
@@ -3058,16 +3058,17 @@ namespace HeartopiaMod
         {
             if (!this.farmWalkActive)
             {
-                // ⚠️ МЕСТО В ТРАНСПОРТЕ ПЕРЕЖИВАЕТ ХОДЬБУ, И ВЫЙТИ ИЗ НЕГО БЫЛО НЕКОМУ.
+                // ⚠️ THE SEAT OUTLIVES THE WALK, AND NOTHING WAS LEFT TO GET OUT OF IT.
                 //
-                // Ранний выход стоял ДО высадки, а keepVehicle:true оставляет игрока в машине с
-                // farmWalkActive=false. Если следующий отрезок не построился (конец вне графа,
-                // предел банов, не резолвится своя позиция), высаживать становилось нечему:
-                // ShouldFarmWalkSummonVehicle видит, что мы уже едем, ProcessFarmWalkVehicleDismount
-                // не работает без ходьбы, а StopQuestWalk упирался ровно в эту строку. Пользователь
-                // выключал режим и оставался сидеть в вызванной модом машине.
+                // The early return stood BEFORE the dismount, and keepVehicle:true leaves the
+                // player in the car with farmWalkActive=false. If the next leg then failed to
+                // build (end off the graph, the two-ban limit, own position unresolvable), there
+                // was nothing left to dismount with: ShouldFarmWalkSummonVehicle sees that we are
+                // already riding, ProcessFarmWalkVehicleDismount does not run without a walk, and
+                // StopQuestWalk hit exactly this line. The user switched the mode off and stayed
+                // sitting in a mod-summoned vehicle.
                 //
-                // Просьба «отпусти всё» должна отпускать всё, даже когда ходьбы уже нет.
+                // A request to release everything must release everything, even with no walk left.
                 if (this.farmWalkVehicleOurs && !keepVehicle)
                 {
                     this.TryFarmWalkDismount("walk aborted (nothing was walking)");

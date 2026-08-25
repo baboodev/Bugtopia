@@ -3,25 +3,27 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Транспорт на дальних перегонах между зонами фермы.
+    // Vehicles for the long hauls between farm areas.
     //
-    // ЗАЧЕМ. Зоны стоят в 200–400 м друг от друга (в логах 356 и 390 м). Пешком это минута с
-    // лишним на переезд; сервер при этом разрешает 9 м/с в транспорте против 4,3 м/с пешком
-    // (MovementAntiCheating), так что ехать не только быстрее, но и безопаснее по античиту.
+    // WHY. Areas sit 200-400 m apart (356 and 390 m in the logs). On foot that is over a minute per
+    // move; the server meanwhile allows 9 m/s in a vehicle against 4.3 m/s on foot
+    // (MovementAntiCheating), so riding is not only faster but safer as far as anti-cheat goes.
     //
-    // ⚠️ ПОД ВОДОЙ ТРАНСПОРТ НЕ ПРИЗЫВАЕТСЯ. Дважды подтверждено живыми тестами: сервер молча
-    // отклоняет (VehicleErrorCode.AreaForbid не шлёт ни события, ни типа). Морские перегоны идут
-    // пешком, и это не ошибка — проверка стоит до призыва, чтобы не ждать таймаут впустую.
+    // ⚠️ VEHICLES DO NOT SUMMON UNDERWATER. Confirmed twice by live tests: the server refuses
+    // silently (VehicleErrorCode.AreaForbid sends neither an event nor a type). Sea hauls go on
+    // foot, and that is not a fault — the check sits before the summon so no timeout is spent.
     //
-    // ⚠️ ПРИЗЫВ ТРЕБУЕТ МЕСТА. VehicleUtility.CreateVehiclePosition делает OverlapBox прямо перед
-    // игроком, и брошенная рядом машина блокирует следующий призыв. Отсюда отзыв перед призывом.
+    // ⚠️ SUMMONING NEEDS ROOM. VehicleUtility.CreateVehiclePosition runs an OverlapBox directly in
+    // front of the player, and a vehicle abandoned nearby blocks the next summon. Hence the recall
+    // before every summon.
     //
-    // ⚠️ УСПЕХ МОЛЧИТ. Сервер отвечает только на отказ, поэтому посадка проверяется опросом
-    // GetUsingVehicle(), а не ожиданием события.
+    // ⚠️ SUCCESS IS SILENT. The server answers only on refusal, so being seated is confirmed by
+    // polling GetUsingVehicle() rather than by waiting for an event.
     public partial class HeartopiaComplete
     {
-        // Дистанция до цели, на которой спешиваемся. Слайдер: ниже пола машина довозит вплотную и
-        // мешает подходу, выше потолка пешком остаётся идти дольше, чем экономит поездка.
+        // How far from the target we dismount. A slider: below the floor the vehicle delivers us
+        // right on top of the node and gets in the way of the approach; above the ceiling the walk
+        // that is left takes longer than the ride saved.
         internal const float FarmWalkVehicleDismountFloor = 1f;
         internal const float FarmWalkVehicleDismountCeiling = 20f;
         internal float farmWalkVehicleDismountDistance = 10f;
@@ -35,17 +37,18 @@ namespace HeartopiaMod
         // behind us, not that we have walked the rest of the way.
         private const float FarmWalkVehicleRemountClearance = 8f;
 
-        // Освобождение в транспорте: назад, потом вбок, по 5 м каждое.
-        // 2 м, не 5: машина откатывается ровно настолько, чтобы освободить нос для разворота.
-        // Пять метров — это уже манёвр, который сам может во что-нибудь упереться (правило 3.2).
+        // Unsticking in a vehicle: back up, then step aside.
+        // 2 m, not 5: the car rolls back just far enough to free its nose for the turn. Five metres
+        // is already a manoeuvre that can run into something of its own (rule 3.2).
         private const float FarmWalkVehicleBackOffDistance = 2f;
         private const float FarmWalkVehicleSideStepDistance = 5f;
 
-        // Два круга «назад + вбок». Не помогло — слезаем и переходим на пешую лестницу.
+        // Two rounds of back-up-then-sidestep. If that did not help, dismount and fall through to
+        // the on-foot ladder.
         private const int FarmWalkVehicleUnstickRoundLimit = 2;
 
-        // Страж на ногу освобождения: заканчивается по расстоянию, таймер — только на случай,
-        // когда и в эту сторону не проехать.
+        // Guard on an unstick leg: it ends on distance, and the timer is only for the case where
+        // this direction turns out to be blocked too.
         private const float FarmWalkVehicleUnstickLegTimeout = 4f;
 
         private const int FarmWalkUnstickVehicleBackOff = 5;
@@ -121,7 +124,7 @@ namespace HeartopiaMod
         private Vector3 farmWalkVehicleUnstickFrom;
         private int farmWalkVehicleSideSign = 1;
 
-        // Взведён, когда транспорт призван ЭТИМ перегоном: только такой мы и спешиваем сами.
+        // Set when the vehicle was summoned by THIS haul: that is the only kind we dismount ourselves.
         private bool farmWalkVehicleOurs;
 
         private IntPtr farmWalkVehicleSystemModule;

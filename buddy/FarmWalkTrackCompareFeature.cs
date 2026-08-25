@@ -3,34 +3,34 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // "Compare Game Track" — диагностический режим для Walk to Nodes.
+    // "Compare Game Track" — a diagnostic mode for Walk to Nodes.
     //
-    // Заставляет игру построить СВОЙ маршрут к тому же узлу, к которому идёт мод, и печатает оба
-    // в лог. Это единственный способ увидеть, где расходятся наш A* и родной Track: мод считает
-    // путь по снимку графа (TrackPathGraphFeature), игра — по своему живому AStar со своим
-    // сглаживанием, и до сих пор сравнивать их было не с чем.
+    // It makes the game route to the SAME node the mod is walking to, and prints both to the log.
+    // This is the only way to see where our A* and the native Track diverge: the mod computes its
+    // path over a snapshot of the graph (TrackPathGraphFeature) while the game uses its own live
+    // AStar with its own smoothing, and until now there was nothing to compare them against.
     //
-    // Как игра узнаёт, куда вести (TrackingSystem.cs:464):
+    // How the game learns where to lead (TrackingSystem.cs:464):
     //     MapSpotProtocolManager.AddSpot(SpotEnum.Custom, useId, pos, SpotReason.TrackMap)
     //     TrackProtocolManager.StartLocalTrackMapSign((uint)useId)
-    // Точка карты создаётся событием EventCenter — сервера это не касается.
+    // The map spot is created by an EventCenter event — the server is not involved.
     //
-    // ⚠️ StartLocalTrackMapSign внутри себя вызывает StopAllLocalTrack(), то есть СБИВАЕТ ручной
-    // трек игрока. Поэтому режим за отдельным тумблером и по умолчанию выключен.
+    // ⚠️ StartLocalTrackMapSign internally calls StopAllLocalTrack(), i.e. it CLEARS the player's
+    // own manual track. That is why this mode has its own switch and is off by default.
     //
-    // Результат игры читается из приватных полей живого TrackingPathModule:
-    //     _path         — углы после сглаживания (аналог наших farmWalkCorners)
-    //     realPathList  — точки звёздочек через perInstanceDis (то, что видно на экране)
+    // The game's result is read from private fields of the live TrackingPathModule:
+    //     _path         — corners after smoothing (our farmWalkCorners equivalent)
+    //     realPathList  — the star positions spaced by perInstanceDis (what is on screen)
     public partial class HeartopiaComplete
     {
         private bool farmWalkTrackCompareEnabled;
 
-        // Свой usageId для точки карты — лишь бы не пересечься с игровыми.
+        // Our own usageId for the map spot — anything that will not collide with the game's.
         private const int FarmWalkTrackSpotUseId = 990117;
         private const int SpotEnumCustom = 7;      // SpotEnum.Custom
         private const int SpotReasonTrackMap = 1;  // SpotReason.TrackMap
 
-        // Игре нужно время посчитать путь: TrackPathConditionConfig.tickFrame = 30 кадров.
+        // The game needs time to compute the path: TrackPathConditionConfig.tickFrame = 30 frames.
         private const float FarmWalkTrackCompareDelay = 1.5f;
 
         private float farmWalkTrackCompareAt = -1f;
@@ -54,8 +54,8 @@ namespace HeartopiaMod
                     "XDTDataAndProtocol.ProtocolService.MapSpot.MapSpotProtocolManager");
                 if (spotClass != IntPtr.Zero)
                 {
-                    // AddSpot(SpotEnum, int, Vector3, SpotReason, GameSceneId) — 5 параметров,
-                    // последний с значением по умолчанию, но в Mono сигнатура полная.
+                    // AddSpot(SpotEnum, int, Vector3, SpotReason, GameSceneId) — 5 parameters; the
+                    // last one has a default, but in Mono the signature is the full one.
                     this.farmWalkAddSpotMethod = this.FindAuraMonoMethodOnHierarchy(spotClass, "AddSpot", 5);
                 }
 
@@ -78,7 +78,7 @@ namespace HeartopiaMod
             return ready;
         }
 
-        // Просим игру проложить маршрут к тому же узлу. Вызывается на старте каждого прохода.
+        // Ask the game to route to the same node. Called at the start of every walk.
         internal unsafe void RequestGameTrackForWalk(Vector3 node)
         {
             if (!this.farmWalkTrackCompareEnabled || !this.EnsureFarmWalkTrackApi())
@@ -93,7 +93,7 @@ namespace HeartopiaMod
                 int useId = FarmWalkTrackSpotUseId;
                 Vector3 pos = node;
                 int reason = SpotReasonTrackMap;
-                int sceneId = 0; // GameSceneId.StarTown — значение по умолчанию сигнатуры
+                int sceneId = 0; // GameSceneId.StarTown — the signature's default value
                 IntPtr* addArgs = stackalloc IntPtr[5];
                 addArgs[0] = (IntPtr)(&category);
                 addArgs[1] = (IntPtr)(&useId);
@@ -121,7 +121,7 @@ namespace HeartopiaMod
             }
         }
 
-        // Тикает из фермы. Через задержку читает путь игры и печатает сравнение.
+        // Ticks from the farm. After the delay it reads the game's path and prints the comparison.
         internal void ProcessFarmWalkTrackCompare()
         {
             if (this.farmWalkTrackCompareAt < 0f || Time.unscaledTime < this.farmWalkTrackCompareAt)
@@ -159,8 +159,8 @@ namespace HeartopiaMod
                 return;
             }
 
-            // ViewModule без статического Instance — только безопасный маршрут через
-            // Managers.GetModule(Type); Type.GetType(string) здесь роняет рантайм.
+            // ViewModule has no static Instance — only the safe route through Managers.GetModule(Type);
+            // Type.GetType(string) crashes the runtime here.
             IntPtr monoType = auraMonoClassGetType(this.farmWalkTrackModuleClass);
             IntPtr typeObj = monoType != IntPtr.Zero ? auraMonoTypeGetObject(this.auraMonoRootDomain, monoType) : IntPtr.Zero;
             IntPtr managersClass = this.FindAuraMonoClassInImages("XDTGame.Framework", "Managers", TrackPathManagersImageNames);
@@ -190,7 +190,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            // Длина игрового маршрута — прямое сравнение с нашим.
+            // The game route's length — the direct comparison against ours.
             float gameLength = 0f;
             Vector3 prev = Vector3.zero;
             bool havePrev = false;
@@ -216,9 +216,9 @@ namespace HeartopiaMod
                 havePrev = true;
             }
 
-            // Наш маршрут считаем ОТ ТЕКУЩЕЙ ПОЗИЦИИ по оставшимся углам: полная длина включает
-            // уже пройденный префикс, и сравнение с игровым путём (он всегда начинается у игрока)
-            // получалось не в те ворота.
+            // Measure our route FROM THE CURRENT POSITION over the corners that are left: the full
+            // length includes the prefix already walked, and comparing that against the game's path
+            // (which always starts at the player) was comparing two different things.
             bool haveSelf = this.TryGetNavMeshSelfPosition(out Vector3 selfPos, out _);
             float modLength = 0f;
             Vector3 modPrev = haveSelf ? selfPos : Vector3.zero;
@@ -239,8 +239,9 @@ namespace HeartopiaMod
 
             float straight = haveSelf ? Vector3.Distance(selfPos, this.farmWalkTrackCompareTarget) : -1f;
 
-            // gameCount — НЕ число углов: GetPath ресемплит ломаную сплайном Catmull-Rom в
-            // фиксированные PointCount/2 + 1 точек (обычно 51). Сравнивать имеет смысл только длину.
+            // gameCount is NOT a corner count: GetPath resamples the polyline with a Catmull-Rom
+            // spline into a fixed PointCount/2 + 1 points (usually 51). Only the length is worth
+            // comparing.
             ModLogger.Msg("[TrackCompare] target=" + FormatNavMeshVector(this.farmWalkTrackCompareTarget)
                 + " straight=" + (straight >= 0f ? straight.ToString("F1") + "m" : "?")
                 + " | GAME: " + gameLength.ToString("F1") + "m over " + gameCount + " spline pts, start=" + firstCorner

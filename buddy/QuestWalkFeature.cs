@@ -101,23 +101,26 @@ namespace HeartopiaMod
         // re-runs on every path update, so without this the rejected route returns immediately.
         private bool questWalkGameRouteRejected;
 
-        // ⚠️ СЫРАЯ точка трека, из которой построен текущий прицел. Сравнивать «цель сдвинулась»
-        // надо С НЕЙ, а не с questWalkAim: прицел проходит через RepairQuestWalkAimHeight, и для
-        // точки с y=0 починка поднимает его на реальную высоту — в замеренном случае на 24,4 м.
-        // Сравнение сырой цели с починенным прицелом давало эти 24,4 м ВСЕГДА, то есть тест
-        // «сдвинулась» был вечно истинным, и раз в 8 секунд шло перецеливание на ту же самую точку.
+        // ⚠️ The RAW track point the current aim was built from. The "target moved" test has to be
+        // made against THIS, not against questWalkAim: the aim goes through
+        // RepairQuestWalkAimHeight, and for a point with y=0 the repair lifts it to the real height
+        // — by 24.4 m in the measured case. Comparing the raw target against the repaired aim
+        // therefore produced those 24.4 m ALWAYS, so the "moved" test was permanently true and a
+        // re-aim to the very same point fired every 8 seconds.
         //
-        // Само по себе это лишь холостая работа, но каждый цикл заново вызывает TryBeginFarmWalk,
-        // а тот обнуляет прыжковый бюджет, счётчик застреваний и farmWalkDeadline. Лимиты, которые
-        // обязаны прервать заклинивший отрезок, не успевали накопиться НИ РАЗУ.
+        // On its own that is only wasted work, but every cycle calls TryBeginFarmWalk again, and
+        // that resets the jump budget, the stuck-strike counter and farmWalkDeadline. The limits
+        // meant to end a wedged leg never once had time to accumulate.
         private Vector3 questWalkAimSource;
 
-        // Точка назначения, для которой маршрут игры был отвергнут. Защёлка обещает «for this
-        // destination» — значит и жить она должна ровно до смены назначения, а не до конца сессии.
+        // The destination the game's route was rejected for. The latch promises "for this
+        // destination", so it must live exactly until the destination changes — not until the
+        // session ends.
         private Vector3 questWalkRejectedFor;
 
-        // Значение farmWalkOwnRouteSeq на момент последней инъекции. Если оно с тех пор выросло —
-        // углы поменял САМ ХОДОК, обходя препятствие, и возвращать поверх этого маршрут игры нельзя.
+        // The value of farmWalkOwnRouteSeq at the last injection. If it has risen since, the corners
+        // were changed by THE WALKER ITSELF routing around an obstacle, and the game's route must
+        // not be put back over that.
         private int questWalkInjectedAtRouteSeq;
         private float questWalkNextStartAt;
         private float questWalkNextRetargetAt;
@@ -299,14 +302,14 @@ namespace HeartopiaMod
                 this.questWalkErrorCount++;
                 ModLogger.Msg("[QuestWalk] tick error (" + this.questWalkErrorCount + "/3, disabled at 3): " + ex.Message);
 
-                // ⚠️ ЗАМОЛЧАТЬ — НЕ ЗНАЧИТ ОСТАНОВИТЬСЯ. Раньше на третьей ошибке тик просто
-                // переставал выполняться, и это оставляло персонажа БЕГУЩИМ: ось движения stateful,
-                // игра держит последнее заданное значение стика до явного отпускания, а отпускает
-                // его только TryClearGameMoveAxis — из FinishFarmWalk и AbortFarmWalk, то есть
-                // изнутри RunFarmWalkTick, до которого защёлка и не пускает. Вдобавок
-                // questWalkFollowing оставался true, а через него FarmWalkRunActive держал
-                // выключенной защиту от вылета за границу мира. Персонаж уходил в последнюю
-                // заданную сторону, и спасал только хоткей.
+                // ⚠️ GOING QUIET IS NOT THE SAME AS STOPPING. The tick used to simply stop running
+                // on the third error, and that left the character RUNNING: the move axis is
+                // stateful, the game holds the last injected stick value until an explicit release,
+                // and the only thing that releases it is TryClearGameMoveAxis — from FinishFarmWalk
+                // and AbortFarmWalk, i.e. from inside RunFarmWalkTick, which the latch does not let
+                // us reach. On top of that questWalkFollowing stayed true, and through it
+                // FarmWalkRunActive kept the out-of-bounds rescue suppressed. The character walked
+                // off in the last steered direction and only the hotkey could save it.
                 if (this.questWalkErrorCount >= 3)
                 {
                     this.StopQuestWalk("3 tick errors");
@@ -326,9 +329,10 @@ namespace HeartopiaMod
             this.questWalkAim = Vector3.zero;
             this.questWalkAimSource = Vector3.zero;
 
-            // Отказ был вынесен маршруту СТАРОГО мира. В новом ни одного маршрута ещё не судили,
-            // а защёлка молча выключала их все — во всех мирах цепочки квестов до конца сессии,
-            // хотя выбор пункта по-прежнему предпочитал те, у которых маршрут игры есть.
+            // The refusal was passed on a route in the OLD world. In the new one no route has been
+            // judged yet, and the latch silently disabled them all — across every world of the quest
+            // chain until the session ended — while the item pick still preferred the ones that come
+            // with a game route.
             this.questWalkGameRouteRejected = false;
             this.questWalkRejectedFor = Vector3.zero;
             this.questWalkCandidateReads = 0;
@@ -445,23 +449,23 @@ namespace HeartopiaMod
                 if (corners != this.questWalkInjectedCorners && this.questWalkInjectedCorners > 0
                     && this.questWalkTrack.HasGameRoute && this.questWalkGamePath.Count > 1)
                 {
-                    // ⚠️ ЧИСЛО УГЛОВ МЕНЯЮТ ДВОЕ, И ПУТАТЬ ИХ НЕЛЬЗЯ.
+                    // ⚠️ TWO PARTIES CHANGE THE CORNER COUNT, AND THEY MUST NOT BE CONFUSED.
                     //
-                    // Комментарий выше верен буквально — углы меняются только на перестройке, — но
-                    // перестраивают маршрут не только присылкой из игры. Ходок перестраивает его
-                    // САМ, когда сошёл с коридора или перестал приближаться, и именно так он
-                    // обходит препятствие. Раньше это читалось как «игра прислала новый маршрут», и
-                    // обход возвращался к тому маршруту, который в стену и упёрся: ходок обходит —
-                    // мы затираем — он обходит снова. Исправление, которое он умеет сделать, не
-                    // жило и кадра, а отрезок заканчивался только телепортом, то есть нарушением
-                    // правила 0.2a.
+                    // The comment above is literally true — the count only changes on a re-path —
+                    // but a route is not re-pathed only by the game sending a new one. The walker
+                    // re-paths it ITSELF when it has left the corridor or stopped closing, and that
+                    // is precisely how it routes around an obstacle. This used to read as "the game
+                    // sent a new route", so the detour was reverted to the route that had hit the
+                    // wall: the walker goes around, we stomp it, it goes around again. The fix it
+                    // knows how to make never survived a single frame, and the leg could only end by
+                    // teleport — a breach of rule 0.2a.
                     //
-                    // Отодвигание farmWalkNextRepathAt на строке выше от этого не спасало: оно
-                    // гасит ТОЛЬКО периодическую перестройку (safetyDue), а обход идёт по причинам
-                    // offCorridor и notClosing, которые им не гасятся вовсе.
+                    // Pushing farmWalkNextRepathAt out on the line above did not save this: that
+                    // suppresses ONLY the periodic re-path (safetyDue), while a detour fires on
+                    // offCorridor and notClosing, which it does not suppress at all.
                     //
-                    // Обошёл — значит маршрут теперь его. Отдаём отрезок ходоку целиком: перестаём
-                    // считать маршрут своим и перестаём давить его собственную перестройку.
+                    // It routed around, so the route is now its own. Hand the leg over entirely:
+                    // stop treating the route as ours and stop suppressing its own re-paths.
                     if (this.farmWalkOwnRouteSeq != this.questWalkInjectedAtRouteSeq)
                     {
                         this.questWalkInjectedCorners = -1;
@@ -558,7 +562,7 @@ namespace HeartopiaMod
             this.questWalkAimSource = this.questWalkTrack.Target;
             this.questWalkAim = this.RepairQuestWalkAimHeight(this.questWalkTrack.Target);
 
-            // Находка 6: назначение сменилось — прошлый отказ к нему больше не относится.
+            // Finding 6: the destination changed, so the old refusal no longer applies to it.
             if (this.questWalkGameRouteRejected
                 && Vector3.Distance(this.questWalkAim, this.questWalkRejectedFor) > 2f)
             {
@@ -599,14 +603,15 @@ namespace HeartopiaMod
         // ⚠️ ENTRY IS THE NEAREST POINT, NOT ZERO (rule 2). The resample also stops short of the
         // real target (its loop ends at t = 0.98), so the aim point is appended — which is exactly
         // what the game's own GetPath2 does.
-        // ⚠️ ВСЯ ГЕОМЕТРИЯ ЗДЕСЬ МЕРЯЕТСЯ ОТ TryGetNavMeshSelfPosition, НЕ ОТ GetPlayer().
+        // ⚠️ EVERY PIECE OF GEOMETRY HERE IS MEASURED FROM TryGetNavMeshSelfPosition, NOT GetPlayer().
         //
-        // TryGetLocalPlayerPosition резолвит игрока через GameObject.Find("p_player_skeleton(Clone)")
-        // с кэшем на секунду, а имя объекта у всех игроков одинаковое — вернуться может СОСЕД. Про
-        // это написано открытым текстом в NavMeshWalkFeature, и ходок поэтому пользуется мониторной
-        // сущностью игрока. QuestWalk мерил чужим телом: у квестового NPC, где чужие стоят всегда,
-        // это давало «Прибыли (0,8 м)» с парковкой, пока настоящий персонаж был в сорока метрах, и
-        // травило точку входа в маршрут — тот самый разворот из правила 2.
+        // TryGetLocalPlayerPosition resolves the player through
+        // GameObject.Find("p_player_skeleton(Clone)") with a one-second cache, and every player
+        // shares that object name — so it can come back with a BYSTANDER. NavMeshWalkFeature says
+        // this in plain words, which is why the walker uses the Mono player entity instead.
+        // QuestWalk was measuring with somebody else's body: at a quest NPC, where strangers always
+        // stand, that produced "Arrived (0.8m)" and a park while the real character was forty metres
+        // out, and it poisoned the route entry point — the very backwards walk rule 2 is about.
         private int InjectQuestWalkRoute()
         {
             if (this.questWalkGamePath.Count == 0)
@@ -652,12 +657,12 @@ namespace HeartopiaMod
             this.farmWalkCorners.Add(this.questWalkAim);
             this.farmWalkCornerIndex = 0;
 
-            // ⚠️ §1a.2: КАЖДЫЙ построитель маршрута ставит farmWalkLegStart. Инъекция — тоже
-            // построитель. Без этой строки коридор мерялся от угла ПРЕДЫДУЩЕГО маршрута (его
-            // ставит переход через угол, FarmWalkFeature.cs), то есть от отрезка, которого больше
-            // нет: на резком повороте игрок оказывался «вне коридора», ходок делал лишнюю
-            // перестройку, детектор числа углов возвращал инъекцию обратно, и пара холостых
-            // перестроек капала в farmWalkFutileRepaths — прямиком к бану путевых точек.
+            // ⚠️ §1a.2: EVERY route builder sets farmWalkLegStart. An injection is a builder too.
+            // Without this line the corridor was measured from a corner of the PREVIOUS route (set
+            // when a corner is passed, FarmWalkFeature.cs) — that is, from a segment that no longer
+            // exists: at a sharp bend the player read as "off corridor", the walker made a needless
+            // re-path, the corner-count detector put the injection straight back, and each futile
+            // pair dripped into farmWalkFutileRepaths — heading directly for a waypoint ban.
             if (this.TryGetNavMeshSelfPosition(out Vector3 legFrom, out _))
             {
                 this.farmWalkLegStart = legFrom;
@@ -748,12 +753,12 @@ namespace HeartopiaMod
             this.farmWalkCorners.Add(this.questWalkAim);
             this.farmWalkCornerIndex = 0;
 
-            // ⚠️ §1a.2: КАЖДЫЙ построитель маршрута ставит farmWalkLegStart. Инъекция — тоже
-            // построитель. Без этой строки коридор мерялся от угла ПРЕДЫДУЩЕГО маршрута (его
-            // ставит переход через угол, FarmWalkFeature.cs), то есть от отрезка, которого больше
-            // нет: на резком повороте игрок оказывался «вне коридора», ходок делал лишнюю
-            // перестройку, детектор числа углов возвращал инъекцию обратно, и пара холостых
-            // перестроек капала в farmWalkFutileRepaths — прямиком к бану путевых точек.
+            // ⚠️ §1a.2: EVERY route builder sets farmWalkLegStart. An injection is a builder too.
+            // Without this line the corridor was measured from a corner of the PREVIOUS route (set
+            // when a corner is passed, FarmWalkFeature.cs) — that is, from a segment that no longer
+            // exists: at a sharp bend the player read as "off corridor", the walker made a needless
+            // re-path, the corner-count detector put the injection straight back, and each futile
+            // pair dripped into farmWalkFutileRepaths — heading directly for a waypoint ban.
             if (this.TryGetNavMeshSelfPosition(out Vector3 legFrom, out _))
             {
                 this.farmWalkLegStart = legFrom;

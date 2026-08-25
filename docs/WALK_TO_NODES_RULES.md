@@ -146,6 +146,9 @@ refusal is forbidden — over one session it masked a real defect as "all clear"
 stuck detectors. Those timers measure failure, not a pause: eighteen seconds of standing in a repair
 aura, exactly as instructed, once ended in a rescue teleport. **[M]**
 
+**0.12a** This document, the walker's code and its log lines are written in **English**, like the
+rest of the repository. A rule that cannot be read by everyone reviewing the walker is not a rule.
+
 **0.13** Every position the walker or its drivers measure comes from the **self player entity**, never
 from `GetLocalPlayer()` / `GameObject.Find("p_player_skeleton(Clone)")`. Remote players share that
 object name and the first match wins, so near a quest NPC — where strangers always stand — the driver

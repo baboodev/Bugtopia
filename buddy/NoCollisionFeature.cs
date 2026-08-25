@@ -3,78 +3,81 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Проход сквозь невидимые преграды — переключением МАТРИЦЫ СТОЛКНОВЕНИЙ движка.
+    // Passing through invisible barriers, by flipping the engine's LAYER COLLISION MATRIX.
     //
-    // ЧТО ЭТО. В игре есть барьерные объёмы, которых игрок не видит: тонкие высокие плиты и прочая
-    // геометрия, лежащая на слое Passable(10). Название слоя означает ПРОТИВОПОЛОЖНОЕ содержимому —
-    // замерено парными пробами, 12 из 12 сплошные. Именно они дают «тут не пройти, хотя пусто».
+    // WHAT THESE BARRIERS ARE. The world contains barrier volumes the player never sees: thin tall
+    // slabs and similar geometry sitting on layer Passable(10). The layer's name means the OPPOSITE
+    // of what it says — measured with paired probes, 12 of 12 samples solid. These are what produce
+    // "I cannot walk here and there is nothing to see".
     //
-    // ЧЕМ СНИМАЕТСЯ. Одним вызовом:
+    // WHAT REMOVES THEM. One call:
     //
-    //     XDT.Physics.PhysicsManager.IgnoreLayerCollision(наш слой, 10, true)
+    //     XDT.Physics.PhysicsManager.IgnoreLayerCollision(our layer, 10, true)
     //
-    // Меняется ОДНА ЯЧЕЙКА матрицы столкновений. Мир не трогается вовсе: ни один коллайдер не
-    // удалён, не выключен, не переведён в триггер, не сдвинут. Барьеры стоят где стояли — они просто
-    // перестают относиться к нам.
+    // That flips ONE CELL of the collision matrix. The world itself is untouched: no collider is
+    // destroyed, disabled, turned into a trigger or moved. The barriers stay exactly where they are —
+    // they simply stop applying to us.
     //
-    // ⭐ Путь штатный, а не найденная дыра: игра пользуется тем же рычагом сама. VehicleManager
-    // гасит пару Water↔Vehicle по слоям, VehicleResHandle — контроллер против кузова попарно, чтобы
-    // водитель не бился о собственную машину.
+    // ⭐ This is the sanctioned route, not a hole someone found: the game uses the same lever itself.
+    // VehicleManager takes out the Water<->Vehicle pair by layer, and VehicleResHandle takes out
+    // controller<->car-body per pair so a driver does not collide with the car they are sitting in.
     //
-    // ⭐ ПЕШКОМ И ЗА РУЛЁМ — РАЗНЫЕ ПАРЫ, и это измерено, а не выведено. Проезд сквозь барьер
-    // получился при ВКЛЮЧЁННОЙ паре игрока: значит во время езды в стену бьётся кузов (слой 16), а
-    // контроллер персонажа в этом не участвует. Одной парой обойтись нельзя.
+    // ⭐ ON FOOT AND IN A VEHICLE ARE DIFFERENT PAIRS, and that is measured rather than reasoned:
+    // driving through a barrier succeeded while the PLAYER pair was still ENABLED, so while riding it
+    // is the car body (layer 16) that meets the wall and the character controller takes no part. One
+    // pair cannot cover both.
     //
-    // ⭐ СМЕНУ МИРА ПЕРЕЖИВАЕТ. Погружение под воду и возврат подняли world epoch 3 → 5 (две смены
-    // сцены, коллайдеры пересобрались полностью), проход продолжал работать без переустановки. Это
-    // глобальная настройка движка, а не свойство сцены, поэтому мирового гейта здесь нет — редкое
-    // исключение из общего правила мода.
+    // ⭐ IT SURVIVES A WORLD CHANGE. Diving underwater and surfacing again raised the world epoch
+    // 3 -> 5 (two scene swaps, colliders fully rebuilt) and the pass-through kept working with no
+    // re-application. This is a global engine setting rather than a property of the scene, which is
+    // why there is no world gate here — a rare exception to how the rest of this mod works.
     //
-    // ⚠️ ГЕТТЕРА НЕТ. Спросить движок «выключено ли сейчас» невозможно: в обёртках только сеттеры.
-    // Значит ЕДИНСТВЕННЫЙ источник правды — поля ниже, и они обязаны быть точными: соврав один раз,
-    // мы навсегда потеряем возможность вернуть коллизию обратно. Отсюда две вещи:
-    //   * применяем только по РАЗНИЦЕ желаемого и применённого, а не «на всякий случай» каждый кадр;
-    //   * восстанавливаем ТЕМ ЖЕ номером слоя, которым выключали (см. noCollisionPlayerLayerApplied).
+    // ⚠️ THERE IS NO GETTER. The engine cannot be asked "is this pair off right now" — the wrappers
+    // expose setters only. So the fields below are the ONLY record of what we switched, and they have
+    // to be exact: lie once and the collision can never be given back. Two consequences:
+    //   * apply strictly on the DIFFERENCE between wanted and applied, never "just in case" per frame;
+    //   * restore with the SAME layer number we disabled with (see noCollisionPlayerLayerApplied).
     //
-    // ⚠️ ОРАКУЛЫ МАТРИЦУ НЕ ВИДЯТ. Весь LevelLayerManager построен на кастах, а каст фильтрует
-    // только по layerMask. После включения игрок проходит, а CanPlayerMoveUseSphere по-прежнему
-    // отвечает BLOCKED. Для ходока это значит, что его аудит ног продолжит отвергать ноги, которые
-    // стали проходимыми — то есть переключатель НЕ открывает ему новые маршруты. Польза в другом и
-    // она реальная: когда ходок всё-таки идёт ногой, где аудит преграду пропустил (а он пропускает —
-    // ради этого и существует лестница побега), он теперь ПРОДАВЛИВАЕТ её вместо того, чтобы
-    // заклинить и потратить весь бюджет отрезка.
+    // ⚠️ THE ORACLES CANNOT SEE THE MATRIX. All of LevelLayerManager is built on casts, and a cast
+    // filters by layerMask alone. Once a pair is off the player walks through while
+    // CanPlayerMoveUseSphere still answers BLOCKED. For the walker that means this switch does NOT
+    // open new routes to it — its leg audit keeps rejecting legs that became walkable. The benefit is
+    // a different one and it is real: when the walker does step onto a leg whose barrier the audit
+    // missed — and it does miss them, which is why the escape ladder exists — it now pushes through
+    // instead of wedging and burning the whole leg budget.
     public partial class HeartopiaComplete
     {
-        // Барьерный слой. См. docs — «Passable» блокирует, «Wall» нет.
+        // The barrier layer. See the docs: "Passable" blocks, "Wall" does not.
         private const int NoCollisionBarrierLayer = 10;
 
-        // Запасной номер слоя игрока: столько показал живой контроллер. Читаем всё равно вживую —
-        // константа только на случай, если контроллер не резолвится.
+        // Fallback layer for the player: this is what the live controller reported. It is still read
+        // live every time — the constant only covers a controller that will not resolve.
         private const int NoCollisionPlayerLayerFallback = 8;
 
-        // Слой кузова. Резолвить его вживую нечем — у нас нет ссылки на коллайдер машины, в которой
-        // сидим, — поэтому число измеренное: перепись дала 32 коллайдера на слое 16, и проезд
-        // сквозь барьер подтвердил именно его.
+        // The car body's layer. There is nothing to read it from live — we hold no reference to the
+        // collider of the vehicle we are sitting in — so the number is the measured one: the census
+        // found 32 colliders on layer 16, and driving through a barrier confirmed that layer.
         private const int NoCollisionVehicleLayer = 16;
 
-        // Пользовательские переключатели (сохраняются).
+        // User toggles (persisted).
         private bool noCollisionPlayerEnabled;
         private bool noCollisionVehicleEnabled;
 
-        // Держатель от ходока: пока walk to nodes ведёт персонажа, столкновение снято независимо от
-        // переключателей. Не сохраняется — это состояние прогона, а не настройка.
+        // The walker's hold: while walk-to-nodes is steering the character, collision is off whatever
+        // the toggles say. Not persisted — this is run state, not a setting.
         private bool noCollisionWalkerHold;
 
         private IntPtr noCollisionMethod;
         private bool noCollisionResolveTried;
         private bool noCollisionResolveFailedLogged;
 
-        // Что РЕАЛЬНО выключено в движке прямо сейчас. Единственный источник правды, см. шапку.
+        // What is ACTUALLY switched off in the engine right now. The only source of truth — see the
+        // header above.
         private bool noCollisionPlayerApplied;
         private bool noCollisionVehicleApplied;
 
-        // Слой, которым выключали. Восстанавливать надо им же: если контроллер в момент отката
-        // отвечает другим числом (или не отвечает вовсе), пара останется выключенной навсегда.
+        // The layer we disabled with. Restoring must use the same one: if the controller answers a
+        // different number at restore time (or does not answer at all), the pair stays off forever.
         private int noCollisionPlayerLayerApplied = -1;
 
         internal bool NoCollisionActive => this.noCollisionPlayerApplied || this.noCollisionVehicleApplied;
@@ -95,11 +98,11 @@ namespace HeartopiaMod
             {
                 if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
                 {
-                    return false;   // AuraMono ещё не поднялась — это НЕ повод сжигать попытку.
+                    return false;   // AuraMono is not up yet — NOT a reason to burn the attempt.
                 }
 
-                // Две обёртки над ОДНИМИ И ТЕМИ ЖЕ нативными icall'ами (сверено по идентификаторам в
-                // декомпиляции), поэтому берём ту, что нашлась.
+                // Two wrappers over the SAME native icalls (verified by comparing the icall ids in
+                // the decompilation), so whichever resolves first will do.
                 IntPtr cls = this.FindAuraMonoClassInImages(
                     "XDT.Physics", "PhysicsManager",
                     new[] { "EngineWrapper", "EngineWrapper.dll" });
@@ -117,16 +120,16 @@ namespace HeartopiaMod
 
                 if (cls == IntPtr.Zero)
                 {
-                    return false;   // образ мог ещё не загрузиться — пробуем позже.
+                    return false;   // the image may not be loaded yet — try again later.
                 }
 
                 this.noCollisionMethod = this.FindAuraMonoMethodOnHierarchy(cls, "IgnoreLayerCollision", 3);
                 if (this.noCollisionMethod == IntPtr.Zero)
                 {
-                    // Класс есть, метода нет — это уже навсегда, повторять нечего.
+                    // Class present, method absent — that is permanent, nothing to retry.
                     this.noCollisionResolveTried = true;
-                    ModLogger.Msg("[NoCollision] IgnoreLayerCollision(int,int,bool) не найден — "
-                        + "проход сквозь преграды недоступен в этой сессии.");
+                    ModLogger.Msg("[NoCollision] IgnoreLayerCollision(int,int,bool) not found — "
+                        + "passing through barriers is unavailable this session.");
                     return false;
                 }
 
@@ -140,9 +143,9 @@ namespace HeartopiaMod
             }
         }
 
-        // Все три аргумента — значимые типы, поэтому каждый слот это указатель на НАШИ СОБСТВЕННЫЕ
-        // байты в стеке. Входные параметры — безопасное направление через mono_runtime_invoke;
-        // смертельная форма (out-слот структуры) здесь не встречается ни разу.
+        // All three arguments are value types, so every slot is a pointer to OUR OWN bytes on the
+        // stack. In-params are the safe direction through mono_runtime_invoke; the lethal shape (an
+        // out slot holding a struct) does not occur here at all.
         private unsafe bool TryNoCollisionIgnoreLayer(int layerA, int layerB, bool ignore)
         {
             if (this.noCollisionMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
@@ -161,13 +164,13 @@ namespace HeartopiaMod
                 args[1] = (IntPtr)(&b);
                 args[2] = (IntPtr)(&flag);
 
-                // ⚠️ Метод возвращает void: судить об успехе по result здесь НЕЛЬЗЯ, он всегда ноль.
-                // Единственный признак — пустое исключение.
+                // ⚠️ The method returns void, so success CANNOT be judged from the result here — it
+                // is always zero. An empty exception is the only signal there is.
                 auraMonoRuntimeInvoke(this.noCollisionMethod, IntPtr.Zero, (IntPtr)args, ref exc);
                 if (exc != IntPtr.Zero)
                 {
                     ModLogger.Msg("[NoCollision] IgnoreLayerCollision(" + layerA + ", " + layerB
-                        + ", " + ignore + ") бросил исключение.");
+                        + ", " + ignore + ") threw.");
                     return false;
                 }
 
@@ -180,8 +183,8 @@ namespace HeartopiaMod
             }
         }
 
-        // Живой слой контроллера персонажа. Не константа: слои раздаёт LayerMask.NameToLayer, и
-        // хардкод пережил бы ровно до первой перенумерации.
+        // The character controller's live layer. Not a constant: layers are handed out by
+        // LayerMask.NameToLayer, and a hardcoded number would survive exactly until they are renumbered.
         private int ResolveNoCollisionPlayerLayer()
         {
             try
@@ -202,28 +205,23 @@ namespace HeartopiaMod
 
         private void ProcessNoCollisionOnUpdate()
         {
-            // Ходок ведёт персонажа — снимаем столкновение на время прогона, независимо от галок.
+            // The walker is steering — drop collision for the length of the run, toggles aside.
             bool hold = this.FarmWalkRunActive;
             if (hold != this.noCollisionWalkerHold)
             {
                 this.noCollisionWalkerHold = hold;
-                if (hold)
-                {
-                    ModLogger.Msg("[NoCollision] walk to nodes пошёл — снимаю столкновение с "
-                        + "барьерным слоем на время прогона.");
-                }
-                else
-                {
-                    ModLogger.Msg("[NoCollision] walk to nodes закончил — столкновение возвращается "
-                        + "к состоянию переключателей.");
-                }
+                ModLogger.Msg(hold
+                    ? "[NoCollision] walk to nodes started — dropping collision with the barrier "
+                        + "layer for the run."
+                    : "[NoCollision] walk to nodes finished — collision returns to whatever the "
+                        + "toggles ask for.");
             }
 
             this.ApplyNoCollisionState();
         }
 
-        // Применяем ТОЛЬКО по разнице желаемого и применённого. Дёргать матрицу каждый кадр было бы
-        // и лишней работой, и потерей единственного следа того, что мы вообще что-то меняли.
+        // Apply ONLY on the difference between wanted and applied. Poking the matrix every frame
+        // would be both wasted work and the loss of the one record that we changed anything at all.
         private void ApplyNoCollisionState()
         {
             bool wantPlayer = this.noCollisionPlayerEnabled || this.noCollisionWalkerHold;
@@ -236,12 +234,13 @@ namespace HeartopiaMod
 
             if (!this.EnsureNoCollisionResolved())
             {
-                // Молчать нельзя: снаружи это выглядит как «галка стоит, а ничего не происходит».
+                // Staying silent is not an option: from outside this looks like "the box is ticked
+                // and nothing happens".
                 if ((wantPlayer || wantVehicle) && !this.noCollisionResolveFailedLogged)
                 {
                     this.noCollisionResolveFailedLogged = true;
-                    ModLogger.Msg("[NoCollision] включить нечем — IgnoreLayerCollision пока не "
-                        + "зарезолвился (AuraMono не поднялась или образ не загружен).");
+                    ModLogger.Msg("[NoCollision] nothing to switch with — IgnoreLayerCollision has "
+                        + "not resolved yet (AuraMono is not up, or the image is not loaded).");
                 }
 
                 return;
@@ -251,14 +250,14 @@ namespace HeartopiaMod
 
             if (wantPlayer != this.noCollisionPlayerApplied)
             {
-                // Выключаем ЖИВЫМ слоем, возвращаем — ЗАПОМНЕННЫМ.
+                // Disable with the LIVE layer, restore with the REMEMBERED one.
                 int layer = wantPlayer ? this.ResolveNoCollisionPlayerLayer() : this.noCollisionPlayerLayerApplied;
                 if (layer >= 0 && this.TryNoCollisionIgnoreLayer(layer, NoCollisionBarrierLayer, wantPlayer))
                 {
                     this.noCollisionPlayerApplied = wantPlayer;
                     this.noCollisionPlayerLayerApplied = wantPlayer ? layer : -1;
-                    ModLogger.Msg("[NoCollision] игрок (слой " + layer + ") "
-                        + (wantPlayer ? "ИГНОРИРУЕТ" : "снова сталкивается с") + " барьерный слой "
+                    ModLogger.Msg("[NoCollision] player (layer " + layer + ") "
+                        + (wantPlayer ? "now IGNORES" : "collides again with") + " barrier layer "
                         + NoCollisionBarrierLayer + ".");
                 }
             }
@@ -268,16 +267,16 @@ namespace HeartopiaMod
                 if (this.TryNoCollisionIgnoreLayer(NoCollisionVehicleLayer, NoCollisionBarrierLayer, wantVehicle))
                 {
                     this.noCollisionVehicleApplied = wantVehicle;
-                    ModLogger.Msg("[NoCollision] транспорт (слой " + NoCollisionVehicleLayer + ") "
-                        + (wantVehicle ? "ИГНОРИРУЕТ" : "снова сталкивается с") + " барьерный слой "
+                    ModLogger.Msg("[NoCollision] vehicle (layer " + NoCollisionVehicleLayer + ") "
+                        + (wantVehicle ? "now IGNORES" : "collides again with") + " barrier layer "
                         + NoCollisionBarrierLayer + ".");
                 }
             }
         }
 
-        // Вернуть всё, что мы выключили. Зовётся на выгрузке мода: матрица переживает смену мира, а
-        // значит пережила бы и выгрузку — оставленная выключенной, она осталась бы такой до конца
-        // игровой сессии, и вернуть её было бы уже некому.
+        // Give back everything we switched off. Called on mod teardown: the matrix SURVIVES a world
+        // change, so it would survive an unload too — left off, it would stay off for the rest of the
+        // game session with nobody left to restore it.
         internal void ReleaseNoCollision()
         {
             if (!this.noCollisionPlayerApplied && !this.noCollisionVehicleApplied)

@@ -1854,7 +1854,7 @@ namespace HeartopiaMod
                     if (!flag3)
                     {
                         GameObject gameObject = child.gameObject;
-                        // Линия маршрута живёт между сканами — её обновляет UpdateMarkers каждый кадр.
+                        // The route line lives across scans — UpdateMarkers refreshes it every frame.
                         if (gameObject.name == FarmWalkRouteLineName)
                         {
                             continue;

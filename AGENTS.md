@@ -312,6 +312,12 @@ See [FEATURES.md § Aura Farm](docs/FEATURES.md), [TECHNICAL.md § Aura Farm](do
 
 ### Code style (project)
 
+- **English only, everywhere in the repo.** Code, comments, commit messages, documentation,
+  log lines and plan files are written in English without exception — including comments that
+  merely explain a measurement or quote what a user reported. The repo is read by people and
+  tools that do not share the author's language, and a mixed-language file cannot be searched,
+  reviewed or diffed reliably. Translate at the point of writing, not later. The only non-English
+  text that belongs here is *data*: localization tables, game strings, and quoted game identifiers.
 - Match surrounding naming and patterns; minimal diff scope.
 - Cache resolved `Type` / `MethodInfo` / `IntPtr` — do not scan assemblies every frame. Class/method `IntPtr`s may stay raw (image lifetime); **object** `IntPtr`s cached across frames go through `AuraMonoObjectCache` (HeartopiaComplete.AuraMonoEngine.cs).
 - New AuraMono invokes: prefer `TryAuraInvoke(method, obj, args, out result, out error)`; the `auraMonoRuntimeInvoke` delegate is also safe (bound to the central guard), the raw export is not.
@@ -406,6 +412,7 @@ Fix it exactly like this:
 
 | Do not | Why |
 |--------|-----|
+| Write comments, docs or log lines in any language other than English | The repo is read by people and tools that do not share the author's language; mixed-language files cannot be searched or reviewed reliably. Localization tables and quoted game strings are data, not prose, and stay as they are |
 | Guess namespaces | Builds differ; use dumps |
 | Cache a MonoObject* across frames in a raw `IntPtr` field | bdwgc collects it once the game drops its reference → random AV; use `AuraMonoObjectCache` (gchandle + world-epoch invalidation). CI lint E3 |
 | Cache or pin **transient** character states (`GamePhotoMode`, equip states, UI panels) across frames | Not singletons — the game tears them down on tool/state change; a pin keeps a detached object alive → AV on field read. Re-resolve from `Character._states` (or equivalent) each tick; pointer valid only in sync scope |

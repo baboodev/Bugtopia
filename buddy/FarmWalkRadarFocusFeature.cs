@@ -3,20 +3,20 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Отрисовка маршрута мода поверх мира.
+    // Drawing the mod's route over the world.
     //
-    // Игра рисует свой Track цепочкой звёздочек; здесь рядом ложится наша ломаная по углам
-    // маршрута — это и есть сравнение путей прямо в кадре, без лога.
+    // The game draws its own Track as a chain of little stars; our polyline over the route corners
+    // lies beside it — that is the path comparison, right there in the frame and not in a log.
     //
-    // ⚠️ ФИЛЬТР РАДАРА УДАЛЁН. Он оставлял на радаре только текущую цель, и это ломало ферму:
-    // FindClosestAvailableNode перечисляет ИМЕННО маркеры радара, так что фильтр отбирал у
-    // сканера всех кандидатов кроме одного — мод переставал знать, куда идти дальше, и уезжал
-    // менять зону. Не возвращать. Если понадобится «показывать только цель», это должен быть
-    // отдельный визуальный слой, не влияющий на маркеры, которые читает скан.
+    // ⚠️ THE RADAR FILTER IS GONE. It left only the current target on the radar, and that broke the
+    // farm: FindClosestAvailableNode enumerates PRECISELY the radar markers, so the filter took
+    // every candidate but one away from the scan — the mod stopped knowing where to go next and
+    // drove off to change areas. Do not bring it back. If "show only the target" is ever wanted, it
+    // has to be a separate visual layer that does not touch the markers the scan reads.
     public partial class HeartopiaComplete
     {
-        // Имя объекта линии. RunRadar сносит всех детей контейнера кроме отслеживаемых маркеров —
-        // линия должна пережить эту зачистку, иначе будет мигать раз в 2 секунды.
+        // The line object's name. RunRadar wipes every child of the container except the markers it
+        // tracks — the line has to survive that sweep or it will blink once every 2 seconds.
         internal const string FarmWalkRouteLineName = "FarmWalkRouteLine";
 
         private const float FarmWalkRouteLineWidth = 0.14f;
@@ -26,9 +26,9 @@ namespace HeartopiaMod
         private LineRenderer farmWalkRouteLine;
         private readonly List<Vector3> farmWalkRoutePoints = new List<Vector3>();
 
-        // Линия висит на тумблере Compare Game Track, а не на самом Walk to Nodes: она существует
-        // ровно для сверки с игровыми звёздочками, так что оба диагностических следа выключаются
-        // одним переключателем. При выключенном тумблере проход идёт молча.
+        // The line hangs off the Compare Game Track switch rather than Walk to Nodes itself: it
+        // exists precisely to be checked against the game's stars, so one switch turns both
+        // diagnostic traces off. With the switch off the run is silent.
         private bool IsFarmWalkRadarFocusActive(out Vector3 target)
         {
             target = Vector3.zero;
@@ -41,7 +41,8 @@ namespace HeartopiaMod
             return true;
         }
 
-        // Тикает каждый кадр из UpdateMarkers. Держит ломаную от игрока по оставшимся углам.
+        // Ticks every frame from UpdateMarkers. Keeps the polyline running from the player through
+        // the corners that are left.
         internal void SyncFarmWalkRouteLine(Material lineMaterial)
         {
             if (!this.IsFarmWalkRadarFocusActive(out Vector3 target) || this.radarContainer == null)
@@ -63,7 +64,7 @@ namespace HeartopiaMod
                 this.farmWalkRoutePoints.Add(this.farmWalkCorners[i] + new Vector3(0f, FarmWalkRouteLineLift, 0f));
             }
 
-            // Цель добавляем, только если последний угол — не она сама.
+            // Append the target only when the last corner is not already it.
             Vector3 lifted = target + new Vector3(0f, FarmWalkRouteLineLift, 0f);
             if ((this.farmWalkRoutePoints[this.farmWalkRoutePoints.Count - 1] - lifted).sqrMagnitude > 0.01f)
             {
@@ -96,7 +97,7 @@ namespace HeartopiaMod
                 this.farmWalkRouteLine.material = lineMaterial;
             }
 
-            // Ярко-зелёный: игровые звёздочки золотистые, спутать нельзя.
+            // Bright green: the game's stars are golden, so the two cannot be confused.
             Color routeColor = new Color(0.25f, 1f, 0.4f, 0.95f);
             this.farmWalkRouteLine.startColor = (this.farmWalkRouteLine.endColor = routeColor);
             this.farmWalkRouteLine.positionCount = this.farmWalkRoutePoints.Count;

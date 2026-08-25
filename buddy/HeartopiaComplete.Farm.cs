@@ -993,9 +993,9 @@ namespace HeartopiaMod
             this.StampVisitedNode(node, expiresAt, approachFailure: false);
         }
 
-        // approachFailure: штамп поставлен потому, что до узла НЕ УДАЛОСЬ ДОЙТИ (нет маршрута,
-        // повторный отказ, пропуск прохода). Такие снимаются на старте прогона; кулдауны ресурсов
-        // и факты о мире — нет.
+        // approachFailure: the stamp exists because the node COULD NOT BE REACHED (no route, a
+        // repeated refusal, a skipped approach). Those are cleared when a run starts; resource
+        // cooldowns and facts about the world are not.
         private void StampVisitedNode(Vector3 node, float expiresAt, bool approachFailure)
         {
             // ⚠️ A NODE THE GAME SAYS IS COLD IS NEVER PARKED FOR LESS THAN ITS COOLDOWN.
@@ -1026,7 +1026,7 @@ namespace HeartopiaMod
             }
             else
             {
-                // Кулдаун поверх бана: узел больше не «недоступен», он просто остыл.
+                // A cooldown on top of a ban: the node is no longer "unreachable", it is merely cold.
                 this.approachFailureStamps.Remove(node);
             }
         }
@@ -1038,9 +1038,9 @@ namespace HeartopiaMod
             this.approachFailureStamps.Remove(node);
         }
 
-        // Сброс прогона снимает ТОЛЬКО баны за недоступность. Кулдаун гриба не знает, что игрок
-        // нажал Stop, и стирать его значит послать ферму проверять ногами то, что она сама только
-        // что собрала.
+        // A run reset clears ONLY the unreachable bans. A mushroom's cooldown knows nothing about
+        // the player pressing Stop, and wiping it sends the farm walking out to check on what it
+        // harvested itself a moment ago.
         private void ClearApproachFailureStamps()
         {
             if (this.approachFailureStamps.Count == 0)

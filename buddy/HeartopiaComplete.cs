@@ -4870,14 +4870,15 @@ namespace HeartopiaMod
         // StampVisitedNode / ForgetVisitedNode — never assign recentlyVisitedNodes directly.
         private readonly Dictionary<Vector3, float> visitedNodeStampedAt = new Dictionary<Vector3, float>();
 
-        // ⚠️ ДВА РАЗНЫХ ФАКТА ЖИЛИ ПОД ОДНИМ ИМЕНЕМ. В recentlyVisitedNodes попадает и «узел на
-        // кулдауне до момента T» — утверждение о МИРЕ, со сроком из самой сущности, — и «ходок сюда
-        // не дошёл» — эвристика ПРОГОНА. Рестарт фермы чистил обе, поэтому остывший гриб снова
-        // считался доступным и ферма шла его проверять ногами: замер 04:55:56 — 131 м до зоны,
-        // опустошённой четырьмя минутами ранее.
+        // ⚠️ TWO DIFFERENT FACTS WERE LIVING UNDER ONE NAME. recentlyVisitedNodes holds both "this
+        // node is on cooldown until T" — a claim about the WORLD, with a deadline that comes from
+        // the entity itself — and "the walker failed to get here", a heuristic about the RUN.
+        // Restarting the farm cleared both, so a cold mushroom counted as available again and the
+        // farm walked out to check on it: measured 04:55:56, 131 m to an area emptied four minutes
+        // earlier.
         //
-        // Здесь отмечаются ТОЛЬКО штампы второго вида, чтобы сброс прогона снимал их и не трогал
-        // кулдауны.
+        // ONLY the second kind is recorded here, so a run reset can clear those and leave the
+        // cooldowns alone.
         private readonly HashSet<Vector3> approachFailureStamps = new HashSet<Vector3>();
 
         // Token: 0x0400004B RID: 75
@@ -5013,9 +5014,9 @@ namespace HeartopiaMod
             // of teardown gets a chance to throw.
             this.ShutdownFpsWatchdog();
 
-            // Вернуть матрицу столкновений. Она ПЕРЕЖИВАЕТ смену мира (измерено: epoch 3 -> 5),
-            // значит пережила бы и выгрузку мода — оставленная выключенной, она осталась бы такой
-            // до конца игровой сессии, и вернуть её было бы уже некому (NoCollisionFeature.cs).
+            // Give the collision matrix back. It SURVIVES a world change (measured: epoch 3 -> 5),
+            // so it would survive an unload too — left switched off it would stay off for the rest
+            // of the game session with nobody left to restore it (NoCollisionFeature.cs).
             try { this.ReleaseNoCollision(); } catch { }
 
             // Close the agent bridge first: it owns background threads and a bound port, and any

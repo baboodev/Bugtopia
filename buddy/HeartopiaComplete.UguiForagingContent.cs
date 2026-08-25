@@ -548,7 +548,7 @@ namespace HeartopiaMod
                 this.farmWalkVehicleDismountDistance, true,
                 new System.Action<float>(this.OnUguiForagingWalkVehicleDismountChanged));
 
-            // Диагностика маршрутов (FarmWalkTrackCompareFeature.cs).
+            // Route diagnostics (FarmWalkTrackCompareFeature.cs).
             handle.TrackCompareToggle = this.CreateUguiCheckbox(settings.transform, "TrackCompareToggle",
                 this.L("Compare Game Track"), this.farmWalkTrackCompareEnabled,
                 new System.Action<bool>(this.OnUguiForagingTrackCompareToggled));
@@ -1054,8 +1054,8 @@ namespace HeartopiaMod
         // setting: the walk itself is driven from the farm state machine, so flipping it while idle
         // changes nothing until the next Start Foraging. Flipping it mid-run is honoured on the
         // next hop, and the game speed is re-applied immediately so 5x can never outlive the flag.
-        // Диагностика маршрутов. Отдельный тумблер, потому что StartLocalTrackMapSign внутри
-        // вызывает StopAllLocalTrack() — то есть сбивает трек, который игрок поставил сам.
+        // Route diagnostics. It gets its own switch because StartLocalTrackMapSign internally
+        // calls StopAllLocalTrack() — that is, it clears the track the player set by hand.
         private void OnUguiForagingTrackCompareToggled(bool value)
         {
             if (value == this.farmWalkTrackCompareEnabled)

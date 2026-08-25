@@ -474,11 +474,11 @@ namespace HeartopiaMod
             this.bypassEnabled = value;
         }
 
-        // Обе галки только ставят намерение — применяет его ProcessNoCollisionOnUpdate, по
-        // разнице желаемого и уже применённого. Дёргать матрицу прямо отсюда нельзя: галку можно
-        // щёлкнуть до того, как AuraMono поднялась, и тогда вызов молча не состоится, а поле уже
-        // сказало бы «включено» — ровно та рассинхронизация, из-за которой вернуть коллизию потом
-        // будет нечем.
+        // Both boxes only record intent — ProcessNoCollisionOnUpdate applies it, on the difference
+        // between wanted and already applied. Poking the matrix straight from here is wrong: a box
+        // can be ticked before AuraMono is up, the call would then silently not happen while the
+        // field already claimed "on" — exactly the divergence that leaves nothing able to give the
+        // collision back.
         private void OnUguiFeaturesMainNoCollisionPlayerToggled(bool value)
         {
             if (value == this.noCollisionPlayerEnabled)

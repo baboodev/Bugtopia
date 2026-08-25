@@ -7,34 +7,35 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Сборщик координат ресурсов из живого скана.
+    // Harvests resource coordinates out of the live scan.
     //
-    // ЗАЧЕМ ИМЕННО ТАК. Просили снять координаты из расшифрованных таблиц — их там нет. Проверены
-    // все 913 таблиц на массивы из трёх float: единственная с координатами это WorldMapEventPos
-    // (106 точек интерфейса карты — магазины, здания), остальное хитбоксы, границы участков и
-    // векторы камеры. Дизайн-таблицы описывают, ЧТО за ресурс (`Dynamicbush`, `Entity`), а ГДЕ он
-    // стоит — данные сцены Unity. Тот же случай, что с водоёмами рыбы.
+    // WHY THIS WAY. The request was to take coordinates from the decrypted tables — they are not
+    // there. All 913 tables were checked for arrays of three floats: the only one carrying
+    // coordinates is WorldMapEventPos (106 map-UI points — shops, buildings); the rest are
+    // hitboxes, plot boundaries and camera vectors. The design tables describe WHAT a resource is
+    // (`Dynamicbush`, `Entity`); WHERE it stands is Unity scene data. Same story as with the fish
+    // water bodies.
     //
-    // Живой скан знает позицию каждого ресурса, поэтому источник берётся оттуда. Накопление идёт
-    // по мере того, как игрок ездит: всё, что подгрузилось, попадает в набор и остаётся там.
+    // The live scan knows every resource's position, so that is the source. The set accumulates as
+    // the player travels: whatever streamed in joins the set and stays there.
     //
-    // ⚠️ ЭТО ПРЕВОСХОДИТ ЗАШИТЫЕ МАССИВЫ ПО ОХВАТУ. В них 238 точек восьми видов, собранных
-    // вручную. Скан видит КАЖДЫЙ ресурс, включая те, которых в массивах не было вовсе — бамбук,
-    // причудливые варианты грибов, событийные растения. Файл заодно и есть ответ на вопрос
-    // «каких типов не хватало».
+    // ⚠️ THIS BEATS THE HARDCODED ARRAYS ON COVERAGE. Those hold 238 points of eight kinds,
+    // collected by hand. The scan sees EVERY resource, including kinds that were not in the arrays
+    // at all — bamboo, the odd mushroom variants, event plants. The file is also the answer to
+    // "which types were missing".
     public partial class HeartopiaComplete
     {
-        // Отдельный тумблер: сбор идёт в файл и растёт весь сеанс, включать это по умолчанию
-        // незачем.
+        // Its own switch: the harvest goes to a file and grows all session, so there is no reason
+        // for it to be on by default.
         internal static bool MasterLogGatherHarvest = false;
 
         private const string GatherHarvestFileName = "gathered-coordinates.tsv";
 
-        // Две точки ближе этого — один и тот же ресурс. Тот же порог, которым ферма считает узлы
-        // совпадающими, чтобы наборы не разъезжались между системами.
+        // Two points closer than this are the same resource. The same threshold the farm uses to
+        // call nodes identical, so the two sets cannot drift apart.
         private const float GatherHarvestSameSpotDistance = 1.5f;
 
-        // Пишем не на каждый скан: файл переписывается целиком, а сканы идут раз в 2 секунды.
+        // Not written on every scan: the file is rewritten whole, and scans run every 2 seconds.
         private const int GatherHarvestFlushEvery = 25;
 
         private readonly Dictionary<string, GatherHarvestEntry> gatherHarvest =
@@ -45,14 +46,14 @@ namespace HeartopiaMod
 
         private struct GatherHarvestEntry
         {
-            public int ItemId;      // разрешённый товарный id, 0 если ресурс его не несёт
+            public int ItemId;      // resolved item id, 0 when the resource carries none
             public int ProduceId;
-            public int StaticId;    // entity staticId — единственная опора для грибов
+            public int StaticId;    // entity staticId — the only handle mushrooms give us
             public Vector3 Position;
-            public string Scene;    // активная сцена Unity — см. NoteGatherHarvest
+            public string Scene;    // the active Unity scene — see NoteGatherHarvest
         }
 
-        // Зовётся из скана на каждую найденную сущность.
+        // Called from the scan for every entity it finds.
         internal void NoteGatherHarvest(Vector3 position, int produceId, int staticId, int itemId)
         {
             if (!MasterLogGatherHarvest)
@@ -62,15 +63,16 @@ namespace HeartopiaMod
 
             this.EnsureGatherHarvestLoaded();
 
-            // ⚠️ СЦЕНА В КЛЮЧЕ. Без неё подводные зоны, микро-дом и суша сложились бы в один
-            // список, а координаты у них в своих системах: запасной путь предложил бы донный
-            // камень игроку, стоящему на берегу. Плюс два разных объекта из разных сцен могли бы
-            // совпасть по клетке и затереть друг друга.
+            // ⚠️ THE SCENE IS PART OF THE KEY. Without it the underwater areas, the micro-home and
+            // the surface would fold into one list, and their coordinates live in separate systems:
+            // the fallback would offer a seabed rock to a player standing on the shore. Two
+            // different objects from different scenes could also land on the same cell and
+            // overwrite each other.
             string scene = string.Empty;
             try { scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name ?? string.Empty; } catch { }
 
-            // Ключ по КЛЕТКЕ, а не по точным координатам: позиция сущности слегка гуляет между
-            // прогрузками, и без округления один куст дал бы десятки строк.
+            // Keyed by CELL rather than exact coordinates: an entity's position drifts slightly
+            // between streams, and without rounding a single bush would produce dozens of rows.
             string key = BuildGatherHarvestKey(scene, staticId, produceId, position);
             if (this.gatherHarvest.ContainsKey(key))
             {
@@ -94,15 +96,16 @@ namespace HeartopiaMod
         }
 
 
-        // Загрузка ранее собранного набора — ОБЯЗАТЕЛЬНА, а не удобство.
+        // Loading the previously harvested set is MANDATORY, not a convenience.
         //
-        // ⚠️ ГРИБЫ (и всё динамическое) СПАВНЯТСЯ НЕ ВЕЗДЕ ОДНОВРЕМЕННО. Точек спавна больше, чем
-        // грибов в мире в любой момент: один обход карты дал 64 гриба на пять видов, и это ВЫБОРКА,
-        // а не полный список мест. Полный набор набирается только повторными обходами.
+        // ⚠️ MUSHROOMS (and everything dynamic) DO NOT ALL SPAWN AT ONCE. There are more spawn
+        // points than there are mushrooms in the world at any moment: one lap of the map produced
+        // 64 mushrooms across five kinds, and that is a SAMPLE, not the full list of places. The
+        // complete set only accumulates over repeated laps.
         //
-        // Без этой загрузки сборщик начинал с пустого словаря и переписывал файл целиком, то есть
-        // ВТОРАЯ прогулка стирала результат первой — и набор не мог сойтись в принципе. Теперь
-        // прошлое содержимое поднимается в память и новые точки добавляются к нему.
+        // Without this load the harvester started from an empty dictionary and rewrote the file
+        // whole, so the SECOND walk erased the first one's result — the set could never converge.
+        // Now the previous contents are read back into memory and new points are added to them.
         private bool gatherHarvestLoaded;
 
         private void EnsureGatherHarvestLoaded()
@@ -167,8 +170,8 @@ namespace HeartopiaMod
             }
         }
 
-        // Один расчёт ключа для записи и для чтения: разойдись они, загруженная точка не совпала бы
-        // с той же точкой из скана и набор бы удваивался с каждым запуском.
+        // One key computation for both writing and reading: were they to diverge, a loaded point
+        // would not match the same point from the scan and the set would double on every launch.
         private static string BuildGatherHarvestKey(string scene, int staticId, int produceId, Vector3 position)
         {
             int cx = Mathf.RoundToInt(position.x / GatherHarvestSameSpotDistance);
@@ -177,8 +180,8 @@ namespace HeartopiaMod
             return (scene ?? string.Empty) + ":" + staticId + ":" + produceId + ":" + cx + ":" + cy + ":" + cz;
         }
 
-        // Полная перезапись — набор целиком живёт в памяти, дописывать нечего, а перезапись
-        // переживает вылет игры лучше, чем незакрытый поток.
+        // A full rewrite — the whole set lives in memory so there is nothing to append, and a
+        // rewrite survives a game crash better than a stream left open.
         internal void FlushGatherHarvest()
         {
             if (this.gatherHarvest.Count == 0)

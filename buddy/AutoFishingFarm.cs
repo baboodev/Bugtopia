@@ -897,7 +897,7 @@ namespace HeartopiaMod
                 }
 
                 bool inSessionNow = hasFishingState && inFishingState;
-                // Falling edge = a cast cycle just ended (catch OR срыв). The rod was just used, so
+                // Falling edge = a cast cycle just ended (a catch OR a lost fish). The rod was just
                 // check its durability NOW: with animations off + fast catches the game's HandHold
                 // durability event and the timed poll lag behind the wear, and the rod snaps between
                 // checks (cast then instantly fails). Direct kit throw (no idle slot) repairs mid-fishing.
