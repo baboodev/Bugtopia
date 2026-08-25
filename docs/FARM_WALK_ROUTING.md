@@ -332,10 +332,20 @@ Three places where the order is critical, each proven by a failure:
 
 **Repeat what pays:**
 ```
-closer >= 0.25 m OR rise >= 0.5 m → repeat the heading (up to 6 times)
-otherwise                         → next heading
-headings exhausted                → press from the other side, or end the escape
+closer >= 0.25 m                              → repeat the heading (up to 6 times)
+rise >= 0.5 m AND we are still below the aim  → repeat as well
+otherwise                                     → next heading
+headings exhausted                            → press from the other side, or end the escape
 ```
+
+⚠️ **Height pays only while there is height worth gaining.** The rule was a bare OR, so a hop that
+gained nothing on the ground kept a heading alive on altitude alone, and nothing checked that the
+climb led anywhere. Measured on `node:Oyster`: the first group read `+0,02m closer, +2,79m up` —
+two centimetres of ground, which is landing noise — and the escape ran on to **+5,71 m of altitude
+for +2,73 m of ground**, finishing on top of something the graph cannot reach. The next snap said
+`no node the ground can carry us to among the 12 nearest`, and the node had gone from the walk's
+best of 3,2 m out to 7,6 m. The ceiling is the aura's own 3-D reach (1.4 m): above that, more
+altitude cannot bring the collect closer even standing directly overhead, so only ground counts.
 
 The thresholds were 0.30 / 0.80 and dropped a working heading: `+0,30m closer, +0,52m up — next
 heading`, when it was still gaining half a metre of height per jump.
