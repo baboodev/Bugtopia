@@ -2777,11 +2777,16 @@ namespace HeartopiaMod
         {
             List<Vector3> newActive = new List<Vector3>();
 
-            if (this.priorityOysterMushroom) newActive.Add(this.priorityLocations["Oyster Mushroom"]);
-            if (this.priorityButtonMushroom) newActive.Add(this.priorityLocations["Button Mushroom"]);
+            // ⚠️ THIS ORDER IS THE VISIT ORDER, not a list of options.
+            // GetActivePriorityLocation returns the FIRST active entry that is not on cooldown, so
+            // whichever mushroom sits highest here is where the farm goes first, and the rest follow
+            // in this sequence as each area goes on its 5-minute cooldown. Do not sort it
+            // alphabetically or to match the checkbox column — the order was chosen deliberately.
+            if (this.priorityTruffle) newActive.Add(this.priorityLocations["Black Truffle"]);
             if (this.priorityPennyBun) newActive.Add(this.priorityLocations["Penny Bun"]);
             if (this.priorityShiitake) newActive.Add(this.priorityLocations["Shiitake"]);
-            if (this.priorityTruffle) newActive.Add(this.priorityLocations["Black Truffle"]);
+            if (this.priorityButtonMushroom) newActive.Add(this.priorityLocations["Button Mushroom"]);
+            if (this.priorityOysterMushroom) newActive.Add(this.priorityLocations["Oyster Mushroom"]);
             if (this.priorityFiddlehead) newActive.Add(this.priorityLocations["Fiddlehead"]);
             if (this.priorityTallMustard) newActive.Add(this.priorityLocations["Tall Mustard"]);
             if (this.priorityBurdock) newActive.Add(this.priorityLocations["Burdock"]);
@@ -4028,11 +4033,16 @@ namespace HeartopiaMod
         // Token: 0x04000011 RID: 17
         private List<HeartopiaComplete.FarmLocation> farmLocations = new List<HeartopiaComplete.FarmLocation>
         {
+            // ⚠️ THIS ORDER IS THE VISIT ORDER, and index 0 is the FIRST STOP OF EVERY RUN.
+            // The rotation is (index + 1) % Count over this list, skipping entries whose resource
+            // type is switched off, and a run starts with currentLocationIndex = -1 so that index 0
+            // comes first. Reordering these lines changes both where the farm goes first and how
+            // long the legs between areas are. Do not sort it alphabetically.
             new HeartopiaComplete.FarmLocation("Black Truffle Spawn", new Vector3(272.1f, 12.7f, 98.2f), "mushroom"),
-            new HeartopiaComplete.FarmLocation("Oyster Spawn", new Vector3(-139.8f, 21.3f, 205.2f), "mushroom"),
             new HeartopiaComplete.FarmLocation("Penny Bun Spawn", new Vector3(176.9f, 25.9f, 59.8f), "mushroom"),
             new HeartopiaComplete.FarmLocation("ShiiTake Spawn", new Vector3(57f, 18.3f, -131.5f), "mushroom"),
             new HeartopiaComplete.FarmLocation("Button Spawn", new Vector3(-156.3f, 18.8f, -115.2f), "mushroom"),
+            new HeartopiaComplete.FarmLocation("Oyster Spawn", new Vector3(-139.8f, 21.3f, 205.2f), "mushroom"),
             new HeartopiaComplete.FarmLocation("Fiddlehead Event Area", new Vector3(229.782f, 11.404f, 48.837f), "event_fiddlehead"),
             new HeartopiaComplete.FarmLocation("Tall Mustard Event Area", new Vector3(-125.213f, 11.729f, 290.797f), "event_tall_mustard"),
             new HeartopiaComplete.FarmLocation("Mustard Greens Event Area", new Vector3(-58.984f, 11.035f, -155.413f), "event_mustard_greens"),
