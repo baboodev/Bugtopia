@@ -228,6 +228,25 @@ namespace HeartopiaMod
 
         // Worth summoning? Land only, long enough haul, a default vehicle actually set, and not
         // already riding one.
+        //
+        // ⚠️ THE HAUL IS THE ROUTE, NOT THE STRAIGHT LINE.
+        //
+        // This used to test Distance3D(from, to), which is the one number that does not describe
+        // the journey about to be made. The planner already knows better and says so in its own
+        // log: "nearest by route, not by line: 39m away costs 47m to travel, against 38m away
+        // costing 73m" — a target 38 m off measured 73 m of actual walking around a bay. On the
+        // straight line that is comfortably under any sane threshold and the farm walked it; the
+        // reverse case is just as wrong, summoning a vehicle for 60 m of open beach.
+        //
+        // The route is committed before this is called (see the note at the call site in
+        // FarmWalkFeature.cs — the vehicle is transport for a journey, and whether the journey
+        // exists is decided first), so the measurement is already in hand. When there is no route
+        // ComputeFarmWalkRouteRemaining falls back to the straight line by itself.
+        //
+        // ⚠️ The threshold now means something different. A route is almost always longer than
+        // the line it spans, so the same slider value summons a vehicle more readily than it did.
+        // That is the point — it is the walking that got measured properly — but the number was
+        // chosen against the old metric and is worth revisiting against this one.
         internal bool ShouldFarmWalkSummonVehicle(Vector3 from, Vector3 to)
         {
             if (!this.farmWalkUseVehicleEnabled || !this.farmWalkToNodeEnabled)
@@ -235,9 +254,19 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (Distance3D(from, to) < this.farmWalkVehicleMinDistance)
+            float haul = this.ComputeFarmWalkRouteRemaining(from);
+            if (haul < this.farmWalkVehicleMinDistance)
             {
                 return false;
+            }
+
+            // Say it only when the two metrics disagree about the verdict — that is the whole
+            // behaviour change, and it is rare enough to be worth a line when it happens.
+            float straight = Distance3D(from, to);
+            if (straight < this.farmWalkVehicleMinDistance)
+            {
+                ModLogger.Msg("[FarmVehicle] " + haul.ToString("F0") + "m to walk though only "
+                    + straight.ToString("F0") + "m away — riding it, the line would have walked it.");
             }
 
             // Underwater the server refuses the summon outright — check before spending the call.
@@ -482,12 +511,15 @@ namespace HeartopiaMod
                 // Either the rest is too short to be worth a vehicle, or we are swimming, or the
                 // summon is on cooldown. The first of those is permanent for this walk; the others
                 // resolve on their own, so the flag stays set and this runs again.
-                if (Distance3D(selfPos, this.farmWalkTarget) < this.farmWalkVehicleMinDistance)
+                //
+                // Measured the same way the decision above measures, or the log explains a refusal
+                // with a number that did not cause it.
+                float left = this.ComputeFarmWalkRouteRemaining(selfPos);
+                if (left < this.farmWalkVehicleMinDistance)
                 {
                     this.farmWalkVehicleLeftForObstacle = false;
-                    ModLogger.Msg("[FarmVehicle] obstacle cleared, but only "
-                        + Distance3D(selfPos, this.farmWalkTarget).ToString("F0")
-                        + "m left — walking the rest.");
+                    ModLogger.Msg("[FarmVehicle] obstacle cleared, but only " + left.ToString("F0")
+                        + "m of route left — walking the rest.");
                 }
 
                 return;
