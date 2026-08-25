@@ -1,317 +1,326 @@
 # Aura Farm — Walk to Nodes
 
-Режим, в котором Aura Farm **идёт по земле** к каждому ресурсу вместо телепорта, повторяя маршрут,
-который рисует игровая функция **Track** (звёздная линия к маркеру на карте).
+The mode in which the Aura Farm **walks along the ground** to each resource instead of teleporting,
+retracing the route the game's own **Track** feature draws (the line of stars to a map marker).
 
-Тумблер: **Resource Gathering → Foraging → SETTINGS → Walk to Nodes** (сохраняется в `Config.xml`).
+Toggle: **Resource Gathering → Foraging → SETTINGS → Walk to Nodes** (persisted in `Config.xml`).
 
 ---
 
-## 1. Откуда берётся маршрут
+## 1. Where the route comes from
 
-**Не navmesh.** Гипотеза про `UnityEngine.AI` проверена в игре и опровергнута: `SamplePosition`
-не находит меш ни на одной дистанции, `CalculatePath` всегда возвращает `PathInvalid`. Причина —
-у `XDNavigationMgr.LoadNavMeshDataSync` **ноль вызовов** во всём Mono-дампе, меш никто не загружает.
-Зонд оставлен в `NavMeshWalkFeature.cs` на случай, если в патче это включат.
+**Not a navmesh.** The `UnityEngine.AI` hypothesis was tested in game and disproved: `SamplePosition`
+finds no mesh at any distance and `CalculatePath` always returns `PathInvalid`. The reason is that
+`XDNavigationMgr.LoadNavMeshDataSync` has **zero callers** anywhere in the Mono dump — nobody loads
+the mesh. The probe is kept in `NavMeshWalkFeature.cs` in case a patch ever enables it.
 
-Реальный механизм Track — **клиентский A\* по рукописному графу путевых точек**:
+Track's real mechanism is a **client-side A\* over a hand-authored waypoint graph**:
 
-| Что | Где |
+| What | Where |
 |---|---|
-| Граф: `Points[]` из `{ position, neighbour[] }` | `EngineWrapper/TrackPathConfig.cs` |
+| The graph: `Points[]` of `{ position, neighbour[] }` | `EngineWrapper/TrackPathConfig.cs` |
 | A\* (`Init`, `GetPath`, `GetNeighbour`) | `XDTLevelAndEntity/...TrackingPoint/AStar.cs` |
-| Оркестратор + сглаживание | `.../TrackingPoint/TrackingPathModule.cs` |
-| Настройки + выбор графа | `XDTDataAndProtocol/.../TrackPathConditionConfig.cs` |
+| The orchestrator plus smoothing | `.../TrackingPoint/TrackingPathModule.cs` |
+| Settings and graph selection | `XDTDataAndProtocol/.../TrackPathConditionConfig.cs` |
 
-Сервер присылает только **позицию цели** (`TrackData.Position`) — маршрут считает клиент.
+The server sends only **the target's position** (`TrackData.Position`) — the client computes the route.
 
-`TrackPathGraphFeature.cs` строит **свой** `AStar` из
-`ConfigManager.MainGameLvlConf.TrackPathConditionConfig.GetTrackPathConfig()` и снимает граф
-в managed-массивы **один раз на мир** (инвалидация по `RegisterWorldLoadingStartedCallback`).
-Дальше A\* выполняется в чистом C# — **в покадровом пути ходьбы нет ни одного вызова AuraMono**,
-поэтому проблема «протухшего указателя» при перемещающемся GC сюда не достаёт.
+`TrackPathGraphFeature.cs` builds **its own** `AStar` from
+`ConfigManager.MainGameLvlConf.TrackPathConditionConfig.GetTrackPathConfig()` and snapshots the graph
+into managed arrays **once per world** (invalidated through
+`RegisterWorldLoadingStartedCallback`). After that the A\* runs in pure C# — **there is not one
+AuraMono call in the per-frame walking path** — so the stale-pointer problem of a moving GC cannot
+reach it.
 
-Замеры: суша **1745 узлов / 7980 связей за 9–12 мс**, подводная зона — **86 узлов / 962 связи**
-(граф у каждого уровня свой; подводный намного разреженнее, отсюда прямые перегоны по 20–30 м).
+Measurements: land is **1745 nodes / 7980 links in 9–12 ms**, the underwater area is **86 nodes / 962
+links** (each level has its own graph; the underwater one is far sparser, hence the straight 20–30 m
+hops).
 
-### ⚠️ Привязка к графу требует линкаста
+### ⚠️ Snapping to the graph requires a linecast
 
-Маршрут состоит из трёх частей, и только средняя лежит в графе:
+A route has three parts, and only the middle one lies in the graph:
 
 ```
-игрок ──?──> стартовый узел ──A*──> конечный узел ──?──> ресурс
-       ^^^ вне графа                              ^^^ вне графа
+player ──?──> start node ──A*──> end node ──?──> resource
+       ^^^ off-graph                        ^^^ off-graph
 ```
 
-Оба крайних плеча **никем не проверяются**, поэтому привязка «ближайший узел по расстоянию»
-спокойно кладёт их сквозь стену — A\* при этом рапортует корректный маршрут. Игра этого не
-допускает: `_FindNearestPoint` берёт ближайший узел, **до которого есть чистая линия** по слою
-`Passable` (подробности и цифры — §10).
+Both outer legs are **checked by nobody**, so snapping by "nearest node by distance" happily lays them
+through a wall while A\* reports a perfectly good route. The game does not allow this:
+`_FindNearestPoint` takes the nearest node **that has a clear line to it** on the `Passable` layer
+(details and figures in §10).
 
-`TryFindReachableTrackGraphNode` повторяет это: кандидаты в радиусе `FarmWalkGraphSnapRadius`
-сортируются по расстоянию, каждый проверяется `IsFarmWalkLineClear(..., farmWalkMaskPassable)`,
-не больше `FarmWalkSnapMaxProbes` = 12 проб (каждая — два Mono-линкаста, ноги и грудь).
-Если не прошёл никто — берётся ближайший, но с **безусловной** строкой в лог: это ровно тот
-случай, который потом заканчивается `final approach not walkable`.
+`TryFindReachableTrackGraphNode` reproduces that: candidates within `FarmWalkGraphSnapRadius` are
+sorted by distance and each is tested with `IsFarmWalkLineClear(..., farmWalkMaskPassable)`, up to
+`FarmWalkSnapMaxProbes` = 12 probes (each being two Mono linecasts, at foot and chest height). If none
+passes, the nearest is taken anyway but with an **unconditional** log line: this is exactly the case
+that later ends in `final approach not walkable`.
 
-### ⚠️ Луч по `All` обязан быть поднят над землёй
+### ⚠️ An `All` ray has to be lifted off the ground
 
-`All` = 13457 включает слой **Ground**. Луч между двумя точками, лежащими на земле, упирается в
-рельеф на любом уклоне, то есть «прямая перекрыта» становится всегда истинным. Игра обходит это
-конфиговыми `startOffset` / `endOffset` в `TrackPathConditionConfig` — они поднимают оба конца:
+`All` = 13457 includes the **Ground** layer. A ray between two points lying on the ground runs into
+the terrain on any slope, which makes "the straight line is blocked" permanently true. The game gets
+around this with the config's `startOffset` / `endOffset` in `TrackPathConditionConfig`, which lift
+both ends:
 
 ```csharp
 PhysicsExtension.Linecast(start + startOffset, end + endOffset - pullBack, All)
 ```
 
-Без лифта проверка врёт на открытом пляже. Прогон 21:53: «прямая перекрыта» срабатывала на
-8,9 м, потом 11,8, потом 13,8 — расстояние **росло**, игрок 45 секунд шёл задом от устрицы.
+Without the lift the check lies on an open beach. Run at 21:53: "the straight line is blocked" fired
+at 8.9 m, then 11.8, then 13.8 — the distance was **growing** while the player walked backwards away
+from an oyster for 45 seconds.
 
-Правило: короткое плечо — `All` **с лифтом** `FarmWalkShortcutProbeLift`; длинное плечо вне
-графа (путевая точка → ресурс, 15–20 м) — только `Passable`, потому что по `All` оно перекрыто
-по определению.
+The rule: a short leg uses `All` **with** the `FarmWalkShortcutProbeLift` lift; a long off-graph leg
+(waypoint → resource, 15–20 m) uses `Passable` only, because on `All` it is blocked by definition.
 
-### ⚠️ Пробовать кандидатов только в отдельном буфере
+### ⚠️ Try candidates only in a separate buffer
 
-`TryComputeTrackGraphPath` **чистит выходной список в начале**. Проба кандидата прямо в
-`farmWalkScratchCorners` уничтожает маршрут, который вызывающий собирался закоммитить: после
-четырёх неудачных проб ходок получал последнего отвергнутого кандидата. В логе это выглядело как
-`timed out 13,1m short [corner 1/8]` для прохода, начавшегося с двух углов.
+`TryComputeTrackGraphPath` **clears its output list at the start**. Probing a candidate straight into
+`farmWalkScratchCorners` destroys the route the caller was about to commit: after four failed probes
+the walker got the last rejected candidate. In the log this appeared as
+`timed out 13,1m short [corner 1/8]` for a walk that had started with two corners.
 
-### ⚠️ Поиск объезда — один раз на проход
+### ⚠️ The detour search runs once per walk
 
-`farmWalkDetourSearchDone`. Каждый успешный объезд ставит `cornerIndex = 0`; если запускать поиск
-на каждом re-path, игрок разворачивается к первому углу, коридорный тест падает, re-path
-срабатывает снова — маршрут «перестраивается туда-сюда» и проход не двигается.
-
----
-
-## 2. Движение
-
-Ось джойстика подаётся через `TrySetGameMoveAxis` (`MovementInputFeature.cs`) — это родная
-локомоция игры, поэтому бесплатно достаются следование рельефу, коллизии, склоны и плавание,
-а сервер видит обычное движение. **Позиция никогда не пишется напрямую.**
-
-- Направление поворачивается на **минус yaw камеры**: игра сама применит поворот камеры дальше по цепочке.
-- Поворот ограничен **360°/с** — иначе персонаж «щёлкает» на углах и после перестроения маршрута.
-- Скорость — всегда полная (1.0). Ограничение 0.95 существовало только ради стамины, а её в игре нет.
-  Полная ось даёт `MotionInfo.MovingSpeedLimit` = 4.0 м/с — это собственный потолок бега игры,
-  ниже порога `MovementAntiCheating` (4.3 м/с).
-- На последних 2 м скорость плавно падает до 0.2, иначе локомоция проскакивает цель и наматывает круги.
-
-**Позиция игрока** читается только из Mono-сущности (`InteractSystem.player`, затем
-`EntityUtil.GetSelfPlayer`). `GetPlayer()` использовать нельзя — он может вернуть чужого игрока.
+`farmWalkDetourSearchDone`. Every successful detour sets `cornerIndex = 0`; if the search runs on
+every re-path, the player turns back toward the first corner, the corridor test fails, the re-path
+fires again — the route "rebuilds back and forth" and the walk goes nowhere.
 
 ---
 
-## 3. Прибытие
+## 2. Movement
 
-Порог — **0.25 м по горизонтали** плюс проверка **3D ≤ 1.8 м** (правило сервера
-`CollectAntiCheating.Distance` = 2 м).
+The joystick axis is fed through `TrySetGameMoveAxis` (`MovementInputFeature.cs`) — the game's own
+locomotion, which gives terrain following, collisions, slopes and swimming for free, and lets the
+server see ordinary movement. **The position is never written directly.**
 
-Разделение осей принципиально: ходьбой нельзя изменить высоту, поэтому чисто-3D проверка делала
-недостижимым любой чуть приподнятый ресурс. «По горизонтали дошли, по вертикали далеко» = уступ,
-и это честный повод для короткого прыжка телепортом.
+- The direction is rotated by **minus the camera yaw**: the game applies the camera rotation itself
+  further down the chain.
+- Turning is capped at **360°/s** — otherwise the character snaps at corners and after a re-path.
+- Speed is always full (1.0). The 0.95 cap existed only for stamina, and the game has none. A full
+  axis yields `MotionInfo.MovingSpeedLimit` = 4.0 m/s, which is the game's own running ceiling, below
+  the `MovementAntiCheating` threshold of 4.3 m/s.
+- Over the last 2 m the speed eases down to 0.2, or the locomotion overshoots the target and circles.
 
-Отказы сервера **молчаливые**, поэтому единственное подтверждение сбора — то, что ферма перестаёт
-переоткрывать один и тот же узел.
+**The player's position** is read only from the Mono entity (`InteractSystem.player`, then
+`EntityUtil.GetSelfPlayer`). `GetPlayer()` must not be used — it can return somebody else's player.
 
 ---
 
-## 4. Детекторы застревания
+## 3. Arrival
 
-Два независимых, ловят разные отказы:
+The threshold is **0.25 m horizontally** plus a **3-D ≤ 1.8 m** check (the server's rule,
+`CollectAntiCheating.Distance` = 2 m).
 
-| Детектор | Что меряет | Зачем |
+Splitting the axes matters: walking cannot change height, so a pure 3-D check made any slightly raised
+resource unreachable. "Close horizontally, far vertically" means a ledge, and that is a fair reason
+for a short teleport hop.
+
+Server refusals are **silent**, so the only confirmation of a collect is that the farm stops
+re-opening the same node.
+
+---
+
+## 4. Stuck detectors
+
+Two independent ones, catching different failures:
+
+| Detector | What it measures | Why |
 |---|---|---|
-| Смещение | 3D за 0.6 с, порог 0.15 м | жёсткий клин (настоящий читает 0.00–0.05) |
-| Остаток маршрута | длина оставшегося пути, 0.5 м / 3 с | «двигаюсь, но никуда» |
+| Displacement | 3-D over 0.6 s, threshold 0.15 m | a hard wedge (a real one reads 0.00–0.05) |
+| Route remaining | the length of the path left, 0.5 m / 3 s | "moving, but getting nowhere" |
 
-Остаток маршрута — именно **длина пути**, а не расстояние по прямой: обход холма или залива
-временно увеличивает дистанцию до цели, и прямолинейная метрика убивала здоровые проходы.
+Route remaining is the **path length**, not the straight-line distance: going around a hill or a bay
+temporarily increases the distance to the target, and the straight-line metric killed healthy walks.
 
-⚠️ **Пересчитывать базу** при каждой смене вертикального состояния, во время обхода препятствия
-и после перестроения маршрута. Сравнение метрики с базой, снятой по другой формуле, — источник
-худшего бага фичи (наматывание кругов на спуске).
-
----
-
-## 5. Эскалация при застревании
-
-**На суше:** одиночный прыжок → отход **5 м** (по расстоянию, таймаут только страховка) →
-разворот и разбег → **серия банни-хопов** начиная с 1/3 остатка дистанции. Прыжок повторяется
-на каждом приземлении (`TryReadBunnyHopSurfaceState`), иначе он гасится в воздухе и цепочки не будет.
-Короткий отход целиком съедался разворотом на 360°/с — персонаж прыгал с места.
-
-**Блуждать по земле нельзя** — на суше преграда обычно берётся высотой, а не обходом.
-
-**Под водой:** отход 5 м → подъём (только если цель выше) → зонд по **8 направлениям**,
-первое — назад, дальше 135/225/90/270/45/315/0 от курса на цель. Там препятствие действительно
-обходится, и игрок уже движется в трёх измерениях.
+⚠️ **Re-base the baseline** on every change of vertical state, during an obstacle detour and after a
+re-path. Comparing a metric against a baseline taken with a different formula is the source of this
+feature's worst bug (circling on a descent).
 
 ---
 
-## 6a. Подводное освобождение (две разные механики)
+## 5. Escalation when stuck
 
-Под водой прыжка нет: `TryFarmWalkJump` проверяет `TryGetFarmWalkSwimLocomotion` и подменяет
-прыжок отходом. Бюджет из `FarmWalkMaxJumpsPerWalk` (4) **общий** на прыжки и отходы, отсюда
-`unstick N/4` в логе.
+**On land:** a single jump → a **5 m** back-off (by distance; the timeout is only a safety net) →
+turn and run-up → a **series of bunny hops** starting from a third of the remaining distance. The jump
+is repeated on every landing (`TryReadBunnyHopSurfaceState`), or it is swallowed mid-air and no chain
+forms. A short back-off was entirely eaten by the 360°/s turn, leaving the character jumping on the
+spot.
 
-**Вертикаль заблокирована** → зонд (`BeginFarmWalkProbe`). Чередует горизонтальный отплыв и
-вертикальную попытку 0,6 с, вертикаль всегда целится в высоту цели (`want = dy > 0 ? 1 : -1`).
-**Четыре стороны**: назад, вправо, влево, вперёд — назад первым, потому что упираемся мы обычно
-передом. Раньше было восемь направлений; диагонали лежали между уже опробованными лучами и не
-окупались. Один зонд на проход (`farmWalkProbeUsed`).
+**Wandering along the ground is not allowed** — on land an obstacle is usually cleared by height
+rather than by going around.
 
-⚠️ Горизонтальная нога кончается **по расстоянию — 5 м** (`FarmWalkProbeHorizontalDistance`), а
-не по таймеру, ровно как отход. Фиксированные 0,8 с покрывали сколько получится: оттолкнулся от
-рифа — метры, зажало в расщелине — сантиметры, и зонд объявлял направление «проверенным», никуда
-не сдвинувшись. Таймер (`FarmWalkProbeHorizontalTimeout` = 4 с) остался стражем ровно для случая,
-который проверкой расстояния не заканчивается: заблокировано и в эту сторону.
-Лог: `probe leg 2/4 (90 deg) swam 5,0m of 5,0m (clear) — trying the vertical.`
-
-**Горизонталь заблокирована** → отход на 5 м, затем вертикальная нога, **направление которой
-чередуется между раундами**: раунд 1 вверх, раунд 2 вниз, дальше по кругу
-(`farmWalkBackOffRound` / `farmWalkBackOffVerticalDir`).
-⚠️ Раньше подъём выполнялся только когда узел выше, а при спуске фаза уходила в Idle. Логика была
-верна буквально (подъём отменяет спуск), но оставляла случай «заклинило при погружении» вообще
-без вертикали: отойти, продолжить тот же спуск, упереться в тот же камень. Чередование даёт шанс
-и перевалить сверху, и поднырнуть снизу, независимо от того, где узел.
-
-Строка отхода безусловная и печатает раунд: `backed off 5,0m (clear), round 2 — descending.`
+**Underwater:** back off 5 m → ascend (only if the target is higher) → probe **8 directions**, the
+first being backwards, then 135/225/90/270/45/315/0 off the bearing to the target. Down there
+obstacles genuinely are gone around, and the player is already moving in three dimensions.
 
 ---
 
-## 6. Подводная специфика
+## 6a. Underwater unsticking (two different mechanics)
 
-- Глубина: `SwimLocomotion.SetSwimVerticalInput(bool asc, bool pressed)` — работает во **всех**
-  режимах плавания, камеру трогать не нужно.
-  ⚠️ **Не жать каждый кадр**: каждое нажатие обновляет `_verticalInputBufferStartTime`, а разворот
-  внутри 0.3 с отклоняется — спам замораживает управление глубиной.
-- Гистерезис: включение 0.35 м, отпускание 0.12 м. Один порог даёт дребезг.
-- Порядок осей: цель **выше** — сперва всплыть, потом плыть; **ниже** — сперва доплыть, спуск
-  за 4 м до цели.
-- ⚠️ Всё вертикальное — **только когда реально плывём** (`farmWalkIsSwimming`). На суше это
-  обнуляло ось движения, и персонаж стоял и прыгал на месте.
-- Спринт: `TryStartSprint()` на перегонах ≥25 м, отмена на 15 м **разворотом** — игра сама гасит
-  спринт при повороте больше `LargeTurnAngleThreshold`.
-- Ремкомплект — это **сущность на дне** со сферой ауры. После броска нужно **опуститься в неё**,
-  иначе починка не начнётся. Держится в каждом состоянии фермы, не только в дупле очистки.
+There is no jump underwater: `TryFarmWalkJump` checks `TryGetFarmWalkSwimLocomotion` and substitutes a
+back-off. The budget from `FarmWalkMaxJumpsPerWalk` (4) is **shared** between jumps and back-offs,
+hence `unstick N/4` in the log.
 
----
+**Vertical blocked** → a probe (`BeginFarmWalkProbe`). It alternates a horizontal swim-out with a 0.6 s
+vertical attempt, and the vertical always aims at the target's height (`want = dy > 0 ? 1 : -1`).
+**Four sides**: back, right, left, forward — back first, because we usually wedge face-on. It used to
+be eight directions; the diagonals lay between rays already tried and did not pay for themselves. One
+probe per walk (`farmWalkProbeUsed`).
 
-## 7. Сглаживание маршрута
+⚠️ A horizontal leg ends **on distance — 5 m** (`FarmWalkProbeHorizontalDistance`), not on a timer,
+exactly like the back-off. A fixed 0.8 s covered whatever it covered: push off a reef and it is metres,
+be pinched in a crevice and it is centimetres, and the probe declared the direction "tested" without
+having moved at all. The timer (`FarmWalkProbeHorizontalTimeout` = 4 s) remains as a guard for exactly
+the case the distance check cannot end: blocked this way too.
+Log: `probe leg 2/4 (90 deg) swam 5,0m of 5,0m (clear) — trying the vertical.`
 
-A\* возвращает путь **по графу**, а не путь игрока: на суше это было 11 углов на 12 м.
+**Horizontal blocked** → back off 5 m, then a vertical leg **whose direction alternates between
+rounds**: round 1 up, round 2 down, and so on (`farmWalkBackOffRound` /
+`farmWalkBackOffVerticalDir`).
+⚠️ Ascending used to happen only when the node was higher, and on a descent the phase fell through to
+Idle. The logic was literally correct (ascending undoes a descent) but left the "wedged while diving"
+case with no vertical at all: back off, resume the same descent, hit the same rock. Alternating gives a
+chance both to climb over and to duck under, wherever the node is.
 
-Сглаживание повторяет форму игрового: срезается **только первый** угол и **только** если луч
-до второго чист — по одному, не больше 3 за перестроение, пролёт ≤10 м (`tryLineConnectDis`).
-
-Луч — `MonoGame.ScriptFramework.PhysicsExtension.Linecast` (⚠️ образ **EngineWrapper**, не
-XDTLevelAndEntity), маски читаются из статиков самого `TrackingPathModule` (`All` / `Passable`).
-Проверяется на уровне **ног и груди (+1.2 м)**, обе должны быть чисты — низкий луч проскакивает
-под перилами и через щели.
-
-⚠️ Брать «самый дальний видимый угол» нельзя: маршрут схлопывается в прямую (18.9 м в 2 угла)
-и персонаж идёт сквозь здания.
+The back-off line is unconditional and prints the round: `backed off 5,0m (clear), round 2 — descending.`
 
 ---
 
-## 7b. Пригодность цели: откуда мод знает, что ресурс можно собрать
+## 6. Underwater specifics
 
-Ходить к ресурсу, который нельзя взять, — самая дорогая ошибка режима: тратятся десятки метров,
-прыжки, пробы и спасательный телепорт, а в конце ещё и полный dwell впустую. Поэтому вердикт
-берётся у игры, а не выводится из подходящего поля.
+- Depth: `SwimLocomotion.SetSwimVerticalInput(bool asc, bool pressed)` — it works in **every** swimming
+  mode and needs no camera work.
+  ⚠️ **Do not press it every frame**: each press refreshes `_verticalInputBufferStartTime`, and a
+  reversal within 0.3 s is rejected — spamming freezes depth control.
+- Hysteresis: 0.35 m to engage, 0.12 m to release. A single threshold chatters.
+- Axis order: target **above** — surface first, then swim; **below** — swim there first and descend
+  4 m from the target.
+- ⚠️ Everything vertical happens **only while actually swimming** (`farmWalkIsSwimming`). On land it
+  zeroed the movement axis and the character stood there jumping on the spot.
+- Sprint: `TryStartSprint()` on hops of 25 m or more, cancelled at 15 m by **turning** — the game
+  itself drops the sprint on a turn larger than `LargeTurnAngleThreshold`.
+- The repair kit is **an entity on the seabed** with an aura sphere. After throwing it you must
+  **descend into it** or the repair will not start. It is held in every farm state, not only in the
+  cleaning dwell.
 
-### Гриб не остывает, он растёт
+---
 
-Измерено на живой игре (2026-08-19, десять сборов — пять вручную, пять фермой):
+## 7. Route smoothing
 
-* Собранный **динамический куст** (гриб, событийное растение) **удаляется из мира**. На его месте
-  появляется **новая сущность с новым netId** — на одной точке за прогон:
+A\* returns a path **through the graph**, not a player's path: on land that was 11 corners over 12 m.
+
+The smoothing follows the game's shape: **only the first** corner is cut, and **only** if the ray to
+the second is clear — one at a time, no more than 3 per rebuild, spanning ≤10 m (`tryLineConnectDis`).
+
+The ray is `MonoGame.ScriptFramework.PhysicsExtension.Linecast` (⚠️ image **EngineWrapper**, not
+XDTLevelAndEntity), and the masks are read from `TrackingPathModule`'s own statics (`All` / `Passable`).
+It is checked at **foot and chest height (+1.2 m)**, and both must be clear — a low ray slips under
+railings and through gaps.
+
+⚠️ Taking "the furthest visible corner" is not allowed: the route collapses into a straight line (18.9 m
+into 2 corners) and the character walks through buildings.
+
+---
+
+## 7b. Target eligibility: how the mod knows a resource can be collected
+
+Walking to a resource that cannot be taken is this mode's most expensive mistake: it spends tens of
+metres, jumps, probes and a rescue teleport, and then a full dwell on top for nothing. So the verdict
+comes from the game rather than being inferred from a convenient-looking field.
+
+### A mushroom does not go cold, it grows
+
+Measured in the live game (2026-08-19, ten collects — five by hand, five by the farm):
+
+* A collected **dynamic bush** (a mushroom, an event plant) **is removed from the world**. A **new
+  entity with a new netId** appears in its place — at one spot over a single run:
   `14215718 → 3630230 → 3631959 → 3696675`.
-* Новая сущность **растёт**, и это тот самый полукруг, который игрок видит на экране. Её компонент
-  при этом пуст: `inCold=False`, `coldEndTime=0`, `availableNum=3` — байт в байт как у спелой.
-* ⚠️ **Нули в компоненте означают «данных нет», а не «доступно».** Пять неудачных прибытий подряд
-  читались именно так. Чтение нулей как «доступно» и было причиной хождения к выработанным узлам.
-* Состояния роста на `CollectableObjectComponent` нет вовсе. Его считает клиент:
+* The new entity **grows**, and that is the very half-circle the player sees on screen. Its component
+  is empty meanwhile: `inCold=False`, `coldEndTime=0`, `availableNum=3` — byte for byte like a ripe
+  one.
+* ⚠️ **Zeros in the component mean "no data", not "available".** Five failed arrivals in a row read
+  exactly that way. Reading zeros as "available" was the cause of walking to depleted nodes.
+* There is no growth state on `CollectableObjectComponent` at all. The client computes it:
   `DynamicMapItemService.GetDynamicBushColdEndTime` → `ParseToUnix(DynamicBushGrowComponent.MaturityTime)`.
 
-Деревья, камень и ягоды ведут себя иначе — сущность остаётся на месте и честно уходит в кулдаун,
-для них компонентный `inCold` достоверен.
+Trees, stone and berries behave differently — the entity stays put and honestly goes on cooldown, and
+for them the component's `inCold` is trustworthy.
 
-### Вердикт клиента: таблица по netId
+### The client's verdict: a table by netId
 
 `ResourceProtocolManager.CmdUpdateCollectCold(netId, coldEndTime, totalColdTime, availableNum)`
-рассылает `CollectColdEvent` и лишь потом пишет в `CollectableObjectData` — и только если объект
-известен `DataCenter`. Событие первично, поэтому слушаем его.
+dispatches `CollectColdEvent` and only afterwards writes to `CollectableObjectData` — and only if the
+object is known to `DataCenter`. The event comes first, so that is what we listen to.
 
-* Хук **регистрируется сразу**, а не из отложенного world-ready колбэка: регистрация — это только
-  метаданные и безопасна всегда, установка детура и так ждёт `IsWorldReady`. Замер: мир готов
-  04:06:20, хук через отложенный колбэк вставал 04:06:21 и пропускал стартовую рассылку.
-* Записывается вердикт **каждого** netId, а не только текущего узла. Старый обработчик отбрасывал
-  за гейтами около 800 вердиктов за прогон.
+* The hook is **registered immediately** rather than from a deferred world-ready callback:
+  registration is only metadata and is always safe, and attaching the detour waits for `IsWorldReady`
+  anyway. Measured: the world was ready at 04:06:20, the hook installed through the deferred callback
+  at 04:06:21 and missed the opening broadcast.
+* The verdict for **every** netId is recorded, not just the current node's. The old handler discarded
+  roughly 800 verdicts per run behind its gates.
 
-### Свип: просим игру опубликовать вердикт по всем
+### The sweep: asking the game to publish a verdict for everything
 
-`TrackModule.OnCreate()` зовёт `UpdateAllColdTime()` **один раз при старте**, и застать эту рассылку
-структурно невозможно. Поэтому мод просит её сам:
+`TrackModule.OnCreate()` calls `UpdateAllColdTime()` **once at startup**, and catching that broadcast
+is structurally impossible. So the mod asks for it itself:
 
 ```
-EcsService.Get<IDynamicMapItemService>()   ← инфлейт дженерика (та же техника, что у DispatchEvent<T>)
+EcsService.Get<IDynamicMapItemService>()   ← inflate the generic (the same technique as DispatchEvent<T>)
         ↓
-service.UpdateAllColdTime()                ← обходит все ресурсные точки
+service.UpdateAllColdTime()                ← walks every resource point
         ↓
-CollectColdEvent × N                       ← 153 события за вызов, таблица 2 → 66 записей
+CollectColdEvent × N                       ← 153 events per call, table 2 → 66 entries
 ```
 
-* Берётся `Get<T>(bool)`, **а не** `TryGet<T>(out T, bool)`: у первого нет out-параметра. Через
-  AuraMono out безопасен только для ссылочных типов.
-* Инфлейт — **только при `IsWorldReady`**: до появления мира это документированный `abort()`
+* Take `Get<T>(bool)` and **not** `TryGet<T>(out T, bool)`: the former has no out parameter. Through
+  AuraMono an out slot is safe only for reference types.
+* Inflate **only while `IsWorldReady`**: before the world exists this is a documented `abort()`
   (`mono_metadata_get_generic_inst` → `g_assert`).
-* Свип запускается **по появлению в снимке незнакомого netId**, а не по часам. Ресурс перерождается
-  между тиками таймера, и тридцатисекундная пауза — это ровно то окно, в которое ферма приходит к
-  растущему грибу. Тридцать секунд остались полом между свипами.
+* The sweep is triggered **by an unfamiliar netId appearing in a snapshot**, not by a clock. A resource
+  is reborn between timer ticks, and a thirty-second pause is precisely the window in which the farm
+  arrives at a growing mushroom. Thirty seconds remain as the floor between sweeps.
 
-### ⚠️ Второе событие свипа врёт нулём
+### ⚠️ The sweep's second event lies with a zero
 
-Тело цикла `UpdateAllColdTime` шлёт по ресурсу **два** события:
+The body of the `UpdateAllColdTime` loop sends **two** events per resource:
 
 ```csharp
 if (has DynamicBushGrowComponent)
-    CmdUpdateCollectCold(netId, ParseToUnix(grow.MaturityTime), growTime, ...);   // правда
-UpdateResourcePoint(resourceId, netId);                                           // безусловно, ещё раз
+    CmdUpdateCollectCold(netId, ParseToUnix(grow.MaturityTime), growTime, ...);   // the truth
+UpdateResourcePoint(resourceId, netId);                                           // unconditionally, again
 ```
 
-`UpdateResourcePoint` пересчитывает по фильтру, привязанному к игроку; когда фильтр пуст,
-`num` остаётся `0` и уходит «готов», затирая время созревания из первого события. Поэтому
-**ноль не перезаписывает живое время созревания в пределах секунды**. Между свипами перезапись
-работает — иначе созревший куст остался бы занятым навсегда.
+`UpdateResourcePoint` recomputes through a filter bound to the player; when the filter is empty `num`
+stays `0` and "ready" goes out, overwriting the maturity time from the first event. So **a zero does
+not overwrite a live maturity time within one second**. Between sweeps the overwrite does work — or a
+matured bush would stay marked as taken forever.
 
-### Два предиката, которые нельзя склеивать
+### Two predicates that must not be merged
 
-| Вопрос | Кто спрашивает | Как трактуется «неизвестно» |
+| Question | Who asks | How "unknown" is read |
 |---|---|---|
-| Занято ли то, что здесь стоит | dwell сбора (`TryGetLiveNodeColdState`) | никак, это не признак |
-| Стоит ли идти к этой цели | ходок и план тура (`IsFarmTargetUnconfirmed`) | **не подтверждено ⇒ не идём** |
+| Is whatever stands here taken | the collect dwell (`TryGetLiveNodeColdState`) | not at all; it is not evidence |
+| Is this target worth walking to | the walker and the tour plan (`IsFarmTargetUnconfirmed`) | **unconfirmed ⇒ do not go** |
 
-Склейка этих вопросов в одну функцию измеримо ломает сбор: девять целей, ноль сборов, шесть
-таймаутов — против шести сборов из одиннадцати до неё.
+Merging these two questions into one function measurably breaks collecting: nine targets, zero
+collects, six timeouts — against six collects out of eleven before it.
 
-Правило «не подтверждено ⇒ не идём» действует **только для динамических кустов**, и ограничение
-измерено: покрытие вердиктами 3/3 у грибов и 77 из 117 у деревьев, камня и ягод — последним
-рассылки нет вовсе, потому что вердикт считается только там, где есть `DynamicBushGrowComponent`.
-Применить правило ко всем — запарковать половину карты.
+The "unconfirmed ⇒ do not go" rule applies **only to dynamic bushes**, and the limit is measured:
+verdict coverage is 3/3 for mushrooms and 77 of 117 for trees, stone and berries — the latter get no
+broadcast at all, because a verdict is only computed where there is a `DynamicBushGrowComponent`.
+Applying the rule to everything would park half the map.
 
-### Результат
+### The result
 
 ```
-до                    6 сборов / 11 целей, таймауты на трети подходов
-склеенный предикат    0 сборов /  9 целей, 6 таймаутов
-после                 3 сбора  /  5 целей, 0 таймаутов, 1 отказ до подхода
+before                6 collects / 11 targets, timeouts on a third of the approaches
+merged predicate      0 collects /  9 targets, 6 timeouts
+after                 3 collects /  5 targets, 0 timeouts, 1 refusal before the approach
 ```
 
-Отказ выглядит так и печатается с источником:
+A refusal looks like this and is printed with its source:
 
 ```
 target went on cooldown [client verdict: netId 21385 not ready for 25317s, heard 3s ago] — moving to the next node
@@ -319,128 +328,134 @@ target went on cooldown [client verdict: netId 21385 not ready for 25317s, heard
 
 ---
 
-## 8. Обработка недостижимых узлов
+## 8. Handling unreachable nodes
 
-Счётчик отказов ведётся **на узел** (`farmWalkNodeFailures`), сбрасывается при успешном
-прибытии и при старте прогона.
+The failure counter is kept **per node** (`farmWalkNodeFailures`) and is reset on a successful arrival
+and at the start of a run.
 
-0. **Второй отказ на одном узле** — парковка на 5 минут, независимо от расстояния. Повторная
-   попытка ничего не даёт: прогон 20:44 показал, что она воспроизводит **те же числа**
-   (6,8 м, dy=3,8 м), потому что мешает геометрия, а не маршрут.
-1. **Спасательный телепорт** — первый отказ, узел ближе `FarmWalkRescueTeleportRange` (10 м),
-   прыжки израсходованы, и с прошлого спасения прошло `FarmWalkRescueTeleportCooldown` (60 с).
-   Кинд в логе — `node:walk-rescue`.
-   ⚠️ Кулдаун здесь несущий: при темпе ~1 узел за 5–8 с один телепорт в минуту это меньше
-   десятой доли переходов, то есть режим по-прежнему ходит пешком, а сервер видит непрерывное
-   движение между ресурсами. Ослабить кулдаун — значит вернуть телепортовую ферму.
-2. **Пропуск** — узел штампуется в `recentlyVisitedNodes`, ферма идёт к следующему. В лог
-   пишется, какая из двух проверок не пустила спасение: `beyond the 10m rescue range` или
+0. **A second failure on the same node** — parked for 5 minutes, whatever the distance. Trying again
+   buys nothing: the 20:44 run showed a retry reproduces **the same numbers** (6.8 m, dy=3.8 m),
+   because the obstacle is geometry rather than routing.
+1. **The rescue teleport** — a first failure, the node closer than `FarmWalkRescueTeleportRange`
+   (10 m), the jumps spent, and `FarmWalkRescueTeleportCooldown` (60 s) elapsed since the last rescue.
+   The kind in the log is `node:walk-rescue`.
+   ⚠️ The cooldown is load-bearing here: at roughly one node every 5–8 s, one teleport a minute is
+   under a tenth of the transitions, so the mode still walks and the server sees continuous movement
+   between resources. Weakening the cooldown means bringing back the teleporting farm.
+2. **A skip** — the node is stamped into `recentlyVisitedNodes` and the farm moves to the next one.
+   The log says which of the two checks refused the rescue: `beyond the 10m rescue range` or
    `rescue teleport on cooldown, Ns left`.
-3. **Повтор после следующего сбора** — с **другой** конечной путевой точкой
-   (`farmWalkExcludedEndNodes`), иначе A\* строит тот же подход и падает с теми же числами.
-   Не дальше 35 м, иначе это долгий поход к заведомо плохому подходу.
-4. **Возврат пропущенного** — если после пропуска ничего другого нет, через 5 с ожидания.
-   ⚠️ Без этой паузы один пустой скан вызывал перелёт через всю карту (`MovingToLocation`).
-5. **Телепорт-размыкание** — только после 3 пропусков подряд (`node:walk-fallback`).
+3. **A retry after the next collect** — with a **different** end waypoint
+   (`farmWalkExcludedEndNodes`), or A\* builds the same approach and fails with the same numbers. No
+   further than 35 m, or it is a long trek to a known-bad approach.
+4. **Reclaiming a skipped node** — if nothing else is left after a skip, after a 5 s wait.
+   ⚠️ Without that pause a single empty scan caused a flight across the whole map
+   (`MovingToLocation`).
+5. **The break-out teleport** — only after 3 consecutive skips (`node:walk-fallback`).
 
-### Все причины телепорта в логе
+### Every teleport reason in the log
 
-Строка `[FarmTeleport] <kind> -> (x,y,z)` безусловна. Kind говорит, что именно произошло:
+The line `[FarmTeleport] <kind> -> (x,y,z)` is unconditional. The kind says what actually happened:
 
-| Kind | Пробуется ли ходьба | Что это |
+| Kind | Is walking tried | What it is |
 |---|---|---|
-| `node:<label>` | **да** | обычный переход к узлу; телепорт = ходьба не построилась |
-| `node:priority-active` | **да** | приоритетный узел в текущей зоне |
-| `node:priority-visible` | **да** | приоритетный узел в зоне видимости |
-| `node:retry` | **да** | повтор ранее пропущенного |
-| `node:walk-rescue` | — | спасение: отказ, ≤10 м, не чаще 1/мин |
-| `node:walk-fallback` | — | размыкание после 3 пропусков подряд |
-| `node:skip-reclaim` | **нет** | пропущенный забирается, когда рядом больше ничего нет |
-| `area:<name>` | **нет** | переезд между зонами фермы |
-| `area:priority-recheck` | **нет** | периодическая (60 с) переоценка приоритетных зон |
-| `area:priority-fallback` | **нет** | приоритетная зона, когда узлов в ней не видно |
-| `area:startup-priority` | **нет** | стартовый прыжок в приоритетную зону |
+| `node:<label>` | **yes** | an ordinary move to a node; a teleport means the walk failed to build |
+| `node:priority-active` | **yes** | a priority node in the current area |
+| `node:priority-visible` | **yes** | a priority node within sight |
+| `node:retry` | **yes** | a retry of a previously skipped node |
+| `node:walk-rescue` | — | the rescue: a failure, ≤10 m, no more than once a minute |
+| `node:walk-fallback` | — | the break-out after 3 consecutive skips |
+| `node:skip-reclaim` | **no** | a skipped node is reclaimed when nothing else is nearby |
+| `area:<name>` | **no** | a move between farm areas |
+| `area:priority-recheck` | **no** | the periodic (60 s) re-evaluation of priority areas |
+| `area:priority-fallback` | **no** | a priority area when no nodes are visible in it |
+| `area:startup-priority` | **no** | the opening hop into a priority area |
 
-⚠️ Все `area:*` — межзонные переезды, ходьба туда **никогда не была в задаче** (согласовано:
-«длинные прыжки можно добавить позже»). Если в логе телепортов больше, чем ожидалось, сначала
-смотреть kind: `area:*` и `node:skip-reclaim` не считаются отказами ходока.
-
----
-
-## 9. Согласованные решения (не пересматривать без спроса)
-
-- **Взаимоисключимость со Stealth Foraging** — та ныряет под террейн на ноклипе.
-- **Принудительный 1x** на всё время прогона: сервер меряет реальное время.
-- **Нет ограничения дистанции** — идём пешком на любое расстояние.
-- **Спасательный телепорт** — только ≤10 м, не чаще одного в минуту, второй отказ на узле
-  вместо телепорта паркует его.
+⚠️ Every `area:*` is an inter-area move, and walking those **was never in scope** (agreed: "long hops
+can be added later"). If the log shows more teleports than expected, look at the kind first: `area:*`
+and `node:skip-reclaim` do not count as walker failures.
 
 ---
 
-## 10. Диагностика: сравнение с игровым Track
+## 9. Agreed decisions (do not revisit without asking)
 
-Тумблер **Compare Game Track** заставляет игру построить свой маршрут к той же цели:
+- **Mutually exclusive with Stealth Foraging** — that one dives under the terrain on noclip.
+- **Forced 1x** for the whole run: the server measures real time.
+- **No distance limit** — we walk any distance.
+- **The rescue teleport** — only ≤10 m and at most once a minute; a second failure on a node parks it
+  instead of teleporting.
+
+---
+
+## 10. Diagnostics: comparing against the game's Track
+
+The **Compare Game Track** switch makes the game route to the same target:
 `MapSpotProtocolManager.AddSpot(Custom, useId, pos, TrackMap)` →
-`TrackProtocolManager.StartLocalTrackMapSign(useId)`, через 1,5 с читается
-`TrackingPathModule._path`.
-⚠️ `StartLocalTrackMapSign` внутри зовёт `StopAllLocalTrack()` — сбивает ручной трек игрока.
+`TrackProtocolManager.StartLocalTrackMapSign(useId)`, and after 1.5 s `TrackingPathModule._path` is
+read.
+⚠️ `StartLocalTrackMapSign` internally calls `StopAllLocalTrack()` — it clears the player's manual
+track.
 
-Тумблер **Walk to Nodes** дополнительно фокусирует радар: остаются только маркеры в 3 м от
-текущей цели (отсечка одна — в начале `CreateMarker`, поэтому накрывает все ~29 мест, включая
-подводные и пузырьковые), а поверх мира рисуется зелёная ломаная `FarmWalkRouteLine` по нашим
-оставшимся углам. Рядом видны золотые звёздочки игры — это и есть прямое сравнение маршрутов.
+The **Walk to Nodes** switch additionally focuses the radar: only markers within 3 m of the current
+target remain (there is a single cut-off, at the top of `CreateMarker`, so it covers all ~29 sites
+including the underwater and bubble ones), and a green `FarmWalkRouteLine` polyline is drawn over the
+world along our remaining corners. The game's golden stars are visible beside it — that is the direct
+route comparison.
 
-### ⚠️ Игровой Track — эталон. Метрика — проходимость, не длина
+### ⚠️ The game's Track is the reference. The metric is passability, not length
 
-Первое живое сравнение: **59,7 м у игры против 5,8 м по прямой** к той же цели; второй замер —
-53,6 м против 11,1 м. Соблазн прочитать это как «наш маршрут лучше» — ошибка: игровой путь
-длиннее именно потому, что обходит то, сквозь что мод шёл напрямик. **Длиннее = правильно.**
+The first live comparison: **59.7 m from the game against 5.8 m in a straight line** to the same
+target; the second measurement was 53.6 m against 11.1 m. The temptation to read this as "our route is
+better" is a mistake: the game's path is longer precisely because it goes around what the mod went
+straight through. **Longer is correct.**
 
-Причина расхождения — `TrackingPathModule._FindNearestPoint`:
+The cause of the divergence is `TrackingPathModule._FindNearestPoint`:
 
 ```csharp
 _aStar.GetNeighbour(pos, ref _neighbours);
 foreach (node in _neighbours)
-    if (dist < best && _HasNoCollider(pos, node.position, Passable))   // ← фильтр
+    if (dist < best && _HasNoCollider(pos, node.position, Passable))   // ← the filter
 ```
 
-Игра никогда не берёт узел на веру: требует чистую линию по слою `Passable`. Привязка «по
-ближайшему расстоянию» кладёт первое плечо маршрута (игрок → стартовый узел) и последнее
-(конечный узел → ресурс) прямо сквозь препятствие, потому что **ни одно из этих двух плеч не
-принадлежит графу и потому не проверяется нигде**. A\* при этом рапортует корректный маршрут по
-реально связанным узлам, а ходок въезжает в здание.
+The game never takes a node on trust: it requires a clear line on the `Passable` layer. Snapping "by
+nearest distance" lays the route's first leg (player → start node) and its last (end node → resource)
+straight through an obstacle, because **neither of those two legs belongs to the graph and so is
+checked nowhere**. A\* meanwhile reports a valid route over genuinely connected nodes, and the walker
+drives into a building.
 
-Отсюда `TryFindReachableTrackGraphNode` (§1): кандидаты перебираются по возрастанию расстояния,
-каждый проверяется линкастом по `Passable`, до 12 проб на конец маршрута, откат на ближайший
-узел с явным логом.
+Hence `TryFindReachableTrackGraphNode` (§1): candidates are tried in increasing order of distance,
+each tested with a `Passable` linecast, up to 12 probes per route end, falling back to the nearest node
+with an explicit log line.
 
-Прочее из `GetPath`, полезное при чтении логов:
+Other things from `GetPath` that help when reading logs:
 
-- `_path` — **не список углов**, а ресемпл сплайном Catmull-Rom: `PointCount = 100`, шаг
-  `i += 2` → всегда ~51 точка независимо от длины. Сравнивать можно только длину.
-- Цикл идёт до `t = 0.98`, то есть кривая не доходит до конца маршрута.
-- `AStar.GetNeighbour` — квадродерево, бокс 15×15 м вокруг точки; наши 60 м заметно шире.
+- `_path` is **not a list of corners** but a Catmull-Rom resample: `PointCount = 100`, stepping
+  `i += 2` → always ~51 points regardless of length. Only the length can be compared.
+- The loop runs to `t = 0.98`, so the curve stops short of the route's end.
+- `AStar.GetNeighbour` is a quadtree with a 15×15 m box around the point; our 60 m is markedly wider.
 
-⚠️ Длину маршрута мода считать **от текущей позиции по оставшимся углам**: полный маршрут
-включает уже пройденный префикс, из-за чего первое сравнение показало 17,6 м вместо 5,8 м.
+⚠️ Measure the mod's route length **from the current position over the remaining corners**: the full
+route includes the prefix already walked, which is why the first comparison showed 17.6 m instead of
+5.8 m.
 
 ---
 
-## 11. Файлы
+## 11. Files
 
-| Файл | Ответственность |
+| File | Responsibility |
 |---|---|
-| `TrackPathGraphFeature.cs` | зонд, снимок графа, C# A\*, поиск ближайшего узла |
-| `FarmWalkFeature.cs` | ходок, эскалация, глубина, спринт, сглаживание, повторы |
-| `FarmWalkTrackCompareFeature.cs` | запрос игрового Track и сравнение длин |
-| `FarmWalkRadarFocusFeature.cs` | фокус радара на цели + линия нашего маршрута |
-| `NavMeshWalkFeature.cs` | зонд navmesh (отрицательный результат) |
-| `HeartopiaComplete.Farm.cs` | состояние `WalkingToNode`, три точки перехода к узлу |
-| `HeartopiaComplete.Radar.cs` | отсечка в `CreateMarker`, сохранение линии между сканами |
-| `HeartopiaComplete.UguiForagingContent.cs` | тумблер и взаимоисключимость |
+| `TrackPathGraphFeature.cs` | the probe, the graph snapshot, the C# A\*, nearest-node search |
+| `FarmWalkFeature.cs` | the walker, escalation, depth, sprint, smoothing, retries |
+| `FarmWalkTrackCompareFeature.cs` | requesting the game's Track and comparing lengths |
+| `FarmWalkRadarFocusFeature.cs` | focusing the radar on the target plus our route line |
+| `NavMeshWalkFeature.cs` | the navmesh probe (a negative result) |
+| `HeartopiaComplete.Farm.cs` | the `WalkingToNode` state and the three entry points to a node |
+| `HeartopiaComplete.Radar.cs` | the cut-off in `CreateMarker`, keeping the line alive between scans |
+| `HeartopiaComplete.UguiForagingContent.cs` | the toggle and the mutual exclusion |
 
-**Пошаговый разбор выбора маршрута** — со всеми ветками, порогами и измерениями, которыми они
-получены: `docs/FARM_WALK_ROUTING.md`.
+**A step-by-step account of route selection** — every branch, threshold and the measurements behind
+them: `docs/FARM_WALK_ROUTING.md`.
 
-**Логи:** `[FarmWalk]`, `[TrackGraph]`, `[FarmTeleport]` — все безусловные.
-⚠️ Не прятать за `MasterLog*`: за эту сессию флаг-гейт трижды скрывал причину бага.
+**Logs:** `[FarmWalk]`, `[TrackGraph]`, `[FarmTeleport]` — all unconditional.
+⚠️ Do not hide them behind `MasterLog*`: over this one session a flag gate concealed the cause of a
+bug three times.

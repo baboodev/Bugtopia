@@ -313,33 +313,34 @@ N overload(s)`.
 - ValueTuple after unbox: fields at sequential offsets from the unboxed data pointer.
 
 
-## Метки недоступных ресурсов
+## Markers for resources you cannot collect
 
-Метка **не создаётся вовсе**, если ресурс сейчас нельзя собрать. Раньше выработанный рисовался
-мешем `_cooldown`; это было верно, пока единственной бедой узла был кулдаун, и неверно для
-динамических кустов: растущий гриб читается `inCold=False` на компоненте и рисовался как обычный
-доступный (см. `docs/FARM_WALK_TO_NODE.md` §7b).
+A marker **is not created at all** when the resource cannot currently be gathered. A depleted one
+used to be drawn with the `_cooldown` mesh; that was right while a cooldown was a node's only
+possible trouble, and wrong for dynamic bushes: a growing mushroom reads `inCold=False` on its
+component and was drawn as an ordinary available one (see `docs/FARM_WALK_TO_NODE.md` §7b).
 
-Проверка (`IsGatherableHiddenFromMarkers`) задаёт три вопроса:
+The check (`IsGatherableHiddenFromMarkers`) asks three questions:
 
-* компонент говорит «выработан» → скрыть;
-* вердикт клиента говорит «ещё не готов» → скрыть (это случай роста);
-* динамический куст **без вердикта** → скрыть, он не подтверждён.
+* the component says "depleted" → hide it;
+* the client's verdict says "not ready yet" → hide it (this is the growing case);
+* a dynamic bush **with no verdict** → hide it, it is unconfirmed.
 
-Последнее прячет куст на секунду-другую, пока свип не ответит — метка, которая может оказаться
-растущим огрызком, хуже метки, появившейся мгновением позже.
+The last one hides a bush for a second or two until the sweep answers — a marker that may turn out
+to be a growing stub is worse than a marker that appeared a moment later.
 
-⚠️ Проверка стоит **в создании маркера**, и это не случайно: маркеры радара — общий источник для
-ESP-оверлея, синхронизации игровой карты и набора кандидатов фермы. Одно скрытие убирает ресурс
-сразу из всех трёх. Число скрытых печатается в строке скана:
+⚠️ The check sits **in marker creation**, and that is deliberate: radar markers are the shared
+source for the ESP overlay, the game-map sync and the farm's candidate set. One hide removes the
+resource from all three at once. The number hidden is printed in the scan line:
 `land radar: marked 12 (hid 5 not collectable) of 142`.
 
-### Иконка резолвится по узкому радиусу
+### The icon resolves on the narrow radius
 
-Иконка метки берётся у сущности, найденной **позиционным сопоставлением**, и радиус для неё —
-тот же тесный радиус опознания, что и у отсева по кулдауну (`MapResCooldownMatchSqr`), а не общий
-трёхметровый. Со свободным радиусом сбор ресурса давал видимый глюк: сущность исчезает, ближайшим
-уцелевшим оказывается дерево в паре метров, и метка на один такт брала его иконку, прежде чем её
-саму снимали — гриб на карте мигал деревом. Дальше радиуса опознания метка сохраняет прежнюю
-иконку, а не занимает соседскую.
+A marker's icon comes from the entity found by **positional matching**, and the radius for it is
+the same tight identification radius the cooldown filter uses (`MapResCooldownMatchSqr`), not the
+general three-metre one. With the loose radius, collecting a resource produced a visible glitch:
+the entity disappears, the nearest survivor turns out to be a tree a couple of metres away, and for
+one tick the marker took that tree's icon before being removed itself — a mushroom on the map
+flickered into a tree. Beyond the identification radius a marker keeps its previous icon rather
+than borrowing a neighbour's.
 

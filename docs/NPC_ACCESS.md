@@ -1,52 +1,54 @@
-# NPC Access — позиции, netId, разговор (карта механизмов)
+# NPC Access — positions, netId, talking (a map of the mechanisms)
 
-Собрано 2026-07-02 по итогам TalkToNpc-разбора (Quest Assistant, см.
+Collected 2026-07-02 out of the TalkToNpc investigation (Quest Assistant, see
 [plans/2026-07-02-quest-assistant-progress.md](plans/2026-07-02-quest-assistant-progress.md)
-§13-§23), когда рабочий позиционный хелпер был случайно написан ЗАНОВО, потому что существующий не
-нашёлся поиском. **Перед добавлением любого нового NPC-механизма — сверься с этим файлом.**
+§13-§23), after a working positional helper was accidentally written AGAIN because the existing one
+did not turn up in a search. **Before adding any new NPC mechanism, check this file first.**
 
-## Итоговая матрица
+## The resulting matrix
 
-| Задача | Рабочий механизм | Где в моде | Ограничения |
+| Task | Working mechanism | Where in the mod | Limits |
 |---|---|---|---|
-| Позиция NPC (в т.ч. НЕзагруженного) | AuraMono static `MapSpotProtocolManager.TryGetMapSpotPosition(SpotEnum.Npc=2, npcId, out Vector3, GameSceneId)` — **с апдейта 2026-07-09 4 параметра**: споты ключуются per-scene (`MapSpotKeyComponent(category, useId, gameSceneId)`), резолвить метод по paramCount=4 (3 — только старые билды) | `Teleport.cs` → **`TryGetLiveNpcPositionByIdMono(int npcId, out Vector3)`** | Работает для всего, что рендерит карта (server-synced map-spot сущность, движется вместе с NPC). Требует, чтобы NPC вообще был на карте текущей сцены. Сцену хелпер берёт сам: `DataCenter.LevelId` (static RoomLevelId) → маппинг `LevelConst.ToGameSceneId` + retry StarTown (игра ключует споты с TargetLevelId==0 на StarTown) |
-| Позиция NPC (загруженного, Unity-скан) | `Object.FindObjectsOfType(Il2CppType.Of<NpcComponent>)` + чтение `position`/`entity.position`/`transform` | `Teleport.cs` → `PopulateLiveNpcEntriesFromUnityObjects` + `TryGetNpcTeleportPosition` | Только реально заспавненные Unity-объекты. **⚠️ МЁРТВ с апдейта 2026-07-09**: `Il2CppType.GetType("...NpcComponent")` = null (Mono-side тип больше не виден из IL2CPP-домена, FQN не менялся) — скан тихо выключен, позиции даёт только map-spot путь |
-| netId NPC (только застримленного!) | AuraMono `EcsService.TryGet<INpcClientService>()` → `TryGetNpcNetId(npcId, out netId)`; fallback — скан `Entities.GetComponents<NpcComponent>` по `_componentData.staticId` | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTryGetNpcNetIdAuraMono` / `QuestAssistantTryGetNpcNetIdViaComponentScan` | ОБА пути видят только застримленные NPC (сервис = клиентский EcsFilter). **API запросить netId далёкого NPC у сервера НЕ существует** |
-| Телепорт к позиции | `TeleportToLocation(Vector3)` | `Teleport.cs` (~line 1639) | Пишет `OverridePosition` + двигает `p_player_skeleton(Clone)` |
-| Разговор с NPC (кредит квеста!) | AuraMono static `TalkProtocolManager.SendTalkWithNpc(npcNetId, startOrEnd, talkParam=0)` → `TalkWithPlayerCommand` (обычный `[NetworkCommand]`, БЕЗ `[VerifyEntity]`) | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTrySendTalkWithNpc` | Требует ЖИВОЙ netId → NPC должен быть застримлен → телепорт обязателен для далёких. Слать парно: start=true … start=false |
-| Диалоговая панель (только UI) | AuraMono static `DialoguePanel.OpenTaskDialogue(taskNetId, netId, isStaticId, staticIdOrResId, targetName)` | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTryOpenNpcDialogue` | **НЕ кредитует квест.** Для Accepted-задачи реплики матчатся `wipItems[i].id == staticIdOrResId` (часто 0, НЕ id NPC — id для панели и id NPC держать раздельно) |
-| One-click "поговорить с NPC по квесту" | резолв netId → (нет? позиция → телепорт → ждать стриминг) → talk-RPC → панель → watcher → парный end-RPC | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTalkToNpcRoutine` | Собирает всё вышеперечисленное |
-| Завершить CanSubmit-квест сдачей предмета NPC | `TaskProtocolManager.ClientSubmitTaskItem` → `ClientSubmitNpcTaskItem` → `SubmitGameTaskItem2NpcCommand { GameTaskId, NpcId=STATIC, ItemNetPairs }` — обычный `[NetworkCommand]`, **без** `[VerifyEntity]` (см. декомпил) | `DailyQuestSubmitFeature.cs` → **`TrySubmitDailyQuestCheapestItemsAura(taskId, submitNpc, type, param)`** (generic, от `TableGameTask.submitTargetItem` + рюкзак); переиспользуется в `QuestAssistantOnSubmitToNpcClicked` | **NpcId = STATIC id, БЕЗ телепорта/netId/диалога — прямой синхронный вызов.** §24→§25→§26→§27: перебор через полный talk-флоу (телепорт+RPC+диалог) РАБОТАЛ, но диалоговая панель зависала (см. ниже) — лишний шаг, убран. **Правило:** прежде чем заворачивать submit-действие в talk-флоу — сверить сигнатуру wire-команды на `[VerifyEntity]`/netId-поле |
-| Завершить CanSubmit-квест БЕЗ предметов (talk/flag-only, напр. `checkParamString="PlayerFeatureOpen"`) | ТОТ ЖЕ `ClientSubmitTaskItem`, но с **пустым** `List<ItemNetPair>` — vanilla `AutoSubmitNpcTaskItem` сама шлёт пустой список, когда `TableGameTask.submitTargetItem` пуст; `submitType`/`submitParam` при `submitNpc>0` игнорируются игрой (читает `submitNpc` из своей же таблицы) | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTrySubmitNoItemsAura` (§29) | **Определять ПЕРЕД действием** через `TryGetDailyQuestSubmitTargetsAura(gameTaskRow, ...)` — если `targets.Count==0`, предметов не нужно вообще, слепой вызов item-сборщика упадёт с "no submit targets" |
+| NPC position (including an UNLOADED one) | AuraMono static `MapSpotProtocolManager.TryGetMapSpotPosition(SpotEnum.Npc=2, npcId, out Vector3, GameSceneId)` — **4 parameters since the 2026-07-09 update**: spots are keyed per scene (`MapSpotKeyComponent(category, useId, gameSceneId)`), so resolve the method by paramCount=4 (3 is old builds only) | `Teleport.cs` → **`TryGetLiveNpcPositionByIdMono(int npcId, out Vector3)`** | Works for anything the map renders (a server-synced map-spot entity that moves with the NPC). Requires the NPC to be on the current scene's map at all. The helper resolves the scene itself: `DataCenter.LevelId` (static RoomLevelId) → the `LevelConst.ToGameSceneId` mapping + a StarTown retry (the game keys spots with TargetLevelId==0 onto StarTown) |
+| NPC position (loaded, Unity scan) | `Object.FindObjectsOfType(Il2CppType.Of<NpcComponent>)` plus reading `position`/`entity.position`/`transform` | `Teleport.cs` → `PopulateLiveNpcEntriesFromUnityObjects` + `TryGetNpcTeleportPosition` | Only genuinely spawned Unity objects. **⚠️ DEAD since the 2026-07-09 update**: `Il2CppType.GetType("...NpcComponent")` = null (the Mono-side type is no longer visible from the IL2CPP domain; the FQN did not change) — the scan is silently off and positions come only from the map-spot path |
+| NPC netId (streamed-in NPCs only!) | AuraMono `EcsService.TryGet<INpcClientService>()` → `TryGetNpcNetId(npcId, out netId)`; fallback is a scan of `Entities.GetComponents<NpcComponent>` by `_componentData.staticId` | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTryGetNpcNetIdAuraMono` / `QuestAssistantTryGetNpcNetIdViaComponentScan` | BOTH paths see streamed-in NPCs only (the service is a client-side EcsFilter). **There is NO API for asking the server for a distant NPC's netId** |
+| Teleport to a position | `TeleportToLocation(Vector3)` | `Teleport.cs` (~line 1639) | Writes `OverridePosition` and moves `p_player_skeleton(Clone)` |
+| Talking to an NPC (quest credit!) | AuraMono static `TalkProtocolManager.SendTalkWithNpc(npcNetId, startOrEnd, talkParam=0)` → `TalkWithPlayerCommand` (an ordinary `[NetworkCommand]`, WITHOUT `[VerifyEntity]`) | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTrySendTalkWithNpc` | Needs a LIVE netId → the NPC must be streamed in → a teleport is mandatory for distant ones. Send in pairs: start=true … start=false |
+| The dialogue panel (UI only) | AuraMono static `DialoguePanel.OpenTaskDialogue(taskNetId, netId, isStaticId, staticIdOrResId, targetName)` | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTryOpenNpcDialogue` | **Does NOT credit the quest.** For an Accepted task the lines match on `wipItems[i].id == staticIdOrResId` (often 0, and NOT the NPC's id — keep the panel's id and the NPC's id apart) |
+| One-click "talk to the quest NPC" | resolve netId → (none? position → teleport → wait for streaming) → talk RPC → panel → watcher → the paired end RPC | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTalkToNpcRoutine` | Assembles everything above |
+| Finish a CanSubmit quest by handing an item to an NPC | `TaskProtocolManager.ClientSubmitTaskItem` → `ClientSubmitNpcTaskItem` → `SubmitGameTaskItem2NpcCommand { GameTaskId, NpcId=STATIC, ItemNetPairs }` — an ordinary `[NetworkCommand]`, **without** `[VerifyEntity]` (see the decompilation) | `DailyQuestSubmitFeature.cs` → **`TrySubmitDailyQuestCheapestItemsAura(taskId, submitNpc, type, param)`** (generic, driven by `TableGameTask.submitTargetItem` and the backpack); reused in `QuestAssistantOnSubmitToNpcClicked` | **NpcId is the STATIC id, with NO teleport, netId or dialogue — a direct synchronous call.** §24→§25→§26→§27: going through the full talk flow (teleport + RPC + dialogue) DID work, but the dialogue panel hung (see below) — a needless step, since removed. **Rule:** before wrapping a submit action in the talk flow, check the wire command's signature for `[VerifyEntity]` or a netId field |
+| Finish a CanSubmit quest WITHOUT items (talk/flag only, e.g. `checkParamString="PlayerFeatureOpen"`) | THE SAME `ClientSubmitTaskItem`, but with an **empty** `List<ItemNetPair>` — vanilla `AutoSubmitNpcTaskItem` sends an empty list itself when `TableGameTask.submitTargetItem` is empty; with `submitNpc>0` the game ignores `submitType`/`submitParam` and reads `submitNpc` from its own table | `HeartopiaComplete.QuestAssistantUi.cs` → `QuestAssistantTrySubmitNoItemsAura` (§29) | **Determine this BEFORE acting** via `TryGetDailyQuestSubmitTargetsAura(gameTaskRow, ...)` — when `targets.Count==0` no items are needed at all, and calling the item collector blindly fails with "no submit targets" |
 
-## Мёртвые пути (подтверждено эмпирически — НЕ переиспользовать, НЕ чинить копированием)
+## Dead paths (confirmed empirically — do NOT reuse, do NOT fix by copying)
 
-- `Teleport.cs` → `TryGetNpcNetIdViaClientService` (managed reflection на `EcsService`/
-  `INpcClientService`) — `FindLoadedType` возвращает null, типы Mono-only (§14-§15).
-- `Teleport.cs` → `PopulateLiveNpcEntriesFromMapSpots` (managed reflection на `MapSpotsSystem`) —
-  тот же диагноз, молча возвращает 0 с момента написания (§21). Список NPC-телепортов реально
-  наполняется Unity-сканом + `TryGetLiveNpcPositionByIdMono`.
-- Чтение `MapSpotData.position` из `GetMapSpots()` для Npc-спотов — поле легитимно нулевое; сам UI
-  карты для Npc/Player зовёт `TryGetMapSpotPosition` (см. `MapSpot.GetPosition()`,
+- `Teleport.cs` → `TryGetNpcNetIdViaClientService` (managed reflection over `EcsService` /
+  `INpcClientService`) — `FindLoadedType` returns null, the types are Mono-only (§14-§15).
+- `Teleport.cs` → `PopulateLiveNpcEntriesFromMapSpots` (managed reflection over `MapSpotsSystem`) —
+  the same diagnosis; it has silently returned 0 since the day it was written (§21). The NPC teleport
+  list is actually filled by the Unity scan plus `TryGetLiveNpcPositionByIdMono`.
+- Reading `MapSpotData.position` from `GetMapSpots()` for Npc spots — the field is legitimately zero;
+  the map UI itself calls `TryGetMapSpotPosition` for Npc/Player (see `MapSpot.GetPosition()`,
   `ilspy-dumps/XDTGameSystem/.../MapSpot.cs:384-397`) (§22).
-- Заворачивать item-submit (`SubmitToNpc`/CanSubmit) в полный talk-флоу (телепорт + `SendTalkWithNpc`
-  + `OpenTaskDialogue`) — РАБОТАЛО (квест завершался), но **вешало `DialoguePanel` навсегда**: панель
-  закрывается только по `TalkEndEvent`, который диспатчится ИЗНУТРИ её собственного tap-through
-  state machine (`DialogueNodeTask.TapHandler`); открыть панель и передать предметы отдельным
-  AuraMono-вызовом в обход панели означает её tap-flow никогда не запускается → `TalkEndEvent`
-  никогда не диспатчится → панель зависает на первой странице (§26-§27). Для submit-действий,
-  сигнатура которых не требует netId (см. строку выше) — не открывать диалог вообще.
+- Wrapping an item submit (`SubmitToNpc`/CanSubmit) in the full talk flow (teleport +
+  `SendTalkWithNpc` + `OpenTaskDialogue`) — it WORKED (the quest completed) but **hung `DialoguePanel`
+  forever**: the panel closes only on `TalkEndEvent`, which is dispatched from INSIDE its own
+  tap-through state machine (`DialogueNodeTask.TapHandler`). Opening the panel and then handing the
+  items over through a separate AuraMono call bypasses the panel, so its tap flow never starts →
+  `TalkEndEvent` is never dispatched → the panel hangs on its first page (§26-§27). For submit actions
+  whose signature does not require a netId (see the row above), do not open a dialogue at all.
 
-## Ключевые факты про квесты "поговори с NPC"
+## Key facts about "talk to an NPC" quests
 
-- Условие `InteractWithNpc`(30011): `typeParam` = static id NPC. Но у `EnterDialogNode`(30501)
-  `typeParam` = **id ДИАЛОГОВОГО УЗЛА, НЕ NPC** (подтверждено 2026-07-04: "Gossip: The Vast World"
-  typeParam=10014, реальный NPC = 307 Li Zhen; "Princess Stella's Adventure" typeParam=10013, NPC =
-  106 Mrs. Joan) — резолв netId/позиции по нему падает везде («no netId and no map-spot position»).
-  **Правильный id NPC для ОБОИХ условий — trackMark `markCategory=2(NPC)`.id** (для InteractWithNpc
-  typeParam с ним просто совпадает). Классификатор предпочитает NPC-trackMark (progress doc §51) —
-  тот же id-space урок, что navpoint/§44.
-- Прогресс кредитует **сервер** при обработке `TalkWithPlayerCommand` — клиентская панель ничего
-  не двигает. Реальный флоу игры: interact-target рядом → `SendTalkWithNpc(netId, true)` → ответ
-  `NpcTalkStartEvent` → только потом UI (`TalkWithTaskNpcCommand.cs`, `[InteractSetting(10401)]`).
-- Проверяет ли сервер дистанцию у RPC — не доказано (после телепорта мы всегда рядом).
+- Condition `InteractWithNpc`(30011): `typeParam` is the NPC's static id. But for
+  `EnterDialogNode`(30501) `typeParam` is **the DIALOGUE NODE's id, NOT the NPC's** (confirmed
+  2026-07-04: "Gossip: The Vast World" typeParam=10014 while the real NPC is 307 Li Zhen;
+  "Princess Stella's Adventure" typeParam=10013, NPC = 106 Mrs. Joan) — resolving a netId or position
+  from it fails everywhere ("no netId and no map-spot position").
+  **The correct NPC id for BOTH conditions is the trackMark `markCategory=2(NPC)`.id** (for
+  InteractWithNpc the typeParam simply happens to match it). The classifier prefers the NPC trackMark
+  (progress doc §51) — the same id-space lesson as navpoint/§44.
+- Progress is credited by **the server** when it handles `TalkWithPlayerCommand` — the client panel
+  moves nothing. The game's real flow: an interact target nearby → `SendTalkWithNpc(netId, true)` →
+  the `NpcTalkStartEvent` reply → and only then the UI (`TalkWithTaskNpcCommand.cs`,
+  `[InteractSetting(10401)]`).
+- Whether the server checks distance on the RPC is unproven (after a teleport we are always close).

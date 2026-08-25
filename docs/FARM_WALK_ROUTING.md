@@ -1,229 +1,237 @@
-# Farm Walk: выбор маршрута, шаг за шагом
+# Farm Walk: route selection, step by step
 
-Что именно происходит в коде между «есть цель» и «ось толкается в такую-то сторону». Каждая
-ветка — со своим условием, своей константой и, где это известно, с числом, которым она получена.
+What actually happens in the code between "there is a target" and "the axis is pushed that way". Every
+branch comes with its condition, its constant and, where it is known, the number that produced it.
 
-Файлы: `buddy/FarmWalkFeature.cs` (маршрут, следование, побеги), `buddy/TrackPathGraphFeature.cs`
-(граф путевых точек, снап, A\*).
+Files: `buddy/FarmWalkFeature.cs` (routing, following, escapes), `buddy/TrackPathGraphFeature.cs` (the
+waypoint graph, snapping, A\*).
 
-Общее устройство: **позиция никогда не пишется напрямую**. Всё движение — это ось джойстика через
-`TrySetGameMoveAxis`, то есть родная локомоция игры; сервер видит обычную ходьбу. Телепорт остаётся
-только аварийным выходом.
-
----
-
-## 1. Начало прохода — `BeginFarmWalk`
-
-```
-позиция игрока не читается            → отказ, прохода нет
-Distance3D(self, target) <= 0.25 м    → маршрут = [target], один угол, идём сразу
-иначе                                 → TryBuildFarmWalkRoute(self, target)
-маршрут не построился                 → отказ (вызывающий уходит в телепорт)
-```
-
-`FarmWalkCollectDistance = 0.25 м`. Ветка «уже на месте» существует ради конкретного бага: отказ
-отправлял вызывающего в `FarmTeleportTo`, и ферма телепортировалась на узел, стоя в 1.3 м от него.
-
-Сбрасывается при каждом новом проходе: счётчик прыжков, разрешение на разовый поиск объезда
-(`farmWalkDetourSearchDone`), разовый зонд, разовое уточнение высоты, фаза побега, база прогресса.
+The overall design: **the position is never written directly**. All movement is a joystick axis
+through `TrySetGameMoveAxis`, i.e. the game's own locomotion, so the server sees ordinary walking. A
+teleport remains an emergency exit only.
 
 ---
 
-## 2. Построение маршрута — `TryBuildFarmWalkRoute(from, to)`
-
-Пишет в **отдельный буфер** `farmWalkScratchCorners` и переносит в `farmWalkCorners` только при
-успехе. Причина: `TryComputeTrackGraphPath` очищает выходной список первым делом, так что запись
-напрямую опустошала бы текущий маршрут, и следующее же чтение угла выходило за границы.
-
-### 2.1. Снап концов к графу — `TryFindReachableTrackGraphNode`
-
-Радиус `FarmWalkGraphSnapRadius = 60 м`, до `FarmWalkSnapMaxProbes = 12` кандидатов.
+## 1. Starting a walk — `BeginFarmWalk`
 
 ```
-граф не готов                          → отказ
-физика (Linecast) недоступна           → берём просто ближайший узел
-кандидаты в радиусе, кроме исключённых → сортировка по расстоянию
-  для первых 12:
-    луч по маске Passable до узла чист → берём этот узел ✔
-  ни один не чист                      → берём ближайший, но пишем в лог предупреждение
-кандидатов ноль, а исключения есть     → ⚠ клапан голодания: игнорируем исключения на этот снап
-кандидатов ноль без исключений         → отказ
+the player's position cannot be read   → refuse, no walk
+Distance3D(self, target) <= 0.25 m     → route = [target], one corner, go straight there
+otherwise                              → TryBuildFarmWalkRoute(self, target)
+the route failed to build              → refuse (the caller falls through to a teleport)
 ```
 
-**Клапан голодания** — не украшение: в одной длинной сессии забанилось 696 из 1745 путевых точек,
-все в районе работы фермы, и снап начал возвращать «нет узла в 60 м» вечно. Эвристика не имеет права
-делать маршрутизацию невозможной.
+`FarmWalkCollectDistance = 0.25 m`. The "already there" branch exists for one specific bug: a refusal
+sent the caller into `FarmTeleportTo`, and the farm teleported onto a node while standing 1.3 m from
+it.
 
-Проверка луча идёт по маске **Passable**, не `All`: `All` включает Ground, и луч между двумя точками
-на уровне земли упирается в рельеф на любом склоне.
-
-### 2.2. A\* по графу — `TryComputeTrackGraphPath`
-
-Обычный A\*, эвристика — евклидово расстояние до цели, стоимость ребра — расстояние между узлами.
-
-```
-startIndex == endIndex → маршрут из одной точки (оба конца снапнулись в один узел)
-путь найден            → список позиций узлов от старта к финишу
-открытый список пуст   → отказ
-```
-
-Соседи хранятся **позициями**, а не ссылками, поэтому граф можно перестраивать без возни с
-идентичностью объектов.
-
-### 2.3. Добавление настоящей цели
-
-К списку узлов дописывается `to`. Это повторяет `GetPath2` игры: проход должен кончаться на ресурсе,
-а не на последней путевой точке.
-
-### 2.4. Вырожденный маршрут и поиск объезда
-
-Условие входа — **только на первом построении прохода**, не на перестроении:
-
-```
-!farmWalkActive  &&  !farmWalkDetourSearchDone  &&  углов < 3  &&  Linecast доступен
-```
-
-Большинство прыжков фермы — 5–20 м, короче шага графа, поэтому оба конца снапаются в **один** узел,
-A\* возвращает одну точку, и маршрут получается `[узел, цель]` — то есть прямая, в которой геометрия
-между игроком и ресурсом не проверялась ни разу.
-
-Игра так не делает: её `GetPath` выдаёт двухточечную прямую только если
-`!Linecast(start, end - horizontalOffset, All)`. Тест скопирован дословно, с двумя оговорками:
-
-- **оба конца подняты** на `FarmWalkShortcutProbeLift = 1.2 м`. Без подъёма луч по `All` идёт по
-  земле и на любом склоне рапортует «занято» — так и было: «direct line blocked» срабатывало на
-  открытом пляже на 8.9 м, потом 11.8, потом 13.8, пока игрок пятился от устрицы;
-- у цели отнимается **0.5 м** вдоль направления (`pullBack`), как в оригинале.
-
-```
-прямая чиста     → оставляем как есть
-прямая занята    → TryBuildDetouredFarmWalkRoute
-                     нашёлся объезд → маршрут заменён, срезка углов НЕ применяется
-                     не нашёлся     → оставляем прямую, но пишем в лог, почему будет тяжело
-```
-
-Ограничение «только на первом построении» тоже выстрадано: повторный запуск каждые 1.5 с сбрасывал
-индекс угла в 0, игрок разворачивался к первому углу, коридорный тест падал, и маршрут строился
-снова — 45 секунд ходьбы **от** узла с одними и теми же шестью строками в логе.
-
-### 2.5. Объезд — `TryBuildDetouredFarmWalkRoute`
-
-До `FarmWalkDetourAttempts = 4` попыток. Каждая: исключить прежний конечный узел, снапнуть цель к
-**другому** узлу, построить A\* в отдельный буфер `farmWalkDetourCorners`, дописать цель.
-
-```
-углов < 2                                        → следующая попытка
-последний_узел → цель занято (маска Passable)    → следующая попытка
-иначе                                            → принять, индекс угла = 0
-```
-
-Три детали, каждая за свой баг:
-
-- **отдельный буфер**, не `farmWalkScratchCorners`: проба затирала маршрут, который вызывающий
-  собирался зафиксировать, и после четырёх неудач проход получал последнего отвергнутого кандидата.
-  Так проход на 18.8 м в два угла превращался в «timed out 13,1m short [corner 1/8]»;
-- финальная нога проверяется по **Passable**, не `All`: 15–20 м от точки до ресурса, оба конца на
-  земле — против `All` это занято по определению, и все четыре попытки падали всегда;
-- срезка углов к объезду **не применяется**: маршрут существует именно потому, что прямая занята,
-  схлопывание вернуло бы стену обратно в середину;
-- индекс угла ставится в **0**, а не «пропустить пройденное»: первый угол и есть весь смысл объезда.
-
-### 2.6. Срезка углов — `ShortcutFarmWalkRoute`
-
-Повторяет `TrackingPathModule`: убирается **только первый** угол и **только** если луч до второго
-чист. Не больше `FarmWalkShortcutMaxRemovals = 3` за построение, пролёт не длиннее
-`FarmWalkShortcutMaxSpan = 10 м` (у игры `tryLineConnectDis` — те же ~10 м).
-
-```
-углов < 2 или Linecast недоступен → выход
-для 3 проходов:
-  расстояние(from, второй) > 10 м                        → стоп
-  прямая не короче ломаной через первый угол             → стоп
-  луч чист на уровне НОГ И на уровне +1.2 м              → убрать первый угол
-  иначе                                                  → стоп
-```
-
-Проверяются **обе** высоты: низкий луч проскакивает под перилами и через щели.
-
-⚠️ Брать «самый дальний видимый угол» и удалять всё до него **нельзя** — так маршрут схлопывался в
-прямую (18.9 м в 2 угла) и игрок шёл сквозь здания. Одна чистая линия на уровне ног не доказывает,
-что весь объезд лишний; обычно это просто луч, попавший в щель.
-
-### 2.7. Выбор стартового угла
-
-Не 0, а первый угол, который **действительно впереди**:
-
-```
-пока угол не последний:
-  reached = горизонт. расстояние(from, угол) <= FarmWalkCornerReachDistance (1.2 м)
-  passed  = расстояние(from, следующий) < расстояние(угол, следующий)
-  reached || passed → пропустить угол
-  иначе             → стоп
-```
-
-A\* всегда начинает маршрут с узла, ближайшего к игроку, и через несколько метров этот узел уже
-**позади**. Два отказа отсюда: стоя на узле — угол 0 под ногами, дельта рулёжки ~0, тело замирает;
-в паре метров за ним — каждое перестроение целится назад, игрок разворачивается, доходит,
-продвигается, разворачивается снова. Со стороны — бег туда-сюда, а детектор застревания показывает
-0.00 м, потому что меряет **чистое смещение**, которое у колебания нулевое при любой скорости.
+Reset on every new walk: the jump counter, the permission for the one-shot detour search
+(`farmWalkDetourSearchDone`), the one-shot probe, the one-shot height correction, the escape phase and
+the progress baseline.
 
 ---
 
-## 3. Следование маршруту, каждый кадр
+## 2. Building the route — `TryBuildFarmWalkRoute(from, to)`
 
-### 3.1. Продвижение по углам
+It writes into a **separate buffer**, `farmWalkScratchCorners`, and moves the result into
+`farmWalkCorners` only on success. The reason: `TryComputeTrackGraphPath` clears its output list first
+thing, so writing directly would empty the current route and the very next corner read would go out of
+bounds.
 
-То же правило `reached || passed`, что и при выборе стартового угла. При продвижении:
-`farmWalkLegStart = пройденный угол`, `farmWalkEverAdvanced = true`, счётчик бесплодных перестроений
-обнуляется.
+### 2.1. Snapping the ends to the graph — `TryFindReachableTrackGraphNode`
 
-Углы кончились → `FinishFarmWalk("ran out of corners …", teleport: true)`.
+Radius `FarmWalkGraphSnapRadius = 60 m`, up to `FarmWalkSnapMaxProbes = 12` candidates.
 
-### 3.2. Рулёжка
+```
+the graph is not ready                      → refuse
+physics (Linecast) unavailable              → just take the nearest node
+candidates in range, minus the excluded     → sort by distance
+  for the first 12:
+    a Passable ray to the node is clear     → take this node ✔
+  none is clear                             → take the nearest, but log a warning
+zero candidates while exclusions exist      → ⚠ starvation valve: ignore exclusions for this snap
+zero candidates with no exclusions          → refuse
+```
 
-Направление — на текущий угол, повёрнутое на **минус yaw камеры** (`ToCameraSpaceJoystick` дальше по
-цепочке повернёт обратно). Скорость полная (`FarmWalkSpeedMax = 1`), на последних
-`FarmWalkSlowApproachDistance = 2 м` плавно падает до `0.2` — иначе локомоция проскакивает цель и
-наматывает круги. Поворот ограничен `FarmWalkTurnRateDegPerSecond = 360°/с`.
+The **starvation valve** is not decoration: in one long session 696 of 1745 waypoints ended up banned,
+all in the area the farm was working, and the snap started returning "no node within 60 m" forever. A
+heuristic has no right to make routing impossible.
 
-Во время побега рулёжка **полностью отключена**: фаза побега владеет осью единолично.
+The ray is tested on the **Passable** mask, not `All`: `All` includes Ground, and a ray between two
+points at ground level runs into the terrain on any slope.
+
+### 2.2. A\* over the graph — `TryComputeTrackGraphPath`
+
+An ordinary A\*, with Euclidean distance to the target as the heuristic and the distance between nodes
+as the edge cost.
+
+```
+startIndex == endIndex → a one-point route (both ends snapped to the same node)
+a path was found       → the list of node positions from start to finish
+the open list is empty → refuse
+```
+
+Neighbours are stored **as positions** rather than references, so the graph can be rebuilt without
+worrying about object identity.
+
+### 2.3. Appending the real target
+
+`to` is appended to the node list. This mirrors the game's `GetPath2`: a walk has to end at the
+resource, not at the last waypoint.
+
+### 2.4. A degenerate route and the detour search
+
+The entry condition applies **only on a walk's first build**, not on a re-path:
+
+```
+!farmWalkActive  &&  !farmWalkDetourSearchDone  &&  corners < 3  &&  Linecast available
+```
+
+Most of the farm's hops are 5–20 m, shorter than the graph's spacing, so both ends snap to **one**
+node, A\* returns a single point, and the route comes out as `[node, target]` — a straight line in
+which the geometry between the player and the resource was never checked at all.
+
+The game does not do this: its `GetPath` produces a two-point straight line only when
+`!Linecast(start, end - horizontalOffset, All)`. The test is copied verbatim, with two caveats:
+
+- **both ends are lifted** by `FarmWalkShortcutProbeLift = 1.2 m`. Without the lift an `All` ray runs
+  along the ground and reports "occupied" on any slope — which is what happened: "direct line blocked"
+  fired on an open beach at 8.9 m, then 11.8, then 13.8, while the player backed away from an oyster;
+- **0.5 m** is subtracted from the target along the direction (`pullBack`), as in the original.
+
+```
+the straight line is clear   → leave it as is
+the straight line is blocked → TryBuildDetouredFarmWalkRoute
+                               a detour was found → the route is replaced, corner cutting is NOT applied
+                               none was found     → keep the straight line, but log why this will be hard
+```
+
+The "first build only" restriction was earned too: re-running it every 1.5 s reset the corner index to
+0, the player turned back toward the first corner, the corridor test failed, and the route was built
+again — 45 seconds of walking **away** from a node with the same six lines in the log.
+
+### 2.5. The detour — `TryBuildDetouredFarmWalkRoute`
+
+Up to `FarmWalkDetourAttempts = 4` attempts. Each one: exclude the previous end node, snap the target
+to a **different** node, run A\* into the separate `farmWalkDetourCorners` buffer, append the target.
+
+```
+corners < 2                                        → next attempt
+last_node → target is blocked (Passable mask)      → next attempt
+otherwise                                          → accept, corner index = 0
+```
+
+Three details, each paid for by its own bug:
+
+- **a separate buffer**, not `farmWalkScratchCorners`: a probe overwrote the route the caller was
+  about to commit, and after four failures the walk got the last rejected candidate. That is how an
+  18.8 m two-corner walk turned into "timed out 13,1m short [corner 1/8]";
+- the final leg is checked on **Passable**, not `All`: 15–20 m from a point to a resource with both
+  ends on the ground is blocked by definition against `All`, and all four attempts always failed;
+- corner cutting is **not applied** to a detour: the route exists precisely because the straight line
+  is blocked, and collapsing it would put the wall back in the middle;
+- the corner index is set to **0** rather than "skip what has been covered": the first corner is the
+  whole point of the detour.
+
+### 2.6. Corner cutting — `ShortcutFarmWalkRoute`
+
+This mirrors `TrackingPathModule`: **only the first** corner is removed, and **only** if the ray to
+the second is clear. No more than `FarmWalkShortcutMaxRemovals = 3` per build, spanning no further
+than `FarmWalkShortcutMaxSpan = 10 m` (the game's `tryLineConnectDis` is the same ~10 m).
+
+```
+corners < 2 or Linecast unavailable → exit
+for 3 passes:
+  distance(from, second) > 10 m                       → stop
+  the straight line is not shorter than via corner 1  → stop
+  the ray is clear at FOOT height AND at +1.2 m       → remove the first corner
+  otherwise                                           → stop
+```
+
+**Both** heights are checked: a low ray slips under railings and through gaps.
+
+⚠️ Taking "the furthest visible corner" and deleting everything before it is **not allowed** — that
+collapsed the route into a straight line (18.9 m into 2 corners) and walked the player through
+buildings. One clear line at foot level does not prove the whole detour is unnecessary; usually it is
+just a ray that found a gap.
+
+### 2.7. Choosing the starting corner
+
+Not 0, but the first corner that is **genuinely ahead**:
+
+```
+while the corner is not the last:
+  reached = horizontal distance(from, corner) <= FarmWalkCornerReachDistance (1.2 m)
+  passed  = distance(from, next) < distance(corner, next)
+  reached || passed → skip the corner
+  otherwise         → stop
+```
+
+A\* always begins a route at the node nearest the player, and a few metres later that node is already
+**behind** them. Two failures come from here: standing on the node, corner 0 is underfoot, the steering
+delta is about zero and the body freezes; a couple of metres past it, every rebuild aims backwards, the
+player turns around, walks back, makes progress, and turns around again. From outside it is running
+back and forth, while the stuck detector reads 0.00 m because it measures **net displacement**, which
+is zero for an oscillation at any speed.
 
 ---
 
-## 4. Перестроение маршрута
+## 3. Following the route, every frame
 
-Три настоящие причины, и только они:
+### 3.1. Advancing through corners
 
-| Причина | Условие | Константа |
+The same `reached || passed` rule as for choosing the starting corner. On an advance:
+`farmWalkLegStart = the corner just passed`, `farmWalkEverAdvanced = true`, and the futile-rebuild
+counter is reset.
+
+Corners run out → `FinishFarmWalk("ran out of corners …", teleport: true)`.
+
+### 3.2. Steering
+
+The direction points at the current corner, rotated by **minus the camera yaw**
+(`ToCameraSpaceJoystick` further down the chain rotates it back). Speed is full
+(`FarmWalkSpeedMax = 1`) and eases down to `0.2` over the last
+`FarmWalkSlowApproachDistance = 2 m` — otherwise the locomotion overshoots the target and circles.
+Turning is capped at `FarmWalkTurnRateDegPerSecond = 360°/s`.
+
+During an escape, steering is **switched off entirely**: the escape phase owns the axis alone.
+
+---
+
+## 4. Re-pathing
+
+Three real causes, and only these:
+
+| Cause | Condition | Constant |
 |---|---|---|
-| вне коридора | `DistanceToWalkLeg(self, legStart, corner) > 4 м` | `FarmWalkCorridorTolerance` |
-| не приближается | `now - farmWalkBestAt >= 1.5 с` (половина окна) | `FarmWalkNoClosingTimeout = 3 с` |
-| страховочный такт | `now >= farmWalkNextRepathAt` | `FarmWalkRepathInterval = 12 с` |
+| off corridor | `DistanceToWalkLeg(self, legStart, corner) > 4 m` | `FarmWalkCorridorTolerance` |
+| not closing | `now - farmWalkBestAt >= 1.5 s` (half the window) | `FarmWalkNoClosingTimeout = 3 s` |
+| safety cadence | `now >= farmWalkNextRepathAt` | `FarmWalkRepathInterval = 12 s` |
 
-⚠️ **Маршрут закреплён.** Раньше он перестраивался каждые 1.5 с безусловно — около сорока раз за
-минутный проход. Каждое перестроение заново снапает оба конца, то есть может выдать другую цепочку
-углов на других высотах. На суше это проходило незаметно, под водой видно как вертикальный
-флип-флоп: `diving 17,6m / surfacing 1,1m / diving 17,6m / surfacing 2,1m` — прицел скачет между
-углами двух разных маршрутов, игрок болтается на месте.
+⚠️ **The route is pinned.** It used to be rebuilt unconditionally every 1.5 s — about forty times over
+a minute-long walk. Every rebuild re-snaps both ends, so it can return a different chain of corners at
+different heights. On land this passed unnoticed; underwater it shows as a vertical flip-flop:
+`diving 17,6m / surfacing 1,1m / diving 17,6m / surfacing 2,1m` — the aim jumping between corners of
+two different routes while the player bobs in place.
 
-### 4.1. Оценка результата перестроения
-
-```
-routeChanged   = число углов изменилось ИЛИ сдвинулся угол 0
-routeImproved  = routeChanged И новая длина маршрута < лучшей - 0.5 м
-```
-
-`FarmWalkRepathMustGain = 0.5 м` — ниже шума от повторного снапа обоих концов и заметно ниже шага
-графа.
+### 4.1. Judging the result of a rebuild
 
 ```
-routeImproved  → база прогресса перевыставляется, счётчик бесплодных обнуляется
-иначе          → база НЕ трогается, счётчик бесплодных растёт
+routeChanged   = the corner count changed OR corner 0 moved
+routeImproved  = routeChanged AND the new route length < the best - 0.5 m
 ```
 
-⚠️ **Различный ≠ лучший.** Перевыставление базы на любое изменение делало проход бессмертным вторым
-способом — через ветку, которую первый сторож не покрывает. У графа в некоторых местах два
-аттрактора, и перестроения скачут между ними, так что маршрут никогда не «идентичен»:
+`FarmWalkRepathMustGain = 0.5 m` — below the noise of re-snapping both ends and appreciably below the
+graph's spacing.
+
+```
+routeImproved  → the progress baseline is re-based, the futile counter resets
+otherwise      → the baseline is NOT touched, the futile counter grows
+```
+
+⚠️ **Different ≠ better.** Re-basing on any change made a walk immortal by a second route — through a
+branch the first guard does not cover. In places the graph has two attractors and rebuilds bounce
+between them, so the route is never "identical":
 
 ```
 re-pathed (safety cadence): 3 -> 5 corners
@@ -231,180 +239,186 @@ shortcut removed 2 corner(s), 3 left
 re-pathed (off corridor):   5 -> 3 corners
 ```
 
-— каждые девять секунд, сколько ни смотри. А поскольку «не приближается» отсчитывается от
-`farmWalkBestAt`, каждый переброс перезапускал часы, которые обязаны проход завершить.
+— every nine seconds, for as long as you care to watch. And since "not closing" counts from
+`farmWalkBestAt`, every bounce restarted the clock that is supposed to end the walk.
 
-В логе печатается вердикт: `(IDENTICAL)`, `(RESHUFFLED, no shorter)` или `(N.Nm shorter)`.
+The verdict is printed in the log: `(IDENTICAL)`, `(RESHUFFLED, no shorter)` or `(N.Nm shorter)`.
 
-### 4.2. Бесплодные перестроения → бан путевой точки
+### 4.2. Futile rebuilds → banning a waypoint
 
-`FarmWalkMaxFutileRepaths = 3`. По достижении:
+`FarmWalkMaxFutileRepaths = 3`. On reaching it:
 
 ```
-есть место в списке банов (< FarmWalkMaxBlockedNodes = 48)
-  и текущий угол снапается к узлу
-  и узел ещё не забанен
-    → бан на FarmWalkBlockedNodeTtl = 300 с, узел в исключения,
-      счётчик сброшен, немедленное перестроение
-иначе
+there is room in the ban list (< FarmWalkMaxBlockedNodes = 48)
+  and the current corner snaps to a node
+  and that node is not already banned
+    → ban it for FarmWalkBlockedNodeTtl = 300 s, add it to the exclusions,
+      reset the counter, re-path immediately
+otherwise
     → FinishFarmWalk("the graph keeps returning the same unwalkable route", teleport: true)
 ```
 
-Прежде чем сдаваться на **узле**, сдаёмся на **путевой точке**: маршрут заклинен на конкретном углу,
-и A\* будет выдавать его же, пока он не убран со стола. Четыре разные цели подряд умирали на
-«corner 2» — разные назначения, одна и та же заблокированная точка посередине.
+Before giving up on the **node**, give up on the **waypoint**: the route is wedged on a specific
+corner, and A\* will keep producing it until that corner is off the table. Four different targets in a
+row died at "corner 2" — different destinations, the same blocked point in the middle.
 
 ---
 
-## 5. Когда маршрут не спасает — побег
+## 5. When the route does not help — the escape
 
-Порядок эскалации на суше (подводный путь свой, см. `FARM_WALK_TO_NODE.md` §6a).
+The escalation order on land (the underwater path is its own, see `FARM_WALK_TO_NODE.md` §6a).
 
-### 5.1. Детекторы
+### 5.1. Detectors
 
-| Детектор | Что меряет | Порог |
+| Detector | What it measures | Threshold |
 |---|---|---|
-| смещение | 3D за `FarmWalkStuckSampleInterval = 0.6 с` | `FarmWalkStuckMinProgress = 0.15 м` |
-| остаток маршрута | длина оставшегося пути | `0.5 м` за `3 с` |
+| displacement | 3-D over `FarmWalkStuckSampleInterval = 0.6 s` | `FarmWalkStuckMinProgress = 0.15 m` |
+| route remaining | the length of the path left | `0.5 m` over `3 s` |
 
-Смещение считается **трёхмерным**: погружение или подъём — чистая вертикаль, по горизонтали это
-0.00 м, и ходок объявлял бы себя застрявшим, спускаясь на 12 м к морскому винограду.
+Displacement is measured **in three dimensions**: descending or ascending is pure vertical, which is
+0.00 m horizontally, and the walker would declare itself stuck while descending 12 m to sea grapes.
 
-Остаток — именно **длина пути**, не расстояние по прямой: обход холма временно увеличивает прямую
-дистанцию, и прямолинейная метрика убивала здоровые проходы.
+Route remaining is the **path length**, not the straight-line distance: going around a hill temporarily
+increases the straight distance, and the straight-line metric killed healthy walks.
 
-### 5.2. Апексный побег — `BeginFarmWalkHopBurst` / `UpdateFarmWalkHopBurst`
+### 5.2. The apex escape — `BeginFarmWalkHopBurst` / `UpdateFarmWalkHopBurst`
 
-Заменил прежний «отойти на 5 м и прыгать, толкая ось в узел». Все числа измерены в игре.
+This replaced the old "back off 5 m and jump while pushing the axis into the node". All the numbers
+were measured in game.
 
-**Предусловие, без которого не работает ничего:** во время побега **ось принадлежит ему одному**.
-Обычная рулёжка к углу на это время выключена. Пока этого не было, ходок каждый кадр возвращал ось
-на угол — то есть в препятствие, — и прыжок глох полностью: `3 hop(s), airborne 0%, 0.00m up` на
-всех курсах.
+**The precondition without which none of it works:** during an escape **the axis belongs to it alone**.
+Ordinary steering toward the corner is switched off for the duration. Until that was true, the walker
+put the axis back on the corner every frame — that is, into the obstacle — and the jump was suppressed
+completely: `3 hop(s), airborne 0%, 0.00m up` on every heading.
 
-**Этап 1 — упор до клина.** Толчок под +45° от курса на цель, направление **фиксируется один раз** в
-мировых координатах (пересчёт от текущего курса превращает диагональ в дугу вокруг цели, и упираться
-становится не во что).
+**Stage 1 — press until wedged.** A push at +45° off the bearing to the target, with the direction
+**fixed once** in world coordinates (recomputing it from the current bearing turns the diagonal into an
+arc around the target, leaving nothing to press against).
 
 ```
-крип < 0.1 м за 0.3 с, не раньше 1.0 с → КЛИН, прыжки отсюда
-пробег >= 3.5 м или прошло 6 с         → не клин
-пробег < 0.3 м                         → эта сторона стена
-не клин: сторона +45 → пробуем −45; обе пусты → прыжки с точки блокировки
+creep < 0.1 m over 0.3 s, no earlier than 1.0 s → WEDGED, jump from here
+travelled >= 3.5 m or 6 s elapsed              → not wedged
+travelled < 0.3 m                              → this side is a wall
+not wedged: side +45 → try −45; both empty → jump from the blocking point
 ```
 
-⚠️ Пустой упор **не переставляет точку отсчёта**. Иначе прыжки отыгрывают увод, набирают метр
-относительно смещённой точки и рапортуют победу: три «cleared it» подряд при движении прохода
-21.1 → 20.5 → 20.3 м.
+⚠️ An empty press **does not move the reference point**. Otherwise the jumps merely undo the drift,
+gain a metre relative to the shifted point and report victory: three "cleared it" in a row while the
+walk went 21.1 → 20.5 → 20.3 m.
 
-⚠️ Бесплодный упор **запоминается на весь проход**: следующие побеги идут сразу к прыжкам. Иначе
-каждый тратит ещё восемь метров на заведомо пустой поиск.
+⚠️ A fruitless press **is remembered for the whole walk**: later escapes go straight to jumping.
+Otherwise each one spends another eight metres on a search known to be empty.
 
-**Этап 2 — апексные прыжки** по курсам `45° → −45° → 0°`.
+**Stage 2 — apex jumps** on the headings `45° → −45° → 0°`.
 
-Один цикл:
+One cycle:
 ```
-фаза 0: ОТПУСКАЕМ ось, затем импульс          ← именно в этом порядке
-фаза 1: оси нет, ждём 0.40 с до вершины       ← без сокращений по отрыву
-фаза 2: на вершине включаем ось
-касание земли: ось снимаем немедленно
-0.35 с оседания → следующий импульс
-```
-
-Три места, где порядок критичен, каждое проверено отказом:
-
-- **отпустить до импульса.** Вызывающий код решает судьбу оси только после возврата, поэтому импульс
-  уходил с осью прошлого кадра — последнего кадра упора, направленного в стену. Курс, совпадавший с
-  направлением упора, давал `airborne 0%`, остальные 25–69 %;
-- **ждать полную задержку.** Сокращение «или отрыв + 0.2 с» включало руль на середине подъёма. Тот же
-  курс: **+4.00 м** высоты при подаче на вершине против **+0.36 м** на отрыве;
-- **снимать ось при касании.** Удержание ещё 0.35 с на земле означало, что следующий импульс уходит в
-  тело, треть секунды прижатое к преграде.
-
-**Повтор того, что платит:**
-```
-closer >= 0.25 м ИЛИ rise >= 0.5 м → повторить курс (до 6 раз)
-иначе                              → следующий курс
-курсы кончились                    → упор с другой стороны, либо конец побега
+phase 0: RELEASE the axis, then the impulse       ← in exactly that order
+phase 1: no axis, wait 0.40 s for the apex        ← no shortcuts based on leaving the ground
+phase 2: at the apex, engage the axis
+touching the ground: drop the axis immediately
+0.35 s to settle → the next impulse
 ```
 
-Пороги были 0.30 / 0.80 и роняли работающий курс: `+0,30m closer, +0,52m up — next heading`, при том
-что он продолжал набирать по полметра вертикали за прыжок.
+Three places where the order is critical, each proven by a failure:
 
-**Успех** — сближение с целью по горизонтали `>= 1 м`, **на земле**, от точки блокировки. Но побег на
-этом **не заканчивается**: победа запоминается, серия продолжается, пока платит, и завершается, когда
-перестала. Прежний немедленный выход резал один подъём на три побега по одному-два прыжка с
-блокировками между ними.
+- **release before the impulse.** The calling code decides the axis's fate only after returning, so the
+  impulse went out with the previous frame's axis — the last frame of the press, aimed at the wall. The
+  heading that matched the press direction gave `airborne 0%`, the others 25–69%;
+- **wait the full delay.** The shortcut "or leaving the ground + 0.2 s" engaged steering halfway up.
+  Same heading: **+4.00 m** of height with input at the apex against **+0.36 m** at take-off;
+- **drop the axis on contact.** Holding it another 0.35 s on the ground meant the next impulse went
+  into a body that had been pressed against the obstacle for a third of a second.
 
-**Бюджет:** 22 с на побег, до **3 побегов на проход**. Одного хватало, лишь пока побег не работал:
-первый уходил на уступ, и на последние два метра его уже не оставалось — `final approach not
-walkable (2,0m, dy=-0,1m) … jumps are spent`.
+**Repeat what pays:**
+```
+closer >= 0.25 m OR rise >= 0.5 m → repeat the heading (up to 6 times)
+otherwise                         → next heading
+headings exhausted                → press from the other side, or end the escape
+```
 
-**Где вызывается:** финальный подход, застревание, «не приближается». Все три раньше слали одиночный
-импульс `TryFarmWalkJump` — подавленный режим; он остался только в подводной ветке.
+The thresholds were 0.30 / 0.80 and dropped a working heading: `+0,30m closer, +0,52m up — next
+heading`, when it was still gaining half a metre of height per jump.
 
-Числа, на которых это построено:
+**Success** is closing on the target horizontally by `>= 1 m`, **on the ground**, measured from the
+blocking point. But the escape does **not** end there: the win is recorded, the series continues while
+it pays, and finishes when it stops. The old immediate exit chopped one climb into three escapes of one
+or two jumps each with blockings in between.
 
-| Утверждение | Измерение |
+**Budget:** 22 s per escape, up to **3 escapes per walk**. One was enough only while the escape did not
+work: the first went onto a ledge and there was nothing left for the last two metres — `final approach
+not walkable (2,0m, dy=-0,1m) … jumps are spent`.
+
+**Where it is called:** the final approach, being stuck, and "not closing". All three used to send a
+single `TryFarmWalkJump` impulse — a suppressed mode; it survives only in the underwater branch.
+
+The numbers this is built on:
+
+| Claim | Measurement |
 |---|---|
-| толчок в преграду подавляет прыжок | 43 импульса → 0.16 м пути, `grounded 100%`; 26 «прыжок-первым» → 4.15 м, `airborne` до 32% |
-| руль нужен на вершине | одновременно +0.11 м · при отрыве +0.36 м · **в апексе +4.00 и +3.67 м** |
-| 45°, не перпендикуляр | 0/±45 → +1.24 и +2.45 м сближения; ±90 → около +0.31 м |
-| подъём это серия | вручную пять одинаковых прыжков: 21.0 → 13.4 м; первые два по +0.52 и +0.60 м |
-| упор перед прыжком помогает | развёртка с голой точки — 9 курсов в минус; из клина первый курс +3.90 м и прибытие через 3.5 с |
-| апекс дуги | пик +1.42 м (`MotionConfig.JumpingHighest` 1.30 + разгон), вершина ~0.42 с |
-| итог в моде | один побег: **+3.58 м сближения, +4.05 м высоты**, 5 прыжков, `airborne 63–93%` |
+| pushing into an obstacle suppresses the jump | 43 impulses → 0.16 m travelled, `grounded 100%`; 26 "jump first" → 4.15 m, `airborne` up to 32% |
+| steering is needed at the apex | simultaneous +0.11 m · at take-off +0.36 m · **at the apex +4.00 and +3.67 m** |
+| 45°, not perpendicular | 0/±45 → +1.24 and +2.45 m closer; ±90 → about +0.31 m |
+| a climb is a series | five identical jumps by hand: 21.0 → 13.4 m; the first two +0.52 and +0.60 m |
+| pressing before jumping helps | a sweep from a bare point — 9 headings in the negative; from a wedge the first heading gave +3.90 m and arrival 3.5 s later |
+| the arc's apex | a peak of +1.42 m (`MotionConfig.JumpingHighest` 1.30 plus the run-up), apex at ~0.42 s |
+| the result in the mod | one escape: **+3.58 m closer, +4.05 m of height**, 5 jumps, `airborne 63–93%` |
 
-### 5.3. Прибытие
+### 5.3. Arrival
 
-Порог `0.25 м` по горизонтали плюс проверка `3D <= 1.8 м` (серверное правило
-`CollectAntiCheating.Distance = 2 м`). Разделение осей принципиально: ходьбой нельзя изменить
-высоту, и чисто-3D проверка делала недостижимым любой чуть приподнятый ресурс.
+The threshold is `0.25 m` horizontally plus a `3-D <= 1.8 m` check (the server's rule,
+`CollectAntiCheating.Distance = 2 m`). Splitting the axes matters: walking cannot change height, and a
+pure 3-D check made any slightly raised resource unreachable.
 
-### 5.4. Телепорт
+### 5.4. The teleport
 
-Только как страховка: маршрут не построился, либо лестница застревания исчерпана. Радиус
-`FarmWalkRescueTeleportRange = 10 м`, откат `FarmWalkRescueTeleportCooldown = 60 с`, не больше
-`FarmWalkMaxNodeFailures = 2` провалов на узел — после этого узел паркуется и ферма идёт к другому.
+Only as a safety net: the route failed to build, or the stuck ladder is exhausted. Radius
+`FarmWalkRescueTeleportRange = 10 m`, cooldown `FarmWalkRescueTeleportCooldown = 60 s`, at most
+`FarmWalkMaxNodeFailures = 2` failures per node — after that the node is parked and the farm goes to
+another.
 
 ---
 
-## 6. Сводка констант маршрутизации
+## 6. Routing constants at a glance
 
-| Константа | Значение | Смысл |
+| Constant | Value | Meaning |
 |---|---|---|
-| `FarmWalkGraphSnapRadius` | 60 м | радиус снапа концов к графу |
-| `FarmWalkSnapMaxProbes` | 12 | сколько ближайших узлов проверять лучом |
-| `FarmWalkCornerReachDistance` | 1.2 м | угол считается достигнутым |
-| `FarmWalkCorridorTolerance` | 4 м | отклонение от ноги маршрута = «вне коридора» |
-| `FarmWalkRepathInterval` | 12 с | страховочный такт перестроения |
-| `FarmWalkRepathMustGain` | 0.5 м | насколько маршрут должен стать короче, чтобы считаться лучше |
-| `FarmWalkNoClosingTimeout` | 3 с | окно «не приближается» (перестроение на половине) |
-| `FarmWalkMaxFutileRepaths` | 3 | бесплодных перестроений до бана точки |
-| `FarmWalkBlockedNodeTtl` | 300 с | срок бана путевой точки |
-| `FarmWalkMaxBlockedNodes` | 48 | предел списка банов |
-| `FarmWalkShortcutMaxSpan` | 10 м | предельный пролёт срезки |
-| `FarmWalkShortcutMaxRemovals` | 3 | срезок за построение |
-| `FarmWalkShortcutProbeLift` | 1.2 м | вторая высота проверки луча |
-| `FarmWalkDetourAttempts` | 4 | попыток найти объезд |
-| `FarmWalkStuckSampleInterval` | 0.6 с | такт детектора смещения |
-| `FarmWalkStuckMinProgress` | 0.15 м | порог этого детектора |
-| `FarmWalkStuckStrikeLimit` | 3 | strike'ов до эскалации |
+| `FarmWalkGraphSnapRadius` | 60 m | radius for snapping the ends to the graph |
+| `FarmWalkSnapMaxProbes` | 12 | how many nearest nodes to test with a ray |
+| `FarmWalkCornerReachDistance` | 1.2 m | a corner counts as reached |
+| `FarmWalkCorridorTolerance` | 4 m | deviation from the route leg = "off corridor" |
+| `FarmWalkRepathInterval` | 12 s | the safety cadence for re-pathing |
+| `FarmWalkRepathMustGain` | 0.5 m | how much shorter a route must be to count as better |
+| `FarmWalkNoClosingTimeout` | 3 s | the "not closing" window (re-path at half) |
+| `FarmWalkMaxFutileRepaths` | 3 | futile rebuilds before banning a point |
+| `FarmWalkBlockedNodeTtl` | 300 s | how long a waypoint stays banned |
+| `FarmWalkMaxBlockedNodes` | 48 | the ban list's limit |
+| `FarmWalkShortcutMaxSpan` | 10 m | the maximum span of a cut |
+| `FarmWalkShortcutMaxRemovals` | 3 | cuts per build |
+| `FarmWalkShortcutProbeLift` | 1.2 m | the second height a ray is checked at |
+| `FarmWalkDetourAttempts` | 4 | attempts to find a detour |
+| `FarmWalkStuckSampleInterval` | 0.6 s | the displacement detector's cadence |
+| `FarmWalkStuckMinProgress` | 0.15 m | that detector's threshold |
+| `FarmWalkStuckStrikeLimit` | 3 | strikes before escalating |
 
-Побег — свои константы, `FarmWalkEscape*`, см. §5.2.
+The escape has its own constants, `FarmWalkEscape*`, see §5.2.
 
 ---
 
-## 7. Что здесь опровергнуто и не подлежит возврату
+## 7. What has been disproved here and must not come back
 
-- **Безусловное перестроение по таймеру** — источник вертикального флип-флопа и хождения по кругу.
-- **Срезка «до самого дальнего видимого угла»** — схлопывает маршрут в прямую сквозь здания.
-- **Перевыставление базы прогресса на любое изменение маршрута** — делает проход бессмертным.
-- **Проверка финальной ноги по маске `All`** — занято по определению, объезд не находится никогда.
-- **Луч по земле без подъёма** — «прямая занята» на любом склоне и на открытом пляже.
-- **Отход с разбегом и прыжки с толчком в препятствие** — прыжок при этом подавляется полностью.
-- **Оценка прыжка по отрыву от земли** — на склоне `grounded` не отпускает ни на кадр, хотя подъём
-  идёт.
+- **Unconditional re-pathing on a timer** — the source of the vertical flip-flop and of walking in
+  circles.
+- **Cutting "to the furthest visible corner"** — collapses the route into a straight line through
+  buildings.
+- **Re-basing the progress baseline on any route change** — makes a walk immortal.
+- **Checking the final leg on the `All` mask** — blocked by definition, so a detour is never found.
+- **A ray along the ground with no lift** — "the straight line is blocked" on any slope and on an open
+  beach.
+- **Backing off with a run-up and jumping while pushing into the obstacle** — the jump is suppressed
+  entirely.
+- **Judging a jump by leaving the ground** — on a slope `grounded` never releases for a single frame
+  even though the climb is happening.
 
-Связанные документы: `FARM_WALK_TO_NODE.md` (проход целиком, подводная специфика, пригодность цели),
-`TECHNICAL.md` (граф путевых точек и его построение).
+Related documents: `FARM_WALK_TO_NODE.md` (the walk as a whole, underwater specifics, target
+eligibility), `TECHNICAL.md` (the waypoint graph and how it is built).

@@ -1,195 +1,197 @@
-# Транспорт: каталог, спавн, посадка, драконья лодка
+# Vehicles: catalogue, spawning, boarding, the dragon boat
 
-Всё, что мод знает про транспорт игры. Источник — разбор `ilspy-dumps` плюс живые проверки; спорные
-места помечены явно, непроверенное названо непроверенным.
-
----
-
-## 1. Каталог и владение
-
-**`TableCar`** (`ilspy-dumps/EcsClient/TableCar.cs`) — одна строка на транспорт, около 350 записей.
-Ключевые поля: `id` (совпадает со `staticId` предмета), физика (`runAcceleration`,
-`runForwardMaxSpeed`, `minTurnSpeed`, `turnTime`), `loadNum` (мест), `carBox[3]` (габарит, по нему
-ищется место для спавна), `refitInfo`, `drivingMode`, `normalPrefabId`.
-
-Словарь `TableData.TableCars`, доступ `TableData.GetCar(int id)`. Грузится из `ExcelTableType.Car`.
-Это и есть «все машины в игре».
-
-**Транспорт игрока** — предметы рюкзака в `EStorageType.Garage` (значение 3), категория
-`EntityType.car` (80–88, `EntityTypeUtil.IsGarageItem`). `staticId` предмета равен `TableCar.id`.
-Читается через `DataModule<BackPackSystem>.Instance.GetAllItem(EStorageType.Garage)` — та же
-кладовая, что показывает штатная панель транспорта.
+Everything the mod knows about the game's vehicles. The source is a reading of `ilspy-dumps` plus live
+checks; anything doubtful is marked as such, and anything unverified is called unverified.
 
 ---
 
-## 2. Спавн: клиент → сервер
+## 1. Catalogue and ownership
+
+**`TableCar`** (`ilspy-dumps/EcsClient/TableCar.cs`) — one row per vehicle, roughly 350 entries. The
+key fields are `id` (matching the item's `staticId`), the physics (`runAcceleration`,
+`runForwardMaxSpeed`, `minTurnSpeed`, `turnTime`), `loadNum` (seats), `carBox[3]` (the bounding box
+used to find room to spawn), `refitInfo`, `drivingMode` and `normalPrefabId`.
+
+The dictionary is `TableData.TableCars`, accessed through `TableData.GetCar(int id)`. It is loaded
+from `ExcelTableType.Car`. This is "every car in the game".
+
+**The player's vehicles** are backpack items in `EStorageType.Garage` (value 3), category
+`EntityType.car` (80–88, `EntityTypeUtil.IsGarageItem`). The item's `staticId` equals `TableCar.id`.
+They are read through `DataModule<BackPackSystem>.Instance.GetAllItem(EStorageType.Garage)` — the same
+store the stock vehicle panel shows.
+
+---
+
+## 2. Spawning: client → server
 
 ```
 VehiclePanel._GetOnVehicle → VehicleManager.GetOnVehicle(staticId)
-    → событие CallVehicleEvent{birthPointNetId=0, staticId, getOnVehicle}   (локальное)
+    → CallVehicleEvent{birthPointNetId=0, staticId, getOnVehicle}   (local)
     → VehicleManager.CreateDrivingVehicle(itemId, getOn)
 ```
 
-Внутри по шагам:
+Step by step, inside:
 
-1. `TableData.GetCar(itemId)` — проверка на null;
-2. позиция перед игроком: `VehicleUtility.CreateVehiclePosition(pos, rot, carBox, out vehiclePos, radius)`;
-3. запретная зона: `IMetaAreaService.IsPosForbiddenForVehicle(vehiclePos)` — **чистый табличный
-   поиск** `TableData.ForbiddenVehicleArea.Contains(areaId)`, не привязан к воде;
-4. `GetVehicleLevleObjectId(itemId, seat0, out levelObjectId)` — через
-   `IConfigManager.GetEntityScriptData(itemId, Feature.putitem)` по имени `sit_point_1`;
+1. `TableData.GetCar(itemId)` — a null check;
+2. a position in front of the player: `VehicleUtility.CreateVehiclePosition(pos, rot, carBox, out vehiclePos, radius)`;
+3. the forbidden area: `IMetaAreaService.IsPosForbiddenForVehicle(vehiclePos)` — **a pure table
+   lookup**, `TableData.ForbiddenVehicleArea.Contains(areaId)`, unrelated to water;
+4. `GetVehicleLevleObjectId(itemId, seat0, out levelObjectId)` — through
+   `IConfigManager.GetEntityScriptData(itemId, Feature.putitem)` by the name `sit_point_1`;
 5. **`VehicleProtocolManager.PlayerCallVehicle(itemId, vehiclePos, yAxis, levelObjectId, getOnVehicle)`**.
 
-Последний просто шлёт команду:
+The last one simply sends a command:
 
 ```csharp
 CallVehicleCommand { int StaticId; Vector3 Position; float YAxis; bool IsAutoGetOnDriveSeat; int LevelObjectId; }
 ```
 
-`XDT.Scene.Shared.Modules.Vehicle`, `[NetworkCommand]`, образ `EcsClient`.
+`XDT.Scene.Shared.Modules.Vehicle`, `[NetworkCommand]`, image `EcsClient`.
 
-**Сервер проверяет владение**: `VehicleErrorCode.VehicleNotHave / CarUnAvailable / AreaForbid /
-StaminaNotEnough`. То есть обычной `CallVehicleCommand` нельзя призвать чужой транспорт.
+**The server checks ownership**: `VehicleErrorCode.VehicleNotHave / CarUnAvailable / AreaForbid /
+StaminaNotEnough`. So an ordinary `CallVehicleCommand` cannot summon somebody else's vehicle.
 
-`VehicleProtocolManager` живёт в `XDTDataAndProtocol` и в interop отсутствует — только AuraMono.
+`VehicleProtocolManager` lives in `XDTDataAndProtocol` and is absent from interop — AuraMono only.
 
-### Ответ сервера асимметричен
+### The server's reply is asymmetric
 
-`VehicleProtocolManager.ServerCallVehicleResult` рассылает:
+`VehicleProtocolManager.ServerCallVehicleResult` dispatches:
 
-| Исход | Что приходит |
+| Outcome | What arrives |
 |---|---|
-| Успех | ⚠️ **ничего** — проверено трижды живьём: транспорт появлялся, `UpdateCurrentVehicle` не приходил ни разу |
-| Отказ по типу | `UITipEvent{tipId=10139}` — быстро и надёжно, <100 мс |
-| `AreaForbid` | ⚠️ **ничего** — в `switch` пустая ветка `case AreaForbid: break;` |
+| Success | ⚠️ **nothing** — checked three times live: the vehicle appeared and `UpdateCurrentVehicle` never came once |
+| A typed refusal | `UITipEvent{tipId=10139}` — fast and reliable, under 100 ms |
+| `AreaForbid` | ⚠️ **nothing** — the `switch` has an empty `case AreaForbid: break;` |
 
-Читается как намеренная схема «молчание = успех». Поэтому **успех проверяется активным сканом
-мира**, а не ожиданием события: ищем живой `VehicleComponent` с нужным `staticId` и своим
-владельцем. Хук на `UpdateCurrentVehicle` оставлен как безвредный быстрый путь на случай, если
-поведение сервера изменится.
+It reads as a deliberate "silence means success" design. So **success is confirmed by actively scanning
+the world** rather than by waiting for an event: look for a live `VehicleComponent` with the right
+`staticId` and our own owner. The hook on `UpdateCurrentVehicle` is kept as a harmless fast path in
+case the server's behaviour ever changes.
 
-> ⚠️ `UITipEvent.backupString` — управляемая строка. **Не читать** из снимка события: обработчик
-> вызывается отложенно из кольцевого буфера, к тому моменту строка может быть уже собрана. Безопасен
-> только `tipId`@0.
+> ⚠️ `UITipEvent.backupString` is a managed string. **Do not read it** from an event snapshot: the
+> handler is invoked later, out of a ring buffer, and by then the string may already have been
+> collected. Only `tipId`@0 is safe.
 
-### Под водой — спавн отклоняется молча
+### Underwater the spawn is refused silently
 
-Дважды подтверждено: ни найденного транспорта после таймаута, ни отказного типа. Соответствует
-`VehicleErrorCode.AreaForbid`. Отдельной подводной сцены нет (уровень один — `GameLevel_Main`,
-глубина это зона внутри него), а `VehicleUtility.DrivingMode` знает только `{Default, DragonBoat}` —
-подводного режима не существует в принципе.
+Confirmed twice: no vehicle found after the timeout, and no refusal type either. This matches
+`VehicleErrorCode.AreaForbid`. There is no separate underwater scene (there is one level,
+`GameLevel_Main`, and depth is an area inside it), and `VehicleUtility.DrivingMode` knows only
+`{Default, DragonBoat}` — an underwater mode does not exist at all.
 
 ---
 
-## 3. Посадка в чужой транспорт — проверки владения нет
+## 3. Boarding someone else's vehicle — there is no ownership check
 
-`VehicleProtocolManager.GetOnVehicle(vehicleNetId, seat, levelObjectId)` — **иной путь, чем призыв**,
-и он не проверяет владельца. Ни в `VehicleComponent`, ни в `VehicleMainInteract` проверки нет,
-только занятость места (`HavePassengerInSeatIndex`). Подтверждено живым вызовом с первого раза.
+`VehicleProtocolManager.GetOnVehicle(vehicleNetId, seat, levelObjectId)` is **a different path from
+summoning**, and it does not check the owner. Neither `VehicleComponent` nor `VehicleMainInteract`
+checks one; only seat occupancy is checked (`HavePassengerInSeatIndex`). Confirmed by a live call that
+worked first time.
 
-### ⚠️ «Спавн перестал работать» — это физика, а не сломанное состояние
+### ⚠️ "Spawning stopped working" is physics, not broken state
 
-`VehicleUtility.CreateVehiclePosition` — шаг поиска места, который проходит **любой** призыв, —
-это локальный `Physics.OverlapBox`/`Raycast` прямо перед игроком по слою транспорта, и
-`IsVehicleCollider` совпадает с **любым** `VehicleComponent`, чьим бы он ни был.
+`VehicleUtility.CreateVehiclePosition` — the find-room step every summon goes through — is a local
+`Physics.OverlapBox`/`Raycast` directly in front of the player on the vehicle layer, and
+`IsVehicleCollider` matches **any** `VehicleComponent`, whoever it belongs to.
 
-Выход из транспорта **не убирает его из мира** — он остаётся физически стоять. Если игрок стоит
-рядом с ним, коллайдер срывает каждую следующую попытку призыва в `VehicleTipsEnum.HaveVehicle` /
-`NotEnoughSpace`, включая призыв собственной машины через штатное меню. Выглядит как «спавн
-сломался», лечится отходом на несколько метров или отзывом мешающего транспорта
+Getting out of a vehicle **does not remove it from the world** — it stays physically parked. If the
+player is standing next to it, that collider fails every subsequent summon with
+`VehicleTipsEnum.HaveVehicle` / `NotEnoughSpace`, including summoning their own car from the stock
+menu. It looks like "spawning is broken" and is cured by walking a few metres away or by recalling the
+vehicle that is in the way
 (`VehicleProtocolManager.ReCallVehicle(staticId, Vector3.zero, 0f, VehicleReCallCommandType.Destroy)`).
-Ничего в состоянии аккаунта при этом не портится.
+Nothing in the account's state is damaged by any of this.
 
 ---
 
-## 4. Драконья лодка
+## 4. The dragon boat
 
-«Сухопутная драконья лодка» — **не отдельная водная мини-игра**. Строки «旱地»/«dryland» в дампах нет
-вовсе. Это обычный наземный `VehicleComponent` с
-`VehicleDrivingMode == VehicleUtility.DrivingMode.DragonBoat`, который призывается, паркуется и
-водится как любой другой транспорт во время фестиваля. Две роли — это просто места:
+The "dry-land dragon boat" is **not a separate water mini-game**. The strings "旱地"/"dryland" do not
+appear in the dumps at all. It is an ordinary land `VehicleComponent` with
+`VehicleDrivingMode == VehicleUtility.DrivingMode.DragonBoat`, summoned, parked and driven like any
+other vehicle during the festival. The two roles are simply seats:
 
-- **Рулевой** (место 0, `SelfVehicleController`): непрерывное весло влево-вправо через
+- **The helmsman** (seat 0, `SelfVehicleController`): continuous left-right paddling through
   `dragonctrl_l_hold`/`dragonctrl_r_hold` → `IMonoInputManager.SendMoveValueToControl` →
-  `VehicleComponent.HandleVirtualInput`, настройки в `DragonBoatSystemConfig`; тратит выносливость
-  через `VehicleProtocolManager.SendVehicleInputCommand`.
-- **Пассажир-барабанщик** (место >0, `RemoteSelfVehicleController`): делает QTE, восстанавливающее
-  рулевому выносливость. ⚠️ Он **тоже** зовёт `VehicleManager.SetSelfEntityVehicle`, поэтому
-  `GetSelfEntityVehicle()` работает и для рулевого, и для пассажира.
+  `VehicleComponent.HandleVirtualInput`, with the settings in `DragonBoatSystemConfig`; it spends
+  stamina through `VehicleProtocolManager.SendVehicleInputCommand`.
+- **The drummer passenger** (seat >0, `RemoteSelfVehicleController`): runs a QTE that restores the
+  helmsman's stamina. ⚠️ It **also** calls `VehicleManager.SetSelfEntityVehicle`, so
+  `GetSelfEntityVehicle()` works for the helmsman and the passenger alike.
 
-### Автомат QTE
+### The QTE state machine
 
-Состояния: `VehicleQTEStatus { None=0, DragonBoatIdle=1, DragonBoatDrum=2, DragonBoatSmite=3,
-DragonBoatRelief=4 }`, владеет сервер через
+The states are `VehicleQTEStatus { None=0, DragonBoatIdle=1, DragonBoatDrum=2, DragonBoatSmite=3,
+DragonBoatRelief=4 }`, owned by the server through
 `VehicleQTEComponent{Status, CurrentStatusStartTimeMs, CurrentStatusDurationMs}`.
 
-Цикл: **Idle** (виден призыв) → тап → **Drum** (заряд) → **Smite** (окно попадания, длительность в
-`CurrentStatusDurationMs`) → тап → **Relief** → снова Idle.
+The cycle: **Idle** (the prompt is visible) → tap → **Drum** (charging) → **Smite** (the hit window,
+its length in `CurrentStatusDurationMs`) → tap → **Relief** → Idle again.
 
-Команда одна на оба тапа:
+One command serves both taps:
 `VehicleProtocolManager.InteractVehicleQTEState(uint vehicleNetId)` →
-`InteractVehicleQTECommand{ uint VehicleNetId }`. В UI оба нажатия висят на одном обработчике
+`InteractVehicleQTECommand{ uint VehicleNetId }`. In the UI both presses hang off the same handler,
 `VehicleBoatWidget.OnInteractBtnClick`.
 
-События (предпочитать первое):
+The events (prefer the first):
 
-| Событие | Область | Размер | Поля |
+| Event | Scope | Size | Fields |
 |---|---|---|---|
-| `ScriptsRefactory.DataAndProtocol.Events.PlayerVehicleQTEEvent` | **глобальное** | 24 | `vehicleNetId(uint)@0, Status(int)@4, StartTimeMs(long)@8, DurationMs(long)@16` |
-| `XDTDataAndProtocol.Events.VehicleQTEEvent` | по netId | 16 | `Status(int)@0, StartTimeMs(long)@8` — без длительности |
-| `VehicleQTEEffectUIEvent` | глобальное | — | `SourcePlayerNetId@0, TargetPlayerNetId@4`, косметика |
+| `ScriptsRefactory.DataAndProtocol.Events.PlayerVehicleQTEEvent` | **global** | 24 | `vehicleNetId(uint)@0, Status(int)@4, StartTimeMs(long)@8, DurationMs(long)@16` |
+| `XDTDataAndProtocol.Events.VehicleQTEEvent` | per netId | 16 | `Status(int)@0, StartTimeMs(long)@8` — no duration |
+| `VehicleQTEEffectUIEvent` | global | — | `SourcePlayerNetId@0, TargetPlayerNetId@4`, cosmetic |
 
-⚠️ `PlayerVehicleQTEEvent` рассылается по **всем** лодкам в округе — фильтровать по своему
-`vehicleNetId` обязательно; штатный виджет делает ровно это. И у `GameEventSnapshot` нет
-`ReadInt64` — читать как `(long)e.ReadUInt64(offset)`.
+⚠️ `PlayerVehicleQTEEvent` is dispatched for **every** boat in the vicinity — filtering by our own
+`vehicleNetId` is mandatory, and the stock widget does exactly that. Also, `GameEventSnapshot` has no
+`ReadInt64` — read it as `(long)e.ReadUInt64(offset)`.
 
-Свой `vehicleNetId`: `VehicleManager.Instance.GetSelfEntityVehicle()` → `entity` → `netId`
-(готовый образец — `VehicleTeleportFeature.cs`).
+Our own `vehicleNetId`: `VehicleManager.Instance.GetSelfEntityVehicle()` → `entity` → `netId` (there
+is a ready example in `VehicleTeleportFeature.cs`).
 
-### Гонка: контрольные точки — это обычные квесты
+### The race: checkpoints are ordinary quests
 
-⚠️ **Не путать с `VehicleCheckPointComponent`** — тот относится к другой мини-игре («Radio Help
-Event», `VehicleRadioComponent`, `GMSearchRadioHelpEvent`).
+⚠️ **Do not confuse this with `VehicleCheckPointComponent`** — that belongs to a different mini-game
+(the "Radio Help Event", `VehicleRadioComponent`, `GMSearchRadioHelpEvent`).
 
-Точки гонки — это `GameTask`: `GameTaskType.DragonboatRaceTarget`,
-`SubmitTaskType.DragonboatRaceTarget = 1000563`, маркер `TrackType.DragonboatRaceVehicle = 22`.
-Привязка «цепочка → задача» лежит в табличных данных (`TableGameTask`), которых в дампах нет.
+Race points are `GameTask`s: `GameTaskType.DragonboatRaceTarget`,
+`SubmitTaskType.DragonboatRaceTarget = 1000563`, marker `TrackType.DragonboatRaceVehicle = 22`. The
+chain-to-task binding lives in table data (`TableGameTask`) that is not in the dumps.
 
-Сдача полностью обобщённая: `TaskProtocolManager.ClientSubmitTaskItem(...)` →
-`SubmitGameTaskItem2WorldObjectCommand`. В команде **нет поля позиции**, а в `GameTaskErrorCode` нет
-кода про расстояние.
+Submission is entirely generic: `TaskProtocolManager.ClientSubmitTaskItem(...)` →
+`SubmitGameTaskItem2WorldObjectCommand`. The command has **no position field**, and `GameTaskErrorCode`
+has no code about distance.
 
-**Но живая проверка показала, что голая сдача не обходит контрольную точку.** Во время реальной
-гонки отслеживаемая задача была в состоянии `Accepted(3)`, а не `CanSubmit(4)`; вызов проходил
-механически, игра отвечала «Unable to complete Quest». Гейт состояния настоящий и серверный.
+**But a live check showed that a bare submit does not bypass a checkpoint.** During a real race the
+tracked task was in state `Accepted(3)` rather than `CanSubmit(4)`; the call went through mechanically
+and the game answered "Unable to complete Quest". The state gate is real and server-side.
 
-`TaskProtocolManager.GmFinishTask` существует, но почти наверняка закрыт серверной GM-проверкой, как
-и прочие `Gm*` команды — см. память про тупик с GM-режимом.
+`TaskProtocolManager.GmFinishTask` exists, but is almost certainly closed by a server-side GM check
+like every other `Gm*` command — see the memory about the GM-mode dead end.
 
 ---
 
-## 5. Что из этого уже есть в моде
+## 5. What of this the mod already has
 
-| Возможность | Где |
+| Capability | Where |
 |---|---|
-| Призыв в обход штатного пути | `VehicleBypassFeature.TryVehicleBypassForceSummon(itemId, getOn, out error)` |
-| Каталог + фильтр «только мои» | `SpawnVehicleFeature.cs` |
-| Скан живого транспорта в мире, с именем владельца | `SpawnVehicleFeature.TryScanLiveVehicles` |
-| Спуфинг позиции транспорта | `VehicleTeleportFeature.cs` |
-| Контекст транспорта для ноклипа | `NoclipFeature.EnsureNoclipVehicleAuraMono` |
+| Summoning around the stock path | `VehicleBypassFeature.TryVehicleBypassForceSummon(itemId, getOn, out error)` |
+| The catalogue plus a "mine only" filter | `SpawnVehicleFeature.cs` |
+| Scanning live vehicles in the world, with the owner's name | `SpawnVehicleFeature.TryScanLiveVehicles` |
+| Spoofing a vehicle's position | `VehicleTeleportFeature.cs` |
+| Vehicle context for noclip | `NoclipFeature.EnsureNoclipVehicleAuraMono` |
 
-Имя владельца берётся из `DataCenter.TryGetComponentData<LevelEntityComponentData>().ownerId` —
-у самого `VehicleComponent` поля владельца нет; дальше через ту же цепочку разрешения имён, что
-использует карта.
+The owner's name comes from `DataCenter.TryGetComponentData<LevelEntityComponentData>().ownerId` —
+`VehicleComponent` itself has no owner field — and then through the same name-resolution chain the map
+uses.
 
 ---
 
-## 6. Общее правило, выученное здесь
+## 6. The general rule learned here
 
-⚠️ **Хук события надо регистрировать заметно раньше действия, результат которого он ловит.**
-`RegisterGameEventHook` только добавляет запись в таблицу; сам детур навешивается **лениво**, за
-несколько последующих кадров `OnUpdate` (резолв класса → инфлейт `DispatchEvent<T>` →
-`mono_compile_method` → `NativeDetour`). Быстрый ответ сервера успевает прийти раньше, чем детур
-встанет, поэтому первое же нажатие в сессии гарантированно теряет свой результат.
+⚠️ **An event hook has to be registered noticeably earlier than the action whose result it catches.**
+`RegisterGameEventHook` only adds a row to a table; the detour itself is attached **lazily**, over the
+next several `OnUpdate` frames (resolve the class → inflate `DispatchEvent<T>` → `mono_compile_method`
+→ `NativeDetour`). A fast server reply arrives before the detour is in place, so the very first press
+of a session is guaranteed to lose its result.
 
-Регистрировать безусловно из `OnUpdate`, а не в том же вызове, что шлёт команду.
+Register unconditionally from `OnUpdate`, not in the same call that sends the command.

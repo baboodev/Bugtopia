@@ -1,27 +1,27 @@
-# UGC-магазин — справочник по декомпиляциям
+# The UGC shop — a reference built from the decompilations
 
-Документ описивает клиентскую реализацию **UGC-магазина** (покупка пользовательских книг и музыкальных пластинок) по `ilspy-dumps/`.
+This document describes the client-side implementation of the **UGC shop** (buying player-made books and music records) as read from `ilspy-dumps/`.
 
-Связанные документы: [UGC_SYSTEM.md](./UGC_SYSTEM.md) (записи, книги, общая UGC-инфраструктура), [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) (открытие UI через AuraMono).
-
----
-
-## 1. Суть
-
-UGC-магазин — **не отдельная панель**, а секция внутри обычного `ShopPanel`. Если у `storeId` в `TableStoreInfo` поле `UgcItemType != 0`, внизу списка товаров появляется блок UGC-товаров соответствующего типа.
-
-Покупка идёт **отдельной** сетевой командой `BuyUgcItemCommand`, не через `ShopSystem.BuyItem` / `ShopShelfProtocolManager.BuyItem`.
+Related documents: [UGC_SYSTEM.md](./UGC_SYSTEM.md) (records, books, the shared UGC infrastructure) and [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) (opening UI through AuraMono).
 
 ---
 
-## 2. Точки входа
+## 1. In short
 
-| storeId | `PlayerUgcType` | Как открывается |
+The UGC shop is **not a separate panel** but a section inside the ordinary `ShopPanel`. When a `storeId`'s `TableStoreInfo` has `UgcItemType != 0`, a block of UGC goods of that type appears at the bottom of the item list.
+
+Buying goes through a **separate** network command, `BuyUgcItemCommand`, and not through `ShopSystem.BuyItem` / `ShopShelfProtocolManager.BuyItem`.
+
+---
+
+## 2. Entry points
+
+| storeId | `PlayerUgcType` | How it opens |
 |---------|-----------------|-----------------|
 | **147** | `Book` (1) | `OpenBookShopCommand` → `NpcShopOpenRequestedEvent { storeId = 147 }` |
-| **148** | `Record` (2) | `ShopPanel.OpenShopPanel(148)` (напр. кнопка в `SeaLanternFestivalActivityWidget`) |
+| **148** | `Record` (2) | `ShopPanel.OpenShopPanel(148)` (e.g. a button in `SeaLanternFestivalActivityWidget`) |
 
-Мост UI (`XDTGame.UI.UIEventBridge`):
+The UI bridge (`XDTGame.UI.UIEventBridge`):
 
 ```csharp
 private static void OnNpcShopOpenRequested(NpcShopOpenRequestedEvent evt)
@@ -37,15 +37,15 @@ NpcShopOpenRequestedEvent @event = new NpcShopOpenRequestedEvent { storeId = 147
 EventCenter.DispatchEvent(in @event);
 ```
 
-**Открытие панели из мода:** AuraMono invoke `XDTGame.UI.Panel.ShopPanel.OpenShopPanel(int storeId, int slotId = 0)` — тот же паттерн, что Force Open Shop в [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md).
+**Opening the panel from the mod:** an AuraMono invoke of `XDTGame.UI.Panel.ShopPanel.OpenShopPanel(int storeId, int slotId = 0)` — the same pattern as Force Open Shop in [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md).
 
 ---
 
-## 3. Архитектура потока данных
+## 3. The data flow
 
 ```
 Server
-  │ sync UgcItemStoreComponent (+ Type, Info) на ECS-сущность витрины
+  │ sync UgcItemStoreComponent (+ Type, Info) onto the shelf's ECS entity
   ▼
 ShopItemSyncSystem
   │ ComponentUpdated/Removed<UgcItemStoreComponent>
@@ -55,7 +55,7 @@ ShopItemProtocolManager
   │ UpdateUgcItem / RemoveUgcItem → DataUpdated/Removed<RawUgcStoreItemData>
   │ BuyUgcItemResponse → OnBuyUgcShopItemSuccessEvent
   ▼
-ShopSystem._ugcItemDatas (кэш по Guid)
+ShopSystem._ugcItemDatas (cached by Guid)
   ▼
 ShopPanel.RenderItems → GoodsWidget (UgcGoodScrollData)
   ▼
@@ -84,42 +84,42 @@ sequenceDiagram
 
 ---
 
-## 4. ECS-компоненты (`XDT.Scene.Shared.Modules.UgcItemStore`)
+## 4. ECS components (`XDT.Scene.Shared.Modules.UgcItemStore`)
 
-Сборка: **EcsClient**.
+Assembly: **EcsClient**.
 
-| Компонент | Поля / назначение |
+| Component | Fields / purpose |
 |-----------|-------------------|
-| `UgcItemStoreComponent` | `Guid UgcItemGuid` — идентификатор UGC-контента; ключ группы ECS |
+| `UgcItemStoreComponent` | `Guid UgcItemGuid` — the UGC content's identifier; the ECS group key |
 | `UgcItemStoreTypeComponent` | `PlayerUgcType UgcType` — Book / Record |
-| `UgcItemInfoComponent` | `int BaughtCount` — сколько раз **текущий игрок** купил этот UGC |
+| `UgcItemInfoComponent` | `int BaughtCount` — how many times **the current player** has bought this UGC |
 | `UgcItemDetailComponent` | `ItemName`, `Extra`, `ExtraEx`, `SyncExtraEx` |
-| `UgcItemStoreBuyLockComponent` | маркер блокировки покупки (пустой struct) |
-| `UgcItemStoreOwnerOfflineComponent` | владелец офлайн |
+| `UgcItemStoreBuyLockComponent` | a purchase-lock marker (an empty struct) |
+| `UgcItemStoreOwnerOfflineComponent` | the owner is offline |
 | `QueriedFriendsUgcItemsComponent` | `Dictionary<Guid, Dictionary<PlayerUgcType, bool>> QueriedFriends` |
-| `PlayerSearchFriendsUgcItemsLock` | лок поиска UGC друзей |
+| `PlayerSearchFriendsUgcItemsLock` | a lock on searching friends' UGC |
 
-**После покупки** предмет в рюкзаке (`XDT.Scene.Shared.Modules.Backpack`):
+**After a purchase** the item in the backpack (`XDT.Scene.Shared.Modules.Backpack`):
 
-| Компонент | Поля |
+| Component | Fields |
 |-----------|------|
 | `UgcItemIdComponent` | `Guid UgcId` |
 | `UgcItemTypeComponent` | `PlayerUgcType UgcType` |
 
-Persistent-ключи: `"uiic"`, `"uitc"`.
+Persistent keys: `"uiic"`, `"uitc"`.
 
 ---
 
-## 5. Сетевые типы
+## 5. Network types
 
 ### 5.1 `BuyUgcItemCommand` (`[NetworkCommand]`)
 
 ```csharp
-public uint ItemNetId;  // netId ECS-сущности на витрине, НЕ Guid UGC
+public uint ItemNetId;  // the netId of the ECS entity on the shelf, NOT the UGC Guid
 public int Count;
 ```
 
-Отправка: `WebRequestUtility.SendCommand(new BuyUgcItemCommand { ... })`.
+Sending: `WebRequestUtility.SendCommand(new BuyUgcItemCommand { ... })`.
 
 ### 5.2 `BuyUgcItemEvent` (`[NetworkEvent]`)
 
@@ -129,27 +129,27 @@ public ErrorCode ErrorCode;
 
 ### 5.3 `ShopItemProtocolManager` (`XDTDataAndProtocol.ProtocolService.ShopShelf`)
 
-| Метод | Назначение |
+| Method | Purpose |
 |-------|------------|
 | `UpdateUgcItem(in EcsEntity item)` | `DataUpdated<RawUgcStoreItemData>` |
 | `RemoveUgcItem(in EcsEntity item)` | `DataRemoved<RawUgcStoreItemData>` + `UgcItemRemoveEvent` |
-| `BuyUgcItemCommand(uint shopItemNetId, int count = 1)` | отправка покупки |
-| `BuyUgcItemResponse(BuyUgcItemEvent evt)` | успех → `OnBuyUgcShopItemSuccessEvent`; ошибка → `ErrorCodeToast` |
+| `BuyUgcItemCommand(uint shopItemNetId, int count = 1)` | sends the purchase |
+| `BuyUgcItemResponse(BuyUgcItemEvent evt)` | success → `OnBuyUgcShopItemSuccessEvent`; failure → `ErrorCodeToast` |
 
 ### 5.4 `ShopItemSyncSystem` (`EcsSystem.ClientSystem.Store.ShopShelf`)
 
-Подписки в `Init()`:
+Subscriptions in `Init()`:
 - `ComponentUpdated<UgcItemStoreComponent>` → `UpdateUgcItem`
 - `ComponentRemoved<UgcItemStoreComponent>` → `RemoveUgcItem`
 - `NetworkEvent<BuyUgcItemEvent>` → `BuyUgcItemResponse`
 
 ---
 
-## 6. Сервисы и кэш
+## 6. Services and caching
 
 ### 6.1 `StoreService` (`EcsSystem.ClientSystem.Store`)
 
-Реализует `IStoreService` + `IIterateService<RawUgcStoreItemData>`.
+Implements `IStoreService` and `IIterateService<RawUgcStoreItemData>`.
 
 ```csharp
 bool TryGetUgcItemTypeComponent(Guid itemGuid, out UgcItemStoreTypeComponent component)
@@ -157,7 +157,7 @@ bool TryGetUgcItemBuyCountComponent(Guid itemGuid, out UgcItemInfoComponent comp
 void IterateAllData(IIterateDataCallback<RawUgcStoreItemData> callback)
 ```
 
-Фильтры: `EcsGroupedFilter<UgcItemStoreComponent, GuidKey>`, `EcsFilter<UgcItemStoreComponent>`.
+Filters: `EcsGroupedFilter<UgcItemStoreComponent, GuidKey>`, `EcsFilter<UgcItemStoreComponent>`.
 
 ### 6.2 `ShopSystem` (`XDTGameSystem.GameplaySystem.Shop`)
 
@@ -165,7 +165,7 @@ void IterateAllData(IIterateDataCallback<RawUgcStoreItemData> callback)
 Dictionary<Guid, RawUgcStoreItemData> _ugcItemDatas;
 
 // OnCreate: IterateServiceUtility.GetAllIterateData<IStoreService, RawUgcStoreItemData>
-// Слушает DataUpdated/Removed<RawUgcStoreItemData>
+// Listens to DataUpdated/Removed<RawUgcStoreItemData>
 
 void GetUgcShopRawItems(PlayerUgcType ugcType, ref List<RawUgcStoreItemData> ugcItems)
 void GetUgcShopItems(in List<RawUgcStoreItemData> raw, ref List<UgcShopItemData> ugcShopItems)
@@ -182,49 +182,49 @@ public uint itemNetId;
 public UgcItemStoreComponent UgcItemStoreComponent;
 ```
 
-### 6.4 `UgcShopItemData` — DTO для UI
+### 6.4 `UgcShopItemData` — the DTO for the UI
 
-| Поле | Источник |
+| Field | Source |
 |------|----------|
 | `itemNetId` | `raw.itemNetId` |
 | `itemId` | `UgcItemStoreComponent.UgcItemGuid` |
 | `itemType` | `GetUgcType(itemId)` |
 | `price`, `currencyType`, `limitBuy` | `TableData.GetUgcItemPrice((int)itemType)` |
-| `leftCount` | `buyLimitEachItem - GetUgcItemBaughtCount(itemId)` или `int.MaxValue` |
+| `leftCount` | `buyLimitEachItem - GetUgcItemBaughtCount(itemId)`, or `int.MaxValue` |
 | `name`, `introduce`, `textureId` | `GetUgcItemDetailInfo` |
 | `staticId` | Record → **13500**, Book → **200159999** |
 | `canBuy` | `leftCount > 0` |
 
-**`GetUgcItemDetailInfo` по типу:**
+**`GetUgcItemDetailInfo` by type:**
 
-| `PlayerUgcType` | Источник метаданных |
+| `PlayerUgcType` | Metadata source |
 |-----------------|---------------------|
 | `Record` | `RecordDataSystem.GetRecordDetailDataByGuid` → `PhotoId`, `SongName`, `Brief` |
 | `Book` | `BookSystem.TryGetUgcBookSummaryComponent` → `BookCover`, `BookName`, `BookDesc` |
 
 ---
 
-## 7. Таблицы
+## 7. Tables
 
 ### 7.1 `TableStoreInfo`
 
 ```csharp
-public int UgcItemType => _UgcItemType;  // byte в бинарнике
+public int UgcItemType => _UgcItemType;  // a byte in the binary
 ```
 
-Если `UgcItemType == 0` — магазин без UGC-секции. Иначе значение = `(int)PlayerUgcType`.
+`UgcItemType == 0` means a shop with no UGC section. Otherwise the value is `(int)PlayerUgcType`.
 
 ### 7.2 `TableUgcItemPrice`
 
-Ключ словаря `TableData.TableUgcItemPrices`: **`id` = PlayerUgcType** (1 Book, 2 Record).
+The key of the `TableData.TableUgcItemPrices` dictionary: **`id` = PlayerUgcType** (1 Book, 2 Record).
 
-| Поле | Смысл |
+| Field | Meaning |
 |------|-------|
-| `cost[]` | `TableCostItem[]` — тип валюты (`rewardType`) и сумма (`value`) |
-| `staticId` | иконка награды |
-| `buyLimitEachItem` | лимит покупок одного UGC-guid на игрока (0 = без лимита) |
-| `shopLabelName` | locId заголовка секции в скролле `ShopPanel` |
-| `refreshCondition` | `Expression` — условие обновления ассортимента |
+| `cost[]` | `TableCostItem[]` — the currency type (`rewardType`) and the amount (`value`) |
+| `staticId` | the reward icon |
+| `buyLimitEachItem` | the purchase limit for one UGC guid per player (0 = no limit) |
+| `shopLabelName` | the locId of the section header in the `ShopPanel` scroll |
+| `refreshCondition` | `Expression` — the condition for refreshing the assortment |
 
 ---
 
@@ -232,9 +232,9 @@ public int UgcItemType => _UgcItemType;  // byte в бинарнике
 
 ### 8.1 `ShopPanel` (`XDTGame.UI.Panel`)
 
-**Открытие:** `ShopPanel.OpenShopPanel(int storeId, int slotId = 0)`
+**Opening:** `ShopPanel.OpenShopPanel(int storeId, int slotId = 0)`
 
-**UGC-рендер** (`RenderItems`):
+**UGC rendering** (`RenderItems`):
 
 ```csharp
 int ugcItemType = TableData.GetStoreInfo(_storeId).UgcItemType;
@@ -242,28 +242,28 @@ if (ugcItemType != 0)
 {
     DataModule<ShopSystem>.Instance.GetUgcShopRawItems((PlayerUgcType)ugcItemType, ref ugcItems);
     DataModule<ShopSystem>.Instance.GetUgcShopItems(in ugcItems, ref ugcShopItems);
-    // CellHolderWidget — заголовок из TableUgcItemPrice.shopLabelName
-    // GoodsWidget.UgcGoodScrollData для каждого UgcShopItemData
+    // CellHolderWidget — the header from TableUgcItemPrice.shopLabelName
+    // GoodsWidget.UgcGoodScrollData for every UgcShopItemData
 }
 ```
 
-**События:**
-| Событие | Действие |
+**Events:**
+| Event | Action |
 |---------|----------|
-| `OnBuyUgcShopItemSuccessEvent` | `RefreshUgcShopList` → перерисовка |
-| `UgcItemRemoveEvent` | `RefreshShopList` → перерисовка |
+| `OnBuyUgcShopItemSuccessEvent` | `RefreshUgcShopList` → redraw |
+| `UgcItemRemoveEvent` | `RefreshShopList` → redraw |
 
-**Особенность `storeId == 148`:** виджет бесплатной награды (`freeReward_widget`, группа товаров **8716**).
+**A quirk of `storeId == 148`:** a free-reward widget (`freeReward_widget`, goods group **8716**).
 
-### 8.2 `GoodsWidget` — клик по UGC-товару
+### 8.2 `GoodsWidget` — clicking a UGC item
 
-Проверки перед `SalePanel.OpenUgcItemShop(data)`:
+Checks before `SalePanel.OpenUgcItemShop(data)`:
 
-1. `leftCount <= 0` → toast loc **10045** (распродано)
+1. `leftCount <= 0` → toast loc **10045** (sold out)
 2. `IUgcManagerService.IsIllegalUgcItem(itemNetId)` → toast **94648**
-3. Иначе — открытие `SalePanel`
+3. Otherwise open the `SalePanel`
 
-Иконка: `UgcIconBinder` + `UgcItemUtility.GetUgcShopItemTextureType()`.
+The icon: `UgcIconBinder` plus `UgcItemUtility.GetUgcShopItemTextureType()`.
 
 ### 8.3 `UgcItemUtility` / `UgcShopItemTextureType`
 
@@ -271,13 +271,13 @@ if (ugcItemType != 0)
 enum UgcShopItemTextureType { empty, draw, photo, officialCover }
 ```
 
-**Record:** `DrawManual` → draw; `official` → officialCover; иначе photo.
+**Record:** `DrawManual` → draw; `official` → officialCover; otherwise photo.
 
-**Book / прочее:** разбор `textureId` по префиксу `painting_`, `photo_`, `official_`.
+**Book and the rest:** parse `textureId` by the prefixes `painting_`, `photo_`, `official_`.
 
-### 8.4 `SalePanel` — покупка UGC
+### 8.4 `SalePanel` — buying UGC
 
-**Открытие:**
+**Opening:**
 
 ```csharp
 public static void OpenUgcItemShop(UgcShopItemData ugcShopItemData, Action<bool> callback = null)
@@ -285,50 +285,50 @@ public static void OpenUgcItemShop(UgcShopItemData ugcShopItemData, Action<bool>
 
 Intent: `"ugcShopItemData"`, `"callback"`.
 
-**Покупка** (`OnClickBuy`):
+**Buying** (`OnClickBuy`):
 
 ```csharp
 ShopItemProtocolManager.BuyUgcItemCommand(ugcShopItemData.itemNetId, _viewModel.BuyCount);
 ```
 
-**Превью** (`OnOpenPreview`):
-| Тип | Панель |
+**Preview** (`OnOpenPreview`):
+| Type | Panel |
 |-----|--------|
 | `Record` | `PreviewRecordInfoPanel.Open(itemId, 0L, itemNetId)` |
 | `Book` | `BookInfoPanel.OpenShopUgcBook(itemId, itemNetId)` |
 
-**Книги в SalePanel:** кнопка перевода, `UgcBookTranslateDoneEvent`, лимиты через `BookModule` / `BookUtility.GetTranslateLimitNum`.
+**Books in the SalePanel:** a translate button, `UgcBookTranslateDoneEvent`, and limits through `BookModule` / `BookUtility.GetTranslateLimitNum`.
 
-**Снятие с витрины:** `UgcItemRemoveEvent` с `guid == itemId` → toast **94597**, закрытие панели.
+**Removal from the shelf:** `UgcItemRemoveEvent` with `guid == itemId` → toast **94597**, and the panel closes.
 
 ### 8.5 `SalePanelViewModel.InitializeUgcShopItem`
 
-- `ShowPreview = true` для Record и Book
-- `ShowCount` + текст владения: Record (рюкзак+склад через `RecordDataSystem`), Book (`BackPackSystem.GetUgcItemCount`)
-- `CanBuy` по валюте и `price * BuyCount`
-- обложка через `GetUgcShopItemTextureType` → `DisplayData.TextureId`
+- `ShowPreview = true` for Record and Book
+- `ShowCount` plus ownership text: Record (backpack and storage through `RecordDataSystem`), Book (`BackPackSystem.GetUgcItemCount`)
+- `CanBuy` from the currency and `price * BuyCount`
+- the cover through `GetUgcShopItemTextureType` → `DisplayData.TextureId`
 
 ---
 
-## 9. События
+## 9. Events
 
-| Событие | Namespace | Когда |
+| Event | Namespace | When |
 |---------|-----------|-------|
-| `OnBuyUgcShopItemSuccessEvent` | `XDTDataAndProtocol.Events` | Успешный `BuyUgcItemEvent` (пустой struct) |
-| `UgcItemRemoveEvent` | `XDTDataAndProtocol.Events` | UGC снят с витрины (`guid`) |
-| `DataUpdated<RawUgcStoreItemData>` | protocol layer | товар добавлен/обновлён |
-| `DataRemoved<RawUgcStoreItemData>` | protocol layer | товар удалён с витрины |
-| `NpcShopOpenRequestedEvent` | `XDTGameSystem.UI` | запрос открыть NPC-магазин (в т.ч. 147) |
+| `OnBuyUgcShopItemSuccessEvent` | `XDTDataAndProtocol.Events` | a successful `BuyUgcItemEvent` (an empty struct) |
+| `UgcItemRemoveEvent` | `XDTDataAndProtocol.Events` | UGC removed from the shelf (`guid`) |
+| `DataUpdated<RawUgcStoreItemData>` | protocol layer | an item was added or updated |
+| `DataRemoved<RawUgcStoreItemData>` | protocol layer | an item was removed from the shelf |
+| `NpcShopOpenRequestedEvent` | `XDTGameSystem.UI` | a request to open an NPC shop (including 147) |
 
 ---
 
-## 10. Модерация — `IUgcManagerService`
+## 10. Moderation — `IUgcManagerService`
 
 Namespace: `XDTDataAndProtocol.ProtocolService.UgcRichTextMedias`  
-Реализация: `UgcManagerClientService` (`EcsSystem`).
+Implementation: `UgcManagerClientService` (`EcsSystem`).
 
 ```csharp
-bool IsIllegalUgcItem(uint itemNetId);   // блок в GoodsWidget
+bool IsIllegalUgcItem(uint itemNetId);   // the block in GoodsWidget
 bool IsBlockUgcItem(uint itemNetId);
 bool CanPackUgcItem(uint itemNetId);
 bool CanPackUgcItem(int staticId, Guid guid);
@@ -353,57 +353,57 @@ public enum PlayerUgcType
 }
 ```
 
-В магазине используются **Book** и **Record**.
+The shop uses **Book** and **Record**.
 
 ---
 
-## 12. Награда после покупки
+## 12. The reward after a purchase
 
-`RewardItemExtensions.FillUgcInfo` заполняет extra-поля награды:
+`RewardItemExtensions.FillUgcInfo` fills in the reward's extra fields:
 
 ```csharp
 rewardItem.extra[RewardExtraType.UgcItemType] = (int)ugcType;
 rewardItem.syncExtraEx[RewardExtraType.UgcItemId] = ugcItemGuid.ToString();
-// опционально UgcDrawManualArtwork = photoId
+// optionally UgcDrawManualArtwork = photoId
 ```
 
-Для пластинок также `RewardExtraType.UgcSongRecord` с `RecordId`.
+Records also get `RewardExtraType.UgcSongRecord` with `RecordId`.
 
 ---
 
-## 13. Статистика UGC-операций
+## 13. UGC operation statistics
 
-`UgcItemOperationType` (flags): `Buy`, `Use`, `Like`, `ViewCount`, письма о нарушениях и др.
+`UgcItemOperationType` (flags): `Buy`, `Use`, `Like`, `ViewCount`, violation mails and others.
 
-`PlayerLikeUgcItemRecordService` — big records лайков UGC (до 128 слотов), смежная подсистема.
+`PlayerLikeUgcItemRecordService` — big records of UGC likes (up to 128 slots), an adjacent subsystem.
 
 ---
 
-## 14. UGC-магазин vs обычный магазин
+## 14. The UGC shop against an ordinary shop
 
-| | Обычный товар | UGC-товар |
+| | Ordinary item | UGC item |
 |--|---------------|-----------|
-| Команда покупки | `ShopShelfProtocolManager.BuyItem` | **`BuyUgcItemCommand`** |
-| Ключ покупки | `netId` слота `StoreItemRecordComponent` | **`itemNetId`** сущности `UgcItemStoreComponent` |
-| Цена | `ShopItemData` | **`TableUgcItemPrice`** |
-| Лимит | `ShopItemData.leftCount` / `reserve` | **`UgcItemInfoComponent.BaughtCount`** + `buyLimitEachItem` |
-| UI покупки | `SalePanel.Open(ShopItemData)` | **`SalePanel.OpenUgcItemShop`** |
-| Результат | предмет по `staticId` | UGC с `UgcItemIdComponent` |
+| Purchase command | `ShopShelfProtocolManager.BuyItem` | **`BuyUgcItemCommand`** |
+| Purchase key | the `netId` of a `StoreItemRecordComponent` slot | the **`itemNetId`** of a `UgcItemStoreComponent` entity |
+| Price | `ShopItemData` | **`TableUgcItemPrice`** |
+| Limit | `ShopItemData.leftCount` / `reserve` | **`UgcItemInfoComponent.BaughtCount`** plus `buyLimitEachItem` |
+| Purchase UI | `SalePanel.Open(ShopItemData)` | **`SalePanel.OpenUgcItemShop`** |
+| Result | an item by `staticId` | UGC with a `UgcItemIdComponent` |
 
 ---
 
-## 15. Интеграция в мод (Bugtopia)
+## 15. Integrating this into the mod (Bugtopia)
 
-| Задача | Канал | API |
+| Task | Channel | API |
 |--------|-------|-----|
-| Открыть магазин книг | **A** AuraMono | `ShopPanel.OpenShopPanel(147)` |
-| Открыть магазин пластинок | **A** AuraMono | `ShopPanel.OpenShopPanel(148)` |
-| Список UGC-товаров | **A** / managed | `DataModule<ShopSystem>.GetUgcShopRawItems` + `GetUgcShopItems` |
-| Купить без UI | **S** SendCommand | `BuyUgcItemCommand { ItemNetId, Count }` |
-| Проверка модерации | **A** | `EcsService.TryGet<IUgcManagerService>` → `IsIllegalUgcItem` |
-| Открыть карточку покупки | **A** | `SalePanel.OpenUgcItemShop(UgcShopItemData)` |
+| Open the book shop | **A** AuraMono | `ShopPanel.OpenShopPanel(147)` |
+| Open the record shop | **A** AuraMono | `ShopPanel.OpenShopPanel(148)` |
+| List the UGC goods | **A** / managed | `DataModule<ShopSystem>.GetUgcShopRawItems` + `GetUgcShopItems` |
+| Buy without the UI | **S** SendCommand | `BuyUgcItemCommand { ItemNetId, Count }` |
+| Check moderation | **A** | `EcsService.TryGet<IUgcManagerService>` → `IsIllegalUgcItem` |
+| Open the purchase card | **A** | `SalePanel.OpenUgcItemShop(UgcShopItemData)` |
 
-**Алиасы `FindLoadedType`:**
+**`FindLoadedType` aliases:**
 
 ```csharp
 "XDT.Scene.Shared.Modules.UgcItemStore.BuyUgcItemCommand"
@@ -417,7 +417,7 @@ rewardItem.syncExtraEx[RewardExtraType.UgcItemId] = ugcItemGuid.ToString();
 
 ---
 
-## 16. Пути в `ilspy-dumps/`
+## 16. Paths in `ilspy-dumps/`
 
 ```
 EcsClient/XDT.Scene.Shared.Modules.UgcItemStore/
@@ -429,7 +429,7 @@ EcsClient/XDT.Scene.Shared.Modules.UgcItemStore/
 EcsClient/XDT.Scene.Shared.Modules.Backpack/
   UgcItemIdComponent.cs, UgcItemTypeComponent.cs
 
-EcsClient/TableUgcItemPrice.cs, TableStoreInfo.cs (поле UgcItemType)
+EcsClient/TableUgcItemPrice.cs, TableStoreInfo.cs (the UgcItemType field)
 
 XDTDataAndProtocol/XDTDataAndProtocol.ProtocolService.ShopShelf/
   ShopItemProtocolManager.cs, RawUgcStoreItemData.cs
@@ -452,12 +452,12 @@ XDTLevelAndEntity/.../OpenBookShopCommand.cs
 
 ---
 
-## 17. Не покрыто клиентской декомпиляцией
+## 17. Not covered by the client decompilation
 
-- Серверная логика **выставления** UGC на витрину (публикация → появление `UgcItemStoreComponent`)
-- UI/команды запроса UGC **друзей** (`QueriedFriendsUgcItemsComponent` — только структура данных)
-- Конкретные значения `TableUgcItemPrice` (цена, валюта, лимит) — в бинарных таблицах игры
+- The server-side logic for **listing** UGC on a shelf (publication → a `UgcItemStoreComponent` appearing)
+- The UI and commands for querying **friends'** UGC (`QueriedFriendsUgcItemsComponent` is only the data structure)
+- The concrete values in `TableUgcItemPrice` (price, currency, limit) — they live in the game's binary tables
 
 ---
 
-*Источник: `ilspy-dumps/`. Мод `buddy/` UGC-магазин пока не реализует.*
+*Source: `ilspy-dumps/`. The `buddy/` mod does not implement the UGC shop yet.*
