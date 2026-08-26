@@ -80,6 +80,19 @@ namespace HeartopiaMod
             "XDTDataAndProtocol.Events.MailUpdatedEvent";
         private const int DailyClaimsMailUpdatedEventBytes = 1;
 
+        // DreamSystem dispatches this immediately after it recomputes the Dream dots
+        // (RefreshRewardRedPoint -> RefreshDreamEvent), which is the only signal that says a dream
+        // reward may just have become claimable. Note the namespace: ScriptsRefactory, not XDT.
+        private const string DailyClaimsRefreshDreamEventName =
+            "ScriptsRefactory.DataAndProtocol.Events.RefreshDreamEvent";
+        private const int DailyClaimsRefreshDreamEventBytes = 4;   // int dreamId
+
+        // Taking a dream reward makes the server push the dream data back, which dispatches
+        // RefreshDreamEvent again. The pass is idempotent (a target with nothing left simply stops
+        // being lit), so the interval is only there to keep the _nodeDic walk rare.
+        private const float DailyClaimsAutoDreamMinIntervalSeconds = 3f;
+        private const int DailyClaimsAutoDreamPerPass = 8;
+
         private const string DailyClaimsAutoWorldReadyCallbackName = "DailyClaimsAutoClaim";
 
         // One send per tick at this spacing — the same "no burst the game never produces" rule the
@@ -137,6 +150,8 @@ namespace HeartopiaMod
         private bool dailyClaimsAutoPendingMarkRead;
         private float dailyClaimsAutoMarkReadNextAllowedAt;
         private bool dailyClaimsAutoPendingMail;
+        private bool dailyClaimsAutoPendingDream;
+        private float dailyClaimsAutoDreamNextAllowedAt;
         private float dailyClaimsAutoMailEchoUntil;
         private float dailyClaimsAutoMailNextAllowedAt;
 
@@ -196,10 +211,14 @@ namespace HeartopiaMod
                     DailyClaimsMailUpdatedEventName,
                     DailyClaimsMailUpdatedEventBytes,
                     this.OnDailyClaimsAutoMailUpdatedEvent);
+                bool dream = this.RegisterGameEventHook(
+                    DailyClaimsRefreshDreamEventName,
+                    DailyClaimsRefreshDreamEventBytes,
+                    this.OnDailyClaimsAutoRefreshDreamEvent);
 
-                this.dailyClaimsAutoHooksRegistered = redPoint || activityTasks || mail;
+                this.dailyClaimsAutoHooksRegistered = redPoint || activityTasks || mail || dream;
                 this.DailyClaimsLog("auto-claim hooks registered: redPoint=" + redPoint
-                    + " activityTasks=" + activityTasks + " mail=" + mail);
+                    + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream);
 
                 if (!this.dailyClaimsAutoHooksRegistered)
                 {
@@ -228,6 +247,11 @@ namespace HeartopiaMod
             this.dailyClaimsAutoCatchUpWhalefall = true;
             this.dailyClaimsAutoPendingTownGuide = true;
             this.dailyClaimsAutoPendingMail = true;
+
+            // Dream dots are computed from data that syncs during login, so by the time the hook
+            // exists RefreshDreamEvent has usually already fired. Without this the whole family
+            // would wait for the next dream change to be claimed at all.
+            this.dailyClaimsAutoPendingDream = true;
 
             // The markers that matter most arrive in the pre-world burst, which the event detour
             // structurally cannot see (installing it that early is what aborted the process three
@@ -350,6 +374,19 @@ namespace HeartopiaMod
             // Fires on any state change of an operation-activity task, not just "became claimable",
             // so the drain re-checks the state before submitting.
             this.dailyClaimsAutoCatchUpTasks = true;
+        }
+
+        private void OnDailyClaimsAutoRefreshDreamEvent(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            // dreamId is read only for the trace: the pass works off the lit nodes, because one
+            // dream's data landing can light a target under any of them.
+            this.DailyClaimsLog("refresh dream event dreamId=" + e.ReadInt32(0));
+            this.dailyClaimsAutoPendingDream = true;
         }
 
         private void OnDailyClaimsAutoMailUpdatedEvent(GameEventSnapshot e)
@@ -576,7 +613,15 @@ namespace HeartopiaMod
         // Client enums whose nodes carry a REWARD but have no server RedPointType, so the switch on
         // serverType below can never reach them. Found by the 2026-08-18 sweep: after the
         // "unread marker" kinds were read, these were what still held the HUD dots lit.
+        //
+        // The Dream family is the clearest example: DreamTypeReward/DreamTaskReward carry real
+        // rewards, RedPointUtility maps only DreamNew and DreamOnline to a server type, so nothing
+        // under Dream can ever arrive as a RedPointEvent. DreamSystem is the authority on all of
+        // them (RefreshRewardRedPoint / OnTaskUpdated / InitDreamTaskRedPoint / OnLoopTaskUpdate).
+        private const int DailyClaimsRedPointEnumDreamReward = 1900;     // aggregate over a dreamType
+        private const int DailyClaimsRedPointEnumDreamUpgrade = 1901;    // SPENDS — never auto
         private const int DailyClaimsRedPointEnumDreamTypeReward = 1902;
+        private const int DailyClaimsRedPointEnumDreamTaskReward = 1903;
         private const int DailyClaimsRedPointEnumPartyFestivalTaskCanSubmit = 803;
         private const int DailyClaimsRedPointEnumPartyOfficialTaskCanSubmit = 804;
         private const int DailyClaimsRedPointEnumActivityFreeReward = 20788;
@@ -608,6 +653,10 @@ namespace HeartopiaMod
 
         // targetId -> dreamType, built once per sweep from TableDreamTaskTypes.
         private readonly Dictionary<int, int> dailyClaimsDreamTypeByTarget = new Dictionary<int, int>();
+
+        // dreamTaskId -> gameTaskId, built once per sweep from TableDreamTasks. A DreamTaskReward
+        // node names the DREAM task; the command that takes it names the GAME task behind it.
+        private readonly Dictionary<int, int> dailyClaimsDreamGameTaskByTask = new Dictionary<int, int>();
 
         // The New Life Log's "Day N" tabs, and every other operation activity's daily tab.
         //
@@ -685,11 +734,145 @@ namespace HeartopiaMod
         // — the server rejects it — but it is still a command the game would never issue.
         private readonly List<int> dailyClaimsSweepSubmittedTaskIds = new List<int>(16);
 
+        // dreamTaskId -> gameTaskId, from TableDreamTasks. Walked at most once per sweep; the map
+        // is baked into the build, so the only reason it is not permanent is that a game update
+        // could renumber it under a running session.
+        private bool DailyClaimsTryGetDreamGameTaskId(int dreamTaskId, out int gameTaskId)
+        {
+            gameTaskId = 0;
+            if (dreamTaskId <= 0)
+            {
+                return false;
+            }
+
+            if (this.dailyClaimsDreamGameTaskByTask.Count == 0)
+            {
+                this.DailyClaimsForEachTableRow("TableDreamTasks", row =>
+                {
+                    // id and gameTaskId are both plain public int fields. The narrow-field-behind-a
+                    // -property trap on this row is dreamType / dreamTaskType / taskType — none of
+                    // which the claim needs, because the red point already encodes the gate.
+                    if (this.TryGetMonoIntMember(row, "id", out int rowId) && rowId > 0
+                        && this.TryGetMonoIntMember(row, "gameTaskId", out int rowGameTaskId)
+                        && rowGameTaskId > 0)
+                    {
+                        this.dailyClaimsDreamGameTaskByTask[rowId] = rowGameTaskId;
+                    }
+                }, out _);
+            }
+
+            return this.dailyClaimsDreamGameTaskByTask.TryGetValue(dreamTaskId, out gameTaskId)
+                && gameTaskId > 0;
+        }
+
+        // One pass over every lit Dream node. This exists as its own pass instead of a case in the
+        // event switch because NO Dream enum has a server RedPointType — RedPointUtility maps only
+        // DreamNew and DreamOnline — so a dream reward can never arrive as a RedPointEvent, and the
+        // switch that handles every other kind structurally cannot see these.
+        //
+        // Only the two claimable kinds are touched. DreamReward is an aggregate that goes out with
+        // its children, and DreamUpgrade spends.
+        private int DailyClaimsAutoClaimDreamNodes(out string status)
+        {
+            List<DailyClaimsRedPointNode> nodes = new List<DailyClaimsRedPointNode>();
+            if (!this.DailyClaimsCollectActiveRedPoints(nodes, out string collectStatus))
+            {
+                status = "collect failed: " + collectStatus;
+                return 0;
+            }
+
+            this.dailyClaimsDreamTypeByTarget.Clear();
+            this.dailyClaimsDreamGameTaskByTask.Clear();
+            this.dailyClaimsSweepSubmittedTaskIds.Clear();
+
+            int sent = 0;
+            int left = 0;
+            int seen = 0;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                int enumValue = nodes[i].EnumValue;
+                if (enumValue != DailyClaimsRedPointEnumDreamTypeReward
+                    && enumValue != DailyClaimsRedPointEnumDreamTaskReward)
+                {
+                    continue;
+                }
+
+                seen++;
+                if (sent >= DailyClaimsAutoDreamPerPass)
+                {
+                    // Re-arm rather than push the rest through in one frame: the drain's contract is
+                    // one action per tick, and the interval above keeps the next pass cheap.
+                    this.dailyClaimsAutoPendingDream = true;
+                    break;
+                }
+
+                int serverType = this.DailyClaimsToRedPointType(enumValue);
+                if (this.DailyClaimsTryClaimForRedPoint(
+                        enumValue, serverType, nodes[i].Id, out string what, out string claimStatus))
+                {
+                    sent++;
+                    this.DailyClaimsLog("auto dream: claimed " + what + " (" + claimStatus + ")");
+                }
+                else
+                {
+                    left++;
+                    this.DailyClaimsLog("auto dream: LEFT " + what + " (" + claimStatus + ")");
+                }
+            }
+
+            status = "lit=" + seen + " claimed=" + sent + (left > 0 ? (" left=" + left) : string.Empty);
+            return sent;
+        }
+
         private bool DailyClaimsTryClaimForRedPoint(int clientEnum, int serverType, int id, out string what, out string status)
         {
             // Client-enum kinds first — these have no server type at all.
             switch (clientEnum)
             {
+                case DailyClaimsRedPointEnumDreamTaskReward:
+                {
+                    // Node id is the TableDreamTask key, and DreamSystem lights it exactly when the
+                    // game task behind it is CanSubmit (or, for taskType 1, has a repeat reward
+                    // waiting). DreamTaskTreePanel takes it with ClientSubmitTask either way — the
+                    // same SubmitGameTaskNetworkCommand the BattlePass tasks already use — so this
+                    // is a reward pickup on finished work, not a story quest being submitted behind
+                    // the player's back (the exclusion in this file's header).
+                    what = "dream task " + id;
+                    if (!this.DailyClaimsTryGetDreamGameTaskId(id, out int dreamGameTaskId))
+                    {
+                        status = "no gameTaskId for dream task " + id;
+                        return false;
+                    }
+
+                    what = "dream task " + id + " (game task " + dreamGameTaskId + ")";
+                    if (this.dailyClaimsSweepSubmittedTaskIds.Contains(dreamGameTaskId))
+                    {
+                        status = "already submitted earlier in this sweep";
+                        return false;
+                    }
+
+                    this.dailyClaimsSweepSubmittedTaskIds.Add(dreamGameTaskId);
+                    return this.TrySubmitDailyClaimsGameTask(dreamGameTaskId, out status);
+                }
+
+                case DailyClaimsRedPointEnumDreamReward:
+                    // Pure aggregate. RefreshRewardRedPoint never sets this one and DreamRewardNode
+                    // has no flag of its own, so it is lit only while a DreamTypeReward or
+                    // DreamTaskReward beneath it is lit, and it goes out with them. Reported rather
+                    // than claimed — and kept off the mark-read pass, because it is the roll-up of a
+                    // reward that really is waiting.
+                    what = "dream " + id;
+                    status = "aggregate - clears with its children";
+                    return false;
+
+                case DailyClaimsRedPointEnumDreamUpgrade:
+                    // UpgradeDreamLevelCommand SPENDS. Same rule that keeps the SeaCycle exploration
+                    // upgrade behind an explicit press: auto-claim never spends. (RefreshUpgradeRed
+                    // Point is empty in this build, so it is not lit either way.)
+                    what = "dream upgrade " + id;
+                    status = "upgrade spends resources - never auto-claimed";
+                    return false;
+
                 case DailyClaimsRedPointEnumDreamTypeReward:
                     // Node id IS the dream TARGET (TableDreamTaskType key); the command also needs
                     // its parent dreamType. One claim drains every earned tier of that target, which
@@ -839,6 +1022,7 @@ namespace HeartopiaMod
             // Rebuilt lazily per sweep — the dream table is static, but a stale map across a game
             // update would silently claim the wrong target.
             this.dailyClaimsDreamTypeByTarget.Clear();
+            this.dailyClaimsDreamGameTaskByTask.Clear();
             this.dailyClaimsSweepSubmittedTaskIds.Clear();
             this.dailyClaimsSweepSuitTiers.Clear();
             this.dailyClaimsSweepSuitTiersLoaded = false;
@@ -1435,6 +1619,17 @@ namespace HeartopiaMod
             // The pending flag is kept (not consumed) while the min-interval backstop holds it off,
             // so a claim that is merely too early is DELAYED rather than dropped, and the drain
             // falls through to the next step instead of stalling on it.
+            if (this.dailyClaimsAutoPendingDream && Time.realtimeSinceStartup >= this.dailyClaimsAutoDreamNextAllowedAt)
+            {
+                this.dailyClaimsAutoPendingDream = false;
+                this.dailyClaimsAutoDreamNextAllowedAt =
+                    Time.realtimeSinceStartup + DailyClaimsAutoDreamMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.dream");
+                int dreamSent = this.DailyClaimsAutoClaimDreamNodes(out string dreamStatus);
+                this.DailyClaimsAutoReport(dreamSent > 0, "dream", dreamStatus);
+                return true;
+            }
+
             if (this.dailyClaimsAutoPendingMail && Time.realtimeSinceStartup >= this.dailyClaimsAutoMailNextAllowedAt)
             {
                 this.dailyClaimsAutoPendingMail = false;
@@ -1593,6 +1788,12 @@ namespace HeartopiaMod
             switch (clientEnum)
             {
                 case DailyClaimsRedPointEnumDreamTypeReward:
+                case DailyClaimsRedPointEnumDreamTaskReward:
+                // Neither of these is claimable, but neither may be hidden: DreamReward is the
+                // roll-up of a child reward that IS waiting, and DreamUpgrade is a spend the player
+                // has to decide on.
+                case DailyClaimsRedPointEnumDreamReward:
+                case DailyClaimsRedPointEnumDreamUpgrade:
                 case DailyClaimsRedPointEnumPartyFestivalTaskCanSubmit:
                 case DailyClaimsRedPointEnumPartyOfficialTaskCanSubmit:
                 case DailyClaimsRedPointEnumActivityFreeReward:

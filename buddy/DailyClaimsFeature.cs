@@ -924,45 +924,103 @@ namespace HeartopiaMod
             yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }
 
-        // Dream target rewards — one command per (dreamType, target); the server hands over every
-        // tier of that target whose exp threshold is met and not yet flagged in TargetRewardFlag.
+        // Dream rewards. Driven by the DOTS, not by the table: DreamSystem recomputes them from
+        // live data and lights DreamTypeReward only when a target has an undrawn tier it has
+        // already earned, and DreamTaskReward only when the game task behind a dream task is
+        // CanSubmit. Walking TableDreamTaskTypes instead sent one command per row — every dream
+        // ever shipped, whether the player has opened it or has anything owed in it — and the
+        // server rejected all but the few real ones.
+        //
+        // The table sweep survives only as the fallback for when the node map cannot be read, and
+        // it is gated on the unlock condition there.
         private IEnumerator DailyClaimsClaimDreamRewardsRoutine()
         {
             this.dailyClaimsLastStatus = "Claiming dream rewards...";
 
-            List<DailyClaimsDreamTarget> targets = new List<DailyClaimsDreamTarget>();
-            if (!this.DailyClaimsTryCollectDreamTargets(targets, out string tableStatus))
-            {
-                this.dailyClaimsLastStatus = "Dream rewards failed: " + tableStatus;
-                this.DailyClaimsLog(this.dailyClaimsLastStatus);
-                yield break;
-            }
+            List<DailyClaimsRedPointNode> nodes = new List<DailyClaimsRedPointNode>();
+            bool haveNodes = this.DailyClaimsCollectActiveRedPoints(nodes, out string collectStatus);
 
-            List<string> lines = new List<string> { "--- dream targets (" + tableStatus + ") ---" };
+            List<string> lines = new List<string>();
             int sent = 0;
-            for (int i = 0; i < targets.Count; i++)
+
+            if (haveNodes)
             {
-                DailyClaimsDreamTarget target = targets[i];
-                if (this.TryClaimDailyClaimsDreamTargetReward(target.DreamType, target.TargetId, out string claimStatus))
+                this.dailyClaimsDreamTypeByTarget.Clear();
+                this.dailyClaimsDreamGameTaskByTask.Clear();
+                this.dailyClaimsSweepSubmittedTaskIds.Clear();
+
+                lines.Add("--- dream red points (" + collectStatus + ") ---");
+                int lit = 0;
+                for (int i = 0; i < nodes.Count; i++)
                 {
-                    sent++;
-                    lines.Add("dreamType=" + target.DreamType + " targetId=" + target.TargetId + " (" + claimStatus + ")");
-                }
-                else
-                {
-                    lines.Add("FAILED dreamType=" + target.DreamType + " targetId=" + target.TargetId
-                        + " (" + claimStatus + ")");
+                    int enumValue = nodes[i].EnumValue;
+                    if (enumValue != DailyClaimsRedPointEnumDreamTypeReward
+                        && enumValue != DailyClaimsRedPointEnumDreamTaskReward)
+                    {
+                        continue;
+                    }
+
+                    lit++;
+                    int serverType = this.DailyClaimsToRedPointType(enumValue);
+                    if (this.DailyClaimsTryClaimForRedPoint(
+                            enumValue, serverType, nodes[i].Id, out string what, out string claimStatus))
+                    {
+                        sent++;
+                        lines.Add("claimed " + what + " (" + claimStatus + ")");
+                    }
+                    else
+                    {
+                        lines.Add("LEFT " + what + " (" + claimStatus + ")");
+                    }
+
+                    yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
                 }
 
-                yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
+                if (lit == 0)
+                {
+                    lines.Add("no dream red point is lit - nothing is owed");
+                }
+
+                this.dailyClaimsLastStatus = "Dream claim done: sent=" + sent + " of " + lit + " lit";
+            }
+            else
+            {
+                lines.Add("--- dream targets, red points unreadable (" + collectStatus + ") ---");
+
+                List<DailyClaimsDreamTarget> targets = new List<DailyClaimsDreamTarget>();
+                if (!this.DailyClaimsTryCollectDreamTargets(targets, out string tableStatus))
+                {
+                    this.dailyClaimsLastStatus = "Dream rewards failed: " + tableStatus;
+                    this.DailyClaimsLog(this.dailyClaimsLastStatus);
+                    yield break;
+                }
+
+                lines.Add("(" + tableStatus + ")");
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    DailyClaimsDreamTarget target = targets[i];
+                    if (this.TryClaimDailyClaimsDreamTargetReward(target.DreamType, target.TargetId, out string claimStatus))
+                    {
+                        sent++;
+                        lines.Add("dreamType=" + target.DreamType + " targetId=" + target.TargetId + " (" + claimStatus + ")");
+                    }
+                    else
+                    {
+                        lines.Add("FAILED dreamType=" + target.DreamType + " targetId=" + target.TargetId
+                            + " (" + claimStatus + ")");
+                    }
+
+                    yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
+                }
+
+                if (targets.Count == 0)
+                {
+                    lines.Add("no UNLOCKED dream targets in TableDreamTaskTypes");
+                }
+
+                this.dailyClaimsLastStatus = "Dream claim done: sent=" + sent + " (table fallback)";
             }
 
-            if (targets.Count == 0)
-            {
-                lines.Add("no dream targets in TableDreamTaskTypes");
-            }
-
-            this.dailyClaimsLastStatus = "Dream claim done: sent=" + sent;
             this.DailyClaimsLog(this.dailyClaimsLastStatus);
             this.DailyClaimsLog(string.Join("\n", lines.ToArray()));
             yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
@@ -2478,7 +2536,21 @@ namespace HeartopiaMod
         private bool DailyClaimsTryCollectDreamTargets(List<DailyClaimsDreamTarget> targets, out string status)
         {
             targets.Clear();
-            return this.DailyClaimsForEachTableRow("TableDreamTaskTypes", row =>
+
+            // Which dreams the player has actually opened. Without this the sweep sent one command
+            // per row of TableDreamTaskTypes — every dream ever shipped, locked or not — and the
+            // server rejected the lot. DreamRewardNode gates its own visibility on exactly this
+            // condition, so it is the game's own answer to "is this dream mine yet".
+            HashSet<int> unlockedDreams = new HashSet<int>();
+            bool dreamGateUsable = this.DailyClaimsTryCollectUnlockedDreamTypes(unlockedDreams, out string gateStatus);
+            if (!dreamGateUsable)
+            {
+                this.DailyClaimsLog("dream unlock gate unavailable (" + gateStatus
+                    + "); falling back to the per-target condition only.");
+            }
+
+            int lockedSkipped = 0;
+            bool collected = this.DailyClaimsForEachTableRow("TableDreamTaskTypes", row =>
             {
                 if (!this.TryGetMonoIntMember(row, "id", out int targetId) || targetId <= 0)
                 {
@@ -2493,12 +2565,130 @@ namespace HeartopiaMod
                     dreamType = targetId / 100;
                 }
 
-                if (dreamType > 0)
+                if (dreamType <= 0)
                 {
-                    targets.Add(new DailyClaimsDreamTarget { DreamType = dreamType, TargetId = targetId });
+                    return;
+                }
+
+                if (dreamGateUsable && !unlockedDreams.Contains(dreamType))
+                {
+                    lockedSkipped++;
+                    return;
+                }
+
+                // The target carries its own condition on top of the dream's. Evaluating it here is
+                // safe despite the "scalars only" contract on this walker: CheckCondition returns a
+                // bool and nothing mono-side is kept across it, while the row itself stays pinned by
+                // the walker for the whole callback.
+                if (this.TryGetMonoObjectMember(row, "unlockCondition", out IntPtr unlockCondition)
+                    && unlockCondition != IntPtr.Zero
+                    && this.DailyClaimsTryCheckUnlockCondition(unlockCondition, out bool targetUnlocked)
+                    && !targetUnlocked)
+                {
+                    lockedSkipped++;
+                    return;
+                }
+
+                targets.Add(new DailyClaimsDreamTarget { DreamType = dreamType, TargetId = targetId });
+            }, out status);
+
+            if (lockedSkipped > 0)
+            {
+                status = status + " (" + lockedSkipped + " locked target(s) skipped)";
+            }
+
+            return collected;
+        }
+
+        // TableDreamTypes rows whose unlockCondition passes right now — the same test
+        // DreamRewardNode.GetParentData applies before it will even show a dot for a dream.
+        private bool DailyClaimsTryCollectUnlockedDreamTypes(HashSet<int> unlocked, out string status)
+        {
+            unlocked.Clear();
+            int rows = 0;
+            bool ok = this.DailyClaimsForEachTableRow("TableDreamTypes", row =>
+            {
+                if (!this.TryGetMonoIntMember(row, "id", out int dreamId) || dreamId <= 0)
+                {
+                    return;
+                }
+
+                rows++;
+
+                // No condition at all means nothing to satisfy — the dream is open.
+                if (!this.TryGetMonoObjectMember(row, "unlockCondition", out IntPtr unlockCondition)
+                    || unlockCondition == IntPtr.Zero)
+                {
+                    unlocked.Add(dreamId);
+                    return;
+                }
+
+                if (this.DailyClaimsTryCheckUnlockCondition(unlockCondition, out bool passed) && passed)
+                {
+                    unlocked.Add(dreamId);
                 }
             }, out status);
+
+            // A walk that produced no rows at all is a failed read, not "every dream is locked" —
+            // treating it as the latter would silently claim nothing forever.
+            if (!ok || rows == 0)
+            {
+                status = "TableDreamTypes unreadable (" + status + ")";
+                return false;
+            }
+
+            status = "unlocked=" + unlocked.Count + " of " + rows;
+            return true;
         }
+
+        // PlayerProtocolManager.CheckCondition(Expression) — one REFERENCE argument, so the args
+        // slot holds the object pointer itself rather than its address, and a static invoke.
+        private unsafe bool DailyClaimsTryCheckUnlockCondition(IntPtr expressionObj, out bool passed)
+        {
+            passed = false;
+            if (expressionObj == IntPtr.Zero || !this.EnsureAuraMonoApiReady() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (this.dailyClaimsAuraPlayerProtocolClass == IntPtr.Zero)
+            {
+                this.dailyClaimsAuraPlayerProtocolClass = this.FindAuraMonoClassByFullName(
+                    "XDTDataAndProtocol.ProtocolService.Player.PlayerProtocolManager");
+                if (this.dailyClaimsAuraPlayerProtocolClass == IntPtr.Zero)
+                {
+                    this.dailyClaimsAuraPlayerProtocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        "XDTDataAndProtocol.ProtocolService.Player", "PlayerProtocolManager");
+                }
+            }
+
+            if (this.dailyClaimsAuraPlayerProtocolClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr method = this.FindAuraMonoMethodOnHierarchy(
+                this.dailyClaimsAuraPlayerProtocolClass, "CheckCondition", 1);
+            if (method == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = expressionObj;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // A boxed bool is one byte at the payload offset.
+            passed = Marshal.ReadByte(boxed, 2 * IntPtr.Size) != 0;
+            return true;
+        }
+
+        private IntPtr dailyClaimsAuraPlayerProtocolClass = IntPtr.Zero;
 
         // Shared by TableStickerThemes and TableBadgeThemes — both rows are {int id; int activityId;}.
         private bool DailyClaimsTryCollectActivityThemes(
