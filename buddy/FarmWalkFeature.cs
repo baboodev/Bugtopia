@@ -3145,11 +3145,23 @@ namespace HeartopiaMod
             bool areaWalk = this.farmWalkPendingArea;
             this.farmWalkPendingArea = false;
 
-            // A zone haul ends at the area, not at a resource — and the vehicle goes back whether
-            // the haul succeeded or was skipped, so it never follows us into the next one.
-            if (this.farmWalkVehicleOurs)
+            // A zone haul ends at the area, not at a resource, and there the vehicle goes back.
+            // A genuine node arrival dismounts too — the collect happens on foot (normally the
+            // approach dismount got us out already; this is its backstop).
+            //
+            // ⚠️ A SKIPPED NODE KEEPS THE SEAT. This used to dismount on every finish, and on
+            // an abandon ("moving to the next node") the next target is picked within the same
+            // tick — while the get-off command is still in flight. The new walk's summon check
+            // then read "already riding" and refused, the dismount landed a moment later, and a
+            // 150 m haul went on foot with no re-summon path (measured 23:04: abandon at 29,7m →
+            // "dismounted (zone haul finished)" → walking 152,6m with no summon line). Keeping
+            // the seat removes both the race and the dismount+resummon round-trip churn.
+            //
+            // The seat cannot leak: the farm's Stop path calls AbortFarmWalk unconditionally,
+            // and its early return now dismounts an owned seat even with no walk active.
+            if (this.farmWalkVehicleOurs && !(this.farmWalkSkipToScan && !areaWalk))
             {
-                this.TryFarmWalkDismount("zone haul finished");
+                this.TryFarmWalkDismount(areaWalk ? "zone haul finished" : "arrived to collect");
             }
 
             if (areaWalk)
