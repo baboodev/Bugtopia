@@ -274,7 +274,10 @@ namespace HeartopiaMod
 
             if (this.strangerChatBypassEnabled)
             {
-                entries.Add(this.CreateLiveFeatureEntry("Stranger Chat Bypass", "Active"));
+                string strangerChatSummary = strangerChatFriendVisibleTrampoline != null
+                    ? "Active"
+                    : (this.strangerChatHookTried ? "Unavailable" : "Arming");
+                entries.Add(this.CreateLiveFeatureEntry("Stranger Chat Bypass", strangerChatSummary));
             }
 
             if (this.chatForceTranslateEnabled)

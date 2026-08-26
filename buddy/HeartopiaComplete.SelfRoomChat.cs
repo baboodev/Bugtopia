@@ -1,36 +1,62 @@
-﻿﻿using HarmonyLib;
-using Il2CppInterop.Runtime;
-using Il2CppInterop.Runtime.InteropTypes.Arrays;
-using Il2CppInterop.Runtime.Runtime;
-using System;
-using System.IO;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Runtime.CompilerServices;
+﻿using System;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Xml;
-using System.Xml.Serialization;
-using UnityEngine;
-using UnityEngine.UI;
-using UnityEngine.EventSystems;
-
-using UnityObject = UnityEngine.Object;
-using Il2CppType = Il2CppSystem.Type;
-using Il2CppFieldInfo = Il2CppSystem.Reflection.FieldInfo;
-using Il2CppMethodInfo = Il2CppSystem.Reflection.MethodInfo;
-using Il2CppPropertyInfo = Il2CppSystem.Reflection.PropertyInfo;
-using Il2CppBindingFlags = Il2CppSystem.Reflection.BindingFlags;
-using Il2CppObject = Il2CppSystem.Object;
-using Object = UnityEngine.Object;
-
+using MonoMod.RuntimeDetour;
 
 namespace HeartopiaMod
 {
+    // Stranger Chat Bypass — show strangers' nearby chat (full text: chat log + head bubbles)
+    // instead of the masked bubbles the game gives non-friends.
+    //
+    // HOW THE GAME GATES IT: every incoming nearby message is resolved live by
+    // XDTLevelAndEntity.Game.Module.Chat.ChatVisibilitySystem.ResolveMessageCore (ChatModule:133;
+    // no per-player caching). After the special-context checks (self, hide&seek, self-room,
+    // multi-build, party, break-the-ice, card table) the last gate is the private
+    // IsFriendChatVisible(long shortId) -> bool; false falls through to Default/Masked.
+    //
+    // We detour that leaf predicate and, while the toggle is on, answer true — every player
+    // resolves as a chat-visible friend (ChatVisibilityReason.Friend: record + bubble + emoji).
+    // While the toggle is off the body forwards to the original via the trampoline, so vanilla
+    // filtering is back for the very next message — nothing to restore.
+    //
+    // WHY A DETOUR (replaced the SelfRoomSystem.IsInSelfRoom field-force, 2026-08-27): forcing
+    // IsInSelfRoom=true poisoned every other consumer of that property (room timer/panels, and the
+    // protocol guards — the old fallback path could even send SelfRoomSetChatVisibility_InRoom,
+    // flipping a REAL self-room's server-side setting with nothing ever sending the inverse). The
+    // restore also only rewrote the local field, could silently miss its snapshot, and the whole
+    // thing needed a 3 s sustained re-apply. The detour has none of that surface: chat-scoped,
+    // zero server commands, no game state mutated, no restore machinery.
+    //
+    // ABI: instance method, one long arg -> native (IntPtr self in RCX, long shortId in RDX),
+    // managed bool returned in AL -> byte return. The body is allocation-free (one volatile bool
+    // read, then constant or trampoline forward — the stock call), safe during teardown.
+    // The detour is image-lifetime: installed once via the world-ready gate, never undone
+    // (memory: native-detours-world-change-corruption; toggling is the flag, not Apply/Undo).
     public partial class HeartopiaComplete
     {
+        private const string StrangerChatWorldReadyCallbackName = "StrangerChatBypass";
+
+        private static readonly string[] StrangerChatImageNames =
+        {
+            "XDTLevelAndEntity", "XDTLevelAndEntity.dll",
+            "Client", "Client.dll"
+        };
+
+        private bool strangerChatCallbackRegistered;
+        private bool strangerChatHookTried;
+
+        // Written on the main thread (toggle / per-frame mirror); read by the native hook body.
+        private static volatile bool strangerChatBypassActive;
+
+        private static NativeDetour strangerChatFriendVisibleDetour;
+        private static FriendChatVisibleHookDelegate strangerChatFriendVisibleKeepAlive; // anti-GC
+        private static FriendChatVisibleHookDelegate strangerChatFriendVisibleTrampoline;
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate byte FriendChatVisibleHookDelegate(IntPtr self, long targetShortId);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr StrangerChatCompileMethodDelegate(IntPtr method);
+
         private void StrangerChatLog(string message)
         {
             if (!MasterLogStrangerChat || string.IsNullOrEmpty(message))
@@ -41,449 +67,129 @@ namespace HeartopiaMod
             ModLogger.Msg("[StrangerChat] " + message);
         }
 
-        // First attempt per world is driven by the world-ready gate (LoadingClosedEvent) instead of
-        // the blind 5 s timer: the toggle is restored from Config.xml at startup, so without the
-        // gate this walked the Mono runtime on the login screen — every attempt guaranteed to fail
-        // and the SelfRoomSystem lookup poking a runtime that has no game data yet.
-        // After the first success the 3 s re-apply cadence stays: the gate is a plain instance
-        // field the game itself rewrites (entering/leaving a room), so this is sustained
-        // enforcement, not a one-shot install.
-        private const string StrangerChatWorldReadyCallbackName = "StrangerChatBypass";
-
-        private void EnsureStrangerChatBypassPatch()
+        // Cheap per-frame tick: with the toggle off (default) this is a bool test + a static write.
+        // Mirrors the persisted toggle into the static flag the hook body reads (covers config
+        // restore at startup as well as UI flips), and hands the install to the world-ready gate.
+        private void ProcessStrangerChatBypassOnUpdate()
         {
             if (!this.strangerChatBypassEnabled)
             {
+                strangerChatBypassActive = false; // installed hook (if any) forwards -> vanilla
                 return;
             }
 
-            this.RegisterWorldReadyCallback(StrangerChatWorldReadyCallbackName, this.TryStrangerChatBypassWorldReadyAttempt);
-
-            if (!this.IsWorldReady)
+            strangerChatBypassActive = true;
+            if (this.strangerChatHookTried || strangerChatFriendVisibleTrampoline != null)
             {
                 return;
             }
 
-            float now = Time.unscaledTime;
-            if (now < this.nextStrangerChatBypassPatchAttemptAt)
+            // Hook installs run on the world-ready gate, never from a retry timer here
+            // (AGENTS.md §1 hard rule). Registration is idempotent.
+            if (!this.strangerChatCallbackRegistered)
             {
-                return;
+                this.strangerChatCallbackRegistered = true;
+                this.RegisterWorldReadyCallback(StrangerChatWorldReadyCallbackName, this.TryInstallStrangerChatHookOnWorldReady);
             }
-
-            this.nextStrangerChatBypassPatchAttemptAt = now + (this.strangerChatBypassPatchApplied ? 3f : 5f);
-            this.TryApplyAuraMonoStrangerChatBypass();
         }
 
-        // Runs once per world load, right after the splash closes. A new world means a new
-        // SelfRoomSystem instance, so the captured "original" value from the previous world is
-        // stale — drop it and let the first attempt re-capture.
-        private bool TryStrangerChatBypassWorldReadyAttempt()
+        // Returns true when settled for this world (installed, or permanently unavailable), false
+        // to be retried by the gate.
+        private bool TryInstallStrangerChatHookOnWorldReady()
         {
-            if (!this.strangerChatBypassEnabled)
+            if (this.strangerChatHookTried || strangerChatFriendVisibleTrampoline != null)
             {
-                return true; // nothing to do this world; the toggle re-arms this on its next flip
+                return true;
             }
 
-            this.strangerChatBypassPatchApplied = false;
-            this.strangerChatBypassPatchUnavailableLogged = false;
-            this.strangerChatOriginalInSelfRoom = false;
-            this.strangerChatOriginalInSelfRoomValid = false;
-            this.nextStrangerChatBypassPatchAttemptAt = -999f;
-            this.TryApplyAuraMonoStrangerChatBypass();
-            return this.strangerChatBypassPatchApplied;
-        }
-
-        private void TryApplyAuraMonoStrangerChatBypass()
-        {
             try
             {
                 if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
                 {
-                    this.StrangerChatLog("AuraMono runtime not ready yet.");
-                    return;
+                    return false; // AuraMono not up yet — retry
                 }
 
-                bool hasState = this.TryGetAuraMonoSelfRoomChatVisibility(out bool inSelfRoom, out bool onlyFriendChat, out string stateStatus);
-                if (hasState && inSelfRoom && !onlyFriendChat)
+                IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                StrangerChatCompileMethodDelegate compile = monoModule != IntPtr.Zero
+                    ? this.GetAuraMonoExport<StrangerChatCompileMethodDelegate>(monoModule, "mono_compile_method")
+                    : null;
+                if (compile == null)
                 {
-                    if (!this.strangerChatBypassPatchApplied)
-                    {
-                        this.StrangerChatLog("Stranger chat already visible. " + stateStatus);
-                    }
-                    this.strangerChatBypassPatchApplied = true;
-                    this.strangerChatBypassPatchUnavailableLogged = false;
-                    return;
+                    this.strangerChatHookTried = true;
+                    ModLogger.Msg("[StrangerChat] mono_compile_method unavailable — bypass off.");
+                    return true;
                 }
 
-                if (this.TryForceAuraMonoStrangerChatDisplayGate(out string gateStatus))
+                const string nameSpace = "XDTLevelAndEntity.Game.Module.Chat";
+                const string shortName = "ChatVisibilitySystem";
+                IntPtr cls = this.FindAuraMonoClassInImages(nameSpace, shortName, StrangerChatImageNames);
+                if (cls == IntPtr.Zero)
                 {
-                    bool wasApplied = this.strangerChatBypassPatchApplied;
-                    this.strangerChatBypassPatchApplied = true;
-                    this.strangerChatBypassPatchUnavailableLogged = false;
-                    if (!wasApplied)
-                    {
-                        this.StrangerChatLog("Stranger Chat Bypass active via AuraMono local gate. " + gateStatus);
-                    }
-                    return;
+                    cls = this.FindAuraMonoClassByFullName(nameSpace + "." + shortName);
                 }
-
-                if (inSelfRoom
-                    && (this.TryInvokeAuraMonoSelfRoomUpdateChatVisibility(false, out string invokeStatus)
-                        || this.TryInvokeAuraMonoSelfRoomProtocolChatVisibility(false, out invokeStatus)))
+                if (cls == IntPtr.Zero)
                 {
-                    this.strangerChatBypassPatchApplied = true;
-                    this.strangerChatBypassPatchUnavailableLogged = false;
-                    this.StrangerChatLog("Stranger Chat Bypass active via AuraMono self-room setting. " + invokeStatus);
-                    return;
+                    this.StrangerChatLog("ChatVisibilitySystem not loaded yet — retrying.");
+                    return false; // image not loaded yet — retry
                 }
 
-                if (!this.strangerChatBypassPatchUnavailableLogged)
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "IsFriendChatVisible", 1);
+                if (method == IntPtr.Zero)
                 {
-                    this.StrangerChatLog("AuraMono chat display gate failed. state=" + stateStatus + " gate=" + gateStatus);
-                    this.strangerChatBypassPatchUnavailableLogged = true;
+                    this.strangerChatHookTried = true;
+                    ModLogger.Msg("[StrangerChat] ChatVisibilitySystem.IsFriendChatVisible(1) not found — bypass off (game update?).");
+                    return true;
                 }
-            }
-            catch (Exception ex)
-            {
-                this.StrangerChatLog("Exception: " + ex.GetType().Name + " - " + ex.Message);
-            }
-        }
 
-        private unsafe bool TryForceAuraMonoStrangerChatDisplayGate(out string status)
-        {
-            status = "SelfRoomSystem display gate unavailable.";
-
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady()
-                    || !this.AttachAuraMonoThread()
-                    || auraMonoObjectGetClass == null
-                    || auraMonoFieldSetValue == null)
+                IntPtr nativePtr = compile(method);
+                if (nativePtr == IntPtr.Zero)
                 {
-                    status = "AuraMono field API not ready.";
-                    return false;
+                    this.strangerChatHookTried = true;
+                    ModLogger.Msg("[StrangerChat] mono_compile_method returned null for IsFriendChatVisible — bypass off.");
+                    return true;
                 }
 
-                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.SelfRoom.SelfRoomSystem", out IntPtr selfRoomSystemObj) || selfRoomSystemObj == IntPtr.Zero)
+                strangerChatFriendVisibleKeepAlive = StrangerChatFriendVisibleDetourBody;
+                strangerChatFriendVisibleDetour = new NativeDetour(nativePtr, strangerChatFriendVisibleKeepAlive);
+                strangerChatFriendVisibleTrampoline = strangerChatFriendVisibleDetour.GenerateTrampoline<FriendChatVisibleHookDelegate>();
+                if (strangerChatFriendVisibleTrampoline == null)
                 {
-                    status = "SelfRoomSystem module unavailable.";
-                    return false;
+                    // Install rollback, not a live-detour teardown (the only case where Undo is
+                    // safe — memory: native-detours-world-change-corruption).
+                    try { strangerChatFriendVisibleDetour?.Undo(); } catch { }
+                    strangerChatFriendVisibleDetour = null;
+                    strangerChatFriendVisibleKeepAlive = null;
+                    this.strangerChatHookTried = true;
+                    ModLogger.Msg("[StrangerChat] trampoline unavailable for IsFriendChatVisible; detour reverted — bypass off.");
+                    return true;
                 }
 
-                IntPtr selfRoomSystemClass = auraMonoObjectGetClass(selfRoomSystemObj);
-                if (selfRoomSystemClass == IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem class unavailable.";
-                    return false;
-                }
-
-                if (!this.TryResolveAuraMonoStrangerChatInSelfRoomField(selfRoomSystemClass))
-                {
-                    status = "SelfRoomSystem IsInSelfRoom field unavailable.";
-                    return false;
-                }
-
-                if (!this.strangerChatOriginalInSelfRoomValid
-                    && this.TryGetAuraMonoSelfRoomChatVisibility(out bool originalInSelfRoom, out _, out _))
-                {
-                    this.strangerChatOriginalInSelfRoom = originalInSelfRoom;
-                    this.strangerChatOriginalInSelfRoomValid = true;
-                }
-
-                if (!this.TrySetAuraMonoStrangerChatInSelfRoom(selfRoomSystemObj, selfRoomSystemClass, true, out status))
-                {
-                    return false;
-                }
-
-                if (this.TryGetAuraMonoSelfRoomChatVisibility(out bool verifyInSelfRoom, out bool verifyOnlyFriendChat, out string verifyStatus))
-                {
-                    status = "forced IsInSelfRoom=True; verify=" + verifyStatus;
-                    if (verifyInSelfRoom && !verifyOnlyFriendChat)
-                    {
-                        return true;
-                    }
-
-                    if (verifyInSelfRoom && verifyOnlyFriendChat && this.TryInvokeAuraMonoSelfRoomUpdateChatVisibility(false, out string updateStatus))
-                    {
-                        if (this.TryGetAuraMonoSelfRoomChatVisibility(out verifyInSelfRoom, out verifyOnlyFriendChat, out verifyStatus))
-                        {
-                            status = "forced IsInSelfRoom=True; " + updateStatus + " verify=" + verifyStatus;
-                            return verifyInSelfRoom && !verifyOnlyFriendChat;
-                        }
-
-                        status = "forced IsInSelfRoom=True; " + updateStatus + " verify unavailable.";
-                        return true;
-                    }
-
-                    return false;
-                }
-
-                status = "forced IsInSelfRoom=True; verify unavailable.";
+                ModLogger.Msg("[StrangerChat] hooked ChatVisibilitySystem.IsFriendChatVisible @0x" + nativePtr.ToInt64().ToString("X"));
                 return true;
             }
             catch (Exception ex)
             {
-                status = "SelfRoomSystem display gate exception: " + ex.Message;
-                return false;
-            }
-        }
-
-        private unsafe bool TryRestoreAuraMonoStrangerChatDisplayGate(out string status)
-        {
-            status = "No stored SelfRoomSystem state to restore.";
-
-            try
-            {
-                if (!this.strangerChatOriginalInSelfRoomValid)
-                {
-                    return false;
-                }
-
-                if (!this.EnsureAuraMonoApiReady()
-                    || !this.AttachAuraMonoThread()
-                    || auraMonoObjectGetClass == null
-                    || auraMonoFieldSetValue == null)
-                {
-                    status = "AuraMono field API not ready.";
-                    return false;
-                }
-
-                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.SelfRoom.SelfRoomSystem", out IntPtr selfRoomSystemObj) || selfRoomSystemObj == IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem module unavailable.";
-                    return false;
-                }
-
-                IntPtr selfRoomSystemClass = auraMonoObjectGetClass(selfRoomSystemObj);
-                if (!this.TrySetAuraMonoStrangerChatInSelfRoom(selfRoomSystemObj, selfRoomSystemClass, this.strangerChatOriginalInSelfRoom, out status))
-                {
-                    return false;
-                }
-
-                bool restoredValue = this.strangerChatOriginalInSelfRoom;
-                this.strangerChatOriginalInSelfRoom = false;
-                this.strangerChatOriginalInSelfRoomValid = false;
-
-                if (this.TryGetAuraMonoSelfRoomChatVisibility(out _, out _, out string verifyStatus))
-                {
-                    status = "restored IsInSelfRoom=" + restoredValue + "; verify=" + verifyStatus;
-                }
-                else
-                {
-                    status = "restored IsInSelfRoom=" + restoredValue + "; verify unavailable.";
-                }
-
+                this.strangerChatHookTried = true;
+                try { strangerChatFriendVisibleDetour?.Undo(); } catch { }
+                strangerChatFriendVisibleDetour = null;
+                strangerChatFriendVisibleKeepAlive = null;
+                strangerChatFriendVisibleTrampoline = null;
+                ModLogger.Msg("[StrangerChat] IsFriendChatVisible hook install failed: " + ex.Message + " — bypass off.");
                 return true;
             }
-            catch (Exception ex)
-            {
-                status = "SelfRoomSystem restore exception: " + ex.Message;
-                return false;
-            }
         }
 
-        private unsafe bool TrySetAuraMonoStrangerChatInSelfRoom(IntPtr selfRoomSystemObj, IntPtr selfRoomSystemClass, bool value, out string status)
+        // Native->coreclr reverse-pinvoke body. Allocation-free, no Mono calls, no logging: hit
+        // once per incoming nearby message, and can run from game code mid-teardown.
+        private static byte StrangerChatFriendVisibleDetourBody(IntPtr self, long targetShortId)
         {
-            status = "SelfRoomSystem IsInSelfRoom field unavailable.";
-            if (selfRoomSystemObj == IntPtr.Zero || selfRoomSystemClass == IntPtr.Zero || auraMonoFieldSetValue == null)
+            if (strangerChatBypassActive)
             {
-                return false;
+                return 1; // every player resolves as a chat-visible friend
             }
 
-            if (!this.TryResolveAuraMonoStrangerChatInSelfRoomField(selfRoomSystemClass))
-            {
-                return false;
-            }
-
-            bool inRoomValue = value;
-            auraMonoFieldSetValue(selfRoomSystemObj, this.cachedStrangerChatSelfRoomInRoomFieldPtr, (IntPtr)(&inRoomValue));
-            status = "set IsInSelfRoom=" + value;
-            return true;
+            FriendChatVisibleHookDelegate trampoline = strangerChatFriendVisibleTrampoline;
+            return trampoline != null ? trampoline(self, targetShortId) : (byte)0; // 0 = vanilla deny
         }
-
-        private bool TryResolveAuraMonoStrangerChatInSelfRoomField(IntPtr selfRoomSystemClass)
-        {
-            if (selfRoomSystemClass == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            if (this.cachedStrangerChatSelfRoomInRoomFieldPtr == IntPtr.Zero)
-            {
-                this.cachedStrangerChatSelfRoomInRoomFieldPtr = this.FindAuraMonoFieldOnHierarchy(selfRoomSystemClass, "<IsInSelfRoom>k__BackingField");
-                if (this.cachedStrangerChatSelfRoomInRoomFieldPtr == IntPtr.Zero)
-                {
-                    this.cachedStrangerChatSelfRoomInRoomFieldPtr = this.FindAuraMonoFieldOnHierarchy(selfRoomSystemClass, "IsInSelfRoom");
-                }
-                if (this.cachedStrangerChatSelfRoomInRoomFieldPtr == IntPtr.Zero)
-                {
-                    this.cachedStrangerChatSelfRoomInRoomFieldPtr = this.FindAuraMonoFieldOnHierarchy(selfRoomSystemClass, "isInSelfRoom");
-                }
-                if (this.cachedStrangerChatSelfRoomInRoomFieldPtr == IntPtr.Zero)
-                {
-                    this.cachedStrangerChatSelfRoomInRoomFieldPtr = this.FindAuraMonoFieldOnHierarchy(selfRoomSystemClass, "_isInSelfRoom");
-                }
-            }
-
-            return this.cachedStrangerChatSelfRoomInRoomFieldPtr != IntPtr.Zero;
-        }
-
-        private bool TryGetAuraMonoSelfRoomChatVisibility(out bool inSelfRoom, out bool onlyFriendChat, out string status)
-        {
-            inSelfRoom = false;
-            onlyFriendChat = true;
-            status = "SelfRoomSystem unavailable.";
-
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
-                {
-                    status = "AuraMono API not ready.";
-                    return false;
-                }
-
-                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.SelfRoom.SelfRoomSystem", out IntPtr selfRoomSystemObj) || selfRoomSystemObj == IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem module unavailable.";
-                    return false;
-                }
-
-                IntPtr selfRoomSystemClass = auraMonoObjectGetClass(selfRoomSystemObj);
-                if (selfRoomSystemClass == IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem class unavailable.";
-                    return false;
-                }
-
-                if (!this.TryInvokeAuraMonoBoolGetter(selfRoomSystemObj, selfRoomSystemClass, out inSelfRoom, "get_IsInSelfRoom", "CheckIfInSelfRoom"))
-                {
-                    status = "SelfRoomSystem IsInSelfRoom unavailable.";
-                    return false;
-                }
-
-                if (!this.TryInvokeAuraMonoBoolGetter(selfRoomSystemObj, selfRoomSystemClass, out onlyFriendChat, "IsOnlyFriendChatVisibility"))
-                {
-                    status = "SelfRoomSystem IsOnlyFriendChatVisibility unavailable. inSelfRoom=" + inSelfRoom;
-                    return false;
-                }
-
-                status = "SelfRoomSystem inSelfRoom=" + inSelfRoom + " onlyFriendChat=" + onlyFriendChat;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "SelfRoomSystem visibility exception: " + ex.Message;
-                return false;
-            }
-        }
-
-        private unsafe bool TryInvokeAuraMonoSelfRoomUpdateChatVisibility(bool onlyFriend, out string status)
-        {
-            status = "SelfRoomSystem.UpdateChatVisibility unavailable.";
-
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
-                {
-                    status = "AuraMono API not ready.";
-                    return false;
-                }
-
-                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.SelfRoom.SelfRoomSystem", out IntPtr selfRoomSystemObj) || selfRoomSystemObj == IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem module unavailable.";
-                    return false;
-                }
-
-                IntPtr selfRoomSystemClass = auraMonoObjectGetClass(selfRoomSystemObj);
-                if (selfRoomSystemClass == IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem class unavailable.";
-                    return false;
-                }
-
-                if (this.cachedStrangerChatSelfRoomUpdateMethodPtr == IntPtr.Zero)
-                {
-                    this.cachedStrangerChatSelfRoomUpdateMethodPtr = this.FindAuraMonoMethodOnHierarchy(selfRoomSystemClass, "UpdateChatVisibility", 1);
-                }
-
-                if (this.cachedStrangerChatSelfRoomUpdateMethodPtr == IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem.UpdateChatVisibility method unavailable.";
-                    return false;
-                }
-
-                bool value = onlyFriend;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&value);
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(this.cachedStrangerChatSelfRoomUpdateMethodPtr, selfRoomSystemObj, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    status = "SelfRoomSystem.UpdateChatVisibility raised exception.";
-                    return false;
-                }
-
-                status = "SelfRoomSystem.UpdateChatVisibility(" + onlyFriend + ") invoked.";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "SelfRoomSystem.UpdateChatVisibility exception: " + ex.Message;
-                return false;
-            }
-        }
-
-        private unsafe bool TryInvokeAuraMonoSelfRoomProtocolChatVisibility(bool onlyFriend, out string status)
-        {
-            status = "SelfRoomProtocolManager.SelfRoomSetChatVisibility_InRoom unavailable.";
-
-            try
-            {
-                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
-                {
-                    status = "AuraMono API not ready.";
-                    return false;
-                }
-
-                IntPtr protocolClass = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Login.SelfRoomProtocolManager");
-                if (protocolClass == IntPtr.Zero)
-                {
-                    status = "SelfRoomProtocolManager class unavailable.";
-                    return false;
-                }
-
-                if (this.cachedStrangerChatSelfRoomProtocolMethodPtr == IntPtr.Zero)
-                {
-                    this.cachedStrangerChatSelfRoomProtocolMethodPtr = this.FindAuraMonoMethodOnHierarchy(protocolClass, "SelfRoomSetChatVisibility_InRoom", 1);
-                }
-
-                if (this.cachedStrangerChatSelfRoomProtocolMethodPtr == IntPtr.Zero)
-                {
-                    status = "SelfRoomProtocolManager.SelfRoomSetChatVisibility_InRoom method unavailable.";
-                    return false;
-                }
-
-                bool value = onlyFriend;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&value);
-                IntPtr exc = IntPtr.Zero;
-                auraMonoRuntimeInvoke(this.cachedStrangerChatSelfRoomProtocolMethodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
-                if (exc != IntPtr.Zero)
-                {
-                    status = "SelfRoomProtocolManager.SelfRoomSetChatVisibility_InRoom raised exception.";
-                    return false;
-                }
-
-                status = "SelfRoomProtocolManager.SelfRoomSetChatVisibility_InRoom(" + onlyFriend + ") invoked.";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                status = "SelfRoomProtocolManager.SelfRoomSetChatVisibility_InRoom exception: " + ex.Message;
-                return false;
-            }
-        }
-
     }
 }

@@ -945,10 +945,10 @@ namespace HeartopiaMod
             }
         }
 
-        // Gui.cs:1764-1799 — verbatim, BOTH directions have real, different logic. Enable: reset
-        // the patch/latch fields (incl. the original-gate snapshot pair) and notify. Disable:
-        // AuraMono display-gate restore first (logged either way via StrangerChatLog), then reset
-        // three fields (the snapshot pair deliberately NOT cleared here — IMGUI parity), notify.
+        // Both directions are just the flag: the IsFriendChatVisible detour body branches on
+        // strangerChatBypassActive, so off = the very next message resolves vanilla — nothing to
+        // restore. Turning on re-arms the world-ready install if the hook is not up yet
+        // (HeartopiaComplete.SelfRoomChat.cs).
         private void OnUguiSelfStrangerChatBypassToggled(bool value)
         {
             if (value == this.strangerChatBypassEnabled)
@@ -956,30 +956,19 @@ namespace HeartopiaMod
                 return;
             }
             this.strangerChatBypassEnabled = value;
+            strangerChatBypassActive = value;
             this.SaveKeybinds(false);
-            if (this.strangerChatBypassEnabled)
+            if (value)
             {
-                this.strangerChatBypassPatchApplied = false;
-                this.strangerChatBypassPatchUnavailableLogged = false;
-                this.strangerChatOriginalInSelfRoom = false;
-                this.strangerChatOriginalInSelfRoomValid = false;
-                this.nextStrangerChatBypassPatchAttemptAt = -999f;
+                if (this.strangerChatCallbackRegistered && !this.strangerChatHookTried
+                    && strangerChatFriendVisibleTrampoline == null)
+                {
+                    this.ResetWorldReadyCallback(StrangerChatWorldReadyCallbackName);
+                }
                 this.AddMenuNotification(this.L("Stranger Chat Bypass Enabled"), new Color(0.55f, 0.88f, 1f));
             }
             else
             {
-                if (this.TryRestoreAuraMonoStrangerChatDisplayGate(out string restoreStatus))
-                {
-                    this.StrangerChatLog("Stranger Chat Bypass restored. " + restoreStatus);
-                }
-                else if (!string.IsNullOrWhiteSpace(restoreStatus))
-                {
-                    this.StrangerChatLog("Stranger Chat Bypass restore failed. " + restoreStatus);
-                }
-
-                this.strangerChatBypassPatchApplied = false;
-                this.strangerChatBypassPatchUnavailableLogged = false;
-                this.nextStrangerChatBypassPatchAttemptAt = -999f;
                 this.AddMenuNotification(this.L("Stranger Chat Bypass Disabled"), new Color(0.88f, 0.6f, 0.6f));
             }
         }

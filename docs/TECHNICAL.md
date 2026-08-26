@@ -326,7 +326,7 @@ and nothing polls before it.
 | GameLod heavy sections + PC_LODBIAS hand-back | own copy of the loading events | gate |
 | VehicleBypass detours | 3 s blind retry | gate + in-world retry |
 | Warehouse `IsPlayerInHomeLand` detour | 5 s | gate |
-| Stranger Chat bypass | 5 s / 3 s | gate + 3 s in-world re-apply |
+| Stranger Chat bypass (`ChatVisibilitySystem.IsFriendChatVisible` detour) | 5 s / 3 s field re-force | gate (one-time install; toggle is the hook flag) |
 | HomelandFarm warmup (`IsSceneLoadFinished` Mono invoke ×2/s) | 0.5 s from frame 1 | gate, then the game's own probe |
 | Instrument-panel resolve (hotkey guard) | 0.2 s, per hotkey check | gate (no world ⇒ no panel) |
 | Chat translate resolve / postcard detour + mailId | 5 s / per frame | gate |

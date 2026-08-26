@@ -655,7 +655,7 @@ namespace HeartopiaMod
             {
                 this.EnsurePetPlayRuntimePatches();
             }
-            this.EnsureStrangerChatBypassPatch();
+            this.ProcessStrangerChatBypassOnUpdate();
             this.EnsureChatForceTranslateFeature();
             WarehouseBypassFeature.Update(this);
             this.EnsureSpawnVehicleResultHooks();
@@ -4586,16 +4586,8 @@ namespace HeartopiaMod
         private bool birdFarmMaxPhotoHookRegistered = false;
         private bool warehouseBypassEnabled = false;
         internal bool WarehouseBypassEnabled => this.warehouseBypassEnabled;
-        // Stranger Chat Bypass
+        // Stranger Chat Bypass (detour machinery lives in HeartopiaComplete.SelfRoomChat.cs)
         private bool strangerChatBypassEnabled = false;
-        private bool strangerChatBypassPatchApplied = false;
-        private bool strangerChatBypassPatchUnavailableLogged = false;
-        private bool strangerChatOriginalInSelfRoom = false;
-        private bool strangerChatOriginalInSelfRoomValid = false;
-        private float nextStrangerChatBypassPatchAttemptAt = -999f;
-        private IntPtr cachedStrangerChatSelfRoomInRoomFieldPtr = IntPtr.Zero;
-        private IntPtr cachedStrangerChatSelfRoomUpdateMethodPtr = IntPtr.Zero;
-        private IntPtr cachedStrangerChatSelfRoomProtocolMethodPtr = IntPtr.Zero;
         private float lastBirdFarmMaxPhotoScareAt = -999f;
         private uint lastBirdFarmMaxPhotoScareNetId = 0U;
         private MethodInfo cachedScannerStatusPanelGetScanningBirdNetIdMethod = null;

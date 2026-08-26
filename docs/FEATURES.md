@@ -751,6 +751,7 @@ Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
 | Inspect player / move | Debug-style player inspection |
 | Hide ID / custom display ID | Social name display tweaks |
 | Block game UI when menu open | Input focus helper |
+| Stranger Chat Bypass | Full text for strangers' nearby chat (log + head bubbles) — detour on the game's friend-visibility check; toggling off restores vanilla filtering for the next message |
 | Stranger chat logging | Optional (master log flag off by default) |
 
 ### Food & Repair
