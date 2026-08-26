@@ -2810,6 +2810,12 @@ namespace HeartopiaMod
                                         || (this.showSeaGrapeRadar && markerLabel.Contains("Sea Grape"))
                                         || (this.showWakameRadar && markerLabel.Contains("Wakame"))
                                         || (this.showContaminatedRadar && markerLabel.Contains("Contaminated"))
+                                        // The roaming daily drops (RoamingCollectableFinderFeature.cs). Their
+                                        // markers were on the radar but no branch here matched the labels, so
+                                        // the farm never targeted them — it kept touring rare trees instead.
+                                        // Cooldown copies are already excluded above (markerOnCooldown).
+                                        || (this.showOakOakRadar && markerLabel.Contains("Oak-Oak"))
+                                        || (this.showFluoriteRadar && markerLabel.Contains("Flawless Fluorite"))
                                         || this.ShouldShowMushroomByLabel(markerLabel)
                                         || (this.showFiddleheadRadar && markerLabel.Contains("Fiddlehead"))
                                         || (this.showTallMustardRadar && markerLabel.Contains("Tall Mustard"))
