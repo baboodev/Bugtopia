@@ -429,6 +429,12 @@ namespace HeartopiaMod
         private int farmWalkCornerIndex;
         private Vector3 farmWalkTarget;
         private string farmWalkLabel = string.Empty;
+        // Set when the target went cold because OUR OWN aura drained it on the way in. The walk
+        // then finishes normally — the drop is lying at the resource and gets picked up by
+        // walking over it — but the collect dwell is skipped, because the collect already
+        // happened and there is nothing left to wait for.
+        private bool farmWalkOwnDrainWalkIn;
+
         private float farmWalkNextRepathAt;
 
         // How many times the walker RE-PATHED ON ITS OWN. It only rises on a corrective re-path —
@@ -533,6 +539,11 @@ namespace HeartopiaMod
         // seen yet, which is the state a node keeps while it is outside the streamed bubble.
         private float farmWalkTargetSeenAt = -1f;
         // Inside this range, absence from the scan is conclusive on its own — no prior sighting needed.
+        // How recently the aura must have acted for a fresh cooldown to be OURS. One swing cycle
+        // plus the round trip that publishes the verdict; the measured cases all read "heard 0s
+        // ago" with the aura reporting hits continuously.
+        private const float FarmWalkOwnDrainWindow = 2.5f;
+
         private const float FarmWalkDrainedCloseDistance = 12f;
         // Crossing this forces one fresh scan, so the approach is judged on current world state well
         // before the last stretch rather than a scan interval into it.
@@ -946,6 +957,7 @@ namespace HeartopiaMod
             this.farmWalkBackOffRound = 0;   // next walk starts its alternation at "rise" again
             this.farmWalkBackOffVerticalDir = 1;
             this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
+            this.farmWalkOwnDrainWalkIn = false; // per walk, like the rest of the one-shots
             this.farmWalkProbeUsed = false;   // one probe sweep per walk
             this.farmWalkHeightRefined = false; // one height refine per walk
             this.farmWalkTargetSeenAt = -1f;  // "seen present" is per-walk evidence, never carried over
@@ -2759,6 +2771,37 @@ namespace HeartopiaMod
                 // Name the SOURCE. The component and the client's broadcast verdict disagree often
                 // enough that "on cooldown" alone is not a diagnosis: one of them is a field that
                 // may simply have no data, the other is the number the game computed for that netId.
+                // ⚠️ OUR OWN KILL IS NOT A REASON TO WALK AWAY — THE DROP IS LYING THERE.
+                //
+                // The aura out-ranges the last metres of the approach, so on trees it fells the
+                // target while the walker is still closing: measured three times in one run at
+                // 1,3m, 1,9m and 2,0m short, each with a verdict "heard 0s ago". Abandoning there
+                // is right when somebody ELSE took the resource — there is nothing on the ground
+                // for us. When we felled it ourselves the loot is at the trunk, and leaving turns
+                // a finished chop into a wasted one. With the vehicle threshold now measuring the
+                // route, the farm was mounting up the instant the tree came down.
+                //
+                // So: keep walking the last couple of metres, which is what collects the drop,
+                // and skip only the dwell — the collect it would wait for has already happened.
+                // ⚠️ THE DECISION HAS TO HOLD, NOT FIRE ONCE. The first version used the flag
+                // as a log guard, so the very next tick found it already set, skipped this
+                // block and abandoned anyway — the log showed both lines back to back:
+                //     our own aura took it 1,1m short — walking in for the drop
+                //     target went on cooldown while we walked (1,1m short) — moving to the next
+                if (this.farmWalkOwnDrainWalkIn)
+                {
+                    return false;
+                }
+
+                if (distance <= FarmWalkDrainedCloseDistance
+                    && Time.unscaledTime - this.auraLastSuccessfulCommandAt <= FarmWalkOwnDrainWindow)
+                {
+                    this.farmWalkOwnDrainWalkIn = true;
+                    ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": our own aura took it "
+                        + distance.ToString("F1") + "m short — walking in for the drop, no collect dwell.");
+                    return false;
+                }
+
                 why = "went on cooldown while we walked" + this.DescribeFarmWalkColdSource(this.farmWalkTrueTarget);
             }
             else if (this.farmWalkTargetSeenAt >= 0f
@@ -3157,6 +3200,19 @@ namespace HeartopiaMod
             // Decoration only: queues the gathering animation when someone is watching. It never
             // gates the collect below, which Aura Farm owns.
             this.NoteForagingAnimArrival(this.farmWalkTarget);
+
+            // Walked in purely to stand on our own drop: the resource is already spent, so the
+            // dwell would wait out its whole timeout for a collect that happened on the way here.
+            if (this.farmWalkOwnDrainWalkIn)
+            {
+                this.farmWalkOwnDrainWalkIn = false;
+                this.StampVisitedNode(this.farmWalkTrueTarget,
+                    Time.unscaledTime + this.GetVisitedColdStampSeconds(0L));
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel
+                    + ": reached our own drop — on to the next node without a collect dwell.");
+                this.FinishCollectingCycle();
+                return;
+            }
 
             this.farmState = HeartopiaComplete.AutoFarmState.Collecting;
             this.autoFarmTimer = 0f;
