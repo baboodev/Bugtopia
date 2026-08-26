@@ -1502,7 +1502,13 @@ namespace HeartopiaMod
         // stays true however long ago it was heard.
         internal bool RegisterCollectColdHookOnWorldReady()
         {
-            this.collectColdByNetId.Clear();   // netIds are per-session
+            // The clear guards against a netId being reused across worlds. "netIds are
+            // per-session" turned out to be too strong, though: a static entity's netId held
+            // across a full game RESTART (21118, its cooldown down by exactly the elapsed wall
+            // clock) — which is what makes reseeding long cooldowns from disk sound
+            // (ColdLedgerPersistFeature.cs).
+            this.collectColdByNetId.Clear();
+            this.SeedPersistedColdLedger();
             this.EnsureAuraCollectColdEventHook();
             return true;
         }
@@ -1915,16 +1921,26 @@ namespace HeartopiaMod
                 // growing (the ring is on screen, hand-collect refuses) was recorded as available,
                 // which is precisely the wrong direction for a farm that must not walk to it.
                 //
-                // So a zero may not erase a live maturity time from the SAME sweep. Across sweeps it
-                // still may — that is how a matured bush becomes available again — which is what the
-                // one-second window separates.
+                // ⚠️ A ZERO NEVER ERASES A FUTURE ABSOLUTE END — ONLY THE CLOCK DOES.
+                //
+                // The first cut of this rule was a one-second window ("a zero may not erase a
+                // live maturity time from the SAME sweep"), which stops only same-sweep pairs.
+                // The seeded ledger showed why that is not enough: the player-keyed filter above
+                // reaches only interaction range — measured 23:30, every REAL end arrived 28-42 m
+                // out and everything further heard zeros — so EVERY sweep re-broadcasts "ready"
+                // for every far resource. Fourteen 9-hour cooldowns restored at world-ready were
+                // wiped within seconds, and the farm toured the same six dead rare trees again.
+                //
+                // An absolute instant stays true however long ago it was heard. A matured bush
+                // still goes warm the honest way — its stored end passes, after which zeros write
+                // freely — and a NON-zero end (shorter or longer) always wins, so an accelerated
+                // maturity or a server-side reschedule still updates.
                 CollectColdRecord previous;
-                bool freshFutureExists = endMs <= 0L
+                bool zeroAgainstFutureEnd = endMs <= 0L
                     && this.collectColdByNetId.TryGetValue(resourceNetId, out previous)
-                    && previous.EndUnixMs > NowUnixMs()
-                    && Time.unscaledTime - previous.SeenAt < 1f;
+                    && previous.EndUnixMs > NowUnixMs();
 
-                if (!freshFutureExists)
+                if (!zeroAgainstFutureEnd)
                 {
                     this.collectColdByNetId[resourceNetId] = new CollectColdRecord
                     {
@@ -1932,6 +1948,10 @@ namespace HeartopiaMod
                         AvailableNum = availableNum,
                         SeenAt = Time.unscaledTime,
                     };
+
+                    // Cooldowns measured in hours survive restarts on disk; everything shorter
+                    // is not worth a row (ColdLedgerPersistFeature.cs).
+                    this.NotePersistableColdVerdict(resourceNetId, endMs);
                 }
             }
 

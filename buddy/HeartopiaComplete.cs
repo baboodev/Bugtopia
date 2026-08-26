@@ -729,6 +729,7 @@ namespace HeartopiaMod
             Breadcrumbs.Phase("ou.locomotion");
             this.ProcessHideJumpButtonOnUpdate();
             this.ProcessNoCollisionOnUpdate();
+            this.ProcessColdLedgerOnUpdate();
             this.ProcessBunnyHopOnUpdate();
             this.ProcessForceLocomotionOnUpdate();
             this.ProcessForceSwimInputOnUpdate();
@@ -5028,6 +5029,9 @@ namespace HeartopiaMod
             // so it would survive an unload too — left switched off it would stay off for the rest
             // of the game session with nobody left to restore it (NoCollisionFeature.cs).
             try { this.ReleaseNoCollision(); } catch { }
+
+            // Long cooldowns learned in the last half-minute would otherwise miss the file.
+            try { this.FlushPersistedColdLedger(true); } catch { }
 
             // Close the agent bridge first: it owns background threads and a bound port, and any
             // in-flight call must be answered rather than left to time out against a dying process.
