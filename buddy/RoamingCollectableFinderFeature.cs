@@ -190,14 +190,21 @@ namespace HeartopiaMod
             for (int i = 0; i < this.roamingHits.Count; i++)
             {
                 RoamingCollectableHit hit = this.roamingHits[i];
+                // The live component's inCold OR a persisted long cooldown at this spot. The
+                // latch alone misses two ways: collect-and-drive-off before a scan pass reads
+                // inCold=true, and any restart (the remembered spot is in-memory). The ledger
+                // rows for these two carry the next-06:00 end, so the marker stays a cooldown
+                // one — and the farm's candidate filter skips cooldown markers, which is what
+                // keeps a collected daily from being re-targeted.
+                bool ledgerCold = this.TryGetPersistedColdAtPosition(hit.Position, out _);
                 if (hit.IsOak)
                 {
-                    this.CreateMarker(hit.Position, hit.OnCooldown ? "oakoak_cooldown" : "oakoak", line, fill, null);
+                    this.CreateMarker(hit.Position, (hit.OnCooldown || ledgerCold) ? "oakoak_cooldown" : "oakoak", line, fill, null);
                     oakMarked = true;
                 }
                 else
                 {
-                    this.CreateMarker(hit.Position, hit.OnCooldown ? "fluorite_cooldown" : "fluorite", line, fill, null);
+                    this.CreateMarker(hit.Position, (hit.OnCooldown || ledgerCold) ? "fluorite_cooldown" : "fluorite", line, fill, null);
                     fluoriteMarked = true;
                 }
             }

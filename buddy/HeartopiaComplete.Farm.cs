@@ -1634,7 +1634,8 @@ namespace HeartopiaMod
         // The last one hides a bush for the second or two before the sweep answers for it, which is
         // the correct trade: a marker that may be a growing stub is worse than a marker that appears
         // a moment late.
-        internal bool IsGatherableHiddenFromMarkers(uint netId, int staticId, bool componentCold)
+        internal bool IsGatherableHiddenFromMarkers(uint netId, int staticId, bool componentCold,
+            Vector3 position)
         {
             if (componentCold)
             {
@@ -1645,6 +1646,16 @@ namespace HeartopiaMod
             if (netId != 0u && this.collectColdByNetId.TryGetValue(netId, out record))
             {
                 return record.EndUnixMs > NowUnixMs();
+            }
+
+            // No netId — the entity is beyond the range where TryReadEntityNetId answers. The
+            // verdict ledger cannot speak for it, but a PERSISTED long cooldown at this spot
+            // can: rare trees park for ~9 h, and without this line their markers came back the
+            // moment the 600 s visited stamp lapsed — the farm toured eight dead trees in one
+            // run (23:15 log), re-learning each cooldown at ~40 m.
+            if (this.TryGetPersistedColdAtPosition(position, out _))
+            {
+                return true;
             }
 
             return staticId >= 130001 && staticId <= 130025;

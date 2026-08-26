@@ -2319,7 +2319,8 @@ namespace HeartopiaMod
                 // game map included. Hiding it here removes it from the ESP, from the game-map
                 // track sync and from the farm's candidate set in one place, because all three read
                 // these markers.
-                if (this.IsGatherableHiddenFromMarkers(entry.NetId, entry.StaticId, entry.OnCooldown))
+                if (this.IsGatherableHiddenFromMarkers(entry.NetId, entry.StaticId, entry.OnCooldown,
+                        entry.Position))
                 {
                     hidden++;
                     continue;
@@ -2450,6 +2451,18 @@ namespace HeartopiaMod
             {
                 float sqr = (positions[i] - origin).sqrMagnitude;
                 if (sqr < minSqr || sqr > maxSqr)
+                {
+                    continue;
+                }
+
+                // ⚠️ A harvested point is a promise the OBJECT is there — it knows nothing about
+                // cooldowns, and it bypasses the live-scan hide entirely (no netId, no component
+                // to ask). That bypass was the carousel: with the local patch marked empty, the
+                // eight dead rare trees were re-offered from HERE beyond streaming range, walked,
+                // abandoned at ~40 m on the verdict, stamped for 600 s — and offered again. The
+                // persisted ledger DOES know: it carries the position and the absolute end of
+                // every long cooldown heard, across restarts.
+                if (this.TryGetPersistedColdAtPosition(positions[i], out _))
                 {
                     continue;
                 }
