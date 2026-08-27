@@ -76,6 +76,7 @@ namespace HeartopiaMod
             public bool IsDog;
             public int Fullness = -1;
             public int Vitality = -1;
+            public int VitalityMax = -1;   // baseMaxVitalityPoint; -1 = table unreadable
             public int Chemistry = -1;
             public int MotionsTotal = -1;
             public int MotionsUnlocked = -1;
@@ -165,6 +166,40 @@ namespace HeartopiaMod
         private const float PetCareFeedConfirmedSeconds = 1.5f; // short settle after the tip (pet is free)
         private float petCareTrainLoopNextFeedPollAt = 0f;
         private bool petCareTrainLoopPendingReject = false;
+
+        // ---- Standalone energy feed (the MY PETS row's "Energy" button). Same three protocol
+        // steps the train loop's FeedPrepare/Feeding phases use — PrepareFeed, then BeginFeed with
+        // an EMPTY foods list and the energy item in the HobbyToolNetId slot — but reachable
+        // WITHOUT arming the train loop. Tick-driven like every other pet-care flow (this file has
+        // no coroutines); shares the tip hook and the "Energy increased" (259) completion signal.
+        //
+        // Deliberately NOT part of IsPetCareEntryActiveSession: it IS part of
+        // TryGetPetCareBusyLabel, so a feed greys out Play/Wash/Energy everywhere, but no "Stop"
+        // button appears for it. There is nothing to stop — the feed is two sends and a wait that
+        // always ends on the tip or PetCareFeedMaxWaitSeconds. ----
+        private enum PetCareEnergyFeedPhase
+        {
+            Idle,
+            Prepare,
+            Feeding
+        }
+
+        private PetCareEnergyFeedPhase petCareEnergyFeedPhase = PetCareEnergyFeedPhase.Idle;
+        private uint petCareEnergyFeedNetId = 0U;
+        private uint petCareEnergyFeedToolNetId = 0U;
+        private string petCareEnergyFeedItemName = string.Empty;
+        private float petCareEnergyFeedNextActionAt = 0f;
+        private float petCareEnergyFeedSentAt = 0f;
+        private float petCareEnergyFeedNextPollAt = 0f;
+        private int petCareEnergyFeedStartVitality = -1;
+        // baseMaxVitalityPoint from TableKittyThemes / TableDogThemes — the same cap CatFeedPanel
+        // gates its tool slot on (it toasts 10133 instead of feeding a pet at full energy). -1 =
+        // not resolved yet, 0 = resolved-but-unreadable (do not gate on it).
+        private int petCareMaxVitalityCat = -1;
+        private int petCareMaxVitalityDog = -1;
+        // A read attempted before TableData is live fails; without this the retry would re-walk the
+        // whole table on every stats load.
+        private float petCareMaxVitalityNextRetryAt = 0f;
         // PetProtocolManager.EndFeedResult dispatches Tip(259) when the feed raised vitality.
         private const int PetTipEnergyIncreased = 259;
         // UITipEvent (ScriptsRefactory.DataAndProtocol.Events): tipId(int)@0. AnimalProtocolManager.Tip
@@ -311,8 +346,10 @@ namespace HeartopiaMod
             bool headlessDogActive = this.petPlayHeadlessDogState != PetPlayHeadlessDogState.Idle;
             bool headlessWashActive = this.petPlayHeadlessWashState != PetPlayHeadlessWashState.Idle;
             bool trainLoopActive = this.petCareTrainLoopPhase != PetCareTrainLoopPhase.Idle;
+            bool energyFeedActive = this.petCareEnergyFeedPhase != PetCareEnergyFeedPhase.Idle;
             if (!this.petPlayAutoCatEnabled && !this.petPlayAutoDogEnabled && !this.petPlayAutoWashEnabled
-                && !headlessCatActive && !headlessDogActive && !headlessWashActive && !trainLoopActive)
+                && !headlessCatActive && !headlessDogActive && !headlessWashActive && !trainLoopActive
+                && !energyFeedActive)
             {
                 return;
             }
@@ -356,6 +393,11 @@ namespace HeartopiaMod
             if (trainLoopActive)
             {
                 this.UpdatePetCareTrainLoop();
+            }
+
+            if (energyFeedActive)
+            {
+                this.UpdatePetCareEnergyFeed();
             }
 
             if (this.petPlayAutoDogEnabled)
@@ -967,6 +1009,9 @@ namespace HeartopiaMod
                     if (this.TryGetNestedMonoIntMember(dataObj, out int vitality, "animalComponentData", "vitality"))
                     {
                         entry.Vitality = vitality;
+                        // Species-wide cap, cached after the first successful table read.
+                        int maxVitality = this.GetPetMaxVitality(entry.IsDog);
+                        entry.VitalityMax = maxVitality > 0 ? maxVitality : -1;
                         any = true;
                     }
 
@@ -1189,6 +1234,12 @@ namespace HeartopiaMod
                 return true;
             }
 
+            if (this.petCareEnergyFeedPhase != PetCareEnergyFeedPhase.Idle)
+            {
+                busy = "energy feed";
+                return true;
+            }
+
             busy = string.Empty;
             return false;
         }
@@ -1295,6 +1346,148 @@ namespace HeartopiaMod
             this.StartHeadlessWash(entry.NetId, entry.Name);
         }
 
+        // ================= Standalone energy feed (MY PETS row button) =================
+
+        // True when feeding this pet an energy snack would be a no-op: the game refuses it at full
+        // vitality (CatFeedPanel toasts 10133), so the row button greys out instead of sending a
+        // feed that can only time out.
+        //
+        // Reads the cap STORED ON THE ENTRY, never GetPetMaxVitality: the UI calls this for every
+        // row on every gated frame, and the resolver walks a Mono table. TryLoadPetCareStatsAuraMono
+        // already stamps VitalityMax beside Vitality, so the value here is exactly as fresh as the
+        // energy it is compared against. VitalityMax <= 0 means the table would not read — no gate.
+        private static bool IsPetCareEntryEnergyFull(PetCareEntry entry)
+        {
+            return entry != null
+                && entry.Vitality >= 0
+                && entry.VitalityMax > 0
+                && entry.Vitality >= entry.VitalityMax;
+        }
+
+        private void OnPetCareEnergyFeedClicked(PetCareEntry entry)
+        {
+            if (entry == null || entry.NetId == 0U)
+            {
+                return;
+            }
+
+            if (this.TryGetPetCareBusyLabel(out string busy))
+            {
+                this.SetPetCareMessage(entry.NetId, "Busy: " + busy + " already in progress.");
+                return;
+            }
+
+            // The row's cached stats can be a poll cycle stale; the full-energy check is worth a
+            // fresh read, exactly as OnPetCarePlayClicked does before its own gates.
+            this.TryLoadPetCareStats(entry);
+
+            if (IsPetCareEntryEnergyFull(entry))
+            {
+                this.SetPetCareMessage(entry.NetId,
+                    "Energy is already full (" + entry.Vitality + "/" + entry.VitalityMax + ").");
+                return;
+            }
+
+            if (!this.TryFindPetEnergyFood(entry.IsDog, out uint toolNetId, out string itemName, out int itemVitality, out string findStatus))
+            {
+                this.SetPetCareMessage(entry.NetId, "No energy food in bag or warehouse (" + findStatus + ").");
+                this.PetPlayLog("Energy feed: no energy item for " + (entry.IsDog ? "dog" : "cat") + " netId=" + entry.NetId + " - " + findStatus + ".");
+                return;
+            }
+
+            if (!this.TryInvokePetFeedPrepareAuraMono(entry.NetId, out string prepStatus))
+            {
+                this.SetPetCareMessage(entry.NetId, "Feed prepare failed (" + prepStatus + ").");
+                this.PetPlayLog("Energy feed: prepare failed netId=" + entry.NetId + " - " + prepStatus + ".");
+                return;
+            }
+
+            this.EnsurePetCareTipHook();
+            this.petCareEnergyFeedPhase = PetCareEnergyFeedPhase.Prepare;
+            this.petCareEnergyFeedNetId = entry.NetId;
+            this.petCareEnergyFeedToolNetId = toolNetId;
+            this.petCareEnergyFeedItemName = itemName ?? string.Empty;
+            this.petCareEnergyFeedStartVitality = entry.Vitality;
+            this.petCareEnergyFeedNextActionAt = Time.unscaledTime + 0.25f;
+            this.SetPetCareMessage(entry.NetId, "Feeding '" + itemName + "' (+" + itemVitality + " energy)...");
+            this.PetPlayLog("Energy feed: '" + itemName + "' item netId=" + toolNetId + " -> pet netId=" + entry.NetId
+                + " (energy " + entry.Vitality + ", +" + itemVitality + ").");
+        }
+
+        // Mirrors the train loop's FeedPrepare/Feeding phases (PetCareTrainLoopDecideNextStep and
+        // UpdatePetCareTrainLoop) without the session bookkeeping: prepare, begin with a tool-only
+        // payload, then wait for the pet to walk over and eat.
+        private void UpdatePetCareEnergyFeed()
+        {
+            float now = Time.unscaledTime;
+            switch (this.petCareEnergyFeedPhase)
+            {
+                case PetCareEnergyFeedPhase.Prepare:
+                    if (now < this.petCareEnergyFeedNextActionAt)
+                    {
+                        return;
+                    }
+
+                    // Empty foods list + the energy item in BeginFeed's HobbyToolNetId slot.
+                    if (!this.TryInvokePetFeedBeginAuraMono(this.petCareEnergyFeedNetId, new List<uint>(), this.petCareEnergyFeedToolNetId, out string beginStatus))
+                    {
+                        this.FinishPetCareEnergyFeed("Energy feed failed (" + beginStatus + ").", false);
+                        return;
+                    }
+
+                    this.petCareEnergyFeedPhase = PetCareEnergyFeedPhase.Feeding;
+                    this.petCareEnergyFeedSentAt = now;
+                    this.petCareEnergyFeedNextPollAt = now + 1f;
+                    return;
+
+                case PetCareEnergyFeedPhase.Feeding:
+                    // The "Energy increased" tip (259) is the precise finish and is handled in
+                    // OnPetCareTipEvent; this poll is the backstop for a dropped tip, and the
+                    // timeout is the backstop for a pet that never walked over at all.
+                    if (now >= this.petCareEnergyFeedNextPollAt)
+                    {
+                        this.petCareEnergyFeedNextPollAt = now + 1f;
+                        this.RefreshPetCareEntryStats(this.petCareEnergyFeedNetId);
+                        PetCareEntry fedEntry = this.FindPetCareEntry(this.petCareEnergyFeedNetId);
+                        if (fedEntry != null && fedEntry.Vitality > this.petCareEnergyFeedStartVitality)
+                        {
+                            this.FinishPetCareEnergyFeed(
+                                "Energy " + this.petCareEnergyFeedStartVitality + " -> " + fedEntry.Vitality
+                                + " ('" + this.petCareEnergyFeedItemName + "').", true);
+                            return;
+                        }
+                    }
+
+                    if (now - this.petCareEnergyFeedSentAt > PetCareFeedMaxWaitSeconds)
+                    {
+                        this.RefreshPetCareEntryStats(this.petCareEnergyFeedNetId);
+                        this.FinishPetCareEnergyFeed(
+                            "Energy did not change within " + PetCareFeedMaxWaitSeconds.ToString("F0") + "s - is the pet reachable?", false);
+                    }
+
+                    return;
+            }
+        }
+
+        private void FinishPetCareEnergyFeed(string message, bool success)
+        {
+            if (this.petCareEnergyFeedPhase == PetCareEnergyFeedPhase.Idle)
+            {
+                return;
+            }
+
+            uint netId = this.petCareEnergyFeedNetId;
+            this.petCareEnergyFeedPhase = PetCareEnergyFeedPhase.Idle;
+            this.petCareEnergyFeedNetId = 0U;
+            this.petCareEnergyFeedToolNetId = 0U;
+            this.petCareEnergyFeedStartVitality = -1;
+            if (netId != 0U && !string.IsNullOrEmpty(message))
+            {
+                this.SetPetCareMessage(netId, message);
+            }
+            this.PetPlayLog("Energy feed " + (success ? "done" : "ended") + " netId=" + netId + ": " + message);
+        }
+
         // ================= Train-until-learned loop =================
 
         private void ArmPetCareTrainLoop(PetCareEntry entry)
@@ -1331,12 +1524,20 @@ namespace HeartopiaMod
         // tease-begin reject codes are recorded, and only while a cat train loop is running.
         private void OnPetCareTipEvent(GameEventSnapshot e)
         {
-            if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Idle)
+            if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Idle
+                && this.petCareEnergyFeedPhase == PetCareEnergyFeedPhase.Idle)
             {
                 return;
             }
 
             int tipId = e.ReadInt32(0);
+
+            // Same "done eating" signal as the train loop's, for the standalone row feed.
+            if (tipId == PetTipEnergyIncreased && this.petCareEnergyFeedPhase == PetCareEnergyFeedPhase.Feeding)
+            {
+                this.FinishPetCareEnergyFeed("Energy restored with '" + this.petCareEnergyFeedItemName + "'.", true);
+                return;
+            }
 
             // "Energy increased" (cats and dogs) — the pet has arrived and eaten; energy is up. This
             // is the exact "done eating" signal, so end the Feeding wait immediately with a short
@@ -2485,6 +2686,52 @@ namespace HeartopiaMod
 
         private int GetDogTeaseVitalityCostAuraMono()
         {
+            return this.GetPetThemeTableIntAuraMono("TableDogThemes", "teaseVitalityPointDecrease");
+        }
+
+        // baseMaxVitalityPoint — the cap CatFeedPanel._InitData reads (TableKittyThemes for cats,
+        // TableDogThemes for dogs) and gates its energy-tool slot on: at vitality >= max the game
+        // toasts 10133 instead of feeding. Cached per species; 0 means "table unreadable", which
+        // callers must treat as no gate rather than as a cap of zero.
+        private int GetPetMaxVitality(bool isDog)
+        {
+            int cached = isDog ? this.petCareMaxVitalityDog : this.petCareMaxVitalityCat;
+            if (cached >= 0)
+            {
+                return cached;
+            }
+
+            if (Time.unscaledTime < this.petCareMaxVitalityNextRetryAt)
+            {
+                return 0;
+            }
+
+            int resolved = this.GetPetThemeTableIntAuraMono(isDog ? "TableDogThemes" : "TableKittyThemes", "baseMaxVitalityPoint");
+            if (resolved < 0)
+            {
+                // Leave the cache unset so a read that failed before the tables were live retries,
+                // but not before the backoff — this runs off the stats poll.
+                this.petCareMaxVitalityNextRetryAt = Time.unscaledTime + 10f;
+                return 0;
+            }
+
+            if (isDog)
+            {
+                this.petCareMaxVitalityDog = resolved;
+            }
+            else
+            {
+                this.petCareMaxVitalityCat = resolved;
+            }
+
+            return resolved;
+        }
+
+        // Reads one int off the FIRST row of a TableData theme dictionary — the game's own idiom
+        // for these single-row config tables (TableData.TableDogThemes.First().Value). AuraMono
+        // ONLY: TableData is an embedded-Mono type absent from interop. -1 = unreadable.
+        private int GetPetThemeTableIntAuraMono(string tableFieldName, string rowFieldName)
+        {
             try
             {
                 if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoClassFromName == null)
@@ -2505,7 +2752,7 @@ namespace HeartopiaMod
                     return -1;
                 }
 
-                if (!this.TryGetAuraMonoStaticObjectField(tableDataClass, "TableDogThemes", out IntPtr dictObj) || dictObj == IntPtr.Zero)
+                if (!this.TryGetAuraMonoStaticObjectField(tableDataClass, tableFieldName, out IntPtr dictObj) || dictObj == IntPtr.Zero)
                 {
                     return -1;
                 }
@@ -2530,9 +2777,9 @@ namespace HeartopiaMod
                         if ((this.TryGetMonoObjectMember(kvObj, "Value", out IntPtr rowObj)
                                 || this.TryGetMonoObjectMember(kvObj, "value", out rowObj))
                             && rowObj != IntPtr.Zero
-                            && this.TryGetMonoIntMember(rowObj, "teaseVitalityPointDecrease", out int cost))
+                            && this.TryGetMonoIntMember(rowObj, rowFieldName, out int value))
                         {
-                            return cost;
+                            return value;
                         }
 
                         break;

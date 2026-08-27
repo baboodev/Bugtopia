@@ -89,6 +89,12 @@ namespace HeartopiaMod
     //    2-real-state button tail: (petCareBusy && IsPetCareEntryActiveSession(netId)) → ONE
     //    "Stop" button → StopPetCareActiveSession(); else → "Play"+"Wash" pair BOTH gated on the
     //    single shared petCareBusy flag → OnPetCarePlayClicked/OnPetCareWashClicked(entry).
+    //    THIS PORT adds a third idle-state button, "Energy" (no IMGUI twin), feeding one energy
+    //    snack through BeginFeed's HobbyToolNetId slot — the send the train loop already made,
+    //    now reachable without arming that loop. It rides the same show/hide as the Play+Wash
+    //    pair but carries a SECOND enable gate (IsPetCareEntryEnergyFull) on its own diff int,
+    //    because the game refuses an energy snack at full vitality. Room for it came out of the
+    //    name label: rowW-200 → rowW-288, the only element on that line with width to give.
     //    petCareBusy comes from ONE TryGetPetCareBusyLabel call per gated frame (the source's
     //    single pre-loop call at :325), NEVER per row; IsPetCareEntryActiveSession stays per-row
     //    like the source's :355. Click closures capture the ROW HANDLE (Research idiom); the
@@ -173,9 +179,11 @@ namespace HeartopiaMod
             public GameObject StopButton;     // active-session state (:355-362)
             public GameObject PlayButton;     // idle state pair (:363-375)
             public GameObject WashButton;
+            public GameObject EnergyButton;   // this port's own — standalone energy-snack feed
             public PetCareEntry BoundEntry;   // rebound every frame — clicks act on the live entry
             public int ActiveSessionShown = -1;   // -1 forces the first apply
             public int PlayWashEnabledShown = -1;
+            public int EnergyEnabledShown = -1;   // separate: also gated on full energy
         }
 
         private sealed class UguiPetCareFoodRowHandle
@@ -303,7 +311,14 @@ namespace HeartopiaMod
         // OMITTED (replaced by " · actions ?") when MotionsTotal < 0 — no "learned" text at all.
         private static string BuildUguiFeaturesPetCarePetStatsLine(PetCareEntry entry)
         {
-            string petStatsLine = "energy " + (entry.Vitality >= 0 ? entry.Vitality.ToString() : "?")
+            string energyText = entry.Vitality >= 0 ? entry.Vitality.ToString() : "?";
+            if (entry.Vitality >= 0 && entry.VitalityMax > 0)
+            {
+                // The cap the Energy button gates on — worth showing so a greyed button explains
+                // itself. Omitted entirely when the theme table would not read.
+                energyText += "/" + entry.VitalityMax;
+            }
+            string petStatsLine = "energy " + energyText
                 + " · food " + (entry.Fullness >= 0 ? entry.Fullness.ToString() : "?")
                 + " · growth " + (entry.Chemistry >= 0 ? entry.Chemistry.ToString() : "?");
             petStatsLine += entry.MotionsTotal >= 0
@@ -723,7 +738,9 @@ namespace HeartopiaMod
 
             row.NameLabel = this.CreateUguiLabel(root.transform, "Name", "", 12f, Color.white, false);
             this.TrySetUguiLabelBold(row.NameLabel);
-            PlaceUguiTopLeft(row.NameLabel, 16f, 0f, rowW - 200f, 18f); // :340
+            // :340's rowW-200 shortened to rowW-288: the button tail grew by one 80px button plus
+            // its 4px gutter, and the name is the only element on this line that can give up width.
+            PlaceUguiTopLeft(row.NameLabel, 16f, 0f, rowW - 288f, 18f);
 
             row.StatsLabel = this.CreateUguiLabel(root.transform, "Stats", "", 11f, this.UguiKitTextColor(), false);
             PlaceUguiTopLeft(row.StatsLabel, 16f, 28f, rowW - 32f, 18f); // :352
@@ -745,6 +762,12 @@ namespace HeartopiaMod
             row.WashButton = this.CreateUguiPrimaryButton(root.transform, "WashButton", this.L("Wash"),
                 new System.Action(() => this.OnUguiFeaturesPetCarePetWashClicked(captured)));
             PlaceUguiTopLeft(row.WashButton, rowW - 96f, 0f, 80f, 26f); // :370
+            // This port's own third button: feeds ONE energy snack (PetSystem.GetTools' hobby-tool
+            // item) through BeginFeed's HobbyToolNetId slot. The same send the train loop makes when
+            // a pet runs dry — previously reachable only by arming that loop.
+            row.EnergyButton = this.CreateUguiPrimaryButton(root.transform, "EnergyButton", this.L("Energy"),
+                new System.Action(() => this.OnUguiFeaturesPetCarePetEnergyClicked(captured)));
+            PlaceUguiTopLeft(row.EnergyButton, rowW - 264f, 0f, 80f, 26f);
 
             row.Root = root;
             return row;
@@ -803,6 +826,7 @@ namespace HeartopiaMod
                     SetUguiGoActive(row.StopButton, rowIsActiveSession);
                     SetUguiGoActive(row.PlayButton, !rowIsActiveSession);
                     SetUguiGoActive(row.WashButton, !rowIsActiveSession);
+                    SetUguiGoActive(row.EnergyButton, !rowIsActiveSession);
                 }
                 if (!rowIsActiveSession)
                 {
@@ -813,6 +837,17 @@ namespace HeartopiaMod
                         row.PlayWashEnabledShown = enabledState;
                         this.SetUguiButtonInteractable(row.PlayButton, !petCareBusy);
                         this.SetUguiButtonInteractable(row.WashButton, !petCareBusy);
+                    }
+
+                    // Energy carries a SECOND gate the other two do not have: the game refuses an
+                    // energy snack at full vitality, so a full pet's button greys out rather than
+                    // sending a feed that could only time out. Diffed on its own state int because
+                    // it flips with the pet's energy, not just with the shared busy flag.
+                    int energyState = (petCareBusy || IsPetCareEntryEnergyFull(entry)) ? 0 : 1;
+                    if (energyState != row.EnergyEnabledShown)
+                    {
+                        row.EnergyEnabledShown = energyState;
+                        this.SetUguiButtonInteractable(row.EnergyButton, energyState == 1);
                     }
                 }
             }
@@ -1368,6 +1403,23 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 ModLogger.Msg("[UguiShell] Pet Care play error: " + ex.Message);
+            }
+        }
+
+        // This port's own row button — no IMGUI twin.
+        private void OnUguiFeaturesPetCarePetEnergyClicked(UguiPetCarePetRowHandle row)
+        {
+            if (row == null || row.BoundEntry == null)
+            {
+                return;
+            }
+            try
+            {
+                this.OnPetCareEnergyFeedClicked(row.BoundEntry);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Pet Care energy feed error: " + ex.Message);
             }
         }
 
