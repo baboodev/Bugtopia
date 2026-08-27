@@ -445,6 +445,7 @@
     <Compile Include="HideJumpButtonFeature.cs" />
     <Compile Include="ColdLedgerPersistFeature.cs" />
     <Compile Include="NoCollisionFeature.cs" />
+    <Compile Include="HomeLikeFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
     <Compile Include="TutorialBlockFeature.cs" />
     <Compile Include="PartyAutoDeclineFeature.cs" />

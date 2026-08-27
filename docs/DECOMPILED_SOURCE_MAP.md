@@ -958,6 +958,28 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 #### `AnimalCareFeature`
 - **Wiring only** — delegates to `WildAnimalFeedFeature` / `WildAnimalGiftFeature`
 
+#### `HomeLikeFeature` (auto-like own home)
+- **Two modules, one of them dead:** `XDT.Scene.Shared.Modules.HouseLike` carries the commands
+  (`HouseLikeNetworkCommand`, `HouseLikeCancelNetworkCommand`) but **no client sends them** — its
+  live role is the synced statistics (`HouseLikeHistoryStatComponent{Total, Today, IsGaveSelf}`,
+  `HouseLike14DayStatComponent`, `HouseLikeBpComponent`). The wire path is
+  `XDT.Scene.Shared.Modules.EmojiFeedBack`.
+- **Game types:** `EmojiFeedBackProtocolManager.SendFeedBack` / `EmojiFeedBackCommand`,
+  `EmojiFeedBackType.Home`(4), `HouseLikeProtocolManager.GetSelfHouseLikeData` /
+  `SelfHouseLikeData`, `HomeLikeUpdatedEvent`; reference-only:
+  `HomeLikeTrackCellModel.OnLikeDisplayClick`, `EmojiReactionPanelLogic.TrySubmitQuickFeedback` /
+  `TrySubmitFeedbackChange`, `InteractId.HomeLike`(911) / `HomeLikeCommand`
+- **Access:** **A** + one EventCenter hook
+- **Dump:** `EcsClient/XDT.Scene.Shared.Modules.EmojiFeedBack/`,
+  `EcsClient/XDT.Scene.Shared.Modules.HouseLike/`,
+  `EcsSystem/ClientSystem.{EmojiFeedBack,HouseLike}/`,
+  `XDTDataAndProtocol/XDTDataAndProtocol.ProtocolService.{EmojiFeedBack,HouseLike}/`,
+  `XDTGameUI/XDTGUI.Module.Track.Cells/HomeLikeTrackCellModel.cs`,
+  `XDTGameUI/XDTGame.UI.Panel/EmojiReactionPanelLogic.cs`
+- **Notes:** the shared `TryAuraSendCommand` cannot build this command — it maps
+  int/uint/float/bool/string fields only and `EmojiFeedBackCommand` carries two `List<int>`s, hence
+  the game's own non-generic protocol wrapper plus AutoLearn's `List<T>` construction shape
+
 #### `HomelandFarmFeature`
 - **Sow all:** `CropProtocolManager.CropSeeding` → `GrowCropNetworkCommand`; `CropPlantPoint` must match `SeedBagCommand` / `GenSimpleConfirmOption` — see **[HOMELAND_SOW_ALIGNMENT.md](./HOMELAND_SOW_ALIGNMENT.md)**
 - **Game types:** `SeedBagCommand`, `BuildSingle.GenSimpleConfirmOption`, `CraftMode_Multiple`, `CropComponent.UpdateManureEffect`, `LevelObjectManager.GetLevelObject`, `FieldComponent.buildWorld`
@@ -1073,6 +1095,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Pad build hotkeys | BuildModule, Managers (GetModule), BuildStatusPanel (UI fallback) | PadBuildHotkeyFeature.cs | A (+ R dormant, G fallback) |
 | Daily quest submit | BackPackSystem, TaskProtocolManager, ItemNetPair, TableData | DailyQuestSubmitFeature.cs | A (+ N) |
 | Daily claims | EcsService, IOperationActivityCenterService, ITownGuidesService, IMailClientService, BattlePassSystem, *ProtocolManager | DailyClaimsFeature.cs | A + S |
+| Auto-like own home | **EmojiFeedBackProtocolManager.SendFeedBack(uint, List&lt;int&gt;, List&lt;int&gt;)** → EmojiFeedBackCommand (⚠️ NOT the dead `HouseLikeNetworkCommand` — the Mono client has no sender for it). Expression 999 = the only `Expression.emojiFeedBackTypes` row carrying `EmojiFeedBackType.Home`(4), which is why `EmojiReactionPanelLogic.ShouldQuickSubmit` skips the picker. Target = home owner's **player** netId (`HomeLikeTrackCellModel` passes the mailbox's `BuildComponent.OwnerId`). State/confirmation: `EmojiReactionPanelLogic.GetHomeTodayFeedbackGuid(uint)` (private static) + `IsEmojiFeedbackLiked(Guid)` — the pair the mailbox widget renders `alreadyLiked` from; an empty guid doubles as the "not in a room where this can work" gate. ⚠️ **`HouseLikeProtocolManager.GetSelfHouseLikeData()` does NOT answer for this path** — measured live 2026-08-27, neither `IsGaveLike` (= `HouseLikeHistoryStatComponent.IsGaveSelf`) nor `Today` moves across a clean send (`today 0, total 4`), and `HomeLikeUpdatedEvent` never fires for it either. Trigger: `EmojiFeedBackRecordUpdateEvent` (AudioRecordSyncSystem, on Added/Updated/Removed of `EmojiFeedBackRecordComponent`). Payoff: `HouseLikeBpComponent.LikeCount` → `StateEnum.HouseLikeLevel`(131) → `BpLikeLevel` 20/50/100 → Mailboxdecorate / MailBoxEmission | HomeLikeFeature.cs | A + event hook |
 | Auto sell | BackPackSystem, TableData, sell protocol (HC) | HC | A + R + N |
 | Net cook | CookingSystem, PrepareCookingNetworkCommand, Entities | HC | A + S + H |
 | Pet feed | PetSystem, PetProtocolManager, TableData | PetFeedFeature.cs | A + R |

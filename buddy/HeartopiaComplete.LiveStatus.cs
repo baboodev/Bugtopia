@@ -252,6 +252,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Auto-learn Recipes", this.autoLearnStatus));
             }
 
+            if (this.autoLikeOwnHome)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Auto-like Home", this.homeLikeStatus));
+            }
+
             if (this.craftDirectSendEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Direct Craft Send", this.craftDirectSendStatus));

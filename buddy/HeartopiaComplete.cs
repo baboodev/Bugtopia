@@ -762,6 +762,10 @@ namespace HeartopiaMod
             // arrived this frame is already queued (DailyClaimsAutoClaimFeature.cs).
             Breadcrumbs.Phase("ou.dailyclaims");
             this.ProcessDailyClaimsAutoClaimOnUpdate();
+            // Auto-like own home — same reason it sits after the drain: its confirmation is a
+            // HomeLikeUpdatedEvent that may have arrived this frame (HomeLikeFeature.cs).
+            Breadcrumbs.Phase("ou.homelike");
+            this.ProcessHomeLikeOnUpdate();
             Breadcrumbs.Phase("ou.seaclean");
             this.ProcessSeaCleanBannerHideOnUpdate();
             // Stealth Foraging owns the noclip force/restore edge — must run before both the OOB

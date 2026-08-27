@@ -107,6 +107,7 @@ namespace HeartopiaMod
             public Toggle CraftDirectSendToggle;
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
+            public Toggle AutoLikeOwnHomeToggle;
             public GameObject NoclipHelpLabel;  // trailing, only visible while Noclip is on
 
             public int LayoutSignature = -1;    // packed conditional-visibility state
@@ -365,6 +366,9 @@ namespace HeartopiaMod
             handle.AutoLearnRecipesToggle = this.CreateUguiCheckbox(scrollContent, "AutoLearnRecipesToggle",
                 this.L("Auto-learn recipes"), this.autoLearnRecipes,
                 new System.Action<bool>(this.OnUguiSelfAutoLearnRecipesToggled));
+            handle.AutoLikeOwnHomeToggle = this.CreateUguiCheckbox(scrollContent, "AutoLikeOwnHomeToggle",
+                this.L("Auto-like own home (once a day)"), this.autoLikeOwnHome,
+                new System.Action<bool>(this.OnUguiSelfAutoLikeOwnHomeToggled));
 
             // Trailing conditional help label — localized in the IMGUI drawer, kept verbatim.
             handle.NoclipHelpLabel = this.CreateUguiLabel(scrollContent, "NoclipHelp",
@@ -624,6 +628,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.AutoLikeOwnHomeToggle != null)
+            {
+                PlaceUguiTopLeft(handle.AutoLikeOwnHomeToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             SetUguiGoActive(handle.NoclipHelpLabel, noclip);
             if (noclip)
             {
@@ -674,6 +684,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
+                this.SyncUguiToggleFromField(handle.AutoLikeOwnHomeToggle, this.autoLikeOwnHome);
 
                 if (handle.NoclipSpeedSlider != null && Mathf.Abs(handle.NoclipSpeedSlider.value - this.noclipSpeed) > 0.0005f)
                 {
@@ -1165,6 +1176,19 @@ namespace HeartopiaMod
                 return;
             }
             this.autoLearnRecipes = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Flag + save only. The send is scheduled by ProcessHomeLikeOnUpdate, which owns the
+        // world-ready gate and the "have I already liked today" read — a checkbox can be clicked on
+        // the load screen, where neither answer exists yet (HomeLikeFeature.cs).
+        private void OnUguiSelfAutoLikeOwnHomeToggled(bool value)
+        {
+            if (value == this.autoLikeOwnHome)
+            {
+                return;
+            }
+            this.autoLikeOwnHome = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

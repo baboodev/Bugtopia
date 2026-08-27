@@ -229,6 +229,7 @@ namespace HeartopiaMod
             public bool foragingAnimEnabled;
             public bool skipCraftDyeAnimations;
             public bool autoLearnRecipes;
+            public bool autoLikeOwnHome;
             public bool craftDirectSendEnabled;
             public bool persistentHudEnabled;
             // Self-tab bypass toggles. These were session-only until now even though their UI

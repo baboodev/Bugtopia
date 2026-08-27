@@ -324,6 +324,36 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   contents — whichever sweeps first wins.
 - Persisted; default off. Self → Main. Source: `buddy/AutoLearnRecipeFeature.cs`.
 
+### Auto-like Own Home
+
+- Sends the one daily "very nice" reaction to your own mailbox, without walking to it — the same
+  thing a click on the like bar over the mailbox does. Received likes feed
+  `HouseLikeBpComponent.LikeCount` and thus `StateEnum.HouseLikeLevel`, whose 20 / 50 / 100
+  thresholds (`BpLikeLevel`) unlock the seasonal mailbox pendants and emissions.
+- **Action:** `EmojiFeedBackProtocolManager.SendFeedBack(ownerNetId, [999], [])` over AuraMono, i.e.
+  `EmojiFeedBackCommand`. Expression 999 is hardcoded because it is the only row in the design
+  tables whose `emojiFeedBackTypes` contains `EmojiFeedBackType.Home` — which is also why the
+  vanilla click never opens the reaction picker (`ShouldQuickSubmit` skips it at one available
+  expression). The target is the home owner's **player** netId, so for your own home it is simply
+  your own — no entity scan, no proximity, no mailbox.
+- **State:** the same pair the mailbox widget draws its `alreadyLiked` from —
+  `EmojiReactionPanelLogic.GetHomeTodayFeedbackGuid(selfNetId)` then `IsEmojiFeedbackLiked(guid)`.
+  Nothing is sent while it reports liked. ⚠ `HouseLikeProtocolManager.GetSelfHouseLikeData()` looks
+  like the natural answer and is **not**: measured live, neither its `IsGaveLike` nor its `Today`
+  moves for an EmojiFeedBack like (`today 0, total 4` across a clean send).
+- **Where it fires:** an empty today-feedback guid means your home's feedback entity is not streamed
+  to the client here — the state in which the mailbox widget could not show a like bar either — so
+  nothing is sent and the feature waits. In practice that makes it fire in your homeland. netIds are
+  room-scoped, so a command naming your player netId from the wrong room is at best a no-op.
+- **Trigger:** `EmojiFeedBackRecordUpdateEvent`, dispatched whenever your own feedback records
+  change, so confirmation is immediate and the daily rotation of the today-entity is noticed inside
+  a running session; a timer re-check backs it up (30 s while waiting, 15 min once done). The hook
+  is registered only once the toggle is on.
+- At most two sends between confirmations. If the like does not show up in your own records
+  afterwards, the feature says so in the log and stops instead of re-sending.
+- ⚠ Sends a real command to a live server on its own schedule, unattended.
+- Persisted; default off. Self → Main. Source: `buddy/HomeLikeFeature.cs`.
+
 ### Anti-AFK
 
 - Periodically simulates mouse input to reduce idle kick.
