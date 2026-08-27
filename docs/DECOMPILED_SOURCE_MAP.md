@@ -1,4 +1,4 @@
-# Decompiled Source Map and Mod Interaction Reference
+﻿# Decompiled Source Map and Mod Interaction Reference
 
 Detailed guide to offline decompilation folders and **every game type** that **Bugtopia** touches:
 
@@ -810,6 +810,12 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
   - `FoodMaterialType`: Vegetable=0, Fruit=1, AquaticProducts=2, Meat=3, Fish=4, Dairy=5.
   - Category match = `CookingSystem.CheckFoodTypeSatisfied(itemStaticId, type)` → `TableData.GetIngredients(id).foodMaterial.Contains((int)type) && canBeCooked` (`TableIngredients { id, int[] foodMaterial, bool canBeCooked }`).
   - Mod move/max-quantity (`HeartopiaComplete.NetCook.cs`): `NetCookIngredientRequirement{IsCategory,MaterialType}`, `BuildNetCookDemands`, `NetCookItemMatchesCategory` (cached `CheckFoodTypeSatisfied` via AuraMono). Earlier code keyed only on `materialId`, so category slots (id 0) were dropped → "any fish" never moved and category-repeated units undercounted.
+- **Universal Ingredient** (万能食材, **46999** = `CookingSystem.MagicIngredientId` / `CookingConfig.magicIngredientId`; the neighbouring 46998 is the unrelated Magic Spice carried by `PrepareCooking(useMagicSpice)`):
+  - Substitutes **any** slot, specific or category, but the game never fills it by itself — `AutoSelectMaterial` skips `staticId == 46999` outright, and `Ingredients[46999].foodMaterial = [99]` sits outside `FoodMaterialType` 0..5 so `CheckFoodTypeSatisfied` rejects it for every category too (it can never be double-counted as category stock).
+  - `GetSlotMaterials(slotIndex)` DOES list it as a candidate for every slot — but only while `CheckMagicIngredientUnlocked()` (`FeatureOpenEnum.CookCanUseMagicIngredient` = 22). The list also subtracts the units already consumed by filled slots from each stack, so re-reading it per slot is what bounds a single stack.
+  - The only way to place one is `CookingSystem.FillMaterialInSlot(int slotIndex, uint materialNetId, int materialStaticId)` (public, all value types → AuraMono-invokable; it calls `RefreshSlots` itself). `CookPanel` never fills — clicking an unfillable slot opens the shop (`CheckMagicMaterial` → `AlertPurchasePanel`); the actual fill comes from `PettyBagWidget`.
+  - Nothing is sent for it: the server sets `CookingStatusComponent.UseMagicIngredient` from the material list itself. `MaterialSlot` is a **class**, so a slot pointer stays valid across the fill and can be re-read in place.
+  - Mod side (`Use Universal Ingredient` toggle): top-up only — warehouse move and the game's `AutoFill` spend real ingredients first, `TryFillNetCookSlotWithUniversalIngredient` covers whatever is still empty, `ExtendNetCookMaxQuantityWithUniversalIngredient` treats the stock as a shared shortfall budget for "Ingredients max", and the top-up is suppressed (`netCookUniversalFillSuppressedUntil`) while a warehouse batch is still landing in the bag.
 
 #### Remote-cook status channels (QTE at distance)
 

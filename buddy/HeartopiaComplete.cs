@@ -4367,6 +4367,14 @@ namespace HeartopiaMod
         // Recipe ingredient ids < 100 are FoodMaterialType category slots (e.g. "any fish"); >= 100 are
         // concrete items. Mirrors CookingSystem.GetMaterialSlotData on this build.
         private const int NetCookSpecificMaterialThreshold = 100;
+        // Universal Ingredient (万能食材) = CookingSystem.MagicIngredientId / CookingConfig.magicIngredientId.
+        // It substitutes ANY recipe slot, but the game never fills it by itself: AutoSelectMaterial
+        // explicitly skips staticId 46999, and its TableIngredients row carries foodMaterial [99]
+        // (outside FoodMaterialType 0..5) so it matches no category either. The only way in is an
+        // explicit CookingSystem.FillMaterialInSlot call, and only while the server feature gate
+        // FeatureOpenEnum.CookCanUseMagicIngredient is open (GetSlotMaterials hides it otherwise).
+        private const int NetCookUniversalIngredientStaticId = 46999;
+        private const float NetCookUniversalLogThrottleSeconds = 5f;
         private const float NetCookMaxRefreshIntervalSeconds = 0.5f;
         private const float NetCookPostMoveMaterialRetrySeconds = 3f;
         private const float NetCookPostMoveMaterialRetryIntervalSeconds = 0.12f;
@@ -4398,6 +4406,24 @@ namespace HeartopiaMod
         private float nextNetCookDiagHeartbeatAt = 0f;
         private bool netCookMoveIngredients = false;
         private bool netCookUseAllIngredients = false;
+        // Use Universal Ingredient: top up the material slots the game's AutoFill could not fill from
+        // the bag with NetCookUniversalIngredientStaticId. Real ingredients are always spent FIRST
+        // (warehouse move -> AutoFill); the universal item only covers what is still missing, because
+        // it is a paid shop item and cooks at its own (low) star rating. Runtime-only, NOT persisted
+        // to config (user's call): spending a paid item must be a deliberate choice each session.
+        private bool netCookUseUniversalIngredient = false;
+        // Timestamp (unscaled time) until which the Universal Ingredient top-up stays off. Set while a
+        // warehouse batch is still landing in the bag: the top-up would otherwise win that race and
+        // burn a paid item on a slot a real ingredient is about to fill. A horizon rather than a flag,
+        // so a killed coroutine cannot leave the top-up disabled.
+        private float netCookUniversalFillSuppressedUntil = 0f;
+        // Universal-ingredient telemetry. Both lines are FORCE-logged rather than sent through
+        // NetCookLog, which is gated behind the user's MasterLogNetCook toggle — the skip reason is the
+        // only explanation a "Missing ingredients" drain ever gets, so it must not depend on a setting.
+        // Throttled so a many-stove run cannot flood the log.
+        private int netCookUniversalSlotsFilled = 0;
+        private float nextNetCookUniversalFillLogAt = 0f;
+        private float nextNetCookUniversalSkipLogAt = 0f;
         private int netCookCookQuantity = 1;
         private string netCookCookQuantityInput = "1";
         private int netCookMaxCookQuantity = 0;

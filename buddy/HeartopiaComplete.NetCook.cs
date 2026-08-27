@@ -163,6 +163,7 @@ namespace HeartopiaMod
             this.netCookDrainReason = null;
             this.netCookCompletedDishCount = 0;
             this.netCookCommittedDishCount = 0;
+            this.netCookUniversalSlotsFilled = 0;
             float now = Time.unscaledTime;
             this.PrimeNetCookTargetsForStart(now);
             this.SeedNetCookCommittedDishCountFromActiveTargets();
@@ -177,6 +178,10 @@ namespace HeartopiaMod
         {
             string lastStatus = "Ingredients not ready after warehouse move.";
             float deadline = Time.unscaledTime + NetCookPostMoveMaterialRetrySeconds;
+            // The moved stacks are still landing in the bag, so hold the Universal Ingredient top-up
+            // back for the whole retry window — otherwise it fills a slot on the first retry and burns
+            // a paid item on ingredients that were one frame away. The final attempt below re-enables it.
+            this.netCookUniversalFillSuppressedUntil = deadline;
             try
             {
                 while (Time.unscaledTime < deadline)
@@ -197,12 +202,24 @@ namespace HeartopiaMod
                     }
                 }
 
+                // Real ingredients never arrived (or never covered the recipe): last attempt, this time
+                // with the Universal Ingredient allowed to top up whatever is still empty.
+                this.netCookUniversalFillSuppressedUntil = 0f;
+                this.TryInvokeNetCookRefreshSlots();
+                if (this.TryCompleteNetCookStart(out string finalStatus))
+                {
+                    this.netCookStartCoroutine = null;
+                    yield break;
+                }
+
+                lastStatus = finalStatus;
                 this.netCookStatus = lastStatus;
                 this.AddMenuNotification(lastStatus, new Color(1f, 0.55f, 0.55f));
                 this.NetCookLog("Deferred mass cook start failed: " + lastStatus);
             }
             finally
             {
+                this.netCookUniversalFillSuppressedUntil = 0f;
                 this.netCookStartCoroutine = null;
             }
         }
@@ -4072,6 +4089,12 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // This re-init is what the server actually cooks from: PrepareCooking below sends
+                // _recipeDetail's filledMaterialNetId per slot, NOT the caller's materials list. So the
+                // detail must be completed AFTER it — AutoFill runs inside the init and refuses the
+                // Universal Ingredient, so any top-up done while building the caller's list is gone by
+                // now and the slot would go out as netId 0 (server answers OnPrepareFail).
+                IntPtr detailObj = IntPtr.Zero;
                 IntPtr initDetailMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "InitCookingRecipeDetail", 1);
                 if (initDetailMethod != IntPtr.Zero && this.netCookRecipeId > 0)
                 {
@@ -4079,12 +4102,45 @@ namespace HeartopiaMod
                     IntPtr initExc = IntPtr.Zero;
                     IntPtr* initArgs = stackalloc IntPtr[1];
                     initArgs[0] = (IntPtr)(&recipeId);
-                    auraMonoRuntimeInvoke(initDetailMethod, cookingSystemObj, (IntPtr)initArgs, ref initExc);
+                    detailObj = auraMonoRuntimeInvoke(initDetailMethod, cookingSystemObj, (IntPtr)initArgs, ref initExc);
                     if (initExc != IntPtr.Zero)
                     {
                         status = "InitCookingRecipeDetail raised exception.";
                         return false;
                     }
+                }
+
+                if (detailObj == IntPtr.Zero)
+                {
+                    IntPtr getDetailMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "GetRecipeDetail", 1);
+                    if (getDetailMethod != IntPtr.Zero && this.netCookRecipeId > 0)
+                    {
+                        int recipeId = this.netCookRecipeId;
+                        IntPtr detailExc = IntPtr.Zero;
+                        IntPtr* detailArgs = stackalloc IntPtr[1];
+                        detailArgs[0] = (IntPtr)(&recipeId);
+                        detailObj = auraMonoRuntimeInvoke(getDetailMethod, cookingSystemObj, (IntPtr)detailArgs, ref detailExc);
+                        if (detailExc != IntPtr.Zero)
+                        {
+                            detailObj = IntPtr.Zero;
+                        }
+                    }
+                }
+
+                // Re-apply the Universal Ingredient top-up and verify every slot carries a real netId.
+                // Bailing out here is deliberate: a half-filled payload is always rejected, so failing
+                // BEFORE the send leaves the target to retry (or drain with a real "Missing ingredients"
+                // reason) instead of burning a prepare on a list the server cannot accept.
+                if (this.netCookUseUniversalIngredient)
+                {
+                    List<uint> wireMaterials = new List<uint>(8);
+                    if (!this.TryResolveNetCookRecipeSlotMaterials(cookingSystemObj, cookingSystemClass, detailObj, wireMaterials, out string slotStatus))
+                    {
+                        status = string.IsNullOrEmpty(slotStatus) ? "Recipe slots incomplete before prepare." : slotStatus;
+                        return false;
+                    }
+
+                    this.NetCookLog("Prepare wire materials=[" + string.Join(", ", wireMaterials) + "]");
                 }
 
                 IntPtr prepareMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "PrepareCooking", 3);
@@ -8735,8 +8791,93 @@ namespace HeartopiaMod
                 ApplyLimit(available / Math.Max(1, pair.Value));
             }
 
+            if (hasLimit && this.netCookUseUniversalIngredient)
+            {
+                limit = this.ExtendNetCookMaxQuantityWithUniversalIngredient(limit, totalsByStaticId, specificPerDish, categoryPerDish, specificItemIds);
+            }
+
             maxQuantity = limit;
             return hasLimit;
+        }
+
+        // The Universal Ingredient is not a per-ingredient limit but a SHARED budget: it covers any
+        // missing unit of any slot. So for a candidate dish count the shortfall is the sum of every
+        // demand's deficit, and the count is reachable while that total still fits the universal
+        // stock. The shortfall grows monotonically with the dish count and every extra dish burns at
+        // least one universal unit, so climbing one dish at a time from the real-ingredient limit is
+        // both correct and bounded by the stock itself.
+        private int ExtendNetCookMaxQuantityWithUniversalIngredient(
+            int baseLimit,
+            Dictionary<int, int> totalsByStaticId,
+            Dictionary<int, int> specificPerDish,
+            Dictionary<int, int> categoryPerDish,
+            HashSet<int> specificItemIds)
+        {
+            int limit = Math.Max(0, baseLimit);
+            if (totalsByStaticId == null)
+            {
+                return limit;
+            }
+
+            totalsByStaticId.TryGetValue(NetCookUniversalIngredientStaticId, out int universalAvailable);
+            if (universalAvailable <= 0)
+            {
+                return limit;
+            }
+
+            // Availability resolved once — the category count walks every aggregated item id. The
+            // universal item itself can never show up in a category total (foodMaterial [99] matches
+            // no FoodMaterialType), so it is not double-counted here.
+            Dictionary<int, int> specificAvailable = new Dictionary<int, int>(specificPerDish.Count);
+            foreach (KeyValuePair<int, int> pair in specificPerDish)
+            {
+                totalsByStaticId.TryGetValue(pair.Key, out int available);
+                specificAvailable[pair.Key] = available;
+            }
+
+            Dictionary<int, int> categoryAvailable = new Dictionary<int, int>(categoryPerDish.Count);
+            foreach (KeyValuePair<int, int> pair in categoryPerDish)
+            {
+                categoryAvailable[pair.Key] = this.CountNetCookCategoryAvailability(totalsByStaticId, pair.Key, specificItemIds);
+            }
+
+            int ceiling = limit + universalAvailable;
+            while (limit < ceiling)
+            {
+                int next = limit + 1;
+                long shortfall = 0L;
+                foreach (KeyValuePair<int, int> pair in specificPerDish)
+                {
+                    specificAvailable.TryGetValue(pair.Key, out int available);
+                    shortfall += Math.Max(0L, ((long)next * Math.Max(1, pair.Value)) - available);
+                    if (shortfall > universalAvailable)
+                    {
+                        break;
+                    }
+                }
+
+                if (shortfall <= universalAvailable)
+                {
+                    foreach (KeyValuePair<int, int> pair in categoryPerDish)
+                    {
+                        categoryAvailable.TryGetValue(pair.Key, out int available);
+                        shortfall += Math.Max(0L, ((long)next * Math.Max(1, pair.Value)) - available);
+                        if (shortfall > universalAvailable)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if (shortfall > universalAvailable)
+                {
+                    break;
+                }
+
+                limit = next;
+            }
+
+            return limit;
         }
 
         private bool TryGetNetCookRecipeRequirements(int recipeId, out List<NetCookIngredientRequirement> requirements, out string status)
@@ -9123,9 +9264,20 @@ namespace HeartopiaMod
             HashSet<int> specificItemIds = new HashSet<int>(specificPerDish.Keys);
             List<int> categoryTypes = new List<int>(categoryPerDish.Keys);
 
+            // The warehouse scan collects the recipe's own items plus — when the toggle is on — the
+            // Universal Ingredient, which is allocated LAST, only for the units real ingredients could
+            // not cover. specificItemIds stays untouched: it is also the category-exclusion set, and
+            // 46999 must never be counted toward a "any <category>" demand (its foodMaterial is [99]).
+            HashSet<int> collectStaticIds = specificItemIds;
+            if (this.netCookUseUniversalIngredient)
+            {
+                collectStaticIds = new HashSet<int>(specificItemIds);
+                collectStaticIds.Add(NetCookUniversalIngredientStaticId);
+            }
+
             Dictionary<int, List<KeyValuePair<uint, int>>> stacksByStaticId = new Dictionary<int, List<KeyValuePair<uint, int>>>();
             Dictionary<uint, int> starByNetId = new Dictionary<uint, int>();
-            if (!this.TryCollectNetCookWarehouseStacks(stacksByStaticId, starByNetId, specificItemIds, categoryTypes, out status))
+            if (!this.TryCollectNetCookWarehouseStacks(stacksByStaticId, starByNetId, collectStaticIds, categoryTypes, out status))
             {
                 return false;
             }
@@ -9146,6 +9298,9 @@ namespace HeartopiaMod
 
             int batches = Math.Max(1, cookQuantity);
             bool anyMoveDeficit = false;
+            // Units neither the bag nor the warehouse can cover with real ingredients — the Universal
+            // Ingredient budget for this move.
+            int unmetUnits = 0;
 
             // Specific demands: every unit must be the exact item.
             foreach (KeyValuePair<int, int> demand in specificPerDish)
@@ -9163,6 +9318,8 @@ namespace HeartopiaMod
                 {
                     AllocateNetCookMoveFromStacks(stacks, remainingByNetId, moveMap, starByNetId, ref remaining);
                 }
+
+                unmetUnits += remaining;
             }
 
             // Category demands: any matching item satisfies a unit. Count what the bag already holds
@@ -9194,6 +9351,21 @@ namespace HeartopiaMod
                 }
 
                 AllocateNetCookMoveFromStacks(categoryPool, remainingByNetId, moveMap, starByNetId, ref remaining);
+                unmetUnits += remaining;
+            }
+
+            // Universal Ingredient top-up, LAST on purpose: whatever real ingredients could reach the
+            // bag has already been allocated above, so this only moves what is still missing, and only
+            // beyond the universal units the bag already holds.
+            if (this.netCookUseUniversalIngredient && unmetUnits > 0)
+            {
+                bagTotalsByStaticId.TryGetValue(NetCookUniversalIngredientStaticId, out int universalInBag);
+                int universalRemaining = Math.Max(0, unmetUnits - universalInBag);
+                if (universalRemaining > 0
+                    && stacksByStaticId.TryGetValue(NetCookUniversalIngredientStaticId, out List<KeyValuePair<uint, int>> universalStacks))
+                {
+                    AllocateNetCookMoveFromStacks(universalStacks, remainingByNetId, moveMap, starByNetId, ref universalRemaining);
+                }
             }
 
             if (moveMap.Count == 0)
@@ -9511,27 +9683,62 @@ namespace HeartopiaMod
                     auraMonoRuntimeInvoke(refreshMethod, cookingSystemObj, IntPtr.Zero, ref exc);
                 }
 
-                IntPtr slotsObj = IntPtr.Zero;
-                if (!this.TryGetMonoObjectMember(detailObj, "materialSlots", out slotsObj) || slotsObj == IntPtr.Zero)
-                {
-                    status = "AuraMono recipe slots unavailable.";
-                    return false;
-                }
+                return this.TryResolveNetCookRecipeSlotMaterials(cookingSystemObj, cookingSystemClass, detailObj, materials, out status);
+            }
+            catch (Exception ex)
+            {
+                status = "AuraMono material build failed: " + ex.Message;
+                materials.Clear();
+                return false;
+            }
+        }
 
-                // Pinned walk: this runs synchronously on the START MASS COOK click; the per-slot
-                // filled/netId reads dereference live MaterialSlot objects — unpinned they race the
-                // moving sgen GC (prime suspect for the occasional start-click native crash).
-                List<IntPtr> slotItems = new List<IntPtr>(16);
-                List<uint> slotPins = new List<uint>(16);
-                if (!this.TryEnumerateAuraMonoCollectionItems(slotsObj, slotItems, slotPins) || slotItems.Count == 0)
-                {
-                    FreeAuraMonoPins(slotPins);
-                    status = "AuraMono recipe slots unavailable.";
-                    return false;
-                }
+        // Walk a freshly initialised recipe detail's material slots: top up whatever the game's own
+        // AutoFill could not fill with the Universal Ingredient, then read back the netId the SERVER
+        // will actually receive for each slot (materials may be null when only the top-up is wanted).
+        //
+        // BOTH the material build and the AuraMono prepare send go through here on purpose. The send
+        // path re-runs InitCookingRecipeDetail immediately before PrepareCooking, which re-runs
+        // AutoFill and WIPES an earlier top-up — AutoSelectMaterial refuses staticId 46999, so the
+        // topped-up slot came back empty and the wire payload carried filledMaterialNetId 0, which the
+        // server rejects (observed in-world: every prepare after the first universal fill answered
+        // OnPrepareFail, while the same dish cooked fine when filled by hand in the game's own panel).
+        // Re-applying the top-up right before the send is what puts the universal netId on the wire.
+        private unsafe bool TryResolveNetCookRecipeSlotMaterials(IntPtr cookingSystemObj, IntPtr cookingSystemClass, IntPtr detailObj, List<uint> materials, out string status)
+        {
+            status = "Materials ready.";
+            if (detailObj == IntPtr.Zero)
+            {
+                status = "AuraMono recipe detail unavailable.";
+                return false;
+            }
 
-                try
-                {
+            IntPtr slotsObj = IntPtr.Zero;
+            if (!this.TryGetMonoObjectMember(detailObj, "materialSlots", out slotsObj) || slotsObj == IntPtr.Zero)
+            {
+                status = "AuraMono recipe slots unavailable.";
+                return false;
+            }
+
+            // Pinned walk: this runs synchronously on the START MASS COOK click; the per-slot
+            // filled/netId reads dereference live MaterialSlot objects — unpinned they race the
+            // moving sgen GC (prime suspect for the occasional start-click native crash).
+            List<IntPtr> slotItems = new List<IntPtr>(16);
+            List<uint> slotPins = new List<uint>(16);
+            if (!this.TryEnumerateAuraMonoCollectionItems(slotsObj, slotItems, slotPins) || slotItems.Count == 0)
+            {
+                FreeAuraMonoPins(slotPins);
+                status = "AuraMono recipe slots unavailable.";
+                return false;
+            }
+
+            try
+            {
+                // Pass 1 runs on what the game's own AutoFill already put in the slots from the bag —
+                // real ingredients are always spent first. Only the slots it left empty go to the
+                // Universal Ingredient top-up (MaterialSlot is a CLASS on this build, so the
+                // enumerated pointers stay valid across FillMaterialInSlot and can be re-read in place).
+                int universalFilled = 0;
                 for (int i = 0; i < slotItems.Count; i++)
                 {
                     IntPtr slotObj = slotItems[i];
@@ -9540,7 +9747,22 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (!this.TryGetMonoBoolMember(slotObj, "filled", out bool filled) || !filled)
+                    bool hasFilledFlag = this.TryGetMonoBoolMember(slotObj, "filled", out bool filled);
+                    if (hasFilledFlag && !filled && this.IsNetCookUniversalIngredientFillAllowed())
+                    {
+                        if (this.TryFillNetCookSlotWithUniversalIngredient(cookingSystemObj, cookingSystemClass, i, out string universalStatus))
+                        {
+                            universalFilled++;
+                            hasFilledFlag = this.TryGetMonoBoolMember(slotObj, "filled", out filled);
+                        }
+                        else if (!string.IsNullOrEmpty(universalStatus) && Time.unscaledTime >= this.nextNetCookUniversalSkipLogAt)
+                        {
+                            this.nextNetCookUniversalSkipLogAt = Time.unscaledTime + NetCookUniversalLogThrottleSeconds;
+                            this.NetCookDiagLog("universal fill slot=" + i + " skipped: " + universalStatus, true);
+                        }
+                    }
+
+                    if (!hasFilledFlag || !filled)
                     {
                         string slotName = this.GetNetCookSelectedRecipeLabel();
                         status = "Missing ingredients for " + slotName;
@@ -9553,15 +9775,25 @@ namespace HeartopiaMod
                         return false;
                     }
 
-                    materials.Add(materialNetId);
-                }
-                }
-                finally
-                {
-                    FreeAuraMonoPins(slotPins);
+                    if (materials != null)
+                    {
+                        materials.Add(materialNetId);
+                    }
                 }
 
-                if (materials.Count == 0)
+                if (universalFilled > 0)
+                {
+                    this.netCookUniversalSlotsFilled += universalFilled;
+                    if (Time.unscaledTime >= this.nextNetCookUniversalFillLogAt)
+                    {
+                        this.nextNetCookUniversalFillLogAt = Time.unscaledTime + NetCookUniversalLogThrottleSeconds;
+                        this.NetCookDiagLog("universal ingredient filled " + universalFilled + " of "
+                            + slotItems.Count + " slot(s); " + this.netCookUniversalSlotsFilled
+                            + " slot fill(s) this run", true);
+                    }
+                }
+
+                if (materials != null && materials.Count == 0)
                 {
                     status = "Recipe has no usable material slots.";
                     return false;
@@ -9569,11 +9801,124 @@ namespace HeartopiaMod
 
                 return true;
             }
+            finally
+            {
+                FreeAuraMonoPins(slotPins);
+            }
+        }
+
+        // The top-up is on only while the toggle is set AND no warehouse batch is still in flight
+        // (real ingredients always get the first claim on a slot).
+        private bool IsNetCookUniversalIngredientFillAllowed()
+        {
+            return this.netCookUseUniversalIngredient
+                && Time.unscaledTime >= this.netCookUniversalFillSuppressedUntil;
+        }
+
+        // Put one Universal Ingredient (46999) into a material slot the game's AutoFill left empty.
+        // The path mirrors the game's own bag UI: CookingSystem.GetSlotMaterials(slotIndex) already
+        // lists the universal item as a candidate for EVERY slot type (specific and "any category"),
+        // but ONLY while CheckMagicIngredientUnlocked() is true — so the server feature gate needs no
+        // separate probe here, a locked feature simply yields no candidate. GetSlotMaterials also
+        // subtracts the units already consumed by filled slots from each stack, so re-reading it per
+        // slot is what stops a single stack from over-filling the recipe.
+        private unsafe bool TryFillNetCookSlotWithUniversalIngredient(IntPtr cookingSystemObj, IntPtr cookingSystemClass, int slotIndex, out string status)
+        {
+            status = string.Empty;
+            if (cookingSystemObj == IntPtr.Zero || cookingSystemClass == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                status = "AuraMono CookingSystem unavailable.";
+                return false;
+            }
+
+            List<uint> itemPins = null;
+            try
+            {
+                IntPtr getSlotMaterialsMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "GetSlotMaterials", 1);
+                IntPtr fillMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "FillMaterialInSlot", 3);
+                if (getSlotMaterialsMethod == IntPtr.Zero || fillMethod == IntPtr.Zero)
+                {
+                    status = "CookingSystem slot-fill methods unavailable.";
+                    return false;
+                }
+
+                int slot = slotIndex;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[3];
+                args[0] = (IntPtr)(&slot);
+                IntPtr itemListObj = auraMonoRuntimeInvoke(getSlotMaterialsMethod, cookingSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || itemListObj == IntPtr.Zero)
+                {
+                    status = "GetSlotMaterials returned nothing.";
+                    return false;
+                }
+
+                // Pinned walk: BackpackItem is a STRUCT, so every enumerated element is a fresh mono
+                // box and the member reads below can trigger a moving sgen collection.
+                List<IntPtr> items = new List<IntPtr>(16);
+                itemPins = new List<uint>(16);
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins))
+                {
+                    status = "Slot material list unreadable.";
+                    return false;
+                }
+
+                uint universalNetId = 0U;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    IntPtr itemObj = items[i];
+                    if (itemObj == IntPtr.Zero
+                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId)
+                        || staticId != NetCookUniversalIngredientStaticId
+                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
+                        || netId == 0U)
+                    {
+                        continue;
+                    }
+
+                    // Same count gate as AutoSelectMaterial — a stack already drained by earlier slots
+                    // comes back with count 0 and must not be used again.
+                    if (this.TryGetDirectBackpackItemCount(itemObj, out int count) && count < 1)
+                    {
+                        continue;
+                    }
+
+                    universalNetId = netId;
+                    break;
+                }
+
+                if (universalNetId == 0U)
+                {
+                    status = "No Universal Ingredient available (locked, out of stock, or not in bag).";
+                    return false;
+                }
+
+                uint materialNetId = universalNetId;
+                int materialStaticId = NetCookUniversalIngredientStaticId;
+                exc = IntPtr.Zero;
+                args[0] = (IntPtr)(&slot);
+                args[1] = (IntPtr)(&materialNetId);
+                args[2] = (IntPtr)(&materialStaticId);
+                auraMonoRuntimeInvoke(fillMethod, cookingSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "FillMaterialInSlot raised exception.";
+                    return false;
+                }
+
+                return true;
+            }
             catch (Exception ex)
             {
-                status = "AuraMono material build failed: " + ex.Message;
-                materials.Clear();
+                status = "Universal ingredient fill failed: " + ex.Message;
                 return false;
+            }
+            finally
+            {
+                if (itemPins != null)
+                {
+                    FreeAuraMonoPins(itemPins);
+                }
             }
         }
 

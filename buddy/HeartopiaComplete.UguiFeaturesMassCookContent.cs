@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -189,6 +189,7 @@ namespace HeartopiaMod
 
             public Toggle MoveIngredientsToggle;
             public Toggle UseAllIngredientsToggle;
+            public Toggle UseUniversalIngredientToggle;
             public GameObject DishLimitLabel;     // static caption
             public GameObject DishMaxLabel;       // "Ingredients max: ..." — live
             public string DishMaxShown;
@@ -458,6 +459,11 @@ namespace HeartopiaMod
             handle.UseAllIngredientsToggle = this.CreateUguiCheckbox(scrollContent, "UseAllIngredientsToggle",
                 this.L("Use All Ingredients"), this.netCookUseAllIngredients,
                 new System.Action<bool>(this.OnUguiFeaturesMassCookUseAllIngredientsToggled));
+            // Mod-only row (no IMGUI twin): fills the slots real ingredients could not cover with the
+            // Universal Ingredient. Own full-width row so its longer label is not clipped.
+            handle.UseUniversalIngredientToggle = this.CreateUguiCheckbox(scrollContent, "UseUniversalIngredientToggle",
+                this.L("Use Universal Ingredient"), this.netCookUseUniversalIngredient,
+                new System.Action<bool>(this.OnUguiFeaturesMassCookUseUniversalIngredientToggled));
 
             handle.DishLimitLabel = this.CreateUguiLabel(scrollContent, "DishLimitLabel",
                 this.L("DISH LIMIT (0 = unlimited)"), 11f, mutedTextColor, false);
@@ -593,6 +599,10 @@ namespace HeartopiaMod
             {
                 SetUguiGoActive(handle.UseAllIngredientsToggle.gameObject, !mini);
             }
+            if (handle.UseUniversalIngredientToggle != null)
+            {
+                SetUguiGoActive(handle.UseUniversalIngredientToggle.gameObject, !mini);
+            }
             SetUguiGoActive(handle.DishLimitLabel, !mini);
             SetUguiGoActive(handle.DishMaxLabel, !mini);
             if (handle.QtyField != null)
@@ -628,6 +638,11 @@ namespace HeartopiaMod
                 if (handle.UseAllIngredientsToggle != null)
                 {
                     PlaceUguiTopLeft(handle.UseAllIngredientsToggle.gameObject, rowX + halfW + 10f, yCur, halfW, 24f);
+                }
+                yCur += 30f;
+                if (handle.UseUniversalIngredientToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.UseUniversalIngredientToggle.gameObject, rowX, yCur, rowW, 24f);
                 }
                 yCur += 38f;
                 PlaceUguiTopLeft(handle.DishLimitLabel, rowX, yCur, rowW * 0.42f, 18f);
@@ -860,6 +875,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.StatusDiagToggle, this.netCookStatusDiagEnabled);
                 this.SyncUguiToggleFromField(handle.MoveIngredientsToggle, this.netCookMoveIngredients);
                 this.SyncUguiToggleFromField(handle.UseAllIngredientsToggle, this.netCookUseAllIngredients);
+                this.SyncUguiToggleFromField(handle.UseUniversalIngredientToggle, this.netCookUseUniversalIngredient);
 
                 if (this.netCookMiniGameOnly)
                 {
@@ -1244,6 +1260,19 @@ namespace HeartopiaMod
             this.netCookUseAllIngredients = value;
             this.nextNetCookMaxRefreshAt = 0f;
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Mod-only toggle (no source twin), and deliberately NOT saved — like "Status Diagnostics" it
+        // is session-only, so a paid item is never spent because a toggle survived a restart. The
+        // throttle reset matters: the "Ingredients max" figure grows/shrinks with the universal stock.
+        private void OnUguiFeaturesMassCookUseUniversalIngredientToggled(bool value)
+        {
+            if (value == this.netCookUseUniversalIngredient)
+            {
+                return;
+            }
+            this.netCookUseUniversalIngredient = value;
+            this.nextNetCookMaxRefreshAt = 0f;
         }
 
         // :327-332 — raw text into the string mirror, then the backend's own parser; NO local

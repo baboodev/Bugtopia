@@ -1,4 +1,4 @@
-# Features Reference
+﻿# Features Reference
 
 Complete feature catalog for **Bugtopia**. Works identically under MelonLoader and BepInEx (same `HeartopiaComplete` core). Menu toggled with **Insert** by default. Labels support en, es, zh-CN, pt-BR.
 
@@ -998,6 +998,16 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#auto-sell-detail).
 - Config: interval, scan radius, wait at spot, cooking speed.
 - Coroutine warmup on mod init (`NetCookCoroutineWarmupRoutine`).
 - **Ingredient model (Move Ingredients / max-quantity):** a recipe is a flat list of material slots, **one slot = one unit** (a recipe needing 3 wheat has 3 slots). A slot is either a **specific item** (ingredient id ≥ 100) or an **"any &lt;category&gt;" slot** (id &lt; 100 = a `FoodMaterialType`, e.g. "any fish" = `Fish`). Category slots carry `materialId == 0` and only set `materialType`. Requirements track `IsCategory`/`MaterialType`; `BuildNetCookDemands` aggregates per-dish counts (specific items vs categories), and warehouse move + max-quantity match category slots via `NetCookItemMatchesCategory` → `CookingSystem.CheckFoodTypeSatisfied` (cached). Cooking itself relies on the game's `AutoFill` to fill slots from the bag, so the mod only needs to move enough matching items. See [cooking ingredient details](DECOMPILED_SOURCE_MAP.md#312-cooking-net-cook--mass-cook).
+
+#### Universal Ingredient top-up (`Use Universal Ingredient` toggle)
+
+Fills the material slots real ingredients could not cover with the **Universal Ingredient** (万能食材, item **46999**, `CookingSystem.MagicIngredientId`), which substitutes any slot — specific or "any &lt;category&gt;".
+
+- **Real ingredients always go first.** Order per dish: warehouse move (real stacks, low-star-first) → the game's own `AutoFill` from the bag → universal top-up for the slots still empty. While a warehouse batch is still landing in the bag the top-up is held back entirely (it would otherwise win the race and burn a paid item on an ingredient that was one frame away); the deferred start makes one final attempt with it enabled.
+- The game never fills 46999 itself (`AutoSelectMaterial` skips it) and it matches no `FoodMaterialType`, so the mod places it explicitly via `CookingSystem.FillMaterialInSlot`. Candidates come from the game's own `GetSlotMaterials`, which lists 46999 **only** while the `CookCanUseMagicIngredient` feature gate is open — a locked account simply gets the usual "Missing ingredients" stop.
+- **The top-up is applied again immediately before the send.** `PrepareCooking` transmits `_recipeDetail`'s per-slot `filledMaterialNetId`, not the caller's material list, and the AuraMono send path re-runs `InitCookingRecipeDetail` (hence `AutoFill`) right before it — which wipes any earlier top-up and would put netId `0` on the wire for that slot. Both the material build and the send therefore go through one shared slot walk, and the send bails out rather than transmitting a half-filled payload the server can only reject.
+- **Ingredients max** grows with the toggle: the universal stock is a shared shortfall budget (one unit covers one missing unit of any slot), not a per-ingredient limit. **Move Ingredients** also pulls universal stacks out of the warehouse, but only for the deficit real ingredients left behind.
+- Off by default and **session-only** — the toggle is not saved to config, so spending a paid item is always a deliberate choice for that session. 46999 also cooks at its own (low) star rating, which drags dish quality down (confirmed in-world: a dish topped up this way came back `quality=1`). Usage is force-logged (`universal ingredient filled N of M slot(s)` / `universal fill slot=i skipped: …`, throttled to 5 s) so a "Missing ingredients" drain always has a reason in the log.
 
 #### Remote cooking (QTE at distance)
 
