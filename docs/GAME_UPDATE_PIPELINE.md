@@ -354,6 +354,7 @@ baseline that exists.** Note its path when the pipeline prints it.
 | 2026-07-23 | yes | yes | purely additive |
 | 2026-08-06 | +0 / −0 / ~22 | 911 tables, no row change | `IconsBarWidget` renamed one node → 16 broken `GameObject.Find` paths |
 | 2026-08-20 | +774 / −92 / ~1078 | 911 → 948 tables, 337 746 → 376 657 rows | `ReadUInt64` opcode added to the decoder; `AreaPriorityManager` moved namespace (diagnostic-only break) |
+| 2026-08-27 | +0 / −0 / ~16 | 14 of 949 tables edited, all micro-fixes | a stale `old/` archive in the work dir made `promote` SKIP silently — bindings/uipaths then diffed the wrong pair; move the archive aside and rerun promote+checks |
 
 See also: [GAME_ASSEMBLIES_AND_TOOLS.md](GAME_ASSEMBLIES_AND_TOOLS.md) (runtime access,
 IL2CPP tree), [GAME_EVENTS.md](GAME_EVENTS.md) (the event engine),
