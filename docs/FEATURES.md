@@ -997,6 +997,13 @@ Reuse a captured stove set on every start **without re-scanning**, so you can ru
 **Pet Feed (`PetFeedFeature`)**
 
 - Feed all visible cats or dogs in sequence.
+- **Scan radius** slider (1-50 m, default **50** = old behaviour). Culls the world entity walk
+  against `TryGetLocalPlayerPosition` **before** the per-entity component walk, so it is also a
+  scan-cost win, and **before** the `seenPetNetIds` dedupe — which makes the rule *the radius
+  culls strangers*: a culled owned pet is re-added by the `PetSystem.GetPetComponentDatas` pass
+  (that source carries no position at all), a culled stranger's pet is in no such list and stays
+  gone. Persisted (`petFeedScanRadiusMeters`); scan log reports `radius= outOfRange= noPos=`.
+  With no player anchor the radius is not applied and the log says so.
 - Cooldown between bulk feed runs.
 - Per-pet single feed from UI list.
 - Food list from `PetSystem.GetFoods()` (not a full-bag scan); sorts by **lowest fullness** first, then `staticId`.

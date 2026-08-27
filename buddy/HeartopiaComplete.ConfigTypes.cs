@@ -319,6 +319,7 @@ namespace HeartopiaMod
             public bool bubbleSpawnAtPlayerEnabled;
             public bool autoBubbleCollectEnabled;
             public float autoBubbleCollectRadius = 10f; // 0 = unlimited, default 10m
+            public float petFeedScanRadiusMeters;
             public float netCookInterval;
             public float netCookScanRadiusMeters;
             public bool netCookMiniGameOnly;

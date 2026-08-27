@@ -11,7 +11,13 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         private static bool PetFeedLogsEnabled => MasterLogPetFeed;
-        private const float PetFeedWorldScanRadius = 55f;
+        // Scan radius for the world pet walk. Was a dead 55f constant that only ever printed into
+        // the favorites log while the scan itself culled nothing; now a real, persisted setting
+        // (petFeedScanRadiusMeters) clamped to [1, 50] m and applied in
+        // TryCollectVisiblePetFeedPetsAuraMono. Default = the max so the cull is opt-in.
+        private const float PetFeedMinScanRadiusMeters = 1f;
+        private const float PetFeedMaxScanRadiusMeters = 50f;
+        private const float PetFeedDefaultScanRadiusMeters = 50f;
         private const float PetFeedProbeCooldownSeconds = 4f;
         private const float PetFeedActionCooldownSeconds = 1.25f;
         private const int PetFeedFoodVisibleRows = 6;
@@ -19,6 +25,7 @@ namespace HeartopiaMod
         private const int PetFeedFavoriteUiMaxVisibleRows = 6;
         private const float PetFeedFavoriteUiRowHeight = 52f;
         private const int PetFeedEntityScanLimit = 650;
+        private float petFeedScanRadiusMeters = PetFeedDefaultScanRadiusMeters;
         private object petFeedAllCoroutine = null;
         private float petFeedAllBusyUntil = 0f;
         private string petFeedAllActiveLabel = string.Empty;
@@ -116,6 +123,13 @@ namespace HeartopiaMod
             public int FavoriteGroupId;
             public string PetTextureId;
             public string PetAvatarIconKey;
+            public Vector3 Position;
+            public bool HasPosition;
+        }
+
+        private float GetPetFeedScanRadiusMeters()
+        {
+            return Mathf.Clamp(this.petFeedScanRadiusMeters, PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters);
         }
 
         private void StartPetFeedAll(bool dog)
@@ -1380,8 +1394,26 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // Radius cull. Deliberately runs BEFORE the component walk: one get_position
+                // invoke is far cheaper than GetAllComponents + per-component class-name lookups,
+                // so the expensive part only pays for entities inside the radius.
+                //
+                // It also runs before seenPetNetIds.Add, which is what makes the rule "the radius
+                // culls STRANGERS": a culled netId stays unseen, so an owned pet dropped here is
+                // re-added by the ownedList pass in TryCollectPetFeedPetListAuraMono (that source
+                // carries no position at all). Stranger pets are in no such list and stay gone.
+                //
+                // Positions are read while the entity pointers are still pinned by
+                // TryEnumerateAuraMonoLoadedEntityObjects' per-scan pin list, and this whole loop
+                // is synchronous - no raw pointer ever crosses a yield.
+                float radius = this.GetPetFeedScanRadiusMeters();
+                bool hasCenter = this.TryGetLocalPlayerPosition(out Vector3 scanCenter);
+                float radiusSq = radius * radius;
+
                 int inspected = 0;
                 int candidates = 0;
+                int outOfRange = 0;
+                int noPos = 0;
                 int limit = Math.Min(entityObjects.Count, PetFeedEntityScanLimit);
                 for (int i = 0; i < entityObjects.Count && inspected < limit; i++)
                 {
@@ -1389,6 +1421,13 @@ namespace HeartopiaMod
                     inspected++;
                     if (entityObj == IntPtr.Zero)
                     {
+                        continue;
+                    }
+
+                    bool hasPosition = this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 entityPosition);
+                    if (hasCenter && hasPosition && (entityPosition - scanCenter).sqrMagnitude > radiusSq)
+                    {
+                        outOfRange++;
                         continue;
                     }
 
@@ -1403,13 +1442,26 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    if (!hasPosition)
+                    {
+                        // Kept on purpose: a pet whose transform would not resolve is not evidence
+                        // that it is far away. Counted so the log says so instead of hiding it.
+                        noPos++;
+                    }
+
+                    target.Position = entityPosition;
+                    target.HasPosition = hasPosition;
                     target.Source = "worldEntities";
                     target.IsDog = dog;
                     pets.Add(target);
                     count++;
                 }
 
-                status = "entities=" + entityObjects.Count + " inspected=" + inspected + " candidates=" + candidates + " added=" + count;
+                status = "entities=" + entityObjects.Count + " inspected=" + inspected
+                    + " radius=" + radius.ToString("F0") + "m"
+                    + (hasCenter ? string.Empty : " (no player anchor - radius NOT applied)")
+                    + " outOfRange=" + outOfRange + " noPos=" + noPos
+                    + " candidates=" + candidates + " added=" + count;
                 return count > 0;
             }
             catch (Exception ex)
@@ -3786,7 +3838,7 @@ namespace HeartopiaMod
             if (writeLog)
             {
                 this.LogPetFeedFavoriteReport(
-                    "Scan radius=" + PetFeedWorldScanRadius.ToString("F0") + "m"
+                    "Scan radius=" + this.GetPetFeedScanRadiusMeters().ToString("F0") + "m"
                     + " cats=" + catCount + " dogs=" + dogCount
                     + " total=" + pets.Count
                     + " catStatus=" + catStatus

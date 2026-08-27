@@ -27,10 +27,12 @@ namespace HeartopiaMod
     //  - The IMGUI panel-height formula (Gui.cs:304-307: 898 + GetPetFeedFavoriteUiTableHeight())
     //    is an estimate — this port computes its scroll height from the relayout cursor like
     //    every prior conditional-content round.
-    //  - NO PERSISTENCE ANYWHERE: SaveKeybinds appears ZERO times in PetPlayFeature.cs AND ZERO
-    //    times in PetFeedFeature.cs (grep-verified). Every toggle/setting on this tab is a plain
-    //    in-memory field write. This file deliberately contains ZERO SaveKeybinds calls and no
-    //    bespoke persist method — none exists to call.
+    //  - PERSISTENCE — exactly ONE control, added after the port: the SCAN RADIUS slider
+    //    (petFeedScanRadiusMeters, PetFeedFeature.cs) calls SaveKeybinds(false) on change, the
+    //    Mass Cook radius-slider contract. Everything ELSE on this tab stays a plain in-memory
+    //    field write: SaveKeybinds appears ZERO times in PetPlayFeature.cs and ZERO times in
+    //    PetFeedFeature.cs, so every toggle here still has no persist method to call. A radius is
+    //    a setting, not a session flag — hence the single deliberate exception.
     //
     // THE ROUND'S BIG DESIGN DECISION — the hand-rolled dropdown scrollbar is NOT ported:
     //  Source (:451-586) hand-rolls an entire scrollbar subsystem for the food-option list — a
@@ -116,11 +118,16 @@ namespace HeartopiaMod
     //    highlight on petFeedSelectedFoodStaticId. Row click → SelectPetFeedFood(StaticId, RAW
     //    Name) — "Any Food" row passes (0, "Any Food") exactly like :502; the backend closes the
     //    dropdown itself (:2471).
-    //  - FEEDING card (:590-624, 160 tall): "Feed All Cats"/"Feed All Dogs" both gated on the
+    //  - FEEDING card (:590-624, source 160 tall; THIS PORT 202 — see the SCAN RADIUS row at the
+    //    end of this bullet): "Feed All Cats"/"Feed All Dogs" both gated on the
     //    SAME live busy flag (petFeedAllCoroutine != null || realtime < petFeedAllBusyUntil —
     //    time-dependent, re-evaluated every gated frame) → StartPetFeedAll(false/true); "Skip 5
     //    star food" toggle = flag-only (no log, no toast, no save); "Show pets favorite food" →
     //    LogNearbyPetFavoriteFoods(). These four labels are L'd in source and stay localized.
+    //    SCAN RADIUS (1-50 m, whole numbers) has NO IMGUI twin — the source card had no radius
+    //    control because the scan itself had no radius: PetFeedWorldScanRadius was a dead 55f
+    //    that only ever printed into the favorites log. The slider drives the real cull in
+    //    TryCollectVisiblePetFeedPetsAuraMono and is the tab's one persisted control.
     //  - FAVORITE FOODS table (PetFeedFeature.cs:4503-4571 + :4492-4501): contributes ZERO
     //    height/content while petFeedFavoriteUiRows.Count == 0 — BOTH source functions return
     //    early/zero in that case (no card, no header, nothing drawn); reproduced as the card
@@ -242,6 +249,9 @@ namespace HeartopiaMod
             public GameObject FeedCatsButton;
             public GameObject FeedDogsButton;
             public Toggle SkipFiveStarToggle;
+            public Slider ScanRadiusSlider;
+            public GameObject ScanRadiusValueLabel;
+            public string ScanRadiusShown;
 
             public GameObject FavCard;
             public GameObject FavListScroll;      // nested ScrollRect — viewport resized by relayout
@@ -264,6 +274,7 @@ namespace HeartopiaMod
         private const float UguiPetCareFoodPanelHeight = 300f; // ≈ source :454 (34 + 7*36 + 14)
         private const float UguiPetCareFoodCardClosedHeight = 86f; // :387 — EXACT source formula
         private const float UguiPetCareFoodCardOpenHeight = 386f;  // this port's own (file header)
+        private const float UguiPetCareFeedCardHeight = 202f;      // :590's 160 + this port's SCAN RADIUS row
 
         // ----------------------------------------------------------------------------------------
         // Live layout signature — list visibility, dropdown-open, pet-row count and favorite
@@ -550,6 +561,22 @@ namespace HeartopiaMod
                 this.L("Show pets favorite food"), new System.Action(this.OnUguiFeaturesPetCareShowFavoritesClicked));
             PlaceUguiTopLeft(favFoodButton, 16f, 112f, rowW - 32f, 30f); // :619
 
+            // SCAN RADIUS — this port's OWN row (no IMGUI twin: the source card had no radius
+            // control because the scan had no radius at all). Mass Cook's slider row verbatim
+            // (:502-518): muted 11pt caption left, live "{0:F0}m" value right, wholeNumbers slider.
+            GameObject radiusLabel = this.CreateUguiLabel(handle.FeedCard.transform, "ScanRadiusLabel",
+                this.L("SCAN RADIUS"), 11f, new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.78f), false);
+            this.TrySetUguiLabelBold(radiusLabel);
+            PlaceUguiTopLeft(radiusLabel, 16f, 150f, (rowW - 32f) * 0.55f, 18f);
+            handle.ScanRadiusShown = string.Format("{0:F0}m", this.GetPetFeedScanRadiusMeters());
+            handle.ScanRadiusValueLabel = this.CreateUguiLabel(handle.FeedCard.transform, "ScanRadiusValue",
+                handle.ScanRadiusShown, 12f, Color.white, false);
+            PlaceUguiTopLeft(handle.ScanRadiusValueLabel, 16f + (rowW - 32f) * 0.55f, 150f, (rowW - 32f) * 0.45f, 18f);
+            handle.ScanRadiusSlider = this.CreateUguiSlider(handle.FeedCard.transform, "ScanRadiusSlider",
+                PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters, this.GetPetFeedScanRadiusMeters(), true,
+                new System.Action<float>(this.OnUguiFeaturesPetCareScanRadiusChanged));
+            PlaceUguiTopLeft(handle.ScanRadiusSlider.gameObject, 16f, 170f, rowW - 32f, 20f);
+
             // -------- FAVORITE FOODS card (PetFeedFeature.cs:4503-4571 — zero-when-empty) --------
             handle.FavCard = this.CreateUguiGo("FavCard", scrollContent);
             this.AddUguiImage(handle.FavCard, this.UguiKitPanelBg(), true, 1f);
@@ -640,8 +667,10 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.FoodPanel, open);
             yCur += Mathf.CeilToInt(foodCardHeight + 14f); // :588
 
-            PlaceUguiTopLeft(handle.FeedCard, rowX, yCur, rowW, 160f); // :590
-            yCur += 160f + 12f; // :624 — the table starts at feedActionRect.yMax + 12
+            // 160 (:590) + 42 for this port's own SCAN RADIUS row (caption at y=150, slider at
+            // y=170 h=20, 12 bottom pad).
+            PlaceUguiTopLeft(handle.FeedCard, rowX, yCur, rowW, UguiPetCareFeedCardHeight);
+            yCur += UguiPetCareFeedCardHeight + 12f; // :624 — the table starts at feedActionRect.yMax + 12
 
             // Zero-when-empty (file header): BOTH source functions return early/zero at 0 rows.
             int favVisible = Math.Min(PetFeedFavoriteUiMaxVisibleRows, this.petFeedFavoriteUiRows.Count);
@@ -1209,6 +1238,15 @@ namespace HeartopiaMod
                 this.SetUguiButtonInteractable(handle.FeedCatsButton, !petFeedBusy);
                 this.SetUguiButtonInteractable(handle.FeedDogsButton, !petFeedBusy);
 
+                // SCAN RADIUS — WithoutNotify re-sync so a config reload / IMGUI-side edit lands.
+                if (handle.ScanRadiusSlider != null
+                    && Mathf.Abs(handle.ScanRadiusSlider.value - this.GetPetFeedScanRadiusMeters()) > 0.0001f)
+                {
+                    handle.ScanRadiusSlider.SetValueWithoutNotify(this.GetPetFeedScanRadiusMeters());
+                }
+                this.SyncUguiSelfLabelText(handle.ScanRadiusValueLabel, ref handle.ScanRadiusShown,
+                    string.Format("{0:F0}m", this.GetPetFeedScanRadiusMeters()));
+
                 // FAVORITE FOODS rows — cheap text diffs; presence/height via the signature.
                 this.SyncUguiFeaturesPetCareFavRows(handle);
 
@@ -1480,6 +1518,21 @@ namespace HeartopiaMod
             {
                 ModLogger.Msg("[UguiShell] Pet Care feed dogs error: " + ex.Message);
             }
+        }
+
+        // WHOLE-number round + epsilon-save, Mass Cook's radius-slider contract (:370-376). This
+        // is the ONE persisted control on this tab — see the file header's persistence note.
+        private void OnUguiFeaturesPetCareScanRadiusChanged(float value)
+        {
+            float rounded = Mathf.Clamp(Mathf.Round(value), PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters);
+            if (Math.Abs(rounded - this.petFeedScanRadiusMeters) <= 0.0001f)
+            {
+                return;
+            }
+
+            this.petFeedScanRadiusMeters = rounded;
+            this.PetFeedLog("Scan radius set to " + rounded.ToString("F0") + "m.");
+            try { this.SaveKeybinds(false); } catch (Exception ex) { ModLogger.Msg("[UguiShell] Pet Care scan radius save failed: " + ex); }
         }
 
         // :614-617 — flag-only: no log, no toast, no save (verified).
