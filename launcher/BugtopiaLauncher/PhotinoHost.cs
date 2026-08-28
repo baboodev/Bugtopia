@@ -173,16 +173,46 @@ namespace Bugtopia.Launcher
     /// it fail-fasts the process with <c>0xC0000409</c> and says nothing. And the folder is keyed by
     /// the DLL's content hash, so a new build writes a new copy instead of fighting one an older
     /// instance still holds open.
+    ///
+    /// Both DLLs, not one. Photino.Native imports WebView2Loader, and carrying only the first
+    /// produces a launcher that starts on a machine with a copy of the second somewhere on PATH —
+    /// the Windows SDK ships one — and dies with 0xC0000409 before its own log exists on every
+    /// machine that does not. Measured: with the SDK's folder taken off PATH, the build that
+    /// carried one DLL failed exactly that way.
     /// </summary>
     internal static class NativeShell
     {
         private const string ResourceName = "Photino.Native.dll";
+        private const string LoaderName = "WebView2Loader.dll";
         private const string IconName = "bugtopia.ico";
         private static IntPtr handle;
 
         internal static void Install()
         {
             NativeLibrary.SetDllImportResolver(typeof(PhotinoWindow).Assembly, Resolve);
+        }
+
+        private static byte[] ReadResource(string name)
+        {
+            using Stream source = typeof(NativeShell).Assembly.GetManifestResourceStream(name);
+            if (source == null)
+                return null;
+
+            var bytes = new byte[source.Length];
+            source.ReadExactly(bytes);
+            return bytes;
+        }
+
+        /// <summary>Writes one file into the cache folder, and returns where it went.</summary>
+        private static string Write(string folder, string name, byte[] bytes)
+        {
+            string file = Path.Combine(folder, name);
+            if (!File.Exists(file) || new FileInfo(file).Length != bytes.Length)
+            {
+                Directory.CreateDirectory(folder);
+                File.WriteAllBytes(file, bytes);
+            }
+            return file;
         }
 
         /// <summary>
@@ -223,24 +253,22 @@ namespace Bugtopia.Launcher
             if (handle != IntPtr.Zero)
                 return handle;
 
-            using Stream source = typeof(NativeShell).Assembly.GetManifestResourceStream(ResourceName);
-            if (source == null)
+            byte[] shell = ReadResource(ResourceName);
+            if (shell == null)
                 return IntPtr.Zero;
 
-            var bytes = new byte[source.Length];
-            source.ReadExactly(bytes);
-
-            string tag = Convert.ToHexString(SHA256.HashData(bytes)).Substring(0, 16);
+            string tag = Convert.ToHexString(SHA256.HashData(shell)).Substring(0, 16);
             string folder = Path.Combine(KnownPaths.NativeShellRoot, tag);
-            string file = Path.Combine(folder, ResourceName);
 
-            if (!File.Exists(file) || new FileInfo(file).Length != bytes.Length)
-            {
-                Directory.CreateDirectory(folder);
-                File.WriteAllBytes(file, bytes);
-            }
+            // The dependency is loaded first, by absolute path. Unpacking it beside the shell is not
+            // enough on its own: Windows resolves a DLL's imports through the standard search order,
+            // which does not include the folder the DLL itself came from. Loading it first puts it
+            // in the process by name, and the import then resolves to it wherever it came from.
+            byte[] loader = ReadResource(LoaderName);
+            if (loader != null)
+                NativeLibrary.Load(Write(folder, LoaderName, loader));
 
-            handle = NativeLibrary.Load(file);
+            handle = NativeLibrary.Load(Write(folder, ResourceName, shell));
             return handle;
         }
     }

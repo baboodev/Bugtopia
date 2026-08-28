@@ -71,6 +71,7 @@
   <PropertyGroup>
     <!-- Payload sources: build outputs of sibling projects rather than files in the tree. -->
     <PhotinoNativePath>$(NuGetPackageRoot)photino.native\4.0.22\runtimes\win-x64\native\Photino.Native.dll</PhotinoNativePath>
+    <WebView2LoaderPath>$(NuGetPackageRoot)photino.native\4.0.22\runtimes\win-x64\native\WebView2Loader.dll</WebView2LoaderPath>
     <InjectDllPath>$(MSBuildThisFileDirectory)..\BugtopiaInject\bin\bugtopia_inject.dll</InjectDllPath>
     <InteropShimPath>$(MSBuildThisFileDirectory)..\BugtopiaInterop\bin\Release\net6.0\BugtopiaInterop.dll</InteropShimPath>
     <PluginDllPath Condition="'$(PluginDllPath)' == ''">$(MSBuildThisFileDirectory)..\..\buddy\bin\BepInEx\Release\bugtopia.dll</PluginDllPath>
@@ -110,6 +111,10 @@
          static library, so it rides as a resource and NativeShell unpacks it on first run. -->
     <EmbeddedResource Include="$(PhotinoNativePath)" LogicalName="Photino.Native.dll"
                       Condition="Exists('$(PhotinoNativePath)')" />
+    <!-- Photino.Native imports this one. Leaving it out is not a smaller build, it is a build that
+         only starts on a machine that happens to have a copy on PATH. -->
+    <EmbeddedResource Include="$(WebView2LoaderPath)" LogicalName="WebView2Loader.dll"
+                      Condition="Exists('$(WebView2LoaderPath)')" />
     <EmbeddedResource Include="$(InjectDllPath)" LogicalName="payload.bugtopia_inject.dll"
                       Condition="Exists('$(InjectDllPath)')" />
     <EmbeddedResource Include="$(InteropShimPath)" LogicalName="payload.BugtopiaInterop.dll"
@@ -125,6 +130,8 @@
   <Target Name="CheckPayload" BeforeTargets="Build">
     <Error Text="Photino.Native.dll not found at $(PhotinoNativePath) - restore the Photino.NET package first."
            Condition="!Exists('$(PhotinoNativePath)')" />
+    <Error Text="WebView2Loader.dll not found at $(WebView2LoaderPath) - restore the Photino.NET package first."
+           Condition="!Exists('$(WebView2LoaderPath)')" />
     <Warning Text="Payload missing: $(InjectDllPath) - run launcher/BugtopiaInject/build.bat"
              Condition="!Exists('$(InjectDllPath)')" />
     <Warning Text="Payload missing: $(InteropShimPath) - build launcher/BugtopiaInterop -c Release"

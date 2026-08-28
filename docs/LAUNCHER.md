@@ -225,6 +225,14 @@ window opens still leaves an account of it.
 during `il2cpp_init`, before any injection, and the bootstrap then refuses to start a second
 runtime. This is what the adoption step exists to resolve.
 
+**The single file has to carry both native DLLs.** `Photino.Native.dll` imports
+`WebView2Loader.dll`, and the package ships them as two files. Carrying only the first produces a
+launcher that starts on a developer's machine — the Windows SDK leaves a copy of the second in
+`Windows Kits\Windows Performance Toolkit\`, which is on PATH — and dies with `0xC0000409`
+before its own log exists on every machine that does not. `NativeShell` loads the dependency first,
+by absolute path: unpacking it beside the shell is not enough, because Windows resolves a DLL's
+imports through the standard search order, which does not include the folder the DLL came from.
+
 **The page's initial string must stay small.** Whatever is handed to `LoadRawString` goes to the
 native side at window creation, and a page carrying the logo as a data URI — 58 KB against 26 KB —
 access-violates inside `Photino.Native.dll` on **every** start. Anything large reaches the page over
