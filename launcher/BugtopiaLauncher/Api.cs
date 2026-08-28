@@ -5,6 +5,7 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Bugtopia.Launch;
 
@@ -147,15 +148,27 @@ namespace Bugtopia.Launcher
                     break;
 
                 case "downloadBepInEx":
-                    RunJob(id, "Download BepInEx", DownloadBepInExAsync);
+                    RunJob(id, "Download BepInEx", DownloadBepInEx);
                     break;
 
-                case "updatePlugin":
-                    RunJob(id, "Update the mod", () => InstallModAsync(RequireStorage(), "Updating"));
+                case "modReleases":
+                    RunJob(id, "Load the release list", () =>
+                    {
+                        knownReleases = FetchReleases();
+                        Log(knownReleases.Count + " releases with a plugin.");
+                    });
+                    break;
+
+                case "installMod":
+                    string wanted = Str(args, "tag");
+                    RunJob(id, "Install the mod", () => InstallMod(
+                        RequireStorage(), string.IsNullOrWhiteSpace(wanted) ? "Installing the newest build"
+                                                                            : "Installing " + wanted,
+                        wanted));
                     break;
 
                 case "downloadUnityLibs":
-                    RunJob(id, "Download Unity libraries", DownloadUnityLibsAsync);
+                    RunJob(id, "Download Unity libraries", DownloadUnityLibs);
                     break;
 
                 case "generateInterop":
@@ -167,7 +180,7 @@ namespace Bugtopia.Launcher
                 case "play":
                     // Closes on success only. A launch that failed has something to say, and the
                     // window is the only place it can say it.
-                    RunJob(id, "Launch", LaunchAsync, dialogs.Close);
+                    RunJob(id, "Launch", Launch, dialogs.Close);
                     break;
 
                 case "confirmResult":
@@ -220,7 +233,7 @@ namespace Bugtopia.Launcher
         /// <summary>Which view the window should open in, read before the window exists.</summary>
         internal bool Expert => settings.Expert;
 
-        private void RunJob(string id, string name, Func<Task> work, Action then = null)
+        private void RunJob(string id, string name, Action work, Action then = null)
         {
             if (busy)
             {
@@ -232,12 +245,12 @@ namespace Bugtopia.Launcher
             Event("busy", true);
             Log("=== " + name + " ===");
 
-            _ = Task.Run(async () =>
+            _ = Task.Run(() =>
             {
                 string error = null;
                 try
                 {
-                    await work();
+                    work();
                     Log(name + ": done.");
                 }
                 catch (Exception ex)
@@ -247,6 +260,7 @@ namespace Bugtopia.Launcher
                 }
 
                 busy = false;
+                Progress("")(0);   // whatever card was filling, stop
                 Event("busy", false);
                 if (error == null)
                 {
@@ -260,8 +274,6 @@ namespace Bugtopia.Launcher
             });
         }
 
-        private void RunJob(string id, string name, Action work) =>
-            RunJob(id, name, () => { work(); return Task.CompletedTask; });
 
 
 
@@ -278,6 +290,9 @@ namespace Bugtopia.Launcher
 
         private volatile Question asked;
         private int askCount;
+
+        /// <summary>Releases the page has been shown, once someone asked for the list.</summary>
+        private List<ModRelease> knownReleases = new List<ModRelease>();
 
         /// <summary>
         /// Asks the page a yes-or-no and blocks the job until it answers.
@@ -375,35 +390,39 @@ namespace Bugtopia.Launcher
             Log("BepInEx " + (Payload.ReadBepInExVersion(coreDir) ?? "archive") + " is ready to install.");
         }
 
-        private async Task DownloadBepInExAsync()
+        private void DownloadBepInEx()
         {
             StorageLayout storage = RequireStorage();
             // Unpacked beside the storage tree, so Prepare has a source folder and the user has
             // something to point at if they ever want to redo it by hand.
             string target = Path.Combine(storage.Root, "download", "bepinex");
-            await Downloads.FetchBepInExAsync(target, Log, new Progress<int>(ReportPercent));
+            Downloads.FetchBepInEx(target, Log, Progress("bepinex"));
 
             settings.BepInExSource = target;
             SafeSave();
         }
 
-        private async Task DownloadUnityLibsAsync()
+        private void DownloadUnityLibs()
         {
             StorageLayout storage = RequireStorage();
             string game = Require(settings.GameFolder, "the game folder");
             string version = GameSession.ReadUnityVersion(game)
                              ?? throw new InvalidOperationException("The game's Unity version could not be determined.");
 
-            await Downloads.FetchUnityLibrariesAsync(version, storage, Log, new Progress<int>(ReportPercent));
+            Downloads.FetchUnityLibraries(version, storage, Log, Progress("interop"));
         }
 
-        /// <summary>Drives the banner's progress fill; only whole percents arrive here.</summary>
-        private void ReportPercent(int percent)
+        /// <summary>
+        /// A progress reporter for one step of the screen. The fill is drawn in the card that is
+        /// downloading, so what is filling and what it is filling for are the same thing on screen.
+        /// </summary>
+        private Action<int> Progress(string target)
         {
-            send(Json(w =>
+            return percent => send(Json(w =>
             {
                 w.WriteStartObject();
                 w.WriteString("event", "progress");
+                w.WriteString("target", target);
                 w.WriteNumber("value", percent);
                 w.WriteEndObject();
             }));
@@ -488,7 +507,7 @@ namespace Bugtopia.Launcher
         /// say which step it was on and leave the rest unattempted, which a UI-driven sequence of
         /// separate jobs cannot promise. The buttons stay for running one step deliberately.
         /// </summary>
-        private async Task LaunchAsync()
+        private void Launch()
         {
             StorageLayout storage = RequireStorage();
             string game = EnsureGame();
@@ -497,12 +516,12 @@ namespace Bugtopia.Launcher
 
             if (!storage.IsPrepared)
             {
-                await EnsureBepInExSourceAsync(storage);
+                EnsureBepInExSource(storage);
                 Prepare();
             }
 
-            await EnsurePluginAsync(storage);
-            await EnsureUnityLibrariesAsync(storage, game);
+            EnsurePlugin(storage);
+            EnsureUnityLibraries(storage, game);
 
             // An adopted set was loading this game a moment ago, so it is taken as current and the
             // generator is not run at all: that would cost a CoreCLR boot and three passes over
@@ -639,7 +658,7 @@ namespace Bugtopia.Launcher
         /// throws before it touches anything, with the URL to fetch by hand — which is exactly the
         /// message this case needs, and a guard here would only be unreachable code in one flavour.
         /// </summary>
-        private async Task EnsureBepInExSourceAsync(StorageLayout storage)
+        private void EnsureBepInExSource(StorageLayout storage)
         {
             if (IsUsableSource(settings.BepInExSource))
                 return;
@@ -655,7 +674,7 @@ namespace Bugtopia.Launcher
                 return;
             }
 
-            await DownloadBepInExAsync();
+            DownloadBepInEx();
         }
 
         /// <summary>Whether a folder passes the same rules <see cref="Prepare"/> will apply to it.</summary>
@@ -677,12 +696,12 @@ namespace Bugtopia.Launcher
         /// build fetches it from its releases, where a missing plugin is simply what a fresh install
         /// looks like rather than something to fail over.
         /// </summary>
-        private async Task EnsurePluginAsync(StorageLayout storage)
+        private void EnsurePlugin(StorageLayout storage)
         {
             if (!Downloads.PluginFromGitHub || File.Exists(storage.Plugin))
                 return;
 
-            await InstallModAsync(storage, "No mod installed yet");
+            InstallMod(storage, "No mod installed yet");
         }
 
         /// <summary>
@@ -692,14 +711,51 @@ namespace Bugtopia.Launcher
         /// a bad one, or the anonymous rate limit - and a token that then works is remembered, so
         /// this is a question the user answers once rather than every launch.
         /// </summary>
-        private async Task InstallModAsync(StorageLayout storage, string why)
+        private void InstallMod(StorageLayout storage, string why, string tag = null)
         {
             Log(why + "; fetching it from " + GitHub.Repository + ".");
 
-            List<ModRelease> releases;
+            List<ModRelease> releases = FetchReleases();
+            ModRelease chosen = null;
+
+            if (!string.IsNullOrWhiteSpace(tag))
+            {
+                foreach (ModRelease release in releases)
+                {
+                    if (string.Equals(release.Tag, tag, StringComparison.OrdinalIgnoreCase))
+                    {
+                        chosen = release;
+                        break;
+                    }
+                }
+
+                if (chosen == null)
+                    throw new InvalidOperationException("No release tagged " + tag + ".");
+            }
+            else if (releases.Count > 0)
+            {
+                chosen = releases[0];
+            }
+
+            if (chosen == null)
+            {
+                throw new InvalidOperationException(
+                    "No release of " + GitHub.Repository + " has a plugin to install.");
+            }
+
+            GitHub.Install(chosen, storage, Log, Progress("mod"));
+        }
+
+        /// <summary>
+        /// The release list, asking for a GitHub token if the API turns us away for a reason a
+        /// token would fix - a bad one, or the anonymous rate limit - and remembering one that then
+        /// works, so this is a question the user answers once rather than every launch.
+        /// </summary>
+        private List<ModRelease> FetchReleases()
+        {
             try
             {
-                releases = await GitHub.FetchReleasesAsync(settings.GitHubToken, Log);
+                return GitHub.FetchReleases(settings.GitHubToken, Log);
             }
             catch (GitHubException refused) when (refused.NeedsToken)
             {
@@ -719,18 +775,11 @@ namespace Bugtopia.Launcher
                         GitHub.ReleasesPage + ".");
                 }
 
-                releases = await GitHub.FetchReleasesAsync(token, Log);
+                List<ModRelease> releases = GitHub.FetchReleases(token, Log);
                 settings.GitHubToken = token;
                 SafeSave();
+                return releases;
             }
-
-            if (releases.Count == 0)
-            {
-                throw new InvalidOperationException(
-                    "No release of " + GitHub.Repository + " has a plugin to install.");
-            }
-
-            await GitHub.InstallAsync(releases[0], storage, Log, new Progress<int>(ReportPercent));
         }
 
         /// <summary>
@@ -740,7 +789,7 @@ namespace Bugtopia.Launcher
         /// happens inside the hosted generator, where it is a silent multi-minute pause with no
         /// progress and nothing in the log until it ends. Doing it here makes the wait legible.
         /// </summary>
-        private async Task EnsureUnityLibrariesAsync(StorageLayout storage, string game)
+        private void EnsureUnityLibraries(StorageLayout storage, string game)
         {
             if (HasUnityLibraries(storage))
                 return;
@@ -759,7 +808,7 @@ namespace Bugtopia.Launcher
                 return;
             }
 
-            await DownloadUnityLibsAsync();
+            DownloadUnityLibs();
         }
 
         /// <summary>
@@ -885,6 +934,17 @@ namespace Bugtopia.Launcher
             w.WriteBoolean("hasInterop", hasInterop);
             w.WriteBoolean("hasPlugin", storage != null && File.Exists(storage.Plugin));
             w.WriteString("pluginVersion", storage == null ? "" : GitHub.InstalledTag(storage) ?? "");
+            w.WriteBoolean("interopStale", hasInterop && IsInteropStale(storage, game));
+
+            w.WriteStartArray("modReleases");
+            foreach (ModRelease release in knownReleases)
+            {
+                w.WriteStartObject();
+                w.WriteString("tag", release.Tag);
+                w.WriteString("asset", release.AssetName);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
 
             // An install already loading the mod. Reported in full rather than as a flag because the
             // page has to be able to say which folder it found and what moving it would preserve.
@@ -899,6 +959,32 @@ namespace Bugtopia.Launcher
             w.WriteEndObject();
             w.WriteBoolean("busy", busy);
             w.WriteEndObject();
+        }
+
+        /// <summary>
+        /// Whether the interop assemblies are older than the game they were built from.
+        ///
+        /// A timestamp comparison, not the real answer: the authoritative check is an MD5 over
+        /// GameAssembly.dll and every unity-libs assembly, which is BepInEx's to compute and takes a
+        /// hosted runtime to ask for. This is the cheap signal that can be had on every state read,
+        /// and it is right about the case that actually happens - the game updated since. The
+        /// generator still does the real check on the next launch, so a wrong answer here costs a
+        /// line of text, not a stale install.
+        /// </summary>
+        private static bool IsInteropStale(StorageLayout storage, string game)
+        {
+            if (storage == null || string.IsNullOrWhiteSpace(game))
+                return false;
+
+            try
+            {
+                return File.GetLastWriteTimeUtc(Path.Combine(game, "GameAssembly.dll")) >
+                       File.GetLastWriteTimeUtc(storage.InteropHash);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         private static void WriteProfiles(Utf8JsonWriter w, ProfileInfo info)

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
-using System.Threading.Tasks;
 
 namespace Bugtopia.Launch
 {
@@ -77,70 +76,67 @@ namespace Bugtopia.Launch
         /// Releases that have a plugin to install, newest first.
         /// </summary>
         /// <exception cref="GitHubException">The API refused. Check <see cref="GitHubException.NeedsToken"/>.</exception>
-        public static async Task<List<ModRelease>> FetchReleasesAsync(string token, Action<string> log = null)
+        public static List<ModRelease> FetchReleases(string token, Action<string> log = null)
         {
             log ??= delegate { };
             log("Checking " + Repository + " releases" + (string.IsNullOrWhiteSpace(token) ? "" : " (with token)"));
 
-#if BUGTOPIA_ONLINE
-            using var http = new System.Net.Http.HttpClient();
-            http.Timeout = TimeSpan.FromMinutes(2);
+            // GitHub rejects requests with no user agent outright; the accept header pins the API
+            // version's response shape.
+            var headers = new List<KeyValuePair<string, string>>
+            {
+                new KeyValuePair<string, string>("Accept", "application/vnd.github+json"),
+            };
 
-            // GitHub rejects requests with no user agent outright.
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("Bugtopia-Launcher");
-            http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
             if (!string.IsNullOrWhiteSpace(token))
-                http.DefaultRequestHeaders.Add("Authorization", "Bearer " + token.Trim());
+            {
+                headers.Add(new KeyValuePair<string, string>(
+                    "Authorization", "Bearer " + token.Trim()));
+            }
 
-            System.Net.Http.HttpResponseMessage response;
+            byte[] body;
+            int status;
             try
             {
-                response = await http.GetAsync(ApiUrl);
+                body = Downloads.Fetch(ApiUrl, headers, out status);
+            }
+            catch (DownloadException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 throw new GitHubException("Could not reach the GitHub API: " + ex.Message, 0, false);
             }
 
-            using (response)
+            if (status != 200)
             {
-                int status = (int)response.StatusCode;
-                if (status != 200)
+                bool needsToken = status == 401 || status == 403 || status == 429;
+                string hint = status switch
                 {
-                    bool needsToken = status == 401 || status == 403 || status == 429;
-                    string hint = status switch
-                    {
-                        401 => " - that token was not accepted.",
-                        403 or 429 => " - the rate limit for unauthenticated requests is 60 an hour; " +
-                                      "a token raises it to 5000.",
-                        404 => " - no such repository, or it is private and the token cannot see it.",
-                        _ => ".",
-                    };
-                    throw new GitHubException(
-                        "GitHub answered " + status + hint, status, needsToken);
-                }
-
-                using Stream body = await response.Content.ReadAsStreamAsync();
-                return Parse(body);
+                    401 => " - that token was not accepted.",
+                    403 or 429 => " - the rate limit for unauthenticated requests is 60 an hour; " +
+                                  "a token raises it to 5000.",
+                    404 => " - no such repository, or it is private and the token cannot see it.",
+                    _ => ".",
+                };
+                throw new GitHubException("GitHub answered " + status + hint, status, needsToken);
             }
-#else
-            await Task.CompletedTask;
-            throw new DownloadException(
-                "This build does not download anything. Fetch the mod yourself from " +
-                ReleasesPage + " and put it in " + "BepInEx" + Path.DirectorySeparatorChar + "plugins.");
-#endif
+
+            using var stream = new MemoryStream(body);
+            return Parse(stream);
         }
 
         /// <summary>
         /// Downloads a release's plugin into the storage tree and records its tag beside it.
         /// </summary>
-        public static async Task InstallAsync(ModRelease release, StorageLayout storage,
-                                              Action<string> log = null, IProgress<int> progress = null)
+        public static void Install(ModRelease release, StorageLayout storage,
+                                   Action<string> log = null, Action<int> progress = null)
         {
             log ??= delegate { };
             Directory.CreateDirectory(storage.Plugins);
 
-            await Downloads.DownloadAsync(release.Url, storage.Plugin, log, progress);
+            Downloads.Download(release.Url, storage.Plugin, log, progress);
 
             // The marker is a convenience, not a guarantee: the plugin is already in place, so a
             // failure to write it costs nothing but the version shown in the UI.

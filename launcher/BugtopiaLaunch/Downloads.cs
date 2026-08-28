@@ -1,18 +1,17 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
-using System.Threading.Tasks;
 
 namespace Bugtopia.Launch
 {
     /// <summary>
-    /// Fetching the two things the launcher does not carry: the BepInEx archive and the Unity base
-    /// libraries.
+    /// Fetching the three things the launcher does not carry: the BepInEx archive, the Unity base
+    /// libraries, and (in an online build) the mod itself.
     ///
     /// <b>This is a compile-time capability, not a runtime setting.</b> Build without
     /// <c>BUGTOPIA_ONLINE</c> and every line that touches the network is excluded from the assembly —
-    /// so an offline build cannot reach out even by accident, and does not link the HTTP stack it
-    /// would need to. A runtime flag could not promise either of those things.
+    /// so an offline build cannot reach out even by accident, and does not link the stack it would
+    /// need to. A runtime flag could not promise either of those things.
     ///
     /// <see cref="Enabled"/> is a constant, so the UI can hide what an offline build cannot do and
     /// the branch folds away at compile time.
@@ -51,8 +50,8 @@ namespace Bugtopia.Launch
         /// Downloads a file to <paramref name="destination"/>, reporting progress as whole percent.
         /// </summary>
         /// <exception cref="DownloadException">Any failure, including "this build cannot download".</exception>
-        public static async Task DownloadAsync(string url, string destination, Action<string> log = null,
-                                               IProgress<int> progress = null)
+        public static void Download(string url, string destination, Action<string> log = null,
+                                    Action<int> progress = null)
         {
             log ??= delegate { };
 
@@ -63,40 +62,27 @@ namespace Bugtopia.Launch
 
             try
             {
-                using var http = new System.Net.Http.HttpClient();
-                http.Timeout = TimeSpan.FromMinutes(10);
-                http.DefaultRequestHeaders.UserAgent.ParseAdd("Bugtopia-Launcher");
+                int status;
+                int lastPercent = -1;
 
-                using System.Net.Http.HttpResponseMessage response =
-                    await http.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
-                if (!response.IsSuccessStatusCode)
-                    throw new DownloadException($"{url} returned {(int)response.StatusCode} {response.ReasonPhrase}.");
-
-                long? total = response.Content.Headers.ContentLength;
-                using (Stream source = await response.Content.ReadAsStreamAsync())
                 using (var target = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
-                    var buffer = new byte[81920];
-                    long done = 0;
-                    int lastPercent = -1;
-                    int read;
-
-                    while ((read = await source.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                    status = WinHttp.Get(url, null, target, (done, total) =>
                     {
-                        await target.WriteAsync(buffer, 0, read);
-                        done += read;
+                        if (progress == null || total <= 0)
+                            return;
 
-                        if (total.HasValue && total.Value > 0)
+                        int percent = (int)(done * 100 / total);
+                        if (percent != lastPercent)
                         {
-                            int percent = (int)(done * 100 / total.Value);
-                            if (percent != lastPercent)
-                            {
-                                lastPercent = percent;
-                                progress?.Report(percent);
-                            }
+                            lastPercent = percent;
+                            progress(percent);
                         }
-                    }
+                    });
                 }
+
+                if (status != 200)
+                    throw new DownloadException(url + " returned HTTP " + status + ".");
 
                 // Only now replace the destination, so an interrupted download never leaves a
                 // half-written archive that looks complete.
@@ -127,7 +113,6 @@ namespace Bugtopia.Launch
                 }
             }
 #else
-            await Task.CompletedTask;
             throw new DownloadException(
                 "This build does not download anything. Fetch the file yourself and point the " +
                 "launcher at it:\n" + url);
@@ -135,17 +120,32 @@ namespace Bugtopia.Launch
         }
 
         /// <summary>
+        /// Reads a URL into memory. Used for the one response small enough to want in one piece.
+        /// </summary>
+        public static byte[] Fetch(string url, IEnumerable<KeyValuePair<string, string>> headers,
+                                   out int status)
+        {
+#if BUGTOPIA_ONLINE
+            using var buffer = new MemoryStream();
+            status = WinHttp.Get(url, headers, buffer);
+            return buffer.ToArray();
+#else
+            status = 0;
+            throw new DownloadException("This build does not download anything.");
+#endif
+        }
+
+        /// <summary>
         /// Downloads the pinned BepInEx archive and unpacks it into <paramref name="targetFolder"/>,
         /// which then serves as the source folder for <see cref="Payload.Prepare"/>.
         /// </summary>
-        public static async Task<string> FetchBepInExAsync(string targetFolder, Action<string> log = null,
-                                                           IProgress<int> progress = null)
+        public static string FetchBepInEx(string targetFolder, Action<string> log = null,
+                                          Action<int> progress = null)
         {
             log ??= delegate { };
             string zip = Path.Combine(Path.GetTempPath(), "bugtopia-bepinex-" + BepInExVersion + ".zip");
 
-            await DownloadAsync(BepInExUrl, zip, log, progress);
-
+            Download(BepInExUrl, zip, log, progress);
             Payload.UnpackArchive(zip, targetFolder, log);
 
             try
@@ -164,15 +164,15 @@ namespace Bugtopia.Launch
         /// uses a zip already sitting there whose name matches the URL it would have fetched, so the
         /// file alone is the whole offline path.
         /// </summary>
-        public static async Task FetchUnityLibrariesAsync(string unityVersion, StorageLayout storage,
-                                                          Action<string> log = null, IProgress<int> progress = null)
+        public static void FetchUnityLibraries(string unityVersion, StorageLayout storage,
+                                               Action<string> log = null, Action<int> progress = null)
         {
             string url = UnityLibrariesUrl(unityVersion);
             if (url == null)
                 throw new DownloadException("The game's Unity version could not be determined.");
 
             Directory.CreateDirectory(storage.UnityLibs);
-            await DownloadAsync(url, Path.Combine(storage.UnityLibs, unityVersion + ".zip"), log, progress);
+            Download(url, Path.Combine(storage.UnityLibs, unityVersion + ".zip"), log, progress);
         }
     }
 

@@ -83,10 +83,9 @@ namespace Bugtopia.Launch
                         head = ReadExactly(stream, head);
 
                     // e.g. "2020.3.13f1"; the zip is named by the part before the release suffix.
-                    string text = System.Text.Encoding.ASCII.GetString(head);
-                    var match = System.Text.RegularExpressions.Regex.Match(text, @"(\d+\.\d+\.\d+)[fpab]\d+");
-                    if (match.Success)
-                        return match.Groups[1].Value;
+                    string found = FindUnityVersion(System.Text.Encoding.ASCII.GetString(head));
+                    if (found != null)
+                        return found;
                 }
             }
             catch (Exception)
@@ -94,6 +93,63 @@ namespace Bugtopia.Launch
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Finds a Unity version stamp such as <c>2020.3.13f1</c> and returns the part before the
+        /// release letter, which is how the base-libraries zip is named.
+        ///
+        /// Scanned by hand rather than matched with a regex. That one call was pulling the whole
+        /// interpreted Regex engine — parser, writer, interpreter, character classes, optimiser —
+        /// into the published binary: 161 KB measured, to read one version number out of 256 bytes.
+        /// </summary>
+        private static string FindUnityVersion(string text)
+        {
+            for (int i = 0; i < text.Length; i++)
+            {
+                // Start only at the front of a number, so a failed attempt does not re-try inside it.
+                if (!char.IsAsciiDigit(text[i]) || (i > 0 && char.IsAsciiDigit(text[i - 1])))
+                    continue;
+
+                int at = i;
+                if (!ReadDigits(text, ref at) || !ReadChar(text, ref at, '.') ||
+                    !ReadDigits(text, ref at) || !ReadChar(text, ref at, '.') ||
+                    !ReadDigits(text, ref at))
+                {
+                    continue;
+                }
+
+                int endOfVersion = at;
+
+                // f/p/a/b marks final, patch, alpha, beta, and a build number follows it.
+                if (at >= text.Length || "fpab".IndexOf(text[at]) < 0)
+                    continue;
+
+                at++;
+                if (!ReadDigits(text, ref at))
+                    continue;
+
+                return text.Substring(i, endOfVersion - i);
+            }
+
+            return null;
+        }
+
+        private static bool ReadDigits(string text, ref int at)
+        {
+            int start = at;
+            while (at < text.Length && char.IsAsciiDigit(text[at]))
+                at++;
+            return at > start;
+        }
+
+        private static bool ReadChar(string text, ref int at, char expected)
+        {
+            if (at >= text.Length || text[at] != expected)
+                return false;
+
+            at++;
+            return true;
         }
 
         private static byte[] ReadExactly(Stream stream, byte[] buffer)

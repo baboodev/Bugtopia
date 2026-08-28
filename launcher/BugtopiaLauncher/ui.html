@@ -24,6 +24,9 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* The hidden attribute only sets display:none through the UA stylesheet, which any class rule
+   outranks - .step sets display:flex, so a hidden card carried on being drawn. */
+[hidden] { display: none !important; }
 
 html, body {
   width: 100%; height: 100%; overflow: hidden;
@@ -81,9 +84,16 @@ body:not(.expert) #play { padding: 15px 34px; font-size: 1rem; }
 
 .steps { display: flex; flex-direction: column; gap: 10px; }
 .step {
+  position: relative; z-index: 0; overflow: hidden;
   display: flex; align-items: center; gap: 14px;
   background: rgba(15, 23, 42, 0.5); border: 1px solid var(--card-border);
   border-radius: 12px; padding: 13px 16px;
+}
+/* A download fills the card it is for, so what is filling says what is arriving. */
+.step::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--progress, 0%);
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.45), rgba(99, 102, 241, 0.18));
+  z-index: -1; transition: width 0.12s ease;
 }
 .step-mark { flex: none; width: 22px; height: 22px; }
 .step-mark svg { width: 22px; height: 22px; }
@@ -131,7 +141,7 @@ input[type=text]:focus { border-color: var(--primary-accent); }
 .field-row { display: flex; gap: 12px; }
 .field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 
-.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .status-box {
   background: rgba(15, 23, 42, 0.5); border: 1px solid var(--card-border);
   border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
@@ -262,7 +272,6 @@ a:hover { text-decoration: underline; }
       </div>
       <div class="step-action">
         <button class="btn secondary compact" id="step-archive">Choose the zip...</button>
-        <button class="btn secondary compact" id="step-download">Download</button>
       </div>
     </div>
 
@@ -271,9 +280,6 @@ a:hover { text-decoration: underline; }
       <div class="step-body">
         <span class="step-title">Bugtopia</span>
         <span class="step-detail wrap" id="step-mod-detail"></span>
-      </div>
-      <div class="step-action">
-        <button class="btn secondary compact" id="step-update">Update</button>
       </div>
     </div>
 
@@ -372,14 +378,28 @@ a:hover { text-decoration: underline; }
     <p class="input-hint" id="profile-hint"></p>
   </section>
 
+  <section class="section-card" id="mod-section">
+    <label class="input-label" for="mod-version">Bugtopia build</label>
+    <div class="input-group">
+      <select id="mod-version" class="select-dropdown"><option value="">Newest release</option></select>
+      <button class="btn secondary compact" id="mod-load">Load versions</button>
+      <button class="btn secondary compact" id="mod-install">Install</button>
+    </div>
+    <p class="input-hint" id="mod-hint"></p>
+  </section>
+
   <section class="status-grid">
     <div class="status-box">
       <span class="status-label">Game</span>
       <span id="st-game" class="status-value status-unknown">Not set</span>
     </div>
     <div class="status-box">
-      <span class="status-label">Payload</span>
-      <span id="st-payload" class="status-value status-unknown">Not prepared</span>
+      <span class="status-label">BepInEx</span>
+      <span id="st-payload" class="status-value status-unknown">Not installed</span>
+    </div>
+    <div class="status-box">
+      <span class="status-label">Mod</span>
+      <span id="st-mod" class="status-value status-unknown">Not installed</span>
     </div>
     <div class="status-box">
       <span class="status-label">Interop</span>
@@ -441,8 +461,8 @@ window.external.receiveMessage(raw => {
   let m; try { m = JSON.parse(raw); } catch { return; }
 
   if (m.event === "log") { appendLog(m.text); return; }
-  if (m.event === "busy") { busy = m.value; if (!busy) setProgress(0); render(); return; }
-  if (m.event === "progress") { setProgress(m.value); return; }
+  if (m.event === "busy") { busy = m.value; if (!busy) setProgress("", 0); render(); return; }
+  if (m.event === "progress") { setProgress(m.target, m.value); return; }
   if (m.event === "confirm") { ask(m); return; }
 
   const p = pending.get(m.id);
@@ -483,7 +503,15 @@ function ask(m) {
   if (wantsText) input.focus();
 }
 
-function setProgress(percent) { $("banner").style.setProperty("--progress", percent + "%"); }
+/** Fills one step card, and clears every other, so only one thing is ever seen arriving. */
+function setProgress(target, percent) {
+  for (const row of document.querySelectorAll(".step")) {
+    const mine = row.id === "step-" + target;
+    row.style.setProperty("--progress", mine ? percent + "%" : "0%");
+  }
+  // Expert mode has no cards, so the status line keeps the fill there.
+  $("banner").style.setProperty("--progress", percent + "%");
+}
 
 function say(text, kind) {
   const b = $("banner");
@@ -551,12 +579,20 @@ function render() {
 
   for (const b of ["dl-bepinex", "dl-unitylibs"]) $(b).style.display = state.downloads ? "" : "none";
 
-  state.gameOk ? mark($("st-game"), "Unity " + state.unityVersion, "status-success")
-               : mark($("st-game"), state.game ? "Not an IL2CPP build" : "Not set", "status-unknown");
-  state.prepared ? mark($("st-payload"), "Prepared" + (state.preparedFrom ? " · " + state.preparedFrom : ""), "status-success")
-                 : mark($("st-payload"), "Not prepared", "status-warning");
-  state.hasInterop ? mark($("st-interop"), "Present", "status-success")
-                   : mark($("st-interop"), "Missing", "status-warning");
+  // Only an online build can install a different one; an offline build has the copy it carries.
+  $("mod-section").style.display = state.pluginFromGitHub ? "" : "none";
+  renderModVersions();
+
+  // The same words the step cards use, so the two views never disagree about what is installed.
+  state.gameOk ? mark($("st-game"), "Found", "status-success")
+               : mark($("st-game"), state.game ? "Not an IL2CPP build" : "Not found", "status-warning");
+  state.prepared ? mark($("st-payload"), "Installed", "status-success")
+                 : mark($("st-payload"), "Not installed", "status-warning");
+  state.hasPlugin ? mark($("st-mod"), "Installed", "status-success")
+                  : mark($("st-mod"), "Not installed", "status-warning");
+  !state.hasInterop ? mark($("st-interop"), "Not built", "status-warning")
+    : state.interopStale ? mark($("st-interop"), "Expired", "status-warning")
+    : mark($("st-interop"), "Up to date", "status-success");
 
   // Launch runs every missing step itself, so the button leads and the banner says what that will
   // involve rather than naming another button to press first.
@@ -589,9 +625,7 @@ function renderSteps() {
   const existing = state.existing || {};
 
   step("game", state.gameOk ? "done" : "todo",
-       state.gameOk ? esc(state.game) + "  &middot;  Unity " + esc(state.unityVersion)
-                    : (state.game ? "Not an IL2CPP build: " + esc(state.game)
-                                  : "Not found automatically."),
+       state.gameOk ? "Found" : state.game ? "Not an IL2CPP build" : "Not found",
        { detect: !state.gameOk, browse: !state.gameOk });
 
   if (existing.found) {
@@ -608,34 +642,53 @@ function renderSteps() {
 
   const haveSource = !!state.source || state.prepared;
   step("bepinex", state.prepared ? "done" : haveSource || state.downloads ? "info" : "todo",
-       state.prepared ? "Installed" + (state.preparedFrom ? "  &middot;  " + esc(state.preparedFrom) : "")
-       : haveSource ? "Archive ready - Launch installs it."
-       : state.downloads ? "Launch downloads " + esc(state.bepInExVersion) + " itself."
-       : 'Needed once. <a data-url="' + esc(state.bepInExUrl) + '">Download ' +
-         esc(state.bepInExVersion) + '</a>, then choose the zip.',
-       { archive: !state.prepared && !state.downloads, download: !state.prepared && state.downloads });
+       state.prepared ? "Installed"
+       : haveSource ? "Not installed - Launch installs the archive you chose."
+       : state.downloads ? "Not installed - Launch downloads it."
+       : 'Not installed. <a data-url="' + esc(state.bepInExUrl) + '">Download the archive</a>, ' +
+         'then choose the zip.',
+       { archive: !state.prepared && !state.downloads });
 
   // Only an online build has anything to say here: an offline one installs the copy it carries.
   $("step-mod").hidden = !state.pluginFromGitHub;
   if (state.pluginFromGitHub) {
     step("mod", state.hasPlugin ? "done" : "info",
-         state.hasPlugin
-           ? "Installed" + (state.pluginVersion ? "  &middot;  " + esc(state.pluginVersion) : "") +
-             ' &middot; <a data-url="' + esc(state.releasesPage) + '">releases</a>'
-           : "Downloaded from the releases page on the first launch.",
-         { update: state.hasPlugin });
+         state.hasPlugin ? "Installed" : "Not installed - Launch downloads it.",
+         {});
   }
 
-  step("interop", state.hasInterop ? "done" : "info",
-       state.hasInterop ? "Built"
-       : existing.interop ? "Comes with the install being adopted."
-       : "Built on the first launch. It takes several minutes, once.",
+  step("interop", !state.hasInterop ? "info" : state.interopStale ? "todo" : "done",
+       !state.hasInterop ? "Not built - Launch builds them, which takes several minutes, once."
+       : state.interopStale ? "Expired - the game has changed since; Launch rebuilds them."
+       : "Up to date",
        {});
 }
 
 function esc(text) {
   return String(text == null ? "" : text)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** The release dropdown. Filled only once someone asks for it - the API counts requests. */
+function renderModVersions() {
+  const select = $("mod-version");
+  const releases = state.modReleases || [];
+  const chosen = select.value;
+
+  select.innerHTML = '<option value="">Newest release</option>';
+  for (const release of releases) {
+    const option = document.createElement("option");
+    option.value = release.tag;
+    option.textContent = release.tag + "  (" + release.asset + ")";
+    select.appendChild(option);
+  }
+  select.value = chosen;
+
+  $("mod-hint").textContent = state.pluginVersion
+    ? "Installed: " + state.pluginVersion + (releases.length ? "" : " - press Load versions to pick another.")
+    : (releases.length ? "" : "Nothing installed yet.");
+
+  for (const b of ["mod-version", "mod-load", "mod-install"]) $(b).disabled = busy;
 }
 
 async function loadProfiles() {
@@ -693,8 +746,6 @@ function save() {
 $("expert").onchange = () => run("setExpert", { value: $("expert").checked });
 
 $("step-detect").onclick = () => $("detect").onclick();
-$("step-download").onclick = () => run("downloadBepInEx");
-$("step-update").onclick = () => run("updatePlugin");
 $("step-archive").onclick = async () => {
   const chosen = await call("pickFile", { title: "BepInEx-Unity.IL2CPP-win-x64 archive" });
   if (chosen) run("useArchive", { path: chosen });
@@ -705,6 +756,9 @@ $("detect").onclick = async () => {
   if (found) { $("game").value = found; await save(); }
   else say("No Heartopia install found. Point at it with Browse.", "warning");
 };
+
+$("mod-load").onclick = () => run("modReleases");
+$("mod-install").onclick = () => run("installMod", { tag: $("mod-version").value });
 
 $("storage-default").onclick = () => { $("storage").value = state.defaultStorage; save(); };
 $("prepare").onclick = () => run("prepare");

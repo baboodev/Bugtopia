@@ -61,6 +61,11 @@
     <EventSourceSupport>false</EventSourceSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <TrimMode>full</TrimMode>
+    <!-- Nothing here consumes DiagnosticSource, so HTTP requests need not carry Activity
+         propagation with them. Worth 84 KB in the online build, measured. Two neighbouring ideas
+         were measured and are NOT here: UseNativeHttpHandler made the binary 512 bytes larger, and
+         turning Http3Support off changed nothing at all. -->
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
   </PropertyGroup>
 
   <PropertyGroup>

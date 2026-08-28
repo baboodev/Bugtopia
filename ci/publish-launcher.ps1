@@ -68,6 +68,21 @@ if ($missing.Count -gt 0) {
     }
 }
 
+# ---- nothing may be holding what we are about to overwrite -----------------
+#
+# A launcher started from the build output keeps its own exe open, and the publish then spends ten
+# seconds retrying a file copy before failing with a wall of MSBuild noise that never says the word
+# "close".
+
+$binRoot = Join-Path $repoRoot "launcher\BugtopiaLauncher\bin"
+$running = Get-Process -Name Bugtopia -ErrorAction SilentlyContinue |
+           Where-Object { $_.Path -and $_.Path.StartsWith($binRoot, [StringComparison]::OrdinalIgnoreCase) }
+
+if ($running) {
+    $list = ($running | ForEach-Object { "  pid {0}  {1}" -f $_.Id, $_.Path }) -join "`n"
+    throw "A launcher is running from the build output and holds its own exe:`n$list`n`n  Close it and run this again."
+}
+
 # ---- the MSVC toolchain ----------------------------------------------------
 
 $vcvars = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvars64.bat" `
@@ -82,6 +97,11 @@ if (-not $vcvars) {
 # ---- publish ---------------------------------------------------------------
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+
+# Clear this script's own earlier output. The names carry a commit hash, so without this the folder
+# fills up with builds from other commits and stops saying which two are the release.
+Get-ChildItem $OutputDirectory -Filter "Bugtopia-Launcher-*.exe" -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
 $flavours = @(
     @{ Name = "offline"; Args = "" }
