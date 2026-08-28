@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Bugtopia interop generator — drives BepInEx's own Cpp2IL/Il2CppInterop pipeline OUT OF PROCESS,
+       so the Il2Cpp interop assemblies can be regenerated after a game update without launching the
+       game at all. See docs/plans/2026-08-27-bepinex-injector.md §4.2.
+
+       WHY IT WORKS: BepInEx's `Il2CppInteropManager.Initialize()` is two separable halves —
+       `GenerateInteropAssemblies()` (Cpp2IL over GameAssembly.dll + global-metadata, then the
+       generator; pure file I/O) and `Il2CppInteropRuntime.Create(...).Start()` (needs a live IL2CPP
+       runtime). We call only the first. Verified by decompiling BepInEx 6.0.0-be.785.
+
+       WHY PURE REFLECTION, NO COMPILE-TIME REFERENCES: the three entry points we need
+       (`Il2CppInteropManager.GenerateInteropAssemblies`, `.ComputeHash`, `UnityInfo.Initialize`) are
+       private/internal, so reflection is forced anyway. Going all the way means this project builds
+       on any machine with no BepInEx install present, needs no HintPaths, and — importantly — has no
+       typerefs that the JIT could try to resolve before our AssemblyLoadContext probe is installed.
+
+       TFM is net6.0 to match the CoreCLR that BepInEx itself ships (6.0.7). That is not cosmetic:
+       it lets this assembly be loaded into BepInEx's own runtime by a host that has no .NET of its
+       own - which is how a native launcher can drive generation without carrying a runtime. A net8.0
+       consumer references it fine in the meantime.
+
+       Build: dotnet build launcher/BugtopiaInterop/BugtopiaInterop.csproj -c Release -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>BugtopiaInterop</AssemblyName>
+    <RootNamespace>Bugtopia.Interop</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

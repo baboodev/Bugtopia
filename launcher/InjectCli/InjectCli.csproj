@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Hand-driven injector for bringing up bugtopia_inject.dll against a game started by hand.
+       Milestone 2 of docs/plans/2026-08-27-bepinex-injector.md: it isolates the CoreCLR host and the
+       main-thread rendezvous from every launcher concern, so a failure here has exactly one possible
+       cause. The launcher will reuse this injection code later; nothing else about it is throwaway.
+
+       Build: dotnet build launcher/InjectCli/InjectCli.csproj -c Release -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>InjectCli</AssemblyName>
+    <RootNamespace>Bugtopia.Inject.Cli</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <!-- The target is x64; an AnyCPU host would still work, but matching removes a class of
+         confusing OpenProcess failures. -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BugtopiaLaunch\BugtopiaLaunch.csproj" />
+  </ItemGroup>
+
+</Project>

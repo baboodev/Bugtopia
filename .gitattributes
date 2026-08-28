@@ -1,0 +1,5 @@
+# Batch files must arrive with CRLF. cmd.exe mis-parses LF-only .bat scripts — the first token of a
+# command gets eaten, so a fresh clone fails with errors like "'em' is not recognized" from a `rem`
+# line. core.autocrlf=input converts on commit but not on checkout, so this has to be explicit.
+*.bat text eol=crlf
+*.cmd text eol=crlf

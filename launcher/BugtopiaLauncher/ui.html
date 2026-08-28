@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bugtopia</title>
+<style>
+/* Visual language taken from Vugtopia's launcher: same variables, same card/section/status/banner
+   composition, same button set. The web fonts are deliberately not linked — an offline build must
+   look the same with no network, so the families fall back to what Windows already has. */
+:root {
+  --bg-gradient: linear-gradient(135deg, #090d16 0%, #1e1b4b 50%, #090d16 100%);
+  --card-bg: rgba(15, 23, 42, 0.75);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --primary-accent: #6366f1;
+  --primary-hover: #4f46e5;
+  --secondary-bg: rgba(51, 65, 85, 0.5);
+  --secondary-hover: rgba(71, 85, 105, 0.7);
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  background: #090d16; color: var(--text-main); user-select: none;
+}
+
+.app-background {
+  position: absolute; inset: 0; z-index: -1;
+  background: radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.2) 0%, transparent 50%),
+              radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.15) 0%, transparent 50%);
+}
+
+.launcher-card {
+  width: 100%; height: 100%;
+  background: var(--card-bg);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  padding: 24px 32px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto;
+}
+/* Everything in the column keeps its natural height; the log is the only part that gives. Without
+   this the banner is handed less room than its text needs and quietly clips. */
+.launcher-card > * { flex: none; }
+.launcher-card > #log { flex: 1 1 auto; }
+
+.launcher-header { display: flex; justify-content: space-between; align-items: center; }
+.brand { display: flex; align-items: baseline; gap: 14px; }
+.brand h1 {
+  font-family: 'Outfit', 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
+  font-size: 1.9rem; font-weight: 700;
+  background: linear-gradient(90deg, #ffffff 0%, #cbd5e1 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.brand .subtitle { font-size: 0.82rem; color: var(--text-muted); }
+.version-tag {
+  font-size: 0.8rem; font-weight: 600; padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border);
+  border-radius: 20px; color: var(--text-muted);
+}
+
+.section-card { display: flex; flex-direction: column; gap: 6px; }
+.input-label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); }
+.input-hint { margin-top: 0.3rem; font-size: 0.72rem; line-height: 1.35; color: var(--text-muted); opacity: 0.75; }
+.input-group { display: flex; gap: 10px; }
+.input-group input, .input-group .select-dropdown { flex: 1; min-width: 0; }
+
+input[type=text] {
+  background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 10px;
+  padding: 10px 14px; color: var(--text-main); font: inherit; font-size: 0.88rem; outline: none;
+}
+input[type=text]:focus { border-color: var(--primary-accent); }
+
+.select-dropdown {
+  width: 100%; border: 1px solid var(--card-border);
+  border-radius: 10px; padding: 10px 38px 10px 14px; color: var(--text-main); font: inherit;
+  font-size: 0.88rem; outline: none; cursor: pointer;
+  /* The native arrow renders hard against the border with no way to space it, so it is replaced by
+     the same chevron the rest of the design uses. */
+  appearance: none; -webkit-appearance: none;
+  background-color: rgba(15, 23, 42, 0.8);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  background-size: 14px 14px;
+}
+.select-dropdown:hover { border-color: var(--secondary-hover); }
+.select-dropdown option { background: #0f172a; color: var(--text-main); }
+
+.field-row { display: flex; gap: 12px; }
+.field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.status-box {
+  background: rgba(15, 23, 42, 0.5); border: 1px solid var(--card-border);
+  border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.status-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.status-value { font-weight: 600; font-size: 0.92rem; }
+.status-success { color: var(--success); }
+.status-warning { color: var(--warning); }
+.status-danger { color: var(--danger); }
+.status-unknown { color: var(--text-muted); }
+
+.message-banner {
+  position: relative; z-index: 0; overflow: hidden;
+  background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px; padding: 10px 16px; font-size: 0.85rem; color: var(--text-muted);
+}
+.message-banner::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--progress, 0%);
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.45), rgba(99, 102, 241, 0.18));
+  z-index: -1; transition: width 0.12s ease;
+}
+.message-banner.warning { color: var(--warning); border-color: rgba(245, 158, 11, 0.35); }
+
+#log {
+  flex: 1; min-height: 96px;
+  background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 10px;
+  padding: 10px 14px; overflow-y: auto; white-space: pre-wrap; user-select: text;
+  font-family: 'Cascadia Mono', Consolas, monospace; font-size: 0.74rem; line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.launcher-footer { display: flex; flex-direction: column; gap: 10px; }
+.footer-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.launcher-actions { display: flex; gap: 12px; }
+
+.btn {
+  font-family: inherit; font-weight: 600; font-size: 0.9rem; padding: 11px 20px;
+  border-radius: 10px; border: none; cursor: pointer; transition: all 0.2s ease;
+  display: flex; align-items: center; gap: 8px; white-space: nowrap;
+}
+.btn.compact { padding: 10px 14px; }
+.icon-svg { width: 17px; height: 17px; }
+.btn.primary {
+  background: linear-gradient(135deg, var(--primary-accent) 0%, var(--primary-hover) 100%);
+  color: #fff; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+}
+.btn.primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6); }
+.btn.secondary { background: var(--secondary-bg); color: var(--text-main); border: 1px solid var(--card-border); }
+.btn.secondary:hover:not(:disabled) { background: var(--secondary-hover); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-main); cursor: pointer; }
+.checkbox-label input { width: 16px; height: 16px; accent-color: var(--primary-accent); cursor: pointer; }
+a { color: #a5b4fc; cursor: pointer; text-decoration: none; }
+a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="app-background"></div>
+<div class="launcher-card">
+
+  <header class="launcher-header">
+    <div class="brand">
+      <h1>Bugtopia</h1>
+      <span class="subtitle" id="subtitle"></span>
+    </div>
+    <div class="version-tag" id="mode-tag">offline</div>
+  </header>
+
+  <section class="section-card">
+    <label class="input-label" for="game">Heartopia Directory</label>
+    <div class="input-group">
+      <input type="text" id="game" placeholder="Detecting..." readonly />
+      <button class="btn secondary" id="detect" title="Search Steam libraries and the usual folders">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        Detect
+      </button>
+      <button class="btn secondary" data-pick="game">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        Browse...
+      </button>
+    </div>
+  </section>
+
+  <section class="section-card">
+    <label class="input-label" for="source">BepInEx (unpacked archive)</label>
+    <div class="input-group">
+      <input type="text" id="source" placeholder="Folder holding BepInEx\ and dotnet\" readonly />
+      <button class="btn secondary" data-pick="source">Browse...</button>
+      <button class="btn secondary" id="dl-bepinex">Download</button>
+    </div>
+    <p class="input-hint" id="source-hint"></p>
+  </section>
+
+  <section class="section-card">
+    <label class="input-label" for="storage">Storage folder</label>
+    <div class="input-group">
+      <input type="text" id="storage" readonly />
+      <button class="btn secondary" data-pick="storage">Browse...</button>
+      <button class="btn secondary" id="storage-default">Default</button>
+    </div>
+  </section>
+
+  <section class="section-card">
+    <label class="input-label" for="unityLibsZip">Unity libraries zip</label>
+    <div class="input-group">
+      <input type="text" id="unityLibsZip" placeholder="optional" readonly />
+      <button class="btn secondary" data-pick="unityLibsZip" data-file="1">Browse...</button>
+      <button class="btn secondary" id="dl-unitylibs">Download</button>
+    </div>
+    <p class="input-hint" id="unity-hint"></p>
+  </section>
+
+  <section class="section-card">
+    <div class="field-row">
+      <div class="field">
+        <label class="input-label" for="profile">Save Profile</label>
+        <div class="input-group">
+          <select id="profile" class="select-dropdown"><option value="">No profiles found</option></select>
+          <button class="btn secondary compact" id="profile-create" title="Create new profile">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+          <button class="btn secondary compact" id="profile-switch">Switch</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="input-label" for="server">Server</label>
+        <div class="input-group">
+          <select id="server" class="select-dropdown">
+            <option value="8">Global</option>
+            <option value="9">SEA</option>
+            <option value="10">America</option>
+            <option value="12">Asia</option>
+            <option value="14">TW / HK / MO</option>
+          </select>
+          <button class="btn secondary compact" id="server-set">Apply</button>
+        </div>
+      </div>
+    </div>
+    <div class="input-group" id="new-profile-row" style="display:none">
+      <input type="text" id="new-profile-name" placeholder="New profile name" autocomplete="off" spellcheck="false" />
+      <button class="btn primary compact" id="profile-create-ok">Create</button>
+      <button class="btn secondary compact" id="profile-create-cancel">Cancel</button>
+    </div>
+    <p class="input-hint" id="profile-hint"></p>
+  </section>
+
+  <section class="status-grid">
+    <div class="status-box">
+      <span class="status-label">Game</span>
+      <span id="st-game" class="status-value status-unknown">Not set</span>
+    </div>
+    <div class="status-box">
+      <span class="status-label">Payload</span>
+      <span id="st-payload" class="status-value status-unknown">Not prepared</span>
+    </div>
+    <div class="status-box">
+      <span class="status-label">Interop</span>
+      <span id="st-interop" class="status-value status-unknown">Missing</span>
+    </div>
+  </section>
+
+  <div class="message-banner" id="banner">Pick your Heartopia directory to begin.</div>
+
+  <div id="log"></div>
+
+  <footer class="launcher-footer">
+    <div class="footer-actions">
+      <label class="checkbox-label"><input type="checkbox" id="force" /><span>Force regenerate</span></label>
+      <div class="launcher-actions">
+        <button class="btn secondary action-btn" id="prepare">Prepare</button>
+        <button class="btn secondary action-btn" id="generate">Generate interop</button>
+        <button class="btn primary action-btn" id="play">
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path>
+            <path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path>
+            <path d="M9 12l-4 4"></path><path d="M15 9l4-4"></path>
+          </svg>
+          Launch Heartopia
+        </button>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script>
+let nextId = 1, busy = false, state = {};
+const pending = new Map();
+const $ = id => document.getElementById(id);
+
+function call(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const id = "r" + (nextId++);
+    pending.set(id, { resolve, reject });
+    window.external.sendMessage(JSON.stringify({ id, cmd, args: args || {} }));
+  });
+}
+
+window.external.receiveMessage(raw => {
+  let m; try { m = JSON.parse(raw); } catch { return; }
+
+  if (m.event === "log") { appendLog(m.text); return; }
+  if (m.event === "busy") { busy = m.value; if (!busy) setProgress(0); render(); return; }
+  if (m.event === "progress") { setProgress(m.value); return; }
+
+  const p = pending.get(m.id);
+  if (!p) return;
+  pending.delete(m.id);
+  m.ok ? p.resolve(m.data) : p.reject(new Error(m.error));
+});
+
+function appendLog(text) {
+  const log = $("log");
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+  log.textContent += (log.textContent ? "\n" : "") + text;
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function setProgress(percent) { $("banner").style.setProperty("--progress", percent + "%"); }
+
+function say(text, kind) {
+  const b = $("banner");
+  b.textContent = text;
+  b.classList.toggle("warning", kind === "warning");
+}
+
+function mark(el, text, cls) {
+  el.textContent = text;
+  el.className = "status-value " + cls;
+}
+
+async function refresh() { state = await call("state"); render(); loadProfiles(); }
+
+function render() {
+  for (const k of ["game", "source", "storage", "unityLibsZip"]) {
+    $(k).value = state[k] || "";
+    $(k).title = state[k] || "";   // a long path still outruns its box on a narrow window
+  }
+
+  $("mode-tag").textContent = state.downloads ? "online" : "offline";
+  $("subtitle").textContent = "BepInEx " + (state.bepInExVersion || "");
+
+  $("source-hint").innerHTML = state.downloads
+    ? "The Unity.IL2CPP win-x64 archive, unpacked. Needed only until Prepare."
+    : 'The Unity.IL2CPP win-x64 archive, unpacked — <a data-url="' + state.bepInExUrl + '">download it here</a>.';
+
+  $("unity-hint").innerHTML = state.unityLibsUrl
+    ? (state.downloads
+        ? "Optional — BepInEx fetches these itself during the first generation."
+        : 'Optional — <a data-url="' + state.unityLibsUrl + '">download ' + state.unityVersion + '.zip</a>.')
+    : "Optional. Set the game directory first to resolve the Unity version.";
+
+  for (const b of ["dl-bepinex", "dl-unitylibs"]) $(b).style.display = state.downloads ? "" : "none";
+
+  state.gameOk ? mark($("st-game"), "Unity " + state.unityVersion, "status-success")
+               : mark($("st-game"), state.game ? "Not an IL2CPP build" : "Not set", "status-unknown");
+  state.prepared ? mark($("st-payload"), "Prepared" + (state.preparedFrom ? " · " + state.preparedFrom : ""), "status-success")
+                 : mark($("st-payload"), "Not prepared", "status-warning");
+  state.hasInterop ? mark($("st-interop"), "Present", "status-success")
+                   : mark($("st-interop"), "Missing", "status-warning");
+
+  if (state.loaderProxy)
+    say(state.loaderProxy + " is still in the game folder — BepInEx would boot from it before the injection, and the bootstrap refuses to run twice in one process. Rename it away.", "warning");
+  else if (!state.gameOk) say("Heartopia was not found automatically — press Detect, or point at it with Browse.");
+  else if (!state.prepared) say("Point at the unpacked BepInEx archive, then press Prepare.");
+  else if (!state.hasInterop) say("Press Generate interop — the first run takes several minutes.");
+  else say("Ready.");
+
+  $("prepare").disabled = busy || !state.source;
+  $("generate").disabled = busy || !state.prepared || !state.gameOk;
+  $("play").disabled = busy || !state.prepared || !state.hasInterop || !state.gameOk;
+  $("dl-bepinex").disabled = busy;
+  $("dl-unitylibs").disabled = busy || !state.gameOk;
+}
+
+async function loadProfiles() {
+  let info; try { info = await call("profiles"); } catch { return; }
+
+  const select = $("profile");
+  select.innerHTML = "";
+  if (!info.profiles.length) select.innerHTML = '<option value="">No profiles found</option>';
+  for (const name of info.profiles) {
+    const o = document.createElement("option");
+    o.value = name;
+    o.textContent = name + (name === info.active ? "  (active)" : "");
+    if (name === info.active) o.selected = true;
+    select.appendChild(o);
+  }
+
+  $("profile-hint").textContent = info.available
+    ? (info.active ? "" : "No active profile yet.")
+    : "The game has not created its save folder yet.";
+  for (const b of ["profile", "profile-switch", "server-set", "profile-create"]) $(b).disabled = !info.available;
+
+  if (info.active) {
+    const value = await call("serverGet", { profile: info.active });
+    if (value > 0) $("server").value = String(value);
+  }
+}
+
+function run(cmd, args) {
+  return call(cmd, args)
+    .then(s => { if (s && s.storage !== undefined) { state = s; render(); } })
+    .catch(e => { appendLog("• " + e.message); say(e.message, "warning"); });
+}
+
+document.addEventListener("click", async e => {
+  const url = e.target.getAttribute && e.target.getAttribute("data-url");
+  if (url) { call("openUrl", { url }); return; }
+
+  const btn = e.target.closest && e.target.closest("[data-pick]");
+  if (btn) {
+    const key = btn.getAttribute("data-pick");
+    const chosen = btn.hasAttribute("data-file")
+      ? await call("pickFile", { title: "Unity base libraries zip" })
+      : await call("pickFolder", { title: "Select folder", current: $(key).value });
+    if (chosen) { $(key).value = chosen; save(); }
+  }
+});
+
+function save() {
+  return call("setPaths", {
+    game: $("game").value, source: $("source").value,
+    storage: $("storage").value, unityLibsZip: $("unityLibsZip").value
+  }).then(s => { state = s; render(); });
+}
+
+$("detect").onclick = async () => {
+  const found = await call("detectGame");
+  if (found) { $("game").value = found; await save(); }
+  else say("No Heartopia install found. Point at it with Browse.", "warning");
+};
+
+$("storage-default").onclick = () => { $("storage").value = state.defaultStorage; save(); };
+$("prepare").onclick = () => run("prepare");
+$("generate").onclick = () => run("generateInterop", { force: $("force").checked });
+$("play").onclick = () => run("play");
+$("dl-bepinex").onclick = () => run("downloadBepInEx");
+$("dl-unitylibs").onclick = () => run("downloadUnityLibs");
+
+$("profile-create").onclick = () => {
+  $("new-profile-row").style.display = "flex";
+  $("new-profile-name").focus();
+};
+$("profile-create-cancel").onclick = () => {
+  $("new-profile-row").style.display = "none";
+  $("new-profile-name").value = "";
+};
+$("profile-create-ok").onclick = async () => {
+  const name = $("new-profile-name").value.trim();
+  if (!name) return;
+  await call("profileCreate", { name }).catch(e => { appendLog("• " + e.message); say(e.message, "warning"); });
+  $("profile-create-cancel").onclick();
+  loadProfiles();
+};
+
+$("profile-switch").onclick = async () => {
+  const name = $("profile").value;
+  if (!name) return;
+  await call("profileSwitch", { name }).catch(e => { appendLog("• " + e.message); say(e.message, "warning"); });
+  loadProfiles();
+};
+
+$("server-set").onclick = async () => {
+  await call("serverSet", { profile: $("profile").value || "", value: parseInt($("server").value, 10) })
+    .catch(e => { appendLog("• " + e.message); say(e.message, "warning"); });
+};
+
+refresh();
+</script>
+</body>
+</html>

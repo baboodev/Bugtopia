@@ -49,3 +49,10 @@ memory
 
 # Local MCP server config (machine-specific).
 .mcp.json
+
+# Launcher/injector projects (docs/plans/2026-08-27-bepinex-injector.md).
+launcher/**/bin/
+launcher/**/obj/
+launcher/**/x64/
+tools/**/bin/
+tools/**/obj/
