@@ -110,6 +110,22 @@ One-off custom game path: add `-p:HeartopiaDir="C:\Games\Heartopia"`. Debug buil
 
 ---
 
+## Building the launcher
+
+The launcher is a separate product — it installs and starts the mod without putting a file in the
+game folder — with its own projects under `launcher/` and its own build:
+
+```powershell
+pwsh launcher/build-launchers.ps1
+```
+
+That builds the payload (native bootstrap, net6.0 interop shim, the mod's BepInEx flavour) and
+publishes both flavours into `release/`: one that carries the mod and downloads nothing, and one
+that carries no mod and fetches the newest release from GitHub.
+
+It needs **MSVC with the C++ workload** in addition to everything below. See
+[LAUNCHER.md](LAUNCHER.md) for the architecture, the storage tree, the two flavours and the traps.
+
 ## Deployment
 
 | Loader | Copy to |

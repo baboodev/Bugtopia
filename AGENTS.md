@@ -30,6 +30,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | **Decompilation folders + per-feature game types** | [docs/DECOMPILED_SOURCE_MAP.md](docs/DECOMPILED_SOURCE_MAP.md) |
 | Disk paths, interop, Il2CppDumper, tools | [docs/GAME_ASSEMBLIES_AND_TOOLS.md](docs/GAME_ASSEMBLIES_AND_TOOLS.md) |
 | Build, deploy, logs, troubleshooting | [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md) |
+| **The launcher** — installing and starting the mod with nothing in the game folder, its build and its two flavours | [docs/LAUNCHER.md](docs/LAUNCHER.md) |
 | Patches, config, frame loops | [docs/TECHNICAL.md](docs/TECHNICAL.md) |
 | User-facing features / menu | [docs/FEATURES.md](docs/FEATURES.md) |
 | Inventory / `ItemNetPair` / bag pipelines | [docs/BACKPACK_AND_ITEMS.md](docs/BACKPACK_AND_ITEMS.md) |
@@ -58,6 +59,16 @@ Bugtopia/
 │   ├── MelonLoaderPlugin.cs / BepInExPlugin.cs
 │   ├── build-all.bat
 │   └── Directory.Build.props.example  → copy to Directory.Build.props (gitignored)
+├── launcher/                 ← the launcher: a separate product, see docs/LAUNCHER.md
+│   ├── build-launchers.ps1   ← builds the payload and publishes both flavours
+│   ├── BugtopiaInject/       ← native C bootstrap, injected into the running game
+│   ├── BugtopiaInterop/      ← net6.0 shim: generates interop inside BepInEx's own CoreCLR
+│   ├── BugtopiaLaunch/       ← storage tree, injection, profiles, downloads
+│   ├── BugtopiaLauncher/     ← the app (NativeAOT + Photino), ui.html
+│   └── Directory.Build.props ← per-flavour bin\ and obj\
+├── ci/                       ← build scripts used by the workflow
+│   ├── publish-launcher.ps1  ← publishes both launchers into release/
+│   └── resolve-build-version.ps1  ← the version stamp, shared by mod and launcher
 ├── ilspy-dumps/              ← offline Mono decompile (gitignored, ~20k .cs)
 └── gameassembly-dumps/       ← offline IL2CPP decompile (gitignored)
 ```
@@ -102,6 +113,28 @@ dotnet build buddy.csproj -c Release -p:Loader=MelonLoader    # MelonLoader only
 ```
 
 One-off path override: add `-p:HeartopiaDir="C:\Games\Heartopia"`. Shipping build (hides loader console): `-c ReleaseShip`.
+
+### Build the launcher
+
+A separate product with its own projects and its own build. Full detail in
+[docs/LAUNCHER.md](docs/LAUNCHER.md).
+
+```powershell
+pwsh launcher/build-launchers.ps1
+```
+
+Builds the native bootstrap, the net6.0 interop shim and the mod's BepInEx flavour, then publishes
+both launchers into `release/` as one file each:
+
+| | Carries | Size |
+|---|---|---|
+| `Bugtopia-Launcher-<version>-offline.exe` | the mod; downloads nothing, ever | ~7.9 MB |
+| `Bugtopia-Launcher-<version>-online.exe` | no mod — fetches the newest release | ~4.2 MB |
+
+Needs **MSVC with the C++ workload** on top of the mod's own prerequisites: NativeAOT needs the
+linker and the bootstrap needs `cl.exe`. `-PluginDll <path>` packages a published
+`bugtopia-bepinex.dll` instead of a local build; `-SkipMod` leaves the mod out entirely, for working
+on the launcher itself.
 
 ### Deploy
 
