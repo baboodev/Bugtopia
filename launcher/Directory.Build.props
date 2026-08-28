@@ -1,0 +1,37 @@
+<Project>
+
+  <!-- Chain to a Directory.Build.props further up if one ever appears. Without this, adding a file
+       here would silently cut the launcher projects off from repo-wide settings, because MSBuild
+       imports only the nearest one. -->
+  <PropertyGroup>
+    <!-- Resolved into a property first: MSBuild's condition parser cannot cope with the quotes
+         inside a property function call. -->
+    <BugtopiaParentProps>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</BugtopiaParentProps>
+  </PropertyGroup>
+
+  <Import Project="$(BugtopiaParentProps)" Condition="'$(BugtopiaParentProps)' != ''" />
+
+  <!-- The offline and online builds are different assemblies, not different settings on one: they
+       compile with different constants, and the online one leaves the mod out entirely. Giving each
+       flavour its own bin\ and obj\ is what lets them exist at the same time - otherwise whichever
+       was published last is the only one on disk, and the difference is invisible until someone
+       ships the wrong file.
+
+       Only the two projects that actually compile per flavour are moved. BugtopiaInterop is left
+       where it is on purpose: BugtopiaLauncher embeds it from its default output path, and it has
+       no flavour of its own. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'BugtopiaLauncher' or
+                            '$(MSBuildProjectName)' == 'BugtopiaLaunch'">
+    <BugtopiaFlavour Condition="'$(BugtopiaOnline)' == 'true'">online</BugtopiaFlavour>
+    <BugtopiaFlavour Condition="'$(BugtopiaFlavour)' == ''">offline</BugtopiaFlavour>
+
+    <BaseOutputPath>$(MSBuildProjectDirectory)\bin\$(BugtopiaFlavour)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)\obj\$(BugtopiaFlavour)\</BaseIntermediateOutputPath>
+
+    <!-- The SDK excludes the current flavour's bin and obj from the source globs, but knows nothing
+         about the other flavour's. Without this the compiler picks up the generated AssemblyInfo
+         from both and fails with a wall of CS0579 duplicate-attribute errors. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+</Project>

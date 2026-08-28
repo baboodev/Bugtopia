@@ -26,6 +26,13 @@ namespace Bugtopia.Launch
 #endif
 
         /// <summary>
+        /// Whether the mod itself is fetched from its releases rather than carried inside this exe.
+        /// Tied to the same switch: an offline build has to carry everything it installs, and an
+        /// online one has no reason to ship a plugin it can fetch a newer copy of.
+        /// </summary>
+        public const bool PluginFromGitHub = Enabled;
+
+        /// <summary>
         /// The pinned BepInEx build. Deliberately a specific build rather than "latest": the interop
         /// generator reflects into <c>Il2CppInteropManager</c>'s private members, so a silent bump is
         /// a silent break. Moving this means moving the expected version stamp with it.

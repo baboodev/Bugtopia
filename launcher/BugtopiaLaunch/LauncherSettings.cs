@@ -31,6 +31,14 @@ namespace Bugtopia.Launch
         public string PreparedFrom { get; set; }
 
         /// <summary>
+        /// A GitHub personal access token, asked for only when the API turns the launcher away for
+        /// a reason a token would fix. Needs no scopes: it exists to raise the anonymous rate limit
+        /// of 60 requests an hour, not to reach anything private.
+        /// </summary>
+        [JsonPropertyName("gitHubToken")]
+        public string GitHubToken { get; set; }
+
+        /// <summary>
         /// Show every field and dropdown rather than the few steps a first run needs. Remembered,
         /// because someone who has turned it on has said something about how they want to work.
         /// </summary>

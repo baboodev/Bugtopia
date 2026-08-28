@@ -204,6 +204,7 @@ input[type=text]:focus { border-color: var(--primary-accent); }
   user-select: text;   /* the paths are the point - they have to be copyable */
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.modal-input { width: 100%; user-select: text; }
 .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-main); cursor: pointer; }
 .checkbox-label input { width: 16px; height: 16px; accent-color: var(--primary-accent); cursor: pointer; }
 a { color: #a5b4fc; cursor: pointer; text-decoration: none; }
@@ -262,6 +263,17 @@ a:hover { text-decoration: underline; }
       <div class="step-action">
         <button class="btn secondary compact" id="step-archive">Choose the zip...</button>
         <button class="btn secondary compact" id="step-download">Download</button>
+      </div>
+    </div>
+
+    <div class="step" id="step-mod" hidden>
+      <span class="step-mark"></span>
+      <div class="step-body">
+        <span class="step-title">Bugtopia</span>
+        <span class="step-detail wrap" id="step-mod-detail"></span>
+      </div>
+      <div class="step-action">
+        <button class="btn secondary compact" id="step-update">Update</button>
       </div>
     </div>
 
@@ -403,6 +415,7 @@ a:hover { text-decoration: underline; }
   <form method="dialog" class="modal-body">
     <h2 class="modal-title" id="modal-title"></h2>
     <div class="modal-text" id="modal-text"></div>
+    <input type="text" class="modal-input" id="modal-input" autocomplete="off" spellcheck="false" hidden />
     <div class="modal-actions">
       <!-- Cancel first, so it is what Enter and the initial focus land on. -->
       <button class="btn secondary compact" id="modal-no" value="no" autofocus>Cancel</button>
@@ -449,14 +462,25 @@ function appendLog(text) {
 // included, since the job on the other side is blocked until something comes back.
 function ask(m) {
   const dlg = $("modal");
+  const input = $("modal-input");
   $("modal-title").textContent = m.title || "";
   $("modal-text").textContent = m.text || "";
   $("modal-yes").textContent = m.confirmLabel || "Continue";
+
+  const wantsText = m.placeholder !== undefined;
+  input.hidden = !wantsText;
+  input.value = wantsText ? (m.initial || "") : "";
+  input.placeholder = wantsText ? m.placeholder : "";
+
   dlg.returnValue = "";
   dlg.addEventListener("close", () => {
-    call("confirmResult", { ticket: m.ticket, ok: dlg.returnValue === "yes" });
+    call("confirmResult", {
+      ticket: m.ticket, ok: dlg.returnValue === "yes", value: input.value.trim()
+    });
   }, { once: true });
   dlg.showModal();
+  // A question with a field is asking for the field, so start there rather than on Cancel.
+  if (wantsText) input.focus();
 }
 
 function setProgress(percent) { $("banner").style.setProperty("--progress", percent + "%"); }
@@ -591,6 +615,17 @@ function renderSteps() {
          esc(state.bepInExVersion) + '</a>, then choose the zip.',
        { archive: !state.prepared && !state.downloads, download: !state.prepared && state.downloads });
 
+  // Only an online build has anything to say here: an offline one installs the copy it carries.
+  $("step-mod").hidden = !state.pluginFromGitHub;
+  if (state.pluginFromGitHub) {
+    step("mod", state.hasPlugin ? "done" : "info",
+         state.hasPlugin
+           ? "Installed" + (state.pluginVersion ? "  &middot;  " + esc(state.pluginVersion) : "") +
+             ' &middot; <a data-url="' + esc(state.releasesPage) + '">releases</a>'
+           : "Downloaded from the releases page on the first launch.",
+         { update: state.hasPlugin });
+  }
+
   step("interop", state.hasInterop ? "done" : "info",
        state.hasInterop ? "Built"
        : existing.interop ? "Comes with the install being adopted."
@@ -659,6 +694,7 @@ $("expert").onchange = () => run("setExpert", { value: $("expert").checked });
 
 $("step-detect").onclick = () => $("detect").onclick();
 $("step-download").onclick = () => run("downloadBepInEx");
+$("step-update").onclick = () => run("updatePlugin");
 $("step-archive").onclick = async () => {
   const chosen = await call("pickFile", { title: "BepInEx-Unity.IL2CPP-win-x64 archive" });
   if (chosen) run("useArchive", { path: chosen });

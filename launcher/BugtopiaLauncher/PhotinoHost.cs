@@ -38,7 +38,7 @@ namespace Bugtopia.Launcher
                 .SetTitle("Bugtopia")
                 .SetUseOsDefaultSize(false)
                 .SetSize(Api.WindowWidth, Api.WindowHeight(api.Expert))
-                .SetMinSize(820, 480)
+                .SetMinSize(560, 480)
                 .Center()
                 .SetResizable(true)
                 .SetContextMenuEnabled(false)

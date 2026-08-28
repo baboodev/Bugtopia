@@ -150,6 +150,10 @@ namespace Bugtopia.Launcher
                     RunJob(id, "Download BepInEx", DownloadBepInExAsync);
                     break;
 
+                case "updatePlugin":
+                    RunJob(id, "Update the mod", () => InstallModAsync(RequireStorage(), "Updating"));
+                    break;
+
                 case "downloadUnityLibs":
                     RunJob(id, "Download Unity libraries", DownloadUnityLibsAsync);
                     break;
@@ -168,7 +172,8 @@ namespace Bugtopia.Launcher
 
                 case "confirmResult":
                     Answer(Str(args, "ticket"),
-                           args.TryGetProperty("ok", out JsonElement ok) && ok.ValueKind == JsonValueKind.True);
+                           args.TryGetProperty("ok", out JsonElement ok) && ok.ValueKind == JsonValueKind.True,
+                           Str(args, "value"));
                     Reply(id, w => WriteValue(w, null));
                     break;
 
@@ -205,9 +210,12 @@ namespace Bugtopia.Launcher
         // ---- jobs ------------------------------------------------------------
 
         /// <summary>The window the page is drawn in. Simple mode has a third less to show.</summary>
-        internal const int WindowWidth = 1000;
+        internal const int WindowWidth = 667;
 
-        internal static int WindowHeight(bool expert) => expert ? 760 : 560;
+        // Simple mode is sized to what it actually shows, and an online build shows one row more:
+        // the mod it fetches rather than carries.
+        internal static int WindowHeight(bool expert) =>
+            expert ? 760 : Downloads.PluginFromGitHub ? 620 : 540;
 
         /// <summary>Which view the window should open in, read before the window exists.</summary>
         internal bool Expert => settings.Expert;
@@ -263,7 +271,9 @@ namespace Bugtopia.Launcher
         private sealed class Question
         {
             internal string Ticket;
-            internal TaskCompletionSource<bool> Answer;
+
+            /// <summary>What the page said, or null when it was declined. Empty for a plain yes.</summary>
+            internal TaskCompletionSource<string> Answer;
         }
 
         private volatile Question asked;
@@ -277,12 +287,26 @@ namespace Bugtopia.Launcher
         /// error. Blocking is the point — the answer gates everything after it — and costs nothing,
         /// because jobs already run off the window thread.
         /// </summary>
-        private bool Confirm(string title, string text, string confirmLabel)
+        private bool Confirm(string title, string text, string confirmLabel) =>
+            Ask(title, text, confirmLabel, null, null) != null;
+
+        /// <summary>
+        /// The same dialog with a text field. Returns what was typed, or null when it was
+        /// dismissed; an empty string means the field was left blank on purpose.
+        /// </summary>
+        private string AskText(string title, string text, string confirmLabel, string placeholder,
+                               string initial)
+        {
+            return Ask(title, text, confirmLabel, placeholder ?? "", initial ?? "");
+        }
+
+        private string Ask(string title, string text, string confirmLabel, string placeholder,
+                           string initial)
         {
             var question = new Question
             {
                 Ticket = "q" + (++askCount),
-                Answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+                Answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously),
             };
             asked = question;
 
@@ -294,6 +318,11 @@ namespace Bugtopia.Launcher
                 w.WriteString("title", title);
                 w.WriteString("text", text);
                 w.WriteString("confirmLabel", confirmLabel);
+                if (placeholder != null)
+                {
+                    w.WriteString("placeholder", placeholder);
+                    w.WriteString("initial", initial ?? "");
+                }
                 w.WriteEndObject();
             }));
 
@@ -304,14 +333,14 @@ namespace Bugtopia.Launcher
         }
 
         /// <summary>The page's answer. A ticket that is not the outstanding one is ignored.</summary>
-        private void Answer(string ticket, bool ok)
+        private void Answer(string ticket, bool ok, string value)
         {
             Question question = asked;
             if (question == null || !string.Equals(ticket, question.Ticket, StringComparison.Ordinal))
                 return;
 
             asked = null;
-            question.Answer.TrySetResult(ok);
+            question.Answer.TrySetResult(ok ? value ?? "" : null);
         }
 
         private void Prepare()
@@ -472,6 +501,7 @@ namespace Bugtopia.Launcher
                 Prepare();
             }
 
+            await EnsurePluginAsync(storage);
             await EnsureUnityLibrariesAsync(storage, game);
 
             // An adopted set was loading this game a moment ago, so it is taken as current and the
@@ -643,6 +673,67 @@ namespace Bugtopia.Launcher
         }
 
         /// <summary>
+        /// The mod itself. An offline build carries it and Prepare has already written it; an online
+        /// build fetches it from its releases, where a missing plugin is simply what a fresh install
+        /// looks like rather than something to fail over.
+        /// </summary>
+        private async Task EnsurePluginAsync(StorageLayout storage)
+        {
+            if (!Downloads.PluginFromGitHub || File.Exists(storage.Plugin))
+                return;
+
+            await InstallModAsync(storage, "No mod installed yet");
+        }
+
+        /// <summary>
+        /// Fetches the release list and installs the newest build.
+        ///
+        /// A token is asked for only when the API turns us away for a reason a token would fix -
+        /// a bad one, or the anonymous rate limit - and a token that then works is remembered, so
+        /// this is a question the user answers once rather than every launch.
+        /// </summary>
+        private async Task InstallModAsync(StorageLayout storage, string why)
+        {
+            Log(why + "; fetching it from " + GitHub.Repository + ".");
+
+            List<ModRelease> releases;
+            try
+            {
+                releases = await GitHub.FetchReleasesAsync(settings.GitHubToken, Log);
+            }
+            catch (GitHubException refused) when (refused.NeedsToken)
+            {
+                string token = AskText(
+                    "GitHub",
+                    refused.Message + "\n\nA personal access token will get past this. It needs no " +
+                    "scopes at all - it only raises the request limit - and it is kept in the " +
+                    "launcher's settings file for next time.",
+                    "Try again",
+                    "ghp_...",
+                    settings.GitHubToken);
+
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    throw new InvalidOperationException(
+                        refused.Message + " Releases can also be downloaded by hand from " +
+                        GitHub.ReleasesPage + ".");
+                }
+
+                releases = await GitHub.FetchReleasesAsync(token, Log);
+                settings.GitHubToken = token;
+                SafeSave();
+            }
+
+            if (releases.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "No release of " + GitHub.Repository + " has a plugin to install.");
+            }
+
+            await GitHub.InstallAsync(releases[0], storage, Log, new Progress<int>(ReportPercent));
+        }
+
+        /// <summary>
         /// Puts the Unity base libraries in unity-libs before the generator looks for them.
         ///
         /// BepInEx fetches them itself when they are missing, so this is not required — but it
@@ -743,8 +834,13 @@ namespace Bugtopia.Launcher
                                                   Path.Combine("bin", StorageLayout.InjectDllName));
             yield return PayloadFile.FromResource(self, "payload.BugtopiaInterop.dll",
                                                   Path.Combine("bin", StorageLayout.InteropShimName));
+
+            // Optional rather than branched on: an online build does not embed the mod at all, so
+            // the resource is simply not there and Prepare says so and carries on. A branch would
+            // be unreachable code in one flavour or the other.
             yield return PayloadFile.FromResource(self, "payload.bugtopia.dll",
-                                                  Path.Combine("BepInEx", "plugins", StorageLayout.PluginName));
+                                                  Path.Combine("BepInEx", "plugins", StorageLayout.PluginName),
+                                                  required: !Downloads.PluginFromGitHub);
         }
 
         // ---- state -----------------------------------------------------------
@@ -760,6 +856,8 @@ namespace Bugtopia.Launcher
             w.WriteString("unityLibsZip", settings.UnityLibsZip ?? "");
             w.WriteString("defaultStorage", LauncherSettings.DefaultStorage);
             w.WriteString("version", HeartopiaMod.ModBuildVersion.Display);
+            w.WriteBoolean("pluginFromGitHub", Downloads.PluginFromGitHub);
+            w.WriteString("releasesPage", GitHub.ReleasesPage);
             w.WriteBoolean("downloads", Downloads.Enabled);
             w.WriteBoolean("expert", settings.Expert);
             w.WriteString("bepInExVersion", Downloads.BepInExVersion);
@@ -785,6 +883,8 @@ namespace Bugtopia.Launcher
             }
             w.WriteBoolean("prepared", prepared);
             w.WriteBoolean("hasInterop", hasInterop);
+            w.WriteBoolean("hasPlugin", storage != null && File.Exists(storage.Plugin));
+            w.WriteString("pluginVersion", storage == null ? "" : GitHub.InstalledTag(storage) ?? "");
 
             // An install already loading the mod. Reported in full rather than as a flag because the
             // page has to be able to say which folder it found and what moving it would preserve.

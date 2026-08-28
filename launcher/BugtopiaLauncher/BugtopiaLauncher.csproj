@@ -9,15 +9,23 @@
        docs/plans/2026-08-28-launcher-consolidation.md.
 
        Two builds ship from here:
-         offline (default)  - contains no network code at all
+         offline (default)  - contains no network code at all, and carries the mod inside it
          online             - dotnet publish ... -p:BugtopiaOnline=true
 
        A compile-time switch rather than a setting, so the offline build cannot reach the network
        even by accident and does not link the stack it would need to.
 
+       The two differ in what they carry, not just in what they can do. The offline build embeds
+       bugtopia.dll and installs that exact copy; the online build embeds no plugin at all and
+       fetches the newest release from github.com/baboodev/Bugtopia instead, so it never ships a
+       mod that is already out of date.
+
+       Each flavour builds into bin\<flavour>\ and obj\<flavour>\, so the two can sit side by side
+       instead of overwriting each other. See launcher/Directory.Build.props.
+
        NativeAOT needs the MSVC linker. In a shell where the toolchain probe cannot run vswhere,
        initialise vcvars64.bat first and add -p:IlcUseEnvironmentalTools=true; note vcvars sets
-       Platform=x64, which moves the output under bin\x64\. ALWAYS run the exe from publish\ —
+       Platform=x64, which moves the output under bin\<flavour>\x64\. ALWAYS run the exe from publish\ —
        bin\...\native\ holds the binary without its native shell, and a missing P/Invoke target under
        AOT fail-fasts with 0xC0000409 instead of saying what is missing.
 
@@ -67,12 +75,12 @@
        different build from the plugin it carries. Both read the tag and the short SHA out of
        this working tree, and both render them as "2.8.2 (46f9cfb)". -->
   <PropertyGroup>
-    <LauncherVersionFile>$(MSBuildProjectDirectory)\obj\$(Configuration)\LauncherVersion.g.cs</LauncherVersionFile>
+    <LauncherVersionFile>$(BaseIntermediateOutputPath)LauncherVersion.g.cs</LauncherVersionFile>
     <ResolveBuildVersionScript>$(MSBuildThisFileDirectory)..\..\ci\resolve-build-version.ps1</ResolveBuildVersionScript>
   </PropertyGroup>
 
   <Target Name="GenerateLauncherVersion" BeforeTargets="BeforeCompile">
-    <MakeDir Directories="$(MSBuildProjectDirectory)\obj\$(Configuration)" />
+    <MakeDir Directories="$(BaseIntermediateOutputPath)" />
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)"
           Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ResolveBuildVersionScript)&quot; -OutputPath &quot;$(LauncherVersionFile)&quot;" />
     <ItemGroup>
@@ -101,8 +109,9 @@
                       Condition="Exists('$(InjectDllPath)')" />
     <EmbeddedResource Include="$(InteropShimPath)" LogicalName="payload.BugtopiaInterop.dll"
                       Condition="Exists('$(InteropShimPath)')" />
+    <!-- Only the offline build carries the mod. See the header. -->
     <EmbeddedResource Include="$(PluginDllPath)" LogicalName="payload.bugtopia.dll"
-                      Condition="Exists('$(PluginDllPath)')" />
+                      Condition="'$(BugtopiaOnline)' != 'true' and Exists('$(PluginDllPath)')" />
   </ItemGroup>
 
   <!-- A launcher without its payload builds and runs, and says which piece is missing when Prepare
@@ -116,7 +125,7 @@
     <Warning Text="Payload missing: $(InteropShimPath) - build launcher/BugtopiaInterop -c Release"
              Condition="!Exists('$(InteropShimPath)')" />
     <Warning Text="Payload missing: $(PluginDllPath) - build the mod with -p:Loader=BepInEx, or set PluginDllPath"
-             Condition="!Exists('$(PluginDllPath)')" />
+             Condition="'$(BugtopiaOnline)' != 'true' and !Exists('$(PluginDllPath)')" />
   </Target>
 
   <!-- One file means one file: the native shell is inside the binary, not beside it. -->
