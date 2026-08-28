@@ -204,6 +204,13 @@ input[type=text]:focus { border-color: var(--primary-accent); }
 .btn.primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6); }
 .btn.secondary { background: var(--secondary-bg); color: var(--text-main); border: 1px solid var(--card-border); }
 .btn.secondary:hover:not(:disabled) { background: var(--secondary-hover); }
+/* Weighted like the primary rather than tinted like a secondary: it is the button someone reaches
+   for in the three seconds they have, so it has to be seen without being read. */
+.btn.danger {
+  background: linear-gradient(135deg, var(--danger) 0%, #dc2626 100%);
+  color: #fff; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+}
+.btn.danger:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Confirmation dialog. A <dialog> rather than an overlay of our own: Escape, focus trapping and
@@ -431,7 +438,7 @@ a:hover { text-decoration: underline; }
       <div class="launcher-actions">
         <button class="btn secondary action-btn expert-only" id="prepare">Prepare</button>
         <button class="btn secondary action-btn expert-only" id="generate">Generate interop</button>
-        <button class="btn secondary action-btn" id="auto-cancel" hidden>Cancel</button>
+        <button class="btn danger action-btn" id="auto-cancel" hidden>Cancel</button>
         <button class="btn primary action-btn" id="play">
           <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path>
