@@ -91,6 +91,11 @@ namespace HeartopiaMod
         private sealed class WildAnimalFeedAuraInventorySnapshot
         {
             public readonly Dictionary<string, List<IntPtr>> ItemsByStorage = new Dictionary<string, List<IntPtr>>(StringComparer.OrdinalIgnoreCase);
+
+            // Pinned gchandles rooting every pointer in ItemsByStorage. Taken DURING the
+            // enumeration walk (see TryBuildWildAnimalFeedAuraInventorySnapshot) — that is the only
+            // moment the pointers are known good. Released by ReleaseWildAnimalFeedAuraPlanContext.
+            public readonly List<uint> Pins = new List<uint>();
             public bool Ready;
         }
 
@@ -135,6 +140,13 @@ namespace HeartopiaMod
             public IntPtr GetFavoriteFoodMethod;
             public IntPtr GetFoodsMethod;
             public List<IntPtr> GroupItems = new List<IntPtr>();
+
+            // Pinned gchandles rooting WildAnimalSystemObj and every GroupItems entry, taken while
+            // the objects are still where they were found. Pinning AFTER the walk is a no-op — the
+            // rows have already moved — which is what killed the roster (WER xdt.exe.21532,
+            // 2026-08-28: mono_object_get_class on a recycled nursery block). Release with
+            // ReleaseWildAnimalFeedAuraPlanContext.
+            public readonly List<uint> Pins = new List<uint>();
             public Dictionary<uint, int> ReservedCountsByNetId = new Dictionary<uint, int>();
             public int CheckedGroups;
             public int HungryGroups;
@@ -598,8 +610,11 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                // Pin as the walk appends: the snapshot outlives this method (it is read per group,
+                // across yields), and the get_Item invokes that build it allocate on the Mono heap,
+                // so unpinned entries can already be stale by the time the list is returned.
                 List<IntPtr> items = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, items))
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, items, snapshot.Pins))
                 {
                     continue;
                 }
@@ -709,39 +724,24 @@ namespace HeartopiaMod
                 yield break;
             }
 
-            context.Inventory = new WildAnimalFeedAuraInventorySnapshot();
-            if (this.TryBuildWildAnimalFeedAuraInventorySnapshot(context.Inventory))
-            {
-                this.WildAnimalFeedLog("AuraMono inventory snapshot: "
-                    + string.Join(", ", WildAnimalFeedStorageNames.Select(name =>
-                        name + "=" + (context.Inventory.ItemsByStorage.TryGetValue(name, out List<IntPtr> bucket) ? bucket.Count : 0)).ToArray()));
-            }
-            else
-            {
-                this.WildAnimalFeedLog("AuraMono inventory snapshot unavailable");
-            }
-
-            // Root every Mono object the plan context carries across the per-group yields below:
-            // the GC may otherwise collect group rows / inventory items between frames.
-            List<uint> auraPlanPins = new List<uint>(context.GroupItems.Count + 8);
-            auraPlanPins.Add(AuraMonoPinNew(context.WildAnimalSystemObj));
-            for (int i = 0; i < context.GroupItems.Count; i++)
-            {
-                auraPlanPins.Add(AuraMonoPinNew(context.GroupItems[i]));
-            }
-            if (context.Inventory != null && context.Inventory.ItemsByStorage != null)
-            {
-                foreach (List<IntPtr> bucket in context.Inventory.ItemsByStorage.Values)
-                {
-                    for (int i = 0; bucket != null && i < bucket.Count; i++)
-                    {
-                        auraPlanPins.Add(AuraMonoPinNew(bucket[i]));
-                    }
-                }
-            }
-
+            // Everything this loop holds across a yield is already rooted: the context pinned the
+            // system object and the group rows during the GetUnlockedAnimals walk, and the snapshot
+            // pins its items as it builds them. Both are released in the finally below. (Pinning
+            // here instead — after the walks — was the bug: by then the rows had already moved.)
             try
             {
+                context.Inventory = new WildAnimalFeedAuraInventorySnapshot();
+                if (this.TryBuildWildAnimalFeedAuraInventorySnapshot(context.Inventory))
+                {
+                    this.WildAnimalFeedLog("AuraMono inventory snapshot: "
+                        + string.Join(", ", WildAnimalFeedStorageNames.Select(name =>
+                            name + "=" + (context.Inventory.ItemsByStorage.TryGetValue(name, out List<IntPtr> bucket) ? bucket.Count : 0)).ToArray()));
+                }
+                else
+                {
+                    this.WildAnimalFeedLog("AuraMono inventory snapshot unavailable");
+                }
+
                 yield return null;
 
                 for (int i = 0; i < context.GroupItems.Count; i++)
@@ -760,10 +760,7 @@ namespace HeartopiaMod
             }
             finally
             {
-                for (int i = 0; i < auraPlanPins.Count; i++)
-                {
-                    AuraMonoPinFree(auraPlanPins[i]);
-                }
+                this.ReleaseWildAnimalFeedAuraPlanContext(context);
             }
 
             status = "AuraMono groups=" + context.CheckedGroups + " hungry=" + context.HungryGroups + " feedable=" + plans.Count;
@@ -816,15 +813,38 @@ namespace HeartopiaMod
                 GetFavoriteFoodMethod = getFavoriteFoodMethod,
                 GetFoodsMethod = getFoodsMethod
             };
-            if (!this.TryEnumerateAuraMonoCollectionItems(groupsObj, context.GroupItems) || context.GroupItems.Count == 0)
+            // Pin BEFORE the walk, never after it. GetUnlockedAnimals returns boxed group ids, so
+            // every get_Item / get_Current inside the enumerate allocates on the Mono heap, and that
+            // allocation can trigger an sgen collection which relocates the rows already appended to
+            // GroupItems. A pin taken afterwards roots an address the object has left, and the first
+            // member read on it is a native AV.
+            context.Pins.Add(AuraMonoPinNew(wildAnimalSystemObj));
+            if (!this.TryEnumerateAuraMonoCollectionItems(groupsObj, context.GroupItems, context.Pins) || context.GroupItems.Count == 0)
             {
                 status = "AuraMono unlocked groups empty";
+                this.ReleaseWildAnimalFeedAuraPlanContext(context);
                 context = null;
                 return false;
             }
 
             status = string.Empty;
             return true;
+        }
+
+        // Frees every gchandle the context and its inventory snapshot hold. Idempotent (FreeAuraMonoPins
+        // clears the list), so it is safe to call from a finally that may run after an early release.
+        private void ReleaseWildAnimalFeedAuraPlanContext(WildAnimalFeedAuraPlanContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            FreeAuraMonoPins(context.Pins);
+            if (context.Inventory != null)
+            {
+                FreeAuraMonoPins(context.Inventory.Pins);
+            }
         }
 
         private unsafe void TryAppendWildAnimalFeedAuraMonoGroupPlan(
@@ -1233,52 +1253,64 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                // Pin as the walk appends. The enumerate itself is what moves things: one get_Item
+                // invoke per element, each boxing on the Mono heap, so an sgen collection partway
+                // through relocates the entries already in the list. The read loop below then
+                // dereferences them, which is a native AV.
                 List<IntPtr> backpackItems = new List<IntPtr>();
-                if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, backpackItems, maxItems: this.WildAnimalFeedGroupRemainingItemBudget()))
+                List<uint> backpackPins = new List<uint>();
+                try
                 {
-                    this.WildAnimalFeedLogDetail("AuraMono Backpack " + storageName + " enumerate failed");
-                    continue;
+                    if (!this.TryEnumerateAuraMonoCollectionItems(itemsObj, backpackItems, backpackPins, this.WildAnimalFeedGroupRemainingItemBudget()))
+                    {
+                        this.WildAnimalFeedLogDetail("AuraMono Backpack " + storageName + " enumerate failed");
+                        continue;
+                    }
+
+                    this.WildAnimalFeedLogDetail("AuraMono Backpack " + storageName + " items=" + backpackItems.Count);
+                    string source = "AuraBackpack/" + storageName + (favoritesOnly ? "/favOnly" : "/all");
+                    foreach (IntPtr item in backpackItems)
+                    {
+                        if (this.WildAnimalFeedGroupBudgetExhausted())
+                        {
+                            break;
+                        }
+
+                        this.wildAnimalFeedGroupItemsInspected++;
+                        stats.RawItems++;
+                        if (!this.TryBuildWildAnimalFeedFoodCandidateAuraMono(
+                            item,
+                            groupId,
+                            favoriteIds,
+                            staticFavorites,
+                            favoriteAddition,
+                            out WildAnimalFeedFoodCandidate candidate,
+                            out WildAnimalFeedSkipReason skipReason))
+                        {
+                            this.IncrementWildAnimalFeedSkip(stats, skipReason);
+                            this.WildAnimalFeedLogRejectAuraMono(groupId, source, item, skipReason);
+                            continue;
+                        }
+
+                        if (favoritesOnly && this.wildAnimalFeedPreferFavorites && !candidate.IsFavorite)
+                        {
+                            stats.SkippedFavorite++;
+                            continue;
+                        }
+
+                        if (!seenNetIds.Add(candidate.NetId))
+                        {
+                            continue;
+                        }
+
+                        stats.Accepted++;
+                        candidates.Add(candidate);
+                        this.WildAnimalFeedLogDetail("AuraMono ACCEPT group=" + groupId + " staticId=" + candidate.StaticId + " netId=" + candidate.NetId);
+                    }
                 }
-
-                this.WildAnimalFeedLogDetail("AuraMono Backpack " + storageName + " items=" + backpackItems.Count);
-                string source = "AuraBackpack/" + storageName + (favoritesOnly ? "/favOnly" : "/all");
-                foreach (IntPtr item in backpackItems)
+                finally
                 {
-                    if (this.WildAnimalFeedGroupBudgetExhausted())
-                    {
-                        break;
-                    }
-
-                    this.wildAnimalFeedGroupItemsInspected++;
-                    stats.RawItems++;
-                    if (!this.TryBuildWildAnimalFeedFoodCandidateAuraMono(
-                        item,
-                        groupId,
-                        favoriteIds,
-                        staticFavorites,
-                        favoriteAddition,
-                        out WildAnimalFeedFoodCandidate candidate,
-                        out WildAnimalFeedSkipReason skipReason))
-                    {
-                        this.IncrementWildAnimalFeedSkip(stats, skipReason);
-                        this.WildAnimalFeedLogRejectAuraMono(groupId, source, item, skipReason);
-                        continue;
-                    }
-
-                    if (favoritesOnly && this.wildAnimalFeedPreferFavorites && !candidate.IsFavorite)
-                    {
-                        stats.SkippedFavorite++;
-                        continue;
-                    }
-
-                    if (!seenNetIds.Add(candidate.NetId))
-                    {
-                        continue;
-                    }
-
-                    stats.Accepted++;
-                    candidates.Add(candidate);
-                    this.WildAnimalFeedLogDetail("AuraMono ACCEPT group=" + groupId + " staticId=" + candidate.StaticId + " netId=" + candidate.NetId);
+                    FreeAuraMonoPins(backpackPins);
                 }
             }
         }
@@ -1303,46 +1335,55 @@ namespace HeartopiaMod
             }
 
             // Cap the enumerate at the remaining item budget so the enumerate loop itself (a get_Item
-            // invoke per element) can't run the full 8192 on a stockpiled category. NOTE: no pins list
-            // is passed, so the returned foodItems pointers are NOT pinned — they must not be held
-            // across a yield (raw Mono ptrs move on the SGen GC -> AV). The loop below stays fully
-            // synchronous for exactly this reason; do not add yields inside it.
+            // invoke per element) can't run the full 8192 on a stockpiled category. Pins are taken
+            // as the walk appends: each get_Item boxes on the Mono heap, so a collection partway
+            // through would relocate the entries already listed and the read loop below would
+            // dereference stale pointers (native AV). Staying synchronous is still required — do
+            // not add yields inside the loop — but it was never sufficient on its own.
             List<IntPtr> foodItems = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(foodsObj, foodItems, maxItems: this.WildAnimalFeedGroupRemainingItemBudget()))
+            List<uint> foodPins = new List<uint>();
+            try
             {
-                this.WildAnimalFeedLogDetail("AuraMono " + source + " enumerate FAILED");
-                return;
+                if (!this.TryEnumerateAuraMonoCollectionItems(foodsObj, foodItems, foodPins, this.WildAnimalFeedGroupRemainingItemBudget()))
+                {
+                    this.WildAnimalFeedLogDetail("AuraMono " + source + " enumerate FAILED");
+                    return;
+                }
+
+                foreach (IntPtr foodObj in foodItems)
+                {
+                    if (this.WildAnimalFeedGroupBudgetExhausted())
+                    {
+                        break;
+                    }
+
+                    this.wildAnimalFeedGroupItemsInspected++;
+                    stats.RawItems++;
+                    if (!this.TryGetWildAnimalFoodCandidateAuraMono(foodObj, groupId, favoriteIds, staticFavorites, favoriteAddition, out WildAnimalFeedFoodCandidate candidate, out WildAnimalFeedSkipReason skipReason))
+                    {
+                        this.IncrementWildAnimalFeedSkip(stats, skipReason);
+                        this.WildAnimalFeedLogRejectAuraMono(groupId, source, foodObj, skipReason);
+                        continue;
+                    }
+
+                    if (favoritesOnly && this.wildAnimalFeedPreferFavorites && !candidate.IsFavorite)
+                    {
+                        stats.SkippedFavorite++;
+                        continue;
+                    }
+
+                    if (!seenNetIds.Add(candidate.NetId))
+                    {
+                        continue;
+                    }
+
+                    stats.Accepted++;
+                    candidates.Add(candidate);
+                }
             }
-
-            foreach (IntPtr foodObj in foodItems)
+            finally
             {
-                if (this.WildAnimalFeedGroupBudgetExhausted())
-                {
-                    break;
-                }
-
-                this.wildAnimalFeedGroupItemsInspected++;
-                stats.RawItems++;
-                if (!this.TryGetWildAnimalFoodCandidateAuraMono(foodObj, groupId, favoriteIds, staticFavorites, favoriteAddition, out WildAnimalFeedFoodCandidate candidate, out WildAnimalFeedSkipReason skipReason))
-                {
-                    this.IncrementWildAnimalFeedSkip(stats, skipReason);
-                    this.WildAnimalFeedLogRejectAuraMono(groupId, source, foodObj, skipReason);
-                    continue;
-                }
-
-                if (favoritesOnly && this.wildAnimalFeedPreferFavorites && !candidate.IsFavorite)
-                {
-                    stats.SkippedFavorite++;
-                    continue;
-                }
-
-                if (!seenNetIds.Add(candidate.NetId))
-                {
-                    continue;
-                }
-
-                stats.Accepted++;
-                candidates.Add(candidate);
+                FreeAuraMonoPins(foodPins);
             }
         }
 

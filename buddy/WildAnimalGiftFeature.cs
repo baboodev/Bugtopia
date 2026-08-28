@@ -139,20 +139,23 @@ namespace HeartopiaMod
 
             yield return null;
 
-            List<IntPtr> haveGiftGroups = new List<IntPtr>();
-            if (!this.TryCollectWildAnimalHaveGiftGroupsAuraMono(haveGiftGroups, out int giftCount, out string groupNote) || giftCount <= 0)
+            // Ids, not raw Mono pointers: the group rows are boxed ints that only stay put while the
+            // collector pins them, and they would otherwise have to survive the yield below (raw
+            // ptrs move on the SGen GC -> AV). Scalarize inside the pinned window instead.
+            List<int> haveGiftGroupIds = new List<int>();
+            if (!this.TryCollectWildAnimalHaveGiftGroupsAuraMono(haveGiftGroupIds, out int giftCount, out string groupNote) || giftCount <= 0)
             {
                 this.WildAnimalGiftLog("HaveGift: " + groupNote);
                 complete?.Invoke("no wild gifts available");
                 yield break;
             }
 
-            this.WildAnimalGiftLog("HaveGift: " + groupNote + ", groups=" + haveGiftGroups.Count);
+            this.WildAnimalGiftLog("HaveGift: " + groupNote + ", groups=" + haveGiftGroupIds.Count);
 
             yield return null;
 
             HashSet<uint> seen = new HashSet<uint>();
-            HashSet<int> targetGroupIds = this.BuildWildAnimalGiftTargetGroupIds(haveGiftGroups);
+            HashSet<int> targetGroupIds = this.BuildWildAnimalGiftTargetGroupIds(haveGiftGroupIds);
             this.wildAnimalGiftActiveTargetGroupIds = targetGroupIds;
 
             if (this.TryCollectWildAnimalGiftNetIdsFromEntityScanAuraMono(targetGroupIds, seen, netIds, giftCount, out string entityScanNote))
@@ -173,11 +176,14 @@ namespace HeartopiaMod
             complete?.Invoke(status);
         }
 
-        private unsafe bool TryCollectWildAnimalHaveGiftGroupsAuraMono(List<IntPtr> groupItems, out int giftCount, out string status)
+        // Returns group IDS, not the Mono rows they were read from: the rows are boxed ints that
+        // move on the SGen GC the moment this method's pins are released, so handing them to a
+        // caller that yields would be a use-after-move.
+        private unsafe bool TryCollectWildAnimalHaveGiftGroupsAuraMono(List<int> groupIds, out int giftCount, out string status)
         {
             giftCount = 0;
             status = "unavailable";
-            groupItems?.Clear();
+            groupIds?.Clear();
 
             if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
             {
@@ -215,26 +221,35 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // Pin as the walk appends — HaveGift() hands back boxed ids, so every get_Item inside
+            // the enumerate allocates and can trigger a collection that relocates the rows already
+            // listed. The id reads below happen while those pins are still held.
             List<IntPtr> items = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(groupsObj, items))
+            List<uint> itemPins = new List<uint>();
+            try
             {
-                status = "collection enumerate failed";
-                return false;
-            }
-
-            for (int i = 0; i < items.Count; i++)
-            {
-                if (items[i] == IntPtr.Zero)
+                if (!this.TryEnumerateAuraMonoCollectionItems(groupsObj, items, itemPins))
                 {
-                    continue;
+                    status = "collection enumerate failed";
+                    return false;
                 }
 
-                giftCount++;
-                if (groupItems != null)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    groupItems.Add(items[i]);
-                    if (this.TryGetWildAnimalFeedGroupIdAuraMono(items[i], out int groupId))
+                    if (items[i] == IntPtr.Zero)
                     {
+                        continue;
+                    }
+
+                    giftCount++;
+                    if (groupIds == null)
+                    {
+                        continue;
+                    }
+
+                    if (this.TryGetWildAnimalFeedGroupIdAuraMono(items[i], out int groupId) && groupId > 0)
+                    {
+                        groupIds.Add(groupId);
                         this.WildAnimalGiftLog("HaveGift group[" + i + "] id=" + groupId);
                     }
                     else
@@ -243,24 +258,28 @@ namespace HeartopiaMod
                     }
                 }
             }
+            finally
+            {
+                FreeAuraMonoPins(itemPins);
+            }
 
             status = "count=" + giftCount;
             return true;
         }
 
-        private HashSet<int> BuildWildAnimalGiftTargetGroupIds(List<IntPtr> haveGiftGroups)
+        private HashSet<int> BuildWildAnimalGiftTargetGroupIds(List<int> haveGiftGroupIds)
         {
             HashSet<int> targetGroupIds = new HashSet<int>();
-            if (haveGiftGroups == null)
+            if (haveGiftGroupIds == null)
             {
                 return targetGroupIds;
             }
 
-            for (int i = 0; i < haveGiftGroups.Count; i++)
+            for (int i = 0; i < haveGiftGroupIds.Count; i++)
             {
-                if (this.TryGetWildAnimalFeedGroupIdAuraMono(haveGiftGroups[i], out int groupId) && groupId > 0)
+                if (haveGiftGroupIds[i] > 0)
                 {
-                    targetGroupIds.Add(groupId);
+                    targetGroupIds.Add(haveGiftGroupIds[i]);
                 }
             }
 

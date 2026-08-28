@@ -227,10 +227,13 @@ namespace HeartopiaMod
                 return false;
             }
 
-            // Pin every group row for the whole read loop: each GetFullness/GetFeedTroughCapacity
-            // invoke boxes its int return, and an sgen collection triggered by that allocation would
-            // move the still-held rows (AGENTS.md §11).
-            List<uint> pins = new List<uint>(context.GroupItems.Count + 1);
+            // The system object and every group row are already pinned — the context takes those
+            // gchandles DURING the GetUnlockedAnimals walk, the only moment the pointers are known
+            // good. That matters here because each GetFullness/GetFeedTroughCapacity invoke boxes
+            // its int return, and an sgen collection triggered by that allocation would otherwise
+            // move the still-held rows (AGENTS.md §11). Pinning them here instead — after the walk —
+            // was the crash: the rows had already moved, so the handles rooted recycled nursery
+            // memory and TryUnboxMonoInt32 AV'd on it (WER xdt.exe.21532, 2026-08-28).
 
             // Arg slot hoisted out of the loop on purpose (CA2014): one 8-byte cell reused across
             // every group, rewritten per iteration.
@@ -240,12 +243,6 @@ namespace HeartopiaMod
 
             try
             {
-                pins.Add(AuraMonoPinNew(context.WildAnimalSystemObj));
-                for (int i = 0; i < context.GroupItems.Count; i++)
-                {
-                    pins.Add(AuraMonoPinNew(context.GroupItems[i]));
-                }
-
                 for (int i = 0; i < context.GroupItems.Count; i++)
                 {
                     IntPtr groupObj = context.GroupItems[i];
@@ -279,10 +276,7 @@ namespace HeartopiaMod
             }
             finally
             {
-                for (int i = 0; i < pins.Count; i++)
-                {
-                    AuraMonoPinFree(pins[i]);
-                }
+                this.ReleaseWildAnimalFeedAuraPlanContext(context);
             }
 
             status = this.FormatWildAnimalRosterStatus();
