@@ -16,6 +16,9 @@ namespace Bugtopia.Launch
     {
         private const string GameFolderName = "Heartopia";
 
+        /// <summary>Heartopia's app id in the TapTap Global launcher, which names its install folder.</summary>
+        private const string TapTapAppId = "231364";
+
         /// <summary>
         /// The first candidate that really is an IL2CPP Heartopia install, or null.
         /// </summary>
@@ -87,6 +90,12 @@ namespace Bugtopia.Launch
             }
         }
 
+        /// <summary>
+        /// Every folder <see cref="Detect"/> looks in, in order. Public so a failed detection can
+        /// say where it looked - "the usual folders were checked" is not something anyone can act on.
+        /// </summary>
+        public static IEnumerable<string> SearchPaths() => Candidates();
+
         private static IEnumerable<string> Candidates()
         {
             foreach (string library in SteamLibraries())
@@ -113,12 +122,53 @@ namespace Bugtopia.Launch
                     yield return dir;
             }
 
-            // Non-Steam installs, including the TapTap Global launcher's app folder.
-            yield return @"C:\TapTapGlobal\Apps\231364";
+            // The TapTap Global launcher installs to <drive>:\TapTapGlobal\Apps\<app id>, and which
+            // drive is the user's choice — so every drive is tried rather than assuming C:.
+            foreach (DriveInfo drive in ReadyDrives())
+                yield return Path.Combine(drive.Name, "TapTapGlobal", "Apps", TapTapAppId);
+
+            // Other non-Steam installs.
             foreach (string root in new[] { @"C:\Program Files", @"C:\Program Files (x86)",
                                             @"C:\Games", @"D:\Games", @"E:\Games" })
             {
                 yield return Path.Combine(root, GameFolderName);
+            }
+        }
+
+        /// <summary>
+        /// Drives worth looking at: the ones that are present and not on the far end of a network.
+        ///
+        /// <see cref="DriveInfo.IsReady"/> is what keeps an empty card reader from being probed, and
+        /// network drives are left out entirely — a disconnected one can block for seconds, and this
+        /// runs while the window is coming up.
+        /// </summary>
+        private static IEnumerable<DriveInfo> ReadyDrives()
+        {
+            DriveInfo[] drives;
+            try
+            {
+                drives = DriveInfo.GetDrives();
+            }
+            catch (Exception)
+            {
+                yield break;
+            }
+
+            foreach (DriveInfo drive in drives)
+            {
+                bool usable;
+                try
+                {
+                    usable = (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable)
+                             && drive.IsReady;
+                }
+                catch (Exception)
+                {
+                    usable = false;
+                }
+
+                if (usable)
+                    yield return drive;
             }
         }
 

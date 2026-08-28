@@ -724,7 +724,10 @@ function renderSteps() {
        state.gameOk ? "Found" : state.game ? "Not an IL2CPP build" : "Not found",
        { detect: !state.gameOk, browse: !state.gameOk });
 
-  if (existing.found) {
+  if (!state.gameOk) {
+    // Nothing to be clean about yet: this card is an opinion about a folder, and there is no folder.
+    step("clean", "info", "Checked once the game is found.", {});
+  } else if (existing.found) {
     step("clean", "info", existing.root
       ? "An existing install at " + esc(existing.root) +
         " loads the mod. Launch will ask before moving it here" +

@@ -53,7 +53,9 @@ namespace Bugtopia.Launcher
             }
             else if (announce)
             {
-                Log("No Heartopia install found - Steam libraries and the usual folders were checked.");
+                Log("No Heartopia install found. Looked in:");
+                foreach (string candidate in GameDetection.SearchPaths())
+                    Log("  " + candidate);
             }
             return found;
         }
