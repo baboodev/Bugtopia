@@ -4460,6 +4460,7 @@ namespace HeartopiaMod
         private readonly List<KeyValuePair<int, string>> netCookVisibleRecipeEntries = new List<KeyValuePair<int, string>>(256);
         private readonly Dictionary<int, int> netCookRecipeCookerTypes = new Dictionary<int, int>();
         private int netCookRecipeCacheCookerStaticId = 0;
+        private int netCookRecipeCacheCookerType = 0;
         private int netCookRecipeCacheFailureCookerStaticId = 0;
         private float nextNetCookRecipeCacheRetryAt = 0f;
         private readonly List<uint> netCookMaterialNetIds = new List<uint>(16);

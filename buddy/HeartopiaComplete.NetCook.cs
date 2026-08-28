@@ -556,15 +556,27 @@ namespace HeartopiaMod
             this.netCookRecipeCookerTypes.Clear();
             this.netCookRecipeRequirementsCache.Clear();
             this.netCookRecipeCacheCookerStaticId = 0;
+            this.netCookRecipeCacheCookerType = 0;
             this.netCookRecipeCacheFailureCookerStaticId = 0;
             this.nextNetCookRecipeCacheRetryAt = 0f;
             this.nextNetCookMaxRefreshAt = 0f;
+        }
+
+        private bool IsNetCookRecipeCacheTypeUsable()
+        {
+            if (this.netCookCookerType <= 0)
+            {
+                return true;
+            }
+
+            return this.netCookRecipeCacheCookerType == this.netCookCookerType;
         }
 
         private bool HasFreshNetCookRecipeCache()
         {
             return this.netCookRecipeEntries.Count > 0
                 && this.netCookRecipeCacheCookerStaticId == this.netCookCookerStaticId
+                && this.IsNetCookRecipeCacheTypeUsable()
                 && this.netCookRecipeCacheFailureCookerStaticId != this.netCookCookerStaticId;
         }
 
@@ -4840,7 +4852,9 @@ namespace HeartopiaMod
                 return true;
             }
 
-            if (this.netCookRecipeEntries.Count > 0 && this.netCookRecipeCacheCookerStaticId == this.netCookCookerStaticId)
+            if (this.netCookRecipeEntries.Count > 0
+                && this.netCookRecipeCacheCookerStaticId == this.netCookCookerStaticId
+                && this.IsNetCookRecipeCacheTypeUsable())
             {
                 return true;
             }
@@ -5023,6 +5037,7 @@ namespace HeartopiaMod
                 }
 
                 this.netCookRecipeCacheCookerStaticId = this.netCookCookerStaticId;
+                this.netCookRecipeCacheCookerType = this.netCookCookerType;
                 if (this.netCookRecipeEntries.Count <= 0)
                 {
                     this.NetCookLog("CookingSystem AuraMono GetAllRecipes produced no usable recipes.");
