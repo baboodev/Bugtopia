@@ -1210,6 +1210,9 @@ namespace HeartopiaMod
 
             // Stealth Block
             { "Friend joined — farm stopped", "Friend joined — farm stopped" },
+
+            // Startup menu hint (StartupMenuHintFeature.cs)
+            { "Press {0} to open the Bugtopia menu", "Press {0} to open the Bugtopia menu" },
         };
 
         // Built-in Spanish fallback strings.
@@ -2401,6 +2404,9 @@ namespace HeartopiaMod
 
             // Stealth Block
             { "Friend joined — farm stopped", "Un amigo se ha unido: recolección detenida" },
+
+            // Startup menu hint (StartupMenuHintFeature.cs)
+            { "Press {0} to open the Bugtopia menu", "Pulsa {0} para abrir el menú de Bugtopia" },
         };
 
         // Built-in Simplified Chinese fallback strings.
@@ -3592,6 +3598,9 @@ namespace HeartopiaMod
 
             // Stealth Block
             { "Friend joined — farm stopped", "好友进入 — 采集已停止" },
+
+            // Startup menu hint (StartupMenuHintFeature.cs)
+            { "Press {0} to open the Bugtopia menu", "按 {0} 打开 Bugtopia 菜单" },
         };
         private static readonly Dictionary<string, string> PortugueseDefaults = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -4774,6 +4783,9 @@ namespace HeartopiaMod
 
             // Stealth Block
             { "Friend joined — farm stopped", "Um amigo entrou — coleta interrompida" },
+
+            // Startup menu hint (StartupMenuHintFeature.cs)
+            { "Press {0} to open the Bugtopia menu", "Pressione {0} para abrir o menu do Bugtopia" },
         };
 
         // Built-in Thai fallback strings.
@@ -5956,6 +5968,9 @@ namespace HeartopiaMod
 
             // Stealth Block
             { "Friend joined — farm stopped", "เพื่อนเข้ามา — หยุดการเก็บเกี่ยว" },
+
+            // Startup menu hint (StartupMenuHintFeature.cs)
+            { "Press {0} to open the Bugtopia menu", "กด {0} เพื่อเปิดเมนู Bugtopia" },
         };
 
         // Built-in Korean fallback strings. Item and creature names follow the game's
@@ -7151,6 +7166,9 @@ namespace HeartopiaMod
 
             // Stealth Block
             { "Friend joined — farm stopped", "친구가 들어와 파밍을 멈췄습니다" },
+
+            // Startup menu hint (StartupMenuHintFeature.cs)
+            { "Press {0} to open the Bugtopia menu", "{0} 키로 Bugtopia 메뉴를 엽니다" },
         };
 
         // Runtime localization state.

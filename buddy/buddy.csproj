@@ -451,6 +451,7 @@
     <Compile Include="PartyAutoDeclineFeature.cs" />
     <Compile Include="ActivityEventAutoDeclineFeature.cs" />
     <Compile Include="PersistentHudFeature.cs" />
+    <Compile Include="StartupMenuHintFeature.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="MusicPlayerFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />

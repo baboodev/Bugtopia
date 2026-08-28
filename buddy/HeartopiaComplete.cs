@@ -530,6 +530,11 @@ namespace HeartopiaMod
             this.LoadUiTheme();
             this.LoadRadarSettings();
             this.LoadBirdFarmSettings();
+            // Startup menu hint (StartupMenuHintFeature.cs) — after LoadKeybinds so the toast names
+            // the player's own key. Queued here, at mod start: the toast stack already renders this
+            // early (LoadUiTheme's toast just above proves it), and a session that never leaves the
+            // login screen is precisely the one that needs the hint.
+            this.ShowStartupMenuHint();
             // NOTE: the mod installs NO IL2CPP-.text Harmony patches anymore. Noclip/teleport drive
             // the game's PlayerMoveComponent, mouse-look drives the game camera controller's axis,
             // and the camera-toggle interact clicks the interact button directly — all embedded-Mono

@@ -86,7 +86,7 @@ Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pet
 
 ### Menu
 
-- **Toggle menu:** Insert (default), rebindable in Settings.
+- **Toggle menu:** Insert (default), rebindable in Settings. The mod toasts the current key once at startup, while the game is still booting (`StartupMenuHintFeature.cs`); it follows the Notifications toggle below.
 - **Disable all:** Optional hotkey stops active farms and automation.
 - **Status overlay:** Optional HUD showing active features and farm states.
 - **Notifications:** Toast-style messages inside the mod UI (position configurable).
