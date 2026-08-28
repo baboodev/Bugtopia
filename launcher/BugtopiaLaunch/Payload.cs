@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
 
 namespace Bugtopia.Launch
@@ -89,6 +90,25 @@ namespace Bugtopia.Launch
                     "BepInEx and holds the runtime the bootstrap hosts; unpack the whole archive, " +
                     "not just the BepInEx folder.");
             }
+        }
+
+        /// <summary>
+        /// Unpacks a BepInEx archive, replacing whatever is in the target folder.
+        ///
+        /// Taking the zip rather than an unpacked folder is what lets the simple screen ask for the
+        /// file exactly as it was downloaded: no unpacking step to explain, and no chance of
+        /// pointing at the wrong level inside the result.
+        /// </summary>
+        public static void UnpackArchive(string zipPath, string targetFolder, Action<string> log = null)
+        {
+            log ??= delegate { };
+            if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath))
+                throw new PayloadException("No such archive: " + zipPath);
+
+            log("Unpacking " + zipPath);
+            Directory.CreateDirectory(targetFolder);
+            ZipFile.ExtractToDirectory(zipPath, targetFolder, overwriteFiles: true);
+            log("Unpacked to " + targetFolder);
         }
 
         /// <summary>Reads the BepInEx build out of the archive, for the version stamp and the status line.</summary>

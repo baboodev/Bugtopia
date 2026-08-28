@@ -34,15 +34,27 @@ namespace Bugtopia.Launcher
         {
             api = new Api(Send, this);
 
-            window = new PhotinoWindow()
+            PhotinoWindow shell = new PhotinoWindow()
                 .SetTitle("Bugtopia")
                 .SetUseOsDefaultSize(false)
-                .SetSize(1000, 760)
-                .SetMinSize(820, 620)
+                .SetSize(Api.WindowWidth, Api.WindowHeight(api.Expert))
+                .SetMinSize(820, 480)
                 .Center()
                 .SetResizable(true)
                 .SetContextMenuEnabled(false)
-                .SetDevToolsEnabled(false)
+                .SetDevToolsEnabled(false);
+
+            // Photino takes the window icon as a path, not a handle, so the .ico has to be on disk
+            // even though it ships inside the exe. It is written beside the native shell, in the
+            // folder the launcher already owns and can delete wholesale.
+            //
+            // The exe's own icon comes from ApplicationIcon in the csproj instead — that one is a
+            // Win32 resource, which is what Explorer and a pinned shortcut read.
+            string icon = NativeShell.WriteIcon();
+            if (icon != null)
+                shell.SetIconFile(icon);
+
+            window = shell
                 .RegisterWebMessageReceivedHandler((sender, message) => api.Dispatch(message))
                 .LoadRawString(LoadUi());
 
@@ -74,6 +86,39 @@ namespace Bugtopia.Launcher
             return chosen != null && chosen.Length > 0 ? chosen[0] : null;
         }
 
+        /// <summary>Resizes and re-centres, for the switch between the two views.</summary>
+        public void Resize(int width, int height)
+        {
+            PhotinoWindow w = window;
+            if (w == null)
+                return;
+
+            try
+            {
+                w.Invoke(() => w.SetSize(width, height).Center());
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        /// <summary>Shuts the launcher down. Called once the game is running and injected.</summary>
+        public void Close()
+        {
+            PhotinoWindow w = window;
+            if (w == null)
+                return;
+
+            try
+            {
+                w.Invoke(() => w.Close());
+            }
+            catch (Exception)
+            {
+                // Already going away.
+            }
+        }
+
         public string PickFile(string title, string filterName, string[] extensions)
         {
             string[] chosen = window.ShowOpenFile(
@@ -84,11 +129,21 @@ namespace Bugtopia.Launcher
             return chosen != null && chosen.Length > 0 ? chosen[0] : null;
         }
 
+        /// <summary>
+        /// The page, exactly as it is embedded.
+        ///
+        /// Nothing is folded into it. The string handed to LoadRawString is what Photino passes to
+        /// the native side at window creation, and a page carrying the logo as a base64 data URI —
+        /// about 58 KB against 26 KB without — access-violates inside Photino.Native.dll every
+        /// time, measured 2 for 2 against a build identical but for that one string. The logo comes
+        /// over the message bridge after load instead, where size is not a problem.
+        /// </summary>
         private static string LoadUi()
         {
             using Stream stream = typeof(PhotinoHost).Assembly.GetManifestResourceStream("ui.html");
             if (stream == null)
                 return "<html><body>ui.html is missing from this build.</body></html>";
+
             using var reader = new StreamReader(stream);
             return reader.ReadToEnd();
         }
@@ -98,6 +153,12 @@ namespace Bugtopia.Launcher
     {
         string PickFolder(string title, string current);
         string PickFile(string title, string filterName, string[] extensions);
+
+        /// <summary>Resizes the window, for the switch between the simple and expert views.</summary>
+        void Resize(int width, int height);
+
+        /// <summary>Closes the launcher, once the game is running and injected.</summary>
+        void Close();
     }
 
     /// <summary>
@@ -116,11 +177,43 @@ namespace Bugtopia.Launcher
     internal static class NativeShell
     {
         private const string ResourceName = "Photino.Native.dll";
+        private const string IconName = "bugtopia.ico";
         private static IntPtr handle;
 
         internal static void Install()
         {
             NativeLibrary.SetDllImportResolver(typeof(PhotinoWindow).Assembly, Resolve);
+        }
+
+        /// <summary>
+        /// Writes the window icon out beside the shell and returns its path, or null when this
+        /// build does not carry one. Rewritten whenever the size differs, which is enough to catch
+        /// a changed icon without hashing a file that is read once per run.
+        /// </summary>
+        internal static string WriteIcon()
+        {
+            try
+            {
+                using Stream source = typeof(NativeShell).Assembly.GetManifestResourceStream(IconName);
+                if (source == null)
+                    return null;
+
+                var bytes = new byte[source.Length];
+                source.ReadExactly(bytes);
+
+                string file = Path.Combine(KnownPaths.NativeShellRoot, IconName);
+                if (!File.Exists(file) || new FileInfo(file).Length != bytes.Length)
+                {
+                    Directory.CreateDirectory(KnownPaths.NativeShellRoot);
+                    File.WriteAllBytes(file, bytes);
+                }
+                return file;
+            }
+            catch (Exception)
+            {
+                // A window without its icon is still a window.
+                return null;
+            }
         }
 
         private static IntPtr Resolve(string name, Assembly assembly, DllImportSearchPath? path)

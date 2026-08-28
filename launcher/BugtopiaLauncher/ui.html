@@ -48,8 +48,18 @@ html, body {
 .launcher-card > * { flex: none; }
 .launcher-card > #log { flex: 1 1 auto; }
 
-.launcher-header { display: flex; justify-content: space-between; align-items: center; }
-.brand { display: flex; align-items: baseline; gap: 14px; }
+/* Three columns so the brand sits in the middle of the window rather than in the space the
+   checkbox leaves it. The outer columns match, and only one of them holds anything. */
+.launcher-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
+/* The logo sits in the left column rather than beside the title in the middle one, so that what
+   is centred in the window is the title itself and not the pair of them. */
+.brand { display: contents; }
+.header-logo {
+  grid-column: 1; justify-self: end; margin-right: 16px;
+  height: 60px; width: auto; filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.6));
+}
+.brand-text { grid-column: 2; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.header-controls { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: 14px; }
 .brand h1 {
   font-family: 'Outfit', 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
   font-size: 1.9rem; font-weight: 700;
@@ -57,12 +67,39 @@ html, body {
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 .brand .subtitle { font-size: 0.82rem; color: var(--text-muted); }
-.version-tag {
-  font-size: 0.8rem; font-weight: 600; padding: 4px 12px;
-  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border);
-  border-radius: 20px; color: var(--text-muted);
-}
 
+/* The two views. Simple is the default; expert is the whole panel, remembered between runs. */
+body:not(.expert) .expert-only { display: none !important; }
+body.expert .simple-only { display: none !important; }
+body:not(.expert) .footer-actions { justify-content: center; }
+/* The steps say everything the status line would repeat, so it stays out of the way until it
+   has something of its own to report: a failure, or a download in progress. */
+body:not(.expert) #log { display: none; }
+body:not(.expert) #banner { display: none; }
+body:not(.expert) #banner.speak { display: block; }
+body:not(.expert) #play { padding: 15px 34px; font-size: 1rem; }
+
+.steps { display: flex; flex-direction: column; gap: 10px; }
+.step {
+  display: flex; align-items: center; gap: 14px;
+  background: rgba(15, 23, 42, 0.5); border: 1px solid var(--card-border);
+  border-radius: 12px; padding: 13px 16px;
+}
+.step-mark { flex: none; width: 22px; height: 22px; }
+.step-mark svg { width: 22px; height: 22px; }
+.step.done .step-mark { color: var(--success); }
+.step.todo .step-mark { color: var(--warning); }
+.step.info .step-mark { color: var(--text-muted); }
+.step-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.step-title { font-size: 0.9rem; font-weight: 600; }
+.step-detail {
+  font-size: 0.78rem; line-height: 1.4; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.step-detail.wrap { white-space: normal; }
+.step-detail a { color: var(--primary-accent); cursor: pointer; text-decoration: underline; }
+.step-action { flex: none; display: flex; gap: 8px; }
+#expert-view { display: flex; flex-direction: column; gap: 14px; }
 .section-card { display: flex; flex-direction: column; gap: 6px; }
 .input-label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); }
 .input-hint { margin-top: 0.3rem; font-size: 0.72rem; line-height: 1.35; color: var(--text-muted); opacity: 0.75; }
@@ -179,11 +216,65 @@ a:hover { text-decoration: underline; }
 
   <header class="launcher-header">
     <div class="brand">
-      <h1>Bugtopia</h1>
-      <span class="subtitle" id="subtitle"></span>
+      <!-- Filled in after load; see PhotinoHost.LoadUi for why it is not inlined here. -->
+      <img class="header-logo" id="logo" alt="" hidden />
+      <div class="brand-text">
+        <h1>Bugtopia Launcher</h1>
+        <span class="subtitle" id="version"></span>
+      </div>
     </div>
-    <div class="version-tag" id="mode-tag">offline</div>
+    <div class="header-controls">
+      <label class="checkbox-label" title="Show every field and dropdown">
+        <input type="checkbox" id="expert" /><span>Expert mode</span>
+      </label>
+    </div>
   </header>
+
+  <!-- The whole of a first run: what was found, what is still needed, and the button. Each row
+       resolves itself, so a machine that is already set up shows four ticks and nothing to do. -->
+  <section class="steps simple-only" id="steps">
+    <div class="step" id="step-game">
+      <span class="step-mark"></span>
+      <div class="step-body">
+        <span class="step-title">Heartopia</span>
+        <span class="step-detail" id="step-game-detail"></span>
+      </div>
+      <div class="step-action">
+        <button class="btn secondary compact" id="step-detect">Detect</button>
+        <button class="btn secondary compact" id="step-browse" data-pick="game">Browse...</button>
+      </div>
+    </div>
+
+    <div class="step" id="step-clean">
+      <span class="step-mark"></span>
+      <div class="step-body">
+        <span class="step-title">Game folder</span>
+        <span class="step-detail wrap" id="step-clean-detail"></span>
+      </div>
+    </div>
+
+    <div class="step" id="step-bepinex">
+      <span class="step-mark"></span>
+      <div class="step-body">
+        <span class="step-title">BepInEx</span>
+        <span class="step-detail wrap" id="step-bepinex-detail"></span>
+      </div>
+      <div class="step-action">
+        <button class="btn secondary compact" id="step-archive">Choose the zip...</button>
+        <button class="btn secondary compact" id="step-download">Download</button>
+      </div>
+    </div>
+
+    <div class="step" id="step-interop">
+      <span class="step-mark"></span>
+      <div class="step-body">
+        <span class="step-title">Interop assemblies</span>
+        <span class="step-detail wrap" id="step-interop-detail"></span>
+      </div>
+    </div>
+  </section>
+
+  <div id="expert-view" class="expert-only">
 
   <section class="section-card">
     <label class="input-label" for="game">Heartopia Directory</label>
@@ -283,6 +374,7 @@ a:hover { text-decoration: underline; }
       <span id="st-interop" class="status-value status-unknown">Missing</span>
     </div>
   </section>
+  </div>
 
   <div class="message-banner" id="banner">Pick your Heartopia directory to begin.</div>
 
@@ -290,10 +382,10 @@ a:hover { text-decoration: underline; }
 
   <footer class="launcher-footer">
     <div class="footer-actions">
-      <label class="checkbox-label"><input type="checkbox" id="force" /><span>Force regenerate</span></label>
+      <label class="checkbox-label expert-only"><input type="checkbox" id="force" /><span>Force regenerate</span></label>
       <div class="launcher-actions">
-        <button class="btn secondary action-btn" id="prepare">Prepare</button>
-        <button class="btn secondary action-btn" id="generate">Generate interop</button>
+        <button class="btn secondary action-btn expert-only" id="prepare">Prepare</button>
+        <button class="btn secondary action-btn expert-only" id="generate">Generate interop</button>
         <button class="btn primary action-btn" id="play">
           <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path>
@@ -373,6 +465,7 @@ function say(text, kind) {
   const b = $("banner");
   b.textContent = text;
   b.classList.toggle("warning", kind === "warning");
+  b.classList.toggle("speak", kind === "warning" || busy);
 }
 
 function mark(el, text, cls) {
@@ -380,16 +473,47 @@ function mark(el, text, cls) {
   el.className = "status-value " + cls;
 }
 
+const MARKS = {
+  done: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+  todo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="8" x2="12" y2="13"></line><line x1="12" y1="16.5" x2="12" y2="16.5"></line></svg>',
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="11" x2="12" y2="16"></line><line x1="12" y1="7.5" x2="12" y2="7.5"></line></svg>',
+};
+
+/** One row of the simple screen: state, what it says, and which of its buttons apply. */
+function step(id, state, detail, buttons) {
+  const row = $("step-" + id);
+  row.className = "step " + state;
+  row.querySelector(".step-mark").innerHTML = MARKS[state];
+  $("step-" + id + "-detail").innerHTML = detail;
+  for (const [name, shown] of Object.entries(buttons || {})) {
+    const btn = $("step-" + name);
+    btn.style.display = shown ? "" : "none";
+    btn.disabled = busy;
+  }
+}
+
 async function refresh() { state = await call("state"); render(); loadProfiles(); }
 
+/** The header graphic, which the launcher hands over separately from the page. */
+async function loadLogo() {
+  let src; try { src = await call("logo"); } catch { return; }
+  if (!src) return;
+  const img = $("logo");
+  img.onload = () => { img.hidden = false; };
+  img.src = src;
+}
+
 function render() {
+  $("version").textContent = state.version || "";
+  document.body.classList.toggle("expert", !!state.expert);
+  $("expert").checked = !!state.expert;
+  renderSteps();
+
   for (const k of ["game", "source", "storage", "unityLibsZip"]) {
     $(k).value = state[k] || "";
     $(k).title = state[k] || "";   // a long path still outruns its box on a narrow window
   }
 
-  $("mode-tag").textContent = state.downloads ? "online" : "offline";
-  $("subtitle").textContent = "BepInEx " + (state.bepInExVersion || "");
 
   $("source-hint").innerHTML = state.downloads
     ? "The Unity.IL2CPP win-x64 archive, unpacked. Needed only until Prepare."
@@ -434,6 +558,49 @@ function render() {
   $("play").disabled = busy;
   $("dl-bepinex").disabled = busy;
   $("dl-unitylibs").disabled = busy || !state.gameOk;
+}
+
+/** The simple screen. Everything here is derived from the same state the expert panel shows. */
+function renderSteps() {
+  const existing = state.existing || {};
+
+  step("game", state.gameOk ? "done" : "todo",
+       state.gameOk ? esc(state.game) + "  &middot;  Unity " + esc(state.unityVersion)
+                    : (state.game ? "Not an IL2CPP build: " + esc(state.game)
+                                  : "Not found automatically."),
+       { detect: !state.gameOk, browse: !state.gameOk });
+
+  if (existing.found) {
+    step("clean", "info", existing.root
+      ? "An existing install at " + esc(existing.root) +
+        " loads the mod. Launch will ask before moving it here" +
+        (existing.interop ? ", interop assemblies and all." : ".")
+      : (existing.melon ? "MelonLoader" : "Another loader") +
+        " is installed here and boots first. Launch will ask before removing it.",
+      {});
+  } else {
+    step("clean", "done", "Clean - nothing else loads into this game.", {});
+  }
+
+  const haveSource = !!state.source || state.prepared;
+  step("bepinex", state.prepared ? "done" : haveSource || state.downloads ? "info" : "todo",
+       state.prepared ? "Installed" + (state.preparedFrom ? "  &middot;  " + esc(state.preparedFrom) : "")
+       : haveSource ? "Archive ready - Launch installs it."
+       : state.downloads ? "Launch downloads " + esc(state.bepInExVersion) + " itself."
+       : 'Needed once. <a data-url="' + esc(state.bepInExUrl) + '">Download ' +
+         esc(state.bepInExVersion) + '</a>, then choose the zip.',
+       { archive: !state.prepared && !state.downloads, download: !state.prepared && state.downloads });
+
+  step("interop", state.hasInterop ? "done" : "info",
+       state.hasInterop ? "Built"
+       : existing.interop ? "Comes with the install being adopted."
+       : "Built on the first launch. It takes several minutes, once.",
+       {});
+}
+
+function esc(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 async function loadProfiles() {
@@ -488,6 +655,15 @@ function save() {
   }).then(s => { state = s; render(); });
 }
 
+$("expert").onchange = () => run("setExpert", { value: $("expert").checked });
+
+$("step-detect").onclick = () => $("detect").onclick();
+$("step-download").onclick = () => run("downloadBepInEx");
+$("step-archive").onclick = async () => {
+  const chosen = await call("pickFile", { title: "BepInEx-Unity.IL2CPP-win-x64 archive" });
+  if (chosen) run("useArchive", { path: chosen });
+};
+
 $("detect").onclick = async () => {
   const found = await call("detectGame");
   if (found) { $("game").value = found; await save(); }
@@ -530,6 +706,7 @@ $("server-set").onclick = async () => {
 };
 
 refresh();
+loadLogo();
 </script>
 </body>
 </html>

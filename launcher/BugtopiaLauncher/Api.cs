@@ -119,6 +119,24 @@ namespace Bugtopia.Launcher
                         Str(args, "title"), "Zip archives", new[] { "zip" })));
                     break;
 
+                case "useArchive":
+                    string archive = Str(args, "path");
+                    RunJob(id, "Unpack BepInEx", () => UseArchive(archive));
+                    break;
+
+                case "setExpert":
+                    settings.Expert = args.ValueKind == JsonValueKind.Object &&
+                                      args.TryGetProperty("value", out JsonElement e) &&
+                                      e.ValueKind == JsonValueKind.True;
+                    SafeSave();
+                    dialogs.Resize(WindowWidth, WindowHeight(settings.Expert));
+                    Reply(id, WriteState);
+                    break;
+
+                case "logo":
+                    Reply(id, w => WriteValue(w, DataUri("logo.png", "image/png")));
+                    break;
+
                 case "openUrl":
                     OpenUrl(Str(args, "url"));
                     Reply(id, w => WriteValue(w, null));
@@ -143,7 +161,9 @@ namespace Bugtopia.Launcher
                     break;
 
                 case "play":
-                    RunJob(id, "Launch", LaunchAsync);
+                    // Closes on success only. A launch that failed has something to say, and the
+                    // window is the only place it can say it.
+                    RunJob(id, "Launch", LaunchAsync, dialogs.Close);
                     break;
 
                 case "confirmResult":
@@ -184,7 +204,15 @@ namespace Bugtopia.Launcher
 
         // ---- jobs ------------------------------------------------------------
 
-        private void RunJob(string id, string name, Func<Task> work)
+        /// <summary>The window the page is drawn in. Simple mode has a third less to show.</summary>
+        internal const int WindowWidth = 1000;
+
+        internal static int WindowHeight(bool expert) => expert ? 760 : 560;
+
+        /// <summary>Which view the window should open in, read before the window exists.</summary>
+        internal bool Expert => settings.Expert;
+
+        private void RunJob(string id, string name, Func<Task> work, Action then = null)
         {
             if (busy)
             {
@@ -213,14 +241,21 @@ namespace Bugtopia.Launcher
                 busy = false;
                 Event("busy", false);
                 if (error == null)
+                {
                     Reply(id, WriteState);
+                    then?.Invoke();
+                }
                 else
+                {
                     Fail(id, error);
+                }
             });
         }
 
         private void RunJob(string id, string name, Action work) =>
             RunJob(id, name, () => { work(); return Task.CompletedTask; });
+
+
 
         // ---- asking ----------------------------------------------------------
 
@@ -291,6 +326,24 @@ namespace Bugtopia.Launcher
             Payload.ValidateSource(source, out string coreDir, out _);
             settings.PreparedFrom = Payload.ReadBepInExVersion(coreDir);
             SafeSave();
+        }
+
+        /// <summary>
+        /// Takes a downloaded archive as the BepInEx source, unpacking it into storage. Validated
+        /// here rather than at Prepare, so picking the wrong flavour is answered while the file
+        /// picker is still the thing on the user's mind.
+        /// </summary>
+        private void UseArchive(string zipPath)
+        {
+            StorageLayout storage = RequireStorage();
+            string target = Path.Combine(storage.Root, "download", "bepinex");
+
+            Payload.UnpackArchive(zipPath, target, Log);
+            Payload.ValidateSource(target, out string coreDir, out _);
+
+            settings.BepInExSource = target;
+            SafeSave();
+            Log("BepInEx " + (Payload.ReadBepInExVersion(coreDir) ?? "archive") + " is ready to install.");
         }
 
         private async Task DownloadBepInExAsync()
@@ -666,6 +719,22 @@ namespace Bugtopia.Launcher
             Log("Injected. The bootstrap's own account is in " + Path.Combine(storage.Bin, "bugtopia_inject.log"));
         }
 
+        /// <summary>
+        /// An embedded file as a data URI, or null when this build does not carry it. Fetched by
+        /// the page rather than baked into it — see <c>PhotinoHost.LoadUi</c> for why the initial
+        /// page string has to stay small.
+        /// </summary>
+        private static string DataUri(string resource, string mediaType)
+        {
+            using Stream stream = typeof(Api).Assembly.GetManifestResourceStream(resource);
+            if (stream == null)
+                return null;
+
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            return "data:" + mediaType + ";base64," + Convert.ToBase64String(buffer.ToArray());
+        }
+
         /// <summary>The files this exe carries, written into the storage tree by Prepare.</summary>
         private static IEnumerable<PayloadFile> CarriedFiles()
         {
@@ -690,7 +759,9 @@ namespace Bugtopia.Launcher
                 : settings.Storage);
             w.WriteString("unityLibsZip", settings.UnityLibsZip ?? "");
             w.WriteString("defaultStorage", LauncherSettings.DefaultStorage);
+            w.WriteString("version", HeartopiaMod.ModBuildVersion.Display);
             w.WriteBoolean("downloads", Downloads.Enabled);
+            w.WriteBoolean("expert", settings.Expert);
             w.WriteString("bepInExVersion", Downloads.BepInExVersion);
             w.WriteString("bepInExUrl", Downloads.BepInExUrl);
             w.WriteString("preparedFrom", settings.PreparedFrom ?? "");

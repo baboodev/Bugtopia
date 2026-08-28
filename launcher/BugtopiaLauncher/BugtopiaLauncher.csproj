@@ -37,6 +37,14 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <DebugType>none</DebugType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>assets\bugtopia.ico</ApplicationIcon>
+    <!-- The three version attributes come from the generated file below instead of the SDK.
+         Only those three: turning the whole of GenerateAssemblyInfo off would also drop the
+         SupportedOSPlatform attribute that net8.0-windows implies, and 154 CA1416 warnings would
+         appear in its place. -->
+    <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
+    <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
+    <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -55,6 +63,24 @@
     <PluginDllPath Condition="'$(PluginDllPath)' == ''">$(MSBuildThisFileDirectory)..\..\buddy\bin\BepInEx\Release\bugtopia.dll</PluginDllPath>
   </PropertyGroup>
 
+  <!-- The launcher takes its version from the same script the mod does, so it can never claim a
+       different build from the plugin it carries. Both read the tag and the short SHA out of
+       this working tree, and both render them as "2.8.2 (46f9cfb)". -->
+  <PropertyGroup>
+    <LauncherVersionFile>$(MSBuildProjectDirectory)\obj\$(Configuration)\LauncherVersion.g.cs</LauncherVersionFile>
+    <ResolveBuildVersionScript>$(MSBuildThisFileDirectory)..\..\ci\resolve-build-version.ps1</ResolveBuildVersionScript>
+  </PropertyGroup>
+
+  <Target Name="GenerateLauncherVersion" BeforeTargets="BeforeCompile">
+    <MakeDir Directories="$(MSBuildProjectDirectory)\obj\$(Configuration)" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ResolveBuildVersionScript)&quot; -OutputPath &quot;$(LauncherVersionFile)&quot;" />
+    <ItemGroup>
+      <Compile Include="$(LauncherVersionFile)" />
+      <FileWrites Include="$(LauncherVersionFile)" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\BugtopiaLaunch\BugtopiaLaunch.csproj" />
     <PackageReference Include="Photino.NET" Version="4.0.16" />
@@ -62,6 +88,11 @@
 
   <ItemGroup>
     <EmbeddedResource Include="ui.html" LogicalName="ui.html" />
+    <!-- The header graphic, folded into the page as a data URI when it is loaded. -->
+    <EmbeddedResource Include="assets\logo.png" LogicalName="logo.png" />
+    <!-- ApplicationIcon above puts this in the exe's Win32 resources, which is what Explorer
+         reads; the window itself needs a file on disk, so it rides as a resource too. -->
+    <EmbeddedResource Include="assets\bugtopia.ico" LogicalName="bugtopia.ico" />
     <!-- The webview shell itself. AOT cannot bundle a native dependency and the package ships no
          static library, so it rides as a resource and NativeShell unpacks it on first run. -->
     <EmbeddedResource Include="$(PhotinoNativePath)" LogicalName="Photino.Native.dll"

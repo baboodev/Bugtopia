@@ -30,6 +30,13 @@ namespace Bugtopia.Launch
         [JsonPropertyName("preparedFrom")]
         public string PreparedFrom { get; set; }
 
+        /// <summary>
+        /// Show every field and dropdown rather than the few steps a first run needs. Remembered,
+        /// because someone who has turned it on has said something about how they want to work.
+        /// </summary>
+        [JsonPropertyName("expert")]
+        public bool Expert { get; set; }
+
         /// <summary><c>%LocalLow%\Bugtopia\runtime</c> — beside the mod's own user data.</summary>
         public static string DefaultStorage => KnownPaths.DefaultStorage;
 

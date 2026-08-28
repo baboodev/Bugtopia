@@ -139,9 +139,7 @@ namespace Bugtopia.Launch
 
             await DownloadAsync(BepInExUrl, zip, log, progress);
 
-            log("Extracting to " + targetFolder);
-            Directory.CreateDirectory(targetFolder);
-            ZipFile.ExtractToDirectory(zip, targetFolder, overwriteFiles: true);
+            Payload.UnpackArchive(zip, targetFolder, log);
 
             try
             {
