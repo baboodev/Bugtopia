@@ -145,6 +145,28 @@ input[type=text]:focus { border-color: var(--primary-accent); }
 .btn.secondary { background: var(--secondary-bg); color: var(--text-main); border: 1px solid var(--card-border); }
 .btn.secondary:hover:not(:disabled) { background: var(--secondary-hover); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Confirmation dialog. A <dialog> rather than an overlay of our own: Escape, focus trapping and
+   an inert page come with it, and only one question is ever open at a time. */
+.modal {
+  border: 1px solid var(--card-border); border-radius: 16px; padding: 0;
+  /* The global reset zeroes every margin, including the auto margin a modal <dialog> centres
+     itself with, so it has to be put back explicitly. */
+  margin: auto;
+  background: #0f172a; color: var(--text-main);
+  width: min(560px, calc(100vw - 64px));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+.modal::backdrop { background: rgba(9, 13, 22, 0.72); backdrop-filter: blur(3px); }
+.modal-body { padding: 24px 26px 20px; display: flex; flex-direction: column; gap: 14px; }
+.modal-title { font-size: 1.05rem; font-weight: 700; }
+.modal-text {
+  font-size: 0.86rem; line-height: 1.55; color: var(--text-muted);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 46vh; overflow-y: auto;
+  user-select: text;   /* the paths are the point - they have to be copyable */
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-main); cursor: pointer; }
 .checkbox-label input { width: 16px; height: 16px; accent-color: var(--primary-accent); cursor: pointer; }
 a { color: #a5b4fc; cursor: pointer; text-decoration: none; }
@@ -278,12 +300,24 @@ a:hover { text-decoration: underline; }
             <path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path>
             <path d="M9 12l-4 4"></path><path d="M15 9l4-4"></path>
           </svg>
-          Launch Heartopia
+          <span id="play-label">Launch Heartopia</span>
         </button>
       </div>
     </div>
   </footer>
 </div>
+
+<dialog class="modal" id="modal">
+  <form method="dialog" class="modal-body">
+    <h2 class="modal-title" id="modal-title"></h2>
+    <div class="modal-text" id="modal-text"></div>
+    <div class="modal-actions">
+      <!-- Cancel first, so it is what Enter and the initial focus land on. -->
+      <button class="btn secondary compact" id="modal-no" value="no" autofocus>Cancel</button>
+      <button class="btn primary compact" id="modal-yes" value="yes">Continue</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 let nextId = 1, busy = false, state = {};
@@ -304,6 +338,7 @@ window.external.receiveMessage(raw => {
   if (m.event === "log") { appendLog(m.text); return; }
   if (m.event === "busy") { busy = m.value; if (!busy) setProgress(0); render(); return; }
   if (m.event === "progress") { setProgress(m.value); return; }
+  if (m.event === "confirm") { ask(m); return; }
 
   const p = pending.get(m.id);
   if (!p) return;
@@ -316,6 +351,20 @@ function appendLog(text) {
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
   log.textContent += (log.textContent ? "\n" : "") + text;
   if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+// Asks, then answers exactly once however the dialog was dismissed - Escape and the close event
+// included, since the job on the other side is blocked until something comes back.
+function ask(m) {
+  const dlg = $("modal");
+  $("modal-title").textContent = m.title || "";
+  $("modal-text").textContent = m.text || "";
+  $("modal-yes").textContent = m.confirmLabel || "Continue";
+  dlg.returnValue = "";
+  dlg.addEventListener("close", () => {
+    call("confirmResult", { ticket: m.ticket, ok: dlg.returnValue === "yes" });
+  }, { once: true });
+  dlg.showModal();
 }
 
 function setProgress(percent) { $("banner").style.setProperty("--progress", percent + "%"); }
@@ -361,16 +410,28 @@ function render() {
   state.hasInterop ? mark($("st-interop"), "Present", "status-success")
                    : mark($("st-interop"), "Missing", "status-warning");
 
-  if (state.loaderProxy)
-    say(state.loaderProxy + " is still in the game folder — BepInEx would boot from it before the injection, and the bootstrap refuses to run twice in one process. Rename it away.", "warning");
-  else if (!state.gameOk) say("Heartopia was not found automatically — press Detect, or point at it with Browse.");
-  else if (!state.prepared) say("Point at the unpacked BepInEx archive, then press Prepare.");
-  else if (!state.hasInterop) say("Press Generate interop — the first run takes several minutes.");
+  // Launch runs every missing step itself, so the button leads and the banner says what that will
+  // involve rather than naming another button to press first.
+  const ready = state.prepared && state.hasInterop;
+  $("play-label").textContent = ready ? "Launch Heartopia" : "Set up and launch";
+
+  const existing = state.existing || {};
+  if (existing.found)
+    say(existing.root
+      ? "An existing install already loads the mod, from " + existing.root +
+        ". Launch will ask before moving it here" + (existing.interop ? ", interop assemblies and all." : ".")
+      : (existing.melon ? "MelonLoader" : "Another loader") +
+        " is installed in the game folder and boots before this launcher can. Launch will ask before removing it.");
+  else if (!state.gameOk && !state.game) say("Heartopia was not found automatically — press Detect, or point at it with Browse.");
+  else if (!state.gameOk) say("That folder is not an IL2CPP Heartopia build — point at the game with Browse.", "warning");
+  else if (!state.prepared && !state.source && !state.downloads)
+    say("Point at the unpacked BepInEx archive — Launch does everything after that.");
+  else if (!ready) say("Nothing else to press: Launch sets the rest up first, which takes several minutes.");
   else say("Ready.");
 
   $("prepare").disabled = busy || !state.source;
   $("generate").disabled = busy || !state.prepared || !state.gameOk;
-  $("play").disabled = busy || !state.prepared || !state.hasInterop || !state.gameOk;
+  $("play").disabled = busy;
   $("dl-bepinex").disabled = busy;
   $("dl-unitylibs").disabled = busy || !state.gameOk;
 }

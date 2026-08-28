@@ -131,11 +131,28 @@ namespace Bugtopia.Launch
                 Directory.CreateDirectory(dir);
             }
 
-            log("Copying BepInEx core...");
-            CopyDirectory(coreDir, storage.Core, log);
+            // An adopted install is its own source: its core and dotnet already sit where they are
+            // being copied to, and File.Copy onto itself throws. Skipping is not a special case so
+            // much as the honest answer to "copy this here".
+            if (ExistingInstall.SamePath(coreDir, storage.Core))
+            {
+                log("  core: already in place");
+            }
+            else
+            {
+                log("Copying BepInEx core...");
+                CopyDirectory(coreDir, storage.Core, log);
+            }
 
-            log("Copying the .NET runtime...");
-            CopyDirectory(runtimeDir, storage.Runtime, log);
+            if (ExistingInstall.SamePath(runtimeDir, storage.Runtime))
+            {
+                log("  dotnet: already in place");
+            }
+            else
+            {
+                log("Copying the .NET runtime...");
+                CopyDirectory(runtimeDir, storage.Runtime, log);
+            }
 
             foreach (PayloadFile file in files ?? Array.Empty<PayloadFile>())
             {

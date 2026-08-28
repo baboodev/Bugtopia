@@ -143,7 +143,13 @@ namespace Bugtopia.Launcher
                     break;
 
                 case "play":
-                    RunJob(id, "Play", Play);
+                    RunJob(id, "Launch", LaunchAsync);
+                    break;
+
+                case "confirmResult":
+                    Answer(Str(args, "ticket"),
+                           args.TryGetProperty("ok", out JsonElement ok) && ok.ValueKind == JsonValueKind.True);
+                    Reply(id, w => WriteValue(w, null));
                     break;
 
                 case "profiles":
@@ -216,6 +222,63 @@ namespace Bugtopia.Launcher
         private void RunJob(string id, string name, Action work) =>
             RunJob(id, name, () => { work(); return Task.CompletedTask; });
 
+        // ---- asking ----------------------------------------------------------
+
+        /// <summary>A question put to the page. One at a time: <see cref="busy"/> serialises jobs.</summary>
+        private sealed class Question
+        {
+            internal string Ticket;
+            internal TaskCompletionSource<bool> Answer;
+        }
+
+        private volatile Question asked;
+        private int askCount;
+
+        /// <summary>
+        /// Asks the page a yes-or-no and blocks the job until it answers.
+        ///
+        /// In the page rather than a native message box: the questions this launcher asks list
+        /// paths and files, and have to read like the rest of the window rather than like a system
+        /// error. Blocking is the point — the answer gates everything after it — and costs nothing,
+        /// because jobs already run off the window thread.
+        /// </summary>
+        private bool Confirm(string title, string text, string confirmLabel)
+        {
+            var question = new Question
+            {
+                Ticket = "q" + (++askCount),
+                Answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            };
+            asked = question;
+
+            send(Json(w =>
+            {
+                w.WriteStartObject();
+                w.WriteString("event", "confirm");
+                w.WriteString("ticket", question.Ticket);
+                w.WriteString("title", title);
+                w.WriteString("text", text);
+                w.WriteString("confirmLabel", confirmLabel);
+                w.WriteEndObject();
+            }));
+
+            // No timeout: the dialog is modal and the user may take as long as they like. Should
+            // the window go away first this thread simply stays parked, which costs nothing — it is
+            // a background thread and does not hold the process open.
+            return question.Answer.Task.GetAwaiter().GetResult();
+        }
+
+        /// <summary>The page's answer. A ticket that is not the outstanding one is ignored.</summary>
+        private void Answer(string ticket, bool ok)
+        {
+            Question question = asked;
+            if (question == null || !string.Equals(ticket, question.Ticket, StringComparison.Ordinal))
+                return;
+
+            asked = null;
+            question.Answer.TrySetResult(ok);
+        }
+
         private void Prepare()
         {
             StorageLayout storage = RequireStorage();
@@ -276,7 +339,14 @@ namespace Bugtopia.Launcher
             if (!storage.IsPrepared)
                 throw new InvalidOperationException("Run Prepare first.");
 
-            Log("Running BepInEx's own generator; a cold run takes several minutes.");
+            // Launch runs this on every start, so say which of the three it is about to be: a cold
+            // generation, a forced rebuild, or the hash check that usually finds nothing to do.
+            Log(!storage.HasInterop
+                ? "Generating the interop assemblies with BepInEx's own generator; a cold run takes " +
+                  "several minutes."
+                : force
+                    ? "Regenerating the interop assemblies; this takes several minutes."
+                    : "Checking the interop assemblies against the game.");
 
             var info = new ProcessStartInfo(Environment.ProcessPath)
             {
@@ -322,6 +392,243 @@ namespace Bugtopia.Launcher
             }
         }
 
+        // ---- launch ----------------------------------------------------------
+
+        /// <summary>
+        /// Everything a launch needs, in the order it needs it, skipping whatever is already on
+        /// disk. On a fresh machine that is: find the game, fetch BepInEx, lay out the storage tree,
+        /// put the Unity base libraries in place, generate the interop assemblies, start the game.
+        /// On every launch after, only the last step really runs — each of the others reduces to
+        /// check that says it is already done, and the generator's own check is what notices a game
+        /// update and rebuilds the interop for it.
+        ///
+        /// One job rather than a queue of the individual commands: a chain that stops halfway should
+        /// say which step it was on and leave the rest unattempted, which a UI-driven sequence of
+        /// separate jobs cannot promise. The buttons stay for running one step deliberately.
+        /// </summary>
+        private async Task LaunchAsync()
+        {
+            StorageLayout storage = RequireStorage();
+            string game = EnsureGame();
+
+            bool adoptedInterop = AdoptExistingInstall(storage, game);
+
+            if (!storage.IsPrepared)
+            {
+                await EnsureBepInExSourceAsync(storage);
+                Prepare();
+            }
+
+            await EnsureUnityLibrariesAsync(storage, game);
+
+            // An adopted set was loading this game a moment ago, so it is taken as current and the
+            // generator is not run at all: that would cost a CoreCLR boot and three passes over
+            // GameAssembly.dll to reach the same answer. Only this launch skips it — the next one
+            // checks as usual, so a set that predates a game update is caught then rather than never.
+            if (adoptedInterop)
+                Log("Keeping the interop assemblies that came with the adopted install.");
+            else
+                GenerateInterop(force: false);
+
+            Play();
+        }
+
+        /// <summary>
+        /// The game folder, found now if what is stored is not one. The constructor already tries
+        /// this once, but a game installed since the window opened should not need a restart.
+        /// </summary>
+        private string EnsureGame()
+        {
+            if (GameDetection.IsGameFolder(settings.GameFolder))
+                return settings.GameFolder;
+
+            return DetectAndStore(announce: true)
+                   ?? throw new InvalidOperationException(
+                       "No Heartopia install found - Steam libraries and the usual folders were " +
+                       "checked. Point at it with Browse.");
+        }
+
+        /// <summary>
+        /// Takes over an install that is already loading the mod, with the user's say-so, and
+        /// refuses to start the game while one is still in the way.
+        ///
+        /// Not tidiness: a proxy DLL in the game folder boots BepInEx from inside
+        /// <c>il2cpp_init</c>, long before the injection can happen, and the bootstrap will not
+        /// start a second runtime in the same process. An old install does not sit alongside this
+        /// launcher — it replaces it. Moving the tree instead of deleting it keeps the expensive
+        /// part, the generated interop assemblies, so adopting one is far cheaper than starting over.
+        /// </summary>
+        /// <returns>True when the storage tree now has interop that did not have to be generated.</returns>
+        private bool AdoptExistingInstall(StorageLayout storage, string game)
+        {
+            ExistingInstall install = ExistingInstall.Detect(game);
+            if (!install.Found || install.IsAdopted(storage))
+                return false;
+
+            Log("Found an existing install: " +
+                (install.HasMelonLoader ? "MelonLoader" : install.BepInExRoot ?? "no loader tree") +
+                (install.ProxyName != null ? ", started by " + install.ProxyName : "") +
+                (install.HasInterop ? ", interop present" : ""));
+
+            if (!Confirm("Existing mod install", ConfirmAdopt(install, storage),
+                         install.BepInExRoot != null ? "Move and clean up" : "Remove and continue"))
+            {
+                throw new InvalidOperationException(
+                    "Left the existing install alone. The game still loads the mod from it - start " +
+                    "the game the way you have been, or press Launch again and accept the move.");
+            }
+
+            Log("Adopting the existing install:");
+            install.AdoptInto(storage, Log);
+
+            // Whatever the individual steps reported, this is the question that decides whether the
+            // game can be started: is anything still able to boot ahead of the injection?
+            string blocker = ExistingInstall.Detect(game).ProxyName;
+            if (blocker != null)
+            {
+                throw new InvalidOperationException(
+                    blocker + " is still in the game folder and would boot BepInEx before the " +
+                    "injection. Close the game and anything else holding that file, then try again.");
+            }
+
+            // Only a tree that was just adopted vouches for its interop. Clearing MelonLoader away
+            // says nothing about whatever happens to be sitting in storage already.
+            return install.BepInExRoot != null && storage.HasInterop;
+        }
+
+        /// <summary>
+        /// What the confirmation asks. It names every path and every file rather than summarising:
+        /// this moves a folder the user may keep deliberately where it is, and deletes files from
+        /// the game folder, so the dialog has to be enough on its own to say no to.
+        /// </summary>
+        private static string ConfirmAdopt(ExistingInstall install, StorageLayout storage)
+        {
+            var text = new StringBuilder();
+            text.Append(install.BepInExRoot != null
+                ? "The game is already set up to load the mod."
+                : "Another mod loader is installed in the game folder.");
+
+            if (install.BepInExRoot != null)
+            {
+                text.Append("\n\nMove\n    ").Append(install.BepInExRoot);
+                if (install.RuntimeRoot != null)
+                    text.Append("\n    ").Append(install.RuntimeRoot);
+                text.Append("\ninto\n    ").Append(storage.Root);
+
+                if (install.HasInterop)
+                    text.Append("\n\nThe generated interop assemblies come with it, so nothing has to be rebuilt.");
+            }
+
+            if (install.DoorstopFiles.Count > 0)
+            {
+                text.Append("\n\nDelete from the game folder:");
+                Names(text, install.DoorstopFiles);
+                text.Append("\n\nThese are what start the old loader. While they are there it boots " +
+                            "before this launcher can inject, and the mod cannot load twice.");
+            }
+
+            if (install.HasMelonLoader)
+            {
+                text.Append("\n\nRemove MelonLoader from the game folder:");
+                Names(text, install.MelonLoaderEntries);
+                text.Append("\n\nIt boots before this launcher can inject, and nothing in it can be " +
+                            "carried over. Any MelonLoader mods, and the settings under UserData, go " +
+                            "with it.");
+            }
+
+            return text.ToString();
+        }
+
+        /// <summary>Lists paths by name, one per line, with a separator marking the folders.</summary>
+        private static void Names(StringBuilder text, IReadOnlyList<string> paths)
+        {
+            foreach (string path in paths)
+            {
+                text.Append("\n    ").Append(Path.GetFileName(path));
+                if (Directory.Exists(path))
+                    text.Append(Path.DirectorySeparatorChar);
+            }
+        }
+
+        /// <summary>
+        /// An unpacked BepInEx archive to lay the tree out from, fetched when the user has not
+        /// supplied one. No <see cref="Downloads.Enabled"/> guard: an offline build's download
+        /// throws before it touches anything, with the URL to fetch by hand — which is exactly the
+        /// message this case needs, and a guard here would only be unreachable code in one flavour.
+        /// </summary>
+        private async Task EnsureBepInExSourceAsync(StorageLayout storage)
+        {
+            if (IsUsableSource(settings.BepInExSource))
+                return;
+
+            // An adopted install is its own source: core and dotnet are already in storage, so
+            // Prepare has only the carried files left to write. This is also the path that lets
+            // someone with an existing install and no archive get going at all.
+            if (IsUsableSource(storage.Root))
+            {
+                Log("Using the adopted tree as the BepInEx source.");
+                settings.BepInExSource = storage.Root;
+                SafeSave();
+                return;
+            }
+
+            await DownloadBepInExAsync();
+        }
+
+        /// <summary>Whether a folder passes the same rules <see cref="Prepare"/> will apply to it.</summary>
+        private static bool IsUsableSource(string folder)
+        {
+            try
+            {
+                Payload.ValidateSource(folder, out _, out _);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Puts the Unity base libraries in unity-libs before the generator looks for them.
+        ///
+        /// BepInEx fetches them itself when they are missing, so this is not required — but it
+        /// happens inside the hosted generator, where it is a silent multi-minute pause with no
+        /// progress and nothing in the log until it ends. Doing it here makes the wait legible.
+        /// </summary>
+        private async Task EnsureUnityLibrariesAsync(StorageLayout storage, string game)
+        {
+            if (HasUnityLibraries(storage))
+                return;
+
+            // Prepare installs a chosen zip itself, so reaching this means the tree was laid out
+            // before the user picked one.
+            if (!string.IsNullOrWhiteSpace(settings.UnityLibsZip) && File.Exists(settings.UnityLibsZip))
+            {
+                Payload.InstallUnityLibs(settings.UnityLibsZip, storage, Log);
+                return;
+            }
+
+            if (!Downloads.Enabled || GameSession.ReadUnityVersion(game) == null)
+            {
+                Log("No Unity base libraries yet; BepInEx will fetch them itself during generation.");
+                return;
+            }
+
+            await DownloadUnityLibsAsync();
+        }
+
+        /// <summary>
+        /// True when unity-libs holds either the zip BepInEx would have downloaded or the assemblies
+        /// it unpacks from it.
+        /// </summary>
+        private static bool HasUnityLibraries(StorageLayout storage)
+        {
+            return Directory.Exists(storage.UnityLibs) &&
+                   (Directory.GetFiles(storage.UnityLibs, "*.dll").Length > 0 ||
+                    Directory.GetFiles(storage.UnityLibs, "*.zip").Length > 0);
+        }
+
         private void Play()
         {
             StorageLayout storage = RequireStorage();
@@ -331,6 +638,16 @@ namespace Bugtopia.Launcher
                 throw new InvalidOperationException("Run Prepare first.");
             if (!storage.HasInterop)
                 throw new InvalidOperationException("Generate the interop assemblies first.");
+
+            // Launch clears this before it gets here; the button on its own does not, so say what
+            // will happen rather than letting the injection fail its guard unexplained.
+            string proxy = ExistingInstall.Detect(game).ProxyName;
+            if (proxy != null)
+            {
+                Log("Warning: " + proxy + " is still in the game folder. Another loader will boot " +
+                    "from it before the injection, and the bootstrap refuses to start a second " +
+                    "runtime - press Launch to clear that install out of the way.");
+            }
 
             string exe = GameSession.FindGameExe(game);
             Log("Starting " + exe);
@@ -384,26 +701,11 @@ namespace Bugtopia.Launcher
             w.WriteString("unityLibsUrl", Downloads.UnityLibrariesUrl(unity) ?? "");
             w.WriteBoolean("gameOk", !string.IsNullOrWhiteSpace(game) && Directory.Exists(game) && unity != null);
 
-            // Only the proxy DLL can boot BepInEx ahead of the injection and trip the bootstrap's
-            // one-CLR-per-process guard; a leftover ini on its own loads nothing.
-            string proxy = null;
-            if (!string.IsNullOrWhiteSpace(game))
-            {
-                foreach (string name in new[] { "winhttp.dll", "version.dll" })
-                {
-                    if (File.Exists(Path.Combine(game, name)))
-                    {
-                        proxy = name;
-                        break;
-                    }
-                }
-            }
-            w.WriteString("loaderProxy", proxy ?? "");
-
             bool prepared = false, hasInterop = false;
+            StorageLayout storage = null;
             try
             {
-                var storage = new StorageLayout(settings.Storage ?? LauncherSettings.DefaultStorage);
+                storage = RequireStorage();
                 prepared = storage.IsPrepared;
                 hasInterop = storage.HasInterop;
             }
@@ -412,6 +714,18 @@ namespace Bugtopia.Launcher
             }
             w.WriteBoolean("prepared", prepared);
             w.WriteBoolean("hasInterop", hasInterop);
+
+            // An install already loading the mod. Reported in full rather than as a flag because the
+            // page has to be able to say which folder it found and what moving it would preserve.
+            ExistingInstall existing = ExistingInstall.Detect(game);
+            w.WriteStartObject("existing");
+            w.WriteBoolean("found", existing.Found && !(storage != null && existing.IsAdopted(storage)));
+            w.WriteString("proxy", existing.ProxyName ?? "");
+            w.WriteString("root", existing.BepInExRoot ?? "");
+            w.WriteBoolean("melon", existing.HasMelonLoader);
+            w.WriteBoolean("plugin", existing.HasPlugin);
+            w.WriteBoolean("interop", existing.HasInterop);
+            w.WriteEndObject();
             w.WriteBoolean("busy", busy);
             w.WriteEndObject();
         }
