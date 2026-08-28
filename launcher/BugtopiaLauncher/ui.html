@@ -188,6 +188,14 @@ input[type=text]:focus { border-color: var(--primary-accent); }
 }
 
 .launcher-footer { display: flex; flex-direction: column; gap: 10px; }
+/* Under the button, because that is where someone is looking when they press it - and the key is
+   the first thing they will need once the game is up. */
+.launch-hint { text-align: center; font-size: 0.75rem; color: var(--text-muted); }
+.launch-hint kbd {
+  font-family: inherit; font-size: 0.72rem; font-weight: 600; color: var(--text-main);
+  background: var(--secondary-bg); border: 1px solid var(--card-border);
+  border-radius: 5px; padding: 1px 7px; margin: 0 1px;
+}
 .footer-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .launcher-actions { display: flex; gap: 12px; }
 
@@ -450,6 +458,7 @@ a:hover { text-decoration: underline; }
         </button>
       </div>
     </div>
+    <p class="launch-hint">In game, press <kbd>Insert</kbd> to open the mod menu.</p>
   </footer>
 </div>
 

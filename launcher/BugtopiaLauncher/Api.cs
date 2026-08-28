@@ -242,7 +242,7 @@ namespace Bugtopia.Launcher
         // Simple mode is sized to what it actually shows, and an online build shows one row more:
         // the mod it fetches rather than carries.
         internal static int WindowHeight(bool expert) =>
-            expert ? 760 : Downloads.PluginFromGitHub ? 620 : 540;
+            expert ? 760 : Downloads.PluginFromGitHub ? 660 : 580;
 
         /// <summary>Which view the window should open in, read before the window exists.</summary>
         internal bool Expert => settings.Expert;
