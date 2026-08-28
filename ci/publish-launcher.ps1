@@ -19,12 +19,23 @@
 .PARAMETER OutputDirectory
     Where the finished exes go. Defaults to release\ beside the repository.
 
+.PARAMETER PluginDll
+    The mod to embed in the offline build. Defaults to the local BepInEx build; CI points it at the
+    same bugtopia-bepinex.dll the release ships, so the launcher carries the published file rather
+    than a second copy built beside it.
+
+.PARAMETER VersionLabel
+    Names the output files with this instead of the version resource inside them. CI passes the tag,
+    which drops the commit hash a release asset has no use for.
+
 .PARAMETER SkipPayloadCheck
     Publish even when a payload file is missing. The build only warns about those, which is right
     for day-to-day work and wrong for a release, so this script refuses by default.
 #>
 param(
     [string]$OutputDirectory = "",
+    [string]$PluginDll = "",
+    [string]$VersionLabel = "",
     [switch]$SkipPayloadCheck
 )
 
@@ -46,7 +57,7 @@ $payload = @(
     @{ Path = Join-Path $repoRoot "launcher\BugtopiaInterop\bin\Release\net6.0\BugtopiaInterop.dll"
        How  = "dotnet build launcher\BugtopiaInterop -c Release"
        Both = $true }
-    @{ Path = Join-Path $repoRoot "buddy\bin\BepInEx\Release\bugtopia.dll"
+    @{ Path = if ($PluginDll) { $PluginDll } else { Join-Path $repoRoot "buddy\bin\BepInEx\Release\bugtopia.dll" }
        How  = "dotnet build buddy -c Release -p:Loader=BepInEx"
        Both = $false }   # offline only: the online build fetches this from GitHub
 )
@@ -103,8 +114,10 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Get-ChildItem $OutputDirectory -Filter "Bugtopia-Launcher-*.exe" -ErrorAction SilentlyContinue |
     Remove-Item -Force
 
+$pluginArg = if ($PluginDll) { "-p:PluginDllPath=`"$PluginDll`"" } else { "" }
+
 $flavours = @(
-    @{ Name = "offline"; Args = "" }
+    @{ Name = "offline"; Args = $pluginArg }
     @{ Name = "online";  Args = "-p:BugtopiaOnline=true" }
 )
 
@@ -136,8 +149,8 @@ foreach ($flavour in $flavours) {
     }
 
     # 2.8.2+57579db is the informational version; the plus is legal in a filename but awkward in a
-    # URL, so it becomes a dash.
-    $version = $exe.VersionInfo.ProductVersion
+    # URL, so it becomes a dash. A caller that knows better - CI, which has the tag - says so.
+    $version = if ($VersionLabel) { $VersionLabel } else { $exe.VersionInfo.ProductVersion }
     if ([string]::IsNullOrWhiteSpace($version)) { $version = "unversioned" }
     $version = $version.Replace("+", "-")
 

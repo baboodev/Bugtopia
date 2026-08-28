@@ -5,21 +5,13 @@
 # ci/prepare-ci-deps.ps1 from an install that has both loaders).
 name: ReleaseShip
 
+# Tags only. Every step here exists to produce a release, and the two NativeAOT publishes at the
+# end are minutes each, so running the lot on every push earns nothing. Use workflow_dispatch to
+# exercise it without cutting a tag.
 on:
   push:
-    branches:
-      - main
-      - master
-    paths:
-      - "buddy/**"
-      - "ci/**"
-      - ".github/workflows/melonloader-releaseship.yml"
     tags:
       - "v*"
-  pull_request:
-    paths:
-      - "buddy/**"
-      - "ci/**"
   workflow_dispatch:
     inputs:
       deps_url:
@@ -44,10 +36,14 @@ jobs:
         shell: pwsh
         run: pwsh ci/crash-hardening-lint.ps1
 
+      # 6.0 for the mod and the launcher's interop shim, 8.0 for the launcher itself, which is
+      # net8.0-windows and published with NativeAOT.
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "6.0.x"
+          dotnet-version: |
+            6.0.x
+            8.0.x
 
       - name: Restore build dependencies
         shell: pwsh
@@ -225,6 +221,28 @@ jobs:
           Copy-Item buddy/bin/BepInEx/ReleaseShip/bugtopia.pdb     dist/bugtopia-bepinex.pdb
           Copy-Item buddy/bin/Universal/ReleaseShip/bugtopia.pdb   dist/bugtopia-universal.pdb
 
+      # The launcher, after the mod is staged: its offline build embeds dist\bugtopia-bepinex.dll,
+      # so it carries the exact file this release publishes rather than a second copy of it.
+      - name: Build the launcher's native bootstrap
+        shell: cmd
+        run: launcher\BugtopiaInject\build.bat
+
+      - name: Build the interop shim
+        shell: pwsh
+        run: |
+          dotnet build launcher/BugtopiaInterop/BugtopiaInterop.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw "Building the interop shim failed." }
+
+      - name: Publish both launcher builds
+        shell: pwsh
+        run: |
+          $label = "${{ github.ref_name }}" -replace '^v', ''
+          if (-not $label) { $label = "dev" }
+          pwsh ci/publish-launcher.ps1 `
+            -OutputDirectory "${{ github.workspace }}\dist" `
+            -PluginDll "${{ github.workspace }}\dist\bugtopia-bepinex.dll" `
+            -VersionLabel $label
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -240,11 +258,17 @@ jobs:
         run: |
           $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" `
             -f "tag_name=${{ github.ref_name }}" --jq .body
-          $notes = "Four builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n- **bugtopia-universal-nolink.dll** — same as universal, built without the Bugtopia News link (no URL or channel reference anywhere in the binary).`n`n$generated"
+          $notes = "Four builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n- **bugtopia-universal-nolink.dll** — same as universal, built without the Bugtopia News link (no URL or channel reference anywhere in the binary).`n`nAnd the launcher, one exe with everything inside it:`n- **Bugtopia-Launcher-*-offline.exe** — carries this release's mod; downloads nothing, ever.`n- **Bugtopia-Launcher-*-online.exe** — carries no mod and fetches the newest release itself.`n`n$generated"
+
+          # Globbed rather than named: the launcher files carry the version in their names.
+          $assets = @(
+            "dist/bugtopia-bepinex.dll"
+            "dist/bugtopia-melonloader.dll"
+            "dist/bugtopia-universal.dll"
+            "dist/bugtopia-universal-nolink.dll"
+          ) + (Get-ChildItem "dist" -Filter "Bugtopia-Launcher-*.exe" | ForEach-Object { $_.FullName })
+
           gh release create "${{ github.ref_name }}" `
             --title "${{ github.ref_name }}" `
             --notes $notes `
-            "dist/bugtopia-bepinex.dll" `
-            "dist/bugtopia-melonloader.dll" `
-            "dist/bugtopia-universal.dll" `
-            "dist/bugtopia-universal-nolink.dll"
+            @assets
