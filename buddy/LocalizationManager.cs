@@ -6715,6 +6715,7 @@ namespace HeartopiaMod
             { "UploadCheat seen: {0} | blocked: {1}", "UploadCheat 감지: {0} | 차단: {1}" },
             { "Visit notifies blocked: {0}", "차단된 방문 알림: {0}" },
             { "Use All Ingredients", "재료 전부 사용" },
+            { "Use Universal Ingredient", "만능 재료 사용" },
             { "VEGETATION & NEIGHBOR HOUSES", "식생과 이웃집" },
             { "Value saved — press 'Rebake now' or reload the world.", "값을 저장했습니다 — '지금 다시 굽기'를 누르거나 월드를 다시 불러오세요." },
             { "Waiting for the world to finish loading…", "월드 로딩이 끝나기를 기다리는 중…" },
