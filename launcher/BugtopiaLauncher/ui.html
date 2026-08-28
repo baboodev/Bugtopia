@@ -418,6 +418,7 @@ a:hover { text-decoration: underline; }
       <div class="launcher-actions">
         <button class="btn secondary action-btn expert-only" id="prepare">Prepare</button>
         <button class="btn secondary action-btn expert-only" id="generate">Generate interop</button>
+        <button class="btn secondary action-btn" id="auto-cancel" hidden>Cancel</button>
         <button class="btn primary action-btn" id="play">
           <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path>
@@ -597,7 +598,7 @@ function render() {
   // Launch runs every missing step itself, so the button leads and the banner says what that will
   // involve rather than naming another button to press first.
   const ready = state.prepared && state.hasInterop;
-  $("play-label").textContent = ready ? "Launch Heartopia" : "Set up and launch";
+  if (!autoTimer) $("play-label").textContent = ready ? "Launch Heartopia" : "Set up and launch";
 
   const existing = state.existing || {};
   if (existing.found)
@@ -613,12 +614,60 @@ function render() {
   else if (!ready) say("Nothing else to press: Launch sets the rest up first, which takes several minutes.");
   else say("Ready.");
 
+  armAutoLaunch();
+
   $("prepare").disabled = busy || !state.source;
   $("generate").disabled = busy || !state.prepared || !state.gameOk;
   $("play").disabled = busy;
   $("dl-bepinex").disabled = busy;
   $("dl-unitylibs").disabled = busy || !state.gameOk;
 }
+
+// ---- starting on its own ---------------------------------------------------
+//
+// Nothing left to do means nothing left to press, so after three seconds it presses the button
+// itself. Armed once per run whatever the outcome: a countdown that comes back after being told no
+// is worse than no countdown.
+
+let autoTimer = null, autoLeft = 0, autoArmed = false;
+
+/** Every card that is showing is green - which is literally what the user sees. */
+function everythingGreen() {
+  const rows = [...document.querySelectorAll(".step")].filter(r => !r.hidden);
+  return rows.length > 0 && rows.every(r => r.classList.contains("done"));
+}
+
+function armAutoLaunch() {
+  // Not in expert mode: someone with every field open is configuring, not waiting to play.
+  if (autoArmed || autoTimer || busy || state.expert || !everythingGreen()) return;
+
+  autoArmed = true;
+  autoLeft = 3;
+  $("auto-cancel").hidden = false;
+  showCountdown();
+  autoTimer = setInterval(() => {
+    autoLeft -= 1;
+    if (autoLeft > 0) { showCountdown(); return; }
+    stopAutoLaunch();
+    run("play");
+  }, 1000);
+}
+
+function showCountdown() {
+  $("play-label").textContent = "Launching in " + autoLeft + "\u2026";
+}
+
+function stopAutoLaunch() {
+  if (autoTimer) clearInterval(autoTimer);
+  autoTimer = null;
+  $("auto-cancel").hidden = true;
+  $("play-label").textContent = "Launch Heartopia";
+}
+
+$("auto-cancel").onclick = () => stopAutoLaunch();
+
+// Any key stops it, not only Escape: the reflex when a countdown appears is to hit something.
+document.addEventListener("keydown", () => { if (autoTimer) stopAutoLaunch(); });
 
 /** The simple screen. Everything here is derived from the same state the expert panel shows. */
 function renderSteps() {
@@ -743,7 +792,10 @@ function save() {
   }).then(s => { state = s; render(); });
 }
 
-$("expert").onchange = () => run("setExpert", { value: $("expert").checked });
+$("expert").onchange = () => {
+  stopAutoLaunch();
+  run("setExpert", { value: $("expert").checked });
+};
 
 $("step-detect").onclick = () => $("detect").onclick();
 $("step-archive").onclick = async () => {
@@ -763,7 +815,7 @@ $("mod-install").onclick = () => run("installMod", { tag: $("mod-version").value
 $("storage-default").onclick = () => { $("storage").value = state.defaultStorage; save(); };
 $("prepare").onclick = () => run("prepare");
 $("generate").onclick = () => run("generateInterop", { force: $("force").checked });
-$("play").onclick = () => run("play");
+$("play").onclick = () => { stopAutoLaunch(); run("play"); };
 $("dl-bepinex").onclick = () => run("downloadBepInEx");
 $("dl-unitylibs").onclick = () => run("downloadUnityLibs");
 
