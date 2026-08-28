@@ -413,6 +413,45 @@ namespace Bugtopia.Launcher
         }
 
         /// <summary>
+        /// Marks one card as working on something with no number to show, and says what.
+        ///
+        /// Interop generation is the case this exists for: minutes in a child process with nothing
+        /// to report until it ends. Left to the progress bar alone it looks identical to a finished
+        /// download that never cleared - which is what it looked like.
+        /// </summary>
+        private void Working(string target, string text)
+        {
+            send(Json(w =>
+            {
+                w.WriteStartObject();
+                w.WriteString("event", "working");
+                w.WriteString("target", target);
+                w.WriteString("text", text);
+                w.WriteEndObject();
+            }));
+        }
+
+        /// <summary>
+        /// Hands the page the state mid-job.
+        ///
+        /// Launch is one job, so without this the screen learns nothing until the whole chain ends:
+        /// a card would fill to 100% and then sit there, still amber, while the next step ran. The
+        /// steps are worth watching go green one at a time, which is the whole point of showing
+        /// them.
+        /// </summary>
+        private void PushState()
+        {
+            send(Json(w =>
+            {
+                w.WriteStartObject();
+                w.WriteString("event", "state");
+                w.WritePropertyName("data");
+                WriteState(w);
+                w.WriteEndObject();
+            }));
+        }
+
+        /// <summary>
         /// A progress reporter for one step of the screen. The fill is drawn in the card that is
         /// downloading, so what is filling and what it is filling for are the same thing on screen.
         /// </summary>
@@ -513,14 +552,19 @@ namespace Bugtopia.Launcher
             string game = EnsureGame();
 
             bool adoptedInterop = AdoptExistingInstall(storage, game);
+            PushState();
 
             if (!storage.IsPrepared)
             {
                 EnsureBepInExSource(storage);
+                Working("bepinex", "Installing.");
                 Prepare();
+                PushState();
             }
 
             EnsurePlugin(storage);
+            PushState();
+
             EnsureUnityLibraries(storage, game);
 
             // An adopted set was loading this game a moment ago, so it is taken as current and the
@@ -528,10 +572,17 @@ namespace Bugtopia.Launcher
             // GameAssembly.dll to reach the same answer. Only this launch skips it — the next one
             // checks as usual, so a set that predates a game update is caught then rather than never.
             if (adoptedInterop)
+            {
                 Log("Keeping the interop assemblies that came with the adopted install.");
+            }
             else
+            {
+                Working("interop", "Building. Several minutes; the game starts by itself when it is done.");
                 GenerateInterop(force: false);
+            }
 
+            PushState();
+            Working("game", "Starting the game.");
             Play();
         }
 

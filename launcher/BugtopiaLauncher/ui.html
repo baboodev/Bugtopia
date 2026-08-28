@@ -95,6 +95,19 @@ body:not(.expert) #play { padding: 15px 34px; font-size: 1rem; }
   background: linear-gradient(90deg, rgba(99, 102, 241, 0.45), rgba(99, 102, 241, 0.18));
   z-index: -1; transition: width 0.12s ease;
 }
+/* Work with nothing to count - interop generation is minutes of it - sweeps instead of filling, so
+   it cannot be mistaken for a bar that finished and never cleared. */
+.step.working::before {
+  width: 100%; transition: none;
+  background: linear-gradient(90deg,
+    transparent 0%, rgba(99, 102, 241, 0.10) 35%, rgba(99, 102, 241, 0.40) 50%,
+    rgba(99, 102, 241, 0.10) 65%, transparent 100%);
+  animation: step-sweep 1.5s linear infinite;
+}
+@keyframes step-sweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
 .step-mark { flex: none; width: 22px; height: 22px; }
 .step-mark svg { width: 22px; height: 22px; }
 .step.done .step-mark { color: var(--success); }
@@ -462,8 +475,12 @@ window.external.receiveMessage(raw => {
   let m; try { m = JSON.parse(raw); } catch { return; }
 
   if (m.event === "log") { appendLog(m.text); return; }
-  if (m.event === "busy") { busy = m.value; if (!busy) setProgress("", 0); render(); return; }
+  if (m.event === "busy") { busy = m.value; if (!busy) { setProgress("", 0); setWorking("", ""); } render(); return; }
   if (m.event === "progress") { setProgress(m.target, m.value); return; }
+  if (m.event === "working") { setWorking(m.target, m.text); return; }
+  // A state push means the step that was working has finished, so its line goes with it and the
+  // card speaks for itself again.
+  if (m.event === "state") { setWorking("", ""); state = m.data; render(); return; }
   if (m.event === "confirm") { ask(m); return; }
 
   const p = pending.get(m.id);
@@ -506,19 +523,41 @@ function ask(m) {
 
 /** Fills one step card, and clears every other, so only one thing is ever seen arriving. */
 function setProgress(target, percent) {
+  if (target) setWorking("", "");   // a number replaces the sweep
+
   for (const row of document.querySelectorAll(".step")) {
     const mine = row.id === "step-" + target;
     row.style.setProperty("--progress", mine ? percent + "%" : "0%");
   }
-  // Expert mode has no cards, so the status line keeps the fill there.
-  $("banner").style.setProperty("--progress", percent + "%");
+
+  // Only in expert mode, which has no cards. Filling both at once showed the same bar twice.
+  $("banner").style.setProperty("--progress",
+    document.body.classList.contains("expert") ? percent + "%" : "0%");
+}
+
+/** The card that is working with nothing to count, and what it says while it does. */
+let workingTarget = "", workingText = "";
+
+function setWorking(target, text) {
+  workingTarget = target || "";
+  workingText = text || "";
+
+  for (const row of document.querySelectorAll(".step")) {
+    const mine = workingTarget && row.id === "step-" + workingTarget;
+    row.classList.toggle("working", !!mine);
+
+    // Every fill is cleared, not only this card's: one thing runs at a time, so a bar left over
+    // from the step before would sit there filled under a card that has already finished.
+    row.style.setProperty("--progress", "0%");
+    if (mine) $(row.id + "-detail").textContent = workingText;
+  }
 }
 
 function say(text, kind) {
   const b = $("banner");
   b.textContent = text;
   b.classList.toggle("warning", kind === "warning");
-  b.classList.toggle("speak", kind === "warning" || busy);
+  b.classList.toggle("speak", kind === "warning");
 }
 
 function mark(el, text, cls) {
@@ -614,6 +653,7 @@ function render() {
   else if (!ready) say("Nothing else to press: Launch sets the rest up first, which takes several minutes.");
   else say("Ready.");
 
+  keepWorking();
   armAutoLaunch();
 
   $("prepare").disabled = busy || !state.source;
@@ -711,6 +751,12 @@ function renderSteps() {
        : state.interopStale ? "Expired - the game has changed since; Launch rebuilds them."
        : "Up to date",
        {});
+}
+
+// Re-applied after every render: a state push mid-job rebuilds every card from the state, which
+// knows nothing about the step running right now.
+function keepWorking() {
+  if (workingTarget) setWorking(workingTarget, workingText);
 }
 
 function esc(text) {
