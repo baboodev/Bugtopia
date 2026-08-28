@@ -336,6 +336,9 @@ namespace HeartopiaMod
             data.netCookMiniGameOnly = this.netCookMiniGameOnly;
             data.netCookMoveIngredients = this.netCookMoveIngredients;
             data.netCookRememberStoves = this.netCookRememberStoves;
+            data.netCookSlotManualMode = this.netCookSlotManualMode;
+            data.netCookCookableOnly = this.netCookCookableOnly;
+            data.netCookSlotPrefs = this.SerializeNetCookSlotPrefs();
             data.netCookCaptureOwnOnly = this.netCookCaptureOwnOnly;
             data.netCookCaptureRadiusOnly = this.netCookCaptureRadiusOnly;
             data.netCookUseAllIngredients = this.netCookUseAllIngredients;
@@ -708,6 +711,9 @@ namespace HeartopiaMod
             this.netCookMiniGameOnly = data.netCookMiniGameOnly;
             this.netCookMoveIngredients = data.netCookMoveIngredients;
             this.netCookRememberStoves = data.netCookRememberStoves;
+            this.netCookSlotManualMode = data.netCookSlotManualMode;
+            this.netCookCookableOnly = data.netCookCookableOnly;
+            this.DeserializeNetCookSlotPrefs(data.netCookSlotPrefs);
             this.netCookCaptureOwnOnly = data.netCookCaptureOwnOnly;
             this.netCookCaptureRadiusOnly = data.netCookCaptureRadiusOnly;
             this.netCookUseAllIngredients = data.netCookUseAllIngredients;

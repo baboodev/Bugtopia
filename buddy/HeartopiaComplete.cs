@@ -4463,6 +4463,15 @@ namespace HeartopiaMod
         private string netCookRecipeSearchText = "";
         private readonly List<KeyValuePair<int, string>> netCookRecipeEntries = new List<KeyValuePair<int, string>>(256);
         private readonly List<KeyValuePair<int, string>> netCookVisibleRecipeEntries = new List<KeyValuePair<int, string>>(256);
+        // Recipe ids the GAME lists as recently cooked, newest first, already filtered to the
+        // captured cooker's type by CookingSystem.GetRecentRecipes.
+        private readonly List<int> netCookRecentRecipeIds = new List<int>(16);
+        // Off keeps the shipped behaviour: the game's AutoFill decides what goes in each slot.
+        private bool netCookSlotManualMode = false;
+        // Hide recipes the current stock cannot cover.
+        private bool netCookCookableOnly = false;
+        // -1 = the grid shows recipes. >= 0 = it shows the candidate items for that slot.
+        private int netCookSlotPickerIndex = -1;
         private readonly Dictionary<int, int> netCookRecipeCookerTypes = new Dictionary<int, int>();
         private int netCookRecipeCacheCookerStaticId = 0;
         private int netCookRecipeCacheFailureCookerStaticId = 0;
