@@ -166,10 +166,19 @@ namespace Bugtopia.Launcher
 
                 case "installMod":
                     string wanted = Str(args, "tag");
-                    RunJob(id, "Install the mod", () => InstallMod(
-                        RequireStorage(), string.IsNullOrWhiteSpace(wanted) ? "Installing the newest build"
-                                                                            : "Installing " + wanted,
-                        wanted));
+                    RunJob(id, "Install the mod", () =>
+                    {
+                        InstallMod(RequireStorage(),
+                                   string.IsNullOrWhiteSpace(wanted) ? "Installing the newest build"
+                                                                     : "Installing " + wanted,
+                                   wanted);
+
+                        // Choosing a build by hand pins it; choosing "newest" hands it back.
+                        settings.PinnedMod = string.IsNullOrWhiteSpace(wanted) ? null : wanted;
+                        SafeSave();
+                        if (settings.PinnedMod != null)
+                            Log("Pinned to " + settings.PinnedMod + "; launches will not move past it.");
+                    });
                     break;
 
                 case "downloadUnityLibs":
@@ -754,10 +763,51 @@ namespace Bugtopia.Launcher
         /// </summary>
         private void EnsurePlugin(StorageLayout storage)
         {
-            if (!Downloads.PluginFromGitHub || File.Exists(storage.Plugin))
+            string installed = GitHub.InstalledTag(storage);
+            bool missing = !File.Exists(storage.Plugin);
+            bool outdated = !missing && ModUpdate(installed) != null;
+
+            // The constant is folded in with a runtime half on purpose: on its own it would make
+            // everything below unreachable code in the offline build.
+            if (!Downloads.PluginFromGitHub || !(missing || outdated))
                 return;
 
-            InstallMod(storage, "No mod installed yet");
+            if (missing)
+            {
+                InstallMod(storage, "No mod installed yet");
+                return;
+            }
+
+            try
+            {
+                Working("mod", "Updating to " + settings.LatestSeen + ".");
+                InstallMod(storage, "A newer mod is out (" + (installed ?? "unknown") + " -> " +
+                                    settings.LatestSeen + ")");
+            }
+            catch (Exception ex)
+            {
+                // The copy already installed works. A failed update is not a reason to keep someone
+                // out of the game, so this is the one step in the chain that swallows its failure.
+                Log("Could not update the mod: " + ex.Message + " - starting with " +
+                    (installed ?? "the installed build") + ".");
+            }
+        }
+
+        /// <summary>
+        /// The release the mod would move to on the next launch, or null.
+        ///
+        /// Costs no request: the mod and the launcher ship in the same release, so the tag the daily
+        /// update check already recorded is the newest mod as well.
+        /// </summary>
+        private string ModUpdate(string installed)
+        {
+            if (!Downloads.PluginFromGitHub || string.IsNullOrWhiteSpace(installed))
+                return null;
+
+            if (string.Equals(settings.PinnedMod, installed, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return GitHub.IsNewer(settings.LatestSeen, installed) ? settings.LatestSeen : null;
         }
 
         /// <summary>
@@ -1042,7 +1092,10 @@ namespace Bugtopia.Launcher
             w.WriteBoolean("prepared", prepared);
             w.WriteBoolean("hasInterop", hasInterop);
             w.WriteBoolean("hasPlugin", storage != null && File.Exists(storage.Plugin));
-            w.WriteString("pluginVersion", storage == null ? "" : GitHub.InstalledTag(storage) ?? "");
+            string installedMod = storage == null ? null : GitHub.InstalledTag(storage);
+            w.WriteString("pluginVersion", installedMod ?? "");
+            w.WriteString("modUpdate", ModUpdate(installedMod) ?? "");
+            w.WriteString("pinnedMod", settings.PinnedMod ?? "");
             w.WriteBoolean("interopStale", hasInterop && IsInteropStale(storage, game));
 
             w.WriteStartArray("modReleases");

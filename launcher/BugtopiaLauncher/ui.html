@@ -758,7 +758,9 @@ function renderSteps() {
   $("step-mod").hidden = !state.pluginFromGitHub;
   if (state.pluginFromGitHub) {
     step("mod", state.hasPlugin ? "done" : "info",
-         state.hasPlugin ? "Installed" : "Not installed - Launch downloads it.",
+         !state.hasPlugin ? "Not installed - Launch downloads it."
+         : state.modUpdate ? "Installed - Launch updates it to " + esc(state.modUpdate) + "."
+         : "Installed",
          {});
   }
 
@@ -795,9 +797,13 @@ function renderModVersions() {
   }
   select.value = chosen;
 
-  $("mod-hint").textContent = state.pluginVersion
-    ? "Installed: " + state.pluginVersion + (releases.length ? "" : " - press Load versions to pick another.")
-    : (releases.length ? "" : "Nothing installed yet.");
+  $("mod-hint").textContent = !state.pluginVersion
+    ? (releases.length ? "" : "Nothing installed yet.")
+    : "Installed: " + state.pluginVersion +
+      (state.pinnedMod === state.pluginVersion ? " (pinned - launches will not move past it)"
+       : state.modUpdate ? " - Launch updates it to " + state.modUpdate
+       : "") +
+      (releases.length ? "" : " - press Load versions to pick another.");
 
   for (const b of ["mod-version", "mod-load", "mod-install"]) $(b).disabled = busy;
 }

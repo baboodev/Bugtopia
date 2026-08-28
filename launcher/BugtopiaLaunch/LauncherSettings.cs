@@ -38,6 +38,14 @@ namespace Bugtopia.Launch
         [JsonPropertyName("gitHubToken")]
         public string GitHubToken { get; set; }
 
+        /// <summary>
+        /// A mod build chosen by hand in expert mode. While it is what is installed, the launch does
+        /// not update past it — picking an old build to reproduce something, and having the next
+        /// launch quietly undo that, would make the picker useless.
+        /// </summary>
+        [JsonPropertyName("pinnedMod")]
+        public string PinnedMod { get; set; }
+
         /// <summary>The newest release seen by the update check, so the notice survives a restart.</summary>
         [JsonPropertyName("latestSeen")]
         public string LatestSeen { get; set; }

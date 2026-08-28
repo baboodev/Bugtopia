@@ -54,7 +54,11 @@ One job, each step skipped when its result is already on disk:
    removed. Never without a modal yes.
 3. **Fetch BepInEx** (online build) or use the archive the user chose (offline build).
 4. **Lay out the storage tree** — see §5.
-5. **Fetch the mod** (online build only; the offline build carries it).
+5. **Fetch or update the mod** (online build only; the offline build carries it). A newer
+   release is installed on the way past — the mod and the launcher ship in the same release, so
+   the tag the daily update check already recorded answers this without another request. A
+   build chosen by hand in expert mode is pinned and left alone, and a failed update is logged
+   rather than fatal: the copy already installed works, and the game still starts.
 6. **Put the Unity base libraries in `unity-libs`.**
 7. **Generate the interop assemblies** — see §4.
 8. **Start the game and inject the bootstrap.** The launcher closes itself on success.
