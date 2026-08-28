@@ -70,6 +70,7 @@ html, body {
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 .brand .subtitle { font-size: 0.82rem; color: var(--text-muted); }
+.brand .subtitle a { color: var(--primary-accent); cursor: pointer; text-decoration: underline; }
 
 /* The two views. Simple is the default; expert is the whole panel, remembered between runs. */
 body:not(.expert) .expert-only { display: none !important; }
@@ -603,7 +604,12 @@ async function loadLogo() {
 }
 
 function render() {
-  $("version").textContent = state.version || "";
+  // The notice goes where the version already is. A newer build is not a warning and does not
+  // belong in the status line, and it is not something to interrupt anyone over.
+  $("version").innerHTML = state.updateVersion
+    ? esc(state.version) + '  &middot;  <a data-url="' + esc(state.releasesPage) + '">' +
+      esc(state.updateVersion) + " available</a>"
+    : esc(state.version || "");
   document.body.classList.toggle("expert", !!state.expert);
   $("expert").checked = !!state.expert;
   renderSteps();

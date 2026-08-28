@@ -76,6 +76,9 @@ namespace Bugtopia.Launcher
                 {
                     greeted = true;
                     Log("ui ready");
+
+                    // Started only now: the page exists, so the answer has somewhere to land.
+                    _ = Task.Run(CheckForUpdate);
                 }
 
                 using JsonDocument doc = JsonDocument.Parse(message);
@@ -945,6 +948,55 @@ namespace Bugtopia.Launcher
                                                   required: !Downloads.PluginFromGitHub);
         }
 
+        // ---- is there a newer launcher? --------------------------------------
+
+        /// <summary>
+        /// Asks the releases page whether a later build exists, and remembers the answer.
+        ///
+        /// Quiet by construction. It never prompts for a token - the token dialog exists for
+        /// someone who asked for a download and cannot have it, not for a question the launcher
+        /// asked on its own - and a refusal or an unreachable network leaves a line in the log and
+        /// nothing else. Nothing is downloaded either: replacing a running exe is not something to
+        /// do behind someone's back, so this only says that a newer one exists.
+        /// </summary>
+        private void CheckForUpdate()
+        {
+            // About once a day. The recorded answer is still shown in between.
+            //
+            // One condition rather than two: Downloads.Enabled is a compile-time constant, and on
+            // its own it would make everything below it unreachable code in the offline build.
+            bool checkedRecently = settings.LastUpdateCheck.HasValue &&
+                                   DateTime.UtcNow - settings.LastUpdateCheck.Value < TimeSpan.FromDays(1);
+
+            if (!Downloads.Enabled || checkedRecently)
+                return;
+
+            try
+            {
+                List<ModRelease> releases = GitHub.FetchReleases(settings.GitHubToken, delegate { });
+                if (releases.Count == 0)
+                    return;
+
+                string latest = releases[0].Tag;
+                settings.LastUpdateCheck = DateTime.UtcNow;
+                settings.LatestSeen = latest;
+                SafeSave();
+
+                if (GitHub.IsNewer(latest, HeartopiaMod.ModBuildVersion.Numeric))
+                {
+                    Log("A newer build is available: " + latest + " (this one is " +
+                        HeartopiaMod.ModBuildVersion.Numeric + "). " + GitHub.ReleasesPage);
+                }
+
+                PushState();
+            }
+            catch (Exception ex)
+            {
+                // An update check is not worth a word to the user, and never worth a dialog.
+                Log("Update check skipped: " + ex.Message);
+            }
+        }
+
         // ---- state -----------------------------------------------------------
 
         private void WriteState(Utf8JsonWriter w)
@@ -958,6 +1010,10 @@ namespace Bugtopia.Launcher
             w.WriteString("unityLibsZip", settings.UnityLibsZip ?? "");
             w.WriteString("defaultStorage", LauncherSettings.DefaultStorage);
             w.WriteString("version", HeartopiaMod.ModBuildVersion.Display);
+            w.WriteString("updateVersion",
+                GitHub.IsNewer(settings.LatestSeen, HeartopiaMod.ModBuildVersion.Numeric)
+                    ? settings.LatestSeen
+                    : "");
             w.WriteBoolean("pluginFromGitHub", Downloads.PluginFromGitHub);
             w.WriteString("releasesPage", GitHub.ReleasesPage);
             w.WriteBoolean("downloads", Downloads.Enabled);

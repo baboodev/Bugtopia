@@ -38,6 +38,19 @@ namespace Bugtopia.Launch
         [JsonPropertyName("gitHubToken")]
         public string GitHubToken { get; set; }
 
+        /// <summary>The newest release seen by the update check, so the notice survives a restart.</summary>
+        [JsonPropertyName("latestSeen")]
+        public string LatestSeen { get; set; }
+
+        /// <summary>
+        /// When the update check last reached GitHub. Kept so it runs about once a day rather than
+        /// on every launch: the anonymous API allows 60 requests an hour, and a launcher that spends
+        /// one of them every time it opens is a launcher that asks for a token to answer a question
+        /// nobody asked.
+        /// </summary>
+        [JsonPropertyName("lastUpdateCheck")]
+        public DateTime? LastUpdateCheck { get; set; }
+
         /// <summary>
         /// Show every field and dropdown rather than the few steps a first run needs. Remembered,
         /// because someone who has turned it on has said something about how they want to work.

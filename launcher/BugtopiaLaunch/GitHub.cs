@@ -54,6 +54,55 @@ namespace Bugtopia.Launch
         private const string ApiUrl =
             "https://api.github.com/repos/" + Repository + "/releases?per_page=50";
 
+        /// <summary>
+        /// Whether <paramref name="candidate"/> names a later build than <paramref name="current"/>.
+        ///
+        /// Compared component by component rather than as text: "2.8.10" is later than "2.8.9" and
+        /// sorts before it. A leading v is dropped, missing components count as zero, and anything
+        /// after the first non-digit in a component is ignored, so 2.9.0-rc1 compares as 2.9.0.
+        /// </summary>
+        public static bool IsNewer(string candidate, string current)
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(current))
+                return false;
+
+            int[] a = Numbers(candidate);
+            int[] b = Numbers(current);
+
+            for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+            {
+                int left = i < a.Length ? a[i] : 0;
+                int right = i < b.Length ? b[i] : 0;
+                if (left != right)
+                    return left > right;
+            }
+
+            return false;
+        }
+
+        private static int[] Numbers(string version)
+        {
+            string text = version.Trim();
+            if (text.Length > 0 && (text[0] == 'v' || text[0] == 'V'))
+                text = text.Substring(1);
+
+            string[] parts = text.Split('.');
+            var numbers = new int[parts.Length];
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                int digits = 0;
+                while (digits < parts[i].Length && char.IsAsciiDigit(parts[i][digits]))
+                    digits++;
+
+                numbers[i] = digits > 0 && int.TryParse(parts[i].Substring(0, digits), out int value)
+                    ? value
+                    : 0;
+            }
+
+            return numbers;
+        }
+
         /// <summary>The tag recorded beside an installed plugin, or null.</summary>
         public static string InstalledTag(StorageLayout storage)
         {
