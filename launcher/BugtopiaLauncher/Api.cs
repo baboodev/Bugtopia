@@ -765,6 +765,14 @@ namespace Bugtopia.Launcher
         {
             string installed = GitHub.InstalledTag(storage);
             bool missing = !File.Exists(storage.Plugin);
+
+            // Asked here rather than trusting the background check to have finished. With the
+            // countdown the window can be three seconds old when this runs, and a launch that
+            // installs a version older than the one released ten minutes ago is worse than a launch
+            // that spends one request finding out.
+            if (!missing)
+                RefreshLatestSeen(announce: false);
+
             bool outdated = !missing && ModUpdate(installed) != null;
 
             // The constant is folded in with a runtime half on purpose: on its own it would make
@@ -1001,7 +1009,18 @@ namespace Bugtopia.Launcher
         // ---- is there a newer launcher? --------------------------------------
 
         /// <summary>
-        /// Asks the releases page whether a later build exists, and remembers the answer.
+        /// How long a recorded answer is trusted before asking again.
+        ///
+        /// Not a day, which is what this was: releases here land minutes apart, and a launcher that
+        /// last looked before the newest one existed spends the next twenty-four hours certain it is
+        /// current — which is exactly what happened to v2.8.6. Ten minutes is a floor against a
+        /// window being opened and closed repeatedly, not a schedule; one request per start is
+        /// nothing against the sixty an hour the anonymous API allows.
+        /// </summary>
+        private static readonly TimeSpan UpdateCheckFloor = TimeSpan.FromMinutes(10);
+
+        /// <summary>
+        /// Asks the releases page what the newest build is, and remembers the answer.
         ///
         /// Quiet by construction. It never prompts for a token - the token dialog exists for
         /// someone who asked for a download and cannot have it, not for a question the launcher
@@ -1009,14 +1028,13 @@ namespace Bugtopia.Launcher
         /// nothing else. Nothing is downloaded either: replacing a running exe is not something to
         /// do behind someone's back, so this only says that a newer one exists.
         /// </summary>
-        private void CheckForUpdate()
+        /// <param name="announce">Put a line in the log when this launcher itself is out of date.</param>
+        private void RefreshLatestSeen(bool announce)
         {
-            // About once a day. The recorded answer is still shown in between.
-            //
             // One condition rather than two: Downloads.Enabled is a compile-time constant, and on
             // its own it would make everything below it unreachable code in the offline build.
             bool checkedRecently = settings.LastUpdateCheck.HasValue &&
-                                   DateTime.UtcNow - settings.LastUpdateCheck.Value < TimeSpan.FromDays(1);
+                                   DateTime.UtcNow - settings.LastUpdateCheck.Value < UpdateCheckFloor;
 
             if (!Downloads.Enabled || checkedRecently)
                 return;
@@ -1027,24 +1045,28 @@ namespace Bugtopia.Launcher
                 if (releases.Count == 0)
                     return;
 
-                string latest = releases[0].Tag;
                 settings.LastUpdateCheck = DateTime.UtcNow;
-                settings.LatestSeen = latest;
+                settings.LatestSeen = releases[0].Tag;
                 SafeSave();
 
-                if (GitHub.IsNewer(latest, HeartopiaMod.ModBuildVersion.Numeric))
+                if (announce && GitHub.IsNewer(settings.LatestSeen, HeartopiaMod.ModBuildVersion.Numeric))
                 {
-                    Log("A newer build is available: " + latest + " (this one is " +
+                    Log("A newer build is available: " + settings.LatestSeen + " (this one is " +
                         HeartopiaMod.ModBuildVersion.Numeric + "). " + GitHub.ReleasesPage);
                 }
-
-                PushState();
             }
             catch (Exception ex)
             {
                 // An update check is not worth a word to the user, and never worth a dialog.
                 Log("Update check skipped: " + ex.Message);
             }
+        }
+
+        /// <summary>The background check at startup: refresh, then tell the page what changed.</summary>
+        private void CheckForUpdate()
+        {
+            RefreshLatestSeen(announce: true);
+            PushState();
         }
 
         // ---- state -----------------------------------------------------------
