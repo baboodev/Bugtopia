@@ -78,18 +78,43 @@ namespace HeartopiaMod
                 return;
             }
 
+            // ⚠️ DYNAMIC BUSHES DO NOT BELONG HERE, AND THE HEADER'S "they cost nothing" WAS WRONG.
+            //
+            // A bush's end is a MATURITY, not a cooldown, and this store is keyed by position as
+            // well as netId — so a row written while one bush was growing goes on hiding the spot
+            // after that bush has been collected and a new one has grown there under a new netId.
+            // Measured: three ripe truffles (staticId 130017, component inCold=false) invisible on
+            // the radar with ~5.8 h still on rows from an earlier session.
+            //
+            // Bush readiness has its own machinery — the client verdict plus the "unconfirmed =>
+            // do not go" rule — and it is live, which is what a resource that comes and goes
+            // needs. This file is for LONG COOLDOWNS OF THINGS THAT STAY PUT: rare trees, daily
+            // rocks. Same reasoning that keeps mushrooms out of the static fallback list.
+            int staticId = 0;
+            Vector3 pos = Vector3.zero;
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                if (this.liveCollectableColds[i].NetId == netId)
+                {
+                    pos = this.liveCollectableColds[i].Position;
+                    staticId = this.liveCollectableColds[i].StaticId;
+                    break;
+                }
+            }
+
+            if (staticId >= 130001 && staticId <= 130025)
+            {
+                if (this.coldLedgerPersisted.Remove(netId))
+                {
+                    this.coldLedgerDirty = true;   // drop rows written before this rule existed
+                }
+
+                return;
+            }
+
             long nowMs = NowUnixMs();
             if (endUnixMs > nowMs + ColdLedgerPersistFloorMs)
             {
-                Vector3 pos = Vector3.zero;
-                for (int i = 0; i < this.liveCollectableColds.Count; i++)
-                {
-                    if (this.liveCollectableColds[i].NetId == netId)
-                    {
-                        pos = this.liveCollectableColds[i].Position;
-                        break;
-                    }
-                }
 
                 // Re-broadcast sweeps deliver the same end time every pass; a real change (new
                 // cooldown, first sighting) dirties the file — and so does FINALLY LEARNING THE

@@ -1932,20 +1932,40 @@ namespace HeartopiaMod
                 // growing (the ring is on screen, hand-collect refuses) was recorded as available,
                 // which is precisely the wrong direction for a farm that must not walk to it.
                 //
+                // ⚠️ A ZERO FROM FAR AWAY IS A LIE; A ZERO FROM CLOSE UP IS THE TRUTH.
+                //
+                // UpdateResourcePoint recomputes through a filter keyed on the self player, so
+                // when it cannot reach the resource `num` stays 0 and "ready" goes out anyway.
+                // Measured 23:30: every REAL end arrived 28-42 m out, everything further heard
+                // zeros — so each sweep re-broadcast "ready" for every distant resource, wiping
+                // fourteen restored 9-hour cooldowns within seconds of world-ready.
+                //
+                // But a blanket "a zero never erases a future end" was too strong, and truffles
+                // proved it: a bush announces maturity by LOSING its DynamicBushGrowComponent,
+                // after which UpdateAllColdTime's `if (hasValue)` branch is skipped and only
+                // UpdateResourcePoint speaks — with a zero. Blocking that zero left three ripe
+                // truffles (staticId 130017) marked cold for six more hours and invisible on the
+                // radar. For a growing bush the zero IS the ripeness announcement.
+                //
                 // ⚠️ A ZERO NEVER ERASES A FUTURE ABSOLUTE END — ONLY THE CLOCK DOES.
                 //
-                // The first cut of this rule was a one-second window ("a zero may not erase a
-                // live maturity time from the SAME sweep"), which stops only same-sweep pairs.
-                // The seeded ledger showed why that is not enough: the player-keyed filter above
-                // reaches only interaction range — measured 23:30, every REAL end arrived 28-42 m
-                // out and everything further heard zeros — so EVERY sweep re-broadcasts "ready"
-                // for every far resource. Fourteen 9-hour cooldowns restored at world-ready were
-                // wiped within seconds, and the farm toured the same six dead rare trees again.
+                // UpdateResourcePoint recomputes through a filter keyed on the self player, and
+                // when it does not reach the resource `num` stays 0 and "ready" goes out anyway.
+                // Measured 23:30: fourteen restored 9-hour cooldowns were wiped within seconds of
+                // world-ready, and the farm toured the same six dead rare trees again.
                 //
-                // An absolute instant stays true however long ago it was heard. A matured bush
-                // still goes warm the honest way — its stored end passes, after which zeros write
-                // freely — and a NON-zero end (shorter or longer) always wins, so an accelerated
-                // maturity or a server-side reschedule still updates.
+                // ⚠️ TWO ATTEMPTS TO LOOSEN THIS WERE WRONG. "Believe a zero from anything in the
+                // live scan" put the radar straight back to `hid 0 not collectable` — the filter
+                // is `GetEntities(selfRef, resourceId)`, an association with the player, not a
+                // radius, so being close proves nothing. "Believe it when the component says
+                // inCold=false" walked into the trap this repo already documents
+                // (FARM_WALK_TO_NODE.md §7b): on a dynamic bush that flag reads false while the
+                // bush is GROWING — zeros there mean "no data", not "available" — and the aura
+                // spent minutes re-picking an uncollectable truffle once a marker appeared for it.
+                //
+                // An absolute instant stays true however long ago it was heard, and a maturity
+                // that passes retires itself. A NON-zero end always wins, so a rescheduled or
+                // accelerated cooldown still updates.
                 CollectColdRecord previous;
                 bool zeroAgainstFutureEnd = endMs <= 0L
                     && this.collectColdByNetId.TryGetValue(resourceNetId, out previous)
