@@ -553,6 +553,7 @@ namespace HeartopiaMod
         {
             this.netCookRecipeEntries.Clear();
             this.netCookVisibleRecipeEntries.Clear();
+            this.netCookRecentRecipeIds.Clear();
             this.netCookRecipeCookerTypes.Clear();
             this.netCookRecipeRequirementsCache.Clear();
             this.netCookRecipeCacheCookerStaticId = 0;
@@ -4859,6 +4860,9 @@ namespace HeartopiaMod
 
                 if (this.TryBuildNetCookRecipeCacheFromCookingSystemAllRecipesAuraMono())
                 {
+                    // Recents ride along with the full list: both are keyed on the same
+                    // cookerStaticId, so refreshing them apart would let the groups disagree.
+                    this.TryRefreshNetCookRecentRecipeIdsAuraMono();
                     this.ResetNetCookRecipeCacheRetry();
                     return this.netCookRecipeEntries.Count > 0;
                 }
@@ -5035,6 +5039,108 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.NetCookLog("CookingSystem AuraMono recipe cache exception: " + ex.Message);
+                return false;
+            }
+        }
+
+        // The game already keeps a recently-cooked list and already filters it to one cooker type:
+        // CookingSystem.GetRecentRecipes(cookerStaticId) walks ICookingClientService's
+        // CookingRecentComponent.RecentRecipe and drops entries whose cookerType does not match.
+        // Same shape as GetAllRecipes above (arity 1, List<CookingRecipe>), so this reads the ids
+        // through the same enumeration and member-probe path.
+        //
+        // Failure here is never fatal: the dropdown simply shows no RECENT group. A missing method
+        // on a future build must not take the recipe list down with it.
+        private unsafe bool TryRefreshNetCookRecentRecipeIdsAuraMono()
+        {
+            this.netCookRecentRecipeIds.Clear();
+
+            try
+            {
+                if (this.netCookCookerStaticId <= 0)
+                {
+                    return false;
+                }
+
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Cooking.CookingSystem", out IntPtr cookingSystemObj)
+                    || cookingSystemObj == IntPtr.Zero
+                    || auraMonoObjectGetClass == null
+                    || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                IntPtr cookingSystemClass = auraMonoObjectGetClass(cookingSystemObj);
+                if (cookingSystemClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr getRecentMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "GetRecentRecipes", 1);
+                if (getRecentMethod == IntPtr.Zero)
+                {
+                    this.NetCookLog("CookingSystem AuraMono GetRecentRecipes unavailable — recent group hidden.");
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                int cookerStaticId = this.netCookCookerStaticId;
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&cookerStaticId);
+                IntPtr recentListObj = auraMonoRuntimeInvoke(getRecentMethod, cookingSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || recentListObj == IntPtr.Zero)
+                {
+                    // A player who has never cooked on this cooker type gets a null list, not an
+                    // error — that is an empty recent group, not a failure worth logging loudly.
+                    return false;
+                }
+
+                List<IntPtr> recentItems = new List<IntPtr>(32);
+                List<uint> recentPins = new List<uint>();
+                try
+                {
+                    if (!this.TryEnumerateAuraMonoCollectionItems(recentListObj, recentItems, recentPins) || recentItems.Count <= 0)
+                    {
+                        return false;
+                    }
+
+                    for (int i = 0; i < recentItems.Count; i++)
+                    {
+                        IntPtr recipeObj = recentItems[i];
+                        if (recipeObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        int recipeId = 0;
+                        if (!this.TryGetMonoInt32Member(recipeObj, "staticId", out recipeId)
+                            && !this.TryGetMonoInt32Member(recipeObj, "StaticId", out recipeId)
+                            && !this.TryGetMonoIntMember(recipeObj, "staticId", out recipeId)
+                            && !this.TryGetMonoIntMember(recipeObj, "StaticId", out recipeId))
+                        {
+                            continue;
+                        }
+
+                        // The game can list the same dish twice; the dropdown must not.
+                        if (recipeId > 0 && !this.netCookRecentRecipeIds.Contains(recipeId))
+                        {
+                            this.netCookRecentRecipeIds.Add(recipeId);
+                        }
+                    }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(recentPins);
+                }
+
+                this.NetCookLog("Recent recipes: " + this.netCookRecentRecipeIds.Count
+                    + " for cookerStaticId=" + this.netCookCookerStaticId + ".");
+                return this.netCookRecentRecipeIds.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                this.netCookRecentRecipeIds.Clear();
+                this.NetCookLog("CookingSystem AuraMono GetRecentRecipes exception: " + ex.Message);
                 return false;
             }
         }
@@ -5232,8 +5338,42 @@ namespace HeartopiaMod
                 this.netCookVisibleRecipeEntries.Add(recipeEntry);
             }
 
+            // Cookable filter runs AFTER the cooker-type and search filters, so it only ever
+            // measures recipes that could otherwise be shown.
+            if (this.netCookCookableOnly)
+            {
+                this.RefreshNetCookCookableCache(this.netCookVisibleRecipeEntries);
+                for (int i = this.netCookVisibleRecipeEntries.Count - 1; i >= 0; i--)
+                {
+                    if (!this.IsNetCookRecipeCookable(this.netCookVisibleRecipeEntries[i].Key))
+                    {
+                        this.netCookVisibleRecipeEntries.RemoveAt(i);
+                    }
+                }
+            }
+
             this.netCookVisibleRecipeEntries.Sort((a, b) =>
             {
+                // Recently cooked dishes float to the top, in the order the GAME lists them
+                // (newest first) rather than alphabetically — that ordering is the whole point of
+                // the group. Everything else keeps the original name sort below it.
+                int rankA = this.netCookRecentRecipeIds.IndexOf(a.Key);
+                int rankB = this.netCookRecentRecipeIds.IndexOf(b.Key);
+                if (rankA != rankB)
+                {
+                    if (rankA < 0)
+                    {
+                        return 1;
+                    }
+
+                    if (rankB < 0)
+                    {
+                        return -1;
+                    }
+
+                    return rankA.CompareTo(rankB);
+                }
+
                 string nameA = a.Value ?? string.Empty;
                 string nameB = b.Value ?? string.Empty;
                 int byName = string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
@@ -9745,6 +9885,14 @@ namespace HeartopiaMod
                     if (slotObj == IntPtr.Zero)
                     {
                         continue;
+                    }
+
+                    // Manual ingredient choice runs BEFORE the universal top-up and after the
+                    // game's own AutoFill: real preferred stacks first, universal only for what
+                    // is still missing. A preference that cannot be met leaves the slot alone.
+                    if (this.netCookSlotManualMode)
+                    {
+                        this.TryApplyNetCookSlotPreference(cookingSystemObj, cookingSystemClass, slotObj, i, this.netCookRecipeId);
                     }
 
                     bool hasFilledFlag = this.TryGetMonoBoolMember(slotObj, "filled", out bool filled);

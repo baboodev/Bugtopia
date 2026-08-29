@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
     <Platform Condition="'$(Platform)' == ''">AnyCPU</Platform>
@@ -483,6 +483,7 @@
     <Compile Include="BubbleFeature.cs" />
     <Compile Include="BubbleSpawnRewriteFeature.cs" />
     <Compile Include="AutoBubbleCollectFeature.cs" />
+    <Compile Include="NetCookSlotPrefsFeature.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="MelonSceneHookCleanup.cs" />
     <Compile Include="ClassInjectorHookTrimFeature.cs" />
