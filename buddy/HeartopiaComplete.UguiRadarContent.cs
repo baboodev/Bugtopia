@@ -498,10 +498,8 @@ namespace HeartopiaMod
         private string BuildUguiRadarEventsSummary()
         {
             List<string> selected = new List<string>();
-            if (this.showFiddleheadRadar) selected.Add("Fiddlehead");
-            if (this.showTallMustardRadar) selected.Add("Tall Mustard");
-            if (this.showBurdockRadar) selected.Add("Burdock");
-            if (this.showMustardGreensRadar) selected.Add("Mustard Greens");
+            if (this.showCapybaraSlabRadar) selected.Add("Capybara Slab");
+            if (this.showOakSlabRadar) selected.Add("Oak-Oak Slab");
             return this.GetRadarSelectionSummary(selected);
         }
 
@@ -627,10 +625,8 @@ namespace HeartopiaMod
                     SetOpen = v => this.radarEventsDropdownOpen = v,
                     Items = new UguiRadarOptionBinding[]
                     {
-                        new UguiRadarOptionBinding { Label = "Fiddlehead", Get = () => this.showFiddleheadRadar, Set = v => this.showFiddleheadRadar = v },
-                        new UguiRadarOptionBinding { Label = "Tall Mustard", Get = () => this.showTallMustardRadar, Set = v => this.showTallMustardRadar = v },
-                        new UguiRadarOptionBinding { Label = "Burdock", Get = () => this.showBurdockRadar, Set = v => this.showBurdockRadar = v },
-                        new UguiRadarOptionBinding { Label = "Mustard Greens", Get = () => this.showMustardGreensRadar, Set = v => this.showMustardGreensRadar = v },
+                        new UguiRadarOptionBinding { Label = "Capybara Slab", Get = () => this.showCapybaraSlabRadar, Set = v => this.showCapybaraSlabRadar = v },
+                        new UguiRadarOptionBinding { Label = "Oak-Oak Slab", Get = () => this.showOakSlabRadar, Set = v => this.showOakSlabRadar = v },
                     },
                     AfterChanged = this.ApplyUguiRadarStandardGroupTail
                 },
@@ -1128,10 +1124,8 @@ namespace HeartopiaMod
             this.showPennyBunRadar = true;
             this.showShiitakeRadar = true;
             this.showTruffleRadar = true;
-            this.showFiddleheadRadar = true;
-            this.showTallMustardRadar = true;
-            this.showBurdockRadar = true;
-            this.showMustardGreensRadar = true;
+            this.showCapybaraSlabRadar = true;
+            this.showOakSlabRadar = true;
             this.showGlasswortRadar = true;
             this.showSeaGrapeRadar = true;
             this.showWakameRadar = true;
@@ -1177,10 +1171,8 @@ namespace HeartopiaMod
             this.showPennyBunRadar = false;
             this.showShiitakeRadar = false;
             this.showTruffleRadar = false;
-            this.showFiddleheadRadar = false;
-            this.showTallMustardRadar = false;
-            this.showBurdockRadar = false;
-            this.showMustardGreensRadar = false;
+            this.showCapybaraSlabRadar = false;
+            this.showOakSlabRadar = false;
             this.showGlasswortRadar = false;
             this.showSeaGrapeRadar = false;
             this.showWakameRadar = false;

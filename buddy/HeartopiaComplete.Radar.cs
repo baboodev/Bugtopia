@@ -50,10 +50,8 @@ namespace HeartopiaMod
             data.resourceVisualEspScale = this.resourceVisualEspScale;
             data.resourceVisualEspOpacity = this.resourceVisualEspOpacity;
             data.resourceVisualEspMaxMarkers = this.resourceVisualEspMaxMarkers;
-            data.priorityFiddlehead = this.priorityFiddlehead;
-            data.priorityTallMustard = this.priorityTallMustard;
-            data.priorityBurdock = this.priorityBurdock;
-            data.priorityMustardGreens = this.priorityMustardGreens;
+            data.priorityCapybaraSlab = this.priorityCapybaraSlab;
+            data.priorityOakSlab = this.priorityOakSlab;
         }
 
         private void ApplyRadarConfig(RadarConfigData data)
@@ -87,10 +85,8 @@ namespace HeartopiaMod
             this.resourceVisualEspScale = Mathf.Clamp(data.resourceVisualEspScale <= 0f ? 1f : data.resourceVisualEspScale, 0.8f, 1.5f);
             this.resourceVisualEspOpacity = Mathf.Clamp(data.resourceVisualEspOpacity <= 0f ? 0.92f : data.resourceVisualEspOpacity, 0.35f, 1f);
             this.resourceVisualEspMaxMarkers = Mathf.Clamp(data.resourceVisualEspMaxMarkers <= 0 ? 120 : data.resourceVisualEspMaxMarkers, 20, 200);
-            this.priorityFiddlehead = data.priorityFiddlehead;
-            this.priorityTallMustard = data.priorityTallMustard;
-            this.priorityBurdock = data.priorityBurdock;
-            this.priorityMustardGreens = data.priorityMustardGreens;
+            this.priorityCapybaraSlab = data.priorityCapybaraSlab;
+            this.priorityOakSlab = data.priorityOakSlab;
         }
 
         private string GetRadarSettingsPath()
@@ -156,21 +152,13 @@ namespace HeartopiaMod
                     {
                         this.radarMaxDistance = Mathf.Clamp(GetJsonFloat(line, "\"radarMaxDistance\":"), 25f, 1000f);
                     }
-                    else if (line.Contains("priorityFiddlehead"))
+                    else if (line.Contains("priorityCapybaraSlab"))
                     {
-                        this.priorityFiddlehead = GetJsonFloat(line, "\"priorityFiddlehead\":") != 0f;
+                        this.priorityCapybaraSlab = GetJsonFloat(line, "\"priorityCapybaraSlab\":") != 0f;
                     }
-                    else if (line.Contains("priorityTallMustard"))
+                    else if (line.Contains("priorityOakSlab"))
                     {
-                        this.priorityTallMustard = GetJsonFloat(line, "\"priorityTallMustard\":") != 0f;
-                    }
-                    else if (line.Contains("priorityBurdock"))
-                    {
-                        this.priorityBurdock = GetJsonFloat(line, "\"priorityBurdock\":") != 0f;
-                    }
-                    else if (line.Contains("priorityMustardGreens"))
-                    {
-                        this.priorityMustardGreens = GetJsonFloat(line, "\"priorityMustardGreens\":") != 0f;
+                        this.priorityOakSlab = GetJsonFloat(line, "\"priorityOakSlab\":") != 0f;
                     }
                 }
                 ModLogger.Msg("Radar settings loaded.");
@@ -551,14 +539,14 @@ namespace HeartopiaMod
                     // gatherables that already load here (scallop = a recognizable seashell). Falls back to the
                     // hazard diamond while it loads.
                     return "p_gather_decadopecten_step00";
-                case "Fiddlehead":
-                    return "p_gather_bracken_00";
-                case "Tall Mustard":
-                    return "p_gather_garlicmustard_00";
-                case "Burdock":
-                    return "p_gather_burdock_00";
-                case "Mustard Greens":
-                    return "p_gather_shepherdspurse_00";
+                // Decoration.normalPrefabId of the first slab piece each node drops (cn_tables:
+                // 302685 -> kapibalaslate_1, 302694 -> oakslab_1). The nodes themselves are
+                // p_dynamicbush_slate_00_*, which has no ui_item_normal_* icon — the DROP does,
+                // and that is the picture the player recognises.
+                case "Capybara Slab":
+                    return "p_decoration_tribe_kapibalaslate_1";
+                case "Oak-Oak Slab":
+                    return "p_decoration_tribe_oakslab_1";
                 case "Stone":
                     return "p_material_stone1";
                 case "Ore":
@@ -1752,7 +1740,7 @@ namespace HeartopiaMod
 
         private bool AnyRadarLootToggleEnabled()
         {
-            return this.IsAnyMushroomRadarEnabled() || this.showFiddleheadRadar || this.showTallMustardRadar || this.showBurdockRadar || this.showMustardGreensRadar
+            return this.IsAnyMushroomRadarEnabled() || this.showCapybaraSlabRadar || this.showOakSlabRadar
                 || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar || this.showContaminatedRadar
                 || this.showBlueberryRadar || this.showRaspberryRadar || this.showStoneRadar || this.showOreRadar
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
@@ -2093,7 +2081,7 @@ namespace HeartopiaMod
             }
 
             bool flag34 = object2 != null;
-            if (this.IsAnyMushroomRadarEnabled() || this.showFiddleheadRadar || this.showTallMustardRadar || this.showBurdockRadar || this.showMustardGreensRadar
+            if (this.IsAnyMushroomRadarEnabled() || this.showCapybaraSlabRadar || this.showOakSlabRadar
                 || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar)
             {
                 if (flag34)
@@ -2507,9 +2495,22 @@ namespace HeartopiaMod
         // Every species I had guessed turned out right — but only by luck, and one look at the
         // table would have settled it before any of the guessing.
         //
-        // 130019/21/23/25 are the event foraging plants, which already have their own toggles.
+        // 130027/130028 are the CURRENT season's dig sites (远古召唤 / Ancient Summon, Date 60901 =
+        // 2026-08-29..2026-10-09). They replaced 130019/21/23/25, last season's foraging plants
+        // (蕨菜/蒜芥/牛蒡/芥菜) whose event window has closed — those toggles are gone, not disabled.
+        //
+        //   130027 卡皮巴拉石板点  Mountain&DynamicBush  produce 1047 -> SLATE03 -> 302685-302693
+        //   130028 橡走走石板点    Forest&DynamicBush    produce 1048 -> SLATE04 -> 302694-302702
+        //
+        // Both are Dynamicbush type 3 with growTime 60 s, and BOTH report itemTypeID = 0 on the
+        // live component — confirmed on the running game, "0/130027->(unmapped)x4" in the gather
+        // histogram — so they resolve HERE, by entity staticId, exactly like the mushrooms. Do not
+        // move them to ResolveLandGatherMeshName: there is no produce id to key on, and the drop
+        // ids (302xxx) have no collectable sprite anyway.
+        //
         // 42001 is 橡走走 Oak-Oak — a daily roamer owned by RoamingCollectableFinderFeature, so it
-        // is deliberately NOT handled here.
+        // is deliberately NOT handled here. It is a different thing from 130028, which only shares
+        // the name: one is the animal, the other is the dig site named after it.
         private static string ResolveLandGatherMeshByStaticId(int staticId, HeartopiaComplete self, out bool known)
         {
             known = true;
@@ -2540,11 +2541,9 @@ namespace HeartopiaMod
                 case 130018:
                     return self.showMushroomRadar ? "mushroom" : null;
 
-                // Event foraging plants (their toggles already exist).
-                case 130019: return self.showFiddleheadRadar ? "fiddlehead" : null;
-                case 130021: return self.showTallMustardRadar ? "tallmustard" : null;
-                case 130023: return self.showBurdockRadar ? "burdock" : null;
-                case 130025: return self.showMustardGreensRadar ? "mustardgreens" : null;
+                // Event dig sites (Slab Mining, Interaction 963).
+                case 130027: return self.showCapybaraSlabRadar ? "capybaraslab" : null;
+                case 130028: return self.showOakSlabRadar ? "oakslab" : null;
             }
 
             known = false;
@@ -2911,33 +2910,23 @@ namespace HeartopiaMod
                                                             endColor = new Color(1f, 1f, 0.5f); // Light yellow
                                                             bgColor = new Color(0.5f, 0.5f, 0.1f, 0.85f);
                                                         }
-                                                        else if (text.Contains("fiddlehead") || text.Contains("fiddle") || text.Contains("fern") || text.Contains("pterid") || text.Contains("bracken"))
+                                                        // ⚠️ "oakslab" is tested BEFORE "capybaraslab" only for
+                                                        // symmetry of reading; the two keys share no substring, so
+                                                        // unlike the mustard pair they cannot steal each other's
+                                                        // markers. Keep them that way if either is ever renamed.
+                                                        else if (text.Contains("capybaraslab"))
                                                         {
-                                                            text2 = "Fiddlehead";
-                                                            icon = "[Fd]";
-                                                            endColor = new Color(0.6f, 0.95f, 0.6f);
-                                                            bgColor = new Color(0.15f, 0.45f, 0.15f, 0.85f);
+                                                            text2 = "Capybara Slab";
+                                                            icon = "[CS]";
+                                                            endColor = new Color(0.95f, 0.82f, 0.55f);
+                                                            bgColor = new Color(0.42f, 0.3f, 0.14f, 0.85f);
                                                         }
-                                                        else if (text.Contains("burdock"))
+                                                        else if (text.Contains("oakslab"))
                                                         {
-                                                            text2 = "Burdock";
-                                                            icon = "?";
-                                                            endColor = new Color(0.86f, 0.72f, 0.48f);
-                                                            bgColor = new Color(0.38f, 0.26f, 0.12f, 0.85f);
-                                                        }
-                                                        else if (text.Contains("shepherdspurse") || (text.Contains("mustard") && text.Contains("green")) || text.Contains("mustard greens") || text.Contains("mustardgreens") || text.Contains("mustard_green") || text.Contains("mustardgreen") || text.Contains("greens"))
-                                                        {
-                                                            text2 = "Mustard Greens";
-                                                            icon = "[Mg]";
-                                                            endColor = new Color(0.58f, 0.95f, 0.52f);
-                                                            bgColor = new Color(0.14f, 0.42f, 0.14f, 0.85f);
-                                                        }
-                                                        else if (text.Contains("tall mustard") || text.Contains("tallmustard") || text.Contains("mustard"))
-                                                        {
-                                                            text2 = "Tall Mustard";
-                                                            icon = "[TM]";
-                                                            endColor = new Color(0.7f, 1f, 0.5f);
-                                                            bgColor = new Color(0.2f, 0.45f, 0.12f, 0.85f);
+                                                            text2 = "Oak-Oak Slab";
+                                                            icon = "[OS]";
+                                                            endColor = new Color(0.72f, 0.86f, 0.98f);
+                                                            bgColor = new Color(0.16f, 0.28f, 0.44f, 0.85f);
                                                         }
                                                         else if (text.Contains("seaasparagus") || text.Contains("glasswort"))
                                                         {

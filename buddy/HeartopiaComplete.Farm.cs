@@ -623,10 +623,8 @@ namespace HeartopiaMod
                             bool flagStone = this.showStoneRadar;
                             bool flagOre = this.showOreRadar;
                             bool flagMeteor = this.showMeteorRadar;
-                            bool flagEventFiddlehead = this.showFiddleheadRadar;
-                            bool flagEventTallMustard = this.showTallMustardRadar;
-                            bool flagEventBurdock = this.showBurdockRadar;
-                            bool flagEventMustardGreens = this.showMustardGreensRadar;
+                            bool flagEventCapybaraSlab = this.showCapybaraSlabRadar;
+                            bool flagEventOakSlab = this.showOakSlabRadar;
                             // Any underwater radar category shares the sea-area waypoints so the farm
                             // can hop to a fresh sea region once the current one is cleared.
                             bool flagUnderwater = this.showContaminatedRadar || this.showGlasswortRadar
@@ -696,19 +694,11 @@ namespace HeartopiaMod
                                             {
                                                 flag13 = true;
                                             }
-                                            else if (farmLocation2.Type == "event_fiddlehead" && flagEventFiddlehead)
+                                            else if (farmLocation2.Type == "event_capybara_slab" && flagEventCapybaraSlab)
                                             {
                                                 flag13 = true;
                                             }
-                                            else if (farmLocation2.Type == "event_tall_mustard" && flagEventTallMustard)
-                                            {
-                                                flag13 = true;
-                                            }
-                                            else if (farmLocation2.Type == "event_burdock" && flagEventBurdock)
-                                            {
-                                                flag13 = true;
-                                            }
-                                            else if (farmLocation2.Type == "event_mustard_greens" && flagEventMustardGreens)
+                                            else if (farmLocation2.Type == "event_oak_slab" && flagEventOakSlab)
                                             {
                                                 flag13 = true;
                                             }
@@ -1658,7 +1648,20 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return staticId >= 130001 && staticId <= 130025;
+            return IsDynamicBushStaticId(staticId);
+        }
+
+        // The dynamic-bush family: mushrooms (130001-130018), last season's foraging plants
+        // (130019-130026) and this season's slab dig sites (130027/130028), plus the daily perch
+        // 130029. Everything in here GROWS, which is the whole point of the range — a member with
+        // no broadcast verdict is unconfirmed, not ripe.
+        //
+        // ⚠️ The bound was 130025 and the slab sites fell outside it, so all four in range were
+        // reported collectable the instant they were dug ("hid 0 not collectable" with growTime
+        // 60 s). Extend this whenever a new Dynamicbush id ships, not just its radar toggle.
+        internal static bool IsDynamicBushStaticId(int staticId)
+        {
+            return staticId >= 130001 && staticId <= 130029;
         }
 
         private bool IsFarmTargetUnconfirmed(Vector3 node, out int staticId)
@@ -1682,7 +1685,7 @@ namespace HeartopiaMod
                 staticId = this.liveCollectableColds[i].StaticId;
             }
 
-            if (!found || staticId < 130001 || staticId > 130025)
+            if (!found || !IsDynamicBushStaticId(staticId))
             {
                 return false;
             }
@@ -2834,13 +2837,16 @@ namespace HeartopiaMod
                                         // markers were on the radar but no branch here matched the labels, so
                                         // the farm never targeted them — it kept touring rare trees instead.
                                         // Cooldown copies are already excluded above (markerOnCooldown).
-                                        || (this.showOakOakRadar && markerLabel.Contains("Oak-Oak"))
+                                        // ⚠️ EQUALITY, not Contains: "Oak-Oak Slab" (the dig site,
+                                        // 130028) contains "Oak-Oak" (the roaming animal, 42001).
+                                        // With Contains here the roamer's toggle also swept up slab
+                                        // markers, which is a different resource in a different area
+                                        // reached by a different interaction.
+                                        || (this.showOakOakRadar && string.Equals(markerLabel, "Oak-Oak", StringComparison.Ordinal))
                                         || (this.showFluoriteRadar && markerLabel.Contains("Flawless Fluorite"))
                                         || this.ShouldShowMushroomByLabel(markerLabel)
-                                        || (this.showFiddleheadRadar && markerLabel.Contains("Fiddlehead"))
-                                        || (this.showTallMustardRadar && markerLabel.Contains("Tall Mustard"))
-                                        || (this.showBurdockRadar && markerLabel.Contains("Burdock"))
-                                        || (this.showMustardGreensRadar && markerLabel.Contains("Mustard Greens"));
+                                        || (this.showCapybaraSlabRadar && markerLabel.Contains("Capybara Slab"))
+                                        || (this.showOakSlabRadar && markerLabel.Contains("Oak-Oak Slab"));
                                     if (flag10)
                                     {
                                         flag9 = true;
@@ -2964,7 +2970,7 @@ namespace HeartopiaMod
             this.lastFoundPriorityNodeLabel = string.Empty;
             // Check if any priorities are enabled
             bool hasPriorities = this.priorityOysterMushroom || this.priorityButtonMushroom || this.priorityPennyBun ||
-                                this.priorityShiitake || this.priorityTruffle || this.priorityFiddlehead || this.priorityTallMustard || this.priorityBurdock || this.priorityMustardGreens || this.priorityBlueberry ||
+                                this.priorityShiitake || this.priorityTruffle || this.priorityCapybaraSlab || this.priorityOakSlab || this.priorityBlueberry ||
                                 this.priorityRaspberry || this.priorityBubble || this.priorityInsect;
 
             if (!hasPriorities)
@@ -3025,13 +3031,9 @@ namespace HeartopiaMod
                     isPriorityMatch = true;
                 else if (this.priorityTruffle && markerLabel.Contains("Truffle"))
                     isPriorityMatch = true;
-                else if (this.priorityFiddlehead && markerLabel.Contains("Fiddlehead"))
+                else if (this.priorityCapybaraSlab && markerLabel.Contains("Capybara Slab"))
                     isPriorityMatch = true;
-                else if (this.priorityTallMustard && (markerLabel.Contains("Tall Mustard") || markerLabel.Contains("Mustard")))
-                    isPriorityMatch = true;
-                else if (this.priorityBurdock && markerLabel.Contains("Burdock"))
-                    isPriorityMatch = true;
-                else if (this.priorityMustardGreens && markerLabel.Contains("Mustard Greens"))
+                else if (this.priorityOakSlab && markerLabel.Contains("Oak-Oak Slab"))
                     isPriorityMatch = true;
                 else if (this.priorityBlueberry && markerLabel.Contains("Blueberry") && this.showBlueberryRadar)
                     isPriorityMatch = true;
@@ -3156,10 +3158,8 @@ namespace HeartopiaMod
             if (text.Contains("Penny Bun")) return this.priorityLocations["Penny Bun"];
             if (text.Contains("Shiitake")) return this.priorityLocations["Shiitake"];
             if (text.Contains("Truffle")) return this.priorityLocations["Black Truffle"];
-            if (text.Contains("Fiddlehead")) return this.priorityLocations["Fiddlehead"];
-            if (text.Contains("Tall Mustard")) return this.priorityLocations["Tall Mustard"];
-            if (text.Contains("Burdock")) return this.priorityLocations["Burdock"];
-            if (text.Contains("Mustard Greens")) return this.priorityLocations["Mustard Greens"];
+            if (text.Contains("Capybara Slab")) return this.priorityLocations["Capybara Slab"];
+            if (text.Contains("Oak-Oak Slab")) return this.priorityLocations["Oak-Oak Slab"];
             if (text.Contains("Blueberry")) return this.priorityLocations["Blueberry"];
             if (text.Contains("Raspberry")) return this.priorityLocations["Raspberry"];
             return null;

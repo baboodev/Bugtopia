@@ -2797,10 +2797,8 @@ namespace HeartopiaMod
             if (this.priorityShiitake) newActive.Add(this.priorityLocations["Shiitake"]);
             if (this.priorityButtonMushroom) newActive.Add(this.priorityLocations["Button Mushroom"]);
             if (this.priorityOysterMushroom) newActive.Add(this.priorityLocations["Oyster Mushroom"]);
-            if (this.priorityFiddlehead) newActive.Add(this.priorityLocations["Fiddlehead"]);
-            if (this.priorityTallMustard) newActive.Add(this.priorityLocations["Tall Mustard"]);
-            if (this.priorityBurdock) newActive.Add(this.priorityLocations["Burdock"]);
-            if (this.priorityMustardGreens) newActive.Add(this.priorityLocations["Mustard Greens"]);
+            if (this.priorityCapybaraSlab) newActive.Add(this.priorityLocations["Capybara Slab"]);
+            if (this.priorityOakSlab) newActive.Add(this.priorityLocations["Oak-Oak Slab"]);
             if (this.priorityBlueberry) newActive.Add(this.priorityLocations["Blueberry"]);
             if (this.priorityRaspberry) newActive.Add(this.priorityLocations["Raspberry"]);
 
@@ -4053,10 +4051,12 @@ namespace HeartopiaMod
             new HeartopiaComplete.FarmLocation("ShiiTake Spawn", new Vector3(57f, 18.3f, -131.5f), "mushroom"),
             new HeartopiaComplete.FarmLocation("Button Spawn", new Vector3(-156.3f, 18.8f, -115.2f), "mushroom"),
             new HeartopiaComplete.FarmLocation("Oyster Spawn", new Vector3(-139.8f, 21.3f, 205.2f), "mushroom"),
-            new HeartopiaComplete.FarmLocation("Fiddlehead Event Area", new Vector3(229.782f, 11.404f, 48.837f), "event_fiddlehead"),
-            new HeartopiaComplete.FarmLocation("Tall Mustard Event Area", new Vector3(-125.213f, 11.729f, 290.797f), "event_tall_mustard"),
-            new HeartopiaComplete.FarmLocation("Mustard Greens Event Area", new Vector3(-58.984f, 11.035f, -155.413f), "event_mustard_greens"),
-            new HeartopiaComplete.FarmLocation("Burdock Event Area", new Vector3(-211.599f, 29.916f, 35.416f), "event_burdock"),
+            // Slab Mining dig sites, 远古召唤 / Ancient Summon (2026-08-29..2026-10-09). Both snapped
+            // from the running game 2026-08-29 while the gather histogram reported four nodes in
+            // range at each ("0/130027->x4" / "0/130028->x4"), so these are stood-on positions, not
+            // map guesses. They replace last season's four foraging-plant areas.
+            new HeartopiaComplete.FarmLocation("Capybara Slab Event Area", new Vector3(-117.367f, 22.262f, 225.887f), "event_capybara_slab"),
+            new HeartopiaComplete.FarmLocation("Oak-Oak Slab Event Area", new Vector3(188.783f, 19.126f, -0.313f), "event_oak_slab"),
             new HeartopiaComplete.FarmLocation("Meteor Spawn 1", new Vector3(78.566f, 20.045f, -99.045f), "meteor"),
             new HeartopiaComplete.FarmLocation("Meteor Spawn 2", new Vector3(-57.025f, 11.051f, -151.923f), "meteor"),
             new HeartopiaComplete.FarmLocation("Big Blueberry Field", new Vector3(-114.2f, 20.1f, 142f), "blueberry"),
@@ -4771,10 +4771,8 @@ namespace HeartopiaMod
         private bool radarTreesDropdownOpen = false;
         private bool radarDailyDropdownOpen = false;
         private bool radarMiscDropdownOpen = false;
-        private bool showFiddleheadRadar = false;
-        private bool showTallMustardRadar = false;
-        private bool showBurdockRadar = false;
-        private bool showMustardGreensRadar = false;
+        private bool showCapybaraSlabRadar = false;
+        private bool showOakSlabRadar = false;
 
         // Underwater gatherables (2026-07-09 SeaWorld update, Fruit table 40601-40603):
         // Glasswort = p_gather_seaasparagus_00, Sea Grape = p_gather_seagrape_00,
@@ -4989,10 +4987,8 @@ namespace HeartopiaMod
         private bool priorityPennyBun = false;
         private bool priorityShiitake = false;
         private bool priorityTruffle = false;
-        private bool priorityFiddlehead = false;
-        private bool priorityTallMustard = false;
-        private bool priorityBurdock = false;
-        private bool priorityMustardGreens = false;
+        private bool priorityCapybaraSlab = false;
+        private bool priorityOakSlab = false;
         private bool priorityBlueberry = false;
         private bool priorityRaspberry = false;
         private bool priorityBubble = false;
@@ -5020,10 +5016,8 @@ namespace HeartopiaMod
             { "Penny Bun", new Vector3(175.89377f, 25.673292f, 55.985367f) },
             { "Shiitake", new Vector3(-66.63026f, 14.248707f, -169.89787f) },
             { "Black Truffle", new Vector3(258.11917f, 13.1247f, 95.18241f) },
-            { "Fiddlehead", new Vector3(229.782f, 11.404f, 48.837f) },
-            { "Tall Mustard", new Vector3(-125.213f, 11.729f, 290.797f) },
-            { "Burdock", new Vector3(-211.599f, 29.916f, 35.416f) },
-            { "Mustard Greens", new Vector3(-58.984f, 11.035f, -155.413f) },
+            { "Capybara Slab", new Vector3(-117.367f, 22.262f, 225.887f) },
+            { "Oak-Oak Slab", new Vector3(188.783f, 19.126f, -0.313f) },
             { "Blueberry", new Vector3(-114.2f, 20.1f, 142f) },
             { "Raspberry", new Vector3(-162.2f, 23.6f, 86.2f) }
         };

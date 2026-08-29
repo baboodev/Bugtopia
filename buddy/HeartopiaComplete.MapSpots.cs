@@ -102,6 +102,13 @@ namespace HeartopiaMod
                 // would otherwise poison the label cache with the wrong icon).
                 case "Oak-Oak": return 40006;           // Roaming Oak Timber
                 case "Flawless Fluorite": return 40026;
+                // Event slab dig sites (130027/130028). Their drops are DECORATIONS (302685 /
+                // 302694), not materials, so they have no collectable-atlas sprite at all — pinning
+                // them here keeps the 3 m position match from handing them a neighbouring stone's
+                // icon and caching it per label. They ride the Furniture route instead, see
+                // IsBigMapFurnitureLabel.
+                case "Capybara Slab": return 302685;
+                case "Oak-Oak Slab": return 302694;
                 default: return 0;
             }
         }
@@ -616,9 +623,14 @@ namespace HeartopiaMod
         // — they reach the big map only through the IsSameType widening (EnsureFurnitureSpotPatch). Keep this
         // list tight: every label here costs a Collectable spot that borrows its icon from our own track.
         //   Meteor -> Starfall Shard 40034-40036, absent from the 35-sprite collectable atlas.
+        //   Capybara Slab / Oak-Oak Slab -> slab pieces 302685 / 302694, Decoration rows whose icon
+        //     lives in the NormalItem atlas (ui_item_normal_p_decoration_tribe_kapibalaslate_1 /
+        //     _oakslab_1); the collectable atlas holds no 302xxx sprite of any kind.
         private static bool IsBigMapFurnitureLabel(string label)
         {
-            return string.Equals(label, "Meteor", StringComparison.Ordinal);
+            return string.Equals(label, "Meteor", StringComparison.Ordinal)
+                || string.Equals(label, "Capybara Slab", StringComparison.Ordinal)
+                || string.Equals(label, "Oak-Oak Slab", StringComparison.Ordinal);
         }
 
         // Called when the ESP/Game segmented control changes.

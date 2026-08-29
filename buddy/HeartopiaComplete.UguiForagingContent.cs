@@ -165,10 +165,8 @@ namespace HeartopiaMod
                 new UguiForagingLootBinding { Label = "Penny Bun", Column = 0, Get = () => this.priorityPennyBun, Set = v => this.priorityPennyBun = v },
                 new UguiForagingLootBinding { Label = "Shiitake", Column = 0, Get = () => this.priorityShiitake, Set = v => this.priorityShiitake = v },
                 new UguiForagingLootBinding { Label = "Truffle", Column = 0, Get = () => this.priorityTruffle, Set = v => this.priorityTruffle = v },
-                new UguiForagingLootBinding { Label = "Fiddlehead", Column = 1, Get = () => this.priorityFiddlehead, Set = v => this.priorityFiddlehead = v },
-                new UguiForagingLootBinding { Label = "Tall Mustard", Column = 1, Get = () => this.priorityTallMustard, Set = v => this.priorityTallMustard = v },
-                new UguiForagingLootBinding { Label = "Burdock", Column = 1, Get = () => this.priorityBurdock, Set = v => this.priorityBurdock = v },
-                new UguiForagingLootBinding { Label = "Mustard Greens", Column = 1, Get = () => this.priorityMustardGreens, Set = v => this.priorityMustardGreens = v },
+                new UguiForagingLootBinding { Label = "Capybara Slab", Column = 1, Get = () => this.priorityCapybaraSlab, Set = v => this.priorityCapybaraSlab = v },
+                new UguiForagingLootBinding { Label = "Oak-Oak Slab", Column = 1, Get = () => this.priorityOakSlab, Set = v => this.priorityOakSlab = v },
                 new UguiForagingLootBinding { Label = "Blueberries", Column = 2, Get = () => this.priorityBlueberry, Set = v => this.priorityBlueberry = v },
                 new UguiForagingLootBinding { Label = "Raspberries", Column = 2, Get = () => this.priorityRaspberry, Set = v => this.priorityRaspberry = v },
                 new UguiForagingLootBinding { Label = "Bubbles", Column = 2, Get = () => this.priorityBubble, Set = v => this.priorityBubble = v },
@@ -628,7 +626,7 @@ namespace HeartopiaMod
                 Toggle tog = this.CreateUguiCheckbox(loot.transform, "Loot" + i,
                     this.L(b.Label), b.Get(), b.Set);
                 PlaceUguiTopLeft(tog.gameObject, colX[b.Column], 68f + colRow[b.Column] * 26f, colW, 22f);
-                // 14pt checkbox labels overflow a 128px column ("Mustard Greens") — the IMGUI
+                // 14pt checkbox labels overflow a 128px column ("Oak-Oak Slab") — the IMGUI
                 // twin wraps these via DrawWrappedSwitchToggle; here a smaller size fits one line.
                 this.TrySetUguiButtonLabelSize(tog.gameObject, 12.5f);
                 handle.LootToggles.Add(tog);

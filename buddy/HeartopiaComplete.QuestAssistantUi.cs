@@ -1750,6 +1750,8 @@ namespace HeartopiaMod
             this.showGlasswortRadar = false;
             this.showSeaGrapeRadar = false;
             this.showWakameRadar = false;
+            this.showCapybaraSlabRadar = false;
+            this.showOakSlabRadar = false;
         }
 
         // Ids/fields verified against docs/RADAR_GAME_MAP.md's known collectable atlas and the actual
@@ -1821,6 +1823,23 @@ namespace HeartopiaMod
                     this.showWakameRadar = true;
                     return true;
                 default:
+                    // Slab Mining (远古召唤 / Ancient Summon). GameTask 1301470-1301473 list every
+                    // piece id in one condition — 302685-302693 for the capybara slab, 302694-302702
+                    // for the Oak-Oak one, three style variants of each of three parts — so a range
+                    // is the honest shape here, not nine cases. The DROP ids map to the NODE toggle:
+                    // 130027 is where the first nine come from, 130028 the second nine.
+                    if (itemStaticId >= 302685 && itemStaticId <= 302693)
+                    {
+                        this.showCapybaraSlabRadar = true;
+                        return true;
+                    }
+
+                    if (itemStaticId >= 302694 && itemStaticId <= 302702)
+                    {
+                        this.showOakSlabRadar = true;
+                        return true;
+                    }
+
                     return false;
             }
         }

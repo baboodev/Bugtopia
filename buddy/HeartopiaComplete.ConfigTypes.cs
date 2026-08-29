@@ -497,10 +497,8 @@ namespace HeartopiaMod
             public float resourceVisualEspScale = 1f;
             public float resourceVisualEspOpacity = 0.92f;
             public int resourceVisualEspMaxMarkers = 120;
-            public bool priorityFiddlehead;
-            public bool priorityTallMustard;
-            public bool priorityBurdock;
-            public bool priorityMustardGreens;
+            public bool priorityCapybaraSlab;
+            public bool priorityOakSlab;
         }
 
         [Serializable]
