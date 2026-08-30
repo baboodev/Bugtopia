@@ -140,10 +140,46 @@ namespace HeartopiaMod
 
         private float ResolveFarmWalkCollectStandoff()
         {
-            return !string.IsNullOrEmpty(this.farmWalkDwellLabel)
-                && this.farmWalkKindStandoff.TryGetValue(this.farmWalkDwellLabel, out float learned)
-                    ? learned
-                    : FarmWalkCollectStandoff;
+            // A value learned on this kind wins: it was measured on a node that refused to
+            // collect, so it describes this species better than any default.
+            if (!string.IsNullOrEmpty(this.farmWalkDwellLabel)
+                && this.farmWalkKindStandoff.TryGetValue(this.farmWalkDwellLabel, out float learned))
+            {
+                return learned;
+            }
+
+            float reach = this.ResolveFarmWalkRangedCollectReach(this.farmWalkDwellLabel);
+            return reach > FarmWalkCollectStandoff ? reach : FarmWalkCollectStandoff;
+        }
+
+        // ⭐ SOME COLLECTORS ACT AT A DISTANCE — THE WALK IS DONE WHEN THE TARGET IS IN THEIR REACH.
+        //
+        // The 1.1 m stand-off is right for a resource the aura must stand next to. Insects are
+        // caught over the net farm's own scan range (12 m by default, its slider), so the metres
+        // between that range and 1.1 m buy nothing — and they are worse than nothing on a target
+        // that MOVES: the walker re-aims at a fleeing insect and the last stretch becomes a chase
+        // it cannot win, while the catch was already possible the moment the range was entered.
+        //
+        // Gated on the catcher actually being on. With the net farm off nothing collects at range,
+        // and stopping 12 m short would simply never collect — the ordinary stand-off is then the
+        // only thing that can work.
+        //
+        // Teleport mode is deliberately NOT special-cased: it hops to the insect itself, so the
+        // walk either does not happen or ends inside the range anyway.
+        private float ResolveFarmWalkRangedCollectReach(string label)
+        {
+            if (string.IsNullOrEmpty(label))
+            {
+                return 0f;
+            }
+
+            if (label.IndexOf("Insect", System.StringComparison.Ordinal) >= 0
+                && InsectNetFarm.IsEnabled)
+            {
+                return InsectNetFarm.GetScanRange();
+            }
+
+            return 0f;
         }
 
         // One step closer for this kind. Returns false when there is no room left to step.
