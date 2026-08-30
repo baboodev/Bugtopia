@@ -1120,24 +1120,19 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    for (int nodeIndex = 0; nodeIndex < 2; nodeIndex++)
+                    if (this.TryClaimDailyClaimsStickerThemeTiers(
+                        theme.ActivityId, theme.ThemeId, out string claimStatus))
                     {
-                        if (this.TryClaimDailyClaimsStickerThemeReward(
-                            theme.ActivityId, theme.ThemeId, nodeIndex, out string claimStatus))
-                        {
-                            sent++;
-                            stickerSent++;
-                            lines.Add("sticker themeId=" + theme.ThemeId + " node=" + nodeIndex
-                                + " (" + claimStatus + ")");
-                        }
-                        else
-                        {
-                            lines.Add("FAILED sticker themeId=" + theme.ThemeId + " node=" + nodeIndex
-                                + " (" + claimStatus + ")");
-                        }
-
-                        yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
+                        sent++;
+                        stickerSent++;
+                        lines.Add("sticker themeId=" + theme.ThemeId + " (" + claimStatus + ")");
                     }
+                    else
+                    {
+                        lines.Add("sticker themeId=" + theme.ThemeId + " nothing claimed (" + claimStatus + ")");
+                    }
+
+                    yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
                 }
 
                 lines.Add("sticker: " + stickerStatus + ", live-theme sends=" + stickerSent);
@@ -2131,6 +2126,131 @@ namespace HeartopiaMod
                 new[] { "DreamType", "TargetId" },
                 new[] { dreamType, targetId },
                 out status);
+        }
+
+        // Sticker theme bonuses, tier by tier, and ONLY the tiers the game itself calls claimable.
+        // SanrioStickerTitleWidget builds one node per TableStickerThemeBonus row of the theme and
+        // only wires a click handler when GetStickerThemeRewardNodeState(themeId, i) is WaitClaim —
+        // Finished tiers are already taken and Lock/Unlock ones are not earned yet. Reproducing that
+        // replaces the blind "try node 0 and node 1" sweep, which fired two commands per live theme
+        // whatever the state was.
+        private bool TryClaimDailyClaimsStickerThemeTiers(int activityId, int themeId, out string status)
+        {
+            int tiers = this.DailyClaimsStickerBonusTierCount(themeId);
+            if (tiers <= 0)
+            {
+                status = "no bonus tiers for theme " + themeId;
+                return false;
+            }
+
+            int sent = 0;
+            int waiting = 0;
+            for (int nodeIndex = 0; nodeIndex < tiers; nodeIndex++)
+            {
+                if (!this.DailyClaimsTryGetStickerThemeNodeState(themeId, nodeIndex, out int state))
+                {
+                    status = "node state unreadable for theme " + themeId + " tier " + nodeIndex;
+                    return sent > 0;
+                }
+
+                // ActivityNodeState: 0 Lock, 1 Unlock, 2 WaitClaim, 3 Finished.
+                if (state != DailyClaimsActivityNodeStateWaitClaim)
+                {
+                    continue;
+                }
+
+                waiting++;
+                if (this.TryClaimDailyClaimsStickerThemeReward(activityId, themeId, nodeIndex, out string tierStatus))
+                {
+                    sent++;
+                }
+                else
+                {
+                    status = "theme " + themeId + " tier " + nodeIndex + " failed: " + tierStatus;
+                    return sent > 0;
+                }
+            }
+
+            status = "theme " + themeId + " tiers=" + tiers + " waiting=" + waiting + " claimed=" + sent;
+            return sent > 0;
+        }
+
+        private const int DailyClaimsActivityNodeStateWaitClaim = 2;
+
+        // How many bonus tiers a theme ships, from TableStickerThemeBonuss (the plural really is
+        // doubled). The count bounds the loop above: GetStickerThemeRewardNodeState indexes an
+        // array with no range check of its own.
+        private readonly Dictionary<int, int> dailyClaimsStickerBonusTiers = new Dictionary<int, int>();
+        private bool dailyClaimsStickerBonusTiersLoaded;
+
+        private int DailyClaimsStickerBonusTierCount(int themeId)
+        {
+            if (!this.dailyClaimsStickerBonusTiersLoaded)
+            {
+                this.dailyClaimsStickerBonusTiersLoaded = true;
+                this.DailyClaimsForEachTableRow("TableStickerThemeBonuss", row =>
+                {
+                    // requiredNum is a public int PROPERTY over a private byte and is NOT read here:
+                    // the tier is addressed by its ordinal, and the node state already says whether
+                    // the requirement is met.
+                    if (this.TryGetMonoIntMember(row, "themeId", out int rowThemeId) && rowThemeId > 0)
+                    {
+                        this.dailyClaimsStickerBonusTiers.TryGetValue(rowThemeId, out int n);
+                        this.dailyClaimsStickerBonusTiers[rowThemeId] = n + 1;
+                    }
+                }, out _);
+            }
+
+            return this.dailyClaimsStickerBonusTiers.TryGetValue(themeId, out int tiers) ? tiers : 0;
+        }
+
+        // GameActivitySystem.GetStickerThemeRewardNodeState(int themeId, int subIndex).
+        //
+        // The class has to come from the resolved INSTANCE: the type sits in the XDTLevelAndEntity
+        // image under a XDTGameSystem.* namespace, and FindAuraMonoClassByFullName misses it on that
+        // mismatch — a live probe returned a null method pointer, whose "result" unboxed to 0, i.e.
+        // Lock, which reads exactly like a legitimately unearned tier.
+        private unsafe bool DailyClaimsTryGetStickerThemeNodeState(int themeId, int nodeIndex, out int state)
+        {
+            state = 0;
+            if (themeId <= 0 || nodeIndex < 0 || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            if (!this.TryResolveAuraMonoModule(
+                    "XDTGameSystem.GameplaySystem.GameActivity.GameActivitySystem", out IntPtr activitySystem)
+                || activitySystem == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr activityClass = auraMonoObjectGetClass(activitySystem);
+            if (activityClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr method = this.FindAuraMonoMethodOnHierarchy(activityClass, "GetStickerThemeRewardNodeState", 2);
+            if (method == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            int themeArg = themeId;
+            int indexArg = nodeIndex;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&themeArg);
+            args[1] = (IntPtr)(&indexArg);
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(method, activitySystem, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return this.TryUnboxMonoInt32(boxed, out state);
         }
 
         private bool TryClaimDailyClaimsStickerThemeReward(int activityId, int themeId, int nodeIndex, out string status)

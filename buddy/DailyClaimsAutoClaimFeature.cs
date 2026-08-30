@@ -626,6 +626,11 @@ namespace HeartopiaMod
         private const int DailyClaimsRedPointEnumPartyOfficialTaskCanSubmit = 804;
         private const int DailyClaimsRedPointEnumActivityFreeReward = 20788;
 
+        // StickerActivityThemeReward: the node id is the sticker THEME, and the claim also needs the
+        // activity that owns it plus the tier ordinal. RedPointUtility gives it no server type, so
+        // like the Dream kinds it can only be reached from a node walk.
+        private const int DailyClaimsRedPointEnumStickerActivityThemeReward = 20786;
+
         // Nodes walked between frame hand-backs when nothing is being sent. Only bounds frame time —
         // it is not command pacing, because no command is going out on those iterations.
         private const int DailyClaimsSweepFrameChunk = 64;
@@ -650,6 +655,9 @@ namespace HeartopiaMod
         // need these rows, and each was re-walking all 922 of them (pinned) for every suit node.
         private readonly List<DailyClaimsSuitRewardTier> dailyClaimsSweepSuitTiers = new List<DailyClaimsSuitRewardTier>();
         private bool dailyClaimsSweepSuitTiersLoaded;
+
+        // sticker themeId -> activityId, built once per sweep from TableStickerThemes.
+        private readonly Dictionary<int, int> dailyClaimsStickerActivityByTheme = new Dictionary<int, int>();
 
         // targetId -> dreamType, built once per sweep from TableDreamTaskTypes.
         private readonly Dictionary<int, int> dailyClaimsDreamTypeByTarget = new Dictionary<int, int>();
@@ -829,6 +837,33 @@ namespace HeartopiaMod
             // Client-enum kinds first — these have no server type at all.
             switch (clientEnum)
             {
+                case DailyClaimsRedPointEnumStickerActivityThemeReward:
+                {
+                    // Node id is the theme (StickerActivityThemeRewardNode resolves its parent
+                    // through TableData.GetStickerTheme(base.Id)); the command needs that theme's
+                    // activity as well.
+                    what = "sticker theme " + id;
+                    if (this.dailyClaimsStickerActivityByTheme.Count == 0)
+                    {
+                        List<DailyClaimsActivityTheme> themes = new List<DailyClaimsActivityTheme>();
+                        this.DailyClaimsTryCollectActivityThemes("TableStickerThemes", themes, out _);
+                        for (int i = 0; i < themes.Count; i++)
+                        {
+                            this.dailyClaimsStickerActivityByTheme[themes[i].ThemeId] = themes[i].ActivityId;
+                        }
+                    }
+
+                    if (!this.dailyClaimsStickerActivityByTheme.TryGetValue(id, out int stickerActivityId)
+                        || stickerActivityId <= 0)
+                    {
+                        status = "activityId for sticker theme " + id + " unknown";
+                        return false;
+                    }
+
+                    what = "sticker theme " + id + " (activity " + stickerActivityId + ")";
+                    return this.TryClaimDailyClaimsStickerThemeTiers(stickerActivityId, id, out status);
+                }
+
                 case DailyClaimsRedPointEnumDreamTaskReward:
                 {
                     // Node id is the TableDreamTask key, and DreamSystem lights it exactly when the
@@ -1024,6 +1059,7 @@ namespace HeartopiaMod
             // update would silently claim the wrong target.
             this.dailyClaimsDreamTypeByTarget.Clear();
             this.dailyClaimsDreamGameTaskByTask.Clear();
+            this.dailyClaimsStickerActivityByTheme.Clear();
             this.dailyClaimsSweepSubmittedTaskIds.Clear();
             this.dailyClaimsSweepSuitTiers.Clear();
             this.dailyClaimsSweepSuitTiersLoaded = false;
@@ -1792,6 +1828,7 @@ namespace HeartopiaMod
         {
             switch (clientEnum)
             {
+                case DailyClaimsRedPointEnumStickerActivityThemeReward:
                 case DailyClaimsRedPointEnumDreamTypeReward:
                 case DailyClaimsRedPointEnumDreamTaskReward:
                 // Neither of these is claimable, but neither may be hidden: DreamReward is the
