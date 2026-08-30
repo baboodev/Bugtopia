@@ -1450,6 +1450,20 @@ namespace HeartopiaMod
                     return;
                 }
 
+                // Leave the vehicle first. Placed AHEAD of the tool check on purpose: fishing is
+                // unreachable from a seat (GameFishingMode.EnterFishing throws outside GameFreeMode),
+                // and equipping the rod while mounted is not something to rely on either — gating
+                // only at the cast could wedge the farm in the equip retry and never get here.
+                // Non-blocking: the helper resends GetOffVehicle on its own cadence and we just
+                // come back next tick.
+                if (host.IsFishingDismountPending(out string dismountStatus))
+                {
+                    lastStatus = dismountStatus;
+                    lastTargetStatus = "Waiting to leave the vehicle";
+                    nextActionAt = now + 0.3f;
+                    return;
+                }
+
                 if (!host.TryGetFishingRodToolStatus(out bool rodEquipped, out string toolStatus))
                 {
                     lastToolStatus = toolStatus;

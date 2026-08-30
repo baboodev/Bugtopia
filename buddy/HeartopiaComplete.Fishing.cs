@@ -1435,6 +1435,7 @@ namespace HeartopiaMod
                 // window before the transition; FishingCameraHudFeature no-ops it when its toggle
                 // is off. See FishingCameraHudFeature.cs §2a.
                 this.ArmFishingCameraHudCastWindow();
+                this.ArmStealthFishingCastWindow();
 
                 if (this.TryResolveGameplayFishingApi(out Type _, out Type fishingSubStateType, out MethodInfo enterFishingMethod, out MethodInfo _))
                 {
@@ -2746,6 +2747,194 @@ namespace HeartopiaMod
         // dispatches ResetFishState, whose listener in PlayerStateFishing does ResetFishingStateData()
         // + CrossFade(Idle) — the game's own instant-reset path. The uint arg is ignored by the body.
         // Safe outside fishing: the listener is only registered while in the Fishing FSM state.
+        // ---- Dismount before casting ------------------------------------------------------------
+        // Fishing is unreachable from a vehicle seat, and not because of one flag: FishingCommand
+        // wants playerState == Free, GameFishingMode.EnterFishing THROWS unless
+        // GameWorld.IsMode<GameFreeMode>(), StateCollection has no Vehicle->Fishing transition, and
+        // TransitionVehicle2Free only fires once Status.VehicleStatus.VehicleNetId == 0 — i.e. once
+        // the seat is really vacated, which is server state. So the only way in is the game's own
+        // exit, and that is exactly what ExitVehicleStateTask does: one call to
+        // VehicleProtocolManager.GetOffVehicle(vehicleNetId, reason), then wait for the server's
+        // PlayerVehicleTurnOffEvent and for the state to leave Vehicle. We drive the same call and
+        // poll the same field the game's own transition polls, so there is nothing to spoof.
+        //
+        // NON-BLOCKING: this reports "still dismounting" and the farm retries on a later tick.
+        // Never a wait loop inside OnUpdate.
+        private const float FishingDismountResendSeconds = 2f;
+        private const float FishingDismountLogInterval = 5f;
+
+        private uint fishingDismountVehicleNetId;
+        private float fishingDismountResendAt;
+        private float fishingDismountFirstAttemptAt;
+        private float fishingDismountNextLogAt;
+
+        // True while the player still occupies a vehicle seat — the caller must NOT cast yet.
+        public bool IsFishingDismountPending(out string status)
+        {
+            status = null;
+
+            if (!this.TryGetLocalPlayerVehicleNetIdMono(out uint vehicleNetId, out string readStatus))
+            {
+                // Cannot read the seat: do not block fishing on a failed probe. If we really are in
+                // a vehicle the cast fails on its own with the EnterFishing throw, which is logged.
+                return false;
+            }
+
+            if (vehicleNetId == 0u)
+            {
+                if (this.fishingDismountVehicleNetId != 0u)
+                {
+                    this.AutoFishLog("Dismount complete after "
+                        + (Time.unscaledTime - this.fishingDismountFirstAttemptAt).ToString("F1")
+                        + "s — casting is unblocked.");
+                    this.fishingDismountVehicleNetId = 0u;
+                    this.fishingDismountResendAt = -999f;
+                    this.fishingDismountNextLogAt = -999f;
+                }
+
+                return false;
+            }
+
+            float now = Time.unscaledTime;
+            bool newVehicle = this.fishingDismountVehicleNetId != vehicleNetId;
+            if (newVehicle)
+            {
+                this.fishingDismountVehicleNetId = vehicleNetId;
+                this.fishingDismountFirstAttemptAt = now;
+                this.fishingDismountResendAt = -999f;
+                this.fishingDismountNextLogAt = -999f;
+            }
+
+            // Resend rather than give up: GetOffVehicle can legitimately be refused for a while —
+            // PlayerStateVehicle.GetExitInteractTask returns null while the driver's vehicle is
+            // InTheAir — and it starts working by itself once the vehicle lands.
+            if (now >= this.fishingDismountResendAt)
+            {
+                this.fishingDismountResendAt = now + FishingDismountResendSeconds;
+                bool sent = this.TryInvokeVehicleGetOffMono(vehicleNetId, out string sendStatus);
+                if (newVehicle || now >= this.fishingDismountNextLogAt)
+                {
+                    this.fishingDismountNextLogAt = now + FishingDismountLogInterval;
+                    this.AutoFishLog("Dismount before cast: vehicle=" + vehicleNetId + " " + sendStatus);
+                }
+
+                if (!sent && newVehicle)
+                {
+                    // A resolver miss will not fix itself — say so once instead of stalling quietly.
+                    FeatureLog.Fail("AutoFish", "cannot leave the vehicle before casting: " + sendStatus);
+                }
+            }
+
+            status = "Leaving vehicle before cast ("
+                + (now - this.fishingDismountFirstAttemptAt).ToString("F1") + "s)";
+            return true;
+        }
+
+        // Status.VehicleStatus.vehicleNetId — the exact field TransitionVehicle2Free keys on, so
+        // "we may fish" and "the game will let the FSM out of PlayerStateVehicle" are one read.
+        // Prefers the private backing field over the property: reading a field off the boxed struct
+        // is a plain read, whereas the property would need an unbox+pin invoke.
+        public bool TryGetLocalPlayerVehicleNetIdMono(out uint vehicleNetId, out string status)
+        {
+            vehicleNetId = 0u;
+            status = "Vehicle status mono unavailable";
+
+            try
+            {
+                if (!this.TryGetFishingPlayerMonoObject(out IntPtr playerObj, out IntPtr _, out status)
+                    || playerObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                if (!this.TryGetMonoObjectMember(playerObj, "Status", out IntPtr statusObj)
+                    && !this.TryGetMonoObjectMember(playerObj, "status", out statusObj)
+                    && !this.TryGetMonoObjectMember(playerObj, "_status", out statusObj))
+                {
+                    status = "Mono player status unavailable";
+                    return false;
+                }
+
+                if (statusObj == IntPtr.Zero
+                    || !this.TryGetMonoObjectMember(statusObj, "VehicleStatus", out IntPtr vehicleStatusObj)
+                    || vehicleStatusObj == IntPtr.Zero)
+                {
+                    status = "Mono VehicleStatus unavailable";
+                    return false;
+                }
+
+                if (!this.TryGetMonoIntMember(vehicleStatusObj, "vehicleNetId", out int raw)
+                    && !this.TryGetMonoIntMember(vehicleStatusObj, "VehicleNetId", out raw))
+                {
+                    status = "Mono VehicleStatus.vehicleNetId unavailable";
+                    return false;
+                }
+
+                vehicleNetId = unchecked((uint)raw);
+                status = "OK";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "Vehicle status mono failed: " + ex.Message;
+                return false;
+            }
+        }
+
+        // VehicleProtocolManager.GetOffVehicle(uint vehicleNetId, VehicleGetOffReason reason) — the
+        // same call ExitVehicleStateTask makes. Two params in the metadata (the default argument is
+        // compile-time only), reason = VehicleGetOffReason.Default = 0.
+        public unsafe bool TryInvokeVehicleGetOffMono(uint vehicleNetId, out string status)
+        {
+            status = "GetOffVehicle Mono unavailable";
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+                {
+                    status = "GetOffVehicle Mono runtime unavailable";
+                    return false;
+                }
+
+                IntPtr classPtr = this.FindAuraMonoClassByFullName("XDTDataAndProtocol.ProtocolService.Vehicle.VehicleProtocolManager");
+                if (classPtr == IntPtr.Zero)
+                {
+                    status = "VehicleProtocolManager Mono class unavailable";
+                    return false;
+                }
+
+                IntPtr methodPtr = this.FindAuraMonoMethodOnHierarchy(classPtr, "GetOffVehicle", 2);
+                if (methodPtr == IntPtr.Zero)
+                {
+                    status = "VehicleProtocolManager.GetOffVehicle(2) Mono method unavailable";
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                uint netIdArg = vehicleNetId;
+                int reasonArg = 0; // VehicleGetOffReason.Default
+                args[0] = (IntPtr)(&netIdArg);
+                args[1] = (IntPtr)(&reasonArg);
+                auraMonoRuntimeInvoke(methodPtr, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "GetOffVehicle Mono exception";
+                    this.AutoFishLog("GetOffVehicle Mono raised exception ptr=0x" + exc.ToInt64().ToString("X"));
+                    return false;
+                }
+
+                status = "GetOffVehicle sent";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "GetOffVehicle Mono failed: " + ex.Message;
+                this.AutoFishLog("GetOffVehicle Mono exception: " + ex.Message);
+                return false;
+            }
+        }
+
         public unsafe bool TryInvokeFishingTakeUpRodMono(out string status)
         {
             status = "TakeUpRod Mono unavailable";

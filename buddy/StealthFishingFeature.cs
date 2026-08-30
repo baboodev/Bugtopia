@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using UnityEngine;
 
 namespace HeartopiaMod
 {
@@ -34,6 +35,18 @@ namespace HeartopiaMod
     // Dropping the call outright is the cleanest cut: the whole ClientShowActionNetworkCommand for
     // that one key simply never goes out, and no game state is left half-updated (the dirty bit was
     // already cleared by SendSyncStatus before OnSend ran -- see "AFTER-EFFECT" below).
+    //
+    // TWO TIERS OF KEYS -- and getting this wrong broke vehicles once, so it is worth stating
+    // plainly. FishingStatus is fishing-exclusive and can be dropped unconditionally. The other
+    // groups are SHARED channels: FsmStatus.MotionData carries EVERY body motion and
+    // CastActionEvent carries EVERY one-shot action. Dropping those wholesale did not merely hide
+    // cosmetics -- it broke vehicle sync for everyone else, because a vehicle seat IS a body
+    // motion: PlayerDriveMotionArg is [ActionConfiguration(ActionId.PlayerDriveMotion,
+    // typeof(PlayerDriveMotionClip))] and PlayerDriveMotionClip : ActorMotionClip, so it replicates
+    // on key 393217. Remote clients never started that clip, so the passenger was never attached,
+    // and its OnMotionFinish (VehicleManager.DoPassengerLeave) never ran either; the dismount
+    // one-shot PlayerDriveMotionEnd went out on key 13 and was dropped too. So the shared groups are
+    // gated on stealthFishContextActive -- a fishing session -- while the fishing-only group is not.
     //
     // WHAT WE DROP (actionKey = SyncFieldId = propertyId | (fieldId << 16)):
     //   FishingStatus  [NetId(5, 10)]  fields 0..8  -- InFishingState / FishRodNetId / FishState /
@@ -134,8 +147,20 @@ namespace HeartopiaMod
         private static StealthFishShowActionHookDelegate stealthFishHookKeepAlive; // anti-GC
         private static StealthFishShowActionHookDelegate stealthFishTrampoline;
 
-        private static HashSet<int> stealthFishBlockedKeys;
+        // Fishing-exclusive: dropped whenever the feature is on.
+        private static HashSet<int> stealthFishAlwaysBlockedKeys;
+
+        // Shared channels (body motion / one-shot casts / equip / show-off): dropped ONLY inside a
+        // fishing session, or driving, emoting and equipping break for everyone watching.
+        private static HashSet<int> stealthFishContextBlockedKeys;
+        private static bool stealthFishContextActive;
+
         private static long stealthFishDroppedCount;
+
+        // Arms the shared-channel tier across the mod's own cast, in case the FSM transition lands a
+        // frame after EnterFishing returns. Main-loop state; never read from a detour body.
+        private const float StealthFishCastArmSeconds = 2f;
+        private float stealthFishContextUntil;
 
         private bool stealthFishEnabled;
         private bool stealthFishCallbackRegistered;
@@ -193,7 +218,30 @@ namespace HeartopiaMod
                 return this.stealthFishHookTried ? "hook unavailable" : "arming";
             }
 
-            return "hiding (" + stealthFishDroppedCount + " dropped)";
+            return (stealthFishContextActive ? "hiding, session (" : "hiding, idle (")
+                + stealthFishDroppedCount + " dropped)";
+        }
+
+        // Called right before the mod hands the game an EnterFishing, so the throw clip and the
+        // fishing motion are already inside the tier-2 window even if the FSM transition settles a
+        // frame later. AutoFishingFarm.IsEnabled / IsInFishingSession cover the rest of the session.
+        internal void ArmStealthFishingCastWindow()
+        {
+            if (!this.stealthFishEnabled)
+            {
+                return;
+            }
+
+            try
+            {
+                this.stealthFishContextUntil = Time.unscaledTime + StealthFishCastArmSeconds;
+            }
+            catch
+            {
+                return;
+            }
+
+            stealthFishContextActive = true;
         }
 
         // ---- per-frame glue --------------------------------------------------------------------
@@ -205,10 +253,28 @@ namespace HeartopiaMod
                 // Deliberately NOT Undo()n once installed — see the header. An inert detour is a
                 // pass-through; the flag is the whole switch.
                 stealthFishHideActive = false;
+                stealthFishContextActive = false;
                 return;
             }
 
             stealthFishHideActive = true;
+
+            // Tier-2 gate: the shared channels are only suppressed inside a fishing session, so
+            // driving, emoting and equipping keep replicating everywhere else. Computed here on the
+            // main loop because the detour body may not call Unity.
+            bool inFishingSession;
+            try
+            {
+                inFishingSession = AutoFishingFarm.IsEnabled
+                    || AutoFishingFarm.IsInFishingSession
+                    || Time.unscaledTime < this.stealthFishContextUntil;
+            }
+            catch
+            {
+                inFishingSession = false;
+            }
+
+            stealthFishContextActive = inFishingSession;
 
             // Hook installs run on the world-ready gate, never on a retry timer here
             // (AGENTS.md §1 hard rule). Registration is idempotent and cheap.
@@ -292,7 +358,8 @@ namespace HeartopiaMod
 
                 this.stealthFishHookTried = true;
                 FeatureLog.Life("StealthFish", "Hooked CharacterProtocolManager.SendPlayerShowActionData @0x"
-                    + nativePtr.ToInt64().ToString("X") + " — " + stealthFishBlockedKeys.Count + " action keys filtered");
+                    + nativePtr.ToInt64().ToString("X") + " — " + stealthFishAlwaysBlockedKeys.Count
+                    + " always-blocked + " + stealthFishContextBlockedKeys.Count + " session-only action keys");
                 return true;
             }
             catch (Exception ex)
@@ -308,29 +375,36 @@ namespace HeartopiaMod
 
         private static void EnsureStealthFishingBlockedKeys()
         {
-            if (stealthFishBlockedKeys != null)
+            if (stealthFishAlwaysBlockedKeys != null && stealthFishContextBlockedKeys != null)
             {
                 return;
             }
 
-            HashSet<int> keys = new HashSet<int>();
+            // Tier 1 — fishing-exclusive, safe to drop unconditionally.
+            HashSet<int> always = new HashSet<int>();
             for (int i = 0; i < StealthFishFishingFieldCount; i++)
             {
-                keys.Add(StealthFishSyncFieldId(StealthFishOpFishingStatus, i));
+                always.Add(StealthFishSyncFieldId(StealthFishOpFishingStatus, i));
             }
+
+            // Tier 2 — SHARED channels. Every body motion rides 393217 and every one-shot cast rides
+            // 13, so these may only be dropped inside a fishing session; otherwise vehicles, emotes
+            // and equipment stop replicating (see the header).
+            HashSet<int> context = new HashSet<int>();
             for (int i = 0; i < StealthFishEquipFieldCount; i++)
             {
-                keys.Add(StealthFishSyncFieldId(StealthFishOpEquipStatus, i));
+                context.Add(StealthFishSyncFieldId(StealthFishOpEquipStatus, i));
             }
             for (int i = 0; i < StealthFishShowOffFieldCount; i++)
             {
-                keys.Add(StealthFishSyncFieldId(StealthFishOpShowOffStatus, i));
+                context.Add(StealthFishSyncFieldId(StealthFishOpShowOffStatus, i));
             }
-            keys.Add(StealthFishSyncFieldId(StealthFishOpFsmStatus, StealthFishFsmMotionDataField));
-            keys.Add(StealthFishSyncFieldId(StealthFishOpCastActionEvent, 0));
-            keys.Add(StealthFishSyncFieldId(StealthFishOpQuickActionEvent, 0));
+            context.Add(StealthFishSyncFieldId(StealthFishOpFsmStatus, StealthFishFsmMotionDataField));
+            context.Add(StealthFishSyncFieldId(StealthFishOpCastActionEvent, 0));
+            context.Add(StealthFishSyncFieldId(StealthFishOpQuickActionEvent, 0));
 
-            stealthFishBlockedKeys = keys;
+            stealthFishAlwaysBlockedKeys = always;
+            stealthFishContextBlockedKeys = context;
         }
 
         // SyncFieldId is [StructLayout(Explicit)] { short propertyId @0; short fieldId @2; int id @0 },
@@ -357,9 +431,12 @@ namespace HeartopiaMod
             StealthFishShowActionHookDelegate orig = stealthFishTrampoline;
 
             if (stealthFishHideActive
-                && stealthFishBlockedKeys != null
+                && stealthFishAlwaysBlockedKeys != null
                 && StealthFishTryReadFirstActionKey(changeActions, out int actionKey)
-                && stealthFishBlockedKeys.Contains(actionKey))
+                && (stealthFishAlwaysBlockedKeys.Contains(actionKey)
+                    || (stealthFishContextActive
+                        && stealthFishContextBlockedKeys != null
+                        && stealthFishContextBlockedKeys.Contains(actionKey))))
             {
                 stealthFishDroppedCount++;
                 return; // the packet never leaves this client
