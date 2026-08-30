@@ -93,6 +93,23 @@ namespace HeartopiaMod
         private const float DailyClaimsAutoDreamMinIntervalSeconds = 3f;
         private const int DailyClaimsAutoDreamPerPass = 8;
 
+        // Sticker theme bonuses have no server RedPointType either. This is what the server sync of
+        // the theme node states dispatches (OperationActivityCenterSyncSystem), i.e. exactly when a
+        // tier can flip to WaitClaim. Empty struct, so one byte.
+        private const string DailyClaimsRefreshStickerRewardEventName =
+            "XDTDataAndProtocol.Events.RefreshStickerRewardEvent";
+        private const int DailyClaimsRefreshStickerRewardEventBytes = 1;
+        private const float DailyClaimsAutoStickerMinIntervalSeconds = 3f;
+        private const int DailyClaimsAutoStickerPerPass = 8;
+
+        // BattlePassSystem dispatches this when the BP component syncs — the moment a level-up makes
+        // new track rewards claimable. It is also what sets the BattlePassLoopReward dot, so both
+        // halves of the panel's own CanOneClaimAward test are settled by the time this arrives.
+        private const string DailyClaimsBattlePassUpdatedEventName =
+            "XDTDataAndProtocol.Events.BattlePassUpdatedEvent";
+        private const int DailyClaimsBattlePassUpdatedEventBytes = 4;   // int level
+        private const float DailyClaimsAutoBattlePassMinIntervalSeconds = 5f;
+
         private const string DailyClaimsAutoWorldReadyCallbackName = "DailyClaimsAutoClaim";
 
         // One send per tick at this spacing — the same "no burst the game never produces" rule the
@@ -152,6 +169,10 @@ namespace HeartopiaMod
         private bool dailyClaimsAutoPendingMail;
         private bool dailyClaimsAutoPendingDream;
         private float dailyClaimsAutoDreamNextAllowedAt;
+        private bool dailyClaimsAutoPendingSticker;
+        private float dailyClaimsAutoStickerNextAllowedAt;
+        private bool dailyClaimsAutoPendingBattlePass;
+        private float dailyClaimsAutoBattlePassNextAllowedAt;
         private float dailyClaimsAutoMailEchoUntil;
         private float dailyClaimsAutoMailNextAllowedAt;
 
@@ -215,10 +236,20 @@ namespace HeartopiaMod
                     DailyClaimsRefreshDreamEventName,
                     DailyClaimsRefreshDreamEventBytes,
                     this.OnDailyClaimsAutoRefreshDreamEvent);
+                bool sticker = this.RegisterGameEventHook(
+                    DailyClaimsRefreshStickerRewardEventName,
+                    DailyClaimsRefreshStickerRewardEventBytes,
+                    this.OnDailyClaimsAutoRefreshStickerRewardEvent);
+                bool battlePass = this.RegisterGameEventHook(
+                    DailyClaimsBattlePassUpdatedEventName,
+                    DailyClaimsBattlePassUpdatedEventBytes,
+                    this.OnDailyClaimsAutoBattlePassUpdatedEvent);
 
-                this.dailyClaimsAutoHooksRegistered = redPoint || activityTasks || mail || dream;
+                this.dailyClaimsAutoHooksRegistered =
+                    redPoint || activityTasks || mail || dream || sticker || battlePass;
                 this.DailyClaimsLog("auto-claim hooks registered: redPoint=" + redPoint
-                    + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream);
+                    + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream
+                    + " sticker=" + sticker + " battlePass=" + battlePass);
 
                 if (!this.dailyClaimsAutoHooksRegistered)
                 {
@@ -252,6 +283,10 @@ namespace HeartopiaMod
             // exists RefreshDreamEvent has usually already fired. Without this the whole family
             // would wait for the next dream change to be claimed at all.
             this.dailyClaimsAutoPendingDream = true;
+
+            // Same reasoning for the sticker tiers: the theme node states sync during login, so the
+            // refresh event has usually already fired by the time the hook exists.
+            this.dailyClaimsAutoPendingSticker = true;
 
             // The markers that matter most arrive in the pre-world burst, which the event detour
             // structurally cannot see (installing it that early is what aborted the process three
@@ -374,6 +409,28 @@ namespace HeartopiaMod
             // Fires on any state change of an operation-activity task, not just "became claimable",
             // so the drain re-checks the state before submitting.
             this.dailyClaimsAutoCatchUpTasks = true;
+        }
+
+        private void OnDailyClaimsAutoRefreshStickerRewardEvent(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            // Carries nothing — the pass works off the lit theme dots.
+            this.dailyClaimsAutoPendingSticker = true;
+        }
+
+        private void OnDailyClaimsAutoBattlePassUpdatedEvent(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            this.DailyClaimsLog("battle pass updated event level=" + e.ReadInt32(0));
+            this.dailyClaimsAutoPendingBattlePass = true;
         }
 
         private void OnDailyClaimsAutoRefreshDreamEvent(GameEventSnapshot e)
@@ -771,6 +828,116 @@ namespace HeartopiaMod
 
             return this.dailyClaimsDreamGameTaskByTask.TryGetValue(dreamTaskId, out gameTaskId)
                 && gameTaskId > 0;
+        }
+
+        // Every lit sticker-theme dot. Same shape as the Dream pass and for the same reason:
+        // StickerActivityThemeReward has no server RedPointType, so it cannot arrive as a
+        // RedPointEvent. The per-tier WaitClaim gate lives in the claim itself, so a pass that finds
+        // nothing owed sends nothing and the refresh this triggers cannot loop.
+        private int DailyClaimsAutoClaimStickerNodes(out string status)
+        {
+            List<DailyClaimsRedPointNode> nodes = new List<DailyClaimsRedPointNode>();
+            if (!this.DailyClaimsCollectActiveRedPoints(nodes, out string collectStatus))
+            {
+                status = "collect failed: " + collectStatus;
+                return 0;
+            }
+
+            this.dailyClaimsStickerActivityByTheme.Clear();
+
+            int sent = 0;
+            int lit = 0;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (nodes[i].EnumValue != DailyClaimsRedPointEnumStickerActivityThemeReward)
+                {
+                    continue;
+                }
+
+                lit++;
+                if (sent >= DailyClaimsAutoStickerPerPass)
+                {
+                    this.dailyClaimsAutoPendingSticker = true;
+                    break;
+                }
+
+                int serverType = this.DailyClaimsToRedPointType(nodes[i].EnumValue);
+                if (this.DailyClaimsTryClaimForRedPoint(
+                        nodes[i].EnumValue, serverType, nodes[i].Id, out string what, out string claimStatus))
+                {
+                    sent++;
+                    this.DailyClaimsLog("auto sticker: claimed " + what + " (" + claimStatus + ")");
+                }
+                else
+                {
+                    this.DailyClaimsLog("auto sticker: LEFT " + what + " (" + claimStatus + ")");
+                }
+            }
+
+            status = "lit=" + lit + " claimed=" + sent;
+            return sent;
+        }
+
+        // The mini-BP "Claim All" button is BattlePassSystem.GetAllRewards(), a one-line passthrough
+        // to the same BattlePassGetRewardNetworkCommand{flag=0,rewardId=0} this already sends. What
+        // was missing is the gate and the trigger: the catch-up fired both commands blind, once per
+        // world epoch, so a level-up mid-session was never picked up at all.
+        //
+        // Gated exactly like the panel's CanOneClaimAward: a track reward needs a slot in state
+        // CanGet, and the cycle reward has its own dot, which BattlePassSystem sets in the very
+        // handler that dispatches the event this pass runs on. Without the gate, claiming makes the
+        // component sync, which dispatches the event again — a two-command echo with no end.
+        private bool DailyClaimsAutoClaimBattlePass(out string status)
+        {
+            if (!this.TryDailyClaimsGetAuraMonoBattlePassSystem(out IntPtr battlePassSystem, out string systemStatus)
+                || battlePassSystem == IntPtr.Zero)
+            {
+                status = "BattlePassSystem unavailable: " + systemStatus;
+                return false;
+            }
+
+            int freeCanGet = this.DailyClaimsCountAuraMonoBattlePassSlotsCanGet(
+                battlePassSystem, "GetFreeBattlePassSlots", out string freeStatus);
+            int paidCanGet = this.DailyClaimsCountAuraMonoBattlePassSlotsCanGet(
+                battlePassSystem, "GetPayBattlePassSlots", out string paidStatus);
+
+            // Second half of CanOneClaimAward: the cycle reward, which is earned exp over the
+            // period's CycleRewardNeedPoint rather than a slot state.
+            this.LogBpLoopRewardState(out bool loopClaimable, out int pendingCycles);
+
+            int sent = 0;
+            string detail = "free=" + freeCanGet + " paid=" + paidCanGet;
+            if (freeCanGet + paidCanGet > 0)
+            {
+                if (this.TryClaimMiniBpAll(out string allStatus))
+                {
+                    sent++;
+                }
+                else
+                {
+                    detail += "; rewards FAILED " + allStatus;
+                }
+            }
+            else
+            {
+                detail += " (" + freeStatus + "; " + paidStatus + ")";
+            }
+
+            if (loopClaimable)
+            {
+                if (this.TryClaimBpLoop(out string loopStatus))
+                {
+                    sent++;
+                    detail += "; loop x" + pendingCycles;
+                }
+                else
+                {
+                    detail += "; loop FAILED " + loopStatus;
+                }
+            }
+
+            status = detail + "; sent=" + sent;
+            return sent > 0;
         }
 
         // One pass over every lit Dream node. This exists as its own pass instead of a case in the
@@ -1660,6 +1827,30 @@ namespace HeartopiaMod
             // The pending flag is kept (not consumed) while the min-interval backstop holds it off,
             // so a claim that is merely too early is DELAYED rather than dropped, and the drain
             // falls through to the next step instead of stalling on it.
+            if (this.dailyClaimsAutoPendingSticker
+                && Time.realtimeSinceStartup >= this.dailyClaimsAutoStickerNextAllowedAt)
+            {
+                this.dailyClaimsAutoPendingSticker = false;
+                this.dailyClaimsAutoStickerNextAllowedAt =
+                    Time.realtimeSinceStartup + DailyClaimsAutoStickerMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.sticker");
+                int stickerSent = this.DailyClaimsAutoClaimStickerNodes(out string stickerStatus);
+                this.DailyClaimsAutoReport(stickerSent > 0, "sticker", stickerStatus);
+                return true;
+            }
+
+            if (this.dailyClaimsAutoPendingBattlePass
+                && Time.realtimeSinceStartup >= this.dailyClaimsAutoBattlePassNextAllowedAt)
+            {
+                this.dailyClaimsAutoPendingBattlePass = false;
+                this.dailyClaimsAutoBattlePassNextAllowedAt =
+                    Time.realtimeSinceStartup + DailyClaimsAutoBattlePassMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.bp");
+                bool bpSent = this.DailyClaimsAutoClaimBattlePass(out string bpStatus);
+                this.DailyClaimsAutoReport(bpSent, "battle pass", bpStatus);
+                return true;
+            }
+
             if (this.dailyClaimsAutoPendingDream && Time.realtimeSinceStartup >= this.dailyClaimsAutoDreamNextAllowedAt)
             {
                 this.dailyClaimsAutoPendingDream = false;
@@ -1696,9 +1887,8 @@ namespace HeartopiaMod
             {
                 this.dailyClaimsAutoCatchUpBattlePass = false;
                 Breadcrumbs.Phase("dc.battlepass");
-                this.TryClaimMiniBpAll(out string miniStatus);
-                this.TryClaimBpLoop(out string loopStatus);
-                this.DailyClaimsAutoReport(true, "catch-up battle pass", miniStatus + "; " + loopStatus);
+                bool bpCaughtUp = this.DailyClaimsAutoClaimBattlePass(out string bpCatchUpStatus);
+                this.DailyClaimsAutoReport(bpCaughtUp, "catch-up battle pass", bpCatchUpStatus);
                 return true;
             }
 
