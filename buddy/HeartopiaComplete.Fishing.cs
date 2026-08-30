@@ -1412,10 +1412,29 @@ namespace HeartopiaMod
 
             try
             {
-                if (!this.TryFacePlayerTowardCastTarget(targetPos, out string faceStatus))
+                // Rotation does NOT ride the show-action channel — it goes out with the transform
+                // sync (LocalPlayerComponent._TickSendSelfTransform), which StealthFishingFeature's
+                // filter deliberately leaves alone so the player's position stays correct for
+                // everyone. So with Hide Fishing From Others on, a pre-cast turn toward every fish
+                // is the one thing still visible: a character standing still and snap-rotating at
+                // the water on a timer. Skipping it costs nothing here — the mod hands EnterFishing
+                // an explicit target instead of aiming with the rod, and the only thing entity
+                // forward feeds is the successLength edge case in FishHelper.ComputeFloatInWaterData,
+                // which the Instant Catch detour overwrites at the source anyway.
+                if (this.GetStealthFishingEnabled())
+                {
+                    this.AutoFishLog("Pre-cast facing suppressed: hide-from-others is on");
+                }
+                else if (!this.TryFacePlayerTowardCastTarget(targetPos, out string faceStatus))
                 {
                     this.AutoFishLog("Pre-cast facing skipped: " + faceStatus);
                 }
+
+                // Entering fishing mode makes GameFreeMode lose focus, and THAT is what closes the
+                // main HUD (StatusPanel) — not anything on GameFishingMode. Open the suppression
+                // window before the transition; FishingCameraHudFeature no-ops it when its toggle
+                // is off. See FishingCameraHudFeature.cs §2a.
+                this.ArmFishingCameraHudCastWindow();
 
                 if (this.TryResolveGameplayFishingApi(out Type _, out Type fishingSubStateType, out MethodInfo enterFishingMethod, out MethodInfo _))
                 {

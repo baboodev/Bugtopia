@@ -755,6 +755,8 @@ namespace HeartopiaMod
             this.ProcessTutorialBlockOnUpdate();
             this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
+            this.ProcessStealthFishingOnUpdate();
+            this.ProcessFishingCameraHudOnUpdate();
             this.EnsureCollectColdRegistrations();
             this.ProcessCollectColdSweepOnUpdate();
             this.ProcessAutoLearnRecipesOnUpdate();

@@ -42,6 +42,8 @@ tools/SurfaceProbe
 tools/HeartopiaTables
 tools/XdUnpack
 tools/gameupdate
+tools/ThemisDump
+tools/ThemisResDump
 tools/maps
 tools/.pitch_cache_*
 tools/*.json

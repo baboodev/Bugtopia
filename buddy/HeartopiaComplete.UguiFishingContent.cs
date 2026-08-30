@@ -73,6 +73,10 @@ namespace HeartopiaMod
             public Toggle SkipCatchToggle;
             public Toggle SkipCastToggle;
             public Toggle SkipBaitToggle;
+            public Toggle HideFromOthersToggle;
+            public string HideFromOthersShown;
+            public GameObject HideFromOthersLabel;
+            public Toggle KeepCameraHudToggle;
             public GameObject StatusLabel;
             public string StatusShown;
             public GameObject ToolLabel;
@@ -121,9 +125,10 @@ namespace HeartopiaMod
 
         private UguiShellFishingHandle uguiShellFishing;
 
-        // Fixed Part A cursor bottom: 8 header +28, equip +42, five toggles +30 each, status +24,
-        // tool +24, target +40, range label +22, range slider +30, auto-bait toggle +30 → 398.
-        private const float UguiFishingBaitBlockTop = 398f;
+        // Fixed Part A cursor bottom: 8 header +28, equip +42, six toggles +30 each (the sixth is
+        // Hide Fishing From Others), its hidden-status line +30, Keep Camera And HUD +30, status
+        // +24, tool +24, target +40, range label +22, range slider +30, auto-bait toggle +30 → 484.
+        private const float UguiFishingBaitBlockTop = 484f;
 
         // The IMGUI No-fish slider bounds — mirror AutoFishingFarm.AutoBaitNoFishSecondsMin/Max
         // (private consts 3f/60f; a numeric range, deliberately not exposed for this).
@@ -257,28 +262,47 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFishingSkipBaitToggled));
             PlaceUguiTopLeft(handle.SkipBaitToggle.gameObject, 16f, 198f, 280f, 25f);
 
+            // Hide Fishing From Others (StealthFishingFeature.cs) — drops the show-action packets
+            // that would replicate the fishing animation, the rod and the show-off pose.
+            handle.HideFromOthersToggle = this.CreateUguiCheckbox(scrollContent, "HideFromOthersToggle",
+                this.L("Hide Fishing From Others"), this.GetStealthFishingEnabled(),
+                new System.Action<bool>(this.OnUguiFishingHideFromOthersToggled));
+            PlaceUguiTopLeft(handle.HideFromOthersToggle.gameObject, 16f, 228f, 280f, 25f);
+
+            handle.HideFromOthersShown = this.LF("Hidden: {0}", this.GetStealthFishingStatus());
+            handle.HideFromOthersLabel = this.CreateUguiBodyLabel(scrollContent, "HideFromOthersLabel",
+                handle.HideFromOthersShown, 12f);
+            PlaceUguiTopLeft(handle.HideFromOthersLabel, 34f, 254f, 360f, 20f);
+
+            // Keep Camera And HUD While Fishing (FishingCameraHudFeature.cs) — suppresses the
+            // fishing camera pushes and the FishingPanel that covers the HUD.
+            handle.KeepCameraHudToggle = this.CreateUguiCheckbox(scrollContent, "KeepCameraHudToggle",
+                this.L("Keep Camera And HUD"), this.GetFishingCameraHudKeepEnabled(),
+                new System.Action<bool>(this.OnUguiFishingKeepCameraHudToggled));
+            PlaceUguiTopLeft(handle.KeepCameraHudToggle.gameObject, 16f, 284f, 280f, 25f);
+
             // Status readouts — safe to seed at build time (pure formatters, unlike Foraging's
             // stop-cascade conditional). IMGUI `small` style = fontSize 12.
             handle.StatusShown = this.LF("Status: {0}", AutoFishingFarm.GetLastStatus());
             handle.StatusLabel = this.CreateUguiBodyLabel(scrollContent, "StatusLabel", handle.StatusShown, 12f);
-            PlaceUguiTopLeft(handle.StatusLabel, 16f, 228f, 360f, 20f);
+            PlaceUguiTopLeft(handle.StatusLabel, 16f, 314f, 360f, 20f);
 
             handle.ToolShown = this.LF("Tool: {0}", AutoFishingFarm.GetLastToolStatus());
             handle.ToolLabel = this.CreateUguiBodyLabel(scrollContent, "ToolLabel", handle.ToolShown, 12f);
-            PlaceUguiTopLeft(handle.ToolLabel, 16f, 252f, 360f, 20f);
+            PlaceUguiTopLeft(handle.ToolLabel, 16f, 338f, 360f, 20f);
 
             handle.TargetShown = this.LF("Target: {0}", AutoFishingFarm.GetLastTargetStatus());
             handle.TargetLabel = this.CreateUguiBodyLabel(scrollContent, "TargetLabel", handle.TargetShown, 12f);
             this.TrySetUguiLabelWrapped(handle.TargetLabel);
-            PlaceUguiTopLeft(handle.TargetLabel, 16f, 276f, 360f, 36f);
+            PlaceUguiTopLeft(handle.TargetLabel, 16f, 362f, 360f, 36f);
 
             handle.ScanRangeShown = this.LF("Scan Range: {0:F0}m", AutoFishingFarm.GetDetectRange());
             handle.ScanRangeLabel = this.CreateUguiBodyLabel(scrollContent, "ScanRangeLabel", handle.ScanRangeShown, 12f);
-            PlaceUguiTopLeft(handle.ScanRangeLabel, 16f, 316f, 320f, 20f);
+            PlaceUguiTopLeft(handle.ScanRangeLabel, 16f, 402f, 320f, 20f);
             handle.ScanRangeSlider = this.CreateUguiSlider(scrollContent, "ScanRangeSlider",
                 1f, 200f, AutoFishingFarm.GetDetectRange(), true,
                 new System.Action<float>(this.OnUguiFishingScanRangeChanged));
-            PlaceUguiTopLeft(handle.ScanRangeSlider.gameObject, 16f, 338f, 260f, 20f);
+            PlaceUguiTopLeft(handle.ScanRangeSlider.gameObject, 16f, 424f, 260f, 20f);
 
             handle.AutoBaitToggle = this.CreateUguiCheckbox(scrollContent, "AutoBaitToggle",
                 this.L("Auto Bait"), AutoFishingFarm.GetAutoBaitEnabled(),
@@ -554,11 +578,15 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SkipCatchToggle, AutoFishingFarm.GetSkipCatchAnimEnabled());
                 this.SyncUguiToggleFromField(handle.SkipCastToggle, AutoFishingFarm.GetSkipCastAnimEnabled());
                 this.SyncUguiToggleFromField(handle.SkipBaitToggle, AutoFishingFarm.GetSkipBaitAnimEnabled());
+                this.SyncUguiToggleFromField(handle.HideFromOthersToggle, this.GetStealthFishingEnabled());
+                this.SyncUguiToggleFromField(handle.KeepCameraHudToggle, this.GetFishingCameraHudKeepEnabled());
                 this.SyncUguiToggleFromField(handle.AutoBaitToggle, AutoFishingFarm.GetAutoBaitEnabled());
                 this.SyncUguiToggleFromField(handle.CustomOnlyToggle, FishingRouteFeature.GetCustomSpotsOnly());
 
                 // Status readouts — every gated frame like the IMGUI drawer (pure string
                 // remapping, no side effects); cached diffs limit SetText churn.
+                this.SyncUguiSelfLabelText(handle.HideFromOthersLabel, ref handle.HideFromOthersShown,
+                    this.LF("Hidden: {0}", this.GetStealthFishingStatus()));
                 this.SyncUguiSelfLabelText(handle.StatusLabel, ref handle.StatusShown,
                     this.LF("Status: {0}", AutoFishingFarm.GetLastStatus()));
                 this.SyncUguiSelfLabelText(handle.ToolLabel, ref handle.ToolShown,
@@ -727,6 +755,32 @@ namespace HeartopiaMod
             }
             AutoFishingFarm.SetSkipBaitAnimEnabled(value);
             this.NotifyUguiFishingToggle("Skip Bait Animation", value);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // StealthFishingFeature.cs — the setter owns the flag, the logging and the deferred
+        // world-ready install; this only mirrors the checkbox into it.
+        private void OnUguiFishingHideFromOthersToggled(bool value)
+        {
+            if (value == this.GetStealthFishingEnabled())
+            {
+                return;
+            }
+            this.SetStealthFishingEnabled(value);
+            this.NotifyUguiFishingToggle("Hide Fishing From Others", value);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // FishingCameraHudFeature.cs — the setter owns the flag and the deferred world-ready
+        // install; this only mirrors the checkbox into it.
+        private void OnUguiFishingKeepCameraHudToggled(bool value)
+        {
+            if (value == this.GetFishingCameraHudKeepEnabled())
+            {
+                return;
+            }
+            this.SetFishingCameraHudKeepEnabled(value);
+            this.NotifyUguiFishingToggle("Keep Camera And HUD", value);
             try { this.SaveKeybinds(false); } catch { }
         }
 
