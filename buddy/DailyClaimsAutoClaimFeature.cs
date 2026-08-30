@@ -1015,7 +1015,8 @@ namespace HeartopiaMod
             if (!this.DailyClaimsCollectActiveRedPoints(nodes, out string collectStatus))
             {
                 this.dailyClaimsLastStatus = "Red point sweep failed: " + collectStatus;
-                this.DailyClaimsLog(this.dailyClaimsLastStatus);
+                // TIER 1 — a failure is never gated (see FeatureLog.cs / the errors-to-log rule).
+                FeatureLog.Fail("DailyClaims", this.dailyClaimsLastStatus);
                 yield break;
             }
 
@@ -1072,7 +1073,11 @@ namespace HeartopiaMod
             this.dailyClaimsLastStatus = "Red points: claimed=" + claimed + " left=" + unmapped
                 + " of " + nodes.Count
                 + " in " + (Time.realtimeSinceStartup - sweepStartedAt).ToString("0.0") + "s";
-            this.DailyClaimsLog(this.dailyClaimsLastStatus);
+            // TIER 1 — the end-of-sweep result. This is the ONE line that says the auto-claim ran
+            // and what it got; before the split it was gated by MasterLogDailyClaims (ships OFF),
+            // so a sweep could only be inferred from FpsWatch phase timings (dc.signin, dc.mail…).
+            // The per-node breakdown below stays Tier 2.
+            FeatureLog.Life("DailyClaims", this.dailyClaimsLastStatus);
             this.DailyClaimsLog(string.Join("\n", lines.ToArray()));
             yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }

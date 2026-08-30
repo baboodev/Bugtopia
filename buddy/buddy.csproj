@@ -490,6 +490,7 @@
     <Compile Include="HeartopiaComplete.UguiOverlay.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />
+    <Compile Include="FeatureLog.cs" />
     <Compile Include="ModLoaderHost.cs" />
     <Compile Include="PetFeedFeature.cs" />
     <Compile Include="PetPlayFeature.cs" />

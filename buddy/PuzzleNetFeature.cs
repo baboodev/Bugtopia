@@ -68,7 +68,7 @@ namespace HeartopiaMod
             if (value)
             {
                 this.puzzleStatus = "Auto Puzzle enabled. Face or open a puzzle board.";
-                this.PuzzleLog("Toggle changed: enabled");
+                FeatureLog.Toggle("PuzzleNet", true);
                 if (notify)
                 {
                     this.AddMenuNotification("Auto Puzzle Enabled", new Color(0.45f, 1f, 0.55f));
@@ -76,7 +76,7 @@ namespace HeartopiaMod
             }
             else
             {
-                this.PuzzleLog("Toggle changed: disabled");
+                FeatureLog.Toggle("PuzzleNet", false);
                 this.StopPuzzleSolve("Auto Puzzle disabled.");
                 if (notify)
                 {
@@ -1918,11 +1918,11 @@ namespace HeartopiaMod
             this.puzzleSolveRunning = false;
             this.puzzleSolveCoroutine = null;
             this.puzzleStatus = "Puzzle solve finished. Sent " + this.puzzleSentCount + " piece action(s), remaining=" + this.puzzlePieces.Count + ".";
-            this.PuzzleLog(this.puzzleStatus);
+            FeatureLog.Life("PuzzleNet", this.puzzleStatus);
             if (this.puzzlePieces.Count <= 0 && this.puzzleSentCount > 0)
             {
                 this.puzzleAutoEnabled = false;
-                this.PuzzleLog("Auto Puzzle disabled after puzzle cleared.");
+                FeatureLog.Toggle("PuzzleNet", false, "puzzle cleared");
                 this.puzzleBoardNetId = 0U;
                 this.puzzleStaticId = 0;
             }

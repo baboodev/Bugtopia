@@ -441,16 +441,22 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Status changes are TIER 1 now. This helper carried every line the feature ever wrote and
+        // gated all of them behind MasterLogCraftAnimSkip — a flag that, until the Logging tab grew
+        // its last ten rows, could not even be switched on without a rebuild. The result was a
+        // feature that skipped animations for weeks and left zero evidence it had ever run.
+        // The dedupe on last-logged status is what keeps that affordable: the count line only
+        // changes when a new animation is actually skipped.
         private void CraftAnimSkipSetStatus(string status)
         {
             this.craftAnimSkipStatus = status;
-            if (!MasterLogCraftAnimSkip || string.Equals(this.craftAnimSkipLastLoggedStatus, status, StringComparison.Ordinal))
+            if (string.Equals(this.craftAnimSkipLastLoggedStatus, status, StringComparison.Ordinal))
             {
                 return;
             }
 
             this.craftAnimSkipLastLoggedStatus = status;
-            ModLogger.Msg("[CraftAnimSkip] " + status);
+            FeatureLog.Life("CraftAnimSkip", status);
         }
     }
 }

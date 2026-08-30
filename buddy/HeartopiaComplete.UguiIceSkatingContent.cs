@@ -591,6 +591,7 @@ namespace HeartopiaMod
                 return;
             }
             this.autoIceSkatingEnabled = value;
+            FeatureLog.Toggle("AutoIceSkating", value);
             if (value)
             {
                 this.autoIceSkatingReflectionRetryAt = -999f;

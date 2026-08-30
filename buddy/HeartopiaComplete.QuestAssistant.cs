@@ -136,7 +136,7 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.questAssistantLastStatus = "Error: " + ex.Message;
-                this.QuestAssistantLog("EXCEPTION during resolve: " + ex);
+                FeatureLog.Fail("QuestAssistant", "exception during resolve: " + ex);
             }
             finally
             {
@@ -256,11 +256,11 @@ namespace HeartopiaMod
                 if (this.TryInvokeDailyQuestClientAcceptTaskAura(taskId, out string status))
                 {
                     accepted++;
-                    this.QuestAssistantLog("Accept ok taskId=" + taskId + " " + status);
+                    FeatureLog.Life("QuestAssistant", "accepted taskId=" + taskId + " " + status);
                 }
                 else
                 {
-                    this.QuestAssistantLog("Accept failed taskId=" + taskId + ": " + status);
+                    FeatureLog.Fail("QuestAssistant", "accept failed taskId=" + taskId + ": " + status);
                 }
 
                 yield return ModWait.Realtime(0.3f);

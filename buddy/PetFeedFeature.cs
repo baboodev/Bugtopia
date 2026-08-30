@@ -172,7 +172,7 @@ namespace HeartopiaMod
             if (targets.Count == 0)
             {
                 this.AddMenuNotification("Feed all " + label + ": no feedable pets (" + visibleCount + " visible)", new Color(0.45f, 0.88f, 1f));
-                this.PetFeedLog("Feed all " + label + " complete: visible=" + visibleCount + " hungry=0 fed=0 skipped=0");
+                FeatureLog.Life("PetFeed", "Feed all " + label + " complete: visible=" + visibleCount + " hungry=0 fed=0 skipped=0");
                 this.petFeedAllCoroutine = null;
                 this.petFeedAllActiveLabel = string.Empty;
                 this.petFeedAllBusyUntil = Time.realtimeSinceStartup + PetFeedActionCooldownSeconds;
@@ -246,7 +246,7 @@ namespace HeartopiaMod
                     yield return ModWait.Realtime(0.45f);
                 }
 
-                this.PetFeedLog("Feed all " + label + " complete: visible=" + visibleCount + " hungry=" + targets.Count + " fed=" + fed + " probed=" + probed + " skipped=" + skipped);
+                FeatureLog.Life("PetFeed", "Feed all " + label + " complete: visible=" + visibleCount + " hungry=" + targets.Count + " fed=" + fed + " probed=" + probed + " skipped=" + skipped);
                 this.AddMenuNotification(
                     "Feed all " + label + ": fed " + (fed + probed)
                     + (skipped > 0 ? ", skipped " + skipped : string.Empty),

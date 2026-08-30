@@ -1079,6 +1079,10 @@ namespace HeartopiaMod
                 return;
             }
             this.autoSellEnabled = value;
+            // TIER 1. The per-batch "QuickSell request" line was already unconditional, but nothing
+            // said the AUTO loop had been armed — 253 batches on a 15 s cadence had to be read as
+            // "probably automatic" from their spacing alone.
+            FeatureLog.Toggle("AutoSell", value, value ? ("interval=" + this.autoSellInterval.ToString("0.#") + "s") : null);
             this.nextAutoSellAt = 0f;
             if (value)
             {

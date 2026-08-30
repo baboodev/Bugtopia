@@ -424,14 +424,15 @@ namespace HeartopiaMod
             }
         }
 
+        // TIER 1 — see the twin helper in CraftAnimationSkipFeature.cs. Same defect, same fix:
+        // this was the feature's only output and it was gated behind an unreachable flag.
         private void RepairThrowTrimSetStatus(string status)
         {
             this.repairThrowTrimStatus = status;
-            if (MasterLogRepairThrowTrim
-                && !string.Equals(status, this.repairThrowTrimLastLoggedStatus, StringComparison.Ordinal))
+            if (!string.Equals(status, this.repairThrowTrimLastLoggedStatus, StringComparison.Ordinal))
             {
                 this.repairThrowTrimLastLoggedStatus = status;
-                ModLogger.Msg("[RepairThrowTrim] " + status);
+                FeatureLog.Life("RepairThrowTrim", status);
             }
         }
     }

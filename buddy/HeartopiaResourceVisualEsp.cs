@@ -48,6 +48,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // TIER 1, once per session: past the enabled/active guard above, so reaching here is
+            // proof the ESP overlay was switched on and drawing.
+            FeatureLog.Once("RadarIconESP", "first-draw", "resource ESP overlay drawing");
+
             this.resourceVisualEspItems.Clear();
             Vector3 cameraPos = cam.transform.position;
             float maxDistance = Mathf.Max(25f, this.radarMaxDistance);

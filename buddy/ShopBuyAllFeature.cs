@@ -957,6 +957,7 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.shopBuyAllStatus = "Shop buy-all error: " + ex.Message;
+                FeatureLog.Fail("ShopBuyAll", this.shopBuyAllStatus);
                 this.ShopBuyAllLog(this.shopBuyAllStatus, always: true);
                 this.AddMenuNotification(this.shopBuyAllStatus, new Color(1f, 0.55f, 0.45f));
                 this.shopBuyAllRunning = false;
@@ -1026,6 +1027,7 @@ namespace HeartopiaMod
             }
 
             this.shopBuyAllStatus = "Done (" + label + "): bought " + bought + ", skipped " + skipped + ".";
+            FeatureLog.Life("ShopBuyAll", this.shopBuyAllStatus);
             this.AddMenuNotification(this.shopBuyAllStatus, new Color(0.55f, 1f, 0.65f));
             this.shopBuyAllRunning = false;
             this.shopBuyAllCoroutine = null;

@@ -241,6 +241,7 @@ namespace HeartopiaMod
             pausedForRepair = false;
             worldNotReadySince = -1f;
             TeleportToSpot(host, currentIndex);
+            FeatureLog.Life("FishingRoute", $"route started: {TotalSpotCount} spot(s)");
             Log($"Route started: {TotalSpotCount} spots, snapshot range={snapshotDetectRange:F0} eat={snapshotAutoEatPanel} repair={snapshotAutoRepair} fish={snapshotAutoFishEnabled}");
         }
 
@@ -279,7 +280,7 @@ namespace HeartopiaMod
 
             hasSnapshot = false;
             try { host?.UI_SaveKeybinds(false); } catch { }
-            Log("Route stopped; previous settings restored.");
+            FeatureLog.Life("FishingRoute", "route stopped; previous settings restored");
         }
 
         // Used by StopAllAutoFishing / disable-all: restore settings quietly.

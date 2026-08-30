@@ -307,6 +307,16 @@ namespace HeartopiaMod
             data.MasterLogPartyAutoDecline = MasterLogPartyAutoDecline;
             data.MasterLogActivityAutoDecline = MasterLogActivityAutoDecline;
             data.MasterLogFpsWatchdog = MasterLogFpsWatchdog;
+            data.MasterLogActionPanel = MasterLogActionPanel;
+            data.MasterLogAutoLearn = MasterLogAutoLearn;
+            data.MasterLogCraftAnimSkip = MasterLogCraftAnimSkip;
+            data.MasterLogCraftDirectSend = MasterLogCraftDirectSend;
+            data.MasterLogEmoteUnlock = MasterLogEmoteUnlock;
+            data.MasterLogForagingAnim = MasterLogForagingAnim;
+            data.MasterLogHomeLike = MasterLogHomeLike;
+            data.MasterLogMusicPlayer = MasterLogMusicPlayer;
+            data.MasterLogRepairThrowTrim = MasterLogRepairThrowTrim;
+            data.MasterLogTutorialBlock = MasterLogTutorialBlock;
             // chatTranslateVerboseLog is deliberately NOT persisted — it is a diagnostic that
             // floods the log, so it always starts OFF and must be re-armed per session.
             data.autoIceSkatingEnabled = this.autoIceSkatingEnabled;
@@ -672,6 +682,16 @@ namespace HeartopiaMod
             MasterLogPartyAutoDecline = data.MasterLogPartyAutoDecline;
             MasterLogActivityAutoDecline = data.MasterLogActivityAutoDecline;
             MasterLogFpsWatchdog = data.MasterLogFpsWatchdog;
+            MasterLogActionPanel = data.MasterLogActionPanel;
+            MasterLogAutoLearn = data.MasterLogAutoLearn;
+            MasterLogCraftAnimSkip = data.MasterLogCraftAnimSkip;
+            MasterLogCraftDirectSend = data.MasterLogCraftDirectSend;
+            MasterLogEmoteUnlock = data.MasterLogEmoteUnlock;
+            MasterLogForagingAnim = data.MasterLogForagingAnim;
+            MasterLogHomeLike = data.MasterLogHomeLike;
+            MasterLogMusicPlayer = data.MasterLogMusicPlayer;
+            MasterLogRepairThrowTrim = data.MasterLogRepairThrowTrim;
+            MasterLogTutorialBlock = data.MasterLogTutorialBlock;
             this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
             this.autoIceSkatingMinUltimateScore = Mathf.Clamp(data.autoIceSkatingMinUltimateScore, 0, AutoIceSkatingMinUltimateScoreSliderMax);

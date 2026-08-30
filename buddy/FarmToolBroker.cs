@@ -58,7 +58,7 @@ namespace HeartopiaMod
             captureDone = false;
             capturedToolId = 0;
             captureAt = Time.unscaledTime + CaptureDeferralSeconds;
-            Log("Handhold acquired by " + owner + " — player tool capture armed.");
+            FeatureLog.Life("FarmToolBroker", "handhold acquired by " + owner + " — player tool capture armed");
         }
 
         // Called every coordinator tick while active. Cheap after the one capture has happened.
@@ -123,14 +123,14 @@ namespace HeartopiaMod
             if (restoreToolId != 0)
             {
                 host.EquipHandTool(restoreToolId);
-                Log("Handhold released — restored player tool " + restoreToolId + ".");
+                FeatureLog.Life("FarmToolBroker", "handhold released — restored player tool " + restoreToolId);
                 return;
             }
 
             // Nothing worth restoring. Leave whatever the last slice held: any farm that is still
             // enabled will re-equip what it needs, and if none is, its own SetEnabled(false) path
             // already unequipped. Unequipping here would fight both cases.
-            Log("Handhold released — no player tool to restore" + (hadCapture ? string.Empty : " (capture never ran)") + ".");
+            FeatureLog.Life("FarmToolBroker", "handhold released — no player tool to restore" + (hadCapture ? string.Empty : " (capture never ran)"));
         }
 
         private static void Log(string message)

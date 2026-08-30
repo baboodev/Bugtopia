@@ -1313,6 +1313,10 @@ namespace HeartopiaMod
             // Feed the EntityRemoveEvent handler: fresh origin for its <25 m pickup gate + one-time hook install.
             this.bubbleRadarLastSyncOrigin = scanOrigin;
             this.bubbleRadarHasLastSyncOrigin = true;
+            // TIER 1, once per session — reached only under `if (this.showBubbleRadar)`, so this
+            // line is the proof the bubble category was switched on. Once(), not Life(): the sync
+            // runs every radar tick.
+            FeatureLog.Once("BubbleRadar", "first-sync", "bubble markers syncing — the bubble radar category is on");
             this.EnsureBubbleRemoveEventHook();
             float sinceLastRefresh = now - this._cachedBubbleRadarAt;
             bool snapshotEmpty = this.bubbleRadarSnapshotPositions.Count == 0;

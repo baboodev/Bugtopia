@@ -139,7 +139,8 @@ namespace HeartopiaMod
                 this.birdPhotoSubmitLastStatus = "Done: " + totalCards + " card(s) in " + batches + " batch(es)";
             }
 
-            this.BirdPhotoSubmitLog(this.birdPhotoSubmitLastStatus);
+            // TIER 1 — the end result of the whole submit run.
+            FeatureLog.Life("BirdPhotoSubmit", this.birdPhotoSubmitLastStatus);
             this.birdPhotoSubmitCoroutine = null;
         }
 

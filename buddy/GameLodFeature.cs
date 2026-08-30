@@ -2995,6 +2995,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodFurnitureEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "Furniture");
             this.gameLodFurnitureRevertPending = !value;
             this.nextGameLodApplyAt = 0f;
         }
@@ -3006,6 +3007,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodBrgBiasEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "BrgBias");
             this.gameLodBrgBiasRevertPending = !value;
             this.nextGameLodApplyAt = 0f;
         }
@@ -3017,6 +3019,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodVegetationEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "Vegetation");
             this.GameLodWriteVegetationPref();
             this.gameLodVegetationRebakePending = true;
             this.nextGameLodApplyAt = 0f;
@@ -3029,6 +3032,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodSignificanceOffEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "SignificanceOff");
             this.gameLodSignificanceRevertPending = !value;
             this.nextGameLodApplyAt = 0f;
         }
@@ -3040,6 +3044,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodNineCellEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "NineCell");
             this.gameLodNineCellRevertPending = !value;
             this.nextGameLodNineCellWalkAt = 0f;
         }
@@ -3051,6 +3056,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodShadowEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "Shadow");
             this.gameLodShadowRevertPending = !value;
             this.nextGameLodApplyAt = 0f;
         }
@@ -3069,6 +3075,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodHlodEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "Hlod");
             this.gameLodHlodRevertPending = !value;
             this.nextGameLodApplyAt = 0f;
         }
@@ -3080,6 +3087,7 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodXdLodEnabled = value;
+            FeatureLog.Toggle("GameLod", value, "XdLod");
             this.gameLodXdLodRevertPending = !value;
             this.nextGameLodXdLodWalkAt = 0f;
         }

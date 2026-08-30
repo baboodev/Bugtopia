@@ -1008,6 +1008,7 @@ namespace HeartopiaMod
             }
 
             this.dailyClaimsAutoClaimEnabled = value;
+            FeatureLog.Toggle("DailyClaims", value);
             try
             {
                 this.SaveKeybinds(false);

@@ -7,6 +7,9 @@ namespace HeartopiaMod
     {
         private static bool debugLoggingEnabled => HeartopiaComplete.MasterLogAutoFish;
 
+        // Shared by the gated Log() and the unconditional FeatureLog Tier-1 lines.
+        private const string LogTag = "AutoFishingFarm";
+
         private static bool enabled = false;
         private static bool instantCatchEnabled = false;
         private static float nextInstantCatchAt = -999f;
@@ -115,6 +118,9 @@ namespace HeartopiaMod
             if (fishBattleResultSuccess)
             {
                 SessionCatchCount++;
+                // TIER 1, once per session — the rod is actually landing fish, not just casting.
+                FeatureLog.Once(LogTag, "first-catch",
+                    "first server-confirmed catch this session (fishId=" + fishBattleResultFishId + ") — the farm is producing");
             }
 
             // On a catch, mark the exact caught fish object (its instance id, captured at cast) so the
@@ -679,6 +685,7 @@ namespace HeartopiaMod
                 CapturePreviousTool(host);
             }
 
+            int endCatches = SessionCatchCount; // read before the reset — see the Tier-1 line below
             SessionCatchCount = 0;
             if (!value)
             {
@@ -731,6 +738,19 @@ namespace HeartopiaMod
             {
                 try { host.TrySetFishingPressed(false, out _); } catch { }
                 RestorePreviousTool(host);
+            }
+
+            // TIER 1 — unconditional. MasterLogAutoFish ships OFF, and every one of this farm's
+            // five event hooks installs lazily from inside the enabled tick, so with the flag off
+            // a run left no trace whatsoever. Now the absence of this line is real evidence the
+            // farm never ran, which is exactly what it was used for.
+            if (enabled)
+            {
+                FeatureLog.Toggle(LogTag, true, $"shadowRange={fishShadowDetectRange:F0}m");
+            }
+            else
+            {
+                FeatureLog.Toggle(LogTag, false, $"session totals: server-confirmed catches={endCatches}");
             }
 
             Log("Toggle changed: " + (enabled ? "enabled" : "disabled") + $" range={fishShadowDetectRange:F0}");

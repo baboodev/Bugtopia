@@ -167,6 +167,34 @@ Merge settings from `buddy/BepInEx.logging.cfg.snippet` into `BepInEx/config/Bep
 Mod backup log (BepInEx only): `%LocalLow%/Bugtopia/Logs/bugtopia.log`. Every other diagnostic the
 mod writes — `breadcrumbs.log`, `birdfarm-crashtrace.log`, `xdt_crash_*.dmp` — shares that folder.
 
+**One file per launch.** At startup the previous `bugtopia.log` is moved to
+`%LocalLow%/Bugtopia/Logs/archive/bugtopia-<yyyyMMdd-HHmmss>.log`, stamped with the time that
+session last wrote. The current session always keeps the plain `bugtopia.log` name, so every path
+in these docs stays correct. **Nothing is ever deleted** — pruning `archive/` is a manual decision.
+If the rotation fails (locked file, no space) the session appends to the existing file instead and
+says so on the first line; a log is never dropped to keep the rotation tidy.
+
+### Two logging tiers
+
+`Settings → Logging` has one `MasterLog*` switch per subsystem — **60 of them, all now persisted**
+(the last ten were source-only constants until they were wired up).
+
+A switch controls **verbose detail only**. It can never make a feature invisible:
+
+| Tier | API (`FeatureLog.cs`) | Gated? | What goes here |
+|------|----------------------|--------|----------------|
+| 1 | `Life` / `Once` / `Toggle` / `Fail` | **no** | enable, disable, first action of the session, end-of-run totals, every failure |
+| 2 | `Detail`, and the per-feature `XxxLog` helpers | yes | per-tick traces, field dumps, resolver candidates |
+
+Use `Once(tag, key, msg)` — not `Life` — for anything reached from a per-frame tick: it writes at
+most one line per key per session. A per-tick `Life` is how the old AuraFarm trace reached 792 000
+lines in 24 days.
+
+Why the split exists: every subsystem used to route *all* output through its switch, and 40 of the
+60 ship OFF. A bird-farm run of 4 184 photos over 81 minutes once left nothing in the log but a
+single accidental event-subscription line, and the run could only be reconstructed from
+`FpsWatch` phase timings and lazily-installed event hooks.
+
 ---
 
 ## First Run Checklist

@@ -171,8 +171,13 @@ internal static class BepInExLogAdapter
             // game folder: the log ended up nowhere near BepInEx's own. HelperPaths puts it beside
             // Config.xml and the crash breadcrumbs, and creates the folder itself.
             string path = Path.Combine(HeartopiaMod.HelperPaths.GetDirectory("Logs"), "bugtopia.log");
+            string rotation = RotatePreviousLog(path);
             _fileLog = new StreamWriter(path, append: true) { AutoFlush = true };
             _fileLog.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] === session start ===");
+            if (rotation != null)
+            {
+                _fileLog.WriteLine($"[{DateTime.Now:HH:mm:ss}] [INFO] [Log] {rotation}");
+            }
         }
         catch (Exception ex)
         {
@@ -180,6 +185,54 @@ internal static class BepInExLogAdapter
         }
 
         ModLogger.SetSinks(Msg, Warning);
+    }
+
+    // One log file per game launch. The previous session's bugtopia.log is MOVED into
+    // Logs\archive\ under the time it was last written to (i.e. when that session ended), and
+    // nothing is ever deleted — pruning is the user's call, not the mod's.
+    //
+    // Why per-launch and not per-size: the single appended file had reached 170 MB across 24 days,
+    // which made "what did this session do" an offset hunt through session-start markers. A file
+    // per launch answers that by its name.
+    //
+    // The current session always keeps the plain `bugtopia.log` name, so every doc, tool and
+    // crash-report path that points at it stays correct.
+    //
+    // A rotation failure is NOT fatal: the file stays where it is and the session appends to it,
+    // exactly like before. Losing a log to a locked file would be far worse than a long one.
+    private static string RotatePreviousLog(string path)
+    {
+        try
+        {
+            FileInfo previous = new FileInfo(path);
+            if (!previous.Exists || previous.Length == 0L)
+            {
+                return null;
+            }
+
+            string archiveDir = HeartopiaMod.HelperPaths.GetDirectory("Logs", "archive");
+            string stamp = previous.LastWriteTime.ToString("yyyyMMdd-HHmmss");
+            string target = Path.Combine(archiveDir, "bugtopia-" + stamp + ".log");
+            // Two launches inside one second, or a restored backup, must not silently overwrite.
+            for (int i = 2; i < 1000 && File.Exists(target); i++)
+            {
+                target = Path.Combine(archiveDir, "bugtopia-" + stamp + "-" + i + ".log");
+            }
+
+            if (File.Exists(target))
+            {
+                return "previous log NOT rotated (archive name collision) — appending instead";
+            }
+
+            long kb = previous.Length / 1024L;
+            File.Move(path, target);
+            return "previous session log rotated -> Logs\\archive\\" + Path.GetFileName(target)
+                + " (" + kb + " KB); nothing is ever deleted from that folder";
+        }
+        catch (Exception ex)
+        {
+            return "previous log NOT rotated (" + ex.Message + ") — appending instead";
+        }
     }
 
     private static void WriteFile(string level, string message)

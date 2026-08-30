@@ -144,7 +144,7 @@ namespace HeartopiaMod
                 InputActionAsset asset = this.FindGameInputActionAsset();
                 if (asset == null)
                 {
-                    LogInputMap("no InputActionAsset found — key rebinding unavailable.");
+                    FeatureLog.Fail("InputMap", "no InputActionAsset found — key rebinding unavailable.");
                     return;
                 }
 
@@ -159,7 +159,7 @@ namespace HeartopiaMod
                 // hand-built path (see PlayerLoopPumpMarker for why that copy was a liability).
                 string path = HelperPaths.GetFile("inputmap.json");
                 System.IO.File.WriteAllText(path, json);
-                LogInputMap("full asset written to " + path + " (" + json.Length + " chars).");
+                FeatureLog.Life("InputMap", "full asset written to " + path + " (" + json.Length + " chars)");
 
                 foreach (string line in DescribeKeyboardBindings(json))
                 {
@@ -168,7 +168,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                LogInputMap("dump failed: " + ex.GetType().Name + ": " + ex.Message);
+                FeatureLog.Fail("InputMap", "dump failed: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 

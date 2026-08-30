@@ -458,6 +458,9 @@ namespace HeartopiaMod
                 if (killedThisPass > 1)
                 {
                     standaloneStatus = "Cleaned " + killedThisPass + " pollutants (session total: " + this.seaCleanAutoKillCount + ").";
+                    // TIER 1 — the actual result of a cleaning pass. Passes are paced by the scan
+                    // loop, so this is a handful of lines per run, not a per-frame trace.
+                    FeatureLog.Life("SeaCleanQte", standaloneStatus);
                 }
                 else if (killedThisPass == 1)
                 {
@@ -769,7 +772,7 @@ namespace HeartopiaMod
         {
             if (this.seaCleanQteExecuteKillMethod == IntPtr.Zero || compObj == IntPtr.Zero || auraMonoRuntimeInvoke == null)
             {
-                this.SeaCleanQteLog("ExecuteKill unavailable (method/obj/invoke missing).");
+                FeatureLog.Fail("SeaCleanQte", "ExecuteKill unavailable (method/obj/invoke missing).");
                 return false;
             }
 
@@ -784,7 +787,7 @@ namespace HeartopiaMod
             auraMonoRuntimeInvoke(this.seaCleanQteExecuteKillMethod, compObj, IntPtr.Zero, ref exc);
             if (exc != IntPtr.Zero)
             {
-                this.SeaCleanQteLog("ExecuteKill threw exc=0x" + exc.ToInt64().ToString("X") + " (" + source + ").");
+                FeatureLog.Fail("SeaCleanQte", "ExecuteKill threw exc=0x" + exc.ToInt64().ToString("X") + " (" + source + ").");
                 return false;
             }
 

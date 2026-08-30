@@ -130,22 +130,29 @@ namespace HeartopiaMod
         //     That is the deliberate trade for the older behaviour, where the whole set was
         //     session-only and a flag switched OFF came back on at the next launch.
         //
-        // Compiled defaults: 49 false, one TRUE — MasterLogGatherScan. It keeps its `true` against a
-        // config written before the field existed because the CONFIG field carries the initialiser
-        // too (`public bool MasterLogGatherScan = true;`): XmlSerializer runs field initialisers and
-        // then overwrites only the elements actually present in the XML, so a missing element means
-        // "compiled default", not "false".
+        // Compiled defaults: 58 false, two TRUE — MasterLogGatherScan and MasterLogTutorialBlock.
+        // They keep their `true` against a config written before the field existed because the
+        // CONFIG field carries the initialiser too (`public bool MasterLogGatherScan = true;`):
+        // XmlSerializer runs field initialisers and then overwrites only the elements actually
+        // present in the XML, so a missing element means "compiled default", not "false".
         //
         // Not in this array, and therefore unreachable from the tab: chatTranslateVerboseLog (a
         // per-message diagnostic — deliberately skipped in PopulateKeybindConfig and forced false in
-        // ApplyKeybindConfig, because a verbose flag left on silently floods the log forever), plus
-        // nine MasterLog* flags that were never given a row and so are neither persisted nor
-        // switchable at runtime; MasterLogTutorialBlock is one of them and still defaults TRUE.
+        // ApplyKeybindConfig, because a verbose flag left on silently floods the log forever).
+        // Every MasterLog* flag now has a row: the last ten (Action Panel … Tutorial Block) were
+        // added when the Tier-1/Tier-2 split landed — before that they existed only as source
+        // constants and could not be changed without a rebuild.
+        //
+        // IMPORTANT, and the reason the whole split exists: a flag OFF must never make a feature
+        // invisible. It gates Tier 2 (FeatureLog.Detail) only. Enable/disable, first action,
+        // end-of-run totals and failures go through FeatureLog.Life/Once/Toggle/Fail and are
+        // written whatever these switches say.
         // ----------------------------------------------------------------------------------------
 
-        // One binding per MasterLog* flag — get/set lambdas instead of 50 hand-written toggle
+        // One binding per MasterLog* flag — get/set lambdas instead of 60 hand-written toggle
         // blocks, so a field/label mismatch cannot hide in copy-paste. Pairs and ORDER date back to
-        // the IMGUI DrawLoggingTab this replaced (deleted with the rest of the IMGUI menu).
+        // the IMGUI DrawLoggingTab this replaced (deleted with the rest of the IMGUI menu); the ten
+        // late additions are appended rather than interleaved, to keep that order stable.
         private struct UguiLoggingToggleBinding
         {
             public Func<bool> Get;
@@ -213,7 +220,17 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogInputMap, v => MasterLogInputMap = v, "Input Map"),
                 new UguiLoggingToggleBinding(() => MasterLogPartyAutoDecline, v => MasterLogPartyAutoDecline = v, "Party Auto-Decline"),
                 new UguiLoggingToggleBinding(() => MasterLogActivityAutoDecline, v => MasterLogActivityAutoDecline = v, "Event Auto-Decline"),
-                new UguiLoggingToggleBinding(() => MasterLogFpsWatchdog, v => MasterLogFpsWatchdog = v, "FPS Watchdog (verbose)")
+                new UguiLoggingToggleBinding(() => MasterLogFpsWatchdog, v => MasterLogFpsWatchdog = v, "FPS Watchdog (verbose)"),
+                new UguiLoggingToggleBinding(() => MasterLogActionPanel, v => MasterLogActionPanel = v, "Action Panel"),
+                new UguiLoggingToggleBinding(() => MasterLogAutoLearn, v => MasterLogAutoLearn = v, "Auto Learn Recipes"),
+                new UguiLoggingToggleBinding(() => MasterLogCraftAnimSkip, v => MasterLogCraftAnimSkip = v, "Craft Anim Skip"),
+                new UguiLoggingToggleBinding(() => MasterLogCraftDirectSend, v => MasterLogCraftDirectSend = v, "Craft Direct Send"),
+                new UguiLoggingToggleBinding(() => MasterLogEmoteUnlock, v => MasterLogEmoteUnlock = v, "Emote Unlock"),
+                new UguiLoggingToggleBinding(() => MasterLogForagingAnim, v => MasterLogForagingAnim = v, "Foraging Animation"),
+                new UguiLoggingToggleBinding(() => MasterLogHomeLike, v => MasterLogHomeLike = v, "Home Like"),
+                new UguiLoggingToggleBinding(() => MasterLogMusicPlayer, v => MasterLogMusicPlayer = v, "Music Player"),
+                new UguiLoggingToggleBinding(() => MasterLogRepairThrowTrim, v => MasterLogRepairThrowTrim = v, "Repair Throw Trim"),
+                new UguiLoggingToggleBinding(() => MasterLogTutorialBlock, v => MasterLogTutorialBlock = v, "Tutorial Block")
             };
         }
 

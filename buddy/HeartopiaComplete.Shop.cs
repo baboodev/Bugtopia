@@ -218,7 +218,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.LogForceOpenShop("Opening " + label + " via storeId=" + storeId + " slotId=" + slotId);
+            FeatureLog.Life("ForceOpenShop", "opening " + label + " via storeId=" + storeId + " slotId=" + slotId);
             return this.TryInvokeAuraMonoStaticIntIntMethod(
                 "XDTGame.UI.Panel.ShopPanel",
                 "OpenShopPanel",
@@ -236,7 +236,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            this.LogForceOpenShop("Opening " + label + " via WeatherExchange storeId=" + storeId + " slotId=" + slotId);
+            FeatureLog.Life("ForceOpenShop", "opening " + label + " via WeatherExchange storeId=" + storeId + " slotId=" + slotId);
             if (this.TryInvokeAuraMonoStaticIntIntMethod(
                 "XDTGame.UI.Panel.WeatherExchangeShopPanel",
                 "OpenWeatherExchangePanel",

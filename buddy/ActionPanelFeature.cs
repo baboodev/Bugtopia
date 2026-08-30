@@ -138,10 +138,10 @@ namespace HeartopiaMod
         public void ToggleActionPanel()
         {
             this.actionPanelVisible = !this.actionPanelVisible;
-            if (MasterLogActionPanel)
-            {
-                ModLogger.Msg("[ActionPanel] " + (this.actionPanelVisible ? "opened" : "closed"));
-            }
+            // TIER 1 — panel open/close. The per-row cast results below were already unconditional,
+            // so the log showed casts arriving out of nowhere with no record of the panel they came
+            // from.
+            FeatureLog.Life("ActionPanel", this.actionPanelVisible ? "opened" : "closed");
         }
 
         // ── casting ─────────────────────────────────────────────────────────────────────────────

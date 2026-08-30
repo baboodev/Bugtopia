@@ -1505,7 +1505,7 @@ namespace HeartopiaMod
             this.petCareTrainLoopLastVitality = entry.Vitality;
             this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
             this.petCareTrainLoopNextActionAt = Time.unscaledTime;
-            this.PetPlayLog("Train loop armed for " + (entry.IsDog ? "dog" : "cat") + " netId=" + entry.NetId + ".");
+            FeatureLog.Life("PetPlay", "train loop armed for " + (entry.IsDog ? "dog" : "cat") + " netId=" + entry.NetId);
         }
 
         private void EnsurePetCareTipHook()

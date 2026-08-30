@@ -522,6 +522,7 @@ namespace HeartopiaMod
                 return;
             }
             this.persistentHudEnabled = value;
+            FeatureLog.Toggle("PersistentHud", value);
             if (this.persistentHudEnabled)
             {
                 // Prompt poll so enabling mid-fishing/driving restores the HUD right away.

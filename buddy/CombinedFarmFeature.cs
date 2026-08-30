@@ -41,6 +41,9 @@ namespace HeartopiaMod
     {
         private static bool DebugLoggingEnabled => HeartopiaComplete.MasterLogCombinedFarm;
 
+        // Shared by the gated Log() and the unconditional FeatureLog Tier-1 lines.
+        private const string LogTag = "CombinedFarm";
+
         // Tool ids as used by ToolSystem/_toolsData and GetAutoRepairSupportedToolName.
         public const int ToolIdRod = 3;
         public const int ToolIdBirdScanner = 4;
@@ -1059,6 +1062,11 @@ namespace HeartopiaMod
                 first = PickFirstEnabledSlice();
             }
 
+            // TIER 1 — unconditional. This coordinator is what actually drove the fish/insect/bird
+            // sub-farms, and with MasterLogCombinedFarm off (the shipped default) its whole run was
+            // invisible: the sub-farms had to be inferred from lazily-installed event hooks.
+            FeatureLog.Toggle(LogTag, true, "coordinating " + CountEnabledFarms()
+                + " farm(s) by priority (" + DescribePriorityOrder() + "), first slice=" + first);
             Log("Coordinating " + CountEnabledFarms() + " farms by priority ("
                 + DescribePriorityOrder() + ") — a class runs until it has no targets left.");
             SwitchSlice(host, now, first, "start");
@@ -1090,6 +1098,7 @@ namespace HeartopiaMod
             // farms' own capture/restore stays disabled until the player's tool has been put back.
             ResumeAll(host);
             FarmToolBroker.Release(host, restoreTool: CountEnabledFarms() == 0);
+            FeatureLog.Toggle(LogTag, false, reason);
             Log("Stopped coordinating (" + reason + ").");
         }
 
@@ -1113,6 +1122,13 @@ namespace HeartopiaMod
             sliceStartConfirmedCount = InsectNetFarm.GetSessionConfirmedCatchCount();
 
             EnforceSuspension(host);
+            // TIER 1, once per slice class per session. Deliberately NOT Life(): a slice can rotate
+            // every few seconds (combinedFarmEmptySliceSeconds), which would put hundreds of lines
+            // an hour into the log — the exact per-tick flood the split exists to avoid. One line
+            // proving each class actually ran is what the record needs; the per-switch line stays
+            // in Tier 2 immediately below.
+            FeatureLog.Once(LogTag, "slice:" + next, "first " + next + " slice this session (" + reason
+                + "), targets=" + GetSliceTargetCount(next));
             Log("Slice → " + next + " (" + reason + "), targets=" + GetSliceTargetCount(next)
                 + ", tool=" + GetToolName(GetSliceToolId(next)));
         }

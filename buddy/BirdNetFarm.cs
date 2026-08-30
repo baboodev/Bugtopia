@@ -10,6 +10,10 @@ namespace HeartopiaMod
         private static bool debugLoggingEnabled => HeartopiaComplete.MasterLogBirdFarm;
         private static bool verboseCrashTraceEnabled => HeartopiaComplete.MasterLogBirdFarmCrashTrace;
 
+        // Tag shared by the gated Log() below and the unconditional FeatureLog Tier-1 lines, so a
+        // grep for [BirdNetFarm] returns both tiers and nothing has to be renamed to find it.
+        private const string LogTag = "BirdNetFarm";
+
         private static bool enabled = false;
         private static bool perfectPhotoEnabled = false;
         private static int captureMode = 0;
@@ -84,6 +88,11 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Captured BEFORE the disable branch below zeroes them — the end-of-run totals are the
+            // whole point of the Tier-1 line, and by the time it runs the counters are gone.
+            int endCatches = sessionCatchCount;
+            int endScared = sessionScaredCount;
+
             Breadcrumbs.Drop("bf.setenabled.begin", value.ToString());
             if (value && !enabled)
             {
@@ -147,7 +156,20 @@ namespace HeartopiaMod
                 multiCatchBurstTarget = 0;
             }
             TraceCrashBreadcrumb("Toggle changed: " + (enabled ? "enabled" : "disabled") + $" perfectPhoto={perfectPhotoEnabled} cooldown={catchCooldown:F1} range={scanRange:F0} multiCatch={multiCatchLimit}");
-            Log("Toggle changed: " + (enabled ? "enabled" : "disabled"));
+
+            // TIER 1 — unconditional. This used to go through Log(), which MasterLogBirdFarm gates,
+            // and that flag ships OFF: an 81-minute run producing 4184 photos left no trace at all
+            // except one accidental event-subscription line. Settings go on the ENABLE line because
+            // "which mode was it in" is the first question asked of any farm run afterwards.
+            if (enabled)
+            {
+                FeatureLog.Toggle(LogTag, true,
+                    $"perfectPhoto={perfectPhotoEnabled} mode={CaptureModeOptions[Mathf.Clamp(captureMode, 0, CaptureModeOptions.Length - 1)]} cooldown={catchCooldown:F1}s range={scanRange:F0}m multiCatch={multiCatchLimit}");
+            }
+            else
+            {
+                FeatureLog.Toggle(LogTag, false, $"session totals: captured={endCatches} scared={endScared}");
+            }
         }
 
         public static void ToggleEnabled(HeartopiaComplete host = null)
@@ -626,6 +648,12 @@ namespace HeartopiaMod
                                 sessionCatchCount++;
                                 confirmedAnyThisFrame = true;
                                 TraceCrashBreadcrumb($"Confirmed capture netId={confirmedNetId} total={sessionCatchCount}");
+                                // TIER 1, once per session: proof the farm is not merely enabled
+                                // but actually producing. Once() rather than Life() because this
+                                // runs inside the per-frame tick — the per-capture line stays in
+                                // Tier 2 below, where thousands of them belong.
+                                FeatureLog.Once(LogTag, "first-capture",
+                                    $"first server-confirmed capture this session (netId={confirmedNetId}) — the farm is producing");
                                 Log($"Confirmed bird capture netId={confirmedNetId} (+1 → total={sessionCatchCount})");
                             }
                             _pendingTimeoutStrikes.Remove(confirmedNetId);

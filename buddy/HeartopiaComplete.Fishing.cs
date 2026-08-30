@@ -2663,16 +2663,16 @@ namespace HeartopiaMod
                     instantCatchNotifyDetour.Undo();
                     instantCatchNotifyDetour = null;
                     instantCatchNotifyHookKeepAlive = null;
-                    this.InstantCatchLog("NotifyFloatInWater trampoline unavailable; detour reverted", true);
+                    FeatureLog.Fail("InstantCatch", "NotifyFloatInWater trampoline unavailable; detour reverted");
                     return;
                 }
 
-                this.InstantCatchLog("NotifyFloatInWater detour installed @0x" + nativePtr.ToInt64().ToString("X"), true);
+                FeatureLog.Life("InstantCatch", "NotifyFloatInWater detour installed @0x" + nativePtr.ToInt64().ToString("X") + " — instant catch is live");
             }
             catch (Exception ex)
             {
                 this.instantCatchNotifyHookTried = true; // don't crash-loop on a hard failure
-                this.InstantCatchLog("NotifyFloatInWater hook failed: " + ex.Message, true);
+                FeatureLog.Fail("InstantCatch", "NotifyFloatInWater hook failed: " + ex.Message);
             }
         }
 

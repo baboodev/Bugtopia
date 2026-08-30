@@ -8,6 +8,10 @@ namespace HeartopiaMod
     {
         private static bool debugLoggingEnabled => HeartopiaComplete.MasterLogInsectFarm;
 
+        // Shared by the gated Log() and the unconditional FeatureLog Tier-1 lines, so one grep
+        // finds both tiers.
+        private const string LogTag = "InsectFarmNet";
+
         private static bool enabled = false;
         private static float catchCooldown = 1.5f;
         // Scan-range bounds. The ceiling dropped 100 -> 12 m on 2026-08-23; public so the UGUI
@@ -117,6 +121,10 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Read before the disable branch clears them: the end-of-run totals are the point.
+            int endCatches = sessionCatchCount;
+            int endConfirmed = sessionConfirmedCount;
+
             if (value && !enabled)
             {
                 CapturePreviousTool(host);
@@ -150,6 +158,20 @@ namespace HeartopiaMod
                 repairTeleportPauseUntil = -999f;
                 eatTeleportPauseUntil = -999f;
             }
+            // TIER 1 — unconditional. MasterLogInsectFarm ships OFF, so before the split the only
+            // evidence a run had ever happened was the NetCaughtInsectEvent hook install, and that
+            // fires once per session at most.
+            if (enabled)
+            {
+                FeatureLog.Toggle(LogTag, true,
+                    $"cooldown={catchCooldown:F1}s range={scanRange:F0}m batch={batchSize} teleport={teleportEnabled}");
+            }
+            else
+            {
+                FeatureLog.Toggle(LogTag, false,
+                    $"session totals: sent={endCatches} server-confirmed={endConfirmed}");
+            }
+
             Log("Toggle changed: " + (enabled ? "enabled" : "disabled"));
         }
 
@@ -374,6 +396,10 @@ namespace HeartopiaMod
         {
             sessionConfirmedCount++;
             ackStatsDirty = true;
+            // TIER 1, once per session — the farm is not just armed, the server is accepting.
+            // Rejections are silent on this channel, so a missing line here is itself the signal.
+            FeatureLog.Once(LogTag, "first-ack",
+                "first server-confirmed catch this session (netId=" + e.NetId + ") — the farm is producing");
 
             uint insectNetId = e.NetId;
             if (insectNetId != 0U)

@@ -413,6 +413,7 @@ namespace HeartopiaMod
             this.musicPlayerAkZeroStreak = 0;
             this.musicPlayerAkBankWarned = false;
 
+            FeatureLog.Life("MusicPlayer", "playing '" + track.Name + "' (" + events.Count + " note event(s))");
             MusicPlayerLogVerbose("Start '" + track.Name + "': events=" + events.Count + " duration=" + this.musicPlayerClipDuration.ToString("F1")
                 + "s instruments=" + track.InstrumentsLabel + " mode=" + (this.musicPlayerNetworkMode ? "network" : "local"));
 
@@ -477,6 +478,7 @@ namespace HeartopiaMod
             this.musicPlayerEvents = null;
             this.musicPlayerWaitingLoopRestart = false;
             this.musicPlayerStatus = reason;
+            FeatureLog.Life("MusicPlayer", "stopped (" + reason + "), notes played=" + this.musicPlayerNotesPlayed);
             MusicPlayerLogVerbose("Stop (" + reason + "): notes played=" + this.musicPlayerNotesPlayed
                 + " dropped=" + this.musicPlayerNotesDropped + " loops=" + this.musicPlayerLoopsDone);
         }

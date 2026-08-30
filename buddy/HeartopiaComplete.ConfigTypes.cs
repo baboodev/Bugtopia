@@ -299,6 +299,23 @@ namespace HeartopiaMod
             public bool MasterLogPartyAutoDecline;
             public bool MasterLogActivityAutoDecline;
             public bool MasterLogFpsWatchdog;
+            // Ten flags that existed in code but had no config field and no Logging-tab row, so
+            // they could only be changed by editing the source and rebuilding. Added together with
+            // the Tier-1/Tier-2 split — see FeatureLog.cs.
+            public bool MasterLogActionPanel;
+            public bool MasterLogAutoLearn;
+            public bool MasterLogCraftAnimSkip;
+            public bool MasterLogCraftDirectSend;
+            public bool MasterLogEmoteUnlock;
+            public bool MasterLogForagingAnim;
+            public bool MasterLogHomeLike;
+            public bool MasterLogMusicPlayer;
+            public bool MasterLogRepairThrowTrim;
+            // Defaults ON, like MasterLogGatherScan: the flag has shipped `true` and its output is
+            // one register line plus a highlight-block line, so turning it silently off on upgrade
+            // would be a regression. The initializer must live on the CONFIG field too — an old
+            // Config.xml has no element, and XmlSerializer only overwrites what is present.
+            public bool MasterLogTutorialBlock = true;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             public bool autoIceSkatingOnlyX2Ultimate = true;

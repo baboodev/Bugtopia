@@ -8,7 +8,10 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private const bool WildAnimalGiftLogsEnabled = true;
+        // Was `const bool = true`, which made MasterLogWildAnimalGift a dead switch: it appeared in
+        // the config and in the Logging tab and gated nothing at all. Now it drives Tier 2 only —
+        // the claim start/result lines below go through FeatureLog and ignore it.
+        private static bool WildAnimalGiftLogsEnabled => MasterLogWildAnimalGift;
         private const float WildAnimalGiftActionCooldownSeconds = 1.25f;
         private const float WildAnimalGiftDelayBetweenTakesSeconds = 0.45f;
 
@@ -54,7 +57,7 @@ namespace HeartopiaMod
 
             this.wildAnimalGiftBusyUntil = Time.realtimeSinceStartup + WildAnimalGiftActionCooldownSeconds;
             this.wildAnimalGiftLastStatus = "Scanning wild animal gifts...";
-            this.WildAnimalGiftLog("Claim all started");
+            FeatureLog.Life("WildAnimalGift", "claim all started");
             this.wildAnimalGiftCoroutine = ModCoroutines.Start(this.WildAnimalClaimAllGiftsRoutine(silent));
         }
 
@@ -73,7 +76,7 @@ namespace HeartopiaMod
             if (netIds.Count == 0)
             {
                 this.wildAnimalGiftLastStatus = collectStatus;
-                this.WildAnimalGiftLog("No targets. " + collectStatus);
+                FeatureLog.Life("WildAnimalGift", "no targets. " + collectStatus);
                 if (!silent)
                 {
                     this.AddMenuNotification("Wild gifts: " + collectStatus, new Color(0.45f, 0.88f, 1f));
@@ -100,12 +103,12 @@ namespace HeartopiaMod
                     if (!this.TryInvokeWildAnimalTakeGiftAuraMono(netId, out string takeStatus))
                     {
                         failed++;
-                        this.WildAnimalGiftLog("TakeGift failed netId=" + netId + ": " + takeStatus);
+                        FeatureLog.Fail("WildAnimalGift", "TakeGift failed netId=" + netId + ": " + takeStatus);
                     }
                     else
                     {
                         claimed++;
-                        this.WildAnimalGiftLog("TakeGift ok netId=" + netId);
+                        FeatureLog.Life("WildAnimalGift", "TakeGift ok netId=" + netId);
                     }
 
                     yield return ModWait.Realtime(WildAnimalGiftDelayBetweenTakesSeconds);

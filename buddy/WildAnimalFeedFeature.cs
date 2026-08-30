@@ -223,7 +223,7 @@ namespace HeartopiaMod
                 {
                     this.AddMenuNotification("Wild feed: " + status, new Color(1f, 0.58f, 0.42f));
                 }
-                this.WildAnimalFeedLog("Plan failed: " + status);
+                FeatureLog.Fail("WildAnimalFeed", "plan failed: " + status);
                 this.wildAnimalFeedCoroutine = null;
                 this.wildAnimalFeedBusyUntil = Time.realtimeSinceStartup + WildAnimalFeedActionCooldownSeconds;
                 yield break;
@@ -265,7 +265,7 @@ namespace HeartopiaMod
                     if (!this.TryInvokeWildAnimalFeed(plan.GroupId, plan.FoodNetIds, out string status))
                     {
                         skipped++;
-                        this.WildAnimalFeedLog("Feed failed group=" + plan.GroupId + " (" + plan.GroupName + "): " + status);
+                        FeatureLog.Fail("WildAnimalFeed", "feed failed group=" + plan.GroupId + " (" + plan.GroupName + "): " + status);
                         yield return ModWait.Realtime(0.35f);
                         continue;
                     }

@@ -331,14 +331,14 @@ namespace HeartopiaMod
                     || auraMonoClassGetType == null || auraMonoTypeGetObject == null
                     || this.auraMonoRootDomain == IntPtr.Zero)
                 {
-                    this.PadBuildHotkeyLog("aura: mono api unavailable");
+                    FeatureLog.Fail("PadBuild", "aura: mono api unavailable");
                     return false;
                 }
 
                 IntPtr moduleClass = this.FindAuraMonoClassInImages("XDTGUI.Module.Build", "BuildModule", PadBuildModuleImageNames);
                 if (moduleClass == IntPtr.Zero)
                 {
-                    this.PadBuildHotkeyLog("aura: BuildModule class not found in images");
+                    FeatureLog.Fail("PadBuild", "aura: BuildModule class not found in images");
                     return false;
                 }
 
@@ -353,7 +353,7 @@ namespace HeartopiaMod
                 IntPtr managersClass = this.FindAuraMonoClassInImages("XDTGame.Framework", "Managers", PadBuildManagersImageNames);
                 if (managersClass == IntPtr.Zero)
                 {
-                    this.PadBuildHotkeyLog("aura: Managers class not found");
+                    FeatureLog.Fail("PadBuild", "aura: Managers class not found");
                     return false;
                 }
 
@@ -770,7 +770,7 @@ namespace HeartopiaMod
             }
             catch (Exception ex)
             {
-                this.PadBuildHotkeyLog("confirm simulate error: " + ex.Message);
+                FeatureLog.Fail("PadBuild", "confirm simulate error: " + ex.Message);
                 return false;
             }
         }
