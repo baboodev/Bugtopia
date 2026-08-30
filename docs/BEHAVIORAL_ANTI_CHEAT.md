@@ -509,7 +509,7 @@ module/memory scanning + integrity hashing** — *not* a loader name blocklist (
 | Size / arch | 16.7 MB, x86-64 PE, on-disk ImageBase `0x180000000` |
 | Vendor | TapTap / XD **Themis** anti-cheat SDK |
 | Exports | 25 named (map 1:1 to `ThemisSDKManager` icalls, §9) |
-| Config | export `ReadCfgFile` exists but **no `themis.res` ships** (recursive `themis*` sweep of the game folder finds only the DLL → config from appid / embedded defaults) |
+| Config | `<Game>\themis.res` — **encrypted config, loaded in full at init** (68 KB; CRC64 header + version `1.0.7` + ChaCha20-Poly1305 body; §10.18). Export `ReadCfgFile` is a stub; real loader is `ParseThemisRes` RVA `0x7EFF0`. |
 | Aux SDK | `taptap_api.dll` (156 KB — not the AC core) |
 
 **Exports** → managed API: `init_themis`/`init_themis_by_appid`/`tminit`/`tminit_windows`/`tmcr` (bring-up), `get_themis_heartbeat` (integrity challenge), `get_oneid`/`get_oneid_data` (device fingerprint), `input_data` (native input feed), `add_custom_field` (context tags), `report_exception`/`report_custom_exception`/`report_custom_exception_ex`/`report_hang_info` (reporting; `isQuitApp` force-closes), `set_exception_callback`/`set_native_callback`/`set_themis_callback`/`set_extra_callback_ex`/`set_use_extend_callback` (native→managed callback reg), `OutOfProcessException{,DebuggerLaunch,Signature}EventCallback`, `ReadCfgFile`, `event_tracking`, `enable_debug_mode`.
@@ -728,7 +728,7 @@ field **set** with zero account risk and **corrected two static inferences**:
 | Topic | Location |
 |-------|----------|
 | Native AC binary | `<Game>/xdt_Data/Plugins/x86_64/themis_x64.dll` |
-| Native config | none ships (`ReadCfgFile` export present, no `themis.res` on disk) |
+| Native config | `<Game>\themis.res` — encrypted, ~68 KB, Steam-delivered/updatable (§10.18) |
 | Managed binding / game wrapper | `ilspy-dumps/EngineWrapper/ThemisSDKManager.cs`, `ilspy-dumps/XDTBaseService/ThemisManager.cs` |
 | Login fingerprint / device id | `ilspy-dumps/XDTGameSystem/XDTGameSystem/ClientSession.cs` (`LoginRiskCheckRequest.FingerPrint`), `.../LoginProtocolManager.cs` (`CheckDeviceIsForbidden`), `ilspy-dumps/EcsClient/Sazabi.Login.Shared/LoginRiskCheckResponse.cs`, `ilspy-dumps/EcsSystem/Network/SceneTcpConnectionHandler.cs` (`ConnectScene_CS.Device`) |
 | Ghidra project | `themis` (Ghidra-MCP `ghidra-mcp-http`); on-disk program at base `0x180000000`, unpacked image at ASLR base |
@@ -857,6 +857,50 @@ bans for it. Note the ProcMon `bugtopia` file hits are dominated by the **mod's 
 attribution stays walled. This confirms what §10.4's module scan already implies: an unsigned injected module
 is detectable; the signature check is an independent confirmation of the same fact, not a new escape hatch.
 
+## 10.18 `themis.res` — the encrypted config file
+
+⚠️ **Corrects an earlier note.** `<Game>\themis.res` **does** exist — a first `themis*` sweep this
+session missed it (the file is Steam-delivered; depot mtime **2026-08-26**, i.e. *newer than the 08-05
+binary* → the detection policy is **updatable without a binary patch**). Present at
+`C:\Program Files (x86)\Steam\steamapps\common\Heartopia\themis.res`, **69,235 B (~68 KB)**.
+
+- **Role:** native policy blob, loaded at Themis init (ProcMon: `CreateFile` Generic Read/Write →
+  `ReadFile` 65536+3699 = whole 69,235 B → `CloseFile`). Same window as fingerprint gather.
+- **Export `ReadCfgFile` (RVA `0x98DD0`) is a stub** — `xor al,al; ret`. It does not parse the file.
+- **Real loader** is clear C in unpacked `.text`: **`ParseThemisRes` RVA `0x7EFF0`** (Ghidra on
+  `themis_module.bin`, not the on-disk PE). `fopen("themis.res","rb+")`, fallback next to the module;
+  `fseek/ftell/fread` the whole file; CRC + app-id checks; stores the **still-ciphertext** buffer on
+  an object (`+0x10`) and publishes it via `XCHG [0x21D6C8], rdi`. Called once from RVA `0x97D02`
+  (init wrapper). On-disk PE `.text` is empty — this function is invisible without a live module dump.
+  Init immediately **before** the parse (`0x97A66`–`0x97D02`) is SDK bring-up, not AEAD: THEMIS folder
+  (`0x7D710`, VMP), registry `Software\Themis` / `PrivousRosemaryV1` (`0x7B100`), host/port/product
+  into the native client (`0x80A20` → `online-international.game-security.xindong.com:19100`,
+  SDK `3.7.0.2`). `0x2D090` is a generic in-place byte cipher (58 call sites). `0x98090` is VMP.
+  No `E8`/`LEA` from this range to `EVP_aead_chacha20_poly1305` / `0x1B58D0`. The only extra
+  `0x21D6C8` imm32 hit is inside `.TH0`.
+- **Format (32-byte header, then payload):**
+  | Offset | Size | Field |
+  |--------|------|--------|
+  | 0 | 8 | **CRC64** of bytes `[0x20:]` (LE). Bytes `10 97 5d bb 12 52 ec 92` are **not a magic** — they are this CRC (`0x92EC5212BB5D9710`). Verified against the 256-QWORD table at RVA `0x1BA690`. |
+  | 8 | 8 | ASCII version `"1.0.7"` + NUL pad |
+  | 16 | 8 | zeros |
+  | 24 | 8 | **app-info token** — CRC64 of 48-byte buffer `sprintf("%s-windows", "xdi_xdt_prod")` padded with NULs (table `0x1BD390`). Equals `DAT_00213158` / file bytes `3d04071b99253eab`. Product blob at RVA `0x20CB70` (xor `0xA5` + `i*3`): `xdi_xdt_prod`, host `online-international.game-security.xindong.com`, port `19100`. Mismatch → `"Invalid app info"`. |
+  | `0x20` | rest | payload (high entropy). Min file size 32 (`"Resource file too small for patch header"` if `< 0x20`). |
+- **Encryption:** payload Shannon entropy **7.997** — still ciphertext after `ParseThemisRes`.
+  BoringSSL **ChaCha20-Poly1305** (RFC 7539) is fully decompiled in unpacked `.TH0`:
+  - `ChaChaCaller0` `0x14DFE0` = Poly1305 (key = ChaCha20(key,nonce,counter=0)[0:32]; AD‖CT padded to 16; LE64 lens)
+  - `ChaChaCaller1` `0x14E1D0` = `aead_open` (nonce **must be 12 bytes**; counter=1 for cipher)
+  - `CallChaCha20` `0x1540C0` → CRYPTOGAMS `0x28900`; AVX path `0x1E580`
+  - XChaCha20-Poly1305 too (`AeadOpenUser1` `0x14DEC0`, nonce **24**, `HChaCha20` `0x154190`)
+  - EVP_AEAD objects at `0x1B58D0` (key=32, nonce=12, tag=16) and `0x1B5920` (nonce=24).
+  Open/init are **vtable-only** (no `E8` from `.text`). `call [reg+0x30]` sites are all in `.TH0`.
+  Guessed keys (`xdi_xdt_prod`, host, SHA256/HKDF, header-as-nonce, live `0x2130F0`) do **not** open
+  the file. HPKE (`hpke.c`, `eae_prk` / `shared_secret`) is in the same image — reports/heartbeat,
+  not proven as the `themis.res` wrap. Not the `0x75A007BE` string cipher.
+- **Contents (inferred):** updatable detection policy (rules / blocklist / heartbeat params).
+- **To read plaintext:** key/nonce are args to `.TH0` `aead_open` (`0x14E1D0`) / CRYPTOGAMS `0x28900`.
+  Trace those on a burner (or dump the heap after that call). Do not breakpoint stub `ReadCfgFile`.
+
 ---
 
-*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review. §10 (native Themis binary reverse engineering) added from Ghidra + memory-dump analysis of `themis_x64.dll`; §10.10 device-fingerprint (`oneid`) sources from a plaintext-string sweep. §10.12–10.15 (2026-08-07): current-build re-verification, VMProtect identification, the named-tool blocklist + verdict strings, the extended capability surface, and the Ghidra-MCP recipe — from a live unpacked image of the shipping binary. §10.16: the Nt/Zw native-API surface. §10.17: signature/catalog verification mechanism + why an injected mod is visible (with live ProcMon evidence).*
+*Updated from ilspy-dumps analysis for the Heartopia-Helper project. Deep-dive sections 2.4–2.6, 3.2, 4.2 added from latest dump review. §10 (native Themis binary reverse engineering) added from Ghidra + memory-dump analysis of `themis_x64.dll`; §10.10 device-fingerprint (`oneid`) sources from a plaintext-string sweep. §10.12–10.15 (2026-08-07): current-build re-verification, VMProtect identification, the named-tool blocklist + verdict strings, the extended capability surface, and the Ghidra-MCP recipe — from a live unpacked image of the shipping binary. §10.16: the Nt/Zw native-API surface. §10.17: signature/catalog verification mechanism + why an injected mod is visible (with live ProcMon evidence). §10.18: `themis.res` — CRC64 header (not magic), `ParseThemisRes` RVA `0x7EFF0`, ChaCha20 via `.TH0` `0x1540C0` (2026-08-30 live dump).
