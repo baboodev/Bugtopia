@@ -11,8 +11,8 @@ namespace HeartopiaMod
     //   * BepInEx baseline is 5, and under the DEFAULT `UnityLogListening = true` this trim is a
     //     no-op there: BepInEx triggers injection itself, before plugins load, via its Unity log
     //     listener, so by the time a plugin can run the hooks are already applied (it logs
-    //     "already applied — TOO LATE to suppress"). Turn that listener off — the toggle on
-    //     Settings→Logging, `UnityLogMirrorSetting.cs` — and nothing has triggered `Setup()` by
+    //     "already applied — TOO LATE to suppress"). Turn that listener off — `Load()` pins it off
+    //     on every launch via `BepInExLoggingConfig.cs` — and nothing has triggered `Setup()` by
     //     plugin-load time, so the trim DOES land and BepInEx goes 5 → 3. That is why
     //     `HeartopiaBepInPlugin.Load()` calls Apply() BEFORE its PlayerLoop early-return: it is the
     //     only moment the suppression can land there.

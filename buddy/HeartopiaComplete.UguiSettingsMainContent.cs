@@ -267,49 +267,14 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(intro);
             PlaceUguiTopLeft(intro, pad, 42f, w - pad * 2f, 36f);
 
-            // BepInEx-only row, above the session toggles because it is a different KIND of setting:
-            // it belongs to the loader, persists to BepInEx.cfg, and only takes effect on the next
-            // launch. Gated on UnityLogMirrorSetting.IsAvailable, which is self-validating — it is
-            // true exactly when the config entry resolved, so under MelonLoader (including the
-            // Universal build launched there, where the check must be at RUNTIME, not #if) the row
-            // simply does not exist and the toggle list starts where it always did.
-            // Running cursor rather than absolute Y literals: the note is a long wrapped string that
-            // grows in other locales, so a hardcoded scroll top would silently be encoding
-            // "82 + toggle + note + gap" and break the moment any of those changed.
+            // A "Mirror Unity logs into the BepInEx log" checkbox USED TO BE HERE, writing
+            // BepInEx's own `[Logging] UnityLogListening`. It is gone: the value is now pinned off
+            // unconditionally at loader startup (BepInExLoggingConfig.cs), together with
+            // `[Logging.Console] Enabled`. Both are read once when BepInEx boots, so the checkbox
+            // could never do more than promise an effect one launch later — on a page most users
+            // open once, which left installs sitting on the BepInEx defaults. Do not re-add it
+            // without also removing the startup pin; two writers on one key is a coin flip.
             float rowY = 84f;
-            if (UnityLogMirrorSetting.IsAvailable)
-            {
-                const float mirrorTogH = 24f;
-                const float mirrorGap = 6f;
-                float noteW = w - pad * 2f;
-
-                string mirrorNoteText = this.L("Off: BepInEx stops installing its Unity log listener, removing 2 of the 5 IL2CPP code patches it writes into the game. Unity's messages are no longer mirrored here — they still go to the game's own Player.log (without timestamps). The mod's log is unaffected. Takes effect after a restart.");
-                GameObject mirrorNote = this.CreateUguiMutedLabel(block.transform, "MirrorNote", mirrorNoteText, 12f);
-                this.TrySetUguiLabelWrapped(mirrorNote);
-
-                // Measured, not guessed: this paragraph is ~330 characters and wraps to a different
-                // number of lines in each of the five languages, so a constant here would clip the
-                // text in some of them. MeasureUguiPicturesWrappedHeight is the kit's proven
-                // GetPreferredValues path and is fail-closed — if the label has never Awoken (the
-                // tab can be built while not visible) it reports ok=false and we keep the fallback,
-                // which is the old five-line estimate.
-                float mirrorNoteH = this.MeasureUguiPicturesWrappedHeight(mirrorNote, mirrorNoteText, noteW, 78f, out _);
-
-                Toggle mirrorTog = this.CreateUguiCheckbox(block.transform, "UnityLogMirror",
-                    this.L("Mirror Unity logs into the BepInEx log"),
-                    UnityLogMirrorSetting.Enabled,
-                    v =>
-                    {
-                        bool ok = UnityLogMirrorSetting.TrySet(v);
-                        this.SetUguiLabelText(mirrorNote, ok
-                            ? this.L("Saved to BepInEx.cfg — restart the game to apply.")
-                            : this.L("Could not write BepInEx.cfg: ") + UnityLogMirrorSetting.Status);
-                    });
-                PlaceUguiTopLeft(mirrorTog.gameObject, pad, rowY, noteW, mirrorTogH);
-                rowY += mirrorTogH + 2f;
-                PlaceUguiTopLeft(mirrorNote, pad, rowY, noteW, mirrorNoteH);
-                rowY += mirrorNoteH + mirrorGap;
-            }
 
             // MCP agent-bridge privileges USED TO BE HERE. They moved to the Agent tab
             // (HeartopiaComplete.UguiAgentContent.cs), which only exists while the bridge is

@@ -298,7 +298,7 @@
   <ItemGroup>
     <Compile Include="GlobalUsings.cs" />
     <Compile Include="InjectionGateCanary.cs" />
-    <Compile Include="UnityLogMirrorSetting.cs" />
+    <Compile Include="BepInExLoggingConfig.cs" />
     <Compile Include="HookFreeDelegate.cs" />
     <Compile Include="InputRebindFeature.cs" />
     <Compile Include="EmoteUnlockFeature.cs" />

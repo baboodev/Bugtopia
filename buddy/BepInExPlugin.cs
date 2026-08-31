@@ -35,6 +35,13 @@ namespace HeartopiaMod
             BepInExLogAdapter.Install(Log);
             ModCoroutines.InitBepInEx();
 
+            // Pin BepInEx's own logging defaults off — `[Logging] UnityLogListening` and
+            // `[Logging.Console] Enabled` (BepInExLoggingConfig.cs). BepInEx read both long before
+            // this line, so the write lands on the NEXT launch: this run still pays for the log
+            // listener and its hooks. Nothing below depends on it within this session; it is here
+            // so the file on disk is right by the time it matters.
+            BepInExLoggingConfig.Apply();
+
             // Trim the ClassInjector hooks that injection would otherwise install but that provably
             // cannot fire for this mod (ClassInjectorHookTrimFeature.cs). MUST precede AddComponent:
             // InjectorHelpers.Setup() installs them lazily on the first RegisterTypeInIl2Cpp, and
@@ -47,7 +54,8 @@ namespace HeartopiaMod
             // NOTE: on its own this does NOT reduce the hook count, because BepInEx installs all 5
             // itself before plugins load (it converts a managed delegate to redirect Unity's log
             // output). The reduction only lands with `BepInEx.cfg [Logging] UnityLogListening = false`
-            // — exposed as a toggle on Settings→Logging (UnityLogMirrorSetting.cs).
+            // — which BepInExLoggingConfig.Apply() above pins on every launch, so from the second
+            // launch after an install the trim always has something to trim.
             //
             // The trim runs BEFORE the pump branch on purpose. With the listener disabled, nothing
             // has triggered `InjectorHelpers.Setup()` yet at this point, so this is the only moment
