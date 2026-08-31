@@ -366,8 +366,8 @@ namespace HeartopiaMod
             data.autoFishSkipCatchAnim = AutoFishingFarm.GetSkipCatchAnimEnabled();
             data.autoFishSkipCastAnim = AutoFishingFarm.GetSkipCastAnimEnabled();
             data.autoFishSkipBaitAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
-            data.autoFishHideFromOthers = this.GetStealthFishingEnabled();
             data.autoFishKeepCameraAndHud = this.GetFishingCameraHudKeepEnabled();
+            data.autoFishServerSide = this.GetServerSideFishingEnabled();
             data.fishingRouteCustomOnly = FishingRouteFeature.GetCustomSpotsOnly();
             data.autoFishReelMaxDuration = -1f;
             data.autoFishReelHoldDuration = -1f;
@@ -779,8 +779,8 @@ namespace HeartopiaMod
             AutoFishingFarm.SetSkipCatchAnimEnabled(data.autoFishSkipCatchAnim);
             AutoFishingFarm.SetSkipCastAnimEnabled(data.autoFishSkipCastAnim);
             AutoFishingFarm.SetSkipBaitAnimEnabled(data.autoFishSkipBaitAnim);
-            this.SetStealthFishingEnabled(data.autoFishHideFromOthers);
             this.SetFishingCameraHudKeepEnabled(data.autoFishKeepCameraAndHud);
+            this.SetServerSideFishingEnabled(data.autoFishServerSide);
             FishingRouteFeature.SetCustomSpotsOnly(data.fishingRouteCustomOnly);
             if (data.insectBatchSize > 0)
             {
@@ -1074,8 +1074,8 @@ namespace HeartopiaMod
                         else if (line.Contains("autoFishSkipCatchAnim")) AutoFishingFarm.SetSkipCatchAnimEnabled(GetJsonInt(line, "\"autoFishSkipCatchAnim\":") != 0);
                         else if (line.Contains("autoFishSkipCastAnim")) AutoFishingFarm.SetSkipCastAnimEnabled(GetJsonInt(line, "\"autoFishSkipCastAnim\":") != 0);
                         else if (line.Contains("autoFishSkipBaitAnim")) AutoFishingFarm.SetSkipBaitAnimEnabled(GetJsonInt(line, "\"autoFishSkipBaitAnim\":") != 0);
-                        else if (line.Contains("autoFishHideFromOthers")) this.SetStealthFishingEnabled(GetJsonInt(line, "\"autoFishHideFromOthers\":") != 0);
                         else if (line.Contains("autoFishKeepCameraAndHud")) this.SetFishingCameraHudKeepEnabled(GetJsonInt(line, "\"autoFishKeepCameraAndHud\":") != 0);
+                        else if (line.Contains("autoFishServerSide")) this.SetServerSideFishingEnabled(GetJsonInt(line, "\"autoFishServerSide\":") != 0);
                         else if (line.Contains("autoFishReelMaxDuration")) this.saved_autoFishReelMaxDuration = GetJsonFloat(line, "\"autoFishReelMaxDuration\":");
                         else if (line.Contains("autoFishReelHoldDuration")) this.saved_autoFishReelHoldDuration = GetJsonFloat(line, "\"autoFishReelHoldDuration\":");
                         else if (line.Contains("autoFishReelPauseDuration")) this.saved_autoFishReelPauseDuration = GetJsonFloat(line, "\"autoFishReelPauseDuration\":");

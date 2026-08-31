@@ -1412,20 +1412,10 @@ namespace HeartopiaMod
 
             try
             {
-                // Rotation does NOT ride the show-action channel — it goes out with the transform
-                // sync (LocalPlayerComponent._TickSendSelfTransform), which StealthFishingFeature's
-                // filter deliberately leaves alone so the player's position stays correct for
-                // everyone. So with Hide Fishing From Others on, a pre-cast turn toward every fish
-                // is the one thing still visible: a character standing still and snap-rotating at
-                // the water on a timer. Skipping it costs nothing here — the mod hands EnterFishing
-                // an explicit target instead of aiming with the rod, and the only thing entity
-                // forward feeds is the successLength edge case in FishHelper.ComputeFloatInWaterData,
-                // which the Instant Catch detour overwrites at the source anyway.
-                if (this.GetStealthFishingEnabled())
-                {
-                    this.AutoFishLog("Pre-cast facing suppressed: hide-from-others is on");
-                }
-                else if (!this.TryFacePlayerTowardCastTarget(targetPos, out string faceStatus))
+                // FSM path only — Server-Side Fishing branches to TryServerSideFishingCast well
+                // before this and never faces at all (it computes the buoy direction itself instead
+                // of letting FishHelper.ComputeFloatInWaterData read entity.forward).
+                if (!this.TryFacePlayerTowardCastTarget(targetPos, out string faceStatus))
                 {
                     this.AutoFishLog("Pre-cast facing skipped: " + faceStatus);
                 }
@@ -1435,7 +1425,6 @@ namespace HeartopiaMod
                 // window before the transition; FishingCameraHudFeature no-ops it when its toggle
                 // is off. See FishingCameraHudFeature.cs §2a.
                 this.ArmFishingCameraHudCastWindow();
-                this.ArmStealthFishingCastWindow();
 
                 if (this.TryResolveGameplayFishingApi(out Type _, out Type fishingSubStateType, out MethodInfo enterFishingMethod, out MethodInfo _))
                 {
@@ -3285,10 +3274,22 @@ namespace HeartopiaMod
         // read back through the standard helpers without manual offset math.
         private bool TryReadFishingFloatData(out uint floatNetId, out Vector3 direction, out float failLength, out Vector3 basePos, out string status)
         {
+            return this.TryReadFishingFloatData(out floatNetId, out direction, out failLength, out basePos,
+                out bool _, out float _, out status);
+        }
+
+        // `available` and `successLength` are what the SERVER last told us about the buoy
+        // (CmdAddRodBuoy / CmdUpdateRodBuoyData write them into PlayerFloatData), which makes them
+        // the only honest read of whether the server considers the buoy live and where it thinks it
+        // is. Server-Side Fishing uses them as its post-activation verdict.
+        private bool TryReadFishingFloatData(out uint floatNetId, out Vector3 direction, out float failLength, out Vector3 basePos, out bool available, out float successLength, out string status)
+        {
             floatNetId = 0U;
             direction = Vector3.zero;
             failLength = 0f;
             basePos = Vector3.zero;
+            available = false;
+            successLength = 0f;
             status = "player unavailable";
 
             IntPtr playerObj = IntPtr.Zero;
@@ -3321,6 +3322,8 @@ namespace HeartopiaMod
             this.TryGetMonoVector3Member(floatDataObj, "direction", out direction);
             this.TryGetMonoSingleMember(floatDataObj, "failLength", out failLength);
             this.TryGetMonoVector3Member(floatDataObj, "basePosition", out basePos);
+            this.TryGetMonoBoolMember(floatDataObj, "available", out available);
+            this.TryGetMonoSingleMember(floatDataObj, "successLength", out successLength);
             status = "ok netId=" + floatNetId + " dir=" + direction + " fail=" + failLength.ToString("F1") + " base=" + basePos;
             return true;
         }

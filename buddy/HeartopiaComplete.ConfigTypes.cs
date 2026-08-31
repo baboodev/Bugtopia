@@ -361,8 +361,8 @@ namespace HeartopiaMod
             public bool autoFishSkipCatchAnim = false;
             public bool autoFishSkipCastAnim = false;
             public bool autoFishSkipBaitAnim = false;
-            public bool autoFishHideFromOthers = false;
             public bool autoFishKeepCameraAndHud = false;
+            public bool autoFishServerSide = false;
             public bool fishingRouteCustomOnly = false;
             public float autoFishReelMaxDuration = -1f;
             public float autoFishReelHoldDuration = -1f;

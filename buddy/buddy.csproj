@@ -314,8 +314,8 @@
     <Compile Include="AutoLearnRecipeFeature.cs" />
     <Compile Include="RepairThrowAnimationTrimFeature.cs" />
     <Compile Include="CraftDirectSendFeature.cs" />
-    <Compile Include="StealthFishingFeature.cs" />
     <Compile Include="FishingCameraHudFeature.cs" />
+    <Compile Include="ServerSideFishingFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
     <Compile Include="DailyClaimsAutoClaimFeature.cs" />
     <Compile Include="DailyClaimsFeature.cs" />

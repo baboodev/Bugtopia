@@ -862,6 +862,21 @@ namespace HeartopiaMod
                 }
 
                 nextWorldReadyLogAt = -999f;
+
+                // Server-Side Fishing owns the whole session when it is on. There is no local FSM
+                // state for the polled machine below to read (InFishingState stays false by design),
+                // so without this the farm would see "not fishing" and re-cast on top of a live
+                // protocol session. When it is idle we deliberately fall through — equip, scan and
+                // target selection are identical for both paths.
+                if (host.GetServerSideFishingEnabled()
+                    && host.IsServerSideFishingSessionActive(out string serverSessionStatus))
+                {
+                    lastStatus = serverSessionStatus;
+                    lastTargetStatus = "Server-side session in flight";
+                    nextActionAt = now + 0.2f;
+                    return;
+                }
+
                 bool hasFishingState = host.TryGetFishingAutomationState(out bool inFishingState, out string fishState, out bool pressed, out float pullStrength, out float rodDurability, out uint baitingFishNetId, out string fishingStateStatus);
                 if (!hasFishingState)
                 {
@@ -1442,25 +1457,39 @@ namespace HeartopiaMod
                 // window is what lets the kit actually be consumed. Once the restorer lands,
                 // its aura repairs the rod passively and casting resumes immediately (fishing
                 // does not move the player, so they stay inside the aura).
+                // Leave the vehicle — but only when the run actually needs the ground.
+                //
+                // The FSM path always does: GameFishingMode.EnterFishing throws outside GameFreeMode,
+                // and equipping the rod while mounted is not reliable either, so this is placed ahead
+                // of the tool check (gating only at the cast could wedge the farm in the equip retry
+                // and never get here).
+                //
+                // Server-Side Fishing does NOT: it talks to the server directly and has no reason to
+                // stand up to fish. The one thing that still needs the ground there is the repair —
+                // a ToolRestorer use is a BagModule action and dismounting is a position change,
+                // which IsAutoRepairBusy() is the documented gate for (the narrower
+                // IsAutoRepairUsePhase below only pauses casting). Hence the whole block sits ABOVE
+                // that pause: otherwise the pause would return first and we would never stand up.
+                //
+                // Non-blocking either way — the helper resends GetOffVehicle on its own cadence and
+                // we come back next tick.
+                bool serverSideFishing = host.GetServerSideFishingEnabled();
+                if ((!serverSideFishing || host.IsAutoRepairBusy())
+                    && host.IsFishingDismountPending(out string dismountStatus))
+                {
+                    lastStatus = dismountStatus;
+                    lastTargetStatus = serverSideFishing
+                        ? "Leaving the vehicle for repair"
+                        : "Waiting to leave the vehicle";
+                    nextActionAt = now + 0.3f;
+                    return;
+                }
+
                 if (host.IsAutoRepairUsePhase())
                 {
                     lastStatus = "Paused for Auto Repair";
                     lastTargetStatus = "Waiting for repair kit use";
                     nextActionAt = now + 0.5f;
-                    return;
-                }
-
-                // Leave the vehicle first. Placed AHEAD of the tool check on purpose: fishing is
-                // unreachable from a seat (GameFishingMode.EnterFishing throws outside GameFreeMode),
-                // and equipping the rod while mounted is not something to rely on either — gating
-                // only at the cast could wedge the farm in the equip retry and never get here.
-                // Non-blocking: the helper resends GetOffVehicle on its own cadence and we just
-                // come back next tick.
-                if (host.IsFishingDismountPending(out string dismountStatus))
-                {
-                    lastStatus = dismountStatus;
-                    lastTargetStatus = "Waiting to leave the vehicle";
-                    nextActionAt = now + 0.3f;
                     return;
                 }
 
@@ -1513,6 +1542,18 @@ namespace HeartopiaMod
                 currentTargetPos = targetPos;
                 lastTargetStatus = $"netId={targetNetId} dist={(targetDistance > 0f ? targetDistance.ToString("F1") : "unknown")}m found={detectedCount}";
                 Log("Fish shadow target resolved: " + lastTargetStatus + " pos=" + targetPos);
+
+                if (host.GetServerSideFishingEnabled())
+                {
+                    // Raw protocol: CastRod now, the feature's own tick carries the rest of the
+                    // session on server events. None of the FSM-side bookkeeping below applies.
+                    bool serverCastOk = host.TryServerSideFishingCast(targetPos, out string serverCastStatus);
+                    lastStatus = serverCastOk ? "Server-side cast sent" : "Server-side cast failed";
+                    lastTargetStatus = serverCastStatus;
+                    lastCastSentAt = now;
+                    nextActionAt = now + (serverCastOk ? 0.2f : 1.5f);
+                    return;
+                }
 
                 if (host.TryEnterFishingAtTarget(targetPos, out string enterStatus))
                 {
