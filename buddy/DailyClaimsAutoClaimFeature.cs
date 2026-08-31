@@ -34,8 +34,12 @@ namespace HeartopiaMod
     // Deliberately NOT auto-claimed:
     //   - RedPointType.Task (200), ordinary quests — Quest Assistant owns those, and submitting a
     //     story quest behind the player's back is not a "claim".
-    //   - the SeaCycle exploration upgrade — it SPENDS a ticket and exp; the Whalefall button does
-    //     it on an explicit press, auto-claim never spends.
+    //
+    // The SeaCycle exploration upgrade USED to be on that list, on the grounds that it spends. It is
+    // auto-claimed now, by explicit request: the exp is Whalefall-only and stops accruing at the
+    // threshold, the tickets have no other use, and levelling is the only thing either is for — so
+    // holding them back is not caution, it is just a level the player already earned going untaken.
+    // It stays gated on SeaCycleSystem's own exact test (exp >= needExp AND ticket >= needTicket).
     //
     // Pacing: one queued item per DailyClaimsAutoDrainIntervalSeconds, never in bursts, and never
     // while a manual Daily Claims coroutine is running. IsAdd=false is ignored outright — a cleared
@@ -118,6 +122,16 @@ namespace HeartopiaMod
         private const int DailyClaimsTaskUpdatedEventBytes = 8;   // uint taskNetId@0, int taskStaticId@4
         private const float DailyClaimsAutoWhalefallMinIntervalSeconds = 5f;
 
+        // The Whalefall HUD dot is NOT a RedPointManager node — SeaCycleHudEntryWidget toggles it
+        // straight from SeaCycleSystem.ShouldShowEntryRedPoint(), which is why the node sweep never
+        // saw it. That dot covers three things: the upgrade being ready, a daily request being
+        // claimable, and a mainline task being claimable. This event is the one the widget itself
+        // listens to for the level half.
+        private const string DailyClaimsSeaCycleLevelUpdatedEventName =
+            "ScriptsRefactory.DataAndProtocol.Events.SeaCycleLevelUpdatedEvent";
+        private const int DailyClaimsSeaCycleLevelUpdatedEventBytes = 1;   // empty struct
+        private const float DailyClaimsAutoSeaCycleMinIntervalSeconds = 5f;
+
         private const string DailyClaimsAutoWorldReadyCallbackName = "DailyClaimsAutoClaim";
 
         // One send per tick at this spacing — the same "no burst the game never produces" rule the
@@ -183,6 +197,8 @@ namespace HeartopiaMod
         private float dailyClaimsAutoBattlePassNextAllowedAt;
         private bool dailyClaimsAutoPendingWhalefall;
         private float dailyClaimsAutoWhalefallNextAllowedAt;
+        private bool dailyClaimsAutoPendingSeaCycleUpgrade;
+        private float dailyClaimsAutoSeaCycleNextAllowedAt;
         private float dailyClaimsAutoMailEchoUntil;
         private float dailyClaimsAutoMailNextAllowedAt;
 
@@ -258,13 +274,18 @@ namespace HeartopiaMod
                     DailyClaimsTaskUpdatedEventName,
                     DailyClaimsTaskUpdatedEventBytes,
                     this.OnDailyClaimsAutoTaskUpdatedEvent);
+                bool seaCycle = this.RegisterGameEventHook(
+                    DailyClaimsSeaCycleLevelUpdatedEventName,
+                    DailyClaimsSeaCycleLevelUpdatedEventBytes,
+                    this.OnDailyClaimsAutoSeaCycleLevelUpdatedEvent);
 
                 this.dailyClaimsAutoHooksRegistered =
-                    redPoint || activityTasks || mail || dream || sticker || battlePass || taskUpdated;
+                    redPoint || activityTasks || mail || dream || sticker || battlePass
+                    || taskUpdated || seaCycle;
                 this.DailyClaimsLog("auto-claim hooks registered: redPoint=" + redPoint
                     + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream
                     + " sticker=" + sticker + " battlePass=" + battlePass
-                    + " taskUpdated=" + taskUpdated);
+                    + " taskUpdated=" + taskUpdated + " seaCycle=" + seaCycle);
 
                 if (!this.dailyClaimsAutoHooksRegistered)
                 {
@@ -302,6 +323,9 @@ namespace HeartopiaMod
             // Same reasoning for the sticker tiers: the theme node states sync during login, so the
             // refresh event has usually already fired by the time the hook exists.
             this.dailyClaimsAutoPendingSticker = true;
+
+            // And for the exploration level, which can already be over its threshold at login.
+            this.dailyClaimsAutoPendingSeaCycleUpgrade = true;
 
             // The markers that matter most arrive in the pre-world burst, which the event detour
             // structurally cannot see (installing it that early is what aborted the process three
@@ -424,6 +448,16 @@ namespace HeartopiaMod
             // Fires on any state change of an operation-activity task, not just "became claimable",
             // so the drain re-checks the state before submitting.
             this.dailyClaimsAutoCatchUpTasks = true;
+        }
+
+        private void OnDailyClaimsAutoSeaCycleLevelUpdatedEvent(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            this.dailyClaimsAutoPendingSeaCycleUpgrade = true;
         }
 
         private void OnDailyClaimsAutoTaskUpdatedEvent(GameEventSnapshot e)
@@ -1856,6 +1890,33 @@ namespace HeartopiaMod
             // The pending flag is kept (not consumed) while the min-interval backstop holds it off,
             // so a claim that is merely too early is DELAYED rather than dropped, and the drain
             // falls through to the next step instead of stalling on it.
+            if (this.dailyClaimsAutoPendingSeaCycleUpgrade
+                && Time.realtimeSinceStartup >= this.dailyClaimsAutoSeaCycleNextAllowedAt)
+            {
+                this.dailyClaimsAutoPendingSeaCycleUpgrade = false;
+                this.dailyClaimsAutoSeaCycleNextAllowedAt =
+                    Time.realtimeSinceStartup + DailyClaimsAutoSeaCycleMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.seacycle");
+
+                // Only when BOTH halves of the game's own test pass. Upgrading dispatches the event
+                // again, but by then the exp is under the NEXT level's threshold, so a pass with
+                // nothing earned sends nothing and this cannot loop. Enough for several levels at
+                // once simply chains them one per pass, which is the intended outcome.
+                if (this.DailyClaimsCanUpgradeSeaCycle(out string upgradeDetail))
+                {
+                    bool upgraded = this.TryUpgradeDailyClaimsSeaCycle(out string upgradeStatus);
+                    this.DailyClaimsAutoReport(upgraded, "seacycle upgrade",
+                        upgradeDetail + "; " + upgradeStatus);
+
+                    // Chain straight into the next level rather than waiting for another event.
+                    this.dailyClaimsAutoPendingSeaCycleUpgrade = upgraded;
+                    return true;
+                }
+
+                this.DailyClaimsAutoReport(false, "seacycle upgrade", upgradeDetail);
+                return true;
+            }
+
             if (this.dailyClaimsAutoPendingWhalefall
                 && Time.realtimeSinceStartup >= this.dailyClaimsAutoWhalefallNextAllowedAt)
             {
