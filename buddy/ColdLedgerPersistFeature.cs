@@ -42,8 +42,12 @@ namespace HeartopiaMod
 
         // Only cooldowns with at least this much left are worth a disk row: regular trees (120 s)
         // and stones (300 s) expire before a restart matters, while rare trees and daily rocks
-        // (86 400 s) are exactly what gets re-walked. Growing dynamic bushes can qualify too;
-        // their rows die with their netIds and cost nothing.
+        // (86 400 s) are exactly what gets re-walked.
+        //
+        // ⚠️ This floor does NOT decide what belongs here — the component-agreement test below
+        // does. An earlier version of this comment said growing bushes "cost nothing" because
+        // their rows die with their netIds; once the store began hiding markers by POSITION that
+        // stopped being true, and it cost two separate outages.
         private const long ColdLedgerPersistFloorMs = 30L * 60L * 1000L;
 
         // A rewrite per new verdict would thrash during sweeps (153 events per pass); batching to a
@@ -78,35 +82,50 @@ namespace HeartopiaMod
                 return;
             }
 
-            // ⚠️ DYNAMIC BUSHES DO NOT BELONG HERE, AND THE HEADER'S "they cost nothing" WAS WRONG.
+            // ⚠️ ONLY A COOLDOWN THE COMPONENT ITSELF CONFIRMS MAY BE WRITTEN DOWN.
             //
-            // A bush's end is a MATURITY, not a cooldown, and this store is keyed by position as
-            // well as netId — so a row written while one bush was growing goes on hiding the spot
-            // after that bush has been collected and a new one has grown there under a new netId.
-            // Measured: three ripe truffles (staticId 130017, component inCold=false) invisible on
-            // the radar with ~5.8 h still on rows from an earlier session.
+            // A verdict's future end is not always a cooldown. On anything that REGROWS it is a
+            // MATURITY, and this store is keyed by position as well as netId — so a row written
+            // while a plant was growing keeps hiding that spot long after it has ripened, or
+            // after it was collected and a new one grew there under a new netId.
             //
-            // Bush readiness has its own machinery — the client verdict plus the "unconfirmed =>
-            // do not go" rule — and it is live, which is what a resource that comes and goes
-            // needs. This file is for LONG COOLDOWNS OF THINGS THAT STAY PUT: rare trees, daily
-            // rocks. Same reasoning that keeps mushrooms out of the static fallback list.
-            int staticId = 0;
+            // Twice measured, twice the same shape:
+            //   * three ripe truffles, component inCold=false, invisible with ~5.8 h left on rows
+            //     from an earlier session;
+            //   * every underwater plant in the bay reading component.inCold=false, end=0 while
+            //     the ledger claimed 6-7 h — so the farm skipped a glasswort 21 m away and swam
+            //     to contamination at 60 m, because "nearest AVAILABLE" had nothing else left.
+            //
+            // The first cut excluded a staticId RANGE (the mushroom ids). That is the wrong shape
+            // of rule: the underwater plants carry staticIds 1, 4, 9, 14-18 and sailed straight
+            // through it. What actually separates the two cases is not an id but AGREEMENT — for
+            // the things this file exists for (rare trees, daily rocks) the component's inCold is
+            // the trustworthy flag (FARM_WALK_TO_NODE.md §7b), and it says so when they cool.
+            // A regrowing plant never sets it.
+            //
+            // Requiring the live entry costs nothing either: these verdicts arrive when the
+            // entity streams in close, which is exactly when the scan holds it.
+            bool componentConfirmsCold = false;
+            bool seenInScan = false;
             Vector3 pos = Vector3.zero;
             for (int i = 0; i < this.liveCollectableColds.Count; i++)
             {
                 if (this.liveCollectableColds[i].NetId == netId)
                 {
+                    seenInScan = true;
                     pos = this.liveCollectableColds[i].Position;
-                    staticId = this.liveCollectableColds[i].StaticId;
+                    componentConfirmsCold = this.liveCollectableColds[i].OnCooldown;
                     break;
                 }
             }
 
-            if (staticId >= 130001 && staticId <= 130025)
+            if (seenInScan && !componentConfirmsCold)
             {
+                // Growing, not cooling. Drop anything written for it before this rule existed —
+                // that is what clears the rows already on disk.
                 if (this.coldLedgerPersisted.Remove(netId))
                 {
-                    this.coldLedgerDirty = true;   // drop rows written before this rule existed
+                    this.coldLedgerDirty = true;
                 }
 
                 return;

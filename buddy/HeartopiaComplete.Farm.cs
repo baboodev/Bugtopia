@@ -1982,11 +1982,47 @@ namespace HeartopiaMod
                         AvailableNum = availableNum,
                         SeenAt = Time.unscaledTime,
                     };
-
-                    // Cooldowns measured in hours survive restarts on disk; everything shorter
-                    // is not worth a row (ColdLedgerPersistFeature.cs).
-                    this.NotePersistableColdVerdict(resourceNetId, endMs);
                 }
+
+                // ⚠️ THE COMPONENT IN FRONT OF US REFUTES A STORED COOLDOWN — AND THE GUARD ABOVE
+                // MUST NOT BE ABLE TO BLOCK THAT CORRECTION.
+                //
+                // The guard is right that a far zero is a lie. But it locked itself: a stored end
+                // makes every later zero "blocked", the block skipped the disk write entirely,
+                // and so the one event that could clear a wrong row never reached the code that
+                // clears it. Measured after the previous fix shipped — four underwater plants in
+                // the scan, component ready, ledger claiming 6 h, rows still on disk, and the
+                // farm still skipping a glasswort 23 m away for contamination at 60 m.
+                //
+                // A resource the scan is holding is one we can actually see, and for the species
+                // this ledger exists for, inCold is the trustworthy flag (FARM_WALK_TO_NODE.md
+                // §7b). If it says the thing is not cooling, the stored cooldown is refuted.
+                //
+                // ⚠️ This does NOT re-open the dynamic-bush trap. Clearing a bush's record leaves
+                // it with NO verdict, and no verdict on a dynamic bush means "unconfirmed => hide"
+                // — the live rule written for exactly that species. What becomes visible again is
+                // what the component positively calls ready.
+                bool scanHoldsItReady = false;
+                for (int i = 0; i < this.liveCollectableColds.Count; i++)
+                {
+                    if (this.liveCollectableColds[i].NetId == resourceNetId)
+                    {
+                        scanHoldsItReady = !this.liveCollectableColds[i].OnCooldown;
+                        break;
+                    }
+                }
+
+                if (endMs <= 0L && scanHoldsItReady
+                    && this.collectColdByNetId.TryGetValue(resourceNetId, out CollectColdRecord stale)
+                    && stale.EndUnixMs > NowUnixMs())
+                {
+                    this.collectColdByNetId.Remove(resourceNetId);
+                }
+
+                // Cooldowns measured in hours survive restarts on disk; everything shorter is not
+                // worth a row. Called unconditionally: this is also what deletes a row the
+                // component has just refuted (ColdLedgerPersistFeature.cs).
+                this.NotePersistableColdVerdict(resourceNetId, endMs);
             }
 
             if (!this.autoFarmActive || !this.auraFarmEnabled)
