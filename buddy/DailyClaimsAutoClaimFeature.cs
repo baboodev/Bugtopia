@@ -110,6 +110,14 @@ namespace HeartopiaMod
         private const int DailyClaimsBattlePassUpdatedEventBytes = 4;   // int level
         private const float DailyClaimsAutoBattlePassMinIntervalSeconds = 5f;
 
+        // Whalefall daily requests are plain game tasks with no red point of either kind, so the only
+        // signal that one became submittable is the task event itself. It is also the noisiest event
+        // in the game — Quest Assistant measured 600-700 dispatches in a single frame — so the
+        // handler does nothing but flip a bool and the interval below does the coalescing.
+        private const string DailyClaimsTaskUpdatedEventName = "XDTDataAndProtocol.Events.TaskUpdated";
+        private const int DailyClaimsTaskUpdatedEventBytes = 8;   // uint taskNetId@0, int taskStaticId@4
+        private const float DailyClaimsAutoWhalefallMinIntervalSeconds = 5f;
+
         private const string DailyClaimsAutoWorldReadyCallbackName = "DailyClaimsAutoClaim";
 
         // One send per tick at this spacing — the same "no burst the game never produces" rule the
@@ -173,6 +181,8 @@ namespace HeartopiaMod
         private float dailyClaimsAutoStickerNextAllowedAt;
         private bool dailyClaimsAutoPendingBattlePass;
         private float dailyClaimsAutoBattlePassNextAllowedAt;
+        private bool dailyClaimsAutoPendingWhalefall;
+        private float dailyClaimsAutoWhalefallNextAllowedAt;
         private float dailyClaimsAutoMailEchoUntil;
         private float dailyClaimsAutoMailNextAllowedAt;
 
@@ -244,12 +254,17 @@ namespace HeartopiaMod
                     DailyClaimsBattlePassUpdatedEventName,
                     DailyClaimsBattlePassUpdatedEventBytes,
                     this.OnDailyClaimsAutoBattlePassUpdatedEvent);
+                bool taskUpdated = this.RegisterGameEventHook(
+                    DailyClaimsTaskUpdatedEventName,
+                    DailyClaimsTaskUpdatedEventBytes,
+                    this.OnDailyClaimsAutoTaskUpdatedEvent);
 
                 this.dailyClaimsAutoHooksRegistered =
-                    redPoint || activityTasks || mail || dream || sticker || battlePass;
+                    redPoint || activityTasks || mail || dream || sticker || battlePass || taskUpdated;
                 this.DailyClaimsLog("auto-claim hooks registered: redPoint=" + redPoint
                     + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream
-                    + " sticker=" + sticker + " battlePass=" + battlePass);
+                    + " sticker=" + sticker + " battlePass=" + battlePass
+                    + " taskUpdated=" + taskUpdated);
 
                 if (!this.dailyClaimsAutoHooksRegistered)
                 {
@@ -409,6 +424,20 @@ namespace HeartopiaMod
             // Fires on any state change of an operation-activity task, not just "became claimable",
             // so the drain re-checks the state before submitting.
             this.dailyClaimsAutoCatchUpTasks = true;
+        }
+
+        private void OnDailyClaimsAutoTaskUpdatedEvent(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            // Deliberately NOT logged and deliberately not filtered by task id: this fires hundreds
+            // of times per frame during a login sync, and reading the SeaCycle list to decide
+            // whether the id is one of ours would pay that cost per dispatch. The drain checks the
+            // seven ids once per interval instead.
+            this.dailyClaimsAutoPendingWhalefall = true;
         }
 
         private void OnDailyClaimsAutoRefreshStickerRewardEvent(GameEventSnapshot e)
@@ -1827,6 +1856,21 @@ namespace HeartopiaMod
             // The pending flag is kept (not consumed) while the min-interval backstop holds it off,
             // so a claim that is merely too early is DELAYED rather than dropped, and the drain
             // falls through to the next step instead of stalling on it.
+            if (this.dailyClaimsAutoPendingWhalefall
+                && Time.realtimeSinceStartup >= this.dailyClaimsAutoWhalefallNextAllowedAt)
+            {
+                this.dailyClaimsAutoPendingWhalefall = false;
+                this.dailyClaimsAutoWhalefallNextAllowedAt =
+                    Time.realtimeSinceStartup + DailyClaimsAutoWhalefallMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.whalefall");
+
+                // Reports through the queue helper. A request that is merely in progress is not
+                // queued, so a pass with nothing finished sends nothing and the submit's own
+                // TaskUpdated cannot loop.
+                this.DailyClaimsAutoQueueWhalefallRequests();
+                return true;
+            }
+
             if (this.dailyClaimsAutoPendingSticker
                 && Time.realtimeSinceStartup >= this.dailyClaimsAutoStickerNextAllowedAt)
             {
