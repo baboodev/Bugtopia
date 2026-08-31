@@ -124,7 +124,7 @@ namespace HeartopiaMod
         private UguiShellFishingHandle uguiShellFishing;
 
         // Fixed Part A cursor bottom: 8 header +28, equip +42, seven toggles +30 each (the last two
-        // are Keep Camera And HUD and Server-Side Fishing), status +24, tool +24, target +40,
+        // are Keep Fishing Camera and Server-Side Fishing), status +24, tool +24, target +40,
         // range label +22, range slider +30, auto-bait toggle +30 → 458.
         private const float UguiFishingBaitBlockTop = 458f;
 
@@ -260,10 +260,10 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFishingSkipBaitToggled));
             PlaceUguiTopLeft(handle.SkipBaitToggle.gameObject, 16f, 198f, 280f, 25f);
 
-            // Keep Camera And HUD While Fishing (FishingCameraHudFeature.cs) — suppresses the
+            // Keep Fishing Camera (FishingCameraHudFeature.cs) — suppresses the
             // fishing camera pushes and the FishingPanel that covers the HUD.
             handle.KeepCameraHudToggle = this.CreateUguiCheckbox(scrollContent, "KeepCameraHudToggle",
-                this.L("Keep Camera And HUD"), this.GetFishingCameraHudKeepEnabled(),
+                this.L("Keep Fishing Camera"), this.GetFishingCameraHudKeepEnabled(),
                 new System.Action<bool>(this.OnUguiFishingKeepCameraHudToggled));
             PlaceUguiTopLeft(handle.KeepCameraHudToggle.gameObject, 16f, 228f, 280f, 25f);
 
@@ -758,7 +758,7 @@ namespace HeartopiaMod
                 return;
             }
             this.SetFishingCameraHudKeepEnabled(value);
-            this.NotifyUguiFishingToggle("Keep Camera And HUD", value);
+            this.NotifyUguiFishingToggle("Keep Fishing Camera", value);
             try { this.SaveKeybinds(false); } catch { }
         }
 

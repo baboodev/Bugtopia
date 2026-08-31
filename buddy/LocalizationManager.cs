@@ -506,7 +506,7 @@ namespace HeartopiaMod
             { "Research Institute", "Research Institute" },
             { "Instruments", "Instruments" },
             { "Status: {0}", "Status: {0}" },
-            { "Keep Camera And HUD", "Keep Camera And HUD" },
+            { "Keep Fishing Camera", "Keep Fishing Camera" },
             { "Server-Side Fishing", "Server-Side Fishing" },
             { "Loading instrument data… (enter the main town — the list fills in a moment).", "Loading instrument data… (enter the main town — the list fills in a moment)." },
             { "Analyzer {0}  ·  Lv {1}", "Analyzer {0}  ·  Lv {1}" },
@@ -1700,7 +1700,7 @@ namespace HeartopiaMod
             { "Research Institute", "Laboratorio" },
             { "Instruments", "Aparatos de investigación" },
             { "Status: {0}", "Estado: {0}" },
-            { "Keep Camera And HUD", "Mantener cámara e interfaz" },
+            { "Keep Fishing Camera", "Mantener cámara de pesca" },
             { "Server-Side Fishing", "Pesca del lado del servidor" },
             { "Loading instrument data… (enter the main town — the list fills in a moment).", "Cargando datos de los aparatos… (entra a tu pueblo principal — la lista se llenará en un momento)." },
             { "Analyzer {0}  ·  Lv {1}", "Aparato {0}  ·  Nv {1}" },
@@ -2894,7 +2894,7 @@ namespace HeartopiaMod
             { "Research Institute", "研究室" },
             { "Instruments", "研究仪" },
             { "Status: {0}", "状态：{0}" },
-            { "Keep Camera And HUD", "保持镜头与界面" },
+            { "Keep Fishing Camera", "保持钓鱼镜头" },
             { "Server-Side Fishing", "服务端钓鱼" },
             { "Loading instrument data… (enter the main town — the list fills in a moment).", "正在加载研究仪数据…（进入主城，列表稍后填充）。" },
             { "Analyzer {0}  ·  Lv {1}", "研究仪{0}  ·  等级{1}" },
@@ -4079,7 +4079,7 @@ namespace HeartopiaMod
             { "Research Institute", "Laboratório de Pesquisa" },
             { "Instruments", "Dispositivos de Pesquisa" },
             { "Status: {0}", "Status: {0}" },
-            { "Keep Camera And HUD", "Manter câmera e interface" },
+            { "Keep Fishing Camera", "Manter câmera de pesca" },
             { "Server-Side Fishing", "Pesca no servidor" },
             { "Loading instrument data… (enter the main town — the list fills in a moment).", "Carregando dados dos dispositivos… (entre na sua cidade principal — a lista será preenchida em instantes)." },
             { "Analyzer {0}  ·  Lv {1}", "Dispositivo {0}  ·  Nv {1}" },
@@ -5264,7 +5264,7 @@ namespace HeartopiaMod
             { "Research Institute", "ห้องวิจัย" },
             { "Instruments", "เครื่องมือวิจัย" },
             { "Status: {0}", "สถานะ: {0}" },
-            { "Keep Camera And HUD", "คงกล้องและอินเทอร์เฟซ" },
+            { "Keep Fishing Camera", "คงกล้องตกปลา" },
             { "Server-Side Fishing", "ตกปลาฝั่งเซิร์ฟเวอร์" },
             { "Loading instrument data… (enter the main town — the list fills in a moment).", "กำลังโหลดข้อมูลเครื่องมือวิจัย… (เข้าเมืองหลักของคุณ รายการจะแสดงในอีกสักครู่)" },
             { "Analyzer {0}  ·  Lv {1}", "เครื่องมือวิจัย {0}  ·  เลเวล {1}" },
@@ -6462,7 +6462,7 @@ namespace HeartopiaMod
             { "Research Institute", "연구소" },
             { "Instruments", "악기" },
             { "Status: {0}", "상태: {0}" },
-            { "Keep Camera And HUD", "카메라와 UI 유지" },
+            { "Keep Fishing Camera", "낚시 카메라 유지" },
             { "Server-Side Fishing", "서버 사이드 낚시" },
             { "Loading instrument data… (enter the main town — the list fills in a moment).", "악기 정보를 불러오는 중… (중앙 마을에 들어가면 잠시 후 목록이 채워집니다)." },
             { "Analyzer {0}  ·  Lv {1}", "분석기 {0}  ·  Lv {1}" },
@@ -7380,6 +7380,20 @@ namespace HeartopiaMod
         private static readonly Dictionary<string, HashSet<string>> ObsoleteLocalizationValues =
             new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
             {
+                // 2026-08-31: the fishing toggle lost its HUD half (that behaviour already existed
+                // as PersistentHudFeature, "Keep HUD in fishing/vehicle modes") and was renamed to
+                // camera-only. The KEY was renamed too, but cached *.json files written by the
+                // interim build map the NEW key to the OLD label, and CreateOrderedDictionary keeps
+                // an existing value — so without this the stale caption survives every rebuild.
+                ["Keep Fishing Camera"] = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "Keep Camera And HUD",
+                    "Mantener cámara e interfaz",
+                    "保持镜头与界面",
+                    "Manter câmera e interface",
+                    "คงกล้องและอินเทอร์เฟซ",
+                    "카메라와 UI 유지",
+                },
                 ["pictures.draw_hint"] = new HashSet<string>(StringComparer.Ordinal)
                 {
                     "Draw: edit colored Draw/*.png files. Index maps are stored in Draw/.index/ for roundtrip.",
