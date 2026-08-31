@@ -363,6 +363,25 @@ namespace HeartopiaMod
                 normalizedName = normalizedName.Substring(0, normalizedName.Length - 2);
             }
 
+            // ⚠️ EVERY world bird and insect is spawned as "<prefab>_dots", and NO icon is named that
+            // way — `icon_index.tsv` has 0 keys containing "_dots" against 227 plain
+            // `ui_item_normal_p_insect_insect*`. So the derived key missed by one suffix and the
+            // marker fell back to the generic category picture.
+            //
+            // Why it looked like "only the NEW species are broken": `radarStaticIdToIconKey` is a
+            // LEARNED cache (radar_species_icons.txt), and nothing in the radar writes to it — it is
+            // filled by the backpack/AutoSell/GameIcons pipelines. So every species already CAUGHT
+            // had a correct cached icon and only the ones never held fell through to this path.
+            //
+            // The prefab number is NOT the staticId and cannot be computed from it: 83 of the 150
+            // Insect rows disagree (51231 -> p_insect_insect1601, 51215 -> p_insect_insect221, and
+            // p_insect_insect231 belongs to 51235). The object name is the only thing that names the
+            // prefab directly, which is exactly why this path exists — it just has to shed "_dots".
+            if (normalizedName.EndsWith("_dots", StringComparison.Ordinal))
+            {
+                normalizedName = normalizedName.Substring(0, normalizedName.Length - 5);
+            }
+
             switch ((canonicalLabel ?? string.Empty).Trim())
             {
                 case "Bird":

@@ -391,8 +391,15 @@ namespace HeartopiaMod
 
         // Bird staticId (Bird table / entity id) -> birdphoto ITEM id (the photo card whose
         // NormalItem icon is the species picture). Joined offline from cn tables on the shared
-        // prefab suffix (p_bird_birdNNN <-> p_birdphoto_birdphotoNNN): 135/136 birds mapped
-        // (only special id 2001 has no photo card). Insects need no map — the insect entity
+        // prefab suffix (p_bird_birdNNN <-> p_birdphoto_birdphotoNNN): 140/141 birds mapped.
+        // 63001 (p_bird_bird2001) is deliberately absent: the table gives it birdPhotoId 69201,
+        // which is ANOTHER bird's card (61101) — a wrong species picture is worse than the
+        // generic one, so it keeps the native icon.
+        // ⚠️ REGENERATE THESE THREE MAPS AFTER EVERY CONTENT UPDATE. They are baked joins over
+        // cn_tables (Bird.normalPrefabId/birdPhotoId, Insect.normalPrefabId), and a species the
+        // update adds is simply absent here — the marker silently falls back to the category
+        // icon, which reads as "the new species have no icon". That is exactly how season 8
+        // shipped: 5 insects and 5 birds missing. Insects need no map — the insect entity
         // staticId IS its bag-item id (Insect table id == Bagitem id, icons ui_item_normal_
         // p_insect_insectNNN).
         private static readonly Dictionary<int, int> BirdIdToPhotoItemId = new Dictionary<int, int>
@@ -420,6 +427,8 @@ namespace HeartopiaMod
             { 61710, 69316 }, { 61711, 69323 }, { 61712, 69324 }, { 61713, 69325 }, { 61714, 69326 }, { 61801, 69238 },
             { 61802, 69239 }, { 61803, 69253 }, { 61804, 69279 }, { 61901, 69208 }, { 61902, 69254 }, { 61903, 69266 },
             { 61904, 69317 }, { 63002, 69283 }, { 63003, 69284 },
+            // Season 8 (2026-08) additions — the five hoopoe colour morphs.
+            { 61232, 69343 }, { 61233, 69344 }, { 61234, 69345 }, { 61235, 69346 }, { 61236, 69347 },
         };
 
         // Bird PREFAB-suffix (the trailing number of p_bird_birdNNN / p_birdphoto_birdphotoNNN —
@@ -448,11 +457,13 @@ namespace HeartopiaMod
             { 1501, 69318 }, { 1502, 69319 }, { 1503, 69320 }, { 1504, 69321 }, { 1601, 69284 }, { 1701, 69315 }, { 1702, 69316 }, { 1703, 69285 },
             { 1704, 69286 }, { 1705, 69287 }, { 1801, 69300 }, { 1802, 69301 }, { 1803, 69302 }, { 1804, 69303 }, { 1805, 69304 }, { 1901, 69339 },
             { 1902, 69340 },
+            // Season 8 (2026-08) additions — the five hoopoe colour morphs.
+            { 239, 69343 }, { 240, 69344 }, { 241, 69345 }, { 242, 69346 }, { 243, 69347 },
         };
 
         // Insect PREFAB-suffix (trailing number of p_insect_insectNNN) -> insect ITEM id (== entity
         // staticId). Joined offline from the Insect table (145 wild-catchable prefabs, collision-
-        // free; the remaining table rows are variants without insectNNN prefabs). Suffixes are
+        // free; the remaining table rows are variants without insectNNN prefabs; 150 as of season 8). Suffixes are
         // SHUFFLED vs ids here too (insect113 -> 51117, insect119 -> 51113) — never derive
         // numerically. PRIMARY insect resolve (no Mono calls); the live-entity path is the fallback.
         private static readonly Dictionary<int, int> InsectSuffixToItemId = new Dictionary<int, int>
@@ -476,6 +487,8 @@ namespace HeartopiaMod
             { 1504, 51225 }, { 1505, 51226 }, { 1601, 51231 }, { 1602, 51227 }, { 1603, 51228 }, { 1604, 51229 }, { 1605, 51230 }, { 1701, 51935 },
             { 1702, 51934 }, { 1703, 51931 }, { 1704, 51933 }, { 1705, 51932 }, { 1801, 51706 }, { 1802, 51707 }, { 1803, 51710 }, { 1804, 51708 },
             { 1805, 51709 },
+            // Season 8 (2026-08) additions — 228/229 rhinoceros beetles, 230-232 fireflies.
+            { 228, 51237 }, { 229, 51238 }, { 230, 51234 }, { 231, 51235 }, { 232, 51236 },
         };
 
         // Trailing number of a bird prefab/sprite name ("p_bird_bird101(clone)" -> 101). 0 = none.
