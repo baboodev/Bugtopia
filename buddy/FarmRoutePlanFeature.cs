@@ -632,7 +632,28 @@ namespace HeartopiaMod
 
             // Walking pays for distance; a teleport does not. So only walk mode measures routes —
             // and only over the few nearest, ordered by the straight line that is already known.
-            if (this.farmWalkToNodeEnabled)
+            //
+            // ⚠️ NOT UNDERWATER: THERE THE MEASUREMENT IS AN ARTEFACT, NOT A ROUTE (rule 4.4).
+            //
+            // Ranking by route needs a graph that describes travel. The underwater one does not:
+            // 86 nodes against 1745 on land, hops of 20-30 m, and both ends of a measurement snap
+            // to whatever node is nearest — so up to ~50 m of phantom route is added to a target
+            // that is swum to almost in a straight line. Swimming is free-form in 3-D; the graph
+            // barely constrains it, and the log shows what the routes really look like down there:
+            //     node:Contaminated: walking 30,5m via 2 corners
+            // — two corners, i.e. the straight line, for a 30 m leg.
+            //
+            // The inflation is big enough to invert the choice while staying under the 3x
+            // implausibility cap that is supposed to catch it. Measured 23:34:
+            //     nearest by route, not by line: 81m away costs 132m to travel,
+            //                                    against 78m away costing 191m
+            // 191/78 = 2.45x on a target that is a straight swim away — the ranking overrode the
+            // nearer stop on a number the graph invented.
+            //
+            // So underwater the pick stays what rule 4.4 measured it to be: the nearest by the
+            // 3-D line, which FarmTourDistance already computes correctly while swimming. On land
+            // the graph is dense, its routes are real, and the ranking keeps earning its place.
+            if (this.farmWalkToNodeEnabled && !this.farmTourVerticalCost)
             {
                 // ⚠️ THE NEAREST FOUR, NOT THE FIRST FOUR. This used to take the tour head plus
                 // stops 0, 1, 2 IN PLAN ORDER and only then sort them by distance — so on land,
