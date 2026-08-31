@@ -112,6 +112,18 @@ namespace HeartopiaMod
         private float persistentHudNextPollAt;
         private float persistentHudNextDedupeAt;
         private bool persistentHudSkillJoySuppressed;
+
+        // RefreshSkillJoy() used to be fired ONCE when the mode panel went away. That races the
+        // mode exit: if the tool/FSM state has not settled yet the widget recomputes to nothing and
+        // the main interact joystick (the F button) stays hidden until some later game event
+        // happens to refresh it — field report after the first fishing session, confirmed live
+        // (main_joy@go@w OFF with hiddenNodes=0 / suppressed=false, i.e. the code believed it had
+        // restored). So the restore is now RE-ASSERTED until the button is actually back, bounded
+        // so a genuinely tool-less state (nothing to show) does not spin forever.
+        private const float PersistentHudSkillJoyRestoreWindow = 5f;
+        private const string PersistentHudMainJoyPath =
+            "AniRoot@ani@queueanimation/right_layout@ani/middle_right_layout@go/skill_bar@w@go/skill_bar@go/main_joy@go@w";
+        private float persistentHudSkillJoyRestoreUntil;
         private string persistentHudLastStatus = "Idle.";
 
         // Nodes we disabled on the mode panels, with the panel root they belong to. Restored the
@@ -166,6 +178,8 @@ namespace HeartopiaMod
                     this.persistentHudSkillJoySuppressed = false;
                     try { this.TryPersistentHudSetSkillJoy(suppress: false); } catch { }
                 }
+
+                this.persistentHudSkillJoyRestoreUntil = 0f;
 
                 return;
             }
@@ -304,10 +318,34 @@ namespace HeartopiaMod
                 if (this.TryPersistentHudSetSkillJoy(suppress: false))
                 {
                     this.persistentHudSkillJoySuppressed = false;
+                    // One call can land before the mode exit has settled, leaving the F button
+                    // hidden; keep re-asserting for a short window until it is actually back.
+                    this.persistentHudSkillJoyRestoreUntil = Time.unscaledTime + PersistentHudSkillJoyRestoreWindow;
                     if (MasterLogPersistentHud)
                     {
                         ModLogger.Msg("[PersistentHud] StatusPanel skill joy restored (RefreshSkillJoy)");
                     }
+                }
+            }
+            else if (this.persistentHudSkillJoyRestoreUntil > 0f)
+            {
+                // Verify the restore actually took. RefreshSkillJoy is the widget's own idempotent
+                // recompute, so re-running it is safe; stop as soon as the button is back or the
+                // window expires (no tool equipped legitimately means nothing to show).
+                if (Time.unscaledTime >= this.persistentHudSkillJoyRestoreUntil
+                    || this.PersistentHudIsMainJoyVisible(statusRoot))
+                {
+                    if (MasterLogPersistentHud)
+                    {
+                        ModLogger.Msg("[PersistentHud] skill joy restore window closed (mainJoyVisible="
+                            + this.PersistentHudIsMainJoyVisible(statusRoot) + ")");
+                    }
+
+                    this.persistentHudSkillJoyRestoreUntil = 0f;
+                }
+                else
+                {
+                    this.TryPersistentHudSetSkillJoy(suppress: false);
                 }
             }
         }
@@ -458,6 +496,19 @@ namespace HeartopiaMod
             {
                 ModLogger.Msg("[PersistentHud] hid " + label + "/" + childPath);
             }
+        }
+
+        // The F interact button. Its GameObject is what SetMainJoyState(Null)/RefreshSkillJoy
+        // toggles, so it is the honest read of whether the restore actually took effect.
+        private bool PersistentHudIsMainJoyVisible(GameObject statusRoot)
+        {
+            if (statusRoot == null)
+            {
+                return false;
+            }
+
+            Transform node = statusRoot.transform.Find(PersistentHudMainJoyPath);
+            return node != null && node.gameObject.activeInHierarchy;
         }
 
         private bool PersistentHudIsNodeTracked(GameObject node)
