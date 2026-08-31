@@ -1420,12 +1420,6 @@ namespace HeartopiaMod
                     this.AutoFishLog("Pre-cast facing skipped: " + faceStatus);
                 }
 
-                // Entering fishing mode makes GameFreeMode lose focus, and THAT is what closes the
-                // main HUD (StatusPanel) — not anything on GameFishingMode. Open the suppression
-                // window before the transition; FishingCameraHudFeature no-ops it when its toggle
-                // is off. See FishingCameraHudFeature.cs §2a.
-                this.ArmFishingCameraHudCastWindow();
-
                 if (this.TryResolveGameplayFishingApi(out Type _, out Type fishingSubStateType, out MethodInfo enterFishingMethod, out MethodInfo _))
                 {
                     object waitingState = Enum.Parse(fishingSubStateType, "Waiting");

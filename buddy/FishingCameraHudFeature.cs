@@ -4,11 +4,12 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Keep Camera And HUD While Fishing — the cast no longer yanks the camera back to the buoy and
-    // no longer swaps your HUD out for the fishing panel. Purely local presentation; nothing here
-    // touches the network or the fishing state machine.
+    // Keep Fishing Camera — the cast no longer yanks the camera back to the buoy and hold it there
+    // through bite and hook-up. Purely local presentation; nothing here touches the network or the
+    // fishing state machine.
     //
-    // TWO INDEPENDENT MECHANISMS, hence two groups of hooks.
+    // CAMERA ONLY. The HUD belongs to PersistentHudFeature ("Keep HUD in fishing/vehicle modes") —
+    // see the note in section 2 below before adding anything HUD-shaped here.
     //
     // 1) THE CAMERA. PlayerStateFishing drives it through the thin wrappers in
     //    XDTLevelAndEntity.GameplaySystem.FishingUtil, which forward to FishingEvent, which
@@ -25,6 +26,20 @@ namespace HeartopiaMod
     //    leaves FishingEvent's own bookkeeping (_cameraControllerTokenId, _fishingIdleTarget,
     //    _fishingBattleTarget) untouched: nothing was pushed, so nothing needs popping.
     //
+    //    ⚠️ HOOK SURFACE IS DELIBERATELY MINIMAL — it cost a process abort once (dump
+    //    xdt.exe.35796, 2026-08-31, 0xC0000409 with RCX=7 = FATAL_APP_EXIT inside
+    //    mono-2.0-sgen.dll). The crashed run's last log line was an UNHANDLED
+    //    System.NullReferenceException thrown by the game itself inside
+    //    FishingUtil.SendCameraEventShowFish -> FishingEvent.ShowFish -> MultipleTargets.Init ->
+    //    TargetEntityGroup.GetColliders -> Entity.get_IsVisible, i.e. a stale playerProxy after the
+    //    build tab churned entities. In vanilla Unity logs such an escape and the game survives;
+    //    here it had to unwind through our CoreCLR detour frame, which Mono's unwinder cannot walk,
+    //    so the runtime aborted. EVERY hook here carries that hazard, because all of these build
+    //    TargetEntityGroup/MultipleTargets over entities that can die. So hook only what the
+    //    feature needs: SendCameraEventShowFish has ZERO callers in either dump and was pure
+    //    liability, and the two aim wrappers only fire while a human aims by hand, which the
+    //    automation never does. Both groups removed; do not add them back for tidiness.
+    //
     //    DELIBERATELY NOT HOOKED: SendCameraEventQuitFishing, SendCameraEventHookUpEmpty and
     //    SendExitAnimAtTarget. Those only POP. Leaving them live is what makes the toggle safe to
     //    flip mid-session -- anything that did get pushed while the option was off is still torn
@@ -32,37 +47,13 @@ namespace HeartopiaMod
     //    pushed is a no-op; vanilla already does exactly that (HookUpEmpty zeroes the token and a
     //    later QuitFishing pops the zero).
     //
-    // 2) THE HUD -- TWO SEPARATE PANELS, and the important one is not on GameFishingMode at all.
-    //
-    //    2a) The MAIN HUD is StatusPanel, and it is owned by GameFreeMode, not by fishing. Entering
-    //        any other mode makes GameBaseMode.IGameMode.OnLoseFocus() call
-    //        GameFreeMode.OnModeLoseFocus(), which dispatches FreeModeHudVisibilityEvent{visible=false};
-    //        UIEventBridge.OnFreeModeHudVisibility answers with CloseView<StatusPanel>() (or
-    //        MicroHomelandStatusPanel on that level). THIS is what takes your interface away at the
-    //        cast. Note GameFreeMode never dispatches GameModeLostFocusEvent, so the
-    //        `case Free: CloseView<StatusPanel>()` arm in OnGameModeLostFocus is dead for this path
-    //        -- OnModeLoseFocus is the single closer.
-    //
-    //        Suppressing it is safe for its own bookkeeping: _mainHudVisible simply stays true, and
-    //        when Free regains focus OnModeFocus re-dispatches visible=true onto an already-open
-    //        panel. But GameFreeMode.OnModeLoseFocus fires for EVERY mode you enter -- craft, drive,
-    //        photo, pet -- so blanket-suppressing it would leave the main HUD stacked under those
-    //        modes' own panels. Hence this one hook alone is gated on
-    //        fishingCamHudSuppressFreeHudHide (a FISHING-CONTEXT window: an auto-fishing session is
-    //        running, or the mod is about to cast), not on the plain feature flag.
-    //
-    //    2b) FishingPanel is the fishing-specific panel, opened by
-    //        UIEventBridge.OnGameModeFocused (case Fishing) in answer to the
-    //        GameModeFocusedEvent{Fishing} that GameFishingMode.OnModeFocus dispatches. It sits on
-    //        UIPhysicalLayerType.Status -- the same physical layer as StatusPanel -- so it must be
-    //        suppressed too, or it would just take the main HUD's place after we kept it. That
-    //        method's whole body is the dispatch plus CheckTrackingPanel(visible:false) and it does
-    //        not call base, so skipping it is self-contained; OnModeLoseFocus's
-    //        CloseView<FishingPanel>() is then a no-op on a panel that never opened.
-    //
-    //    OnModeFocus is resolved with mono_class_get_method_from_name on GameFishingMode ITSELF,
-    //    never through FindAuraMonoMethodOnHierarchy: that helper walks parents, and silently
-    //    landing on the base GameMode.OnModeFocus would blank the focus handler for EVERY game mode.
+    // 2) THE HUD IS **NOT** THIS FEATURE'S JOB — see PersistentHudFeature ("Keep HUD in
+    //    fishing/vehicle modes", Features -> Main). That one already reopens StatusPanel over the
+    //    mode panel via UIManager.OpenView, for fishing AND vehicle/skate/coaster/etc, hides the
+    //    duplicated widgets (minimap, chat, energy), and hides StatusPanel's bottom-right skill
+    //    block because its RightJoyStick otherwise eats the PointerDown and the strike button never
+    //    fires. A second HUD-restore path here duplicated it and reintroduced exactly that bug, so
+    //    it was removed. THIS feature is camera-only.
     //
     // WHAT THIS COSTS: with the panel suppressed you also lose the fishing panel's own widgets --
     // the main-hold button and the rod durability readout. That is fine for the automated flow,
@@ -83,9 +74,6 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void FishingCamHudVoid1Delegate(IntPtr a);
-
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void FishingCamHudVoid2Delegate(IntPtr a, IntPtr b);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -96,28 +84,15 @@ namespace HeartopiaMod
 
         // Slot indexes into the trampoline arrays. Each hooked method needs its own trampoline, so
         // each body is a closure over its slot; the arrays keep the lookup a plain array read.
-        private const int FishingCamHudSlotShowFish = 0;
-        private const int FishingCamHudSlotModeFocus = 1;
-        private const int FishingCamHudSlotFreeHudHide = 2;
-        private const int FishingCamHudVoid1Slots = 3;
-
         private const int FishingCamHudSlotBaiting = 0;
         private const int FishingCamHudSlotHookUp = 1;
-        private const int FishingCamHudSlotAimAt = 2;
-        private const int FishingCamHudSlotUpdateAimAt = 3;
-        private const int FishingCamHudVoid2Slots = 4;
+        private const int FishingCamHudVoid2Slots = 2;
 
-        // Read by the detour bodies. Static because the bodies must be.
-        private static bool fishingCamHudActive;
+        // Read by the detour bodies — the ONLY thing they read. Set when the hooks install and
+        // NEVER cleared: once armed, the bodies suppress unconditionally, because the forwarding
+        // path is the proven process-killer (see the header). Static because the bodies must be.
+        private static bool fishingCamHudArmed;
 
-        // Narrower gate, used ONLY by the GameFreeMode.OnModeLoseFocus hook: that method runs for
-        // every mode transition out of Free, so it may only be suppressed while we are actually in
-        // a fishing context. Recomputed once per frame on the main loop (below) -- the detour body
-        // just reads the bool, it cannot call Unity.
-        private static bool fishingCamHudSuppressFreeHudHide;
-
-        private static readonly FishingCamHudVoid1Delegate[] fishingCamHudTramp1 =
-            new FishingCamHudVoid1Delegate[FishingCamHudVoid1Slots];
         private static readonly FishingCamHudVoid2Delegate[] fishingCamHudTramp2 =
             new FishingCamHudVoid2Delegate[FishingCamHudVoid2Slots];
         private static FishingCamHudWaitingDelegate fishingCamHudTrampWaiting;
@@ -128,10 +103,6 @@ namespace HeartopiaMod
         private static readonly System.Collections.Generic.List<MonoMod.RuntimeDetour.NativeDetour> fishingCamHudDetours =
             new System.Collections.Generic.List<MonoMod.RuntimeDetour.NativeDetour>();
 
-        // Arming window for the cast the mod itself triggers, in case the mode transition does not
-        // complete inside the EnterFishing call. Main-loop state; never read from a detour body.
-        private const float FishingCamHudCastArmSeconds = 1.5f;
-        private float fishingCamHudSuppressUntil;
 
         private bool fishingCamHudEnabled;
         private bool fishingCamHudCallbackRegistered;
@@ -153,36 +124,20 @@ namespace HeartopiaMod
             }
 
             this.fishingCamHudEnabled = value;
-            fishingCamHudActive = value;
             FeatureLog.Toggle("FishingCamHud", value);
 
             if (value && this.fishingCamHudInstalledCount == 0)
             {
                 FeatureLog.Life("FishingCamHud", "arming — hooks install on the next world-ready gate");
             }
-        }
-
-        // Called right before the mod hands the game an EnterFishing. GameBaseMode.IGameMode
-        // .OnLoseFocus -> GameFreeMode.OnModeLoseFocus should run inside that call, but the mode
-        // stack is a hierarchical state machine and may settle a frame later, so this opens a short
-        // window rather than relying on a try/finally around the invoke.
-        internal void ArmFishingCameraHudCastWindow()
-        {
-            if (!this.fishingCamHudEnabled)
+            else if (!value && fishingCamHudArmed)
             {
-                return;
+                // Deliberate one-way arming: forwarding through the stubs is the proven
+                // process-killer, so the installed hooks keep suppressing. Only the HUD-restore
+                // dispatch (no detour) obeys the toggle immediately.
+                FeatureLog.Life("FishingCamHud", "hooks stay suppressing until the game restarts"
+                    + " (safe-teardown rule); the OFF setting takes full effect on the next launch");
             }
-
-            try
-            {
-                this.fishingCamHudSuppressUntil = Time.unscaledTime + FishingCamHudCastArmSeconds;
-            }
-            catch
-            {
-                return;
-            }
-
-            fishingCamHudSuppressFreeHudHide = true;
         }
 
         // ---- per-frame glue --------------------------------------------------------------------
@@ -191,29 +146,8 @@ namespace HeartopiaMod
         {
             if (!this.fishingCamHudEnabled)
             {
-                fishingCamHudActive = false;
-                fishingCamHudSuppressFreeHudHide = false;
                 return;
             }
-
-            fishingCamHudActive = true;
-
-            // The main-HUD hook's gate. GameFreeMode.OnModeLoseFocus runs for every transition out
-            // of Free, so it is suppressed only inside a fishing context: an auto-fishing session is
-            // running, or the mod armed a cast in the last FishingCamHudCastArmSeconds. Computed
-            // here, on the main loop, because the detour body may not call Unity.
-            bool inFishingContext;
-            try
-            {
-                inFishingContext = AutoFishingFarm.IsEnabled
-                    || Time.unscaledTime < this.fishingCamHudSuppressUntil;
-            }
-            catch
-            {
-                inFishingContext = false;
-            }
-
-            fishingCamHudSuppressFreeHudHide = inFishingContext;
 
             // Hook installs run on the world-ready gate, never on a retry timer here
             // (AGENTS.md §1 hard rule). Registration is idempotent and cheap.
@@ -223,6 +157,8 @@ namespace HeartopiaMod
                 this.RegisterWorldReadyCallback("FishingCameraHud", this.TryInstallFishingCameraHudHooksOnWorldReady);
             }
         }
+
+        // ---- HUD restore (no detour) ------------------------------------------------------------
 
         // ---- install ---------------------------------------------------------------------------
 
@@ -254,35 +190,24 @@ namespace HeartopiaMod
                 // NOT XDT.Scene.Shared.GamePlay.Fishing.FishingUtil — that is a different class of
                 // the same short name (fish AI maths). The camera wrappers live in GameplaySystem.
                 IntPtr utilClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.GameplaySystem.FishingUtil");
-                IntPtr modeClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Game.GameMode.GameFishingMode");
-                IntPtr freeModeClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Game.GameMode.GameFreeMode");
-                if (utilClass == IntPtr.Zero || modeClass == IntPtr.Zero || freeModeClass == IntPtr.Zero)
+                if (utilClass == IntPtr.Zero)
                 {
-                    return false; // images not loaded yet — retry
+                    return false; // image not loaded yet — retry
                 }
 
                 int installed = 0;
 
-                installed += this.TryHookFishingCamVoid1(compile, utilClass, "SendCameraEventShowFish", 1,
-                    FishingCamHudSlotShowFish, hierarchy: true) ? 1 : 0;
-                installed += this.TryHookFishingCamVoid1(compile, modeClass, "OnModeFocus", 0,
-                    FishingCamHudSlotModeFocus, hierarchy: false) ? 1 : 0;
-                installed += this.TryHookFishingCamVoid1(compile, freeModeClass, "OnModeLoseFocus", 0,
-                    FishingCamHudSlotFreeHudHide, hierarchy: false, gateOnFishingContext: true) ? 1 : 0;
 
                 installed += this.TryHookFishingCamVoid2(compile, utilClass, "SendCameraEventBaiting",
                     FishingCamHudSlotBaiting) ? 1 : 0;
                 installed += this.TryHookFishingCamVoid2(compile, utilClass, "SendCameraEventHookUp",
                     FishingCamHudSlotHookUp) ? 1 : 0;
-                installed += this.TryHookFishingCamVoid2(compile, utilClass, "SendCameraEventAimAt",
-                    FishingCamHudSlotAimAt) ? 1 : 0;
-                installed += this.TryHookFishingCamVoid2(compile, utilClass, "SendCameraEventUpdateAimAtTarget",
-                    FishingCamHudSlotUpdateAimAt) ? 1 : 0;
 
                 installed += this.TryHookFishingCamWaiting(compile, utilClass) ? 1 : 0;
 
                 this.fishingCamHudHookTried = true;
                 this.fishingCamHudInstalledCount = installed;
+                fishingCamHudArmed = installed > 0;
 
                 if (installed == 0)
                 {
@@ -290,8 +215,8 @@ namespace HeartopiaMod
                     return true;
                 }
 
-                FeatureLog.Life("FishingCamHud", "installed " + installed + "/8 hooks"
-                    + (installed < 8 ? " — the missing ones stay vanilla" : string.Empty));
+                FeatureLog.Life("FishingCamHud", "installed " + installed + "/3 camera hooks (always-suppress once armed)"
+                    + (installed < 3 ? " — the missing ones stay vanilla" : string.Empty));
                 return true;
             }
             catch (Exception ex)
@@ -300,46 +225,6 @@ namespace HeartopiaMod
                 FeatureLog.Fail("FishingCamHud", "hook install failed: " + ex.Message + " — feature off.");
                 return true;
             }
-        }
-
-        // hierarchy:false resolves on the declaring class ONLY. Mandatory for the virtual
-        // OnModeFocus override: walking parents would hand back GameMode.OnModeFocus and suppress
-        // the focus handler of every game mode in the game, not just fishing.
-        private bool TryHookFishingCamVoid1(FishingCamHudCompileMethodDelegate compile, IntPtr klass,
-            string methodName, int paramCount, int slot, bool hierarchy, bool gateOnFishingContext = false)
-        {
-            IntPtr method = hierarchy
-                ? this.FindAuraMonoMethodOnHierarchy(klass, methodName, paramCount)
-                : (auraMonoClassGetMethodFromName != null
-                    ? auraMonoClassGetMethodFromName(klass, methodName, paramCount)
-                    : IntPtr.Zero);
-            IntPtr nativePtr = this.CompileFishingCamHudMethod(compile, method, methodName);
-            if (nativePtr == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            int slotCopy = slot;
-            bool narrowGate = gateOnFishingContext;
-            FishingCamHudVoid1Delegate body = delegate (IntPtr a)
-            {
-                // Two static-bool reads and a captured constant — still nothing but field reads.
-                if (narrowGate ? fishingCamHudSuppressFreeHudHide : fishingCamHudActive)
-                {
-                    return;
-                }
-
-                FishingCamHudVoid1Delegate orig = fishingCamHudTramp1[slotCopy];
-                if (orig != null)
-                {
-                    orig(a);
-                }
-            };
-
-            return this.ApplyFishingCamHudDetour(nativePtr, methodName, body,
-                d => fishingCamHudTramp1[slotCopy] = d.GenerateTrampoline<FishingCamHudVoid1Delegate>(),
-                () => fishingCamHudTramp1[slotCopy] != null,
-                () => fishingCamHudTramp1[slotCopy] = null);
         }
 
         private bool TryHookFishingCamVoid2(FishingCamHudCompileMethodDelegate compile, IntPtr klass,
@@ -355,9 +240,9 @@ namespace HeartopiaMod
             int slotCopy = slot;
             FishingCamHudVoid2Delegate body = delegate (IntPtr a, IntPtr b)
             {
-                if (fishingCamHudActive)
+                if (fishingCamHudArmed)
                 {
-                    return;
+                    return; // never forward once armed — the pass-through path is the crash vector
                 }
 
                 FishingCamHudVoid2Delegate orig = fishingCamHudTramp2[slotCopy];
@@ -385,9 +270,9 @@ namespace HeartopiaMod
 
             FishingCamHudWaitingDelegate body = delegate (IntPtr playerProxy, IntPtr floatTransform, IntPtr tarPos, float time)
             {
-                if (fishingCamHudActive)
+                if (fishingCamHudArmed)
                 {
-                    return;
+                    return; // never forward once armed — the pass-through path is the crash vector
                 }
 
                 FishingCamHudWaitingDelegate orig = fishingCamHudTrampWaiting;
