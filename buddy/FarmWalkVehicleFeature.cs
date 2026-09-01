@@ -83,6 +83,65 @@ namespace HeartopiaMod
         }
         private float farmWalkVehicleLastSummonAt = -999f;
 
+        // ⭐ THE PLAYER MOUNTS AND DISMOUNTS TOO, AND BOTH ROUND-TRIP WINDOWS ONLY KNEW ABOUT US.
+        //
+        // farmWalkVehicleLastSummonAt and farmWalkVehicleLastDismountAt were stamped where the mod
+        // ISSUES a command, so a seat change the player made themselves was covered by neither:
+        //   * they get out → no settle window → IsFarmWalkVehicleSteering answers "yes" for a moment
+        //     on someone standing on their own feet, and the escape runs a reverse-and-sidestep on a
+        //     pedestrian — the exact failure the settle window was added for (measured 05:37:04),
+        //     reached through the other door;
+        //   * they get in → no summon window → the live check still answers "no" for a moment and
+        //     the mod can summon its own vehicle on top of the one they just took.
+        //
+        // So stamp on the OBSERVED transition instead of on our own command. Ownership is the
+        // discriminator and it is exact: the mod sets farmWalkVehicleOurs at command time, so a
+        // transition that disagrees with it is the player's doing — riding while we claim nothing
+        // means they got in, not riding while we still claim the seat means they got out.
+        private bool farmWalkVehicleSeatSeen;
+        private bool farmWalkVehicleSeatSeenValid;
+
+        internal void ObserveFarmWalkVehicleSeat()
+        {
+            bool riding = this.IsFarmWalkRidingVehicle();
+            if (this.farmWalkVehicleSeatSeenValid && riding == this.farmWalkVehicleSeatSeen)
+            {
+                return;
+            }
+
+            bool first = !this.farmWalkVehicleSeatSeenValid;
+            this.farmWalkVehicleSeatSeenValid = true;
+            this.farmWalkVehicleSeatSeen = riding;
+            if (first)
+            {
+                // Nothing changed — this is the first reading, and a first reading is a baseline,
+                // not a transition. Stamping here would open a settle window nobody asked for.
+                return;
+            }
+
+            if (riding)
+            {
+                this.farmWalkVehicleLastSummonAt = Time.unscaledTime;
+                if (!this.farmWalkVehicleOurs)
+                {
+                    ModLogger.Msg("[FarmVehicle] the player took a seat we did not summon — the walk "
+                        + "treats it as a vehicle from here, and will still get out to collect.");
+                }
+            }
+            else
+            {
+                this.farmWalkVehicleLastDismountAt = Time.unscaledTime;
+                if (this.farmWalkVehicleOurs)
+                {
+                    // Our own dismount clears the claim at command time, so reaching here with it
+                    // still set means the player left the seat by hand.
+                    this.farmWalkVehicleOurs = false;
+                    ModLogger.Msg("[FarmVehicle] the player left the seat we summoned — dropping our "
+                        + "claim on it.");
+                }
+            }
+        }
+
         private int farmWalkVehicleUnstickRounds;
 
         // ⚠️ THE ROUND BUDGET IS PER OBSTACLE, NOT PER RIDE.
@@ -536,9 +595,22 @@ namespace HeartopiaMod
         // every haul — a node needs the last stretch on foot anyway (the collect wants the player
         // within 0.25 m, which no vehicle is going to deliver), and a zone point wants the arrival
         // to look like an arrival.
+        //
+        // ⚠️ WHOEVER PUT THE PLAYER IN THE SEAT, THE COLLECT NEEDS THEM OUT OF IT.
+        //
+        // This used to ask farmWalkVehicleOurs — a memory of the mod's own summon, never reconciled
+        // with the game — so a vehicle the player mounted themselves was invisible here: the haul
+        // drove up to the node and tried to collect from the driving seat, which wants the player
+        // within a stand-off no vehicle delivers. The escape ladder meanwhile DID see it, because it
+        // asks the live check — half the walker treating the same seat as a vehicle and half not.
+        //
+        // IsFarmWalkVehicleSteering, not IsFarmWalkRidingVehicle: it is the live check plus the
+        // dismount round-trip window, so a get-off already in flight is not re-issued every tick.
+        // Ownership still governs GIVING THE VEHICLE BACK (AbortFarmWalk, the no-route release) —
+        // the mod returns what it summoned; it does not confiscate the player's ride when it stops.
         internal void ProcessFarmWalkVehicleDismount(Vector3 selfPos)
         {
-            if (!this.farmWalkVehicleOurs)
+            if (!this.IsFarmWalkVehicleSteering())
             {
                 return;
             }

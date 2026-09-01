@@ -2174,6 +2174,9 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // Before either vehicle decision: reconcile the seat with the world, so a mount or
+            // dismount the player performed carries the same round-trip guards as our own.
+            this.ObserveFarmWalkVehicleSeat();
             this.ProcessFarmWalkVehicleDismount(selfPos);
             this.TryRemountFarmWalkVehicle(selfPos);
             this.autoFarmStatus = "Walking to node (" + remaining.ToString("F0") + "m)...";
@@ -3235,7 +3238,10 @@ namespace HeartopiaMod
             //
             // The seat cannot leak: the farm's Stop path calls AbortFarmWalk unconditionally,
             // and its early return now dismounts an owned seat even with no walk active.
-            if (this.farmWalkVehicleOurs && !(this.farmWalkSkipToScan && !areaWalk))
+            //
+            // Live check, not ownership, for the same reason as the approach dismount: arriving to
+            // collect means arriving on foot no matter who took the seat.
+            if (this.IsFarmWalkVehicleSteering() && !(this.farmWalkSkipToScan && !areaWalk))
             {
                 this.TryFarmWalkDismount(areaWalk ? "zone haul finished" : "arrived to collect");
             }
