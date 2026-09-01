@@ -2500,9 +2500,14 @@ namespace HeartopiaMod
                 // to already-loaded neighbors and the node's mesh simply isn't there yet.
                 if (!markerFound && this.autoCollectClickedSinceArrival && this.auraCollectNodeOwnerNetId != 0U)
                 {
-                    // The narrowing found a distance that works: this kind keeps it, and the next
-                    // stubborn node starts its own budget from scratch.
-                    this.farmWalkStandoffRetries = 0;
+                    // The narrowing found a distance that works: this kind keeps the number and
+                    // gets its steps back, so a later stubborn node of the same kind starts fresh.
+                    // Only this kind's — the budget is per label now, and spending one kind's steps
+                    // on another is exactly the bug this branch used to feed.
+                    if (!string.IsNullOrEmpty(nodeMarkerLabel))
+                    {
+                        this.farmWalkStandoffRetries.Remove(nodeMarkerLabel);
+                    }
                     this.AutoFarmLog($"Aura collect confirmed (marker gone) after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
                     // Collected (stamped nodes hide their marker) — real/fallback cooldown, not 15s.
                     this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
@@ -2526,15 +2531,16 @@ namespace HeartopiaMod
                 // stand-off gets a tighter one for the rest of the session. One timeout buys a
                 // permanent fix for that kind, and nothing is assumed about the kinds that work.
                 if (!string.IsNullOrEmpty(nodeMarkerLabel) && markerState == "available"
-                    && this.farmWalkStandoffRetries < FarmWalkMaxStandoffSteps
+                    && this.FarmWalkStandoffStepsTaken(nodeMarkerLabel) < FarmWalkMaxStandoffSteps
                     && this.TryNarrowFarmWalkStandoff(nodeMarkerLabel, out float wasStandoff,
                         out float nowStandoff))
                 {
-                    this.farmWalkStandoffRetries++;
+                    int stepsTaken = this.FarmWalkStandoffStepsTaken(nodeMarkerLabel) + 1;
+                    this.farmWalkStandoffRetries[nodeMarkerLabel] = stepsTaken;
                     ModLogger.Msg("[FarmWalk] '" + nodeMarkerLabel + "' did not collect from "
                         + wasStandoff.ToString("0.0#") + "m — stepping in to "
                         + nowStandoff.ToString("0.0#") + "m and trying this same node again ("
-                        + this.farmWalkStandoffRetries + "/" + FarmWalkMaxStandoffSteps + ").");
+                        + stepsTaken + "/" + FarmWalkMaxStandoffSteps + " for this kind).");
 
                     // ⚠️ THE SAME NODE, NOW. Learning a number and walking away from the node that
                     // taught it means the lesson costs a resource every time, and a number that is

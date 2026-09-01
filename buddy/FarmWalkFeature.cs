@@ -134,7 +134,31 @@ namespace HeartopiaMod
 
         // Steps spent narrowing on the node in hand. Reset when a collect succeeds, so the budget is
         // per stubborn node rather than per session.
-        private int farmWalkStandoffRetries;
+        // ⭐ THE BUDGET IS PER KIND, BECAUSE THE LESSON IS PER KIND.
+        //
+        // This was one counter for the whole run while farmWalkKindStandoff is keyed by label, so
+        // four kinds each learning their first step exhausted it for every kind that had not yet
+        // learned anything. Measured over one run:
+        //     16:34:04  'Truffle'   did not collect from 1,1m — stepping in to 0,8m (1/4)
+        //     16:35:23  'Penny Bun' ... (2/4)
+        //     16:57:02  'Shiitake'  ... (3/4)
+        //     17:00:45  'Button'    ... (4/4)
+        //     17:05:55 onward: Oyster timed out 31 times, always "arrived 1,07m — inside the 1,1m
+        //                      stand-off", never once narrowed, and the farm moved on each time.
+        // Oyster had spent nothing. It was refused its FIRST step by four unrelated kinds.
+        //
+        // Per kind the cap is also self-limiting: from 1.1 m in 0.3 m steps the floor at
+        // FarmWalkCollectDistance stops it after two, so this counter is a backstop, not the policy.
+        private readonly System.Collections.Generic.Dictionary<string, int> farmWalkStandoffRetries =
+            new System.Collections.Generic.Dictionary<string, int>();
+
+        private int FarmWalkStandoffStepsTaken(string label)
+        {
+            return !string.IsNullOrEmpty(label)
+                && this.farmWalkStandoffRetries.TryGetValue(label, out int taken)
+                    ? taken
+                    : 0;
+        }
         private readonly System.Collections.Generic.Dictionary<string, float> farmWalkKindStandoff =
             new System.Collections.Generic.Dictionary<string, float>(System.StringComparer.Ordinal);
 
@@ -3450,7 +3474,7 @@ namespace HeartopiaMod
             // run is usually somewhere else, and a stand-off narrowed for the wrong place fails
             // silently by never collecting. Re-learning is one node; a wrong value is every node.
             this.farmWalkKindStandoff.Clear();
-            this.farmWalkStandoffRetries = 0;
+            this.farmWalkStandoffRetries.Clear();
 
             // Vehicle: a summon cooldown and a half-finished dismount from the last run.
             this.farmWalkVehicleLastSummonAt = 0f;
