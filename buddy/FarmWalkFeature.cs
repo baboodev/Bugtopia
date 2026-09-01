@@ -3833,8 +3833,6 @@ namespace HeartopiaMod
         // obstacle in front of us counts even when the node is still fifty metres away.
         private void BeginFarmWalkHopBurst(Vector3 selfPos, float now, float distance, Vector3 aim)
         {
-            this.farmWalkHopBurstsUsed++;
-
             // ⚠️ A CAR CANNOT JUMP, AND THIS ESCAPE IS NOTHING BUT JUMPING.
             //
             // The vehicle has its own ladder — reverse, then pull out sideways, twice, then get out
@@ -3861,6 +3859,29 @@ namespace HeartopiaMod
                 this.farmWalkUnstickPhase = FarmWalkUnstickIdle;
                 return;
             }
+
+            // ⭐ THE FOOT BUDGET IS CHARGED HERE, NOT ABOVE — A DRIVER'S WEDGE MUST NOT SPEND IT.
+            //
+            // The counter used to be bumped on the first line, before the vehicle branch had even
+            // been reached, so every reverse-and-sidestep round billed the foot ladder for a
+            // manoeuvre it never performed. The vehicle ladder ends by getting out and continuing
+            // on foot — which is exactly when the escapes are needed — and by then all three were
+            // gone, silently: the vehicle branch returns above the log line, so not one "escape
+            // N/3" was ever printed for them.
+            //
+            // Measured on the same Oyster three times (05:26:50, 05:32:26, 05:51:53): dismounted
+            // after two failed vehicle rounds, 2.6 m from the node, blocked at knee height (0.30 m)
+            // and clear at chest height — a kerb a single hop clears — and it gave up ONE SECOND
+            // later with no jump at all, because the budget was already spent. Two such give-ups
+            // park the node for five minutes (FarmWalkMaxNodeFailures), which is what sent the walk
+            // off to a different target.
+            //
+            // Not charging is safe from re-arming: BeginFarmWalkVehicleUnstick owns the phase from
+            // here, so later ticks run that ladder instead of calling in again, and it is bounded on
+            // its own (two rounds, then dismount). The swimming backstop below KEEPS its charge on
+            // purpose — it has no phase of its own to hold the walk, so the count is the only thing
+            // stopping it re-arming every tick.
+            this.farmWalkHopBurstsUsed++;
 
             // Backstop for the guard every caller is supposed to carry. Underwater the whole escape
             // is inert — no ground to launch from, no landing to end a phase — so it would sit out
