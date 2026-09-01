@@ -1305,7 +1305,8 @@ namespace HeartopiaMod
                     break;
                 }
 
-                if (!this.TryBanFarmWalkWaypointAt(this.farmWalkScratchCorners[blockedLeg], blockedDetail))
+                if (!this.TryBanFarmWalkWaypointAt(this.farmWalkScratchCorners[blockedLeg], blockedDetail,
+                        out int bannedWaypoint))
                 {
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + blockedDetail
                         + " is not passable and there is no waypoint left to ban — keeping the route, "
@@ -1331,8 +1332,47 @@ namespace HeartopiaMod
                 {
                     this.farmWalkScratchCorners.Clear();
                     this.farmWalkScratchCorners.AddRange(this.farmWalkEdgeAuditBackup);
+
+                    // ⭐ UNDO THE BAN. A BAN THAT LEAVES NO ROUTE HAS DISPROVED ITSELF.
+                    //
+                    // The point of a ban is "make A* find another way round". When the re-route it
+                    // was placed for finds nothing, that purpose is refuted in the same frame — and
+                    // the ban then buys this walk nothing while poisoning every LATER route build,
+                    // because the walk-start rebuild re-imports it from farmWalkBlockedGraphNodes
+                    // and PruneFarmWalkBlockedNodes only expires rows at walk start.
+                    //
+                    // Measured end to end. 06:05:40: a 0.30 m kerb ("blocked at knee height though
+                    // clear at chest height") banned waypoint 1223, and this branch fired at once.
+                    // 1223 is one of only five cut vertices between the truffle peninsula and the
+                    // rest of the graph — the graph itself is a single connected island of 1745
+                    // nodes — so the ban severed the peninsula. 06:06:38, a different walk: "A* found
+                    // no route between waypoints 1230 and 1248", and the area branch, which has no
+                    // alternative target to pick, warped. Probed on the live graph afterwards:
+                    // ban{1223} disconnects 1230 from 1248, ban{742} alone does not, and the pair
+                    // {742, 1223} was still excluded half an hour later.
+                    //
+                    // Rule 0.8 is the one being enforced: a heuristic may never make routing
+                    // impossible. Rule 1.4 already exempts the END node on the same reasoning; a ban
+                    // that orphans the destination's whole region is that failure one hop out.
+                    //
+                    // ⚠️ THE PER-WALK BAN COUNT IS NOT REFUNDED, ON PURPOSE. Rolling the row out of
+                    // farmWalkBlockedGraphNodes also removes the ContainsKey guard that stops the
+                    // same corner being banned again, so a refund would let one neck be banned and
+                    // rolled back on every re-path for the whole walk. Left spent, the churn stops
+                    // at FarmWalkEdgeAuditBansPerWalk and the walk settles. This cannot revive the
+                    // "graph shredder" incident either: there every re-route SUCCEEDED, so this
+                    // branch never ran.
+                    if (bannedWaypoint >= 0)
+                    {
+                        this.farmWalkBlockedGraphNodes.Remove(bannedWaypoint);
+                        this.farmWalkExcludedNodes.Remove(bannedWaypoint);
+                    }
+
+                    // Say which waypoint, and do not claim the ban CAUSED the failure: this branch
+                    // also fires when either re-snap fails for reasons of its own.
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel
-                        + ": no route left after the ban — keeping the blocked one, the escape ladder "
+                        + ": no route left after banning waypoint " + bannedWaypoint
+                        + " — rolling the ban back and keeping the blocked route, the escape ladder "
                         + "will have to deal with it.");
                     break;
                 }

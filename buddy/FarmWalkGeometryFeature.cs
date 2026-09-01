@@ -730,8 +730,13 @@ namespace HeartopiaMod
         // Ban the waypoint a blocked leg ends at, so the next A* has to find another way round.
         // Returns false when there is nothing to ban — no node resolved, already banned, or the ban
         // list is full — and the caller then keeps the route it has.
-        private bool TryBanFarmWalkWaypointAt(Vector3 corner, string why)
+        // `bannedIndex` is what makes the ban undoable: the caller places it, then tests whether a
+        // route survives it, and rolls it back when none does (rule 0.8 — a heuristic may never make
+        // routing impossible). -1 means nothing was banned and there is nothing to undo.
+        private bool TryBanFarmWalkWaypointAt(Vector3 corner, string why, out int bannedIndex)
         {
+            bannedIndex = -1;
+
             // ⚠️ A RATE LIMIT, NOT ONLY A TOTAL. The global cap is 48 waypoints and the audit sailed
             // most of the way there: twenty-four bans in two minutes, each one A* offering the next
             // nearest node and this banning it too, marching outward from 6.8 m to 33 m. The cause
@@ -772,6 +777,7 @@ namespace HeartopiaMod
             this.farmWalkBlockedGraphNodes[index] = Time.unscaledTime + FarmWalkBlockedNodeTtl;
             this.farmWalkExcludedNodes.Add(index);
             this.farmWalkEdgeAuditBans++;
+            bannedIndex = index;
             ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + why
                 + " is not passable — banning waypoint " + index + " for "
                 + (FarmWalkBlockedNodeTtl / 60f).ToString("0.#") + " min ("
