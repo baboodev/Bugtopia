@@ -105,6 +105,7 @@ namespace HeartopiaMod
             public Toggle FriendInteractUnlockToggle;
             public Toggle SkipCraftDyeToggle;
             public Toggle CraftDirectSendToggle;
+            public Toggle InteractObstacleToggle;
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
             public Toggle AutoLikeOwnHomeToggle;
@@ -360,6 +361,9 @@ namespace HeartopiaMod
             handle.CraftDirectSendToggle = this.CreateUguiCheckbox(scrollContent, "CraftDirectSendToggle",
                 this.L("Direct Craft Send (no walk, no animation)"), this.craftDirectSendEnabled,
                 new System.Action<bool>(this.OnUguiSelfCraftDirectSendToggled));
+            handle.InteractObstacleToggle = this.CreateUguiCheckbox(scrollContent, "InteractObstacleToggle",
+                this.L("Ignore interaction-area obstacles"), this.interactObstacleBypassEnabled,
+                new System.Action<bool>(this.OnUguiSelfInteractObstacleToggled));
             handle.BlockTutorialsToggle = this.CreateUguiCheckbox(scrollContent, "BlockTutorialsToggle",
                 this.L("Disable tutorials"), this.blockTutorials,
                 new System.Action<bool>(this.OnUguiSelfBlockTutorialsToggled));
@@ -616,6 +620,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.InteractObstacleToggle != null)
+            {
+                PlaceUguiTopLeft(handle.InteractObstacleToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.BlockTutorialsToggle != null)
             {
                 PlaceUguiTopLeft(handle.BlockTutorialsToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -682,6 +692,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.FriendInteractUnlockToggle, this.friendInteractUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
+                this.SyncUguiToggleFromField(handle.InteractObstacleToggle, this.interactObstacleBypassEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
                 this.SyncUguiToggleFromField(handle.AutoLikeOwnHomeToggle, this.autoLikeOwnHome);
@@ -1156,6 +1167,16 @@ namespace HeartopiaMod
                 return;
             }
             this.craftDirectSendEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfInteractObstacleToggled(bool value)
+        {
+            if (value == this.interactObstacleBypassEnabled)
+            {
+                return;
+            }
+            this.interactObstacleBypassEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

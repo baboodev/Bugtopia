@@ -420,6 +420,7 @@
     <Compile Include="HeartopiaComplete.WorldReady.cs" />
     <Compile Include="HeartopiaComplete.GameWorldProbe.cs" />
     <Compile Include="InstantTeleportFeature.cs" />
+    <Compile Include="InteractObstacleBypassFeature.cs" />
     <Compile Include="HeartopiaComplete.Config.cs" />
     <Compile Include="HeartopiaComplete.Gui.cs" />
     <Compile Include="HeartopiaComplete.Player.cs" />

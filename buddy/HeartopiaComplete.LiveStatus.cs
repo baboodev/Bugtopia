@@ -262,6 +262,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Direct Craft Send", this.craftDirectSendStatus));
             }
 
+            if (this.interactObstacleBypassEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Interact Obstacle Bypass", this.interactObstacleStatus));
+            }
+
             if (this.persistentHudEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Persistent HUD", this.persistentHudLastStatus));

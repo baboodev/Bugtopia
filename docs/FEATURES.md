@@ -299,6 +299,41 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   detour is `Undo()`n the moment the toggle goes off, so leaving it alone adds no surface.
 - Persisted; default off. Source: `buddy/CraftDirectSendFeature.cs`.
 
+### Ignore Interaction-Area Obstacles
+
+- Removes the client refusal **"Obstacles in the interaction area!"** (`InteractErrorCode
+  .InteractAreaUnSafe` = 91525 — the error code *is* the localization id of the toast, dispatched as
+  `UITipEvent{ tipId }` and rendered by `UIEventBridge` → `TipDecorator.Toast`).
+- What the game is testing: prefabs may carry help points named `interact_collision_safe` ..
+  `interact_collision_safe5` (`LevelObjectHelpPointName`) marking where the character will stand.
+  `ActorMovementComponent.CheckAreaCollisionSafe` requires ground under that spot
+  (`CheckHasWalkableBelow`, SphereCast 500 m down) **and** an empty player-sized capsule at it
+  (`LevelLayerManager.CheckPlayerCollisionSafe`, `OverlapCapsule` on `playerCollisionLayer`, radius
+  `InteractSystem.InteractCollisionSafeRadius` = 0.3 m by default from
+  `LevelScriptableConfig.interactionConfigPC`). Colliders belonging to the interaction target itself
+  are excluded (`levelObject.IsOwnerHandleCollision`); anything else — a chair pushed against the
+  stove, a UGC prop, a pet — blocks the interaction.
+- Three producers return 91525, and the first two both fire on a single click, so all three are
+  hooked: `LocalPlayerComponent.CanExecuteInteraction` (the generic gate, run before **any**
+  `HasTargetCommand`; vanilla skips it only for CommandId 21 = Repair),
+  `InteractWithCookerCommand.IsExecutable` (pots and stoves) and
+  `PressurePadTriggerCommand.IsExecutable` (UGC springboards).
+- Lever: one Mono `NativeDetour` per producer that **calls the original through its trampoline** and
+  rewrites only the `91525` answer to `0`. Deliberately not a constant hook —
+  `CanExecuteInteraction` is also where stamina, bag-full, invalid-target and build-in-building are
+  decided, and a blanket `0` would silently disable all of them. Every other refusal, and every
+  other toast, is untouched.
+- Client-side only: the interaction still travels the game's own command path and the server still
+  validates it. This cannot conjure an interaction the server would refuse — it stops the client
+  refusing one before it is ever sent.
+- The detours install behind the world-ready gate the first time the toggle is on and are never torn
+  down (`native-detours-world-change-corruption`); switching the toggle off makes every body forward
+  to the original, i.e. byte-exact vanilla. A missing target after a game update disarms that one
+  hook with a log line and leaves the others working.
+- Live status shows how many blocks were cleared this session; `[InteractObstacle]` verbose logging
+  is a Settings → Logging row.
+- Persisted; default off. Source: `buddy/InteractObstacleBypassFeature.cs`.
+
 ### Auto-learn Recipes
 
 - Learns every blueprint / cookbook / music sheet that lands in the backpack — no Learn animation,

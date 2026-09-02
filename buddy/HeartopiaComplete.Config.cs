@@ -244,6 +244,7 @@ namespace HeartopiaMod
             data.autoLearnRecipes = this.autoLearnRecipes;
             data.autoLikeOwnHome = this.autoLikeOwnHome;
             data.craftDirectSendEnabled = this.craftDirectSendEnabled;
+            data.interactObstacleBypassEnabled = this.interactObstacleBypassEnabled;
             data.persistentHudEnabled = this.persistentHudEnabled;
             data.vehicleBypassEnabled = this.vehicleBypassEnabled;
             data.vehicleBypassServerEventsEnabled = this.vehicleBypassServerEventsEnabled;
@@ -311,6 +312,7 @@ namespace HeartopiaMod
             data.MasterLogAutoLearn = MasterLogAutoLearn;
             data.MasterLogCraftAnimSkip = MasterLogCraftAnimSkip;
             data.MasterLogCraftDirectSend = MasterLogCraftDirectSend;
+            data.MasterLogInteractObstacle = MasterLogInteractObstacle;
             data.MasterLogEmoteUnlock = MasterLogEmoteUnlock;
             data.MasterLogForagingAnim = MasterLogForagingAnim;
             data.MasterLogHomeLike = MasterLogHomeLike;
@@ -616,6 +618,7 @@ namespace HeartopiaMod
             this.autoLearnRecipes = data.autoLearnRecipes;
             this.autoLikeOwnHome = data.autoLikeOwnHome;
             this.craftDirectSendEnabled = data.craftDirectSendEnabled;
+            this.interactObstacleBypassEnabled = data.interactObstacleBypassEnabled;
             this.persistentHudEnabled = data.persistentHudEnabled;
             // Plain assignment is enough: ApplyKeybindConfig only ever runs once, from LoadKeybinds
             // at startup (HeartopiaComplete.cs:533), so every retry/latch field is still at its
@@ -688,6 +691,7 @@ namespace HeartopiaMod
             MasterLogAutoLearn = data.MasterLogAutoLearn;
             MasterLogCraftAnimSkip = data.MasterLogCraftAnimSkip;
             MasterLogCraftDirectSend = data.MasterLogCraftDirectSend;
+            MasterLogInteractObstacle = data.MasterLogInteractObstacle;
             MasterLogEmoteUnlock = data.MasterLogEmoteUnlock;
             MasterLogForagingAnim = data.MasterLogForagingAnim;
             MasterLogHomeLike = data.MasterLogHomeLike;
@@ -1030,6 +1034,7 @@ namespace HeartopiaMod
                         else if (line.Contains("autoLearnRecipes")) this.autoLearnRecipes = GetJsonInt(line, "\"autoLearnRecipes\":") != 0;
                         else if (line.Contains("autoLikeOwnHome")) this.autoLikeOwnHome = GetJsonInt(line, "\"autoLikeOwnHome\":") != 0;
                         else if (line.Contains("craftDirectSendEnabled")) this.craftDirectSendEnabled = GetJsonInt(line, "\"craftDirectSendEnabled\":") != 0;
+                        else if (line.Contains("interactObstacleBypassEnabled")) this.interactObstacleBypassEnabled = GetJsonInt(line, "\"interactObstacleBypassEnabled\":") != 0;
                         else if (line.Contains("persistentHudEnabled")) this.persistentHudEnabled = GetJsonInt(line, "\"persistentHudEnabled\":") != 0;
                         else if (line.Contains("autoIceSkatingMinUltimateScore")) this.autoIceSkatingMinUltimateScore = Mathf.Clamp(GetJsonInt(line, "\"autoIceSkatingMinUltimateScore\":"), 0, AutoIceSkatingMinUltimateScoreSliderMax);
                         else if (line.Contains("autoIceSkatingOnlyX2Ultimate")) this.autoIceSkatingOnlyX2Ultimate = GetJsonInt(line, "\"autoIceSkatingOnlyX2Ultimate\":") != 0;

@@ -226,6 +226,7 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogCraftAnimSkip, v => MasterLogCraftAnimSkip = v, "Craft Anim Skip"),
                 new UguiLoggingToggleBinding(() => MasterLogCraftDirectSend, v => MasterLogCraftDirectSend = v, "Craft Direct Send"),
                 new UguiLoggingToggleBinding(() => MasterLogEmoteUnlock, v => MasterLogEmoteUnlock = v, "Emote Unlock"),
+                new UguiLoggingToggleBinding(() => MasterLogInteractObstacle, v => MasterLogInteractObstacle = v, "Interact Obstacle Bypass"),
                 new UguiLoggingToggleBinding(() => MasterLogForagingAnim, v => MasterLogForagingAnim = v, "Foraging Animation"),
                 new UguiLoggingToggleBinding(() => MasterLogHomeLike, v => MasterLogHomeLike = v, "Home Like"),
                 new UguiLoggingToggleBinding(() => MasterLogMusicPlayer, v => MasterLogMusicPlayer = v, "Music Player"),

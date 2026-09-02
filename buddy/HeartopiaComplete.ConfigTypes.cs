@@ -231,6 +231,7 @@ namespace HeartopiaMod
             public bool autoLearnRecipes;
             public bool autoLikeOwnHome;
             public bool craftDirectSendEnabled;
+            public bool interactObstacleBypassEnabled;
             public bool persistentHudEnabled;
             // Self-tab bypass toggles. These were session-only until now even though their UI
             // handlers already called SaveKeybinds — the fields simply had no home in the config.
@@ -307,6 +308,7 @@ namespace HeartopiaMod
             public bool MasterLogCraftAnimSkip;
             public bool MasterLogCraftDirectSend;
             public bool MasterLogEmoteUnlock;
+            public bool MasterLogInteractObstacle;
             public bool MasterLogForagingAnim;
             public bool MasterLogHomeLike;
             public bool MasterLogMusicPlayer;
