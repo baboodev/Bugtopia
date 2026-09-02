@@ -544,6 +544,12 @@ namespace HeartopiaMod
             this.netCookRecipeDropdownOpen = false;
             this.netCookRecipeScrollPos = Vector2.zero;
             this.netCookRecipeSearchText = "";
+            // Reset Capture forgets the Stove Type pick too: it is scoped to the stoves that were
+            // captured, and a pinned type surviving a reset would silently narrow the next capture.
+            this.netCookPreferredCookerType = 0;
+            this.netCookPinnedCookerTypeSuppressed = false;
+            this.netCookCookerTypeDropdownOpen = false;
+            this.ClearNetCookCookerTypeCensus();
             this.InvalidateNetCookRecipeCache();
             this.netCookStatus = status ?? "Captured stoves reset. Capture stoves again.";
             this.NetCookLog(this.netCookStatus);
@@ -3353,6 +3359,12 @@ namespace HeartopiaMod
                     this.NetCookDiagLog("capture start clearing targets=" + this.netCookTargets.Count);
                 }
                 this.netCookTargets.Clear();
+                // Fresh scan -> fresh Stove Type snapshot. The census itself survives until the scan
+                // rebuilds it, so the picker does not blink out mid-capture. Warming the recipe-type
+                // cache from the registries here (top level, no AuraMono walk in flight) is what lets
+                // the compatibility predicate stay invoke-free deeper in the scan.
+                this.ClearNetCookScanSnapshot();
+                this.PrimeNetCookRecipeCookerTypesFromRegistries();
                 this.LogNetCookStatusCacheClear("capture-start", this.netCookStatusCache.Count);
                 this.netCookStatusCache.Clear();
                 this.netCookStatusByLevelObject.Clear();
@@ -3724,6 +3736,10 @@ namespace HeartopiaMod
                             if (!this.IsCompatibleNetCookCooker(cookerStaticId, cookerType, desiredCookerStaticId, desiredCookerType))
                             {
                                 skippedDifferentCooker++;
+                                // Rejected on type before its burners were enumerated: record the kind
+                                // so the Stove Type picker still lists it (switching to it falls back
+                                // to a full capture, since we never resolved its individual stoves).
+                                this.NoteNetCookObservedCooker(ownerCookBuildNetId, cookerStaticId, cookerType, ownerPosition, hasOwnerPosition);
                                 AddNetCookScanDebugSample(debugSamples, "deferred-owner owner=" + ownerCookBuildNetId + " rejected incompatible static=" + cookerStaticId + " type=" + cookerType);
                                 continue;
                             }
@@ -3860,6 +3876,8 @@ namespace HeartopiaMod
                         if (!this.IsCompatibleNetCookCooker(cookerStaticId, cookerType, desiredCookerStaticId, desiredCookerType))
                         {
                             skippedDifferentCooker++;
+                            // Same as the owner-window pass: keep the kind for the Stove Type picker.
+                            this.NoteNetCookObservedCooker(ownerCookBuildNetId, cookerStaticId, cookerType, ownerPosition, true);
                             continue;
                         }
 
@@ -3939,6 +3957,11 @@ namespace HeartopiaMod
                     this.RegisterNetCookTargets(this.netCookTargets);
                     this.SortNetCookTargetsByDistanceFromScanOrigin(this.netCookTargets);
                 }
+
+                // The expansion is where most stoves (and most rejected kinds) surface — refresh the
+                // Stove Type picker with what it saw. Never touches the pick itself.
+                this.SnapshotNetCookScannedTargets(this.netCookTargets);
+                this.RebuildNetCookCookerTypeCensus(this.netCookRememberStoves);
 
                 this.netCookStatus = "Captured " + this.netCookTargets.Count + " nearby stove(s) within " + Mathf.Clamp(this.netCookScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters).ToString("F0") + "m.";
                 this.SyncNetCookCaptureDebugEsp();
@@ -5264,6 +5287,20 @@ namespace HeartopiaMod
                 }
             }
 
+            // Before falling back to the first entry, honour what the user last chose for THIS menu —
+            // the list's head is not necessarily cookable (see netCookRecipeByCookerType).
+            if (this.TryGetRememberedNetCookRecipe(this.GetNetCookActiveRecipeCookerType(), out int rememberedRecipeId))
+            {
+                for (int i = 0; i < visibleRecipes.Count; i++)
+                {
+                    if (visibleRecipes[i].Key == rememberedRecipeId)
+                    {
+                        this.netCookRecipeId = rememberedRecipeId;
+                        return;
+                    }
+                }
+            }
+
             this.netCookRecipeId = visibleRecipes[0].Key;
         }
 
@@ -5336,12 +5373,30 @@ namespace HeartopiaMod
             int recipeCookerType = 0;
             this.netCookRecipeCookerTypes.TryGetValue(this.netCookRecipeId, out recipeCookerType);
 
+            // The recipe belongs to a MENU (TableCooker.cookerType of the captured cooker), and every
+            // stove sharing that menu can cook it. netCookRecipeCookerTypes tags recipes with the
+            // COOKWARE type instead, which would prune exactly the same-menu-different-cookware
+            // stoves the capture just merged (a campfire next to a stove). Gate on the menu when it
+            // resolves; the cookware tag stays as the fallback.
+            int recipeMenuType = 0;
+            this.TryGetNetCookRecipeCookerTypeCached(this.netCookCookerStaticId, out recipeMenuType);
+
             for (int i = this.netCookTargets.Count - 1; i >= 0; i--)
             {
                 NetCookTargetContext target = this.netCookTargets[i];
                 if (target.CookerNetId == 0U || target.LevelObjectNetId == 0UL)
                 {
                     this.RemoveNetCookTargetAt(i, "ensure-recipe-invalid-target");
+                    continue;
+                }
+
+                if (recipeMenuType > 0 && target.CookerStaticId > 0)
+                {
+                    if (!this.TryGetNetCookRecipeCookerTypeCached(target.CookerStaticId, out int targetMenuType)
+                        || targetMenuType != recipeMenuType)
+                    {
+                        this.RemoveNetCookTargetAt(i, "ensure-recipe-incompatible-menu");
+                    }
                     continue;
                 }
 
@@ -5370,6 +5425,26 @@ namespace HeartopiaMod
         // right after "registered-cache skipped (Capture Radius only)").
         private bool TryResolveNetCookContextsFromCurrentTarget(List<NetCookTargetContext> targets, out string status, bool deferOwnerWindowExpansion = false, bool explicitCapture = false)
         {
+            bool resolved = this.TryResolveNetCookContextsFromCurrentTargetCore(targets, out status, deferOwnerWindowExpansion, explicitCapture);
+
+            // Stove Type census only on the Capture button path: a mass-cook (re)start resolving its
+            // own targets must not repaint the picker under the user, and validating the pick is an
+            // explicit-scan concern. Range culling mirrors the working set — except under Remember
+            // Stoves, where the user has opted into "distance does not matter" for the whole feature.
+            if (explicitCapture)
+            {
+                this.SnapshotNetCookScannedTargets(targets);
+                this.RebuildNetCookCookerTypeCensus(this.netCookRememberStoves);
+                this.ValidateNetCookPreferredCookerType();
+            }
+
+            return resolved;
+        }
+
+        private bool TryResolveNetCookContextsFromCurrentTargetCore(List<NetCookTargetContext> targets, out string status, bool deferOwnerWindowExpansion, bool explicitCapture)
+        {
+            // Each scan re-decides whether the Stove Type pick applies to what IT finds.
+            this.netCookPinnedCookerTypeSuppressed = false;
             status = "No cooker target found.";
             if (targets == null)
             {
@@ -5507,6 +5582,14 @@ namespace HeartopiaMod
                     WorldPosition = worldPosition
                 });
             }
+
+            // Everything the scan resolved, ALL types, before the desired-type vote prunes the set —
+            // this is what the Stove Type picker lists (HeartopiaComplete.NetCookStoveType.cs). The
+            // suppression check runs here too: a pick with no match in this scan must not prune the
+            // capture down to nothing.
+            this.SnapshotNetCookScannedTargets(targets);
+            this.PrimeNetCookRecipeCookerTypes(targets); // top-level: the invoking resolver is safe here
+            this.EvaluateNetCookPinnedCookerTypeSuppression(targets);
 
             int desiredCookerStaticId = this.GetPreferredNetCookTargetStaticId(targets);
             int desiredCookerType = this.GetPreferredNetCookTargetCookerType(targets, desiredCookerStaticId);
@@ -5783,9 +5866,16 @@ namespace HeartopiaMod
 
                 if (registeredCooker == null
                     || registeredCooker.OwnerNetId == 0U
-                    || registeredCooker.StaticId <= 0
-                    || !this.IsCompatibleNetCookCooker(registeredCooker.StaticId, registeredCooker.CookerType, desiredCookerStaticId, desiredCookerType))
+                    || registeredCooker.StaticId <= 0)
                 {
+                    continue;
+                }
+
+                if (!this.IsCompatibleNetCookCooker(registeredCooker.StaticId, registeredCooker.CookerType, desiredCookerStaticId, desiredCookerType))
+                {
+                    // Registered world cookers carry no burner ids — record the kind for the Stove
+                    // Type picker (position unknown, so it lists without a distance).
+                    this.NoteNetCookObservedCooker(registeredCooker.OwnerNetId, registeredCooker.StaticId, registeredCooker.CookerType, Vector3.zero, false);
                     continue;
                 }
 
@@ -5878,9 +5968,16 @@ namespace HeartopiaMod
                 if (registeredTarget == null
                     || registeredTarget.CookerNetId == 0U
                     || registeredTarget.LevelObjectNetId == 0UL
-                    || registeredTarget.CookerStaticId <= 0
-                    || !this.IsCompatibleNetCookCooker(registeredTarget.CookerStaticId, registeredTarget.CookerType, desiredCookerStaticId, desiredCookerType))
+                    || registeredTarget.CookerStaticId <= 0)
                 {
+                    continue;
+                }
+
+                if (!this.IsCompatibleNetCookCooker(registeredTarget.CookerStaticId, registeredTarget.CookerType, desiredCookerStaticId, desiredCookerType))
+                {
+                    // A fully resolved stove of another kind — it goes into the Stove Type snapshot as
+                    // a real target, so picking that type can rebuild from it without a re-scan.
+                    this.SnapshotNetCookScannedTarget(registeredTarget);
                     continue;
                 }
 
@@ -6447,6 +6544,24 @@ namespace HeartopiaMod
                         FreeAuraMonoPins(burnerPins);
                     }
                 }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(cookBuildPins);
+                }
+
+                // The vote + type filter below used to run INSIDE the pinned block above, which made
+                // this path invisible to the Stove Type picker: it is the live capture route ("Captured
+                // N stove(s) from cook-build registry") and it RETURNS EARLY, so the caller's snapshot
+                // only ever saw the already-filtered set — a mixed kitchen looked homogeneous (field
+                // report: 54 stoves + 5 clay stoves in range, census showed one type). discoveredTargets
+                // here is the full, unfiltered scan, and the pins are released, so the menu resolver may
+                // invoke again. Priming the cache here is also what makes the same-menu merge work on
+                // the FIRST capture — IsCompatibleNetCookCooker is cache-only by design and would
+                // otherwise fall back to the staticId comparison and split the styles apart.
+                this.SnapshotNetCookScannedTargets(discoveredTargets);
+                this.PrimeNetCookRecipeCookerTypes(discoveredTargets);
+                this.EvaluateNetCookPinnedCookerTypeSuppression(discoveredTargets);
 
                 if (discoveredTargets.Count <= 0)
                 {
@@ -6496,15 +6611,10 @@ namespace HeartopiaMod
                 this.TrimNetCookTargetsToClosest(targets, "stove(s)");
                 this.RegisterNetCookTargets(targets);
                 status = "Captured " + targets.Count + " stove(s) from cook-build registry within " + maxScanDistance.ToString("F0") + "m.";
-                this.NetCookLog("Cook-build registry scan entities=" + inspectedEntities + " cookBuilds=" + inspectedCookBuilds + " burners=" + inspectedBurners + " selectedStatic=" + desiredCookerStaticId + " selectedType=" + desiredCookerType + ".");
+                this.NetCookLog("Cook-build registry scan entities=" + inspectedEntities + " cookBuilds=" + inspectedCookBuilds + " burners=" + inspectedBurners + " selectedStatic=" + desiredCookerStaticId + " selectedType=" + desiredCookerType + " discovered=" + discoveredTargets.Count + " kept=" + targets.Count + ".");
                 this.NetCookLog(status);
                 this.LogNetCookTargetSummary(targets);
                 return true;
-                }
-                finally
-                {
-                    FreeAuraMonoPins(cookBuildPins);
-                }
             }
             catch (Exception ex)
             {
@@ -6762,6 +6872,48 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // A Stove Type pick is by RECIPE cooker type (TableCooker.cookerType — what
+            // GetAllRecipes groups its lists by), NOT by the cookware type this method normally
+            // compares: two stoves can share a cookware type and still cook different menus (the
+            // ordinary stove and the elephant food truck are both cookware "Boil"). See
+            // HeartopiaComplete.NetCookStoveType.cs. Unresolvable recipe type falls through to the
+            // legacy comparison rather than dropping a stove we simply could not classify.
+            // Cache-only lookup on purpose — this predicate runs inside AuraMono walks that hold
+            // pinned pointers, where a nested invoke is an AV risk (see the cached-variant comment).
+            // Fail CLOSED while pinned: a cooker whose recipe type we cannot prove must not join a
+            // set the user explicitly narrowed. Its kind still reaches the census (which resolves at
+            // a safe point), so the next scan classifies it.
+            int pinnedRecipeCookerType = this.GetNetCookPinnedCookerType();
+            if (pinnedRecipeCookerType > 0)
+            {
+                return this.TryGetNetCookRecipeCookerTypeCached(cookerStaticId, out int candidateRecipeCookerType)
+                    && candidateRecipeCookerType == pinnedRecipeCookerType;
+            }
+
+            // "Same cooker" MEANS "same menu". CookingSystem.GetAllRecipes keys on
+            // TableCooker.cookerType, so two cookers sharing that value accept exactly the same
+            // dishes and belong in one working set — whatever their style or cookware. Both older
+            // comparisons below get this wrong in opposite directions:
+            //  - by staticId: splits one homogeneous kitchen, because 灶台 (370001) and 简约灶台
+            //    (370002) are different ids with an identical 141-recipe menu. This is the live path
+            //    on builds where the burner view reports cookware 0 (observed in-world: capture
+            //    logged `cookerStaticId=370001 cookerType=0`), so the minority style was silently
+            //    dropped from every capture.
+            //  - by cookware: also splits a shared menu (recipe type 1 spans cookware Boil, Campfire,
+            //    TreeHouseCooker, TribeCooker — a stove and a campfire cook the same list), while
+            //    conversely merging different menus (the stove and the elephant food truck are both
+            //    cookware Boil with different lists).
+            // So prefer the menu whenever both sides resolve; the two legacy rungs stay as the
+            // fallback for cookers we cannot classify. Cache-only for the same AuraMono reason as
+            // the pinned branch above.
+            if (cookerStaticId > 0
+                && desiredCookerStaticId > 0
+                && this.TryGetNetCookRecipeCookerTypeCached(cookerStaticId, out int candidateMenuType)
+                && this.TryGetNetCookRecipeCookerTypeCached(desiredCookerStaticId, out int desiredMenuType))
+            {
+                return candidateMenuType == desiredMenuType;
+            }
+
             if (desiredCookerType > 0 && cookerType > 0)
             {
                 return cookerType == desiredCookerType;
@@ -6777,6 +6929,17 @@ namespace HeartopiaMod
 
         private bool IsSameNetCookCookerFamily(int firstStaticId, int firstCookerType, int secondStaticId, int secondCookerType)
         {
+            // "Family" decides whether the recipe cache survives a capture — so it is the MENU, same
+            // as IsCompatibleNetCookCooker. Without this, re-capturing a mixed-style kitchen whose
+            // nearest stove changed style invalidated a cache that held the identical list.
+            if (firstStaticId > 0
+                && secondStaticId > 0
+                && this.TryGetNetCookRecipeCookerTypeCached(firstStaticId, out int firstMenuType)
+                && this.TryGetNetCookRecipeCookerTypeCached(secondStaticId, out int secondMenuType))
+            {
+                return firstMenuType == secondMenuType;
+            }
+
             if (firstCookerType > 0 && secondCookerType > 0)
             {
                 return firstCookerType == secondCookerType;
@@ -6797,13 +6960,30 @@ namespace HeartopiaMod
                 return this.netCookCookerStaticId;
             }
 
+            // With a Stove Type pick active the vote must stay INSIDE the pinned group: the recipe
+            // cache is keyed by this staticId, so a majority from another group would fetch the
+            // wrong menu (and mis-seed the expansion for candidates whose type is unknown).
+            int pinnedRecipeCookerType = this.GetNetCookPinnedCookerType();
+            bool pinned = pinnedRecipeCookerType > 0;
             Dictionary<int, int> counts = new Dictionary<int, int>();
             int bestStaticId = this.netCookCookerStaticId;
+            if (pinned
+                && (bestStaticId <= 0
+                    || !this.TryGetNetCookRecipeCookerTypeCached(bestStaticId, out int seedRecipeCookerType)
+                    || seedRecipeCookerType != pinnedRecipeCookerType))
+            {
+                bestStaticId = 0; // the captured cooker is not in the pinned group — do not seed with it
+            }
             int bestCount = bestStaticId > 0 ? 0 : -1;
             for (int i = 0; i < targets.Count; i++)
             {
                 int staticId = targets[i].CookerStaticId;
                 if (staticId <= 0)
+                {
+                    continue;
+                }
+
+                if (pinned && !this.NetCookTargetMatchesPinnedCookerType(targets[i]))
                 {
                     continue;
                 }
@@ -6828,13 +7008,29 @@ namespace HeartopiaMod
                 return this.netCookCookerType;
             }
 
+            // This returns the COOKWARE type (netCookCookerType) — with a Stove Type pick active it
+            // must be the cookware of the pinned group, so vote only among its members.
+            int pinnedRecipeCookerType = this.GetNetCookPinnedCookerType();
+            bool pinned = pinnedRecipeCookerType > 0;
             Dictionary<int, int> counts = new Dictionary<int, int>();
             int bestCookerType = this.netCookCookerType;
+            if (pinned
+                && (this.netCookCookerStaticId <= 0
+                    || !this.TryGetNetCookRecipeCookerTypeCached(this.netCookCookerStaticId, out int seedRecipeCookerType)
+                    || seedRecipeCookerType != pinnedRecipeCookerType))
+            {
+                bestCookerType = 0; // the captured cooker is not in the pinned group — do not seed with it
+            }
             int bestCount = bestCookerType > 0 ? 0 : -1;
             for (int i = 0; i < targets.Count; i++)
             {
                 int cookerType = targets[i].CookerType;
                 if (cookerType <= 0)
+                {
+                    continue;
+                }
+
+                if (pinned && !this.NetCookTargetMatchesPinnedCookerType(targets[i]))
                 {
                     continue;
                 }
@@ -6860,6 +7056,14 @@ namespace HeartopiaMod
                 {
                     return targets[i].CookerType;
                 }
+            }
+
+            if (pinned)
+            {
+                // No cookware type anywhere in the pinned group (public/world cookers report none):
+                // returning the stale context type would prune the group away, so stay neutral and
+                // let IsCompatibleNetCookCooker decide on the pinned recipe type alone.
+                return 0;
             }
 
             return this.netCookCookerType;
@@ -8424,7 +8628,16 @@ namespace HeartopiaMod
                 Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
                 if (tableDataType == null)
                 {
-                    this.NetCookLog("GetCookerType failed: TableData unavailable.");
+                    // Managed TableData is part of the dead managed cluster on IL2CPP, so this is the
+                    // normal outcome, not a failure — it just means the cookware fallback below cannot
+                    // run. Logging it per cooker staticId made every capture emit the same line again.
+                    // Say it once and stay quiet; the Stove Type picker resolves what it needs over
+                    // AuraMono (HeartopiaComplete.NetCookStoveType.cs) and does not go through here.
+                    if (!this.netCookCookerTypeManagedTableDataMissingLogged)
+                    {
+                        this.netCookCookerTypeManagedTableDataMissingLogged = true;
+                        this.NetCookLog("GetCookerType: managed TableData unavailable (expected on IL2CPP); cookware fallback is off for this session.");
+                    }
                     this.netCookCookerTypeFailedStaticIds.Add(cookerStaticId);
                     return false;
                 }

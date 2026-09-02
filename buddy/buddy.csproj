@@ -391,6 +391,7 @@
     <Compile Include="HeartopiaComplete.UguiToast.cs" />
     <Compile Include="HeartopiaComplete.NavIcons.cs" />
     <Compile Include="HeartopiaComplete.NetCook.cs" />
+    <Compile Include="HeartopiaComplete.NetCookStoveType.cs" />
     <Compile Include="HeartopiaComplete.AutoSell.cs" />
     <Compile Include="HeartopiaComplete.GameIcons.cs" />
     <Compile Include="HeartopiaComplete.AutoEatRepair.cs" />

@@ -4479,6 +4479,8 @@ namespace HeartopiaMod
         private readonly Dictionary<uint, NetCookRegisteredWorldCooker> netCookRegisteredWorldCookers = new Dictionary<uint, NetCookRegisteredWorldCooker>(64);
         private readonly Dictionary<int, int> netCookCookerTypeCache = new Dictionary<int, int>(8);
         private readonly HashSet<int> netCookCookerTypeFailedStaticIds = new HashSet<int>();
+        // One line per session for the dead managed TableData path, instead of one per cooker staticId.
+        private bool netCookCookerTypeManagedTableDataMissingLogged = false;
         private readonly Dictionary<ulong, long> netCookAuraMonoLevelObjectPtrs = new Dictionary<ulong, long>(64);
         private bool birdPhotoAuraMonoDiscoveryComplete = false;
         private float nextBirdPhotoRuntimeProbePatchAttemptAt = 0f;

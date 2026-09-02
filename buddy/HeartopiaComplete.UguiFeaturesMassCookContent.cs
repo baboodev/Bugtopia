@@ -147,6 +147,18 @@ namespace HeartopiaMod
             public bool SelectedShown;
         }
 
+        // STOVE TYPE picker row (see HeartopiaComplete.NetCookStoveType.cs). Same pooled-row shape as
+        // the recipe list; BoundRecipeCookerType 0 is the "Auto (majority)" row.
+        private sealed class UguiMassCookStoveTypeRowHandle
+        {
+            public GameObject Root;
+            public Image Fill;
+            public GameObject Label;
+            public int BoundRecipeCookerType = int.MinValue;
+            public string BoundDisplay;
+            public bool SelectedShown;
+        }
+
         private sealed class UguiShellFeaturesMassCookHandle
         {
             public GameObject Root;
@@ -172,6 +184,22 @@ namespace HeartopiaMod
             public GameObject AssistDescLabel;
             public float AssistTextHeight = 32f;  // Max(32, measured) — source fallback floor
             public bool AssistTextMeasured;       // retry until the TMP component has Awoken
+
+            // STOVE TYPE picker — only built/shown when the capture census saw 2+ recipe cooker
+            // types in range (mixed kitchen); hidden entirely otherwise, so the single-type layout
+            // is byte-for-byte what it was before the feature.
+            public GameObject StoveTypeLabel;
+            public GameObject StoveTypeHeader;
+            public GameObject StoveTypeHeaderValue;
+            public string StoveTypeHeaderShown;
+            public GameObject StoveTypeArrow;
+            public string StoveTypeArrowShown;
+            public GameObject StoveTypePanel;
+            public GameObject StoveTypeListScroll;
+            public Transform StoveTypeListContent;
+            public readonly List<UguiMassCookStoveTypeRowHandle> StoveTypeRows = new List<UguiMassCookStoveTypeRowHandle>();
+            public int StoveTypeCensusVersionShown = -1;   // rebind rows only when the census moves
+            public int StoveTypeSelectionShown = int.MinValue;
 
             public GameObject RecipeLabel;        // recipe branch — "RECIPE"
             public GameObject RecipeHeader;       // dropdown header box (whole-header button)
@@ -230,6 +258,10 @@ namespace HeartopiaMod
         private const float UguiMassCookConditionalTopY = 340f;
         private const float UguiMassCookRecipePanelHeight = 260f;  // :245
         private const float UguiMassCookRecipeRowStep = 28f;       // :275 — 24-tall rows stepping 28
+        // Stove Type panel: at most 17 rows (16 recipe cooker types + Auto), no search field, so it
+        // sizes to its content and caps instead of taking the recipe list's fixed 260.
+        private const float UguiMassCookStoveTypeRowStep = 28f;
+        private const float UguiMassCookStoveTypeMaxPanelHeight = 176f;
 
         // ----------------------------------------------------------------------------------------
         // Live layout signature — branch, dropdown-open, measured assist-card height (all three
@@ -239,9 +271,26 @@ namespace HeartopiaMod
 
         private int ComputeUguiFeaturesMassCookLayoutSignature(UguiShellFeaturesMassCookHandle handle)
         {
+            // The Stove Type row count enters the signature because the open panel sizes to it (0
+            // rows also encodes "picker hidden", so no separate visibility bit is needed).
+            int stoveTypeRows = this.GetUguiFeaturesMassCookStoveTypeRowCount();
             return (this.netCookMiniGameOnly ? 1 : 0)
                  | (this.netCookRecipeDropdownOpen ? 2 : 0)
-                 | (Mathf.CeilToInt(handle.AssistTextHeight) << 2);
+                 | (this.netCookCookerTypeDropdownOpen ? 4 : 0)
+                 | ((stoveTypeRows & 0x3F) << 3)
+                 | (Mathf.CeilToInt(handle.AssistTextHeight) << 9);
+        }
+
+        // Auto row + one row per census group; 0 while the picker is hidden.
+        private int GetUguiFeaturesMassCookStoveTypeRowCount()
+        {
+            return this.ShouldShowNetCookCookerTypePicker() ? (this.netCookScannedCookerTypes.Count + 1) : 0;
+        }
+
+        private float GetUguiFeaturesMassCookStoveTypePanelHeight()
+        {
+            int rows = this.GetUguiFeaturesMassCookStoveTypeRowCount();
+            return Mathf.Min(rows * UguiMassCookStoveTypeRowStep + 16f, UguiMassCookStoveTypeMaxPanelHeight);
         }
 
         // The status card's fallback-vs-live conditional (:397-401) — NOT "always netCookStatus".
@@ -379,6 +428,61 @@ namespace HeartopiaMod
                 handle.AssistTextHeight = Mathf.Max(32f, measuredH);
                 handle.AssistTextMeasured = measured;
             }
+
+            // -------- STOVE TYPE label + dropdown header + panel (mixed-kitchen picker) --------
+            // Same hand-rolled dropdown shape as RECIPE below (header box + accent arrow + a panel
+            // of pooled rows), minus the search field: at most 17 entries. Built unconditionally,
+            // shown only when the census has 2+ types — the relayout owns visibility and positions.
+            handle.StoveTypeLabel = this.CreateUguiLabel(scrollContent, "StoveTypeLabel", this.L("STOVE TYPE"), 11f, mutedTextColor, false);
+            this.TrySetUguiLabelBold(handle.StoveTypeLabel);
+
+            handle.StoveTypeHeader = this.CreateUguiGo("StoveTypeHeader", scrollContent);
+            Image stoveTypeHeaderBg = this.AddUguiImage(handle.StoveTypeHeader, this.UguiKitControlFill(), true, 1.5f);
+            stoveTypeHeaderBg.raycastTarget = true;
+            Button stoveTypeHeaderBtn = handle.StoveTypeHeader.AddComponent<Button>();
+            stoveTypeHeaderBtn.targetGraphic = stoveTypeHeaderBg;
+            this.WireUguiClick(stoveTypeHeaderBtn.onClick, new System.Action(this.OnUguiFeaturesMassCookStoveTypeHeaderClicked));
+            handle.StoveTypeHeaderShown = this.GetNetCookSelectedCookerTypeLabel();
+            handle.StoveTypeHeaderValue = this.CreateUguiLabel(handle.StoveTypeHeader.transform, "Value",
+                handle.StoveTypeHeaderShown, 12f, Color.white, false);
+            this.TrySetUguiLabelBold(handle.StoveTypeHeaderValue);
+            StretchUguiFill(handle.StoveTypeHeaderValue, 12f, 1f, 34f, 1f);
+            handle.StoveTypeArrowShown = this.netCookCookerTypeDropdownOpen ? "^" : "v";
+            handle.StoveTypeArrow = this.CreateUguiLabel(handle.StoveTypeHeader.transform, "Arrow",
+                handle.StoveTypeArrowShown, 12f, this.UguiKitAccent(), true);
+            this.TrySetUguiLabelBold(handle.StoveTypeArrow);
+            RectTransform stoveTypeArrowRt = handle.StoveTypeArrow.GetComponent<RectTransform>();
+            stoveTypeArrowRt.anchorMin = new Vector2(1f, 0.5f);
+            stoveTypeArrowRt.anchorMax = new Vector2(1f, 0.5f);
+            stoveTypeArrowRt.pivot = new Vector2(1f, 0.5f);
+            stoveTypeArrowRt.anchoredPosition = new Vector2(-8f, 0f);
+            stoveTypeArrowRt.sizeDelta = new Vector2(16f, 34f);
+
+            handle.StoveTypePanel = this.CreateUguiGo("StoveTypePanel", scrollContent);
+            this.AddUguiImage(handle.StoveTypePanel, this.UguiKitPanelBg(), true, 1f);
+            Transform stoveTypeListContent;
+            handle.StoveTypeListScroll = this.CreateUguiScrollView(handle.StoveTypePanel.transform, "StoveTypeList",
+                10f, out stoveTypeListContent);
+            PlaceUguiTopLeft(handle.StoveTypeListScroll, 4f, 4f, rowW - 8f,
+                UguiMassCookStoveTypeMaxPanelHeight - 8f); // relayout resizes to the live row count
+            handle.StoveTypeListContent = stoveTypeListContent;
+            try
+            {
+                Image stoveTypeListBg = handle.StoveTypeListScroll.GetComponent<Image>();
+                if (stoveTypeListBg != null)
+                {
+                    stoveTypeListBg.color = Color.clear; // the panel itself is the box
+                }
+                if (stoveTypeListContent != null && stoveTypeListContent.parent != null)
+                {
+                    Image stoveTypeVpBg = stoveTypeListContent.parent.GetComponent<Image>();
+                    if (stoveTypeVpBg != null)
+                    {
+                        stoveTypeVpBg.color = Color.clear;
+                    }
+                }
+            }
+            catch { }
 
             // -------- RECIPE label + dropdown header (:229-241 — recipe branch) --------
             handle.RecipeLabel = this.CreateUguiLabel(scrollContent, "RecipeLabel", this.L("RECIPE"), 11f, mutedTextColor, false);
@@ -587,7 +691,13 @@ namespace HeartopiaMod
             bool open = !mini && this.netCookRecipeDropdownOpen;
             float yCur = UguiMassCookConditionalTopY;
 
+            bool stoveTypeVisible = this.ShouldShowNetCookCookerTypePicker(); // false while mini
+            bool stoveTypeOpen = stoveTypeVisible && this.netCookCookerTypeDropdownOpen;
+
             SetUguiGoActive(handle.AssistCard, mini);
+            SetUguiGoActive(handle.StoveTypeLabel, stoveTypeVisible);
+            SetUguiGoActive(handle.StoveTypeHeader, stoveTypeVisible);
+            SetUguiGoActive(handle.StoveTypePanel, stoveTypeOpen);
             SetUguiGoActive(handle.RecipeLabel, !mini);
             SetUguiGoActive(handle.RecipeHeader, !mini);
             SetUguiGoActive(handle.RecipePanel, open);
@@ -621,6 +731,21 @@ namespace HeartopiaMod
             }
             else
             {
+                if (stoveTypeVisible)
+                {
+                    PlaceUguiTopLeft(handle.StoveTypeLabel, rowX, yCur, rowW, 18f);
+                    yCur += 20f;
+                    PlaceUguiTopLeft(handle.StoveTypeHeader, rowX, yCur, rowW, 36f);
+                    yCur += 46f;
+                    if (stoveTypeOpen)
+                    {
+                        float stoveTypePanelH = this.GetUguiFeaturesMassCookStoveTypePanelHeight();
+                        PlaceUguiTopLeft(handle.StoveTypePanel, rowX, yCur - 6f, rowW, stoveTypePanelH);
+                        PlaceUguiTopLeft(handle.StoveTypeListScroll, 4f, 4f, rowW - 8f, stoveTypePanelH - 8f);
+                        yCur += stoveTypePanelH + 8f;
+                    }
+                }
+
                 PlaceUguiTopLeft(handle.RecipeLabel, rowX, yCur, rowW, 18f);
                 yCur += 20f;
                 PlaceUguiTopLeft(handle.RecipeHeader, rowX, yCur, rowW, 36f);
@@ -842,6 +967,111 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
+        // Pooled STOVE TYPE rows — row 0 is "Auto", the rest mirror the capture census
+        // (netCookScannedCookerTypes). Rebound only when the census version or the pick moves.
+        // ----------------------------------------------------------------------------------------
+
+        private UguiMassCookStoveTypeRowHandle CreateUguiFeaturesMassCookStoveTypeRow(
+            UguiShellFeaturesMassCookHandle handle, int index, float innerW)
+        {
+            UguiMassCookStoveTypeRowHandle row = new UguiMassCookStoveTypeRowHandle();
+
+            GameObject root = this.CreateUguiGo("StoveType" + index, handle.StoveTypeListContent);
+            PlaceUguiTopLeft(root, 0f, index * UguiMassCookStoveTypeRowStep, innerW, 24f);
+            row.Fill = this.AddUguiImage(root, this.UguiKitControlFill(), true, 1.5f);
+            row.Fill.raycastTarget = true;
+            Button btn = root.AddComponent<Button>();
+            btn.targetGraphic = row.Fill;
+            UguiMassCookStoveTypeRowHandle captured = row;
+            this.WireUguiClick(btn.onClick, new System.Action(
+                () => this.OnUguiFeaturesMassCookStoveTypeRowClicked(captured)));
+
+            row.Label = this.CreateUguiLabel(root.transform, "Name", "", 11f, this.UguiKitTextColor(), false);
+            this.TrySetUguiLabelBold(row.Label);
+            PlaceUguiTopLeft(row.Label, 8f, 1f, innerW - 16f, 22f);
+
+            row.Root = root;
+            return row;
+        }
+
+        private void SyncUguiFeaturesMassCookStoveTypeRows(UguiShellFeaturesMassCookHandle handle)
+        {
+            int count = this.GetUguiFeaturesMassCookStoveTypeRowCount();
+            float innerW = handle.ContentWidth - 16f - 8f - 22f;
+            int selected = this.netCookPreferredCookerType; // 0 selects the Auto row
+
+            for (int i = 0; i < count; i++)
+            {
+                if (i >= handle.StoveTypeRows.Count)
+                {
+                    handle.StoveTypeRows.Add(this.CreateUguiFeaturesMassCookStoveTypeRow(handle, i, innerW));
+                }
+                UguiMassCookStoveTypeRowHandle row = handle.StoveTypeRows[i];
+                if (row.Root != null && !row.Root.activeSelf)
+                {
+                    row.Root.SetActive(true);
+                }
+
+                int boundType;
+                string display;
+                if (i == 0)
+                {
+                    boundType = 0;
+                    display = this.L("Auto (most stoves)");
+                }
+                else
+                {
+                    NetCookCookerTypeGroup group = this.netCookScannedCookerTypes[i - 1];
+                    boundType = group.RecipeCookerType;
+                    display = this.GetNetCookCookerTypeGroupLabel(group);
+                    if (group.NearestDistance >= 0f)
+                    {
+                        display += "  ·  " + group.NearestDistance.ToString("F1") + "m";
+                    }
+                }
+
+                if (row.BoundRecipeCookerType != boundType
+                    || !string.Equals(row.BoundDisplay, display, StringComparison.Ordinal))
+                {
+                    row.BoundRecipeCookerType = boundType;
+                    row.BoundDisplay = display;
+                    this.SetUguiLabelText(row.Label, display);
+                }
+
+                bool isSelected = boundType == selected;
+                if (isSelected != row.SelectedShown)
+                {
+                    row.SelectedShown = isSelected;
+                    try
+                    {
+                        if (row.Fill != null)
+                        {
+                            row.Fill.color = isSelected ? this.UguiKitAccent() : this.UguiKitControlFill();
+                        }
+                    }
+                    catch { }
+                    this.SetUguiLabelColor(row.Label, isSelected
+                        ? this.GetUiTextOnAccent(this.UguiKitAccent())
+                        : this.UguiKitTextColor());
+                }
+            }
+
+            for (int i = count; i < handle.StoveTypeRows.Count; i++)
+            {
+                UguiMassCookStoveTypeRowHandle row = handle.StoveTypeRows[i];
+                if (row.Root != null && row.Root.activeSelf)
+                {
+                    row.Root.SetActive(false);
+                }
+            }
+
+            this.SetUguiScrollContentHeight(handle.StoveTypeListContent,
+                Mathf.Max(1f, count * UguiMassCookStoveTypeRowStep));
+            handle.StoveTypeCensusVersionShown = this.netCookScannedCookerTypesVersion;
+            handle.StoveTypeSelectionShown = selected;
+        }
+
+        // ----------------------------------------------------------------------------------------
         // Per-frame driver (called from ProcessUguiShellOnUpdate)
         // ----------------------------------------------------------------------------------------
 
@@ -896,6 +1126,28 @@ namespace HeartopiaMod
                 }
                 else
                 {
+                    // STOVE TYPE picker — caption/arrow live; rows rebind only when the census
+                    // version or the pick moves (a background expansion can add a type mid-open).
+                    if (this.ShouldShowNetCookCookerTypePicker())
+                    {
+                        this.SyncUguiSelfLabelText(handle.StoveTypeHeaderValue, ref handle.StoveTypeHeaderShown,
+                            this.GetNetCookSelectedCookerTypeLabel());
+                        this.SyncUguiSelfLabelText(handle.StoveTypeArrow, ref handle.StoveTypeArrowShown,
+                            this.netCookCookerTypeDropdownOpen ? "^" : "v");
+                        if (this.netCookCookerTypeDropdownOpen
+                            && (handle.StoveTypeCensusVersionShown != this.netCookScannedCookerTypesVersion
+                                || handle.StoveTypeSelectionShown != this.netCookPreferredCookerType))
+                        {
+                            this.SyncUguiFeaturesMassCookStoveTypeRows(handle);
+                        }
+                    }
+                    else if (this.netCookCookerTypeDropdownOpen)
+                    {
+                        // The census shrank to a single type under an open panel — close it so the
+                        // relayout does not leave an orphaned box behind the recipe row.
+                        this.netCookCookerTypeDropdownOpen = false;
+                    }
+
                     // :228 — per-repaint in source; self-caching after the first success.
                     this.EnsureNetCookRecipeCache();
 
@@ -1072,6 +1324,9 @@ namespace HeartopiaMod
             }
             this.netCookMiniGameOnly = value;
             this.netCookRecipeDropdownOpen = false;
+            // Mini Game Assist is cooker-type agnostic — the picker is hidden there, so its panel
+            // must not survive the branch swap either.
+            this.netCookCookerTypeDropdownOpen = false;
             this.netCookStatus = this.netCookMiniGameOnly
                 ? "Mini game only mode enabled. Capture stoves to assist active cooking."
                 : "Mini game only mode disabled. Select a recipe to mass cook.";
@@ -1154,10 +1409,86 @@ namespace HeartopiaMod
             }
         }
 
+        // STOVE TYPE header — mutually exclusive with the recipe panel: both are absolutely
+        // positioned in the same scroll column, so two open boxes would overlap.
+        private void OnUguiFeaturesMassCookStoveTypeHeaderClicked()
+        {
+            UguiShellFeaturesMassCookHandle handle = this.uguiShellFeaturesMassCook;
+            if (handle == null || handle.Root == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.ShouldShowNetCookCookerTypePicker())
+                {
+                    return;
+                }
+
+                this.netCookCookerTypeDropdownOpen = !this.netCookCookerTypeDropdownOpen;
+                if (this.netCookCookerTypeDropdownOpen)
+                {
+                    this.netCookRecipeDropdownOpen = false;
+                }
+                this.SyncUguiSelfLabelText(handle.StoveTypeArrow, ref handle.StoveTypeArrowShown,
+                    this.netCookCookerTypeDropdownOpen ? "^" : "v");
+                if (this.netCookCookerTypeDropdownOpen)
+                {
+                    this.SyncUguiFeaturesMassCookStoveTypeRows(handle);
+                }
+                this.RefreshUguiFeaturesMassCookLayout(handle);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Mass Cook stove type header error: " + ex.Message);
+            }
+        }
+
+        // A pick rebuilds the working set from the capture snapshot, swaps the recipe cache and
+        // kicks the deferred expansion for the new type (HeartopiaComplete.NetCookStoveType.cs).
+        private void OnUguiFeaturesMassCookStoveTypeRowClicked(UguiMassCookStoveTypeRowHandle row)
+        {
+            if (row == null || row.BoundRecipeCookerType == int.MinValue)
+            {
+                return;
+            }
+
+            try
+            {
+                bool applied = this.ApplyNetCookPreferredCookerType(row.BoundRecipeCookerType, out string status);
+                if (!string.IsNullOrWhiteSpace(status))
+                {
+                    this.AddMenuNotification(status, applied
+                        ? new Color(0.45f, 1f, 0.55f)
+                        : new Color(1f, 0.55f, 0.55f));
+                }
+
+                UguiShellFeaturesMassCookHandle handle = this.uguiShellFeaturesMassCook;
+                if (handle != null && handle.Root != null)
+                {
+                    this.SyncUguiFeaturesMassCookStoveTypeRows(handle);
+                    this.SyncUguiSelfLabelText(handle.StoveTypeHeaderValue, ref handle.StoveTypeHeaderShown,
+                        this.GetNetCookSelectedCookerTypeLabel());
+                    this.SyncUguiSelfLabelText(handle.StoveTypeArrow, ref handle.StoveTypeArrowShown,
+                        this.netCookCookerTypeDropdownOpen ? "^" : "v");
+                    this.RefreshUguiFeaturesMassCookLayout(handle); // both panels close this frame
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Mass Cook stove type pick error: " + ex.Message);
+            }
+        }
+
         // :235-237 — the SHARED open flag (file header); relayout on the click frame.
         private void OnUguiFeaturesMassCookRecipeHeaderClicked()
         {
             this.netCookRecipeDropdownOpen = !this.netCookRecipeDropdownOpen;
+            if (this.netCookRecipeDropdownOpen)
+            {
+                this.netCookCookerTypeDropdownOpen = false; // never two open boxes in one column
+            }
             UguiShellFeaturesMassCookHandle handle = this.uguiShellFeaturesMassCook;
             if (handle == null || handle.Root == null)
             {
@@ -1220,6 +1551,8 @@ namespace HeartopiaMod
             try
             {
                 this.netCookRecipeId = row.BoundId;
+                // An explicit pick is what the Stove Type switch restores later for this menu.
+                this.RememberNetCookRecipeForActiveMenu();
                 this.netCookRecipeDropdownOpen = false;
                 this.netCookCookQuantity = 1;
                 this.netCookCookQuantityInput = "1";
