@@ -232,6 +232,7 @@ namespace HeartopiaMod
             public bool autoLikeOwnHome;
             public bool craftDirectSendEnabled;
             public bool interactObstacleBypassEnabled;
+            public bool interactBuildModeBypassEnabled;
             public bool persistentHudEnabled;
             // Self-tab bypass toggles. These were session-only until now even though their UI
             // handlers already called SaveKeybinds — the fields simply had no home in the config.

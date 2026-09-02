@@ -67,6 +67,23 @@ namespace HeartopiaMod
         // InteractErrorCode.InteractAreaUnSafe — the code AND the localization id of the toast.
         private const int InteractObstacleUnsafeCode = 91525;
 
+        // InteractErrorCode.TargetInBuilding = 10144 — "Target being adjusted. Unable to interact
+        // now." (ru "Объект настраивается, взаимодействие пока невозможно"). SECOND, separate
+        // toggle: same method, different question. LocalPlayerComponent.CanExecuteInteraction is its
+        // only producer in the whole client, and it asks EntityUtil.IsBuildInBuilding about the
+        // target's parent FieldComponent — true when the plot owner has PlayerBuildModeData
+        // .BuildMode set, or the private home has PrivateHomeComponentData.buildMode. So the refusal
+        // means "somebody is editing the plot this object sits in", not "the way is blocked", which
+        // is why it does not share the obstacle toggle: while a plot is genuinely being edited the
+        // furniture can move or vanish server-side, so this one is the more likely of the two to be
+        // refused again on the server.
+        //
+        // IsBuildInBuilding also has a side effect worth keeping: when the flagged owner is the
+        // local player it sends CharacterProtocolManager.PostBuildMode(false, 4), i.e. it clears a
+        // stale build-mode flag of your own. The detour calls the original through the trampoline,
+        // so that self-heal still runs — only the verdict is rewritten.
+        private const int InteractBuildModeCode = 10144;
+
         private static readonly string[] InteractObstacleImageNames =
         {
             "XDTLevelAndEntity", "XDTLevelAndEntity.dll",
@@ -97,51 +114,91 @@ namespace HeartopiaMod
         private static InteractObstacleArg0HookDelegate interactObstaclePadKeepAlive; // anti-GC
         private static InteractObstacleArg0HookDelegate interactObstaclePadTrampoline;
 
-        // Written on the main thread, read by the native bodies. Only true while the toggle is on
-        // AND at least one detour is live.
+        // Written on the main thread, read by the native bodies. Only true while the matching toggle
+        // is on AND the detour that can produce its code is live.
         private static volatile bool interactObstacleBypassActive;
+        private static volatile bool interactBuildModeBypassActive;
 
         // Bumped from the native bodies (Interlocked only — no allocation, no logging in there).
         private static int interactObstacleClearedCount;
+        private static int interactBuildModeClearedCount;
+
+        // Which hook sets have ever been asked for this session. Monotonic on purpose: the detours
+        // are never torn down, so "wanted once" is exactly "installed". Growing the mask re-arms the
+        // world-ready callback so a toggle flipped on mid-session installs its hooks now instead of
+        // at the next world load.
+        private const int InteractObstacleWantObstacle = 1;
+        private const int InteractObstacleWantBuildMode = 2;
+        private int interactObstacleWantMask;
 
         private bool interactObstacleBypassEnabled;
+        private bool interactBuildModeBypassEnabled;
         private bool interactObstacleCallbackRegistered;
         private bool interactObstacleCanExecuteTried;
         private bool interactObstacleCookerTried;
         private bool interactObstaclePadTried;
         private int interactObstacleReportedCount;
+        private int interactBuildModeReportedCount;
         private string interactObstacleStatus = "Idle.";
+        private string interactBuildModeStatus = "Idle.";
         private string interactObstacleLastLoggedStatus;
+        private string interactBuildModeLastLoggedStatus;
 
         private void ProcessInteractObstacleBypassOnUpdate()
         {
-            if (!this.interactObstacleBypassEnabled)
+            bool wantObstacle = this.interactObstacleBypassEnabled;
+            bool wantBuildMode = this.interactBuildModeBypassEnabled;
+            if (!wantObstacle && !wantBuildMode)
             {
                 // Never Undo()n: tearing a live native detour down mid-session is a documented
                 // heap-corruption source (memory: native-detours-world-change-corruption). An
                 // inert hook just forwards to the trampoline = vanilla.
                 interactObstacleBypassActive = false;
+                interactBuildModeBypassActive = false;
                 return;
             }
 
-            // Hook installs run on the world-ready gate, never from a retry timer here
-            // (AGENTS.md hard rule). Registration is idempotent and cheap.
-            if (!this.interactObstacleCallbackRegistered)
+            int want = (wantObstacle ? InteractObstacleWantObstacle : 0)
+                | (wantBuildMode ? InteractObstacleWantBuildMode : 0);
+            if ((want | this.interactObstacleWantMask) != this.interactObstacleWantMask)
             {
-                this.interactObstacleCallbackRegistered = true;
-                this.RegisterWorldReadyCallback("InteractObstacleBypass",
-                    this.TryInstallInteractObstacleHooksOnWorldReady);
+                this.interactObstacleWantMask |= want;
+
+                // Hook installs run on the world-ready gate, never from a retry timer here
+                // (AGENTS.md hard rule). Registration is idempotent; the reset is the documented way
+                // to make a toggle flipped on mid-world install now rather than at the next load.
+                if (!this.interactObstacleCallbackRegistered)
+                {
+                    this.interactObstacleCallbackRegistered = true;
+                    this.RegisterWorldReadyCallback("InteractObstacleBypass",
+                        this.TryInstallInteractObstacleHooksOnWorldReady);
+                }
+                else
+                {
+                    this.ResetWorldReadyCallback("InteractObstacleBypass");
+                }
             }
 
-            interactObstacleBypassActive = interactObstacleCanExecuteTrampoline != null
-                || interactObstacleCookerTrampoline != null
-                || interactObstaclePadTrampoline != null;
+            // The obstacle code comes out of all three gates; the build-mode code only out of
+            // CanExecuteInteraction, so it is armed by that one hook alone.
+            interactObstacleBypassActive = wantObstacle
+                && (interactObstacleCanExecuteTrampoline != null
+                    || interactObstacleCookerTrampoline != null
+                    || interactObstaclePadTrampoline != null);
+            interactBuildModeBypassActive = wantBuildMode && interactObstacleCanExecuteTrampoline != null;
 
             int cleared = Volatile.Read(ref interactObstacleClearedCount);
             if (cleared != this.interactObstacleReportedCount)
             {
                 this.interactObstacleReportedCount = cleared;
                 this.InteractObstacleSetStatus("Cleared " + cleared + " interaction-area block(s).");
+            }
+
+            int buildCleared = Volatile.Read(ref interactBuildModeClearedCount);
+            if (buildCleared != this.interactBuildModeReportedCount)
+            {
+                this.interactBuildModeReportedCount = buildCleared;
+                this.InteractBuildModeSetStatus("Cleared " + buildCleared + " build-mode block(s).");
             }
         }
 
@@ -169,9 +226,15 @@ namespace HeartopiaMod
                     return true;
                 }
 
+                // Only what has actually been asked for: the build-mode toggle alone needs nothing
+                // but the generic gate, so it must not drag the other two detours in with it.
                 bool done = this.TryInstallInteractObstacleCanExecuteHook(compile);
-                done &= this.TryInstallInteractObstacleCookerHook(compile);
-                done &= this.TryInstallInteractObstaclePadHook(compile);
+                if ((this.interactObstacleWantMask & InteractObstacleWantObstacle) != 0)
+                {
+                    done &= this.TryInstallInteractObstacleCookerHook(compile);
+                    done &= this.TryInstallInteractObstaclePadHook(compile);
+                }
+
                 return done;
             }
             catch (Exception ex)
@@ -378,11 +441,13 @@ namespace HeartopiaMod
         // Native->coreclr reverse-pinvoke bodies. Each one forwards to the original (exactly the
         // work vanilla does), compares one integer and, at most, bumps a counter. No allocation, no
         // logging, no game-Mono call of our own — the trampoline IS the game's own call.
+        // The only gate that can answer either code, so it runs both rewrites. Chaining is safe:
+        // the two codes are distinct and a rewritten answer is 0, which neither rewrite matches.
         private static int InteractObstacleCanExecuteDetourBody(IntPtr self, IntPtr command)
         {
             InteractObstacleArg1HookDelegate trampoline = interactObstacleCanExecuteTrampoline;
             int code = trampoline != null ? trampoline(self, command) : 0;
-            return InteractObstacleRewrite(code);
+            return InteractBuildModeRewrite(InteractObstacleRewrite(code));
         }
 
         private static int InteractObstacleCookerDetourBody(IntPtr self, IntPtr arg)
@@ -412,6 +477,18 @@ namespace HeartopiaMod
             return 0;
         }
 
+        // 10144 -> 0 (Success) while its own toggle is armed. Independent of the obstacle rewrite.
+        private static int InteractBuildModeRewrite(int code)
+        {
+            if (code != InteractBuildModeCode || !interactBuildModeBypassActive)
+            {
+                return code;
+            }
+
+            Interlocked.Increment(ref interactBuildModeClearedCount);
+            return 0;
+        }
+
         private void InteractObstacleSetStatus(string status)
         {
             this.interactObstacleStatus = status;
@@ -421,6 +498,21 @@ namespace HeartopiaMod
             }
 
             this.interactObstacleLastLoggedStatus = status;
+            if (MasterLogInteractObstacle || status.StartsWith("Error", StringComparison.Ordinal))
+            {
+                ModLogger.Msg("[InteractObstacle] " + status);
+            }
+        }
+
+        private void InteractBuildModeSetStatus(string status)
+        {
+            this.interactBuildModeStatus = status;
+            if (string.Equals(this.interactBuildModeLastLoggedStatus, status, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            this.interactBuildModeLastLoggedStatus = status;
             if (MasterLogInteractObstacle || status.StartsWith("Error", StringComparison.Ordinal))
             {
                 ModLogger.Msg("[InteractObstacle] " + status);

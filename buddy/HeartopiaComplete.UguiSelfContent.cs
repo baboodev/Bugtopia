@@ -106,6 +106,7 @@ namespace HeartopiaMod
             public Toggle SkipCraftDyeToggle;
             public Toggle CraftDirectSendToggle;
             public Toggle InteractObstacleToggle;
+            public Toggle InteractBuildModeToggle;
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
             public Toggle AutoLikeOwnHomeToggle;
@@ -364,6 +365,9 @@ namespace HeartopiaMod
             handle.InteractObstacleToggle = this.CreateUguiCheckbox(scrollContent, "InteractObstacleToggle",
                 this.L("Ignore interaction-area obstacles"), this.interactObstacleBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfInteractObstacleToggled));
+            handle.InteractBuildModeToggle = this.CreateUguiCheckbox(scrollContent, "InteractBuildModeToggle",
+                this.L("Ignore build mode on the interaction target"), this.interactBuildModeBypassEnabled,
+                new System.Action<bool>(this.OnUguiSelfInteractBuildModeToggled));
             handle.BlockTutorialsToggle = this.CreateUguiCheckbox(scrollContent, "BlockTutorialsToggle",
                 this.L("Disable tutorials"), this.blockTutorials,
                 new System.Action<bool>(this.OnUguiSelfBlockTutorialsToggled));
@@ -626,6 +630,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.InteractBuildModeToggle != null)
+            {
+                PlaceUguiTopLeft(handle.InteractBuildModeToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.BlockTutorialsToggle != null)
             {
                 PlaceUguiTopLeft(handle.BlockTutorialsToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -693,6 +703,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
                 this.SyncUguiToggleFromField(handle.InteractObstacleToggle, this.interactObstacleBypassEnabled);
+                this.SyncUguiToggleFromField(handle.InteractBuildModeToggle, this.interactBuildModeBypassEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
                 this.SyncUguiToggleFromField(handle.AutoLikeOwnHomeToggle, this.autoLikeOwnHome);
@@ -1177,6 +1188,16 @@ namespace HeartopiaMod
                 return;
             }
             this.interactObstacleBypassEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfInteractBuildModeToggled(bool value)
+        {
+            if (value == this.interactBuildModeBypassEnabled)
+            {
+                return;
+            }
+            this.interactBuildModeBypassEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

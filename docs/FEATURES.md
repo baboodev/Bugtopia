@@ -330,6 +330,19 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   down (`native-detours-world-change-corruption`); switching the toggle off makes every body forward
   to the original, i.e. byte-exact vanilla. A missing target after a game update disarms that one
   hook with a log line and leaves the others working.
+- **Second toggle — Ignore build mode on the interaction target** (separate, also default off).
+  Removes **"Target being adjusted. Unable to interact now."** =
+  `InteractErrorCode.TargetInBuilding` (10144), whose only producer in the whole client is the same
+  `CanExecuteInteraction`, ten lines below the obstacle test: it takes the target's parent
+  `FieldComponent` and asks `EntityUtil.IsBuildInBuilding` — true when the plot owner has
+  `PlayerBuildModeData.BuildMode` set, or the private home has `PrivateHomeComponentData.buildMode`.
+  So the refusal means "somebody is editing the plot this object sits in", which is a different
+  question from "the way is blocked" and gets its own switch: while a plot really is being edited the
+  furniture can move or vanish server-side, so this is the likelier of the two to be refused again on
+  the server. No extra detour — the gate is already hooked; only one more code is rewritten, and the
+  toggle arms it independently. `IsBuildInBuilding` also clears a stale build-mode flag of your own
+  (`CharacterProtocolManager.PostBuildMode(false, 4)`) — the original still runs through the
+  trampoline, so that self-heal is kept.
 - Live status shows how many blocks were cleared this session; `[InteractObstacle]` verbose logging
   is a Settings → Logging row.
 - Persisted; default off. Source: `buddy/InteractObstacleBypassFeature.cs`.

@@ -267,6 +267,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Interact Obstacle Bypass", this.interactObstacleStatus));
             }
 
+            if (this.interactBuildModeBypassEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Interact Build-Mode Bypass", this.interactBuildModeStatus));
+            }
+
             if (this.persistentHudEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Persistent HUD", this.persistentHudLastStatus));
