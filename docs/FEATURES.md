@@ -536,6 +536,34 @@ separate on purpose: the first is side-effect free, the second talks to the serv
   `jumpTuningTapHeight`, `jumpTuningGravity`, `jumpTuningFallSpeedLimit`). Implementation:
   `JumpTuningFeature.cs`.
 
+### Quiet congratulation popups (Self)
+
+Swallows the family of full-screen "well done" cards the game throws up after a collection
+milestone, at the event level — the panel is never built.
+
+| Channel | Event | Panel |
+| --- | --- | --- |
+| Справочник → сертификация коллекционера | `XDTDataAndProtocol.Events.PictorialProgressRewardEvent` | `PictorialProgressRewardPanel` |
+| Ранг коллекционера | `XDTDataAndProtocol.Events.CertificationLevelUpEvent` | `PictorialCollectLevelUpTipPanel` |
+| Достижения | `XDTGameSystem.UI.AchievementUnlockedNotifyEvent` | `AchievementTipPanel` |
+| Уровень хобби | `XDTGameSystem.UI.HobbyUnlockedEvent` | `HobbyUnlockPanel` |
+| «Новая запись в справочнике» | `XDTGame.UI.PictorialTipShowRequestedEvent` | `PictorialTipPanel` |
+| BattlePass collect tip | `XDTGameSystem.UI.BattlePassCollectTipEvent` | `BattlePassCollectTipPanel` |
+
+- Each of these events has exactly **one** listener in the whole game (`UIEventBridge`) and each of
+  those handlers does nothing but `SomePanel.Open(...)`. Rewards are already granted server-side
+  before the dispatch (`MailSyncSystem` raises them off a `RewardNotice`), and every panel on the
+  receiving end is display-only — none sends a protocol, marks anything read, or writes PlayerPrefs.
+  Suppressing the forward therefore removes the visual and nothing else.
+- Same mechanism as Skip Show Off's `AlertRewardsEvent`: a suppress-forward hook on the EventCenter
+  dispatch detour. No `.text` patches.
+- **Hooks register lazily**, only the first time the toggle goes on — slots are never released and
+  the pool is shared with every other feature, so an unused filter costs nothing. A refused hook is
+  logged at Warning naming the channel, because the visible symptom would otherwise read as
+  "the toggle does nothing".
+- Not covered: the "Obtained" reward modal (`AlertRewardPanel`) — that one lives under **Skip Show
+  Off**. Persisted as `quietCongratsPopups`. Implementation: `QuietPopupsFeature.cs`.
+
 ### Game UI — Custom UI Timings (Self → Game UI sub-tab)
 
 - Editable display durations for the game's tip/toast popups: item-obtained bubbles

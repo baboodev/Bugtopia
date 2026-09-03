@@ -101,6 +101,8 @@ namespace HeartopiaMod
             public Toggle AnalogMoveToggle;
             public GameObject AnalogMoveHint;
             public Toggle SkipShowOffToggle;
+            public Toggle QuietPopupsToggle;
+            public GameObject QuietPopupsHint;
             public Toggle EmoteUnlockToggle;
             public Toggle FriendInteractUnlockToggle;
             public Toggle SkipCraftDyeToggle;
@@ -347,6 +349,16 @@ namespace HeartopiaMod
             handle.SkipShowOffToggle = this.CreateUguiCheckbox(scrollContent, "SkipShowOffToggle",
                 this.L("Skip Show Off animations"), this.skipShowOffAnimations,
                 new System.Action<bool>(this.OnUguiSelfSkipShowOffToggled));
+
+            handle.QuietPopupsToggle = this.CreateUguiCheckbox(scrollContent, "QuietPopupsToggle",
+                this.L("Quiet congratulation popups"), this.quietCongratsPopups,
+                new System.Action<bool>(this.OnUguiSelfQuietPopupsToggled));
+            // Static help line: name what disappears, since the panels themselves are the only
+            // place the game ever tells you a certification or hobby level landed.
+            handle.QuietPopupsHint = this.CreateUguiLabel(scrollContent, "QuietPopupsHint",
+                this.L("Hides certification, collector rank, achievement, hobby level and pictorial cards."),
+                11f, new Color(muted.r, muted.g, muted.b, 0.85f), false);
+            this.TrySetUguiLabelWrapped(handle.QuietPopupsHint);
 
             handle.EmoteUnlockToggle = this.CreateUguiCheckbox(scrollContent, "EmoteUnlockToggle",
                 this.L("Unlock all emotes (panel + locked ones playable)"), this.emoteUnlockEnabled,
@@ -598,7 +610,17 @@ namespace HeartopiaMod
             {
                 PlaceUguiTopLeft(handle.SkipShowOffToggle.gameObject, rowX, yCur, rowW, 24f);
             }
-            yCur += 30f;
+            yCur += 28f;
+            if (handle.QuietPopupsToggle != null)
+            {
+                PlaceUguiTopLeft(handle.QuietPopupsToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 28f;
+            if (handle.QuietPopupsHint != null)
+            {
+                PlaceUguiTopLeft(handle.QuietPopupsHint, rowX, yCur, rowW, 18f);
+            }
+            yCur += 24f;
 
             if (handle.EmoteUnlockToggle != null)
             {
@@ -698,6 +720,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CustomFovToggle, this.customCameraFOVEnabled);
                 this.SyncUguiToggleFromField(handle.AnalogMoveToggle, this.analogMoveBridgeEnabled);
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
+                this.SyncUguiToggleFromField(handle.QuietPopupsToggle, this.quietCongratsPopups);
                 this.SyncUguiToggleFromField(handle.EmoteUnlockToggle, this.emoteUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.FriendInteractUnlockToggle, this.friendInteractUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
@@ -1125,6 +1148,18 @@ namespace HeartopiaMod
                 return;
             }
             this.skipShowOffAnimations = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Save only: the feature tick owns hook registration, so a UI callback never reaches native
+        // code. Turning it back off un-suppresses the same hooks — nothing to undo.
+        private void OnUguiSelfQuietPopupsToggled(bool value)
+        {
+            if (value == this.quietCongratsPopups)
+            {
+                return;
+            }
+            this.quietCongratsPopups = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

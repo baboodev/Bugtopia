@@ -227,6 +227,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Skip Show Off", "Active"));
             }
 
+            if (this.quietCongratsPopups)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Quiet Popups", "Active"));
+            }
+
             if (this.emoteUnlockEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Emote Unlock", this.emoteUnlockStatus));

@@ -237,6 +237,7 @@ namespace HeartopiaMod
             data.bunnyHopEnabled = this.bunnyHopEnabled;
             data.analogMoveBridgeEnabled = this.analogMoveBridgeEnabled;
             data.skipShowOffAnimations = this.skipShowOffAnimations;
+            data.quietCongratsPopups = this.quietCongratsPopups;
             data.emoteUnlockEnabled = this.emoteUnlockEnabled;
             data.friendInteractUnlockEnabled = this.friendInteractUnlockEnabled;
             data.foragingAnimEnabled = this.foragingAnimEnabled;
@@ -612,6 +613,7 @@ namespace HeartopiaMod
             this.bunnyHopEnabled = data.bunnyHopEnabled;
             this.analogMoveBridgeEnabled = data.analogMoveBridgeEnabled;
             this.skipShowOffAnimations = data.skipShowOffAnimations;
+            this.quietCongratsPopups = data.quietCongratsPopups;
             this.emoteUnlockEnabled = data.emoteUnlockEnabled;
             this.friendInteractUnlockEnabled = data.friendInteractUnlockEnabled;
             this.foragingAnimEnabled = data.foragingAnimEnabled;
@@ -1032,6 +1034,7 @@ namespace HeartopiaMod
                         else if (line.Contains("bunnyHopEnabled")) this.bunnyHopEnabled = GetJsonInt(line, "\"bunnyHopEnabled\":") != 0;
                         else if (line.Contains("analogMoveBridgeEnabled")) this.analogMoveBridgeEnabled = GetJsonInt(line, "\"analogMoveBridgeEnabled\":") != 0;
                         else if (line.Contains("skipShowOffAnimations")) this.skipShowOffAnimations = GetJsonInt(line, "\"skipShowOffAnimations\":") != 0;
+                        else if (line.Contains("quietCongratsPopups")) this.quietCongratsPopups = GetJsonInt(line, "\"quietCongratsPopups\":") != 0;
                         else if (line.Contains("skipCraftDyeAnimations")) this.skipCraftDyeAnimations = GetJsonInt(line, "\"skipCraftDyeAnimations\":") != 0;
                         else if (line.Contains("autoLearnRecipes")) this.autoLearnRecipes = GetJsonInt(line, "\"autoLearnRecipes\":") != 0;
                         else if (line.Contains("autoLikeOwnHome")) this.autoLikeOwnHome = GetJsonInt(line, "\"autoLikeOwnHome\":") != 0;

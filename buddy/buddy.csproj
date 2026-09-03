@@ -451,6 +451,7 @@
     <Compile Include="NoCollisionFeature.cs" />
     <Compile Include="HomeLikeFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
+    <Compile Include="QuietPopupsFeature.cs" />
     <Compile Include="TutorialBlockFeature.cs" />
     <Compile Include="PartyAutoDeclineFeature.cs" />
     <Compile Include="ActivityEventAutoDeclineFeature.cs" />
