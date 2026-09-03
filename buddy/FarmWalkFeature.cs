@@ -4649,6 +4649,29 @@ namespace HeartopiaMod
 
             this.farmWalkIsSwimming = true;
 
+            // ⭐ THE REPAIR SINK OWNS THE VERTICAL AXIS WHILE IT HOLDS — DO NOT FIGHT IT.
+            //
+            // Two controllers were driving depth every frame with opposite intent and no
+            // arbitration: this one steering toward the node's height, TryHoldDescentIntoRepairAura
+            // pulling DOWN onto the thrown kit. Each frame one released what the other had pressed,
+            // so the player hung motionless while both logged the attempt. Measured underwater:
+            //     00:01:52  repair kit thrown — sinking onto it ...   x60 in one second
+            //     00:01:52  surfacing 7,0m (last hold moved  0,00m in 0,0s)   x60 in the same second
+            // Sixty flips a second, 0.00 m of movement, and the target depth drifting the WRONG way
+            // (6.9 m to 7.1 m over a second and a half). The route rebuilds that followed were the
+            // symptom — a walk that cannot close eventually re-paths, and got IDENTICAL routes back
+            // ten times out of fourteen, because nothing was ever wrong with the route.
+            //
+            // The lease is held by whoever is actually pressing, not by a flag mirrored from a
+            // caller: TryHoldDescentIntoRepairAura stamps it on every frame it holds, and BOTH its
+            // callers (the walk's own repair hold and the contamination clean) are covered by that
+            // one stamp. Half a second is long enough to be immune to which of the two runs first
+            // in a frame, and short enough that the walk resumes as soon as the sink lets go.
+            if (Time.unscaledTime - this.farmRepairSinkHeldAt < FarmRepairSinkAxisLease)
+            {
+                return;
+            }
+
             float now = Time.unscaledTime;
             float dy = this.ResolveFarmWalkDepthAim().y - selfPos.y;
 
@@ -4796,6 +4819,11 @@ namespace HeartopiaMod
             this.ReleaseFarmWalkDepth();
         }
 
+        // How long a single frame's claim on the vertical axis lasts. Only the repair sink takes
+        // it; DriveFarmWalkDepth stands down for as long as it is held.
+        private const float FarmRepairSinkAxisLease = 0.5f;
+        private float farmRepairSinkHeldAt = -999f;
+
         // Sink onto a thrown repair kit so its aura actually reaches the player.
         //
         // The ToolRestorer is an entity resting on the sea floor with a SPHERE of effect around it
@@ -4819,13 +4847,23 @@ namespace HeartopiaMod
                 return false; // on land the kit lands at the player's feet; nothing to do
             }
 
+            // Claim the axis for this frame, and notice whether the claim is a NEW one. The same
+            // stamp does both jobs, which is why the announcement cannot flood again: it is keyed on
+            // the hold starting, not on the held value — that value used to be flipped back by the
+            // depth controller sixty times a second, and every flip printed the line.
             float now = Time.unscaledTime;
+            bool freshHold = now - this.farmRepairSinkHeldAt >= FarmRepairSinkAxisLease;
+            this.farmRepairSinkHeldAt = now;
+
             if (this.farmWalkVerticalHeld >= 0)
             {
                 this.TryInvokeFarmWalkSwimVertical(swim, false, true);
                 this.farmWalkVerticalHeld = -1;
                 this.farmWalkVerticalAssertedAt = now;
-                ModLogger.Msg("[FarmWalk] repair kit thrown — sinking onto it to enter the repair aura.");
+                if (freshHold)
+                {
+                    ModLogger.Msg("[FarmWalk] repair kit thrown — sinking onto it to enter the repair aura.");
+                }
             }
             else if (now - this.farmWalkVerticalAssertedAt >= FarmWalkDepthReassertInterval)
             {
