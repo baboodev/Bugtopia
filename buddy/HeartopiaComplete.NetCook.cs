@@ -8757,7 +8757,23 @@ namespace HeartopiaMod
                 int currentCookerType = this.netCookCookerType;
                 if (!this.netCookRecipeCookerTypes.TryGetValue(this.netCookRecipeId, out int recipeCookerType))
                 {
-                    return this.netCookRecipeCacheCookerStaticId == this.netCookCookerStaticId;
+                    // No cookware tag for this recipe — the tag is only written when the burner
+                    // reports a cookware type, and on this build it reports 0, so this is the normal
+                    // path. Fall back to "does the recipe cache belong to the cooker we are pointing
+                    // at", but compare by MENU: the cache is keyed by the staticId it was built from,
+                    // while the working set now legitimately mixes styles that share one menu
+                    // (370001/370002/370003...), and ProcessNetCookTargets repoints the context at
+                    // each target in turn. A raw staticId equality therefore failed on the first
+                    // target of another style and drained the run as "ingredients unavailable" —
+                    // field log: 20 dishes requested, 2 cooked, committed=2 on every attempt.
+                    if (this.IsSameNetCookCookerFamily(this.netCookRecipeCacheCookerStaticId, 0, this.netCookCookerStaticId, 0))
+                    {
+                        return true;
+                    }
+
+                    status = "Recipe cache belongs to cooker " + this.netCookRecipeCacheCookerStaticId
+                        + ", current cooker is " + this.netCookCookerStaticId + ".";
+                    return false;
                 }
 
                 if (currentCookerType > 0 && recipeCookerType > 0 && currentCookerType != recipeCookerType)
