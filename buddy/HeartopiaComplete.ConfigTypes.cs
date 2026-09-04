@@ -356,6 +356,9 @@ namespace HeartopiaMod
             public int netCookCookQuantity;
             public float homelandFarmWaterRadius;
             public bool homelandFarmAutoFertilizeEnabled;
+            // Privacy pause radius in metres, 0 = off. A missing element deserializes to 0, which
+            // is exactly the off state — no sentinel needed.
+            public float homelandFarmPrivacyRadius;
             public float autoFishScanTimeout = -1f;
             public float autoFishTeleportDelay = -1f;
             public float autoFishFishShadowDetectRange = -1f;

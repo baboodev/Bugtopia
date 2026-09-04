@@ -90,12 +90,13 @@ namespace HeartopiaMod
     // the Foraging convention), with the two documented height deviations noted below:
     //   auto card      y=8    h=176  (capture 38, status 43, hint 74, checkbox 98, start/stop 126)
     //   y += 188   →   radius card  y=196 h=88  (labels 34, slider 54)
-    //   y += 100   →   crops card   y=296 h=160 (storage lbl 36, picker 58, refresh 90, sel 122)
-    //   y += 172   →   fert card    y=468 h=160 (same rows; refresh 140w, count lbl at 166)
-    //   y += 172   →   ops card     y=640 h=236 (rows 40/78/116/154 two-col + 192 full-width)
-    //   y += 248   →   event diag   y=888 (h28); y += 34 → event-driven y=922 (h28)
-    //   y += 38    →   status card  y=960 h=52  (label 16,10, wrapped 11pt @ .82)
-    //   y += 62    →   stop button  y=1022 (160x30); + 40 → content height 1062.
+    //   y += 100   →   privacy card y=296 h=88  (labels 34, slider 54)
+    //   y += 100   →   crops card   y=396 h=160 (storage lbl 36, picker 58, refresh 90, sel 122)
+    //   y += 172   →   fert card    y=568 h=160 (same rows; refresh 140w, count lbl at 166)
+    //   y += 172   →   ops card     y=740 h=236 (rows 40/78/116/154 two-col + 192 full-width)
+    //   y += 248   →   event diag   y=988 (h28); y += 34 → event-driven y=1022 (h28)
+    //   y += 38    →   status card  y=1060 h=52 (label 16,10, wrapped 11pt @ .82)
+    //   y += 62    →   stop button  y=1122 (160x30); + 40 → content height 1162.
     // NOTE (2026-07-22): the radius card is 88, not the source's 70 — its slider runs y=54..74 and
     // was overflowing the card. Everything from the crops card down is therefore +18 off the IMGUI
     // y-cursor; the 12px inter-card gap is unchanged. Don't "restore" these to source parity.
@@ -104,6 +105,9 @@ namespace HeartopiaMod
     // breathing room the radius/crops/fert cards carry). Everything from the event-diag toggle
     // down is therefore -36 vs the 07-22 chain (net -18 vs the raw IMGUI cursor); the 12px gap
     // after the ops card and every later step are unchanged. Don't "restore" this either.
+    // NOTE (2026-09-04): the PRIVACY PAUSE card was inserted after the radius card, so everything
+    // from the crops card down is a further +100 (its 88 height + the uniform 12px gap). It has no
+    // IMGUI twin — the feature is UGUI-only.
     //
     // Per-gated-frame cadence (shell visible + New Features tab + Homeland Farm sub, matching
     // the source running these on every IMGUI repaint of the tab):
@@ -171,6 +175,11 @@ namespace HeartopiaMod
             public Slider RadiusSlider;
             public GameObject RadiusValueLabel;
             public string RadiusValueShown;
+
+            // PRIVACY PAUSE card — same three-field shape; 0 shows as "Off".
+            public Slider PrivacySlider;
+            public GameObject PrivacyValueLabel;
+            public string PrivacyValueShown;
 
             // CROPS card
             public UguiHomelandFarmSegmentHandle[] SeedSegments;   // Backpack/Warehouse/Both
@@ -559,10 +568,37 @@ namespace HeartopiaMod
                 true, new System.Action<float>(this.OnUguiHomelandFarmRadiusChanged));
             PlaceUguiTopLeft(handle.RadiusSlider.gameObject, 16f, 54f, rowW, 20f);
 
+            // -------- 2b. PRIVACY PAUSE card (y=296, h=88) --------
+            // Added 2026-09-04. Same geometry as the FARM RADIUS card above it, so the two
+            // distance sliders read as a pair; every scrollContent child below moved down by
+            // +100 (88 card + the file's uniform 12px gap).
+            GameObject privacyCard = this.CreateUguiSettingsMainPanel(scrollContent, "PrivacyPanel",
+                this.L("homeland_farm.privacy_section"));
+            PlaceUguiTopLeft(privacyCard, 8f, 296f, panelW, 88f);
+
+            GameObject privacyName = this.CreateUguiLabel(privacyCard.transform, "SliderLabel",
+                this.L("homeland_farm.privacy_slider_label"), 11f,
+                new Color(textColor.r, textColor.g, textColor.b, 0.78f), false);
+            this.TrySetUguiLabelBold(privacyName);
+            PlaceUguiTopLeft(privacyName, 16f, 34f, rowW * 0.55f, 18f);
+
+            handle.PrivacyValueShown = string.Empty;
+            handle.PrivacyValueLabel = this.CreateUguiLabel(privacyCard.transform, "SliderValue",
+                string.Empty, 12f, textColor, false);
+            this.TrySetUguiLabelRightAligned(handle.PrivacyValueLabel);
+            PlaceUguiTopLeft(handle.PrivacyValueLabel, 16f + rowW * 0.55f, 34f, rowW * 0.45f, 18f);
+
+            // 0..100 with 0 = off: one control, no companion toggle (autoBubbleCollectRadius
+            // precedent). The default is 0, so a fresh install behaves exactly as before.
+            handle.PrivacySlider = this.CreateUguiSlider(privacyCard.transform, "PrivacySlider",
+                HomelandFarmPrivacyMinRadius, HomelandFarmPrivacyMaxRadius, this.homelandFarmPrivacyRadius,
+                true, new System.Action<float>(this.OnUguiHomelandFarmPrivacyRadiusChanged));
+            PlaceUguiTopLeft(handle.PrivacySlider.gameObject, 16f, 54f, rowW, 20f);
+
             // -------- 3. CROPS card (y=278, h=160 — :22340-22375) --------
             GameObject cropsCard = this.CreateUguiSettingsMainPanel(scrollContent, "CropsPanel",
                 this.L("homeland_farm.sow_section"));
-            PlaceUguiTopLeft(cropsCard, 8f, 296f, panelW, 160f);
+            PlaceUguiTopLeft(cropsCard, 8f, 396f, panelW, 160f);
 
             GameObject seedStorageLabel = this.CreateUguiHomelandFarmSectionLabel(cropsCard.transform,
                 "SeedStorageLabel", this.L("homeland_farm.seed_storage"));
@@ -592,7 +628,7 @@ namespace HeartopiaMod
             // -------- 4. FERTILIZER card (y=450, h=160 — :22377-22412) --------
             GameObject fertCard = this.CreateUguiSettingsMainPanel(scrollContent, "FertPanel",
                 this.L("homeland_farm.fertilize_section"));
-            PlaceUguiTopLeft(fertCard, 8f, 468f, panelW, 160f);
+            PlaceUguiTopLeft(fertCard, 8f, 568f, panelW, 160f);
 
             GameObject fertStorageLabel = this.CreateUguiHomelandFarmSectionLabel(fertCard.transform,
                 "FertStorageLabel", this.L("homeland_farm.fert_storage"));
@@ -629,7 +665,7 @@ namespace HeartopiaMod
             // breathing room the radius/crops/fert cards carry) = 236. Everything below is -36.
             GameObject opsCard = this.CreateUguiSettingsMainPanel(scrollContent, "OpsPanel",
                 this.L("homeland_farm.operations_section"));
-            PlaceUguiTopLeft(opsCard, 8f, 640f, panelW, 236f);
+            PlaceUguiTopLeft(opsCard, 8f, 740f, panelW, 236f);
 
             float colW = (rowW - 12f) / 2f;
             float col1 = 16f;
@@ -674,18 +710,18 @@ namespace HeartopiaMod
             handle.EventDiagToggle = this.CreateUguiCheckbox(scrollContent, "EventDiagToggle",
                 this.L("Event Diagnostics (log)"), this.homelandFarmEventDiagEnabled,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDiagToggled));
-            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 888f, panelW, 28f);
+            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 988f, panelW, 28f);
 
             handle.EventDrivenToggle = this.CreateUguiCheckbox(scrollContent, "EventDrivenToggle",
                 this.L("Event-driven auto-farm (no rescan)"), this.homelandFarmAutoEventDriven,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDrivenToggled));
-            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 922f, panelW, 28f);
+            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 1022f, panelW, 28f);
 
             // -------- 8. Status card (source y=978, h=52 — :22501-22508) --------
             // Headerless panel (the source box carries no label — Animal Care's "" precedent).
             GameObject statusCard = this.CreateUguiSettingsMainPanel(scrollContent, "StatusPanel",
                 string.Empty);
-            PlaceUguiTopLeft(statusCard, 8f, 960f, panelW, 52f);
+            PlaceUguiTopLeft(statusCard, 8f, 1060f, panelW, 52f);
 
             // statusStyle: 11pt, wordWrap, uiText @ 0.82 (:22227-22228). Text painted by the
             // sync pass (key-then-localize — file header).
@@ -700,10 +736,10 @@ namespace HeartopiaMod
             handle.StopButton = this.CreateUguiPrimaryButton(scrollContent, "StopButton",
                 this.L("homeland_farm.stop"),
                 new System.Action(this.OnUguiHomelandFarmStopClicked));
-            PlaceUguiTopLeft(handle.StopButton, 8f, 1022f, 160f, 30f);
+            PlaceUguiTopLeft(handle.StopButton, 8f, 1122f, 160f, 30f);
 
-            // Cursor chain end (file header): stop button 1022 + the source's trailing 40 = 1062.
-            this.SetUguiScrollContentHeight(scrollContent, 1062f);
+            // Cursor chain end (file header): stop button 1122 + the source's trailing 40 = 1162.
+            this.SetUguiScrollContentHeight(scrollContent, 1162f);
 
             // Seed every dynamic state once (texts, interactables, segment styles, selector
             // rows, Start/Stop swap) via the same pass the processor runs. The warmup kick,
@@ -762,6 +798,27 @@ namespace HeartopiaMod
                 {
                     this.homelandFarmWaterRadiusSavePending = false;
                     this.PersistHomelandFarmRadius();
+                }
+
+                // The same debounce machine for the privacy-pause slider, over its own three
+                // fields (declared in HomelandFarmPrivacyPauseFeature.cs).
+                if (this.homelandFarmPrivacyRadiusLastSeen < 0f)
+                {
+                    this.homelandFarmPrivacyRadiusLastSeen = this.homelandFarmPrivacyRadius;
+                }
+                else if (this.homelandFarmPrivacyRadius != this.homelandFarmPrivacyRadiusLastSeen)
+                {
+                    this.homelandFarmPrivacyRadiusLastSeen = this.homelandFarmPrivacyRadius;
+                    this.homelandFarmPrivacyRadiusSavePending = true;
+                    this.homelandFarmPrivacyRadiusSaveAt = Time.realtimeSinceStartup
+                        + HomelandFarmRadiusSaveDebounceSeconds;
+                }
+
+                if (this.homelandFarmPrivacyRadiusSavePending
+                    && Time.realtimeSinceStartup >= this.homelandFarmPrivacyRadiusSaveAt)
+                {
+                    this.homelandFarmPrivacyRadiusSavePending = false;
+                    this.PersistHomelandFarmPrivacyRadius();
                 }
 
                 this.SyncUguiHomelandFarmDynamicState(handle);
@@ -824,6 +881,19 @@ namespace HeartopiaMod
             }
             this.SyncUguiSelfLabelText(handle.RadiusValueLabel, ref handle.RadiusValueShown,
                 $"{this.homelandFarmWaterRadius:F0}m"); // :22313
+
+            // -------- PRIVACY PAUSE --------
+            // Always interactable: the slider IS the on/off control (0 = off), so there is no
+            // state in which disabling it would be right.
+            if (handle.PrivacySlider != null
+                && handle.PrivacySlider.value != this.homelandFarmPrivacyRadius)
+            {
+                handle.PrivacySlider.SetValueWithoutNotify(this.homelandFarmPrivacyRadius);
+            }
+            this.SyncUguiSelfLabelText(handle.PrivacyValueLabel, ref handle.PrivacyValueShown,
+                this.homelandFarmPrivacyRadius < 1f
+                    ? this.L("homeland_farm.privacy_off")
+                    : $"{this.homelandFarmPrivacyRadius:F0}m");
 
             // -------- CROPS --------
             if (handle.SeedSegments != null && handle.SeedSegments.Length == 3)
@@ -935,6 +1005,13 @@ namespace HeartopiaMod
         private void OnUguiHomelandFarmRadiusChanged(float value)
         {
             this.homelandFarmWaterRadius = Mathf.Round(value);
+        }
+
+        // Privacy-pause radius. Same shape as the farm-radius handler: a plain rounded field
+        // write, with the debounce machine in the processor picking the change up.
+        private void OnUguiHomelandFarmPrivacyRadiusChanged(float value)
+        {
+            this.homelandFarmPrivacyRadius = Mathf.Round(value);
         }
 
         // :22349-22354 — a guarded plain field write, ZERO other side effects, NO persistence.

@@ -1418,10 +1418,11 @@ Tab layout (top → bottom):
 
 1. **Auto Farming** — Capture planters + Start / Stop.
 2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**.
-3. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
-4. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
-5. **Operations** — buttons: Water in radius · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
-6. Status panel + **Stop** (cancels the running operation).
+3. **Privacy Pause** — single slider (0–100 m, **0 = off**, default off); **persisted to config**.
+4. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
+5. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
+6. **Operations** — buttons: Water in radius · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
+7. Status panel + **Stop** (cancels the running operation).
 
 ### Manual operations (radius)
 
@@ -1448,6 +1449,27 @@ Item names in the seed/fertilizer selectors resolve through the same game-table 
 **Stop:** manual (Stop button / Stop auto farm), or automatic once the selected seed runs out **and** the last harvest is collected.
 
 Enable `MasterLogHomelandFarm` for per-tick logs (`Auto crop timing`, `Auto poll`, `next ripe in …`).
+
+### Privacy Pause
+
+Holds auto farming while **another player stands within N metres of your home plot**. The distance is
+measured to the nearest **edge of the plot rectangle**, not to a point, so it means the same thing at
+every side and corner of the field. The rectangle is the game's own — `FieldComponent.minCorner` /
+`maxCorner` (what `OutOfBoundsTesting` uses to validate building placement), read in the plot's local
+frame, so a rotated plot measures correctly.
+
+- Slider **0–100 m**; **0 = off**, which is the default — nothing changes until you set a distance.
+- Both send paths are held: the auto loop *and* the event-driven weeder, which runs off the crop
+  detour independently of the loop.
+- Hysteresis of 5 m on resume, so someone loitering on the boundary cannot flap the farm.
+- **Inert while you are away from the field** — ECS entities stream around the player, not around the
+  plot, so at distance the scan cannot see who is at home. It says so once in the log; remote weeding
+  and sowing keep running.
+- Manual tab buttons and the water+weed hotkey are **not** gated — they are an explicit user action.
+- Resolution failures fail **open** (farm keeps running) and are always logged under
+  `[HomelandFarmPrivacy]`; pause/resume transitions log one line each.
+
+Implemented in `HomelandFarmPrivacyPauseFeature.cs`.
 
 ### Entity discovery — the scan funnel
 
@@ -1644,7 +1666,7 @@ Sections typically include:
 | Performance | FPS bypass; **FPS Watchdog** (see below); LOD override (game default / better / performance / custom bias & max level) |
 | Misc | Restore defaults, export-related options |
 
-Config persisted to `%LocalLow%/Bugtopia/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, and the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30).
+Config persisted to `%LocalLow%/Bugtopia/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30) and the **Homeland Farm privacy pause radius** (`homelandFarmPrivacyRadius`, clamped 0–100, default 0 = off).
 
 Separate legacy-compatible JSON fragments still loaded line-by-line for some keys in older migration path.
 

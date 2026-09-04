@@ -11,6 +11,7 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
+        private const string HomelandFarmTag = "HomelandFarm";
         private static bool HomelandFarmLogsEnabled => MasterLogHomelandFarm;
         private const float HomelandFarmDefaultWaterRadius = 30f;
         private const float HomelandFarmMinWaterRadius = 1f;
@@ -241,6 +242,8 @@ namespace HeartopiaMod
         private Vector3 homelandFarmAutoCenter = Vector3.zero;
         private float homelandFarmAutoCaptureRadius = 0f;
         private int homelandFarmAutoPlanterCount = 0;
+        // Last reported sow outcome, so ReportHomelandFarmAutoSowOutcome logs on CHANGE only.
+        private string homelandFarmAutoSowReportSignature = string.Empty;
         private int homelandFarmAutoCaptureExcludedOutsideRadius = 0;
         private bool homelandFarmAutoRunning = false;
         // Separate coroutine slot for the weed+water hotkey so it can run INDEPENDENTLY of auto-farm
@@ -12133,6 +12136,32 @@ namespace HeartopiaMod
             }
         }
 
+        // Unconditional (Tier 1) account of what the sow step decided, logged only when the answer
+        // CHANGES — a steady state costs one line, not one per tick. The whole sow path used to be
+        // Tier 2, so with MasterLogHomelandFarm off (its default) a run that filled half the field
+        // and then quietly stopped left NO trace, and the reason had to be reconstructed from the
+        // source. These are exactly the numbers the decision is made from, so the line answers
+        // "why is only half the field sown" on its own: seeds gone, nothing free, or the
+        // event-driven full-field estimate (tracked + pending vs planters) skipping the scan.
+        private void ReportHomelandFarmAutoSowOutcome(string outcome, int sowed)
+        {
+            string signature = outcome + "|" + sowed
+                + "|" + this.homelandFarmAutoCropNetIds.Count
+                + "|" + this.homelandFarmAutoPendingSowBoxNetIds.Count
+                + "|" + this.homelandFarmAutoPlanterCount;
+            if (string.Equals(signature, this.homelandFarmAutoSowReportSignature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            this.homelandFarmAutoSowReportSignature = signature;
+            FeatureLog.Life(HomelandFarmTag, "sow: " + outcome
+                + " — sowed " + sowed
+                + ", planters " + this.homelandFarmAutoPlanterCount
+                + ", tracked crops " + this.homelandFarmAutoCropNetIds.Count
+                + ", pending boxes " + this.homelandFarmAutoPendingSowBoxNetIds.Count + ".");
+        }
+
         private bool TryHomelandFarmTryReadPlanterNetIdFromSowPoint(object point, out uint planterNetId)
         {
             planterNetId = 0U;
@@ -12497,6 +12526,20 @@ namespace HeartopiaMod
                         inHomeland = false;
                     }
 
+                    // Privacy pause: hold the whole tick while another player stands within the
+                    // configured distance of the home plot RECTANGLE. Placed before every scan and
+                    // every send, so a witness never sees a command land. The refresh is the only
+                    // AuraMono pass allowed here besides the farm's own, and it is self-throttled;
+                    // the gate is inert when the slider is 0 or when we are away from the field
+                    // (see HomelandFarmPrivacyPauseFeature.cs).
+                    this.RefreshHomelandFarmPrivacyState(inHomeland);
+                    if (this.IsHomelandFarmPrivacyBlocking)
+                    {
+                        this.homelandFarmLastStatus = this.HomelandFarmPrivacyStatusText();
+                        yield return ModWait.Realtime(HomelandFarmPrivacyPollSeconds);
+                        continue;
+                    }
+
                     // 1. DISCOVERY FIRST — (re)build the crop cache so we know what is actually in the
                     //    zone BEFORE deciding to sow. This is the only radius scan in the loop. Running
                     //    it before sow is what prevents re-sowing already-occupied planters on a restart
@@ -12665,6 +12708,7 @@ namespace HeartopiaMod
                             && Time.realtimeSinceStartup < this.homelandFarmAutoNextFullFieldSowSweepAt)
                         {
                             sowScanSkipped = true;
+                            this.ReportHomelandFarmAutoSowOutcome("skipped — field looks full", 0);
                         }
                     }
 
@@ -12679,6 +12723,7 @@ namespace HeartopiaMod
                         if (seed == null)
                         {
                             seedsExhausted = true;
+                            this.ReportHomelandFarmAutoSowOutcome("selected seed exhausted", 0);
                             this.HomelandFarmLog("Auto: selected seed exhausted.");
                         }
                         else
@@ -12693,6 +12738,7 @@ namespace HeartopiaMod
 
                             if (this.homelandFarmAutoSowCount > 0)
                             {
+                                this.ReportHomelandFarmAutoSowOutcome("filled free planters", this.homelandFarmAutoSowCount);
                                 totalSown += this.homelandFarmAutoSowCount;
                                 // Full registration wait: just-sown crops are invisible for a beat.
                                 nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoSowCooldownSeconds;
@@ -12708,6 +12754,7 @@ namespace HeartopiaMod
                             // Nothing was free to sow right now (e.g. boxes just harvested aren't
                             // server-free yet). Use a SHORT retry gap, not the long registration
                             // cooldown, so freed boxes get filled within seconds.
+                            this.ReportHomelandFarmAutoSowOutcome("no free planters found", 0);
                             nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoEmptyRetrySeconds;
                         }
                     }
@@ -12744,6 +12791,7 @@ namespace HeartopiaMod
 
                             if (this.homelandFarmAutoSowCount > 0)
                             {
+                                this.ReportHomelandFarmAutoSowOutcome("filled free planters (remote)", this.homelandFarmAutoSowCount);
                                 totalSown += this.homelandFarmAutoSowCount;
                                 nextSowAllowedAt = Time.realtimeSinceStartup + HomelandFarmAutoSowCooldownSeconds;
                                 // No discovery away (scan impossible): the new crops are ADOPTED by the
@@ -12812,7 +12860,16 @@ namespace HeartopiaMod
                                 + this.homelandFarmAutoPendingSowBoxNetIds.Count + waitingLabel);
                         }
 
-                        yield return ModWait.Realtime(inHomeland ? HomelandFarmAutoEmptyRetrySeconds : HomelandFarmAutoMaxIdleSleepSeconds);
+                        // Sliced while the privacy gate is armed so the cached verdict cannot go a
+                        // whole idle sleep stale; one plain wait otherwise (see the routine).
+                        IEnumerator idleWait = this.HomelandFarmAutoPrivacyAwareSleepRoutine(
+                            inHomeland ? HomelandFarmAutoEmptyRetrySeconds : HomelandFarmAutoMaxIdleSleepSeconds,
+                            inHomeland);
+                        while (idleWait.MoveNext())
+                        {
+                            yield return idleWait.Current;
+                        }
+
                         needDiscovery = true;
                         continue;
                     }
@@ -12852,7 +12909,11 @@ namespace HeartopiaMod
                             + " crop(s) tracked)" + (inHomeland ? string.Empty : ", away") + ", sleeping " + sleep.ToString("F0") + "s.");
                     }
 
-                    yield return ModWait.Realtime(sleep);
+                    IEnumerator tickWait = this.HomelandFarmAutoPrivacyAwareSleepRoutine(sleep, inHomeland);
+                    while (tickWait.MoveNext())
+                    {
+                        yield return tickWait.Current;
+                    }
                 }
 
                 this.homelandFarmLastStatus = "Auto farm complete — sown " + totalSown + ", weeded " + totalWeeded
@@ -12866,6 +12927,9 @@ namespace HeartopiaMod
             {
                 this.homelandFarmScanCenterOverride = null;
                 this.homelandFarmAutoRunning = false;
+                this.homelandFarmAutoSowReportSignature = string.Empty; // next run reports afresh
+                // A stopped farm must never leave the event-driven weeder gated off.
+                this.ResetHomelandFarmPrivacyState();
                 this.homelandFarmAutoCropNetIds.Clear();
                 this.homelandFarmAutoHarvestedNetIds.Clear();
                 this.homelandFarmAutoPendingSowBoxNetIds.Clear();

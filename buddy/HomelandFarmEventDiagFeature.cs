@@ -182,7 +182,12 @@ namespace HeartopiaMod
                 // auto-farm, send the weed command (throttled). This is what lets the auto loop sleep
                 // until maturity instead of polling every second to catch weeds. Weeding works at
                 // distance (netId-keyed command), so this keeps clearing weeds even while roaming.
-                if (entry.HasWeed && this.homelandFarmAutoRunning && this.homelandFarmAutoCropNetIds.Contains(netId))
+                // The privacy gate has to be honoured HERE too: this weeder runs off the detour
+                // drain, independently of the auto loop, so gating only the loop would leave weed
+                // commands landing in front of a visitor. It is a cached bool — the scan that
+                // maintains it runs in the coroutine, never here.
+                if (entry.HasWeed && this.homelandFarmAutoRunning && !this.IsHomelandFarmPrivacyBlocking
+                    && this.homelandFarmAutoCropNetIds.Contains(netId))
                 {
                     this.TryHomelandFarmAutoWeedThrottled(netId);
                 }

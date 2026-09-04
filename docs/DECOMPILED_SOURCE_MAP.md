@@ -992,6 +992,14 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 - **Access:** **A** (Aura mono: fieldSystem, buildWorld matrices, putZone rectMatrix, native `CropSeeding`); partial **R** for managed fallback
 - **Files:** `HomelandFarmFeature.cs`, `tools/parse_grow_packet.py`
 
+#### `HomelandFarmPrivacyPauseFeature`
+- **Holds auto farm while a remote player is near the home plot**, measured to the nearest EDGE of the plot rectangle
+- **Game types:** `Entities.fieldSystem` → `FieldComponentSystem.GetFieldByOwnerId`, `FieldComponent.minCorner/maxCorner/fieldZone`, `LevelObject.localToWorldMatrix`, `RemotePlayerComponent`
+- **Dump:** `XDTLevelAndEntity/XDTLevelAndEntity.GameplaySystem.CraftingSystem/FieldComponent.cs` (`RefreshLevelObjectRect`, `CheckInArea`); rectangle semantics cross-checked against `XDTDataAndProtocol/XDTLevelAndEntity.Core.Craft/OutOfBoundsTesting.cs`
+- **Access:** **A** (AuraMono only)
+- **Notes:** the game's own `FieldComponent.CheckInArea(pos, safeDis)` is deliberately NOT used — it widens the rectangle per axis (Chebyshev), so a player off a corner counts as near at `radius·√2`
+- **Files:** `HomelandFarmPrivacyPauseFeature.cs`
+
 ---
 
 ### 3.18 Snow sculpting
@@ -1110,6 +1118,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Wild animal gifts | WildAnimalProtocolManager.HaveGift, AnimalUtil, AnimalProtocolManager.TakeGift | WildAnimalGiftFeature.cs | A |
 | Shop buy-all coin | ShopSystem, ShopItemData, ShopShelfProtocolManager, BuyStoreItemCommand, ClothesStoreEntry, ClothesStoreBuyItemsCommand, PlayerServiceSystem | ShopBuyAllFeature.cs | A (+ R listing/buy fallback) |
 | Homeland sow/fertilize | CropProtocolManager, GrowCropNetworkCommand, SeedBagCommand, BuildSingle, CropComponent | HomelandFarmFeature.cs | A + R |
+| Homeland privacy pause | Entities.fieldSystem, FieldComponentSystem.GetFieldByOwnerId, FieldComponent.minCorner/maxCorner, LevelObject.localToWorldMatrix, RemotePlayerComponent | HomelandFarmPrivacyPauseFeature.cs | A |
 | Puzzle | JigsawPuzzleSystem, JigsawPuzzleProtocolManager, DataCenter | PuzzleNetFeature.cs | R + A |
 | NPC teleport | TableData.TableNpcs | HC | A + R + N |
 | Noclip / TP | Unity CharacterController, Transform | *Patch.cs | I + H |
