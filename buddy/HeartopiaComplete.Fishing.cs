@@ -1406,6 +1406,50 @@ namespace HeartopiaMod
             return true;
         }
 
+        // The stamina gate the vanilla cast has and the farm did not.
+        //
+        // FishingCommand.CheckExecuteThrowCommand refuses the throw unless
+        //     player.dataComponent.GetStaminaCurrValue() > TableData.TableInteractions[600].staminaCost
+        // and tips the player with UITipEvent 13. AutoFishingFarm never runs that command: the FSM
+        // path enters at GameplayApi.EnterFishing, which is what ExecuteCommand() calls AFTER the
+        // check, and Server-Side Fishing goes straight to FishingProtocolManager.CastRod. So nothing
+        // on our side ever looked at energy -- while the server keeps enforcing it: an out-of-stamina
+        // cast comes back CmdCastRodResult=false on the server-side path, and on the FSM path leaves
+        // the state machine sitting in Waiting until it times out. Either way the cycle is burned for
+        // nothing, which is why the farm asks this before it casts.
+        //
+        // THE COST IS A CONSTANT, not a table read: row 600 of the Interaction table carries
+        // _staminaCost = 2 (decrypted tables, tools/HeartopiaTables/cn_tables.db), and pulling that
+        // one int out of TableData.TableInteractions would mean inflating a
+        // Dictionary<int, TableInteraction> walk over AuraMono on every cast. If a game update ever
+        // raises the cost, this gate only becomes permissive again -- the server refusal and the
+        // energy/durability line in DescribeServerFishResources() still report the truth.
+        //
+        // FAIL-OPEN BY DESIGN. Energy comes from the shared cache (PlayerStaminaUpdatedEvent, with
+        // the energy panel's text as the fallback). When neither has produced a reading this returns
+        // false: a gate that cannot see the value must never be the thing that stops the farm.
+        private const int FishingCastStaminaCost = 2;
+
+        public bool IsFishingEnergyTooLow(out string status)
+        {
+            try
+            {
+                if (!this.TryReadEnergy(out int current, out int max) || max <= 0 || current < 0)
+                {
+                    status = "energy unknown - cast allowed";
+                    return false;
+                }
+
+                status = "energy " + current + "/" + max + " (cast needs > " + FishingCastStaminaCost + ")";
+                return current <= FishingCastStaminaCost;
+            }
+            catch (Exception ex)
+            {
+                status = "energy read failed: " + ex.Message + " - cast allowed";
+                return false;
+            }
+        }
+
         public bool TryEnterFishingAtTarget(Vector3 targetPos, out string status)
         {
             status = "GameplayApi unavailable";

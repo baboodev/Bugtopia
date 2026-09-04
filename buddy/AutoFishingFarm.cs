@@ -211,6 +211,9 @@ namespace HeartopiaMod
         private static string lastActiveStateLogKey = string.Empty;
         private static float nextTargetMissLogAt = -999f;
         private static float nextPressUpdateAt = -999f;
+        // Energy hold: edge-triggered, so a pause writes exactly two Tier-1 lines (held, resumed)
+        // instead of one per retry.
+        private static bool energyHoldActive = false;
         private static int consecutiveTargetMisses = 0;
         private static uint currentTargetNetId = 0U;
         private static Vector3 currentTargetPos = Vector3.zero;
@@ -228,8 +231,14 @@ namespace HeartopiaMod
         private const float EmptyScanMinDelay = 0.55f;
         private const float EmptyScanMaxDelay = 1.5f;
         private const float EmptyScanMissLogInterval = 10f;
+        // Energy only comes back from eating or regen, so re-checking the hold once a second is
+        // already generous.
+        private const float EnergyHoldRetryDelay = 1f;
 
         public static bool IsEnabled => enabled;
+        // True while the pre-cast energy gate is holding the run (FishingRouteFeature parks its
+        // spot rotation on this, the same way it parks on an auto repair).
+        public static bool IsHeldForEnergy => energyHoldActive;
         public static bool IsDebugLoggingEnabled() => debugLoggingEnabled;
 
         // --- Read-only signals for FishingRouteFeature (location rotation) ---
@@ -429,6 +438,11 @@ namespace HeartopiaMod
             if (lower.Contains("paused for auto repair"))
             {
                 return "Repairing tool";
+            }
+
+            if (lower.Contains("out of energy"))
+            {
+                return "Out of energy";
             }
 
             if (lower.Contains("recasting") || lower.Contains("idle stall") || lower.Contains("stale"))
@@ -722,6 +736,7 @@ namespace HeartopiaMod
             lastActiveStateLogKey = string.Empty;
             nextTargetMissLogAt = -999f;
             nextPressUpdateAt = -999f;
+            energyHoldActive = false;
             consecutiveTargetMisses = 0;
             currentTargetNetId = 0U;
             currentTargetPos = Vector3.zero;
@@ -1493,6 +1508,44 @@ namespace HeartopiaMod
                     return;
                 }
 
+                // No energy, no cast. The vanilla throw is gated on stamina (FishingCommand
+                // .CheckExecuteThrowCommand) and the server enforces it whichever way we cast, so
+                // casting here would only burn cycles: CmdCastRodResult=false on the server-side
+                // path, a Waiting state that never bites on the FSM one. Auto Eat, when it is on,
+                // runs off its own tick and lifts this hold by itself.
+                //
+                // PLACED AFTER the dismount block and the repair pause on purpose. Both of those
+                // serve Auto Repair, which has to keep working while the farm is held -- gating
+                // ahead of them would stand the run down with a worn rod and no way to fix it.
+                bool energyHold = host.IsFishingEnergyTooLow(out string energyStatus);
+                if (energyHold != energyHoldActive)
+                {
+                    energyHoldActive = energyHold;
+                    FeatureLog.Life(LogTag, energyHold
+                        ? "cast held: out of energy (" + energyStatus + ")"
+                        : "cast resumed: " + energyStatus);
+                    if (energyHold)
+                    {
+                        try
+                        {
+                            host.UI_AddMenuNotification(
+                                host.UI_Localize("Fishing paused: out of energy"),
+                                new Color(1f, 0.65f, 0.45f));
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+
+                if (energyHold)
+                {
+                    lastStatus = "Paused: out of energy";
+                    lastTargetStatus = energyStatus;
+                    nextActionAt = now + EnergyHoldRetryDelay;
+                    return;
+                }
+
                 if (!host.TryGetFishingRodToolStatus(out bool rodEquipped, out string toolStatus))
                 {
                     lastToolStatus = toolStatus;
@@ -1646,6 +1699,7 @@ namespace HeartopiaMod
             lastActiveStateLogKey = string.Empty;
             nextTargetMissLogAt = -999f;
             nextPressUpdateAt = -999f;
+            energyHoldActive = false;
             consecutiveTargetMisses = 0;
             currentTargetNetId = 0U;
             currentTargetPos = Vector3.zero;

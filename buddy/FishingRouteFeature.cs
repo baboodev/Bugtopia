@@ -397,8 +397,19 @@ namespace HeartopiaMod
                 return;
             }
 
-            // Hop due. Defer the teleport while an auto repair is running or queued — fishing
-            // (and the repair) continue at the current spot; hop fires once the repair finishes.
+            // Hop due — but not while the engine is held for energy. The no-fish window is fed by
+            // scan events, and the energy gate stops the scans, so the countdown keeps running on
+            // wall-clock with nothing able to reset it: without this the route would tour every
+            // spot on the list while the player simply has no stamina to cast. Auto Eat (which
+            // this feature switches on at start) lifts the hold and the rotation resumes.
+            if (AutoFishingFarm.IsHeldForEnergy)
+            {
+                lastStatus = "Paused (out of energy)";
+                return;
+            }
+
+            // Defer the teleport while an auto repair is running or queued — fishing (and the
+            // repair) continue at the current spot; hop fires once the repair finishes.
             if (host.IsAutoRepairBusy())
             {
                 pausedForRepair = true;
