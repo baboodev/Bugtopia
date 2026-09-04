@@ -5333,6 +5333,10 @@ namespace HeartopiaMod
                 }
             }
 
+            // Assist is cooker-type agnostic, but this set usually comes from a mass-cook capture that
+            // pruned to a single menu — put the other kinds back (HeartopiaComplete.NetCookStoveType.cs).
+            this.WidenNetCookAssistTargetsToAllCookerTypes();
+
             if (this.netCookTargets.Count <= 0)
             {
                 status = "No nearby cooker targets found.";

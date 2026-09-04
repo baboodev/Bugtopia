@@ -894,6 +894,96 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
+        // Mini Game Assist: type-agnostic by definition
+        // ----------------------------------------------------------------------------------------
+
+        // Assist only relieves danger and collects finished food, and both interactions work on any
+        // cooker — IsCompatibleNetCookCooker says exactly that by returning true for everything while
+        // netCookMiniGameOnly is set. But that exemption only applies to a scan that RUNS in assist
+        // mode. netCookTargets is normally produced by a mass-cook capture, which prunes to one menu
+        // (majority vote, or an explicit Stove Type pick), and switching assist on afterwards
+        // inherited the narrowing: field log, 56 cookers in range — `STARTED mini-game-only
+        // cookerStaticId=370001 targets=51` ignored the 5 clay stoves, and with type 16 picked
+        // `targets=5` ignored the other 51.
+        //
+        // The scan snapshot is the fix: it holds every kind the scan resolved, before any type prune.
+        // Widen from it whenever assist takes over, applying the same distance rule capture uses so
+        // this cannot pull in stoves the capture itself would have culled.
+        private int WidenNetCookAssistTargetsToAllCookerTypes()
+        {
+            if (this.netCookScannedTargets.Count <= 0)
+            {
+                return 0;
+            }
+
+            try
+            {
+                HashSet<string> presentKeys = new HashSet<string>();
+                HashSet<uint> presentCookerNetIds = new HashSet<uint>();
+                for (int i = 0; i < this.netCookTargets.Count; i++)
+                {
+                    NetCookTargetContext target = this.netCookTargets[i];
+                    if (target == null)
+                    {
+                        continue;
+                    }
+
+                    presentKeys.Add(target.CookerNetId + ":" + target.LevelObjectNetId);
+                    presentCookerNetIds.Add(target.CookerNetId);
+                }
+
+                List<NetCookTargetContext> candidates = new List<NetCookTargetContext>(this.netCookScannedTargets.Count);
+                for (int i = 0; i < this.netCookScannedTargets.Count; i++)
+                {
+                    NetCookTargetContext scanned = this.netCookScannedTargets[i];
+                    if (scanned == null
+                        || scanned.CookerNetId == 0U
+                        || scanned.LevelObjectNetId == 0UL
+                        || presentCookerNetIds.Contains(scanned.CookerNetId)
+                        || presentKeys.Contains(scanned.CookerNetId + ":" + scanned.LevelObjectNetId))
+                    {
+                        continue;
+                    }
+
+                    candidates.Add(this.CloneNetCookTargetContext(scanned));
+                }
+
+                if (candidates.Count <= 0)
+                {
+                    return 0;
+                }
+
+                // Same exception capture makes: Permanent Stove Memory keeps the remembered set at
+                // any distance, everything else is culled to the scan radius.
+                if (!this.netCookRememberStoves)
+                {
+                    this.RemoveOutOfRangeNetCookTargets(candidates, null, null);
+                }
+
+                if (candidates.Count <= 0)
+                {
+                    return 0;
+                }
+
+                int added = candidates.Count;
+                this.netCookTargets.AddRange(candidates);
+                this.RemoveNetCookDuplicateLevelObjectTargets(this.netCookTargets);
+                this.SortNetCookTargetsByDistanceFromScanOrigin(this.netCookTargets);
+                this.TrimNetCookTargetsToClosest(this.netCookTargets, "assist stove(s)");
+                this.RegisterNetCookTargets(this.netCookTargets);
+                this.NetCookLog("Mini game assist widened to all cooker types: added " + added
+                    + " stove(s) from the scan snapshot, now " + this.netCookTargets.Count
+                    + " (snapshot=" + this.netCookScannedTargets.Count + ", pick=" + this.netCookPreferredCookerType + ").");
+                return added;
+            }
+            catch (Exception ex)
+            {
+                this.NetCookLog("Mini game assist widen failed: " + ex.Message);
+                return 0;
+            }
+        }
+
+        // ----------------------------------------------------------------------------------------
         // Applying a pick
         // ----------------------------------------------------------------------------------------
 

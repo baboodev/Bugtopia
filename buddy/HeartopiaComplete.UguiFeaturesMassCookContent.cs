@@ -1327,6 +1327,13 @@ namespace HeartopiaMod
             // Mini Game Assist is cooker-type agnostic — the picker is hidden there, so its panel
             // must not survive the branch swap either.
             this.netCookCookerTypeDropdownOpen = false;
+            // Turning assist on widens the set back to every kind in range right away, so the STOVES
+            // counter tells the truth before Start rather than after it. Mass cook re-narrows to the
+            // recipe's menu on its own start path, so the widened set costs it nothing.
+            if (this.netCookMiniGameOnly && !this.netCookEnabled)
+            {
+                this.WidenNetCookAssistTargetsToAllCookerTypes();
+            }
             this.netCookStatus = this.netCookMiniGameOnly
                 ? "Mini game only mode enabled. Capture stoves to assist active cooking."
                 : "Mini game only mode disabled. Select a recipe to mass cook.";
