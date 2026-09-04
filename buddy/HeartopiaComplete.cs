@@ -214,8 +214,19 @@ namespace HeartopiaMod
         // mid-fishing, but it has to invent the placement geometrically.
         private bool autoRepairNoAnimationEnabled = false;
         // Only consulted while autoRepairNoAnimationEnabled: ON = drop the kit on the ground under
-        // the player; OFF = 3m ahead at the player's height.
+        // the player; OFF = the offset below, at the player's height.
         private bool autoRepairThrowAtFeetEnabled = false;
+        // Direct-throw placement, as an XYZ offset in the PLAYER'S OWN frame (Unity local axes:
+        // X = right, Y = up, Z = forward) applied before the game's 0.3m sink. Player-frame rather
+        // than world, so the spot stays put relative to the character whichever way they are facing.
+        // Z defaults to ToolRestorerThrowDistance, which reproduces the fixed "3m straight ahead"
+        // this used to hard-code. Each axis is bounded by +/-ToolRestorerThrowMaxOffset, the repair
+        // aura's radius, because a kit that lands further away than the aura reaches repairs nothing
+        // at all. All three are ignored while autoRepairThrowAtFeetEnabled is on, and the whole
+        // group is ignored on the animated path (the game picks the spot there).
+        private float autoRepairThrowOffsetX = 0f;
+        private float autoRepairThrowOffsetY = 0f;
+        private float autoRepairThrowOffsetZ = ToolRestorerThrowDistance;
         private bool autoEatOnToastEnabled = false; // Toggle for auto eat via toast notification
         private static bool AutoEatRepairLogsEnabled => MasterLogAutoEatRepair;
         private bool autoEatAutoTriggerEnabled = true;

@@ -425,6 +425,9 @@ namespace HeartopiaMod
             data.autoRepairOnToastEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoRepair : this.autoRepairOnToastEnabled;
             data.autoRepairNoAnimationEnabled = this.autoRepairNoAnimationEnabled;
             data.autoRepairThrowAtFeetEnabled = this.autoRepairThrowAtFeetEnabled;
+            data.autoRepairThrowOffsetX = this.autoRepairThrowOffsetX;
+            data.autoRepairThrowOffsetY = this.autoRepairThrowOffsetY;
+            data.autoRepairThrowOffsetZ = this.autoRepairThrowOffsetZ;
             data.trimRepairThrowAnimation = this.trimRepairThrowAnimation;
             data.repairThrowPathTrimMigrated = true;
             data.autoEatOnToastEnabled = this.autoEatOnToastEnabled;
@@ -868,6 +871,9 @@ namespace HeartopiaMod
             this.autoRepairOnToastEnabled = data.autoRepairOnToastEnabled;
             this.autoRepairNoAnimationEnabled = data.autoRepairNoAnimationEnabled;
             this.autoRepairThrowAtFeetEnabled = data.autoRepairThrowAtFeetEnabled;
+            this.autoRepairThrowOffsetX = Mathf.Clamp(data.autoRepairThrowOffsetX, -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset);
+            this.autoRepairThrowOffsetY = Mathf.Clamp(data.autoRepairThrowOffsetY, -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset);
+            this.autoRepairThrowOffsetZ = Mathf.Clamp(data.autoRepairThrowOffsetZ, -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset);
             this.trimRepairThrowAnimation = data.trimRepairThrowAnimation;
             if (!data.repairThrowPathTrimMigrated)
             {

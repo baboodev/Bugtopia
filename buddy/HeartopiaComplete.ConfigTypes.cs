@@ -427,6 +427,13 @@ namespace HeartopiaMod
             public bool autoRepairOnToastEnabled;
             public bool autoRepairNoAnimationEnabled;
             public bool autoRepairThrowAtFeetEnabled;
+            // Direct-throw placement offset in the player's own frame (X right, Y up, Z forward).
+            // Absent from every config written before these sliders existed, and XmlSerializer leaves
+            // a missing element's initializer alone - so an old config silently keeps the fixed
+            // 3m-ahead throw it already had.
+            public float autoRepairThrowOffsetX;
+            public float autoRepairThrowOffsetY;
+            public float autoRepairThrowOffsetZ = 3f;
             public bool trimRepairThrowAnimation = true;
             // One-shot marker for the 2026-08-06 switch of the primary repair-throw path from the
             // direct send to the trimmed game throw. Absent in every config written before that, so

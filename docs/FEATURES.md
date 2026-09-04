@@ -944,11 +944,26 @@ Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
   cost is placement: it has to pick the spot geometrically (see below). Turn it on when a repair
   must land without an idle window; leave it off to let the game resolve the spot.
 - **Drop Repair Kit At Feet** (default off, only meaningful while the above is on) — places the kit
-  at the player's own position instead of 3 m ahead. Since the player is standing on the ground this
-  is ground level by construction, so it is the mode to use on slopes, ledges, jetties and mid-jump;
-  it also leaves the whole 5 m aura as margin. Off = 3 m ahead at the player's height, matching the
-  game whenever the ground ahead is level (the normal case) and hanging in the air when it is not.
-  Both apply the game's 0.3 m `toolRestoreSinkHeight`.
+  at the player's own position, bypassing the offset sliders below entirely. Since the player is
+  standing on the ground this is ground level by construction, so it is the mode to use on slopes,
+  ledges, jetties and mid-jump; it also leaves the whole 5 m aura as margin.
+- **Throw X (right) / Throw Y (up) / Throw Z (forward)** (±5 m each, 0.1 m steps; defaults
+  0 / 0 / 3, i.e. the fixed "3 m straight ahead" this used to hard-code) — the direct throw's landing
+  point as an XYZ offset in the **player's own frame**, Unity's local axes: X right, Y up,
+  Z forward. Player-frame, not world — a tuned spot stays where you put it relative to the
+  character however they turn. Applied at the player's height plus Y, then sunk by the game's 0.3 m
+  `toolRestoreSinkHeight`. The three rows sit **directly under the *Instant Direct Throw* / *Drop
+  Repair Kit At Feet* pair** and are **hidden**, not greyed, unless the first is on **and** the
+  second is off — the only state that reads them. Hiding collapses the block, so every row below
+  it (both Auto Eat toggles, the three int sliders, both dropdowns and the food picker) is placed
+  by the relayout at `constant + 84` rather than at its build-time constant. The bound is the
+  repair aura radius (`TableBuffConfig.range` = 5 for the tool-restore buffs 701–706, the same field
+  `ToolRestorerComponent` feeds into its sphere): beyond it the player standing where they threw is
+  outside the aura and nothing is repaired. It is a **per-axis** bound, not a magnitude one — 5/5/5
+  still reaches 8.7 m of slant range, so the sliders will happily throw a kit out of its own aura if
+  asked. All three at zero resolves to the same spot as at-feet. There is still no ground raycast
+  (see below), so any horizontal offset over a ledge, a slope, water or mid-jump hangs in the air at
+  the player's height — that has not changed, it is now just adjustable.
 - **Trim Repair Throw Animation** (default **on**; applies only while *Instant Direct Throw* is
   OFF, i.e. on the default path) — keeps the game's own throw, and therefore its own correct placement (`TryFindThrowPoint`
   raycasts the real ground **and** resolves `parentNetId`, so on a ship the device rides the ship),
@@ -973,8 +988,9 @@ Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
   Not built. **Note this also means the ESP ground-ring raycasts have always silently fallen back to
   their anchor position.**
 - The **Repair Status** row appends the placement the last direct throw resolved to
-  (`Ready · forward 3m`, `Ready · at feet`), and every throw logs one `[AutoRepair] throw target`
-  line with the resolved position, player position and facing.
+  (`Ready · z 3m`, `Ready · x -1.5m + z 3m`, `Ready · at feet`, and `Ready · at player` when all
+  three sliders sit at zero — only non-zero axes are listed), and every throw logs one
+  `[AutoRepair] throw target` line with the resolved position, player position and facing.
 
 **Auto Eat**
 

@@ -200,6 +200,21 @@ namespace HeartopiaMod
             public string RepairUsesShown;
             public Slider RepairUsesSlider;
 
+            // Direct-throw placement offsets (player-frame X/Y/Z): three collapsing rows sitting
+            // above everything else on this tab, so every row below them is owned by the relayout
+            // rather than by its build-time constant.
+            public GameObject ThrowXLabel;
+            public string ThrowXShown;
+            public Slider ThrowXSlider;
+            public GameObject ThrowYLabel;
+            public string ThrowYShown;
+            public Slider ThrowYSlider;
+            public GameObject ThrowZLabel;
+            public string ThrowZShown;
+            public Slider ThrowZSlider;
+
+            public GameObject RepairKitLabel;      // moves with the throw-offset block
+            public GameObject FoodTypeLabel;       // moves with the throw-offset block
             public Dropdown RepairDropdown;
             public bool RepairDropdownListenerWired;
             public int RepairDropdownLastValue;    // poll-fallback change detection
@@ -234,6 +249,20 @@ namespace HeartopiaMod
         // Fixed content-local geometry (see the builder's cursor replay). The picker starts at
         // the repair-dropdown row + 80 â€” the source's own num += 80 spacing (:867), which covers
         // both dropdown rows (36 + 40) + a 4px gap in the closed-dropdown flow it was written for.
+        // Collapsing block: the three direct-throw offset rows sit immediately under the Instant
+        // Direct Throw toggle and its at-feet sub-option (the two switches that decide whether they
+        // are read at all), and only exist while that pair actually consults them. So EVERY row
+        // below them is placed by the relayout at its constant + (visible ? ThrowRowsHeight : 0)
+        // rather than at the constant itself.
+        private const float UguiFoodRepairThrowRowsTopY = 371f;     // At-feet row 341 + 30
+        private const float UguiFoodRepairThrowRowsHeight = 84f;    // 3 rows x 28
+        // Collapsed-state Y of every row below the block (build-time placement; the relayout adds
+        // the block height on top when it is showing).
+        private const float UguiFoodRepairEatAutoTriggerRowY = 371f;
+        private const float UguiFoodRepairEatNoAnimRowY = 401f;
+        private const float UguiFoodRepairEatTriggerRowY = 431f;
+        private const float UguiFoodRepairRepairTriggerRowY = 459f;
+        private const float UguiFoodRepairRepairUsesRowY = 487f;
         private const float UguiFoodRepairDropdownRowY = 515f;      // 425 + the 90 the three added repair-throw toggles cost
         private const float UguiFoodRepairFoodDropdownRowY = 551f;  // was 461
         private const float UguiFoodRepairDropdownsBottomY = 591f;  // food row 551 + field h 40
@@ -248,17 +277,29 @@ namespace HeartopiaMod
 
         private int ComputeUguiFeaturesFoodRepairLayoutSignature()
         {
+            // Bit 30: the direct-throw offset rows, which collapse independently of the picker - so
+            // it has to survive the early return below, and it sits well clear of the count field.
+            int throwBit = this.AreUguiFeaturesFoodRepairThrowRowsVisible() ? (1 << 30) : 0;
             bool pickerVisible = this.customFoodPickMode
                 && this.autoEatFoodType == this.autoEatFoodOptions.Length - 1;
             if (!pickerVisible)
             {
-                return 0;
+                return throwBit;
             }
             string[] foods = this.scannedBagFoods;
             int listState = foods == null ? 0 : (foods.Length == 0 ? 1 : 2);
             bool selectionVisible = !string.IsNullOrEmpty(this.autoEatCustomFoodName);
             int count = foods != null ? foods.Length : 0;
-            return 1 | (listState << 1) | (selectionVisible ? 8 : 0) | (count << 4);
+            return throwBit | 1 | (listState << 1) | (selectionVisible ? 8 : 0) | (count << 4);
+        }
+
+        // The three offset rows are consulted only by the direct send, and only while it is not
+        // dropping the kit at the player's feet - exactly the branch ComputeToolRestorerThrowTarget
+        // reads them in. Anywhere else they would be three dead sliders, so they are hidden rather
+        // than greyed.
+        private bool AreUguiFeaturesFoodRepairThrowRowsVisible()
+        {
+            return this.autoRepairNoAnimationEnabled && !this.autoRepairThrowAtFeetEnabled;
         }
 
         // Expanded probe â€” see file header (the "Dropdown List" child exists exactly while the
@@ -325,6 +366,10 @@ namespace HeartopiaMod
 
             const float rowX = 8f;
             float rowW = handle.ContentWidth - 16f;
+            // Hoisted: the throw-offset rows below the repair toggles need the same label/slider
+            // columns as the three int sliders further down.
+            float sliderX = rowX + 230f + 10f;
+            float sliderW = handle.ContentWidth - sliderX - 8f;
             Color textColor = this.UguiKitTextColor();
             // Source stat styles (:591-605): labels 11 bold uiText; values 12 bold uiText @ 0.92
             // (durability value 11 â€” compactValueStyle).
@@ -419,52 +464,83 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairRepairAtFeetToggled));
             PlaceUguiTopLeft(handle.RepairAtFeetToggle.gameObject, rowX, 341f, rowW, 24f);
             this.SetUguiToggleInteractable(handle.RepairAtFeetToggle, this.autoRepairNoAnimationEnabled);
+
+            // -------- Direct-throw placement offsets (3 rows), parked directly under the two
+            // switches that decide whether they are read at all. Unlike those switches, the rows are
+            // HIDDEN rather than greyed: they are meaningless on the animated path (the game picks
+            // the spot) and equally meaningless with at-feet on (the offset is bypassed), so three
+            // dead sliders in either state would be noise. Hiding collapses the block and every row
+            // below shifts up, which is why the state is folded into the layout signature.
+            // wholeNumbers = FALSE here (the field contract is a float, unlike the three int sliders
+            // further down); the handlers quantise to 0.1m and the re-sync snaps the handle back.
+            handle.ThrowXShown = this.LF("Throw X (right): {0} m", this.autoRepairThrowOffsetX.ToString("0.0"));
+            handle.ThrowXLabel = this.CreateUguiBodyLabel(scrollContent, "ThrowXLabel", handle.ThrowXShown, 13f);
+            PlaceUguiTopLeft(handle.ThrowXLabel, rowX, UguiFoodRepairThrowRowsTopY + 2f, 230f, 20f);
+            handle.ThrowXSlider = this.CreateUguiSlider(scrollContent, "ThrowXSlider",
+                -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset, this.autoRepairThrowOffsetX, false,
+                new System.Action<float>(this.OnUguiFeaturesFoodRepairThrowXChanged));
+            PlaceUguiTopLeft(handle.ThrowXSlider.gameObject, sliderX, UguiFoodRepairThrowRowsTopY + 3f, sliderW, 20f);
+
+            handle.ThrowYShown = this.LF("Throw Y (up): {0} m", this.autoRepairThrowOffsetY.ToString("0.0"));
+            handle.ThrowYLabel = this.CreateUguiBodyLabel(scrollContent, "ThrowYLabel", handle.ThrowYShown, 13f);
+            PlaceUguiTopLeft(handle.ThrowYLabel, rowX, UguiFoodRepairThrowRowsTopY + 28f + 2f, 230f, 20f);
+            handle.ThrowYSlider = this.CreateUguiSlider(scrollContent, "ThrowYSlider",
+                -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset, this.autoRepairThrowOffsetY, false,
+                new System.Action<float>(this.OnUguiFeaturesFoodRepairThrowYChanged));
+            PlaceUguiTopLeft(handle.ThrowYSlider.gameObject, sliderX, UguiFoodRepairThrowRowsTopY + 28f + 3f, sliderW, 20f);
+
+            handle.ThrowZShown = this.LF("Throw Z (forward): {0} m", this.autoRepairThrowOffsetZ.ToString("0.0"));
+            handle.ThrowZLabel = this.CreateUguiBodyLabel(scrollContent, "ThrowZLabel", handle.ThrowZShown, 13f);
+            PlaceUguiTopLeft(handle.ThrowZLabel, rowX, UguiFoodRepairThrowRowsTopY + 56f + 2f, 230f, 20f);
+            handle.ThrowZSlider = this.CreateUguiSlider(scrollContent, "ThrowZSlider",
+                -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset, this.autoRepairThrowOffsetZ, false,
+                new System.Action<float>(this.OnUguiFeaturesFoodRepairThrowZChanged));
+            PlaceUguiTopLeft(handle.ThrowZSlider.gameObject, sliderX, UguiFoodRepairThrowRowsTopY + 56f + 3f, sliderW, 20f);
+
             handle.EatAutoTriggerToggle = this.CreateUguiCheckbox(scrollContent, "EatAutoTriggerToggle",
                 this.L("Auto Eat Energy Panel"), this.autoEatAutoTriggerEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairEatAutoTriggerToggled));
-            PlaceUguiTopLeft(handle.EatAutoTriggerToggle.gameObject, rowX, 371f, rowW, 24f);
+            PlaceUguiTopLeft(handle.EatAutoTriggerToggle.gameObject, rowX, UguiFoodRepairEatAutoTriggerRowY, rowW, 24f);
             handle.EatNoAnimationToggle = this.CreateUguiCheckbox(scrollContent, "EatNoAnimationToggle",
                 this.L("Eat Without Animation"), this.autoEatNoAnimationEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairEatNoAnimationToggled));
-            PlaceUguiTopLeft(handle.EatNoAnimationToggle.gameObject, rowX, 401f, rowW, 24f);
+            PlaceUguiTopLeft(handle.EatNoAnimationToggle.gameObject, rowX, UguiFoodRepairEatNoAnimRowY, rowW, 24f);
 
             // -------- 3 sliders (:691-716 â€” side-by-side rows per the Main-round conversion;
             // wholeNumbers = TRUE, int contract â€” file header) --------
-            float sliderX = rowX + 230f + 10f;
-            float sliderW = handle.ContentWidth - sliderX - 8f;
-
             handle.EatTriggerShown = this.LF("Auto Eat Trigger: {0}% or lower", this.autoEatTriggerPercent);
             handle.EatTriggerLabel = this.CreateUguiBodyLabel(scrollContent, "EatTriggerLabel",
                 handle.EatTriggerShown, 13f);
-            PlaceUguiTopLeft(handle.EatTriggerLabel, rowX, 431f + 2f, 230f, 20f);
+            PlaceUguiTopLeft(handle.EatTriggerLabel, rowX, UguiFoodRepairEatTriggerRowY + 2f, 230f, 20f);
             handle.EatTriggerSlider = this.CreateUguiSlider(scrollContent, "EatTriggerSlider",
                 1f, 100f, this.autoEatTriggerPercent, true,
                 new System.Action<float>(this.OnUguiFeaturesFoodRepairEatTriggerChanged));
-            PlaceUguiTopLeft(handle.EatTriggerSlider.gameObject, sliderX, 431f + 3f, sliderW, 20f);
+            PlaceUguiTopLeft(handle.EatTriggerSlider.gameObject, sliderX, UguiFoodRepairEatTriggerRowY + 3f, sliderW, 20f);
 
             handle.RepairTriggerShown = this.LF("Auto Repair Trigger: {0}% or lower", this.autoRepairTriggerPercent);
             handle.RepairTriggerLabel = this.CreateUguiBodyLabel(scrollContent, "RepairTriggerLabel",
                 handle.RepairTriggerShown, 13f);
-            PlaceUguiTopLeft(handle.RepairTriggerLabel, rowX, 459f + 2f, 230f, 20f);
+            PlaceUguiTopLeft(handle.RepairTriggerLabel, rowX, UguiFoodRepairRepairTriggerRowY + 2f, 230f, 20f);
             handle.RepairTriggerSlider = this.CreateUguiSlider(scrollContent, "RepairTriggerSlider",
                 1f, 100f, this.autoRepairTriggerPercent, true,
                 new System.Action<float>(this.OnUguiFeaturesFoodRepairRepairTriggerChanged));
-            PlaceUguiTopLeft(handle.RepairTriggerSlider.gameObject, sliderX, 459f + 3f, sliderW, 20f);
+            PlaceUguiTopLeft(handle.RepairTriggerSlider.gameObject, sliderX, UguiFoodRepairRepairTriggerRowY + 3f, sliderW, 20f);
 
             handle.RepairUsesShown = this.LF("Repair Kit Uses: {0}", this.autoRepairUseTarget);
             handle.RepairUsesLabel = this.CreateUguiBodyLabel(scrollContent, "RepairUsesLabel",
                 handle.RepairUsesShown, 13f);
-            PlaceUguiTopLeft(handle.RepairUsesLabel, rowX, 487f + 2f, 230f, 20f);
+            PlaceUguiTopLeft(handle.RepairUsesLabel, rowX, UguiFoodRepairRepairUsesRowY + 2f, 230f, 20f);
             handle.RepairUsesSlider = this.CreateUguiSlider(scrollContent, "RepairUsesSlider",
                 1f, 3f, this.autoRepairUseTarget, true,
                 new System.Action<float>(this.OnUguiFeaturesFoodRepairRepairUsesChanged));
-            PlaceUguiTopLeft(handle.RepairUsesSlider.gameObject, sliderX, 487f + 3f, sliderW, 20f);
+            PlaceUguiTopLeft(handle.RepairUsesSlider.gameObject, sliderX, UguiFoodRepairRepairUsesRowY + 3f, sliderW, 20f);
 
             // -------- Dropdown rows (:760-803 â€” labels 13 bold at the source's 78px column,
             // fields at +90; repair 160x28, food 160x40; fixed y â€” popups overlay) --------
             GameObject repairKitLabel = this.CreateUguiBodyLabel(scrollContent, "RepairKitLabel",
                 this.L("Repair Kit"), 13f);
             this.TrySetUguiLabelBold(repairKitLabel);
+            handle.RepairKitLabel = repairKitLabel;
             PlaceUguiTopLeft(repairKitLabel, rowX, UguiFoodRepairDropdownRowY + 3f, 90f, 22f);
             string[] repairOptions = new string[this.autoRepairOptions.Length];
             for (int i = 0; i < repairOptions.Length; i++)
@@ -483,6 +559,7 @@ namespace HeartopiaMod
             GameObject foodTypeLabel = this.CreateUguiBodyLabel(scrollContent, "FoodTypeLabel",
                 this.L("Food Type"), 13f);
             this.TrySetUguiLabelBold(foodTypeLabel);
+            handle.FoodTypeLabel = foodTypeLabel;
             PlaceUguiTopLeft(foodTypeLabel, rowX, UguiFoodRepairFoodDropdownRowY + 3f, 90f, 22f);
             string[] foodOptions = new string[this.autoEatFoodOptions.Length];
             for (int i = 0; i < foodOptions.Length; i++)
@@ -565,15 +642,69 @@ namespace HeartopiaMod
         // [count>0: header 24 (+28) â†’ list Min(count*36,214) (+10)] / [empty or null: one state
         // line (+30)] â†’ [selection non-empty: label (+26)] â†’ buttons 26 at 0/110/220 (+35).
         // Everything above the picker is fixed at build time. Reposition/SetActive only.
+        // The relayout now moves a dozen controls that a failed build could have left null, and one
+        // NRE in there would repeat every gated frame - so both accessors are null-tolerant.
+        private static GameObject UguiGoOf(Selectable control)
+        {
+            return control != null ? control.gameObject : null;
+        }
+
+        private static void PlaceUguiTopLeftIfSet(GameObject go, float x, float y, float w, float h)
+        {
+            if (go != null)
+            {
+                PlaceUguiTopLeft(go, x, y, w, h);
+            }
+        }
+
         private void RelayoutUguiShellFeaturesFoodRepair(UguiShellFeaturesFoodRepairHandle handle)
         {
+            // The offset block sits above every other row on this tab, so collapsing it moves all
+            // of them up by its height. That is why each row below is positioned HERE, against its
+            // constant + extraY, instead of staying at the constant the builder placed it at.
+            bool throwRowsVisible = this.AreUguiFeaturesFoodRepairThrowRowsVisible();
+            SetUguiGoActive(handle.ThrowXLabel, throwRowsVisible);
+            SetUguiGoActive(handle.ThrowYLabel, throwRowsVisible);
+            SetUguiGoActive(handle.ThrowZLabel, throwRowsVisible);
+            SetUguiGoActive(UguiGoOf(handle.ThrowXSlider), throwRowsVisible);
+            SetUguiGoActive(UguiGoOf(handle.ThrowYSlider), throwRowsVisible);
+            SetUguiGoActive(UguiGoOf(handle.ThrowZSlider), throwRowsVisible);
+
+            float extraY = throwRowsVisible ? UguiFoodRepairThrowRowsHeight : 0f;
+            const float rowX = 8f;
+            float rowW = handle.ContentWidth - 16f;
+            float sliderX = rowX + 230f + 10f;
+            float sliderW = handle.ContentWidth - sliderX - 8f;
+
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.EatAutoTriggerToggle), rowX,
+                UguiFoodRepairEatAutoTriggerRowY + extraY, rowW, 24f);
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.EatNoAnimationToggle), rowX,
+                UguiFoodRepairEatNoAnimRowY + extraY, rowW, 24f);
+
+            PlaceUguiTopLeftIfSet(handle.EatTriggerLabel, rowX, UguiFoodRepairEatTriggerRowY + extraY + 2f, 230f, 20f);
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.EatTriggerSlider), sliderX,
+                UguiFoodRepairEatTriggerRowY + extraY + 3f, sliderW, 20f);
+            PlaceUguiTopLeftIfSet(handle.RepairTriggerLabel, rowX, UguiFoodRepairRepairTriggerRowY + extraY + 2f, 230f, 20f);
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.RepairTriggerSlider), sliderX,
+                UguiFoodRepairRepairTriggerRowY + extraY + 3f, sliderW, 20f);
+            PlaceUguiTopLeftIfSet(handle.RepairUsesLabel, rowX, UguiFoodRepairRepairUsesRowY + extraY + 2f, 230f, 20f);
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.RepairUsesSlider), sliderX,
+                UguiFoodRepairRepairUsesRowY + extraY + 3f, sliderW, 20f);
+
+            PlaceUguiTopLeftIfSet(handle.RepairKitLabel, rowX, UguiFoodRepairDropdownRowY + extraY + 3f, 90f, 22f);
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.RepairDropdown), rowX + 90f,
+                UguiFoodRepairDropdownRowY + extraY, 160f, 28f);
+            PlaceUguiTopLeftIfSet(handle.FoodTypeLabel, rowX, UguiFoodRepairFoodDropdownRowY + extraY + 3f, 90f, 22f);
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.FoodDropdown), rowX + 90f,
+                UguiFoodRepairFoodDropdownRowY + extraY, 160f, 40f);
+
             bool pickerVisible = this.customFoodPickMode
                 && this.autoEatFoodType == this.autoEatFoodOptions.Length - 1;
             SetUguiGoActive(handle.PickerRoot, pickerVisible);
 
             if (!pickerVisible)
             {
-                this.SetUguiScrollContentHeight(handle.ScrollContent, UguiFoodRepairDropdownsBottomY + 16f);
+                this.SetUguiScrollContentHeight(handle.ScrollContent, UguiFoodRepairDropdownsBottomY + extraY + 16f);
                 return;
             }
 
@@ -620,8 +751,8 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.CancelButton, 220f, py, 100f, 26f);
             py += 35f;
 
-            PlaceUguiTopLeft(handle.PickerRoot, 8f, UguiFoodRepairPickerTopY, pickerW, py);
-            this.SetUguiScrollContentHeight(handle.ScrollContent, UguiFoodRepairPickerTopY + py + 16f);
+            PlaceUguiTopLeft(handle.PickerRoot, 8f, UguiFoodRepairPickerTopY + extraY, pickerW, py);
+            this.SetUguiScrollContentHeight(handle.ScrollContent, UguiFoodRepairPickerTopY + extraY + py + 16f);
         }
 
         // ----------------------------------------------------------------------------------------
@@ -912,6 +1043,31 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.RepairUsesLabel, ref handle.RepairUsesShown,
                     this.LF("Repair Kit Uses: {0}", this.autoRepairUseTarget));
 
+                // Float-backed offset sliders: epsilon compare instead of the RoundToInt diff the
+                // three above use, and this is also what snaps the handle onto the handler's 0.1m
+                // grid after a drag lands between steps.
+                if (handle.ThrowXSlider != null
+                    && Mathf.Abs(handle.ThrowXSlider.value - this.autoRepairThrowOffsetX) > 0.001f)
+                {
+                    handle.ThrowXSlider.SetValueWithoutNotify(this.autoRepairThrowOffsetX);
+                }
+                this.SyncUguiSelfLabelText(handle.ThrowXLabel, ref handle.ThrowXShown,
+                    this.LF("Throw X (right): {0} m", this.autoRepairThrowOffsetX.ToString("0.0")));
+                if (handle.ThrowYSlider != null
+                    && Mathf.Abs(handle.ThrowYSlider.value - this.autoRepairThrowOffsetY) > 0.001f)
+                {
+                    handle.ThrowYSlider.SetValueWithoutNotify(this.autoRepairThrowOffsetY);
+                }
+                this.SyncUguiSelfLabelText(handle.ThrowYLabel, ref handle.ThrowYShown,
+                    this.LF("Throw Y (up): {0} m", this.autoRepairThrowOffsetY.ToString("0.0")));
+                if (handle.ThrowZSlider != null
+                    && Mathf.Abs(handle.ThrowZSlider.value - this.autoRepairThrowOffsetZ) > 0.001f)
+                {
+                    handle.ThrowZSlider.SetValueWithoutNotify(this.autoRepairThrowOffsetZ);
+                }
+                this.SyncUguiSelfLabelText(handle.ThrowZLabel, ref handle.ThrowZShown,
+                    this.LF("Throw Z (forward): {0} m", this.autoRepairThrowOffsetZ.ToString("0.0")));
+
                 // Custom Food picker â€” ALL live-game polling stays inside the SAME condition the
                 // source block uses (:864), so IsBagOpen (a GameObject.Find) never runs while
                 // the picker is closed (file header).
@@ -1042,6 +1198,48 @@ namespace HeartopiaMod
                 return;
             }
             this.autoRepairThrowAtFeetEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Direct-throw offset handlers. 0.1m grid (100 steps across the aura's +/-5m is as fine as
+        // this is worth) and the same bound the compute clamps to, so the stored value is always one
+        // the throw can actually use.
+        private static float QuantizeToolRestorerThrowOffset(float value)
+        {
+            return Mathf.Clamp(Mathf.Round(value * 10f) / 10f,
+                -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset);
+        }
+
+        private void OnUguiFeaturesFoodRepairThrowXChanged(float value)
+        {
+            float quantized = QuantizeToolRestorerThrowOffset(value);
+            if (Mathf.Abs(quantized - this.autoRepairThrowOffsetX) < 0.0001f)
+            {
+                return;
+            }
+            this.autoRepairThrowOffsetX = quantized;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiFeaturesFoodRepairThrowYChanged(float value)
+        {
+            float quantized = QuantizeToolRestorerThrowOffset(value);
+            if (Mathf.Abs(quantized - this.autoRepairThrowOffsetY) < 0.0001f)
+            {
+                return;
+            }
+            this.autoRepairThrowOffsetY = quantized;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiFeaturesFoodRepairThrowZChanged(float value)
+        {
+            float quantized = QuantizeToolRestorerThrowOffset(value);
+            if (Mathf.Abs(quantized - this.autoRepairThrowOffsetZ) < 0.0001f)
+            {
+                return;
+            }
+            this.autoRepairThrowOffsetZ = quantized;
             try { this.SaveKeybinds(false); } catch { }
         }
 

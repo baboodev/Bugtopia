@@ -2138,7 +2138,13 @@ namespace HeartopiaMod
         // player (the game's own CanThrowAutoBait has an out-Vector3 that's unsafe via mono invoke).
         // 3m matches the game's standard: FishGear searches 3–5m (FishGearMinLength=3), toolRestorerLength=3.
         private const float BaitThrowDistance = 4f;         // bait / attractor forward throw distance
-        private const float ToolRestorerThrowDistance = 3f; // repair-kit forward throw distance
+        private const float ToolRestorerThrowDistance = 3f; // repair-kit DEFAULT forward throw distance
+        // Bound for every repair-kit throw offset axis, applied as +/- this value: the restorer's
+        // aura radius, TableBuffConfig.range for the tool-restore buffs 701-706 (5.0 in every row,
+        // and ToolRestorerComponent feeds exactly that field into its sphere Radius). Past it the
+        // player standing where they threw is outside the aura and the kit repairs nothing, so it is
+        // the only honest bound for a user-set offset.
+        private const float ToolRestorerThrowMaxOffset = 5f;
 
         // ----------------------------------------------------------------------------------------
         // Repair-kit placement
@@ -2165,12 +2171,19 @@ namespace HeartopiaMod
         // overload disambiguation by parameter type. Not built.
         //
         // So placement is purely geometric, and the two modes differ in what they trade away:
-        //   at feet  — playerPos: the player is standing on the ground, so this is exactly ground
-        //              level by construction, and 0m offset leaves the whole 5m aura as margin.
-        //   forward  — playerPos + forward*3, at the PLAYER'S height. Matches the game whenever the
-        //              ground 3m ahead is level with the player, which is the normal case; over a
-        //              ledge, a slope, water or mid-jump it will hang in the air. That is the cost
-        //              of the mode, and the reason the at-feet toggle exists.
+        //   at feet  = playerPos: the player is standing on the ground, so this is exactly ground
+        //              level by construction, and a zero offset leaves the whole 5m aura as margin.
+        //   offset   = playerPos + right*X + up*Y + forward*Z, at the PLAYER'S height plus Y. The
+        //              three components are user-set (Features -> Food & Repair), each bounded to
+        //              +/-ToolRestorerThrowMaxOffset; the default 0/0/3 is the fixed 3m-ahead throw
+        //              this used to hard-code. The axes are the PLAYER'S local ones (Unity's own
+        //              X = right, Y = up, Z = forward), not world axes, so a tuned spot stays put
+        //              relative to the character however they turn. Matches the game whenever the
+        //              ground under the resolved point is level with the player, which is the
+        //              normal case; over a ledge, a slope, water or mid-jump it will hang in the
+        //              air. That is the cost of the mode, and the reason the at-feet toggle exists.
+        //              The bound is PER AXIS, not on the magnitude: 5/5/5 still reaches 8.7m, well
+        //              outside the aura, so it is a sanity rail rather than a guarantee.
         // Both apply the game's 0.3m sink so the device sits in the ground rather than on top of it.
         private const float ToolRestorerSinkHeight = 0.3f;  // LevelScriptableConfig.toolRestoreSinkHeight
 
@@ -2182,6 +2195,26 @@ namespace HeartopiaMod
             return "(" + v.x.ToString("0.0") + "," + v.y.ToString("0.0") + "," + v.z.ToString("0.0") + ")";
         }
 
+        // Renders the resolved offset for the Repair Status row and the throw log line: only the
+        // axes actually in play, so the common single-axis default still reads "z 3m".
+        private static string FormatToolRestorerThrowPlacement(float offsetX, float offsetY, float offsetZ)
+        {
+            string text = "";
+            if (offsetX != 0f)
+            {
+                text = "x " + offsetX.ToString("0.#") + "m";
+            }
+            if (offsetY != 0f)
+            {
+                text += (text.Length > 0 ? " + " : "") + "y " + offsetY.ToString("0.#") + "m";
+            }
+            if (offsetZ != 0f)
+            {
+                text += (text.Length > 0 ? " + " : "") + "z " + offsetZ.ToString("0.#") + "m";
+            }
+            return text.Length > 0 ? text : "at player";
+        }
+
         private Vector3 ComputeToolRestorerThrowTarget(Vector3 playerPos, Vector3 forward, out string how)
         {
             Vector3 sink = new Vector3(0f, ToolRestorerSinkHeight, 0f);
@@ -2191,8 +2224,24 @@ namespace HeartopiaMod
                 return playerPos - sink;
             }
 
-            how = "forward " + ToolRestorerThrowDistance.ToString("0.#") + "m";
-            return playerPos + forward * ToolRestorerThrowDistance - sink;
+            // Clamped here as well as in the UI and on config load: this is the only place the
+            // numbers reach the wire, and a hand-edited config must not be able to fling a kit
+            // across the map.
+            float offsetX = Mathf.Clamp(this.autoRepairThrowOffsetX, -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset);
+            float offsetY = Mathf.Clamp(this.autoRepairThrowOffsetY, -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset);
+            float offsetZ = Mathf.Clamp(this.autoRepairThrowOffsetZ, -ToolRestorerThrowMaxOffset, ToolRestorerThrowMaxOffset);
+
+            // Player-frame right, derived from the SAME flattened forward the caller resolved rather
+            // than from transform.right, so the two axes cannot disagree about the facing (and X
+            // stays horizontal even if the root is ever pitched).
+            Vector3 right = new Vector3(forward.z, 0f, -forward.x);
+
+            how = FormatToolRestorerThrowPlacement(offsetX, offsetY, offsetZ);
+            return playerPos
+                + right * offsetX
+                + new Vector3(0f, offsetY, 0f)
+                + forward * offsetZ
+                - sink;
         }
 
         private bool TryComputeBaitThrowTarget(out Vector3 targetPos)
