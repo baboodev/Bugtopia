@@ -81,8 +81,15 @@ namespace HeartopiaMod
         private const float ForagingAnimNodeMatchRadius = 4f;
 
         // ControllerShortName ordinals; the override comes from whatever is actually in hand.
-        private const int ForagingAnimShortLumbering = 159;
-        private const int ForagingAnimShortMining = 160;
+        // ⚠️ ORDINALS, and they MOVE. ControllerShortName is a plain enum with a single explicit
+        // value, so every name's number is its position — the 2026-08-20 update inserted entries
+        // ahead of these and shifted them by four (lumbering was 159, mining 160). The cast still
+        // returned ActionErrorCode 0 and simply rendered nothing, because the action asks the
+        // animator for a controller family that no longer means what it did.
+        // Re-check against ilspy-dumps/XDTLevelAndEntity/XDTLevelAndEntity.ResHandle.AnimationRes
+        // /ControllerShortName.cs after every game update.
+        private const int ForagingAnimShortLumbering = 163;
+        private const int ForagingAnimShortMining = 164;
 
         private const int ForagingAnimResTree = 1;
         private const int ForagingAnimResStone = 2;

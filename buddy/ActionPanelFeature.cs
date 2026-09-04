@@ -41,8 +41,16 @@ namespace HeartopiaMod
 
         // ControllerShortName ordinals — the clip family a tool swing asks for. Only the axe rows
         // need one; everything else resolves its clip without help.
-        private const int ActionPanelShortLumbering = 159;
-        private const int ActionPanelShortMining = 160;
+        //
+        // ⚠️ ORDINALS, and they MOVE. ControllerShortName is a plain enum with a single explicit
+        // value, so every name's number is its position — the 2026-08-20 update inserted entries
+        // ahead of these and shifted them by four (lumbering was 159, mining 160). The cast still
+        // returned ActionErrorCode 0 and simply rendered nothing, because the action asks the
+        // animator for a controller family that no longer means what it did.
+        // Re-check against ilspy-dumps/XDTLevelAndEntity/XDTLevelAndEntity.ResHandle.AnimationRes
+        // /ControllerShortName.cs after every game update.
+        private const int ActionPanelShortLumbering = 163;
+        private const int ActionPanelShortMining = 164;
 
         // The social clip the two social rows play. 1 is the plain wave.
         private const int ActionPanelSocialType = 1;
@@ -214,6 +222,7 @@ namespace HeartopiaMod
                 }
 
                 int overrideType = this.ReadActionPanelControllerOverride(playerClass, players[0]);
+                int controllerSent = 0;
                 string[] parts = (row.Fields ?? string.Empty).Split('|');
                 for (int i = 0; i < parts.Length; i++)
                 {
@@ -235,6 +244,7 @@ namespace HeartopiaMod
                     else if (string.Equals(name, "controllerFullName", StringComparison.Ordinal)
                              && row.ControllerShortName > 0)
                     {
+                        controllerSent = (1 << 24) | (1 << 14) | (overrideType << 9) | row.ControllerShortName;
                         // (charType << 24) | (poseType << 14) | (override << 9) | shortName, with the
                         // override read live so whatever is actually in hand is honoured.
                         this.SetActionPanelInt(argObj, argClass, name,
@@ -259,7 +269,12 @@ namespace HeartopiaMod
                 }
 
                 int code = result == IntPtr.Zero ? 0 : this.ReadAuraMonoBoxedInt32(result);
-                status = "ActionErrorCode " + code;
+                // The controller id goes in the line too: a swing that is ACCEPTED and renders
+                // nothing is almost always this number pointing at the wrong clip family, and
+                // without it that costs a live debugging session to find (it already did once).
+                status = "ActionErrorCode " + code
+                    + (controllerSent != 0 ? " controller=" + controllerSent + " (override " + overrideType
+                        + ", shortName " + row.ControllerShortName + ")" : string.Empty);
                 return code == 0;
             }
             finally
