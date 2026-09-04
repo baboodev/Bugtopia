@@ -2569,7 +2569,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        private bool TryFindDirectBackpackItem(string itemKey, bool anyFood, out uint netId)
+        private bool TryFindDirectBackpackItem(string itemKey, bool anyFood, out uint netId, bool requireEdible = false)
         {
             netId = 0U;
             float now = Time.unscaledTime;
@@ -2586,7 +2586,7 @@ namespace HeartopiaMod
             this.lastDirectBackpackMatchedEntityType = 0;
             this.lastDirectBackpackMatchedCount = 0;
             bool runtimeSnapshotAvailable;
-            if (this.TryFindDirectBackpackItemFromRuntimeSnapshot(itemKey, anyFood, out netId, out runtimeSnapshotAvailable))
+            if (this.TryFindDirectBackpackItemFromRuntimeSnapshot(itemKey, anyFood, out netId, out runtimeSnapshotAvailable, requireEdible))
             {
                 this.lastDirectBackpackLookupKey = string.Empty;
                 this.nextDirectBackpackLookupRetryAt = -999f;
@@ -2683,18 +2683,31 @@ namespace HeartopiaMod
                             ? (descriptor.Contains("food_") || descriptor.Contains("p_food") || descriptor.Contains("ui_item_normal_p_food"))
                             : (!string.IsNullOrEmpty(normalizedKey) && descriptor.Contains(normalizedKey));
 
-                        if (matches)
+                        if (!matches)
                         {
-                            netId = candidateNetId;
-                            this.lastDirectBackpackMatchedNetId = netId;
-                            this.TryGetDirectBackpackItemStaticId(itemObj, out this.lastDirectBackpackMatchedStaticId);
-                            this.TryGetDirectBackpackItemEntityType(itemObj, out this.lastDirectBackpackMatchedEntityType);
-                            this.TryGetDirectBackpackItemCount(itemObj, out this.lastDirectBackpackMatchedCount);
-                            this.AutoEatRepairLog("[DirectBackpackMono] Matched item netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + " count=" + this.lastDirectBackpackMatchedCount + " descriptor=" + descriptor);
-                            this.lastDirectBackpackLookupKey = string.Empty;
-                            this.nextDirectBackpackLookupRetryAt = -999f;
-                            return true;
+                            continue;
                         }
+
+                        // The descriptor is a prefab/icon name, so it matches decorations that
+                        // merely LOOK like food (`p_food_oroll_award`). Eating one throws inside
+                        // BagModule, so a food lookup checks the item's real type first.
+                        this.TryGetDirectBackpackItemStaticId(itemObj, out int candidateStaticId);
+                        this.TryGetDirectBackpackItemEntityType(itemObj, out int candidateEntityType);
+                        if (requireEdible && !this.IsAutoEatFoodCandidate(candidateNetId, candidateStaticId, candidateEntityType, out string rejectReason))
+                        {
+                            this.AutoEatRepairLog("[DirectBackpackMono] Skipped inedible match netId=" + candidateNetId + " staticId=" + candidateStaticId + " entityType=" + candidateEntityType + " descriptor=" + descriptor + " (" + rejectReason + ")");
+                            continue;
+                        }
+
+                        netId = candidateNetId;
+                        this.lastDirectBackpackMatchedNetId = netId;
+                        this.lastDirectBackpackMatchedStaticId = candidateStaticId;
+                        this.lastDirectBackpackMatchedEntityType = candidateEntityType;
+                        this.TryGetDirectBackpackItemCount(itemObj, out this.lastDirectBackpackMatchedCount);
+                        this.AutoEatRepairLog("[DirectBackpackMono] Matched item netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + " count=" + this.lastDirectBackpackMatchedCount + " descriptor=" + descriptor);
+                        this.lastDirectBackpackLookupKey = string.Empty;
+                        this.nextDirectBackpackLookupRetryAt = -999f;
+                        return true;
                     }
 
                     this.AutoEatRepairLog("[DirectBackpackMono] No match. inspected=" + inspected + " key=" + normalizedKey);
@@ -2715,7 +2728,7 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryFindDirectBackpackItemFromRuntimeSnapshot(string itemKey, bool anyFood, out uint netId, out bool snapshotAvailable)
+        private bool TryFindDirectBackpackItemFromRuntimeSnapshot(string itemKey, bool anyFood, out uint netId, out bool snapshotAvailable, bool requireEdible = false)
         {
             netId = 0U;
             snapshotAvailable = false;
@@ -2741,6 +2754,12 @@ namespace HeartopiaMod
 
                 if (!matches)
                 {
+                    continue;
+                }
+
+                if (requireEdible && !this.IsAutoEatFoodCandidate(item.NetId, item.StaticId, item.EntityType, out string rejectReason))
+                {
+                    this.AutoEatRepairLog("[DirectBackpackRuntime] Skipped inedible match netId=" + item.NetId + " staticId=" + item.StaticId + " entityType=" + item.EntityType + " descriptor=" + descriptor + " (" + rejectReason + ")");
                     continue;
                 }
 
@@ -3071,7 +3090,7 @@ namespace HeartopiaMod
                 {
                     if (!this.TryResolveAuraMonoModule("XDTLevelAndEntity.Game.Module.Bag.BagModule", out bagModuleObj) || bagModuleObj == IntPtr.Zero)
                     {
-                        this.AutoEatRepairLog("[DirectBackpackMono] BagModule unavailable; trying protocol fallback.");
+                        FeatureLog.Fail("DirectBackpack", "BagModule unavailable; trying the protocol fallback.");
                         return this.TryExecuteDirectBackpackProtocolFallback(functionValue, netId);
                     }
 
@@ -3081,7 +3100,7 @@ namespace HeartopiaMod
                     this.AutoEatRepairLog("[DirectBackpackMono] ExecuteBackpackItemFunc lookup. method=0x" + executeMethod.ToString("X"));
                     if (executeMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
                     {
-                        this.AutoEatRepairLog("[DirectBackpackMono] BagModule.ExecuteBackpackItemFunc not found; trying protocol fallback.");
+                        FeatureLog.Fail("DirectBackpack", "BagModule.ExecuteBackpackItemFunc not found; trying the protocol fallback.");
                         return this.TryExecuteDirectBackpackProtocolFallback(functionValue, netId);
                     }
 
@@ -3109,7 +3128,7 @@ namespace HeartopiaMod
                     // Stale module pointer (e.g. after scene reload) — clear cache so next call re-resolves.
                     this.cachedAuraMonoBagModuleObj.Clear();
                     this.cachedAuraMonoBagExecuteMethod = IntPtr.Zero;
-                    this.AutoEatRepairLog("[DirectBackpackMono] ExecuteBackpackItemFunc raised exception; clearing cache and trying protocol fallback.");
+                    FeatureLog.Fail("DirectBackpack", "ExecuteBackpackItemFunc(" + functionValue + ") raised a Mono exception for netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + "; clearing cache and trying the protocol fallback.");
                     return this.TryExecuteDirectBackpackProtocolFallback(functionValue, netId);
                 }
 
@@ -3130,17 +3149,17 @@ namespace HeartopiaMod
         {
             if (functionValue == 112)
             {
-                this.AutoEatRepairLog("[DirectBackpackMono] UseBackpackItem protocol fallback disabled for safety after crash. netId=" + netId + " entityType=" + this.lastDirectBackpackMatchedEntityType);
+                FeatureLog.Fail("DirectBackpack", "UseBackpackItem protocol fallback is disabled for safety after a crash, so the use is lost. netId=" + netId + " entityType=" + this.lastDirectBackpackMatchedEntityType);
                 return false;
             }
 
             if (functionValue == 113)
             {
-                this.AutoEatRepairLog("[DirectBackpackMono] ToolRestorer protocol fallback disabled for safety after crash. netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId);
+                FeatureLog.Fail("DirectBackpack", "ToolRestorer protocol fallback is disabled for safety after a crash, so the use is lost. netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId);
                 return false;
             }
 
-            this.AutoEatRepairLog("[DirectBackpackMono] No protocol fallback for function=" + functionValue);
+            FeatureLog.Fail("DirectBackpack", "No protocol fallback for function=" + functionValue + "; the use is lost.");
             return false;
         }
 

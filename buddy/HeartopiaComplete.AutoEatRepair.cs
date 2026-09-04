@@ -1486,7 +1486,13 @@ namespace HeartopiaMod
                 }
             }
 
-            return this.TryExecuteDirectBackpackItemFunc(112, netId);
+            bool eatSent = this.TryExecuteDirectBackpackItemFunc(112, netId);
+            if (!eatSent)
+            {
+                this.RejectAutoEatFoodCandidate(netId, this.lastDirectBackpackMatchedStaticId, this.lastDirectBackpackMatchedEntityType, "BagModule Eat (112) failed");
+            }
+
+            return eatSent;
         }
 
         // True once HandHoldUpdatedEvent has fired on this build AND the live durability read
@@ -1987,6 +1993,13 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (!this.IsAutoEatFoodCandidate(this.cachedFoodNetId, this.cachedFoodStaticId, this.cachedFoodEntityType, out string cachedRejectReason))
+            {
+                this.AutoEatRepairLog("[Auto Eat] Cached food dropped: netId=" + this.cachedFoodNetId + " staticId=" + this.cachedFoodStaticId + " (" + cachedRejectReason + ")");
+                this.ClearCachedFood();
+                return false;
+            }
+
             this.lastDirectBackpackMatchedNetId = this.cachedFoodNetId;
             this.lastDirectBackpackMatchedStaticId = this.cachedFoodStaticId;
             this.lastDirectBackpackMatchedEntityType = this.cachedFoodEntityType;
@@ -2397,6 +2410,127 @@ namespace HeartopiaMod
             }
         }
 
+        // ── Auto Eat candidate validation ───────────────────────────────────────────────────────
+        //
+        // Item lookups match on the descriptor, which is a prefab/icon name — so a DECORATION that
+        // merely looks like food matches too: `p_food_oroll_award` (staticId 301782, entityType 50)
+        // contains "p_food", and `p_food_bakemushroom_award` even matches the "Bake Mushroom"
+        // preset key. Feeding one to BagModule.ExecuteBackpackItemFunc(Eat) is fatal to the call:
+        //
+        //     int[] eatAction = TableData.GetEatable(item.staticId).eatAction;   // GetEatable → null
+        //
+        // The NRE surfaces as a Mono exception on our invoke, the protocol fallback is stubbed out,
+        // and Auto Eat gives up — then re-picks the same decoration 5 s later, forever, while
+        // energy drains to zero. (Seen in the field: energy 1/100 with food in the bag.)
+        //
+        // Guard = the item's real entity type. Every one of the 477 rows in the game's Eatable
+        // table sits in exactly one of these three EntityType rows, so this is not a heuristic:
+        //   25 fruit          40101-40999
+        //   45 food           45101-45999
+        //   97 normalmushroom 48000-48999
+        private const int EatableEntityTypeFruit = 25;
+        private const int EatableEntityTypeFood = 45;
+        private const int EatableEntityTypeMushroom = 97;
+
+        // Items that made the game throw on Eat. Keyed by both ids because a decoration stacks:
+        // rejecting only the netId would just pick the next copy of the same thing.
+        private readonly HashSet<uint> autoEatRejectedFoodNetIds = new HashSet<uint>();
+        private readonly HashSet<int> autoEatRejectedFoodStaticIds = new HashSet<int>();
+
+        private static bool IsEatableEntityType(int entityType)
+        {
+            return entityType == EatableEntityTypeFood
+                || entityType == EatableEntityTypeFruit
+                || entityType == EatableEntityTypeMushroom;
+        }
+
+        // Fallback for when the entity type could not be read: the same three types as id ranges.
+        private static bool IsEatableStaticIdRange(int staticId)
+        {
+            return (staticId >= 40101 && staticId <= 40999)
+                || (staticId >= 45101 && staticId <= 45999)
+                || (staticId >= 48000 && staticId <= 48999);
+        }
+
+        private bool IsAutoEatFoodCandidate(uint netId, int staticId, int entityType, out string rejectReason)
+        {
+            if (netId != 0U && this.autoEatRejectedFoodNetIds.Contains(netId))
+            {
+                rejectReason = "netId rejected earlier this session";
+                return false;
+            }
+
+            if (staticId > 0 && this.autoEatRejectedFoodStaticIds.Contains(staticId))
+            {
+                rejectReason = "staticId rejected earlier this session";
+                return false;
+            }
+
+            if (entityType > 0)
+            {
+                if (IsEatableEntityType(entityType))
+                {
+                    rejectReason = null;
+                    return true;
+                }
+
+                rejectReason = "entityType " + entityType + " is not an eatable type";
+                return false;
+            }
+
+            if (staticId > 0)
+            {
+                if (IsEatableStaticIdRange(staticId))
+                {
+                    rejectReason = null;
+                    return true;
+                }
+
+                rejectReason = "staticId " + staticId + " is outside every eatable id range";
+                return false;
+            }
+
+            // Neither id readable — no worse than before this guard existed; let it through and let
+            // RejectAutoEatFoodCandidate deal with the failure if it turns out to be inedible.
+            rejectReason = null;
+            return true;
+        }
+
+        // Called when a send for this candidate failed. Blacklists it so the next attempt picks a
+        // DIFFERENT item instead of retrying the same one until energy hits zero.
+        private void RejectAutoEatFoodCandidate(uint netId, int staticId, int entityType, string reason)
+        {
+            // A provably edible item that failed hit a transient fault (stale module pointer,
+            // fishing mode, server refusal) — blacklisting real food over that would be worse than
+            // the bug this guard exists for.
+            if (IsEatableEntityType(entityType) || (entityType <= 0 && staticId > 0 && IsEatableStaticIdRange(staticId)))
+            {
+                FeatureLog.Fail("AutoEat", "Eat failed for edible item netId=" + netId + " staticId=" + staticId
+                    + " entityType=" + entityType + " (" + reason + "); keeping it as a candidate.");
+                this.ClearCachedFood();
+                return;
+            }
+
+            bool added = false;
+            if (netId != 0U)
+            {
+                added |= this.autoEatRejectedFoodNetIds.Add(netId);
+            }
+
+            if (staticId > 0)
+            {
+                added |= this.autoEatRejectedFoodStaticIds.Add(staticId);
+            }
+
+            if (added)
+            {
+                FeatureLog.Fail("AutoEat", "Item is not food - excluded from Auto Eat for this session. netId=" + netId
+                    + " staticId=" + staticId + " entityType=" + entityType + " (" + reason + ")");
+            }
+
+            this.ClearCachedFood();
+        }
+
         private bool TryDirectUseFood()
         {
             try
@@ -2409,9 +2543,9 @@ namespace HeartopiaMod
                     return true;
                 }
 
-                if (!this.TryFindDirectBackpackItem(foodKey, anyFood, out uint netId) || netId == 0U)
+                if (!this.TryFindDirectBackpackItem(foodKey, anyFood, out uint netId, true) || netId == 0U)
                 {
-                    this.AutoEatRepairLog("[Auto Eat] Direct backpack food not found for " + this.GetAutoEatFoodOptionLabel(this.autoEatFoodType));
+                    FeatureLog.Fail("AutoEat", "No usable food found in the backpack for " + this.GetAutoEatFoodOptionLabel(this.autoEatFoodType) + ".");
                     this.ClearCachedFood();
                     this.ShowMissingFoodNotification();
                     return false;
@@ -2529,6 +2663,12 @@ namespace HeartopiaMod
                     if (isFood && !seenItems.Contains(spriteName))
                     {
                         seenItems.Add(spriteName);
+                        if (!this.IsEdibleBagFoodSprite(spriteName))
+                        {
+                            FeatureLog.Once("AutoEat", "picker-skip:" + spriteName, "Custom Food picker skipped " + spriteName + " - it is not an edible item.");
+                            continue;
+                        }
+
                         foodList.Add(spriteName);
                         this.CacheScannedBagFoodDisplayName(spriteName);
                         if (!this.scannedBagFoodTextures.ContainsKey(spriteName)
@@ -2588,6 +2728,60 @@ namespace HeartopiaMod
             {
                 this.scannedBagFoodDisplayNames[normalizedSprite] = resolvedName;
             }
+        }
+
+        // The Custom Food picker offers whatever the open bag shows whose SPRITE NAME reads like
+        // food — and a decoration's sprite reads exactly like food:
+        // `ui_item_normal_p_food_bakemushroom_award` (staticId 302311, entityType 50 decoration)
+        // even matches the "Bake Mushroom" keyword. Picking one is a dead end now that Auto Eat
+        // validates its candidates — the eat lookup skips it and reports "no usable food" — so the
+        // list resolves each sprite back to a real bag item and applies the same test.
+        //
+        // Both sources carry StaticId + EntityType; a sprite that resolves to neither is left in
+        // the list, exactly as before this filter existed.
+        private bool IsEdibleBagFoodSprite(string spriteName)
+        {
+            string normalizedSprite = this.NormalizeAutoSellMatchKey(spriteName);
+            if (string.IsNullOrWhiteSpace(normalizedSprite))
+            {
+                return true;
+            }
+
+            try
+            {
+                if (this.TryRefreshDirectBackpackRuntimeSnapshot(false))
+                {
+                    for (int i = 0; i < this.directBackpackRuntimeItems.Count; i++)
+                    {
+                        DirectBackpackRuntimeItem item = this.directBackpackRuntimeItems[i];
+                        if (item == null || !this.DoesRuntimeBackpackItemMatchSprite(item, normalizedSprite))
+                        {
+                            continue;
+                        }
+
+                        return this.IsAutoEatFoodCandidate(0U, item.StaticId, item.EntityType, out _);
+                    }
+                }
+
+                if (this.autoSellBagItems != null)
+                {
+                    for (int i = 0; i < this.autoSellBagItems.Count; i++)
+                    {
+                        AutoSellBagItemEntry entry = this.autoSellBagItems[i];
+                        if (entry == null || !this.DoesBagItemEntryMatchSprite(entry, normalizedSprite))
+                        {
+                            continue;
+                        }
+
+                        return this.IsAutoEatFoodCandidate(0U, entry.StaticId, entry.EntityType, out _);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return true;
         }
 
         private bool TryResolveScannedBagFoodDisplayName(string spriteName, string normalizedSprite, out string displayName)

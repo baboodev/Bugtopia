@@ -3406,7 +3406,7 @@ namespace HeartopiaMod
                         // Energy may still sit at/below the trigger — without this cooldown the very
                         // next stamina event re-triggered StartAutoEat (and its notification) instantly.
                         nextAutoEatDirectRetryAt = Time.unscaledTime + 5f;
-                        this.AutoEatRepairLog($"[Auto Eat] Stopped after max attempts ({autoEatAttempts}) - energy at {this.GetCurrentEnergyDisplay()}");
+                        FeatureLog.Fail("AutoEat", $"Stopped after max attempts ({autoEatAttempts}) - energy at {this.GetCurrentEnergyDisplay()}");
                         break;
                     }
                     if (this.TryDirectUseFood())
@@ -3418,7 +3418,7 @@ namespace HeartopiaMod
                     }
                     else
                     {
-                        this.AutoEatRepairLog("[Auto Eat] Direct food use failed; stopped without opening bag UI.");
+                        FeatureLog.Fail("AutoEat", "Direct food use failed; stopped without opening the bag UI.");
                         isAutoEating = false;
                         autoEatStep = 0;
                         autoEatForceSingleUse = false;

@@ -2719,6 +2719,16 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // Keyword matching alone lets DECORATIONS into the list the user picks from: a
+            // decoration's sprite/name reads exactly like food (`p_food_bakemushroom_award`,
+            // `p_food_oroll_award`), which is the same flaw that made Auto Eat try to eat one.
+            // When the item's real entity type resolves it decides on its own; the keywords below
+            // stay as the fallback for items whose type could not be read.
+            if (this.TryGetPetFeedEntityTypeId(entry.StaticId, out int entityTypeId) && entityTypeId > 0)
+            {
+                return IsPetFeedableEntityType(entityTypeId);
+            }
+
             string[] foodKeywords = new[] { "food", "bread", "jam", "mushroom", "salad", "soup", "stew", "pie", "cake", "fish", "meat", "fruit", "vegetable", "berry", "apple", "cheese", "egg", "milk", "honey", "candy", "snack", "meal", "dish", "seafood", "octopus", "oyster", "animal" };
             foreach (string keyword in foodKeywords)
             {
@@ -2729,6 +2739,31 @@ namespace HeartopiaMod
             }
 
             return text.Contains("gather_") || text.Contains("fruit_");
+        }
+
+        // Every EntityType row the game flags as f_catfood, f_dogfood or f_petFood — i.e. the
+        // complete set of types a pet will accept:
+        //   19 croploot   25 fruit    30 fish     45 food     97 normalmushroom
+        //   98 poisonmushroom         402 catfooditem         411 dogfooditem
+        //   431 animalcommonfood
+        // Anything else (50 decoration above all) is not food no matter what its sprite is called.
+        private static bool IsPetFeedableEntityType(int entityTypeId)
+        {
+            switch (entityTypeId)
+            {
+                case 19:
+                case 25:
+                case 30:
+                case 45:
+                case 97:
+                case 98:
+                case 402:
+                case 411:
+                case 431:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private bool TryGetPetFeedEntityTypeId(int staticId, out int entityTypeId)
