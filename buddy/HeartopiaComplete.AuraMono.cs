@@ -1809,6 +1809,17 @@ namespace HeartopiaMod
             {
                 imageNames = new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "Client", "Client.dll" };
             }
+            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("ScriptsRefactory.LevelAndEntity", StringComparison.Ordinal))
+            {
+                // The refactored gameplay half — PlayerAxeAttackTree / PlayerAxeAttackStone and the
+                // rest of ScriptsRefactory.LevelAndEntity.Gameplay.Action — compiles into
+                // XDTLevelAndEntity, the same image as the un-refactored namespace above it.
+                // Without this branch the namespace fell through to the default list, missed, and the
+                // across-assemblies fallback could not see it either (that path is BCL-only): the
+                // Action Panel's Chop and Mine logged "context unresolved" for names that are
+                // verbatim correct — confirmed against the running build with mono.search.
+                imageNames = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll", "Client", "Client.dll" };
+            }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("XDTBaseService", StringComparison.Ordinal))
             {
                 imageNames = new[] { "XDTBaseService", "XDTBaseService.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
