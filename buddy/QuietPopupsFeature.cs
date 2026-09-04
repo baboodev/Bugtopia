@@ -20,6 +20,10 @@ namespace HeartopiaMod
     // HOOKS ARE REGISTERED LAZILY — only on the first time the toggle goes on. Slots are never
     // released and the pool is shared with every other feature (see MaxEventHookSlots), so six
     // permanently-burnt slots for a popup filter nobody enabled is not a trade worth making.
+    //
+    // TWO INDEPENDENT TOGGLES with two independent latches: the congratulation family above, and
+    // the Battle Pass reward modal (AlertBPPayRewardEvent), which is kept separate because it
+    // doubles as a paid-pass upsell rather than being a pure "well done" card.
     public partial class HeartopiaComplete
     {
         // Справочник -> сертификация коллекционера. MailSyncSystem (RewardNotice, reason
@@ -53,14 +57,34 @@ namespace HeartopiaMod
         private const string BattlePassCollectTipEventName = "XDTGameSystem.UI.BattlePassCollectTipEvent";
         private const int BattlePassCollectTipEventPayloadBytes = 8;
 
+        // Наградная модалка боевого пропуска — SEPARATE TOGGLE, not part of the congratulation
+        // family above: this one also carries the "buy the paid pass" upsell (payRewardBg /
+        // toBuy@btn / payRewards@list next to the granted rewards), so hiding it is a different
+        // decision from hiding a certification card.
+        //
+        // MailSyncSystem (WorldSystem.ShowBattlePassPayReward) -> ShowBpPayRewardEvent ->
+        // DefaultModule.ShowBpPayRewardEventHandler (pure field copy) -> AlertBPPayRewardEvent ->
+        // UIEventBridge.OnAlertBPPayReward -> AlertBPPayRewardPanel.Open. Hooked at the LOWER,
+        // terminal channel for the same reason AlertRewardsEvent is preferred over
+        // AlertRewardEvent: the upper one could grow a second listener that runs real logic.
+        // Payload is a List<(RewardData,int)> reference plus an int whose offset depends on how
+        // Mono lays the struct out — nothing is read.
+        private const string AlertBPPayRewardEventName = "XDTGameSystem.UI.AlertBPPayRewardEvent";
+        private const int AlertBPPayRewardEventPayloadBytes = 0;
+
         internal static bool MasterLogQuietPopups = false;
 
         private bool quietCongratsPopups;
         private bool quietPopupsHooksRegistered;
         private bool quietPopupsHookInstallLogged;
 
+        private bool quietBpPayRewardPopup;
+        private bool quietBpPayHookRegistered;
+
         private void ProcessQuietPopupsOnUpdate()
         {
+            this.ProcessQuietBpPayRewardOnUpdate();
+
             bool on = this.quietCongratsPopups;
             if (!on && !this.quietPopupsHooksRegistered)
             {
@@ -134,6 +158,44 @@ namespace HeartopiaMod
 
             this.quietPopupsHookInstallLogged = true;
             ModLogger.Msg("[QuietPopups] hooks installed, suppress=" + this.quietCongratsPopups);
+        }
+
+        // Own latch, own slot: the two toggles are independent, so enabling one must not register
+        // the other's hooks.
+        private void ProcessQuietBpPayRewardOnUpdate()
+        {
+            bool on = this.quietBpPayRewardPopup;
+            if (!on && !this.quietBpPayHookRegistered)
+            {
+                return;
+            }
+
+            if (!this.quietBpPayHookRegistered)
+            {
+                this.quietBpPayHookRegistered = true;
+                if (!this.RegisterGameEventHook(
+                        AlertBPPayRewardEventName, AlertBPPayRewardEventPayloadBytes, this.OnAlertBPPayRewardEventHook))
+                {
+                    ModLogger.Warning("[QuietPopups] AlertBPPayRewardEvent hook refused"
+                        + " — the Battle Pass reward popup will still show.");
+                }
+                else if (MasterLogQuietPopups)
+                {
+                    ModLogger.Msg("[QuietPopups] AlertBPPayRewardEvent hook registered");
+                }
+            }
+
+            this.SetGameEventHookSuppressForward(AlertBPPayRewardEventName, on);
+        }
+
+        private void OnAlertBPPayRewardEventHook(GameEventSnapshot e)
+        {
+            if (!MasterLogQuietPopups)
+            {
+                return;
+            }
+
+            ModLogger.Msg("[QuietPopups] AlertBPPayRewardEvent suppress=" + this.quietBpPayRewardPopup);
         }
 
         // The payload is one inline RewardData — never dereferenced (see the const's comment), so

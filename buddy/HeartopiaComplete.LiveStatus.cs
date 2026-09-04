@@ -232,6 +232,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Quiet Popups", "Active"));
             }
 
+            if (this.quietBpPayRewardPopup)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Quiet BP Reward Popup", "Active"));
+            }
+
             if (this.emoteUnlockEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Emote Unlock", this.emoteUnlockStatus));

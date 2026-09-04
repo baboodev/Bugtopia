@@ -102,6 +102,7 @@ namespace HeartopiaMod
             public GameObject AnalogMoveHint;
             public Toggle SkipShowOffToggle;
             public Toggle QuietPopupsToggle;
+            public Toggle QuietBpPayToggle;
             public GameObject QuietPopupsHint;
             public Toggle EmoteUnlockToggle;
             public Toggle FriendInteractUnlockToggle;
@@ -359,6 +360,10 @@ namespace HeartopiaMod
                 this.L("Hides certification, collector rank, achievement, hobby level and pictorial cards."),
                 11f, new Color(muted.r, muted.g, muted.b, 0.85f), false);
             this.TrySetUguiLabelWrapped(handle.QuietPopupsHint);
+
+            handle.QuietBpPayToggle = this.CreateUguiCheckbox(scrollContent, "QuietBpPayToggle",
+                this.L("Hide the Battle Pass reward popup"), this.quietBpPayRewardPopup,
+                new System.Action<bool>(this.OnUguiSelfQuietBpPayToggled));
 
             handle.EmoteUnlockToggle = this.CreateUguiCheckbox(scrollContent, "EmoteUnlockToggle",
                 this.L("Unlock all emotes (panel + locked ones playable)"), this.emoteUnlockEnabled,
@@ -622,6 +627,12 @@ namespace HeartopiaMod
             }
             yCur += 24f;
 
+            if (handle.QuietBpPayToggle != null)
+            {
+                PlaceUguiTopLeft(handle.QuietBpPayToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.EmoteUnlockToggle != null)
             {
                 PlaceUguiTopLeft(handle.EmoteUnlockToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -721,6 +732,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AnalogMoveToggle, this.analogMoveBridgeEnabled);
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
                 this.SyncUguiToggleFromField(handle.QuietPopupsToggle, this.quietCongratsPopups);
+                this.SyncUguiToggleFromField(handle.QuietBpPayToggle, this.quietBpPayRewardPopup);
                 this.SyncUguiToggleFromField(handle.EmoteUnlockToggle, this.emoteUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.FriendInteractUnlockToggle, this.friendInteractUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
@@ -1160,6 +1172,17 @@ namespace HeartopiaMod
                 return;
             }
             this.quietCongratsPopups = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Own toggle, own hook latch — see QuietPopupsFeature. Save only.
+        private void OnUguiSelfQuietBpPayToggled(bool value)
+        {
+            if (value == this.quietBpPayRewardPopup)
+            {
+                return;
+            }
+            this.quietBpPayRewardPopup = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 
