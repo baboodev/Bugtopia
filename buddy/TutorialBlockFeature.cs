@@ -443,7 +443,7 @@ namespace HeartopiaMod
                     IntPtr openDispatch = eventCenterClass != IntPtr.Zero
                         ? this.FindAuraMonoMethodOnHierarchy(eventCenterClass, "DispatchEvent", 1)
                         : IntPtr.Zero;
-                    IntPtr interruptClass = this.ResolveGameEventClass(TutorialInterruptEventName);
+                    IntPtr interruptClass = this.ResolveGameEventClass(TutorialInterruptEventName, allowExhaustive: true);
                     if (openDispatch == IntPtr.Zero || interruptClass == IntPtr.Zero)
                     {
                         if (MasterLogTutorialBlock)

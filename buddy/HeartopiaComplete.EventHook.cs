@@ -486,13 +486,16 @@ namespace HeartopiaMod
 
             // The event struct's image (e.g. XDTDataAndProtocol) may load after EventCenter. If the
             // class isn't resolvable yet, leave InstallAttempted=false so we retry on a later frame.
-            IntPtr eventClass = this.ResolveGameEventClass(entry.EventFullName);
+            // The expensive image walks only run on the 5 s beat, not on every pass.
+            bool dueForRetry = UnityEngine.Time.unscaledTime >= entry.NextResolveLogAt;
+            IntPtr eventClass = this.ResolveGameEventClass(entry.EventFullName, dueForRetry);
             if (eventClass == IntPtr.Zero)
             {
-                if (UnityEngine.Time.unscaledTime >= entry.NextResolveLogAt)
+                if (dueForRetry)
                 {
                     entry.NextResolveLogAt = UnityEngine.Time.unscaledTime + 5f;
-                    ModLogger.Msg("[EventHook] awaiting event type: " + entry.EventFullName);
+                    ModLogger.Msg("[EventHook] awaiting event type: " + entry.EventFullName
+                        + " (not in any loaded image yet — its assembly may load later)");
                 }
 
                 return;
@@ -1191,7 +1194,18 @@ namespace HeartopiaMod
             this.entityLastRemoveNetId = e.ReadUInt32(8);
         }
 
-        private IntPtr ResolveGameEventClass(string eventFullName)
+        // Three rungs, cheapest first. The shortlist that FindAuraMonoClassByFullName consults is
+        // keyed on the namespace prefix, and a namespace does NOT reliably predict the image in this
+        // build — XDTGame.UI.PictorialTipShowRequestedEvent sat unresolvable for a whole session
+        // ("awaiting event type" every 5 s) even though its namespace shortlist already listed the
+        // image the dumps put it in. So when the cheap paths miss, fall through to a walk of every
+        // named game image and then of every loaded image, and SAY which rung answered — that log
+        // line is how the next unresolvable event names its own image instead of guessing.
+        //
+        // The two exhaustive rungs are gated by the caller to the 5 s retry cadence: walking every
+        // loaded mono image on every install pass would be a per-frame cost for a miss that, by
+        // definition, is not going to resolve this frame either.
+        private IntPtr ResolveGameEventClass(string eventFullName, bool allowExhaustive)
         {
             if (string.IsNullOrWhiteSpace(eventFullName))
             {
@@ -1212,11 +1226,9 @@ namespace HeartopiaMod
 
             string ns = eventFullName.Substring(0, lastDot);
             string name = eventFullName.Substring(lastDot + 1);
-            if (!ns.StartsWith("ScriptsRefactory.DataAndProtocol", StringComparison.Ordinal))
-            {
-                return IntPtr.Zero;
-            }
 
+            // Kept as its own rung because it is cheap and historically load-bearing: the
+            // ScriptsRefactory.DataAndProtocol events live in an image their namespace does not name.
             cls = this.FindAuraMonoClassInImages(ns, name, new string[]
             {
                 "XDTDataAndProtocol",
@@ -1226,9 +1238,29 @@ namespace HeartopiaMod
                 "Client",
                 "Client.dll"
             });
-            if (cls != IntPtr.Zero && MasterLogShowOffBypass)
+            if (cls != IntPtr.Zero)
             {
-                ModLogger.Msg("[EventHook] resolved " + eventFullName + " via XDTDataAndProtocol image");
+                return cls;
+            }
+
+            if (!allowExhaustive)
+            {
+                return IntPtr.Zero;
+            }
+
+            cls = this.FindAuraMonoClassByFullNameExhaustive(eventFullName);
+            if (cls != IntPtr.Zero)
+            {
+                ModLogger.Msg("[EventHook] resolved " + eventFullName
+                    + " only by scanning every named game image — its namespace shortlist is wrong.");
+                return cls;
+            }
+
+            cls = this.FindAuraMonoClassInAllLoadedImages(name, ns);
+            if (cls != IntPtr.Zero)
+            {
+                ModLogger.Msg("[EventHook] resolved " + eventFullName
+                    + " only by walking every loaded image — it is not in AuraMonoAllGameImageNames.");
             }
 
             return cls;
