@@ -103,6 +103,8 @@ namespace HeartopiaMod
             public Toggle SkipShowOffToggle;
             public Toggle QuietPopupsToggle;
             public Toggle QuietBpPayToggle;
+            public Toggle ActivityRewardClaimToggle;
+            public Toggle ActivityHideEndPanelToggle;
             public GameObject QuietPopupsHint;
             public Toggle EmoteUnlockToggle;
             public Toggle FriendInteractUnlockToggle;
@@ -364,6 +366,14 @@ namespace HeartopiaMod
             handle.QuietBpPayToggle = this.CreateUguiCheckbox(scrollContent, "QuietBpPayToggle",
                 this.L("Hide the Battle Pass reward popup"), this.quietBpPayRewardPopup,
                 new System.Action<bool>(this.OnUguiSelfQuietBpPayToggled));
+
+            handle.ActivityRewardClaimToggle = this.CreateUguiCheckbox(scrollContent, "ActivityRewardClaimToggle",
+                this.L("Auto-Claim Event Rewards"), this.activityRewardAutoClaim,
+                new System.Action<bool>(this.OnUguiSelfActivityRewardClaimToggled));
+
+            handle.ActivityHideEndPanelToggle = this.CreateUguiCheckbox(scrollContent, "ActivityHideEndPanelToggle",
+                this.L("Hide the event results panel"), this.activityHideEndPanel,
+                new System.Action<bool>(this.OnUguiSelfActivityHideEndPanelToggled));
 
             handle.EmoteUnlockToggle = this.CreateUguiCheckbox(scrollContent, "EmoteUnlockToggle",
                 this.L("Unlock all emotes (panel + locked ones playable)"), this.emoteUnlockEnabled,
@@ -633,6 +643,18 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.ActivityRewardClaimToggle != null)
+            {
+                PlaceUguiTopLeft(handle.ActivityRewardClaimToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
+            if (handle.ActivityHideEndPanelToggle != null)
+            {
+                PlaceUguiTopLeft(handle.ActivityHideEndPanelToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.EmoteUnlockToggle != null)
             {
                 PlaceUguiTopLeft(handle.EmoteUnlockToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -733,6 +755,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SkipShowOffToggle, this.skipShowOffAnimations);
                 this.SyncUguiToggleFromField(handle.QuietPopupsToggle, this.quietCongratsPopups);
                 this.SyncUguiToggleFromField(handle.QuietBpPayToggle, this.quietBpPayRewardPopup);
+                this.SyncUguiToggleFromField(handle.ActivityRewardClaimToggle, this.activityRewardAutoClaim);
+                this.SyncUguiToggleFromField(handle.ActivityHideEndPanelToggle, this.activityHideEndPanel);
                 this.SyncUguiToggleFromField(handle.EmoteUnlockToggle, this.emoteUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.FriendInteractUnlockToggle, this.friendInteractUnlockEnabled);
                 this.SyncUguiToggleFromField(handle.SkipCraftDyeToggle, this.skipCraftDyeAnimations);
@@ -2050,6 +2074,30 @@ namespace HeartopiaMod
                 return;
             }
             this.activityAutoLeaveEvents = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Save only — the feature tick owns hook registration and every Mono call, so a UI callback
+        // never reaches native code.
+        private void OnUguiSelfActivityRewardClaimToggled(bool value)
+        {
+            if (value == this.activityRewardAutoClaim)
+            {
+                return;
+            }
+            this.activityRewardAutoClaim = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Hiding the results panel also hides the only manual claim route, which is why it is its
+        // own switch rather than a side effect of auto-claim. Save only; the tick owns the hook.
+        private void OnUguiSelfActivityHideEndPanelToggled(bool value)
+        {
+            if (value == this.activityHideEndPanel)
+            {
+                return;
+            }
+            this.activityHideEndPanel = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

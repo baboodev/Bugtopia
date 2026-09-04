@@ -455,6 +455,7 @@
     <Compile Include="TutorialBlockFeature.cs" />
     <Compile Include="PartyAutoDeclineFeature.cs" />
     <Compile Include="ActivityEventAutoDeclineFeature.cs" />
+    <Compile Include="ActivityRewardAutoClaimFeature.cs" />
     <Compile Include="PersistentHudFeature.cs" />
     <Compile Include="StartupMenuHintFeature.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />

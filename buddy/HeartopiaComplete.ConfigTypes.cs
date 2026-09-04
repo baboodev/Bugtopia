@@ -249,6 +249,8 @@ namespace HeartopiaMod
             public bool partyAutoLeaveParties;
             public bool activityAutoDeclineInvites;
             public bool activityAutoLeaveEvents;
+            public bool activityRewardAutoClaim;
+            public bool activityHideEndPanel;
             // Settings -> Logging: all MasterLog* verbose switches, persisted since the whole set
             // was made default-OFF. Field names match the static flags 1:1 so the XML is greppable.
             public bool MasterLogAuraFarm;

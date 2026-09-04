@@ -237,6 +237,16 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Quiet BP Reward Popup", "Active"));
             }
 
+            if (this.activityRewardAutoClaim)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Auto-Claim Event Rewards", this.GetActivityRewardClaimStatus()));
+            }
+
+            if (this.activityHideEndPanel)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Hide Event Results Panel", "Active"));
+            }
+
             if (this.emoteUnlockEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Emote Unlock", this.emoteUnlockStatus));

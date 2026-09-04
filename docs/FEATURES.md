@@ -504,6 +504,65 @@ separate on purpose: the first is side-effect free, the second talks to the serv
 - The Privacy sub-tab shows a live counter (`Invites declined: N | parties left: M`) and the
   feature's status line. Verbose tracing: `MasterLogPartyAutoDecline`.
 
+### Auto-Claim Event Rewards (Self)
+
+Drains the rewards of a player-hosted **ActivityEvent** the moment it ends, so the "Claim Rewards"
+button on `PartyMembersPanel` never has to be pressed. Implementation:
+`ActivityRewardAutoClaimFeature.cs`, persisted as `activityRewardAutoClaim`. The toggle sits on the
+main Self tab, not under Privacy — it claims rewards rather than refusing contact.
+
+- **The button does not claim.** `PartyMembersPanel.ClaimReward` only opens `EventRewardPanel`; the
+  claim is two independent static sends in that panel —
+  `ActivityEventProtocolManager.SendGetActivityEventRewardCommand(Personal|Team, info.NetId)`. The
+  feature calls the **manager**, never building `GetActivityRewardCommand` itself: its `RewardType`
+  is an enum field and `TrySetObjectMember` cannot set enums without `Enum.ToObject`.
+- **Gates mirrored from the panel:** `ActivityEventSystem.CanGetReward(idArg, netId, type)` — the
+  same call that drives the button's interactability — where `idArg` is
+  `GetPersonalGoalId(staticId)` for Personal (a `0` result means the event has no personal goal, so
+  that half is skipped for good) and `staticId` itself for Team; plus `CheckRewardClaimed(netId,
+  type)`, the local dictionary the game's own panel writes, which stops a second send after a manual
+  claim. `CanGetReward` is backed by a server-pushed component and can turn true *after* the end, so
+  the job polls every 2 s for up to 120 s instead of firing once.
+- **Trigger costs zero hook slots.** `SelfActivityChangedEvent` is already hooked by the auto-decline
+  half at `payloadBytes` 0; re-registering appends a second handler to the same entry and grows the
+  payload to 64 for both. `hasValue` of its `ActivityEventInfo?` is the end discriminator — every
+  join/start/update dispatch is `default(...)`, while both end paths (organizer via
+  `ActivityEndEvent`, participant via `QuitActivityEvent{ActivityFinish}`) converge on
+  `OnEndActivity` and set it. Jobs dedupe by netId because both can fire for one end.
+- **Offsets** (bare, i.e. boxed minus 16): `hasValue`@0, `NetId`@8, `StaticId`@12, `StatusType`@32 —
+  `ActivityEventInfo` keeps declaration order and `Nullable<T>` on this build is corefx-ordered
+  (`hasValue` first), both measured live.
+- **Why the event payload and not the list.** `GetAllActivityEventInfo()` is a safe reference-returning
+  call, but it is useless at end time: the end is raised with `needWithDestroy: true`, so the entity
+  may already carry `NetworkEntityDestroyedTag` while the list defaults to filtering those out. The
+  list is used only for the world-ready sweep (an event still sitting in `Ending` after a relog),
+  filtered by `StatusType == Ending` and `CheckPlayerInActivity(netId, selfNetId)`.
+- **Failures are silent.** `ActivityRewardRefreshEvent` is dispatched only on
+  `ActivityErrorCode.Success`; a rejection goes to `ShowErrorToast` and never reaches the mod. A
+  claim is therefore judged by the *absence* of an ack: no ack in 10 s → one retry → give up with a
+  `FeatureLog.Fail` naming netId/staticId. An event that simply ended with an unmet goal logs at
+  `Once`, not `Fail` — that is the normal outcome of a lost team target.
+- One command per 2 s tick, so the two claims of an event never leave in the same frame.
+- **Separate toggle: "Hide the event results panel"** (`activityHideEndPanel`).
+  `ActivityEventEndingNoticeRequestedEvent` has exactly one listener
+  (`UIEventBridge.OnActivityEventEndingNoticeRequested`) whose body only opens
+  `PartySoonPanel(Finish)` and, when the event's `isOpenResult` is set, wires the callback that
+  opens `PartyMembersPanel`. Suppressing the dispatch removes both and nothing else. Deliberately
+  NOT tied to auto-claim: that panel is also the only manual claim route, so hiding it is the
+  player's call rather than a side effect of automation.
+- **The trigger reads BOTH candidate `Nullable<T>` layouts.** `ActivityEventInfo` itself was
+  measured, but the wrapper was not — the offsets came from describing the open generic and
+  inferring the closed instantiation, and the first live run produced no trigger line at all while
+  the game's end panel opened normally. corefx order (`hasValue` first → NetId@8/StaticId@12) and
+  Mono order (`value` first → NetId@0/StaticId@4, `has_value` past the 64-byte snapshot) are both
+  read and both offered as jobs; a misread pair is harmless because nothing is sent until
+  `CanGetReward` accepts that netId, which it never will for garbage. The first 12 dispatches dump
+  their leading bytes at `FeatureLog.Life` so the layout gets settled from evidence.
+- ⚠️ **Not yet witnessed at a real event end** — the layout was measured while nothing was ending, so
+  the dispatch order and the `StatusType` value at that instant are read off the decompiled code.
+  The trigger therefore logs every end it sees at `FeatureLog.Life` unconditionally: the first real
+  end is meant to confirm `hasValue=1` with a sane netId/staticId before the automation is trusted.
+
 ### Custom Jump (Self → Fun sub-tab)
 
 - Four numeric input fields that retune the player's jump arc by writing the game's live

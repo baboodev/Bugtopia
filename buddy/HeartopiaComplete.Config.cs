@@ -260,6 +260,8 @@ namespace HeartopiaMod
             data.partyAutoLeaveParties = this.partyAutoLeaveParties;
             data.activityAutoDeclineInvites = this.activityAutoDeclineInvites;
             data.activityAutoLeaveEvents = this.activityAutoLeaveEvents;
+            data.activityRewardAutoClaim = this.activityRewardAutoClaim;
+            data.activityHideEndPanel = this.activityHideEndPanel;
             // Logging tab (static flags, so no `this.`).
             data.MasterLogAuraFarm = MasterLogAuraFarm;
             data.MasterLogBirdFarm = MasterLogBirdFarm;
@@ -641,6 +643,8 @@ namespace HeartopiaMod
             this.partyAutoLeaveParties = data.partyAutoLeaveParties;
             this.activityAutoDeclineInvites = data.activityAutoDeclineInvites;
             this.activityAutoLeaveEvents = data.activityAutoLeaveEvents;
+            this.activityRewardAutoClaim = data.activityRewardAutoClaim;
+            this.activityHideEndPanel = data.activityHideEndPanel;
             // Logging tab. A config written before these existed has them absent -> false, which is
             // now also the compiled default, so old and new configs agree.
             MasterLogAuraFarm = data.MasterLogAuraFarm;
