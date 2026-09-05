@@ -100,6 +100,15 @@ namespace HeartopiaMod
         // Sticker theme bonuses have no server RedPointType either. This is what the server sync of
         // the theme node states dispatches (OperationActivityCenterSyncSystem), i.e. exactly when a
         // tier can flip to WaitClaim. Empty struct, so one byte.
+        // "Guess Who's Here" on the Friends Link tab. FriendSystem lights it LOCALLY from
+        // _hasNewSocialRecord, never through ClientRedPointSystem, so no RedPointEvent is ever
+        // dispatched for it and the event switch cannot see it. SocialReportUpdateEvent is
+        // dispatched at every point where that flag changes, which is the signal.
+        private const int DailyClaimsRedPointEnumDailyRecommendation = 50004;
+        private const string DailyClaimsSocialReportUpdateEventName =
+            "XDTGameSystem.GameplaySystem.Social.SocialReportUpdateEvent";
+        private const int DailyClaimsSocialReportUpdateEventBytes = 1;
+
         private const string DailyClaimsRefreshStickerRewardEventName =
             "XDTDataAndProtocol.Events.RefreshStickerRewardEvent";
         private const int DailyClaimsRefreshStickerRewardEventBytes = 1;
@@ -278,14 +287,19 @@ namespace HeartopiaMod
                     DailyClaimsSeaCycleLevelUpdatedEventName,
                     DailyClaimsSeaCycleLevelUpdatedEventBytes,
                     this.OnDailyClaimsAutoSeaCycleLevelUpdatedEvent);
+                bool socialReport = this.RegisterGameEventHook(
+                    DailyClaimsSocialReportUpdateEventName,
+                    DailyClaimsSocialReportUpdateEventBytes,
+                    this.OnDailyClaimsAutoSocialReportUpdateEvent);
 
                 this.dailyClaimsAutoHooksRegistered =
                     redPoint || activityTasks || mail || dream || sticker || battlePass
-                    || taskUpdated || seaCycle;
+                    || taskUpdated || seaCycle || socialReport;
                 this.DailyClaimsLog("auto-claim hooks registered: redPoint=" + redPoint
                     + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream
                     + " sticker=" + sticker + " battlePass=" + battlePass
-                    + " taskUpdated=" + taskUpdated + " seaCycle=" + seaCycle);
+                    + " taskUpdated=" + taskUpdated + " seaCycle=" + seaCycle
+                    + " socialReport=" + socialReport);
 
                 if (!this.dailyClaimsAutoHooksRegistered)
                 {
@@ -472,6 +486,18 @@ namespace HeartopiaMod
             // whether the id is one of ours would pay that cost per dispatch. The drain checks the
             // seven ids once per interval instead.
             this.dailyClaimsAutoPendingWhalefall = true;
+        }
+
+        private void OnDailyClaimsAutoSocialReportUpdateEvent(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            // Carries nothing. Fires when the flag is CLEARED too, including by our own pass — that
+            // is harmless, because mark-read only ever acts on a node that is still lit.
+            this.dailyClaimsAutoPendingMarkRead = true;
         }
 
         private void OnDailyClaimsAutoRefreshStickerRewardEvent(GameEventSnapshot e)
@@ -1445,6 +1471,14 @@ namespace HeartopiaMod
                         lines.Add("daily tab id=" + id + " NOT cleared: " + tabStatus);
                     }
                 }
+                else if (enumValue == DailyClaimsRedPointEnumDailyRecommendation)
+                {
+                    ok = this.TryDailyClaimsReadSocialReport(out string socialStatus);
+                    if (!ok)
+                    {
+                        lines.Add("daily recommendation NOT cleared: " + socialStatus);
+                    }
+                }
                 else
                 {
                     // Straight into the game's own polymorphic Read(). No special casing — the node
@@ -1612,6 +1646,61 @@ namespace HeartopiaMod
         }
 
         // RedPointManager.UpdateRedPointData(RedPointEnum, int, bool) — 3 scalar args, instance.
+        // "Guess Who's Here". Its own Read() sends RedPointProtocolManager.DeleteRedPoint, which
+        // does nothing here: the dot hangs off FriendSystem._hasNewSocialRecord, a CLIENT flag that
+        // no server delete touches — verified live, the node stayed lit after a successful Read().
+        //
+        // The game clears it in FriendPaperPanel, which stamps the check time and fetches the
+        // records. Only the stamp is reproduced: RefreshSocialReport recomputes the flag as
+        // "LastSocialReportCheckTime < newest record", so stamping now makes every record already in
+        // hand count as seen and keeps it that way, while a genuinely newer one still relights the
+        // dot. Fetching the records as well would mean invoking an async UniTask<List<T>> — a
+        // generic inflate on the very path that has aborted this process before — for data the mod
+        // has no use for.
+        private unsafe bool TryDailyClaimsReadSocialReport(out string status)
+        {
+            status = "FriendSystem unavailable";
+            if (auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null
+                || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            if (!this.TryResolveAuraMonoModule(
+                    "XDTGameSystem.GameplaySystem.Social.FriendSystem", out IntPtr friendSystem)
+                || friendSystem == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr friendClass = auraMonoObjectGetClass(friendSystem);
+            if (friendClass == IntPtr.Zero)
+            {
+                status = "FriendSystem class unavailable";
+                return false;
+            }
+
+            IntPtr stamp = this.FindAuraMonoMethodOnHierarchy(friendClass, "UpdateSocialReportCheckTime", 0);
+            if (stamp == IntPtr.Zero)
+            {
+                status = "UpdateSocialReportCheckTime unavailable";
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(stamp, friendSystem, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                status = "UpdateSocialReportCheckTime threw exc=0x" + exc.ToInt64().ToString("X");
+                return false;
+            }
+
+            // The stamp alone only decides the NEXT refresh; the dot is lit right now, so put it out.
+            bool cleared = this.TryDailyClaimsClearRedPointLocally(DailyClaimsRedPointEnumDailyRecommendation, 0);
+            status = "check time stamped, dot cleared=" + cleared;
+            return true;
+        }
+
         private unsafe bool TryDailyClaimsClearRedPointLocally(int redPointEnum, int nodeId)
         {
             if (redPointEnum <= 0 || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
