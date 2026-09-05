@@ -1441,6 +1441,31 @@ namespace HeartopiaMod
             return exc == IntPtr.Zero;
         }
 
+        // How a given kind is ACTUALLY cleared. Both mark-read paths — the manual button's chunk
+        // step and the auto pass — go through here, because they used to carry a copy of this
+        // dispatch each: the Friends Link case was added to the button's copy only, so it worked on
+        // a press and silently did nothing under auto-claim, which is exactly how it was reported.
+        private bool TryDailyClaimsMarkNodeRead(int enumValue, int id, out string status)
+        {
+            // Daily tabs: no server type to delete by and no Read() override, so the game clears
+            // them through their own activity command.
+            if (enumValue == DailyClaimsRedPointEnumActivityDailyTab
+                || enumValue == DailyClaimsRedPointEnumActivityNewDay)
+            {
+                return this.TryDailyClaimsClearActivityDailyTab(id, out status);
+            }
+
+            // "Guess Who's Here": has a Read() override, but it deletes server-side and the dot is
+            // client-side, so Read() reports success and changes nothing.
+            if (enumValue == DailyClaimsRedPointEnumDailyRecommendation)
+            {
+                return this.TryDailyClaimsReadSocialReport(out status);
+            }
+
+            status = "Read()";
+            return this.TryDailyClaimsReadRedPoint(enumValue, id);
+        }
+
         // One chunk of the mark-read walk. SYNCHRONOUS on purpose: RedPointManager is resolved inside
         // each helper call and never survives a frame boundary (CI lint W1), and keeping the whole
         // chunk in one frame is what lets the spacing move from per-node to per-chunk.
@@ -1458,32 +1483,11 @@ namespace HeartopiaMod
             {
                 int enumValue = nodes[i].EnumValue;
                 int id = nodes[i].Id;
-                bool ok;
 
-                // Daily tabs are the one kind Read() cannot serve: no server type to delete by and
-                // no Read() override, so the game clears them through their own activity command.
-                if (enumValue == DailyClaimsRedPointEnumActivityDailyTab
-                    || enumValue == DailyClaimsRedPointEnumActivityNewDay)
+                bool ok = this.TryDailyClaimsMarkNodeRead(enumValue, id, out string readStatus);
+                if (!ok)
                 {
-                    ok = this.TryDailyClaimsClearActivityDailyTab(id, out string tabStatus);
-                    if (!ok)
-                    {
-                        lines.Add("daily tab id=" + id + " NOT cleared: " + tabStatus);
-                    }
-                }
-                else if (enumValue == DailyClaimsRedPointEnumDailyRecommendation)
-                {
-                    ok = this.TryDailyClaimsReadSocialReport(out string socialStatus);
-                    if (!ok)
-                    {
-                        lines.Add("daily recommendation NOT cleared: " + socialStatus);
-                    }
-                }
-                else
-                {
-                    // Straight into the game's own polymorphic Read(). No special casing — the node
-                    // subclass knows which subsystem command it needs.
-                    ok = this.TryDailyClaimsReadRedPoint(enumValue, id);
+                    lines.Add("enum=" + enumValue + " id=" + id + " NOT cleared: " + readStatus);
                 }
 
                 if (ok)
@@ -2173,18 +2177,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                bool ok;
-                if (enumValue == DailyClaimsRedPointEnumActivityDailyTab
-                    || enumValue == DailyClaimsRedPointEnumActivityNewDay)
-                {
-                    // No server type to delete by and no Read() override — the game clears these
-                    // through their own activity command, same as the manual button does.
-                    ok = this.TryDailyClaimsClearActivityDailyTab(id, out _);
-                }
-                else
-                {
-                    ok = this.TryDailyClaimsReadRedPoint(enumValue, id);
-                }
+                bool ok = this.TryDailyClaimsMarkNodeRead(enumValue, id, out _);
 
                 if (ok)
                 {
