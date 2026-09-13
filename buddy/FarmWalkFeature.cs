@@ -41,7 +41,33 @@ namespace HeartopiaMod
 
         // A corner is "reached" inside this XZ radius. Loose enough that the locomotion's own
         // acceleration curve does not overshoot into an orbit around the point.
-        private const float FarmWalkCornerReachDistance = 1.2f;
+        // Corner reach: how close, in XZ, the walker must come to an intermediate corner for it to
+        // count as reached. A setting since the slider was asked for; 1.2 m is the value that was
+        // the constant. 0 is allowed and means "only by passing it" — the "passed" test still
+        // advances corners, so the walk cannot wedge on an unreachable radius.
+        //
+        // Three values, because the three ways of moving miss a corner differently: a walker can
+        // stop on it, a vehicle carries wide by its turn lag, a swimmer drifts in three dimensions.
+        // Resolved at the moment a corner is judged, from what the body is doing right then.
+        internal const float FarmWalkCornerReachFloor = 0f;
+        internal const float FarmWalkCornerReachCeiling = 3f;
+        internal const float FarmWalkCornerReachDefault = 1.2f;
+        internal float farmWalkCornerReachFoot = FarmWalkCornerReachDefault;
+        internal float farmWalkCornerReachVehicle = FarmWalkCornerReachDefault;
+        internal float farmWalkCornerReachSwim = FarmWalkCornerReachDefault;
+
+        // Swimming first: a swimmer is never in a seat. Then the seat, by the live check with the
+        // dismount settle window (IsFarmWalkVehicleSteering), so a get-off in flight already counts
+        // as on foot.
+        private float ResolveFarmWalkCornerReach()
+        {
+            if (this.farmWalkIsSwimming)
+            {
+                return this.farmWalkCornerReachSwim;
+            }
+
+            return this.IsFarmWalkVehicleSteering() ? this.farmWalkCornerReachVehicle : this.farmWalkCornerReachFoot;
+        }
 
         // Arrival is measured in 3-D, not in XZ.
         //
@@ -1475,7 +1501,7 @@ namespace HeartopiaMod
                 Vector3 candidate = this.farmWalkCorners[this.farmWalkCornerIndex];
                 Vector3 next = this.farmWalkCorners[this.farmWalkCornerIndex + 1];
 
-                bool reached = HorizontalDistance(from, candidate) <= FarmWalkCornerReachDistance;
+                bool reached = HorizontalDistance(from, candidate) <= this.ResolveFarmWalkCornerReach();
                 bool passed = HorizontalDistance(from, next) < HorizontalDistance(candidate, next);
                 // Same switch as the tick's loop: the final waypoint is not skipped at build either.
                 if (this.farmWalkKeepFinalNode && passed && !reached
@@ -1976,7 +2002,7 @@ namespace HeartopiaMod
                 Vector3 candidate = this.farmWalkCorners[this.farmWalkCornerIndex];
                 Vector3 next = this.farmWalkCorners[this.farmWalkCornerIndex + 1];
 
-                bool reached = HorizontalDistance(selfPos, candidate) <= FarmWalkCornerReachDistance;
+                bool reached = HorizontalDistance(selfPos, candidate) <= this.ResolveFarmWalkCornerReach();
                 bool passed = HorizontalDistance(selfPos, next) < HorizontalDistance(candidate, next);
 
                 // ⭐ OPTIONAL: THE FINAL WAYPOINT IS WALKED TO, NOT PASSED. "passed" is what drops

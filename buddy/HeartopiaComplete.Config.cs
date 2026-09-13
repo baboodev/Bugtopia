@@ -200,6 +200,9 @@ namespace HeartopiaMod
             data.farmWalkVehicleFixEnabled = this.farmWalkVehicleFixEnabled;
             data.farmWalkVehicleMinDistance = this.farmWalkVehicleMinDistance;
             data.farmWalkVehicleDismountDistance = this.farmWalkVehicleDismountDistance;
+            data.farmWalkCornerReachFoot = this.farmWalkCornerReachFoot;
+            data.farmWalkCornerReachVehicle = this.farmWalkCornerReachVehicle;
+            data.farmWalkCornerReachSwim = this.farmWalkCornerReachSwim;
             data.resourceAutoRepairPauseSeconds = this.resourceAutoRepairPauseSeconds;
             data.gameSpeed = this.gameSpeed;
             data.fpsBypassEnabled = this.fpsBypassEnabled;
@@ -584,6 +587,18 @@ namespace HeartopiaMod
                 ? 10f
                 : Mathf.Clamp(data.farmWalkVehicleDismountDistance,
                     FarmWalkVehicleDismountFloor, FarmWalkVehicleDismountCeiling);
+
+            // 0 is a legal value for this one, so absence is a NEGATIVE sentinel (the field's own
+            // initializer), not zero.
+            this.farmWalkCornerReachFoot = data.farmWalkCornerReachFoot < 0f
+                ? FarmWalkCornerReachDefault
+                : Mathf.Clamp(data.farmWalkCornerReachFoot, FarmWalkCornerReachFloor, FarmWalkCornerReachCeiling);
+            this.farmWalkCornerReachVehicle = data.farmWalkCornerReachVehicle < 0f
+                ? FarmWalkCornerReachDefault
+                : Mathf.Clamp(data.farmWalkCornerReachVehicle, FarmWalkCornerReachFloor, FarmWalkCornerReachCeiling);
+            this.farmWalkCornerReachSwim = data.farmWalkCornerReachSwim < 0f
+                ? FarmWalkCornerReachDefault
+                : Mathf.Clamp(data.farmWalkCornerReachSwim, FarmWalkCornerReachFloor, FarmWalkCornerReachCeiling);
             // Belt and braces for a hand-edited Config.xml: the two modes cannot both be on.
             if (this.farmWalkToNodeEnabled && this.stealthForagingEnabled)
             {

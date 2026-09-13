@@ -181,6 +181,9 @@ namespace HeartopiaMod
             public float farmWalkVehicleMinDistance;
             // Distance from the destination at which the driver gets out.
             public float farmWalkVehicleDismountDistance;
+            public float farmWalkCornerReachFoot = -1f;      // -1 = absent; 0 is a real value
+            public float farmWalkCornerReachVehicle = -1f;
+            public float farmWalkCornerReachSwim = -1f;
             public float resourceAutoRepairPauseSeconds;
             public float gameSpeed;
             public bool fpsBypassEnabled;
