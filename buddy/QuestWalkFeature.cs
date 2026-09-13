@@ -217,6 +217,10 @@ namespace HeartopiaMod
             this.questWalkErrorCount = 0;
             this.questWalkEpoch = AuraMonoWorldEpoch;
 
+            // Already in the seat when the hotkey is pressed: the mount transition has passed, so
+            // the movement fix is applied here; later mounts get it from the seat observer.
+            this.ApplyFarmWalkVehicleMovementFix("quest walk started");
+
             float gap = this.QuestWalkDistance(this.questWalkTrack.Target);
             float radius = QuestWalkRadiusFor(this.questWalkTrack);
             ModLogger.Msg("[QuestWalk] following task " + this.questWalkTrack.TaskTableId
@@ -241,6 +245,15 @@ namespace HeartopiaMod
             }
             this.questWalkFollowing = false;
             this.questWalkParked = false;
+
+            // Give the table values back unless Auto Farm still needs the fix (it cannot be running
+            // here — the toggle refuses to start over it — but the guard keeps that a fact, not an
+            // assumption).
+            if (!this.autoFarmActive)
+            {
+                this.RestoreFarmWalkVehicleMovementFix("quest walk stopped");
+            }
+
             try
             {
                 this.AbortFarmWalk();

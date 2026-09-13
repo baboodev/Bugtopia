@@ -144,7 +144,10 @@ namespace HeartopiaMod
 
         internal void ApplyFarmWalkVehicleMovementFix(string why)
         {
-            if (!this.farmWalkVehicleFixEnabled || !this.autoFarmActive)
+            // Any mod-driven walk qualifies, not only Auto Farm: the quest-walk hotkey summons the
+            // same vehicle through the same TryBeginFarmWalk and suffered the same turn lag, but the
+            // fix was gated on autoFarmActive alone and silently skipped it.
+            if (!this.farmWalkVehicleFixEnabled || (!this.autoFarmActive && !this.questWalkFollowing))
             {
                 return;
             }
