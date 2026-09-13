@@ -145,7 +145,7 @@ namespace HeartopiaMod
         private IntPtr musicPlayerFieldPlayerNetId;
         private IntPtr musicPlayerFieldInstrumentNetId;
         private IntPtr musicPlayerFieldLevelObjectNetId;
-        private IntPtr musicPlayerFieldType;
+        private IntPtr musicPlayerFieldInstrumentTypeId;
         private IntPtr musicPlayerFieldPressingKeys;
         private IntPtr musicPlayerFieldReleasingKeys;
         private IntPtr musicPlayerIntListClass;
@@ -1077,9 +1077,40 @@ namespace HeartopiaMod
 
         // ==================== network send ====================
 
+        // A send failure used to set the UI status only, so the log said nothing about why
+        // network playback did not work. Errors always go to the log (throttled, because a batch
+        // can be dispatched many times a second), never toast-only.
+        private void MusicPlayerNetFail(string error)
+        {
+            this.musicPlayerStatus = "Net: " + error;
+            if (Time.unscaledTime >= this.musicPlayerErrorLogThrottleAt)
+            {
+                this.musicPlayerErrorLogThrottleAt = Time.unscaledTime + 10f;
+                MusicPlayerLog("Send failed: " + error);
+            }
+        }
+
+        // Every handle MusicPlayerSendPlayCommand dereferences without a null check. Both the
+        // fast path and the post-resolve validation gate on this, so a partial binding can never
+        // reach mono_field_set_value.
+        private bool MusicPlayerNetBindingComplete()
+        {
+            return this.musicPlayerPlayInstrumentMethod != IntPtr.Zero
+                && this.musicPlayerPlayDataClass != IntPtr.Zero
+                && this.musicPlayerFieldPlayerNetId != IntPtr.Zero
+                && this.musicPlayerFieldInstrumentTypeId != IntPtr.Zero
+                && this.musicPlayerFieldPressingKeys != IntPtr.Zero
+                && this.musicPlayerFieldReleasingKeys != IntPtr.Zero;
+        }
+
         private bool MusicPlayerEnsureNetworkResolved(out string error)
         {
-            if (this.musicPlayerPlayInstrumentMethod != IntPtr.Zero && this.musicPlayerPlayDataClass != IntPtr.Zero)
+            // Fail closed on the WHOLE binding, not just method+class. A fast path that only
+            // checked those two let a null field handle through to mono_field_set_value, which
+            // computes obj+field->offset off a NULL field and kills the process (crash
+            // 2026-09-12, WER dump coreclr_30764: first Play logged "fields not resolved" and
+            // aborted cleanly, the second took this fast path and died at the `type` write).
+            if (this.MusicPlayerNetBindingComplete())
             {
                 error = string.Empty;
                 return true;
@@ -1148,21 +1179,24 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.musicPlayerFieldPlayerNetId == IntPtr.Zero)
+            // Re-attempt while ANY required handle is still null — gating this on playerNetId
+            // alone meant a single missing field was never retried.
+            if (!this.MusicPlayerNetBindingComplete())
             {
                 this.musicPlayerFieldPlayerNetId = auraMonoClassGetFieldFromName(this.musicPlayerPlayDataClass, "playerNetId");
                 this.musicPlayerFieldInstrumentNetId = auraMonoClassGetFieldFromName(this.musicPlayerPlayDataClass, "instrumentNetId");
                 this.musicPlayerFieldLevelObjectNetId = auraMonoClassGetFieldFromName(this.musicPlayerPlayDataClass, "instrumentLevelObjectNetId");
-                this.musicPlayerFieldType = auraMonoClassGetFieldFromName(this.musicPlayerPlayDataClass, "type");
+                // PlayInstrumentData.instrumentTypeId — NOT "type"; the struct has never had a
+                // field by that name, so this lookup returned NULL on every build.
+                this.musicPlayerFieldInstrumentTypeId = auraMonoClassGetFieldFromName(this.musicPlayerPlayDataClass, "instrumentTypeId");
                 this.musicPlayerFieldPressingKeys = auraMonoClassGetFieldFromName(this.musicPlayerPlayDataClass, "pressingKeys");
                 this.musicPlayerFieldReleasingKeys = auraMonoClassGetFieldFromName(this.musicPlayerPlayDataClass, "releasingKeys");
             }
 
-            if (this.musicPlayerFieldPlayerNetId == IntPtr.Zero || this.musicPlayerFieldType == IntPtr.Zero
-                || this.musicPlayerFieldPressingKeys == IntPtr.Zero || this.musicPlayerFieldReleasingKeys == IntPtr.Zero)
+            if (!this.MusicPlayerNetBindingComplete())
             {
                 error = "PlayInstrumentData fields not resolved (playerNetId=" + (this.musicPlayerFieldPlayerNetId != IntPtr.Zero)
-                    + " type=" + (this.musicPlayerFieldType != IntPtr.Zero)
+                    + " instrumentTypeId=" + (this.musicPlayerFieldInstrumentTypeId != IntPtr.Zero)
                     + " pressingKeys=" + (this.musicPlayerFieldPressingKeys != IntPtr.Zero)
                     + " releasingKeys=" + (this.musicPlayerFieldReleasingKeys != IntPtr.Zero) + ")";
                 this.musicPlayerNetResolveError = error;
@@ -1291,7 +1325,7 @@ namespace HeartopiaMod
 
             if (!this.MusicPlayerEnsureNetworkResolved(out string error))
             {
-                this.musicPlayerStatus = "Net: " + error;
+                this.MusicPlayerNetFail(error);
                 return false;
             }
 
@@ -1301,7 +1335,7 @@ namespace HeartopiaMod
                 IntPtr pressList = this.MusicPlayerCreateIntList(out error);
                 if (pressList == IntPtr.Zero)
                 {
-                    this.musicPlayerStatus = "Net: " + error;
+                    this.MusicPlayerNetFail(error);
                     return false;
                 }
 
@@ -1310,7 +1344,7 @@ namespace HeartopiaMod
                 IntPtr releaseList = this.MusicPlayerCreateIntList(out error);
                 if (releaseList == IntPtr.Zero)
                 {
-                    this.musicPlayerStatus = "Net: " + error;
+                    this.MusicPlayerNetFail(error);
                     return false;
                 }
 
@@ -1319,14 +1353,14 @@ namespace HeartopiaMod
                 if (!this.MusicPlayerListAddInts(pressList, press, out error)
                     || !this.MusicPlayerListAddInts(releaseList, release, out error))
                 {
-                    this.musicPlayerStatus = "Net: " + error;
+                    this.MusicPlayerNetFail(error);
                     return false;
                 }
 
                 IntPtr boxed = auraMonoObjectNew(this.auraMonoRootDomain, this.musicPlayerPlayDataClass);
                 if (boxed == IntPtr.Zero)
                 {
-                    this.musicPlayerStatus = "Net: PlayInstrumentData alloc failed";
+                    this.MusicPlayerNetFail("PlayInstrumentData alloc failed");
                     return false;
                 }
 
@@ -1347,7 +1381,7 @@ namespace HeartopiaMod
                     auraMonoFieldSetValue(boxed, this.musicPlayerFieldLevelObjectNetId, (IntPtr)(&levelObjectNetId));
                 }
 
-                auraMonoFieldSetValue(boxed, this.musicPlayerFieldType, (IntPtr)(&typeValue));
+                auraMonoFieldSetValue(boxed, this.musicPlayerFieldInstrumentTypeId, (IntPtr)(&typeValue));
                 // Reference-type fields take the object pointer DIRECTLY
                 // (memory/auramono-field-set-value-ref-semantics.md).
                 auraMonoFieldSetValue(boxed, this.musicPlayerFieldPressingKeys, pressList);
@@ -1356,7 +1390,7 @@ namespace HeartopiaMod
                 IntPtr unboxed = auraMonoObjectUnbox(boxed);
                 if (unboxed == IntPtr.Zero)
                 {
-                    this.musicPlayerStatus = "Net: unbox failed";
+                    this.MusicPlayerNetFail("unbox failed");
                     return false;
                 }
 
