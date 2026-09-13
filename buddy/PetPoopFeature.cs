@@ -92,12 +92,17 @@ namespace HeartopiaMod
         private int petPoopScanEpoch = -1;
         private int petPoopSendCount;
         private int petPoopCollectedCount;
+        // Droppings the walker gave up on (no route / dwell capped): netId -> unscaled time until
+        // which the farm must not target them again. The scan keeps listing them for the radar.
+        private readonly Dictionary<uint, float> petPoopWalkSkipUntil = new Dictionary<uint, float>();
 
         // ── toggles ─────────────────────────────────────────────────────────────────────────────
 
         // Aura Farm means "collect everything in reach", so the running aura is the only switch
-        // for pickup — no separate toggle to remember on a walk with the dogs.
-        private bool IsPetPoopPickupActive => this.auraFarmEnabled;
+        // for pickup — no separate toggle to remember on a walk with the dogs. The foraging farm
+        // counts too: its walker targets droppings (HeartopiaComplete.Farm.cs, "node:poop"), and a
+        // walk to one is pointless unless the pickup runs when it gets there.
+        private bool IsPetPoopPickupActive => this.auraFarmEnabled || this.autoFarmActive;
 
         // Called from SetAuraFarmEnabled: the aura flipping on mid-session must run the pending
         // resolve now, not at the next world load. Only from there - never from a per-frame path
@@ -116,6 +121,59 @@ namespace HeartopiaMod
             {
                 FeatureLog.Life(PetPoopTag, "aura off — session totals: sent=" + this.petPoopSendCount
                     + " collected=" + this.petPoopCollectedCount);
+            }
+        }
+
+        // ── walk-to-node surface (HeartopiaComplete.Farm.cs) ────────────────────────────────────
+
+        // Nearest dropping the farm may walk to: on the map right now, not refused by the server
+        // (send budget spent) and not parked by the walker. No distance cap of its own — the scan
+        // only ever sees view entities streamed in around the player.
+        internal bool TryGetNearestPetPoopTarget(Vector3 from, out Vector3 position, out uint netId)
+        {
+            position = Vector3.zero;
+            netId = 0u;
+            if (this.petPoopEntries.Count == 0)
+            {
+                return false;
+            }
+
+            float now = Time.unscaledTime;
+            float bestDistSqr = float.MaxValue;
+            foreach (PetPoopEntry entry in this.petPoopEntries.Values)
+            {
+                if (entry.PickupAttempts >= PetPoopPickupMaxAttempts)
+                {
+                    continue;
+                }
+
+                if (this.petPoopWalkSkipUntil.TryGetValue(entry.NetId, out float until) && now < until)
+                {
+                    continue;
+                }
+
+                float distSqr = (entry.Position - from).sqrMagnitude;
+                if (distSqr < bestDistSqr)
+                {
+                    bestDistSqr = distSqr;
+                    position = entry.Position;
+                    netId = entry.NetId;
+                }
+            }
+
+            return netId != 0u;
+        }
+
+        internal bool IsPetPoopStillOnMap(uint netId)
+        {
+            return netId != 0u && this.petPoopEntries.ContainsKey(netId);
+        }
+
+        internal void SkipPetPoopForWalk(uint netId, float seconds)
+        {
+            if (netId != 0u)
+            {
+                this.petPoopWalkSkipUntil[netId] = Time.unscaledTime + seconds;
             }
         }
 
@@ -240,6 +298,7 @@ namespace HeartopiaMod
                 this.petPoopScanEpoch = this.WorldReadyEpoch;
                 this.petPoopEntries.Clear();
                 this.petPoopIgnoredNetIds.Clear();
+                this.petPoopWalkSkipUntil.Clear();
                 this.ClearPetPoopTrackedMarkers();
                 this.petPoopHasScanned = false;
                 this.petPoopBagFullUntil = 0f;

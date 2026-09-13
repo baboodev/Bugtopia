@@ -312,6 +312,20 @@ verdict coverage is 3/3 for mushrooms and 77 of 117 for trees, stone and berries
 broadcast at all, because a verdict is only computed where there is a `DynamicBushGrowComponent`.
 Applying the rule to everything would park half the map.
 
+### Dog poop is a target too, but not a resource
+
+A dog dropping (`PetPoopFeature.cs`, Entity 7100) is offered to the walker **before** every priority
+row and every regular node, with no switch: `TryGetNearestPetPoopTarget` → `node:poop` walk, dwell
+label `Dog Poop`. Two things make it unlike a resource:
+
+* It is **not in the collectable scan** — the absence gate ("target is not there at all") must exempt
+  it exactly the way it exempts bubbles (`FarmWalkTargetIsPetPoop`), or every poop walk dies 10 m out.
+* There is **no collect confirmation event**. The dwell asks the poop scan whether THAT netId is still
+  listed; gone = picked up (by us, the owner, or expiry). The pickup is the feature's own 2 m send
+  loop — the walker's 1.5 m stand-off lands inside it — and the server ignores sends for the first
+  8-15 s, so the dwell cap is 25 s. A dropping still there after that, or one the router cannot
+  reach, is parked for 5 minutes (`SkipPetPoopForWalk`); it is never teleported to.
+
 ### The result
 
 ```
@@ -449,7 +463,8 @@ route includes the prefix already walked, which is why the first comparison show
 | `FarmWalkTrackCompareFeature.cs` | requesting the game's Track and comparing lengths |
 | `FarmWalkRadarFocusFeature.cs` | focusing the radar on the target plus our route line |
 | `NavMeshWalkFeature.cs` | the navmesh probe (a negative result) |
-| `HeartopiaComplete.Farm.cs` | the `WalkingToNode` state and the three entry points to a node |
+| `HeartopiaComplete.Farm.cs` | the `WalkingToNode` state and the three entry points to a node; the `node:poop` step and `RunPetPoopCollectWait` |
+| `PetPoopFeature.cs` | the dropping scan the walker targets, the 2 m pickup loop, `TryGetNearestPetPoopTarget` / `IsPetPoopStillOnMap` / `SkipPetPoopForWalk` |
 | `HeartopiaComplete.Radar.cs` | the cut-off in `CreateMarker`, keeping the line alive between scans |
 | `HeartopiaComplete.UguiForagingContent.cs` | the toggle and the mutual exclusion |
 

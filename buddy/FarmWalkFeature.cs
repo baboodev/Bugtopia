@@ -2800,6 +2800,11 @@ namespace HeartopiaMod
         internal bool FarmWalkTargetIsBubble =>
             string.Equals(this.farmWalkDwellLabel, "Bubble", StringComparison.Ordinal);
 
+        // Dog poop (PetPoopFeature.cs) is a pickable, not a resource: it never appears in the
+        // collectable scan, so the absence gate below would call every poop walk "not there".
+        internal bool FarmWalkTargetIsPetPoop =>
+            string.Equals(this.farmWalkDwellLabel, "Dog Poop", StringComparison.Ordinal);
+
         private void UpdateFarmWalkBubbleChase(Vector3 selfPos, float now)
         {
             if (!this.FarmWalkTargetIsBubble)
@@ -2972,6 +2977,7 @@ namespace HeartopiaMod
             if (!this.farmWalkLabel.StartsWith("node:", StringComparison.Ordinal)
                 || this.farmWalkAimOffsetY != 0f    // contamination standoff: aimed off the node
                 || this.FarmWalkTargetIsBubble      // bubbles are not in the collectable scan
+                || this.FarmWalkTargetIsPetPoop     // neither is a pickable (dog poop)
                 || this.autoFarmTargetIsBubble)
             {
                 return false;

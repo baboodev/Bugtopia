@@ -58,6 +58,15 @@ steering. **[M]**
 stops at a **stand-off**, not on top of the node: driving in to 0.25 m made the last metre the
 expensive part of every walk. **[M]**
 
+**0.4-poop** A dog dropping the poop scan can see (`PetPoopFeature.cs`) is **always the next
+target**, ahead of every priority row and without a switch of its own (owner's call, 2026-09-12): it
+is worth more than any bush and it expires. It is a `node:poop` walk with dwell label `Dog Poop`;
+the dwell is judged by the dropping's **netId leaving the scan**, never by a marker or a
+`CollectColdEvent` (a pickable has neither), capped at 25 s for the server's 8-15 s grace. A dropping
+the router cannot reach, or one still there after the cap, is **parked for 5 minutes, never warped
+to** — 0.2a's emergency exit is for the ONLY target, and a dropping is never that. The pickup itself
+is the feature's 2 m send loop, which runs whenever the foraging farm or Aura Farm is on. **[M]**
+
 **0.4a** The stand-off is **per resource kind and learned, not assumed**. It starts at **1.1 m**.
 Measured 2026-08-22: Raspberry, Ore, Stone and Mandarin Tree all collected from ~1.05 m while a
 Button mushroom at 1.03 m did not — so there is no single right number, and nothing is assumed about

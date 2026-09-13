@@ -228,6 +228,36 @@ namespace HeartopiaMod
                             }
                         }
 
+                        // ZERO: a dropping the poop scan can see is always the next target — no
+                        // switch and no priority row, by the owner's call (2026-09-12): it is worth
+                        // more than any bush and it expires. Walk only. A dropping the router cannot
+                        // reach is parked, never warped to (rule 0.2a: a teleport is the emergency
+                        // exit for the ONLY target, and a dropping is never that). Walk-to-node mode
+                        // only: the teleport farm has nothing to offer a dropping.
+                        if (this.farmWalkToNodeEnabled
+                            && this.TryGetNearestPetPoopTarget(Camera.main.transform.position, out Vector3 poopPos, out uint poopNetId))
+                        {
+                            float poopDistance = Vector3.Distance(Camera.main.transform.position, poopPos);
+                            this.lastNodePosition = poopPos;
+                            this.autoFarmPetPoopNetId = poopNetId;
+                            // priority:false on purpose — a priority walk hands over to the bare
+                            // aura wait and never calls BeginFarmNodeDwell, which is what sets the
+                            // poop dwell flag.
+                            if (this.TryBeginFarmWalk(poopPos, "node:poop", false, "Dog Poop"))
+                            {
+                                this.autoFarmStatus = $"Walking to dog poop ({poopDistance:F0}m)...";
+                                this.AutoFarmLog("Dog poop -> " + poopPos + " netId=" + poopNetId + " distance=" + poopDistance.ToString("F1"));
+                                this.lastTeleportWasPriorityLocation = false;
+                                this.farmState = HeartopiaComplete.AutoFarmState.WalkingToNode;
+                                this.autoFarmTimer = 0f;
+                                break;
+                            }
+
+                            this.SkipPetPoopForWalk(poopNetId, FarmPetPoopSkipSeconds);
+                            FeatureLog.Life(PetPoopTag, "walker cannot route to netId=" + poopNetId + " (" + poopDistance.ToString("F0")
+                                + " m) — parked for " + FarmPetPoopSkipSeconds.ToString("F0") + " s");
+                        }
+
                         // If we're already working an active priority area, keep sweeping
                         // matching nodes in that area before jumping back to the anchor.
                         if (this.currentPriorityLocation.HasValue)
@@ -485,6 +515,13 @@ namespace HeartopiaMod
                     }
                 case HeartopiaComplete.AutoFarmState.Collecting:
                     {
+                        // Dog poop: the pickup itself is PetPoopFeature's 2 m send loop (active
+                        // while the farm runs); this dwell only waits for the dropping to vanish.
+                        if (this.autoFarmTargetIsPetPoop)
+                        {
+                            this.RunPetPoopCollectWait();
+                            break;
+                        }
                         // Contamination nodes get the sea-clean sweep dwell instead of the aura
                         // pick wait. Deliberately NOT gated on IsAutoRepairBusy — an in-flight
                         // dwell finishes (and can even hold for a cleaner repair).
@@ -919,6 +956,12 @@ namespace HeartopiaMod
         // Bubble targets get their own dwell completion: the aura cannot collect bubbles (touch /
         // AutoBubbleCollect territory), so no aura confirmation ever fires for them.
         private bool autoFarmTargetIsBubble = false;
+        // Dog poop target (PetPoopFeature.cs): the dwell is judged by the dropping's netId vanishing
+        // from the poop scan, never by a marker or a CollectColdEvent (a pickable has neither).
+        private bool autoFarmTargetIsPetPoop = false;
+        private uint autoFarmPetPoopNetId = 0u;
+        private const float FarmPetPoopDwellCapSeconds = 25f;   // 8-15 s server grace + a few 3 s retries
+        private const float FarmPetPoopSkipSeconds = 300f;      // after a capped dwell or a refused route
         private int contaminationZeroPassCount = 0;
         private int contaminationKillsThisNode = 0;
         private float contaminationLastConsumedPassAt = 0f;
@@ -1267,6 +1310,7 @@ namespace HeartopiaMod
         {
             this.autoFarmTargetIsContamination = false;
             this.autoFarmTargetIsBubble = false;
+            this.autoFarmTargetIsPetPoop = false;
             this.contaminationZeroPassCount = 0;
             this.contaminationKillsThisNode = 0;
             this.contaminationLastConsumedPassAt = Time.unscaledTime;
@@ -1275,6 +1319,39 @@ namespace HeartopiaMod
             this.contaminationToolReady = false;
             this.contaminationToolDepleted = false;
             this.contaminationToolStatus = string.Empty;
+        }
+
+        // Dog-poop Collecting dwell. Identity, not proximity: the dropping is done when ITS netId
+        // has left the poop scan (picked up by us, by the owner, or expired). The server ignores
+        // Pickup for the first 8-15 s after a dropping appears, so the cap leaves room for that
+        // window plus a few 3 s retries; a dropping still there after the cap is parked so the
+        // farm does not pace around it.
+        private void RunPetPoopCollectWait()
+        {
+            float now = Time.unscaledTime;
+            bool gone = !this.IsPetPoopStillOnMap(this.autoFarmPetPoopNetId);
+            if (this.autoFarmTimer >= 1f && gone)
+            {
+                this.AutoFarmLog($"Dog poop {this.autoFarmPetPoopNetId} gone after {this.autoFarmTimer:F1}s at {this.lastNodePosition}");
+                this.StampVisitedNode(this.lastNodePosition, now + FarmVisitedRetryStampSeconds);
+                this.autoFarmPetPoopNetId = 0u;
+                this.FinishCollectingCycle();
+                return;
+            }
+
+            if (this.autoFarmTimer >= FarmPetPoopDwellCapSeconds)
+            {
+                FeatureLog.Life(PetPoopTag, "dwell capped after " + this.autoFarmTimer.ToString("F0") + " s — netId="
+                    + this.autoFarmPetPoopNetId + " is still there (out of the 2 m pickup reach, or the server refuses it); parked for "
+                    + FarmPetPoopSkipSeconds.ToString("F0") + " s");
+                this.SkipPetPoopForWalk(this.autoFarmPetPoopNetId, FarmPetPoopSkipSeconds);
+                this.StampVisitedNode(this.lastNodePosition, now + FarmVisitedRetryStampSeconds);
+                this.autoFarmPetPoopNetId = 0u;
+                this.FinishCollectingCycle();
+                return;
+            }
+
+            this.autoFarmStatus = "Picking up dog poop...";
         }
 
         // Starts the Collecting dwell for a freshly targeted radar node: "Contaminated" markers
@@ -1286,6 +1363,7 @@ namespace HeartopiaMod
             bool contamination = string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal);
             this.autoFarmTargetIsContamination = contamination;
             this.autoFarmTargetIsBubble = string.Equals(nodeLabel, "Bubble", StringComparison.Ordinal);
+            this.autoFarmTargetIsPetPoop = string.Equals(nodeLabel, "Dog Poop", StringComparison.Ordinal);
             if (contamination)
             {
                 // Ignore sweep passes completed before (or immediately after) arrival — the

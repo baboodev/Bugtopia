@@ -1319,7 +1319,7 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
 
 **Dog poop pickup (`PetPoopFeature.cs`) — part of Aura Farm, no switch of its own**
 
-- Active whenever **Aura Farm** is running (Resource Gathering → Aura Farm): the aura already means
+- Active whenever **Aura Farm** or the **foraging farm** is running: the aura already means
   "collect everything in reach", so droppings ride along. Pickup radius is fixed at **2 m**: the
   server only honours `Pickup` right next to the dropping (user-measured; a wider radius just burns
   the send budget).
@@ -1349,6 +1349,11 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   pickable (`AllowedNetId`) — six refused sends and the netId is left alone, with a `[PetPoop]` log line.
 - No targeted event exists for "a pickable appeared" (`DataCreated<T>` is a nested generic,
   `EntityCreateEvent` fires for everything) — hence the throttled scan.
+- **Walk to Nodes targets droppings first.** A dropping the scan can see is always the walker's next
+  target — ahead of every priority row, with no switch of its own (`node:poop`, dwell label `Dog
+  Poop`). The dwell ends when the dropping's netId leaves the scan (25 s cap for the server's 8-15 s
+  grace); an unreachable or stubborn dropping is parked for 5 minutes and never teleported to. See
+  [WALK_TO_NODES_RULES.md](./WALK_TO_NODES_RULES.md) 0.4-poop and [FARM_WALK_TO_NODE.md](./FARM_WALK_TO_NODE.md) §7b.
 - Same scan feeds the **Radar → Misc → Dog Poop** category (below).
 
 **My Pets (per-pet Play / Wash)**
