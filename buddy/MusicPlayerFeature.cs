@@ -88,6 +88,12 @@ namespace HeartopiaMod
         private int musicPlayerLoopsDone;
         // noteId -> instrumentType of the press that is currently held (release/stop bookkeeping).
         private readonly Dictionary<int, byte> musicPlayerHeldNotes = new Dictionary<int, byte>();
+
+        // Notes drained this tick, in FILE order. The wire command splits a tick into
+        // pressingKeys/releasingKeys, which loses the ordering between a note-off and the
+        // re-press of the same note; the local echo replays this list instead so what we hear
+        // matches what the game's own record player would do.
+        private readonly List<ValueTuple<int, bool>> musicPlayerLocalEcho = new List<ValueTuple<int, bool>>();
         private int musicPlayerNotesPlayed;
         private int musicPlayerNotesDropped;
         private string musicPlayerStatus = string.Empty;
@@ -548,6 +554,7 @@ namespace HeartopiaMod
             List<int> press = null;
             List<int> release = null;
             byte batchType = 0;
+            this.musicPlayerLocalEcho.Clear();
 
             while (this.musicPlayerNextIndex < this.musicPlayerEvents.Count)
             {
@@ -564,7 +571,15 @@ namespace HeartopiaMod
                 bool typeChanges = batchType != 0 && ev.InstrumentType != batchType;
                 bool capHit = (press != null && press.Count >= MusicPlayerMaxKeysPerCommand)
                     || (release != null && release.Count >= MusicPlayerMaxKeysPerCommand);
-                if (typeChanges || capHit)
+
+                // One PlayInstrumentData carries no ordering between pressingKeys and
+                // releasingKeys, so a note that appears on both sides of the same batch has to be
+                // split across two commands or the receiver may stop it before it starts.
+                bool orderConflict = ev.IsStart
+                    ? (release != null && release.Contains(ev.NoteId))
+                    : (press != null && press.Contains(ev.NoteId));
+
+                if (typeChanges || capHit || orderConflict)
                 {
                     this.MusicPlayerDispatchBatch(batchType, press, release);
                     press = null;
@@ -582,28 +597,38 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (this.musicPlayerHeldNotes.ContainsKey(ev.NoteId))
-                    {
-                        continue;
-                    }
-
+                    // NO re-press guard: the game re-attacks a note that is still ringing
+                    // (AudioPlaybackComponent.HandlePlaybackEvent posts playEeventName
+                    // unconditionally and just overwrites its _activeNotes entry). Suppressing
+                    // the second attack swallowed 15% of the notes in a legato track.
                     this.musicPlayerHeldNotes[ev.NoteId] = ev.InstrumentType;
                     this.musicPlayerNotesPlayed++;
                     (press ??= new List<int>()).Add(ev.NoteId);
+                    this.musicPlayerLocalEcho.Add(new ValueTuple<int, bool>(ev.NoteId, true));
                 }
                 else
                 {
-                    // Only release notes we actually pressed (skips releases of dropped note-ons).
-                    if (!this.musicPlayerHeldNotes.Remove(ev.NoteId))
-                    {
-                        continue;
-                    }
-
+                    // The game stops unconditionally too; a stop for a note that is not sounding
+                    // is a no-op, whereas skipping it can leave a note ringing forever.
+                    this.musicPlayerHeldNotes.Remove(ev.NoteId);
                     (release ??= new List<int>()).Add(ev.NoteId);
+                    this.musicPlayerLocalEcho.Add(new ValueTuple<int, bool>(ev.NoteId, false));
                 }
             }
 
             this.MusicPlayerDispatchBatch(batchType, press, release);
+
+            // Local echo last, in file order — see musicPlayerLocalEcho. Runs in BOTH modes: the
+            // server never relays our own notes back to us.
+            if (this.musicPlayerLocalEcho.Count > 0)
+            {
+                this.MusicPlayerEnsurePlayerAkRegistered(GetLocalPlayer());
+                for (int i = 0; i < this.musicPlayerLocalEcho.Count; i++)
+                {
+                    ValueTuple<int, bool> note = this.musicPlayerLocalEcho[i];
+                    this.MusicPlayerPostLocalNote(note.Item1, note.Item2);
+                }
+            }
         }
 
         private void MusicPlayerDispatchBatch(byte instrumentType, List<int> press, List<int> release)
@@ -622,23 +647,9 @@ namespace HeartopiaMod
                 this.MusicPlayerSendPlayCommand(instrumentType, press, release);
             }
 
-            // Local echo in BOTH modes: the server never plays our own notes back to us.
-            this.MusicPlayerEnsurePlayerAkRegistered(GetLocalPlayer());
-            if (press != null)
-            {
-                for (int i = 0; i < press.Count; i++)
-                {
-                    this.MusicPlayerPostLocalNote(press[i], true);
-                }
-            }
-
-            if (release != null)
-            {
-                for (int i = 0; i < release.Count; i++)
-                {
-                    this.MusicPlayerPostLocalNote(release[i], false);
-                }
-            }
+            // The local echo is NOT posted here — MusicPlayerDrainDueEvents replays the tick in
+            // file order after every batch has gone out, because this press/release split cannot
+            // express "stop this note, then hit it again".
         }
 
         private void MusicPlayerReleaseAllHeld()
