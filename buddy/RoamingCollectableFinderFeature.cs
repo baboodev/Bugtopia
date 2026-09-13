@@ -95,6 +95,7 @@ namespace HeartopiaMod
             public Vector3 Position;
             public bool IsOak;
             public bool OnCooldown;
+            public uint NetId;        // 0 when the entity's netId could not be read
         }
 
         private readonly List<RoamingCollectableHit> roamingHits = new List<RoamingCollectableHit>(4);
@@ -107,6 +108,7 @@ namespace HeartopiaMod
             public Vector3 Position;
             public bool OnCooldown;
             public float LastSeenAt; // Time.unscaledTime of the last live confirmation
+            public uint NetId;       // last netId seen at this spot, 0 if never read
         }
 
         private RoamingRememberedSpot roamingOakSpot;
@@ -196,7 +198,8 @@ namespace HeartopiaMod
                 // rows for these two carry the next-06:00 end, so the marker stays a cooldown
                 // one — and the farm's candidate filter skips cooldown markers, which is what
                 // keeps a collected daily from being re-targeted.
-                bool ledgerCold = this.TryGetPersistedColdAtPosition(hit.Position, out _);
+                bool ledgerCold = this.TryGetPersistedColdAtPosition(hit.Position, out _)
+                    || this.IsRoamingHitColdByVerdict(hit);
                 if (hit.IsOak)
                 {
                     this.CreateMarker(hit.Position, (hit.OnCooldown || ledgerCold) ? "oakoak_cooldown" : "oakoak", line, fill, null);
@@ -282,6 +285,11 @@ namespace HeartopiaMod
                             continue;
                         }
 
+                        // The netId is what the cold verdicts are keyed by; read it here, while the
+                        // entity is pinned, so the marker can be judged by verdict below.
+                        uint netId = 0;
+                        this.TryGetMonoUInt32Member(entityObj, "netId", out netId);
+
                         // Cooldown lives on the sibling CollectableObjectComponent the advanced
                         // component caches in _collectable; unreadable -> treat as ready (the
                         // marker is the point, the cooldown tint is a bonus).
@@ -300,7 +308,7 @@ namespace HeartopiaMod
                             }
                         }
 
-                        this.AddRoamingHit(pos, isOak, onCooldown);
+                        this.AddRoamingHit(pos, isOak, onCooldown, netId);
                     }
                     finally
                     {
@@ -336,6 +344,11 @@ namespace HeartopiaMod
                 spot.Position = hit.Position;
                 spot.OnCooldown = hit.OnCooldown;
                 spot.LastSeenAt = Time.unscaledTime;
+                if (hit.NetId != 0)
+                {
+                    spot.NetId = hit.NetId;
+                }
+
                 return;
             }
 
@@ -353,12 +366,63 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.AddRoamingHit(spot.Position, isOak, spot.OnCooldown);
+            this.AddRoamingHit(spot.Position, isOak, spot.OnCooldown, spot.NetId);
+        }
+
+        // ⭐ THE VERDICT FOR THIS ENTITY, BY NETID — THE POSITIONAL LEDGER LOOKUP MISSES THESE TWO.
+        //
+        // Measured 2026-09-13: Oak-Oak drawn as available at (61.4, 21.1, 94.1), 152 m from the
+        // player, while the mod held a verdict for netId 20061 ending at the next day boundary —
+        // received at unscaledTime 1662, the very tick the Oak-Oak streamed in (the spot's
+        // LastSeenAt was 1662.9; the Fluorite's 1598 vs 1600.5 matched the same way). The marker
+        // could not see it for two reasons stacked:
+        //   * the live inCold read treats "unreadable" as ready, on purpose;
+        //   * the ledger lookup is BY POSITION, and this netId's persisted row carried (0,0,0):
+        //     an advanced collectable is not in the resource scan the ledger takes positions from.
+        // The verdict itself was silent in the log as well — the CollectColdEvent line goes through
+        // AutoFarmLog, which was off — so nothing anywhere said the tree was spent.
+        //
+        // So ask the verdicts by the entity's own netId, and while here give the persisted row the
+        // position it never had, so the positional lookup (and the farm's marker filter, which uses
+        // it) works for this spot after a restart too.
+        private bool IsRoamingHitColdByVerdict(RoamingCollectableHit hit)
+        {
+            if (hit.NetId == 0)
+            {
+                return false;
+            }
+
+            long now = NowUnixMs();
+            bool cold = false;
+            if (this.collectColdByNetId.TryGetValue(hit.NetId, out CollectColdRecord live) && live.EndUnixMs > now)
+            {
+                cold = true;
+            }
+
+            if (this.coldLedgerPersisted.TryGetValue(hit.NetId, out PersistedColdEntry persisted))
+            {
+                if (persisted.EndUnixMs > now)
+                {
+                    cold = true;
+                }
+
+                if (persisted.Position == Vector3.zero)
+                {
+                    persisted.Position = hit.Position;
+                    this.coldLedgerPersisted[hit.NetId] = persisted;
+                    this.coldLedgerDirty = true;
+                    ModLogger.Msg("[RoamingRadar] " + (hit.IsOak ? "Oak-Oak" : "Flawless Fluorite")
+                        + " netId " + hit.NetId + ": persisted cooldown row had no position, stamped "
+                        + FormatNavMeshVector(hit.Position) + ".");
+                }
+            }
+
+            return cold;
         }
 
         // Merge a position into the hit list, deduped within 2 m; a position reported as
         // on-cooldown by any source stays on-cooldown.
-        private void AddRoamingHit(Vector3 pos, bool isOak, bool onCooldown)
+        private void AddRoamingHit(Vector3 pos, bool isOak, bool onCooldown, uint netId)
         {
             for (int i = 0; i < this.roamingHits.Count; i++)
             {
@@ -368,19 +432,32 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                bool changed = false;
                 if (onCooldown && !existing.OnCooldown)
                 {
                     existing.OnCooldown = true;
+                    changed = true;
+                }
+
+                if (netId != 0 && existing.NetId == 0)
+                {
+                    existing.NetId = netId;
+                    changed = true;
+                }
+
+                if (changed)
+                {
                     this.roamingHits[i] = existing;
                 }
+
                 return;
             }
-
             this.roamingHits.Add(new RoamingCollectableHit
             {
                 Position = pos,
                 IsOak = isOak,
                 OnCooldown = onCooldown,
+                NetId = netId,
             });
         }
 
