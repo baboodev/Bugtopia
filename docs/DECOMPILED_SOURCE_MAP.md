@@ -1118,6 +1118,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Pet play | Meow/PetProtocolManager, TrackingCatPlay, TableDogLearningMotion | PetPlayFeature.cs | A + R |
 | Wild animal feed | WildAnimalSystem, WildAnimalProtocolManager, BackPackSystem | WildAnimalFeedFeature.cs | R + A |
 | Wild animal gifts | WildAnimalProtocolManager.HaveGift, AnimalUtil, AnimalProtocolManager.TakeGift | WildAnimalGiftFeature.cs | A |
+| Visiting animal gifts (radar + auto-claim) | WildAnimalComponent (view), AnimalProtocolManager.GetNetworkEntity, WildAnimalProtocolManager.HaveGift(EcsEntity), AnimalProtocolManager.TakeGift | WildAnimalVisitGiftFeature.cs | A |
 | Shop buy-all coin | ShopSystem, ShopItemData, ShopShelfProtocolManager, BuyStoreItemCommand, ClothesStoreEntry, ClothesStoreBuyItemsCommand, PlayerServiceSystem | ShopBuyAllFeature.cs | A (+ R listing/buy fallback) |
 | Homeland sow/fertilize | CropProtocolManager, GrowCropNetworkCommand, SeedBagCommand, BuildSingle, CropComponent | HomelandFarmFeature.cs | A + R |
 | Homeland privacy pause | Entities.fieldSystem, FieldComponentSystem.GetFieldByOwnerId, FieldComponent.minCorner/maxCorner, LevelObject.localToWorldMatrix, RemotePlayerComponent | HomelandFarmPrivacyPauseFeature.cs | A |

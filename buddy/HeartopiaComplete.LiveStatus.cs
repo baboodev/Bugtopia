@@ -217,6 +217,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Aura Farm: Dog Poop", this.GetPetPoopLiveSummary()));
             }
 
+            if (this.IsWildVisitGiftAutoClaimActive)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Auto-claim Animal Gifts", this.GetWildVisitGiftLiveSummary()));
+            }
+
             if (this.bunnyHopEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Bunny Hop", "Active"));

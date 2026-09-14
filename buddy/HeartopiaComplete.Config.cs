@@ -253,6 +253,7 @@ namespace HeartopiaMod
             data.foragingAnimEnabled = this.foragingAnimEnabled;
             data.skipCraftDyeAnimations = this.skipCraftDyeAnimations;
             data.autoLearnRecipes = this.autoLearnRecipes;
+            data.wildAnimalAutoClaimVisitGifts = this.wildAnimalAutoClaimVisitGifts;
             data.autoLikeOwnHome = this.autoLikeOwnHome;
             data.craftDirectSendEnabled = this.craftDirectSendEnabled;
             data.interactObstacleBypassEnabled = this.interactObstacleBypassEnabled;
@@ -657,6 +658,7 @@ namespace HeartopiaMod
             this.foragingAnimEnabled = data.foragingAnimEnabled;
             this.skipCraftDyeAnimations = data.skipCraftDyeAnimations;
             this.autoLearnRecipes = data.autoLearnRecipes;
+            this.wildAnimalAutoClaimVisitGifts = data.wildAnimalAutoClaimVisitGifts;
             this.autoLikeOwnHome = data.autoLikeOwnHome;
             this.craftDirectSendEnabled = data.craftDirectSendEnabled;
             this.interactObstacleBypassEnabled = data.interactObstacleBypassEnabled;

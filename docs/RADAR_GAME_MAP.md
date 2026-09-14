@@ -174,6 +174,16 @@ already shows. Notes:
 - Which labels take this route is `IsBigMapFurnitureLabel` — deliberately just `"Meteor"`. Bird/Insect
   species pictures and `Contaminated` also ride `Furniture` and would work the same way if ever added.
 - The tracked square is already suppressed for every `Collectable` spot by `MapSpotIsTrackedNative`.
+- **`Animal` (23) rides the same widening** (2026-09-14, built, not yet live-confirmed): the "Gift Animal"
+  label (WildAnimalVisitGiftFeature.cs) is dispatched as `TrackType.Animal`, whose sprite is fixed by the
+  type — `AtlasEnum.Map` / `ui_dynamic_hud_map_mark_animalgroup`, the pink paw the game pins when you
+  track a wild animal. `IsSameTypeNative` accepts `Furniture` **or** `Animal` for a `Collectable` spot, and
+  the sync marks `Animal` tracks big-map eligible. Nothing else in the client keys off `TrackType.Animal`
+  (only `TrackingItem`'s atlas/sprite switches; `GetTrackedWildAnimal` reads `Species`), and the
+  minimap's only type filter is `IsTrackPet` (= `Pet`).
+- The ESP tag cannot use the item-icon loaders for an atlas sprite, and `CopySpriteTexture` would copy the
+  whole atlas page — `ui_dynamic_*` keys go through `TryGetRadarIconFromSpriteAtlas` (Radar.cs), a UV-space
+  `Graphics.Blit` of `sprite.textureRect` out of the loaded `SpriteAtlas`.
 Diag: `[MapSpots] big-map patch: Furniture->Collectable match installed on TrackingSystem.IsSameType`.
 
 ---

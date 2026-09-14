@@ -59,6 +59,10 @@ namespace HeartopiaMod
         // icon (ui_item_normal_{prefab}). StaticId must be the resource ENTITY's static id (EntityUtil
         // .GetEntityResId), NOT the produce itemTypeID. This is how we get true per-resource icons.
         private const byte MapTrackTypeFurniture = 14;
+        // Animal -> AtlasEnum.Map / "ui_dynamic_hud_map_mark_animalgroup" (the pink paw the game itself
+        // pins when you track a wild animal). The sprite is fixed by the type; StaticId is not read.
+        // Used for "Gift Animal" (WildAnimalVisitGiftFeature.cs).
+        private const byte MapTrackTypeAnimal = 23;
         // MapResource -> AtlasEnum.Collectable, SpriteName = ui_dynamic_collectable_{StaticId}. For our
         // produce drop-item ids (timber/stone/fruit) that sprite EXISTS, and unlike Furniture this track
         // type matches a Collectable map-spot (IsSameType) so it also drives the BIG map per-position.
@@ -994,6 +998,13 @@ namespace HeartopiaMod
                     type = MapTrackTypeFurniture;
                     staticId = ContaminatedMapIconStaticId;
                 }
+                else if (string.Equals(cand.Label, "Gift Animal", StringComparison.Ordinal))
+                {
+                    // Visiting animal with a gift: the game's own animal paw. Not a collectable, so it
+                    // must never reach the position match below (a nearby bush would hand it its icon).
+                    type = MapTrackTypeAnimal;
+                    staticId = MapTrackSyntheticStaticId;
+                }
                 else if (type == MapTrackTypeNavigationPoint
                     && !string.Equals(cand.Label, "Bubble", StringComparison.Ordinal))
                 {
@@ -1125,7 +1136,8 @@ namespace HeartopiaMod
                 // the IsSameType widening (EnsureFurnitureSpotPatch), installed on the same radarBigMapSpots
                 // gate — without it such a spot would find no track and render blank.
                 bool bigMapEligible = type == MapTrackTypeMapResource
-                    || (type == MapTrackTypeFurniture && IsBigMapFurnitureLabel(cand.Label));
+                    || (type == MapTrackTypeFurniture && IsBigMapFurnitureLabel(cand.Label))
+                    || type == MapTrackTypeAnimal; // matched to its spot by the same IsSameType widening
 
                 uint desiredTargetNet = 0u;
                 if (type == MapTrackTypePlayer && this.TryMatchRemotePlayer(cand.Position, out uint playerNetId))
@@ -3634,20 +3646,23 @@ namespace HeartopiaMod
             return 1;
         }
 
-        // TrackingSystem.IsSameType(TrackData, SpotEnum) replacement: additionally accept a Furniture track
-        // for a Collectable spot, so our NormalItem-icon markers (Meteor) can be matched by their big-map
-        // spot and lend it the real item icon. Everything else falls through to the original — and since no
-        // vanilla code creates Collectable spots, the widening can only reach our own markers.
-        // Hot path (runs per track x spot on every map refresh): allocation-free, no logging.
+        // TrackingSystem.IsSameType(TrackData, SpotEnum) replacement: additionally accept a Furniture or
+        // Animal track for a Collectable spot, so our NormalItem-icon markers (Meteor) and the gift-animal
+        // paw can be matched by their big-map spot and lend it their icon. Everything else falls through to
+        // the original — and since no vanilla code creates Collectable spots, the widening can only reach our
+        // own markers. Hot path (runs per track x spot on every map refresh): allocation-free, no logging.
         private static unsafe byte IsSameTypeNative(IntPtr self, IntPtr trackData, int spotEnum)
         {
             if (mapFurnitureSpotActive
                 && spotEnum == SpotEnumCollectable
                 && trackData != IntPtr.Zero
-                && mapTrackTypeRawOffset >= 0
-                && *((byte*)trackData + mapTrackTypeRawOffset) == MapTrackTypeFurniture)
+                && mapTrackTypeRawOffset >= 0)
             {
-                return 1;
+                byte trackType = *((byte*)trackData + mapTrackTypeRawOffset);
+                if (trackType == MapTrackTypeFurniture || trackType == MapTrackTypeAnimal)
+                {
+                    return 1;
+                }
             }
             return isSameTypeTrampoline != null ? isSameTypeTrampoline(self, trackData, spotEnum) : (byte)0;
         }

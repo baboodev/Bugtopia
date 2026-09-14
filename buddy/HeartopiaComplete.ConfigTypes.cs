@@ -240,6 +240,7 @@ namespace HeartopiaMod
             public bool foragingAnimEnabled;
             public bool skipCraftDyeAnimations;
             public bool autoLearnRecipes;
+            public bool wildAnimalAutoClaimVisitGifts;
             public bool autoLikeOwnHome;
             public bool craftDirectSendEnabled;
             public bool interactObstacleBypassEnabled;

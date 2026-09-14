@@ -544,6 +544,7 @@ namespace HeartopiaMod
             List<string> selected = new List<string>();
             if (this.showOakOakRadar) selected.Add("Oak-Oak");
             if (this.showFluoriteRadar) selected.Add("Flawless Fluorite");
+            if (this.showWildGiftAnimalRadar) selected.Add("Gift Animals");
             return this.GetRadarSelectionSummary(selected);
         }
 
@@ -695,6 +696,25 @@ namespace HeartopiaMod
                     {
                         new UguiRadarOptionBinding { Label = "Oak-Oak", Get = () => this.showOakOakRadar, Set = v => this.showOakOakRadar = v },
                         new UguiRadarOptionBinding { Label = "Flawless Fluorite", Get = () => this.showFluoriteRadar, Set = v => this.showFluoriteRadar = v },
+                        // Visiting wild animals carrying a gift (WildAnimalVisitGiftFeature.cs) —
+                        // a once-a-day visitor, so it sits with the other daily finds.
+                        new UguiRadarOptionBinding
+                        {
+                            Label = "Gift Animals",
+                            Get = () => this.showWildGiftAnimalRadar,
+                            Set = v =>
+                            {
+                                this.showWildGiftAnimalRadar = v;
+                                if (v)
+                                {
+                                    this.OnWildVisitGiftSurfaceEnabled();
+                                }
+                                else
+                                {
+                                    this.ClearWildGiftAnimalTrackedMarkers();
+                                }
+                            }
+                        },
                     },
                     AfterChanged = this.ApplyUguiRadarStandardGroupTail
                 },
@@ -1157,6 +1177,7 @@ namespace HeartopiaMod
             this.showBambooRadar = true;
             this.showOakOakRadar = true;
             this.showFluoriteRadar = true;
+            this.showWildGiftAnimalRadar = true;
             this.showBubbleRadar = true;
             this.showBirdRadar = true;
             this.showInsectRadar = true;
@@ -1205,6 +1226,7 @@ namespace HeartopiaMod
             this.showBambooRadar = false;
             this.showOakOakRadar = false;
             this.showFluoriteRadar = false;
+            this.showWildGiftAnimalRadar = false;
             this.showBubbleRadar = false;
             this.showBirdRadar = false;
             this.showInsectRadar = false;

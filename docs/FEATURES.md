@@ -1387,6 +1387,14 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   is remembered for the session and its marker ignores the Max-distance slider, so walking away
   does not hide it. One "located" toast per world session. Range cannot be extended — see
   [DECOMPILED_SOURCE_MAP.md](DECOMPILED_SOURCE_MAP.md).
+- **Daily → Gift Animals** — visiting wild animals that carry a gift (`WildAnimalVisitGiftFeature.cs`).
+  `GetComponents<WildAnimalComponent>` every 2 s, and an animal counts only while the game's own
+  `WildAnimalProtocolManager.HaveGift(EcsEntity)` says so, so the per-day (3) and per-animal (1)
+  visit-gift limits are already applied. Markers are keyed by netId (`WildGiftAnimalMarker_<netId>`)
+  and move with the animal. Icon = the game's own animal paw `ui_dynamic_hud_map_mark_animalgroup`
+  (Map atlas): on the game map a `TrackType.Animal` (23) track draws it natively (big map via the
+  `IsSameType` widening), and the ESP tag (code GA, pink) crops it out of the loaded `SpriteAtlas`
+  (`TryGetRadarIconFromSpriteAtlas`). Only animals streamed in around the player can be seen.
 - Toggle per category; select all / clear all.
 - Max distance slider (25–1000 m, default 75 m).
 - Marker styles: **Default** (icon markers) or **Simple Text**.
@@ -1478,6 +1486,21 @@ Full pipeline: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#bag--warehouse-tr
 - **Claim:** `AnimalProtocolManager.TakeGift(uint)` → `AnimalGiftTakeNetworkCommand`.
 - Does **not** use managed `EcsService.TryGet<IWildAnimalService>`, `DataCenter.TryGetComponentData`, or level-object scan (those paths fail or are redundant under BepInEx).
 - Details, logs, troubleshooting: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#wild-animal-gifts-detail).
+- ⚠️ **Visit gifts are not gift boxes.** A visiting animal carries `AnimalGiftComponent{Type=Visit}` on
+  its own entity with no gift-box entity at all, and `HaveGift()` (the gift-box group list) does not
+  list it — so **Claim All** stops at "no wild gifts available" and never reaches it (live, 2026-09-14).
+
+### Auto-claim visiting animal gifts (`WildAnimalVisitGiftFeature`, beta)
+
+- Checkbox under **Claim All Wild Gifts** (Animal Care), shown only with the beta marker; saved in
+  Config.xml (`wildAnimalAutoClaimVisitGifts`).
+- Shares the Gift Animals radar scan; for each animal with a claimable gift it calls
+  `AnimalProtocolManager.TakeGift(netId)` — up to 3 sends per animal, 10 s apart, 0.5 s between sends,
+  never while Claim All is running. No distance limit of its own: the command carries no position, and a
+  claim from **36.7 m** was accepted in the live test (the gift flag cleared and the reward reached the
+  bag). Whether the server records the distance is unknown — hence beta.
+- Log tag `[WildVisitGift]`: `+ gift animal`, `TakeGift(netId) attempt N dist=…`, `claimed netId=…`,
+  session totals on disable. Live status row "Auto-claim Animal Gifts".
 
 ### Daily Quests
 

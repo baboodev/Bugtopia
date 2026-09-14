@@ -570,6 +570,10 @@ namespace HeartopiaMod
                 // ui_item_normal_p_dogpoop_dogpoop001 exists in the icon index.
                 case "Dog Poop":
                     return "p_dogpoop_dogpoop001";
+                // The game's own animal map paw — an atlas sprite, not an item icon, so the loader
+                // crops it out of its SpriteAtlas (TryGetRadarIconFromSpriteAtlas).
+                case "Gift Animal":
+                    return WildVisitGiftIconSpriteName;
                 case "Stone":
                     return "p_material_stone1";
                 case "Ore":
@@ -639,6 +643,101 @@ namespace HeartopiaMod
             }
         }
 
+        // Crop one packed sprite out of whichever loaded SpriteAtlas holds it (e.g. the Map atlas, which is
+        // up whenever the minimap is). Throttled per key through radarIconEspRetryAt; the result is cached
+        // in radarIconEspTextures like every other radar icon. The crop is a UV-space Blit into a
+        // sprite-sized RenderTexture and a full read of that — no pixel-rect math against the page, so
+        // the platform's RenderTexture origin cannot flip or offset it.
+        private bool TryGetRadarIconFromSpriteAtlas(string spriteName, out Texture2D texture)
+        {
+            texture = null;
+            if (string.IsNullOrEmpty(spriteName))
+            {
+                return false;
+            }
+
+            if (this.radarIconEspRetryAt.TryGetValue(spriteName, out float retryAt) && Time.unscaledTime < retryAt)
+            {
+                return false;
+            }
+
+            this.radarIconEspRetryAt[spriteName] = Time.unscaledTime + 5f;
+            try
+            {
+                var atlases = Resources.FindObjectsOfTypeAll<UnityEngine.U2D.SpriteAtlas>();
+                if (atlases == null)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < atlases.Length; i++)
+                {
+                    UnityEngine.U2D.SpriteAtlas atlas = atlases[i];
+                    if (atlas == null || atlas.spriteCount <= 0)
+                    {
+                        continue;
+                    }
+
+                    Sprite sprite = atlas.GetSprite(spriteName); // a clone — destroyed below
+                    if (sprite == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        Texture2D page = sprite.texture;
+                        if (page == null || page.width <= 0 || page.height <= 0)
+                        {
+                            continue;
+                        }
+
+                        Rect r = sprite.textureRect;
+                        int w = Mathf.Max(1, Mathf.RoundToInt(r.width));
+                        int h = Mathf.Max(1, Mathf.RoundToInt(r.height));
+                        RenderTexture rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
+                        RenderTexture previous = RenderTexture.active;
+                        Texture2D copy;
+                        try
+                        {
+                            Graphics.Blit(page, rt,
+                                new Vector2(r.width / page.width, r.height / page.height),
+                                new Vector2(r.x / page.width, r.y / page.height));
+                            RenderTexture.active = rt;
+                            copy = new Texture2D(w, h, TextureFormat.RGBA32, false);
+                            copy.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+                            copy.Apply();
+                        }
+                        finally
+                        {
+                            RenderTexture.active = previous;
+                            RenderTexture.ReleaseTemporary(rt);
+                        }
+
+                        copy.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                        copy.wrapMode = TextureWrapMode.Clamp;
+                        copy.filterMode = FilterMode.Bilinear;
+                        this.radarIconEspTextures[spriteName] = copy;
+                        this.radarIconEspRetryAt.Remove(spriteName);
+                        FeatureLog.Once("RadarIconESP", "atlas:" + spriteName, "cropped '" + spriteName + "' (" + w + "x" + h
+                            + ") from atlas '" + atlas.name + "' rotation=" + sprite.packingRotation);
+                        texture = copy;
+                        return true;
+                    }
+                    finally
+                    {
+                        UnityEngine.Object.Destroy(sprite);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                FeatureLog.Fail("RadarIconESP", "atlas crop for '" + spriteName + "' failed: " + ex.GetType().Name + ": " + ex.Message);
+            }
+
+            return false;
+        }
+
         private bool TryResolveRadarIconFromLoadedSprites(string spriteKey, out Texture2D texture)
         {
             texture = null;
@@ -701,6 +800,20 @@ namespace HeartopiaMod
                 if (this.radarIconEspTextures.TryGetValue(normalizedKey, out texture) && texture != null)
                 {
                     return true;
+                }
+
+                // Atlas sprites (ui_dynamic_*) are not item icons: none of the item loaders below can
+                // fetch them, and the loaded-sprite scan would copy the WHOLE atlas page (CopySpriteTexture
+                // copies sprite.texture, which for a packed sprite is the page). Crop them out of their
+                // SpriteAtlas instead, and never fall through to those paths.
+                if (normalizedKey.StartsWith("ui_dynamic_", StringComparison.Ordinal))
+                {
+                    if (this.TryGetRadarIconFromSpriteAtlas(normalizedKey, out texture))
+                    {
+                        return true;
+                    }
+
+                    continue;
                 }
 
                 // Direct game loads land in the shared texture dictionary under the same
@@ -1775,7 +1888,7 @@ namespace HeartopiaMod
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
                 || this.showOakOakRadar || this.showFluoriteRadar
                 || this.showBubbleRadar || this.showBirdRadar || this.showInsectRadar || this.showFishShadowRadar || this.showMeteorRadar
-                || this.showOtherPlayersRadar || this.showPetPoopRadar;
+                || this.showOtherPlayersRadar || this.showPetPoopRadar || this.showWildGiftAnimalRadar;
         }
 
         private bool IsAnyMushroomRadarEnabled()
@@ -1878,7 +1991,8 @@ namespace HeartopiaMod
                         }
 
                         bool flag4 = gameObject.name.StartsWith("TrackedMarker_") || this.TryParseBubbleTrackedMarkerId(gameObject.name, out _)
-                            || IsPetPoopTrackedMarkerName(gameObject.name);
+                            || IsPetPoopTrackedMarkerName(gameObject.name)
+                            || IsWildGiftAnimalTrackedMarkerName(gameObject.name);
                         bool flag5 = !flag4;
                         if (flag5)
                         {
@@ -1954,6 +2068,17 @@ namespace HeartopiaMod
             else if (this.trackedPetPoopMarkers.Count > 0)
             {
                 this.ClearPetPoopTrackedMarkers();
+            }
+
+            // Visiting wild animals carrying a gift (WildAnimalVisitGiftFeature.cs): view-component
+            // scan, markers keyed by netId and moved with the animal.
+            if (this.showWildGiftAnimalRadar)
+            {
+                this.SyncWildGiftAnimalRadarMarkers(position, material, material2);
+            }
+            else if (this.trackedWildGiftAnimalMarkers.Count > 0)
+            {
+                this.ClearWildGiftAnimalTrackedMarkers();
             }
 
             // Little Whale figurine finder (daily photo hide-and-seek, LittleWhaleFinderFeature.cs):
@@ -3015,6 +3140,14 @@ namespace HeartopiaMod
                 icon = "?";
                 endColor = new Color(0.72f, 0.52f, 0.3f); // brown
                 bgColor = new Color(0.3f, 0.18f, 0.08f, 0.88f);
+            }
+            // Visiting wild animal with a gift (WildAnimalVisitGiftFeature.cs).
+            if (meshName == "giftanimal")
+            {
+                text2 = "Gift Animal";
+                icon = "?";
+                endColor = new Color(1f, 0.6f, 0.78f); // gift-ribbon pink
+                bgColor = new Color(0.42f, 0.12f, 0.26f, 0.88f);
             }
             if (text2 == "Mushroom" && text.Contains("dynamicbush") && !this.loggedUnknownForageMeshNames.Contains(meshName))
             {
