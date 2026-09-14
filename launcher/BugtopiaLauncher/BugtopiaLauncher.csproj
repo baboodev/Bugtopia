@@ -40,6 +40,9 @@
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <AssemblyName>Bugtopia</AssemblyName>
+    <!-- CompanyName in the exe's version information (Bugtopia.rc) and the managed AssemblyCompany.
+         Unset, the SDK falls back to Authors, which falls back to AssemblyName. -->
+    <Company>Baboodev</Company>
     <RootNamespace>Bugtopia.Launcher</RootNamespace>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -57,6 +60,9 @@
 
   <PropertyGroup>
     <PublishAot>true</PublishAot>
+    <!-- The exe's Win32 resources come from Bugtopia.rc, not from the managed assembly - see
+         CompileLauncherResources. -->
+    <IlcGenerateWin32Resources>false</IlcGenerateWin32Resources>
     <IlcOptimizationPreference>Size</IlcOptimizationPreference>
     <EventSourceSupport>false</EventSourceSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
@@ -92,6 +98,61 @@
     <ItemGroup>
       <Compile Include="$(LauncherVersionFile)" />
       <FileWrites Include="$(LauncherVersionFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The exe's own icon, manifest and version information, compiled from Bugtopia.rc and linked in.
+
+       Left to itself NativeAOT copies these out of the managed Bugtopia.dll the compiler produced,
+       and the compiler fills InternalName and OriginalFilename with that file's name, so the
+       published exe called itself "Bugtopia.dll" - which is also the name VirusTotal files it under.
+       IlcGenerateWin32Resources is off above and the linker takes this .res in its place.
+
+       Runs only on publish: SetupOSSpecificProps belongs to the NativeAOT pipeline, so a plain build
+       never needs rc.exe. The newest Windows Kits rc.exe is used when there is one, which works with
+       or without vcvars; PATH is the fallback. -->
+  <Target Name="CompileLauncherResources" BeforeTargets="SetupOSSpecificProps"
+          DependsOnTargets="GenerateLauncherVersion">
+    <PropertyGroup>
+      <_LauncherVersionText>$([System.IO.File]::ReadAllText('$(LauncherVersionFile)'))</_LauncherVersionText>
+      <_LauncherFileVersion>$([System.Text.RegularExpressions.Regex]::Replace($(_LauncherVersionText), '(?s).*AssemblyFileVersion\("([^"]*)"\).*', '$1'))</_LauncherFileVersion>
+      <_LauncherProductVersion>$([System.Text.RegularExpressions.Regex]::Replace($(_LauncherVersionText), '(?s).*AssemblyInformationalVersion\("([^"]*)"\).*', '$1'))</_LauncherProductVersion>
+      <_LauncherResourceDir>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)'))))</_LauncherResourceDir>
+      <_LauncherResourceFile>$(_LauncherResourceDir)Bugtopia.res</_LauncherResourceFile>
+      <_LauncherRc>rc.exe</_LauncherRc>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_LauncherRcCandidate Include="$(MSBuildProgramFiles32)\Windows Kits\10\bin\10.*\x64\rc.exe" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_FILEVERSION $(_LauncherFileVersion.Replace('.', ','))" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_FILEVERSION_STR &quot;$(_LauncherFileVersion)&quot;" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_PRODUCTVERSION_STR &quot;$(_LauncherProductVersion)&quot;" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_COMPANY &quot;$(Company)&quot;" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_PRODUCT &quot;$(Product)&quot;" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_DESCRIPTION &quot;$(AssemblyTitle)&quot;" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_COPYRIGHT &quot;$(Copyright)&quot;" />
+      <_LauncherVersionHeader Include="#define BUGTOPIA_FILENAME &quot;$(TargetName)$(NativeBinaryExt)&quot;" />
+    </ItemGroup>
+
+    <!-- Batched over the candidates, so the last one wins: the version folders sort in release order. -->
+    <PropertyGroup Condition="'@(_LauncherRcCandidate)' != ''">
+      <_LauncherRc>%(_LauncherRcCandidate.FullPath)</_LauncherRc>
+    </PropertyGroup>
+
+    <Error Condition="'$(_LauncherFileVersion)' == '' or '$(_LauncherFileVersion)' == '$(_LauncherVersionText)'"
+           Text="Could not read AssemblyFileVersion out of $(LauncherVersionFile)." />
+
+    <MakeDir Directories="$(_LauncherResourceDir)" />
+    <WriteLinesToFile File="$(_LauncherResourceDir)launcher_version.h" Lines="@(_LauncherVersionHeader)"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <!-- The include path is passed without its trailing backslash, which would escape the quote. -->
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)"
+          Command="&quot;$(_LauncherRc)&quot; /nologo /I &quot;$(_LauncherResourceDir.TrimEnd('\'))&quot; /fo &quot;$(_LauncherResourceFile)&quot; Bugtopia.rc" />
+
+    <ItemGroup>
+      <NativeLibrary Include="$(_LauncherResourceFile)" />
+      <FileWrites Include="$(_LauncherResourceDir)launcher_version.h" />
+      <FileWrites Include="$(_LauncherResourceFile)" />
     </ItemGroup>
   </Target>
 

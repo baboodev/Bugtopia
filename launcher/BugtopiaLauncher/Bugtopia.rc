@@ -1,0 +1,47 @@
+// Win32 resources of the published exe: icon, manifest and version information.
+//
+// Left to itself, NativeAOT copies these out of the managed Bugtopia.dll the compiler produced, and
+// the compiler writes that file's name into InternalName and OriginalFilename - so the exe described
+// itself as a DLL. IlcGenerateWin32Resources is off in the csproj and the linker takes this instead.
+//
+// launcher_version.h is written at publish time by CompileLauncherResources: the version strings
+// come from the same script as the mod's, the rest from the project's Company / Product /
+// AssemblyTitle / Copyright properties. Constants are numeric on purpose, so rc.exe needs no
+// Windows SDK include path.
+
+#include "launcher_version.h"
+
+// The group id the compiler used, so the icon resource is laid out as before.
+32512 ICON "assets\\bugtopia.ico"
+
+// RT_MANIFEST, CREATEPROCESS_MANIFEST_RESOURCE_ID - byte-identical to the SDK default it replaces.
+1 24 "assets\\app.manifest"
+
+1 VERSIONINFO
+FILEVERSION     BUGTOPIA_FILEVERSION
+PRODUCTVERSION  BUGTOPIA_FILEVERSION
+FILEFLAGSMASK   0x3F
+FILEFLAGS       0x0
+FILEOS          0x4     // VOS__WINDOWS32
+FILETYPE        0x1     // VFT_APP
+FILESUBTYPE     0x0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "CompanyName",      BUGTOPIA_COMPANY
+            VALUE "FileDescription",  BUGTOPIA_DESCRIPTION
+            VALUE "FileVersion",      BUGTOPIA_FILEVERSION_STR
+            VALUE "InternalName",     BUGTOPIA_FILENAME
+            VALUE "LegalCopyright",   BUGTOPIA_COPYRIGHT
+            VALUE "OriginalFilename", BUGTOPIA_FILENAME
+            VALUE "ProductName",      BUGTOPIA_PRODUCT
+            VALUE "ProductVersion",   BUGTOPIA_PRODUCTVERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
+END

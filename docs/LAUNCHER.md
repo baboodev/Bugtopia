@@ -254,6 +254,15 @@ rendered. Off-screen rather than hidden, because a visible unowned window still 
 button, and that button is the only sign the launcher is starting at all. A five-second timeout
 reveals it regardless, so a page that never reports in cannot leave a launcher with no window.
 
+**The exe's version information is its own.** Left to itself, NativeAOT copies the Win32 resources
+out of the managed `Bugtopia.dll` the compiler produced, and the compiler writes that file's name
+into `InternalName` and `OriginalFilename` - so the published exe called itself `Bugtopia.dll`,
+which is also the name VirusTotal filed it under. `IlcGenerateWin32Resources` is off and
+`Bugtopia.rc` is linked in instead, with the version strings written into `launcher_version.h` at
+publish time by `CompileLauncherResources`. The exe's icon, manifest and version fields are changed
+there; `ApplicationIcon` in the csproj now reaches only the build-output apphost. The step needs
+`rc.exe`, which comes with the Windows SDK the C++ workload installs.
+
 **`UnityLogListening` must be off in `BepInEx.cfg`.** Left at its default, the chainloader installs a
 Unity log handler before any plugin loads, which pulls in Il2CppInterop's delegate support and
 applies the ClassInjector hooks the mod's own HookTrim exists to suppress. `Payload.Prepare` writes

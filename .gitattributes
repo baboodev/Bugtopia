@@ -3,3 +3,7 @@
 # line. core.autocrlf=input converts on commit but not on checkout, so this has to be explicit.
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# The launcher's manifest is embedded into the exe as it is on disk (launcher/BugtopiaLauncher/Bugtopia.rc),
+# so its bytes ship: kept exactly as extracted from the SDK default, CRLF and BOM included.
+launcher/BugtopiaLauncher/assets/app.manifest -text
