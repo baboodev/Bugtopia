@@ -173,7 +173,15 @@ pwsh launcher/build-launchers.ps1 -PluginDll C:\downloads\bugtopia-bepinex.dll
 
 # working on the launcher itself; the offline build then has no plugin in it
 pwsh launcher/build-launchers.ps1 -SkipMod
+
+# also the offline launcher carrying the BepInEx mod built without the Telegram link
+pwsh launcher/build-launchers.ps1 -NoLink
 ```
+
+`-NoLink` adds `Bugtopia-Launcher-<version>-offline-nolink.exe`: the offline build with the BepInEx
+mod compiled `-p:Telegram=false` inside it. It publishes into its own `bin\offline-nolink\`, and the
+script fails if that plugin still carries a Telegram trace - the check CI runs on the Universal
+no-link DLL. CI does not build this variant.
 
 `ci/publish-launcher.ps1` is the publish half on its own — CI calls it directly, so a local build
 and a release build cannot drift apart. It refuses to publish when a payload file is missing or when

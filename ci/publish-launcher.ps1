@@ -8,6 +8,10 @@
       offline  carries the mod and the bootstrap; downloads nothing, ever
       online   carries no mod at all and fetches the newest release from GitHub
 
+    Given -NoLinkPluginDll, a third one is published beside them:
+
+      offline-nolink  the offline build, carrying the BepInEx mod built without the Telegram link
+
     They are different assemblies, not one assembly with a switch, so both are published and both
     are kept. The output is two files and nothing else - no runtime beside them, no folder to
     unpack, which is the whole point of the NativeAOT build.
@@ -24,6 +28,11 @@
     same bugtopia-bepinex.dll the release ships, so the launcher carries the published file rather
     than a second copy built beside it.
 
+.PARAMETER NoLinkPluginDll
+    A BepInEx plugin built with -p:Telegram=false. Given one, the offline-nolink launcher is
+    published as well, into its own bin\offline-nolink\ and obj\offline-nolink\. There is no default:
+    that build shares an output folder with the regular one, so no fixed path can be trusted to hold it.
+
 .PARAMETER VersionLabel
     Names the output files with this instead of the version resource inside them. CI passes the tag,
     which drops the commit hash a release asset has no use for.
@@ -35,6 +44,7 @@
 param(
     [string]$OutputDirectory = "",
     [string]$PluginDll = "",
+    [string]$NoLinkPluginDll = "",
     [string]$VersionLabel = "",
     [switch]$SkipPayloadCheck
 )
@@ -61,6 +71,12 @@ $payload = @(
        How  = "dotnet build buddy -c ReleaseShip -p:Loader=BepInEx -p:ContinuousIntegrationBuild=true"
        Both = $false }   # offline only: the online build fetches this from GitHub
 )
+
+if ($NoLinkPluginDll) {
+    $payload += @{ Path = $NoLinkPluginDll
+                   How  = "dotnet build buddy -c ReleaseShip -p:Loader=BepInEx -p:Telegram=false -p:ContinuousIntegrationBuild=true"
+                   Both = $false }
+}
 
 $missing = @()
 foreach ($item in $payload) {
@@ -120,6 +136,12 @@ $flavours = @(
     @{ Name = "offline"; Args = $pluginArg }
     @{ Name = "online";  Args = "-p:BugtopiaOnline=true" }
 )
+
+# The offline compile with a different plugin inside. Its own flavour name gives it its own bin\ and
+# obj\ (launcher/Directory.Build.props), so it never shares incremental state with the offline build.
+if ($NoLinkPluginDll) {
+    $flavours += @{ Name = "offline-nolink"; Args = "-p:BugtopiaFlavour=offline-nolink -p:PluginDllPath=`"$NoLinkPluginDll`"" }
+}
 
 $built = @()
 
