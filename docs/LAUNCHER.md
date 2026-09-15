@@ -124,6 +124,19 @@ accident and does not link the stack it would need to.
 | Network code | none in the binary | WinHTTP |
 | Size | ~7.9 MB | ~4.2 MB |
 
+"None in the binary" is enforced in the source rather than left to the trimmer: `WinHttp.cs`, the
+parts of `GitHub.cs` that talk to the API, the download half of `Downloads.cs`, and the update and
+download paths in `Api.cs` - with the page commands that start them - sit behind
+`#if BUGTOPIA_ONLINE`, which both `BugtopiaLaunch` and `BugtopiaLauncher` define for the online
+build. Runtime guards on `Downloads.Enabled` were not enough: those methods stayed reachable from
+the page commands and `Launch`, so NativeAOT compiled them into the offline exe and only the HTTP
+client itself was trimmed. The releases page URL goes with them: `GitHub.ReleasesPage` and the
+`updateVersion` / `releasesPage` fields of the page state are online-only, so a `LatestSeen` left
+behind by an online build - both read the same `%LocalLow%\Bugtopia\launcher.json` - cannot make an
+offline build show an update notice. To check a build, publish it with `-p:IlcGenerateMapFile=true`
+and look for `MethodCode` entries for `GitHub`, `Downloads` or `WinHttp` in the map, and for
+`baboodev/Bugtopia` in the exe's strings.
+
 They build into `bin\<flavour>\` and `obj\<flavour>\` so both exist at once. Two things that needs,
 both in `launcher/Directory.Build.props`: an explicit `DefaultItemExcludes` (the SDK excludes only
 the *current* flavour's obj from source globs, so the generated `AssemblyInfo` from both would be

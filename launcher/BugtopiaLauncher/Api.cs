@@ -77,8 +77,10 @@ namespace Bugtopia.Launcher
                     greeted = true;
                     Log("ui ready");
 
+#if BUGTOPIA_ONLINE
                     // Started only now: the page exists, so the answer has somewhere to land.
                     _ = Task.Run(CheckForUpdate);
+#endif
                 }
 
                 using JsonDocument doc = JsonDocument.Parse(message);
@@ -167,6 +169,9 @@ namespace Bugtopia.Launcher
                     RunJob(id, "Prepare", Prepare);
                     break;
 
+                // Online only. An offline page hides every control that sends these, and should one
+                // arrive anyway it is an unknown command.
+#if BUGTOPIA_ONLINE
                 case "downloadBepInEx":
                     RunJob(id, "Download BepInEx", DownloadBepInEx);
                     break;
@@ -199,6 +204,7 @@ namespace Bugtopia.Launcher
                 case "downloadUnityLibs":
                     RunJob(id, "Download Unity libraries", DownloadUnityLibs);
                     break;
+#endif
 
                 case "generateInterop":
                     bool force = args.ValueKind == JsonValueKind.Object &&
@@ -320,8 +326,10 @@ namespace Bugtopia.Launcher
         private volatile Question asked;
         private int askCount;
 
+#if BUGTOPIA_ONLINE
         /// <summary>Releases the page has been shown, once someone asked for the list.</summary>
         private List<ModRelease> knownReleases = new List<ModRelease>();
+#endif
 
         /// <summary>
         /// Asks the page a yes-or-no and blocks the job until it answers.
@@ -419,6 +427,7 @@ namespace Bugtopia.Launcher
             Log("BepInEx " + (Payload.ReadBepInExVersion(coreDir) ?? "archive") + " is ready to install.");
         }
 
+#if BUGTOPIA_ONLINE
         private void DownloadBepInEx()
         {
             StorageLayout storage = RequireStorage();
@@ -440,6 +449,7 @@ namespace Bugtopia.Launcher
 
             Downloads.FetchUnityLibraries(version, storage, Log, Progress("interop"));
         }
+#endif
 
         /// <summary>
         /// Marks one card as working on something with no number to show, and says what.
@@ -737,10 +747,9 @@ namespace Bugtopia.Launcher
         }
 
         /// <summary>
-        /// An unpacked BepInEx archive to lay the tree out from, fetched when the user has not
-        /// supplied one. No <see cref="Downloads.Enabled"/> guard: an offline build's download
-        /// throws before it touches anything, with the URL to fetch by hand — which is exactly the
-        /// message this case needs, and a guard here would only be unreachable code in one flavour.
+        /// An unpacked BepInEx archive to lay the tree out from. An online build fetches one when the
+        /// user has not supplied it; an offline build has no download code at all, and says where
+        /// to get the archive instead.
         /// </summary>
         private void EnsureBepInExSource(StorageLayout storage)
         {
@@ -758,7 +767,13 @@ namespace Bugtopia.Launcher
                 return;
             }
 
+#if BUGTOPIA_ONLINE
             DownloadBepInEx();
+#else
+            throw new InvalidOperationException(
+                "This build does not download anything. Fetch the BepInEx archive yourself and " +
+                "point the launcher at it:\n" + Downloads.BepInExUrl);
+#endif
         }
 
         /// <summary>Whether a folder passes the same rules <see cref="Prepare"/> will apply to it.</summary>
@@ -782,6 +797,7 @@ namespace Bugtopia.Launcher
         /// </summary>
         private void EnsurePlugin(StorageLayout storage)
         {
+#if BUGTOPIA_ONLINE
             string installed = GitHub.InstalledVersion(storage);
             bool missing = !File.Exists(storage.Plugin);
 
@@ -794,9 +810,7 @@ namespace Bugtopia.Launcher
 
             bool outdated = !missing && ModUpdate(installed) != null;
 
-            // The constant is folded in with a runtime half on purpose: on its own it would make
-            // everything below unreachable code in the offline build.
-            if (!Downloads.PluginFromGitHub || !(missing || outdated))
+            if (!(missing || outdated))
                 return;
 
             if (missing)
@@ -818,6 +832,7 @@ namespace Bugtopia.Launcher
                 Log("Could not update the mod: " + ex.Message + " - starting with " +
                     (installed ?? "the installed build") + ".");
             }
+#endif
         }
 
         /// <summary>
@@ -828,15 +843,20 @@ namespace Bugtopia.Launcher
         /// </summary>
         private string ModUpdate(string installed)
         {
-            if (!Downloads.PluginFromGitHub || string.IsNullOrWhiteSpace(installed))
+#if BUGTOPIA_ONLINE
+            if (string.IsNullOrWhiteSpace(installed))
                 return null;
 
             if (GitHub.SameVersion(settings.PinnedMod, installed))
                 return null;
 
             return GitHub.IsNewer(settings.LatestSeen, installed) ? settings.LatestSeen : null;
+#else
+            return null;
+#endif
         }
 
+#if BUGTOPIA_ONLINE
         /// <summary>
         /// Fetches the release list and installs the newest build.
         ///
@@ -914,6 +934,7 @@ namespace Bugtopia.Launcher
                 return releases;
             }
         }
+#endif
 
         /// <summary>
         /// Puts the Unity base libraries in unity-libs before the generator looks for them.
@@ -935,13 +956,14 @@ namespace Bugtopia.Launcher
                 return;
             }
 
-            if (!Downloads.Enabled || GameSession.ReadUnityVersion(game) == null)
+#if BUGTOPIA_ONLINE
+            if (GameSession.ReadUnityVersion(game) != null)
             {
-                Log("No Unity base libraries yet; BepInEx will fetch them itself during generation.");
+                DownloadUnityLibs();
                 return;
             }
-
-            DownloadUnityLibs();
+#endif
+            Log("No Unity base libraries yet; BepInEx will fetch them itself during generation.");
         }
 
         /// <summary>
@@ -1027,6 +1049,7 @@ namespace Bugtopia.Launcher
 
         // ---- is there a newer launcher? --------------------------------------
 
+#if BUGTOPIA_ONLINE
         /// <summary>
         /// How long a recorded answer is trusted before asking again.
         ///
@@ -1050,12 +1073,10 @@ namespace Bugtopia.Launcher
         /// <param name="announce">Put a line in the log when this launcher itself is out of date.</param>
         private void RefreshLatestSeen(bool announce)
         {
-            // One condition rather than two: Downloads.Enabled is a compile-time constant, and on
-            // its own it would make everything below it unreachable code in the offline build.
             bool checkedRecently = settings.LastUpdateCheck.HasValue &&
                                    DateTime.UtcNow - settings.LastUpdateCheck.Value < UpdateCheckFloor;
 
-            if (!Downloads.Enabled || checkedRecently)
+            if (checkedRecently)
                 return;
 
             try
@@ -1087,6 +1108,7 @@ namespace Bugtopia.Launcher
             RefreshLatestSeen(announce: true);
             PushState();
         }
+#endif
 
         // ---- state -----------------------------------------------------------
 
@@ -1101,12 +1123,21 @@ namespace Bugtopia.Launcher
             w.WriteString("unityLibsZip", settings.UnityLibsZip ?? "");
             w.WriteString("defaultStorage", LauncherSettings.DefaultStorage);
             w.WriteString("version", HeartopiaMod.ModBuildVersion.Display);
+            // Both are online-only. Nothing in an offline build can learn about a newer one, and
+            // LatestSeen left in the settings file by an online build - the two share
+            // %LocalLow%\Bugtopia\launcher.json - must not resurrect the notice or its link.
+            // Written empty rather than omitted, so the page gets the same shape from both builds.
+#if BUGTOPIA_ONLINE
             w.WriteString("updateVersion",
                 GitHub.IsNewer(settings.LatestSeen, HeartopiaMod.ModBuildVersion.Numeric)
                     ? settings.LatestSeen
                     : "");
-            w.WriteBoolean("pluginFromGitHub", Downloads.PluginFromGitHub);
             w.WriteString("releasesPage", GitHub.ReleasesPage);
+#else
+            w.WriteString("updateVersion", "");
+            w.WriteString("releasesPage", "");
+#endif
+            w.WriteBoolean("pluginFromGitHub", Downloads.PluginFromGitHub);
             w.WriteBoolean("downloads", Downloads.Enabled);
             w.WriteBoolean("expert", settings.Expert);
             w.WriteBoolean("autoLaunch", settings.AutoLaunch);
@@ -1143,7 +1174,9 @@ namespace Bugtopia.Launcher
             w.WriteBoolean("pluginPinned", GitHub.SameVersion(settings.PinnedMod, installedMod));
             w.WriteBoolean("interopStale", hasInterop && IsInteropStale(storage, game));
 
+            // Written empty offline, so the page gets the same shape from both builds.
             w.WriteStartArray("modReleases");
+#if BUGTOPIA_ONLINE
             foreach (ModRelease release in knownReleases)
             {
                 w.WriteStartObject();
@@ -1151,6 +1184,7 @@ namespace Bugtopia.Launcher
                 w.WriteString("asset", release.AssetName);
                 w.WriteEndObject();
             }
+#endif
             w.WriteEndArray();
 
             // An install already loading the mod. Reported in full rather than as a flag because the

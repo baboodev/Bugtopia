@@ -4,6 +4,8 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 
+// The HTTP client exists only in an online build; an offline one does not compile a line of it.
+#if BUGTOPIA_ONLINE
 namespace Bugtopia.Launch
 {
     /// <summary>Something went wrong before an HTTP status was reached.</summary>
@@ -227,3 +229,4 @@ namespace Bugtopia.Launch
         private static extern bool WinHttpCloseHandle(IntPtr handle);
     }
 }
+#endif

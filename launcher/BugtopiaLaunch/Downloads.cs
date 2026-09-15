@@ -46,16 +46,18 @@ namespace Bugtopia.Launch
         public static string UnityLibrariesUrl(string unityVersion) =>
             string.IsNullOrEmpty(unityVersion) ? null : "https://unity.bepinex.dev/libraries/" + unityVersion + ".zip";
 
+        // Everything below reaches the network, so it is compiled into an online build only. An
+        // offline one keeps the constants above, which the page uses for its links, and nothing else.
+#if BUGTOPIA_ONLINE
         /// <summary>
         /// Downloads a file to <paramref name="destination"/>, reporting progress as whole percent.
         /// </summary>
-        /// <exception cref="DownloadException">Any failure, including "this build cannot download".</exception>
+        /// <exception cref="DownloadException">Any failure.</exception>
         public static void Download(string url, string destination, Action<string> log = null,
                                     Action<int> progress = null)
         {
             log ??= delegate { };
 
-#if BUGTOPIA_ONLINE
             log("Downloading " + url);
             Directory.CreateDirectory(Path.GetDirectoryName(destination));
             string partial = destination + ".part";
@@ -112,11 +114,6 @@ namespace Bugtopia.Launch
                     }
                 }
             }
-#else
-            throw new DownloadException(
-                "This build does not download anything. Fetch the file yourself and point the " +
-                "launcher at it:\n" + url);
-#endif
         }
 
         /// <summary>
@@ -125,14 +122,9 @@ namespace Bugtopia.Launch
         public static byte[] Fetch(string url, IEnumerable<KeyValuePair<string, string>> headers,
                                    out int status)
         {
-#if BUGTOPIA_ONLINE
             using var buffer = new MemoryStream();
             status = WinHttp.Get(url, headers, buffer);
             return buffer.ToArray();
-#else
-            status = 0;
-            throw new DownloadException("This build does not download anything.");
-#endif
         }
 
         /// <summary>
@@ -174,10 +166,13 @@ namespace Bugtopia.Launch
             Directory.CreateDirectory(storage.UnityLibs);
             Download(url, Path.Combine(storage.UnityLibs, unityVersion + ".zip"), log, progress);
         }
+#endif
     }
 
+#if BUGTOPIA_ONLINE
     public sealed class DownloadException : Exception
     {
         public DownloadException(string message) : base(message) { }
     }
+#endif
 }

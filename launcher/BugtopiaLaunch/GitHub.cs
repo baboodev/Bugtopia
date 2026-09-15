@@ -5,6 +5,7 @@ using System.Text.Json;
 
 namespace Bugtopia.Launch
 {
+#if BUGTOPIA_ONLINE
     /// <summary>One downloadable build of the mod.</summary>
     public sealed class ModRelease
     {
@@ -33,6 +34,7 @@ namespace Bugtopia.Launch
 
         public bool NeedsToken { get; }
     }
+#endif
 
     /// <summary>
     /// Fetching the mod itself from its releases, for builds that do not carry it.
@@ -41,6 +43,9 @@ namespace Bugtopia.Launch
     /// list releases newest-first rather than asking for "latest" so an older build can be chosen,
     /// keep only the ones with a <c>.dll</c> asset, and download the asset unauthenticated — a token
     /// raises the API rate limit from 60 to 5000 requests an hour but is not needed for the file.
+    ///
+    /// Every build keeps the version helpers, which only read files on disk; everything that talks
+    /// to GitHub - and every URL that names it - is compiled into an online build only.
     /// </summary>
     public static class GitHub
     {
@@ -52,10 +57,16 @@ namespace Bugtopia.Launch
         /// </summary>
         public const string VersionMarker = "bugtopia.version";
 
+#if BUGTOPIA_ONLINE
+        /// <summary>
+        /// Where a human goes to fetch a build by hand. Online only: an offline build has nothing to
+        /// point anyone at, and keeping the constant would leave the URL in its binary.
+        /// </summary>
         public static string ReleasesPage => "https://github.com/" + Repository + "/releases";
 
         private const string ApiUrl =
             "https://api.github.com/repos/" + Repository + "/releases?per_page=50";
+#endif
 
         /// <summary>
         /// Whether <paramref name="candidate"/> names a later build than <paramref name="current"/>.
@@ -135,6 +146,7 @@ namespace Bugtopia.Launch
             return plus < 0 ? version : version.Substring(0, plus) + " (" + version.Substring(plus + 1) + ")";
         }
 
+#if BUGTOPIA_ONLINE
         /// <summary>
         /// Releases that have a plugin to install, newest first.
         /// </summary>
@@ -289,5 +301,6 @@ namespace Bugtopia.Launch
 
             return -1;
         }
+#endif
     }
 }

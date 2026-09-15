@@ -58,6 +58,12 @@
     <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
   </PropertyGroup>
 
+  <!-- The switch BugtopiaLaunch compiles with, for Api.cs: its update and download paths sit behind
+       #if BUGTOPIA_ONLINE, so an offline build compiles none of that code. -->
+  <PropertyGroup Condition="'$(BugtopiaOnline)' == 'true'">
+    <DefineConstants>$(DefineConstants);BUGTOPIA_ONLINE</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup>
     <PublishAot>true</PublishAot>
     <!-- The exe's Win32 resources come from Bugtopia.rc, not from the managed assembly - see
