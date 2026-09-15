@@ -46,7 +46,10 @@ namespace Bugtopia.Launch
     {
         public const string Repository = "baboodev/Bugtopia";
 
-        /// <summary>Records which release is installed. Same filename Vugtopia writes, so both agree.</summary>
+        /// <summary>
+        /// Written beside a plugin installed from a release. Kept for Vugtopia, which reads the same
+        /// file; the launcher itself goes by <see cref="InstalledVersion"/>.
+        /// </summary>
         public const string VersionMarker = "bugtopia.version";
 
         public static string ReleasesPage => "https://github.com/" + Repository + "/releases";
@@ -103,22 +106,33 @@ namespace Bugtopia.Launch
             return numbers;
         }
 
-        /// <summary>The tag recorded beside an installed plugin, or null.</summary>
-        public static string InstalledTag(StorageLayout storage)
-        {
-            try
-            {
-                string marker = Path.Combine(storage.Plugins, VersionMarker);
-                if (!File.Exists(marker))
-                    return null;
+        /// <summary>
+        /// The version the installed plugin declares about itself, e.g. <c>2.8.2+46f9cfb</c>, or null.
+        ///
+        /// Read out of the DLL rather than out of <see cref="VersionMarker"/>: the marker says which
+        /// release was last downloaded, and anything that puts a different DLL in its place - an
+        /// offline launcher, a copy by hand, a build deployed over it - leaves it saying that.
+        /// Measured: a marker reading v2.8.3 beside a 3.0.0 DLL, which the update check then offered
+        /// to "update" to v2.9.5. Every release since v2.0.0 stamps its version into the DLL.
+        /// </summary>
+        public static string InstalledVersion(StorageLayout storage) => Payload.VersionOf(storage.Plugin);
 
-                string tag = File.ReadAllText(marker).Trim();
-                return tag.Length > 0 ? tag : null;
-            }
-            catch (IOException)
-            {
+        /// <summary>
+        /// Whether two versions name the same build, by the component rule <see cref="IsNewer"/> uses:
+        /// a release tag <c>v2.8.3</c> and a DLL's <c>2.8.3+46f9cfb</c> are the same. False when either
+        /// is missing.
+        /// </summary>
+        public static bool SameVersion(string a, string b) =>
+            !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && !IsNewer(a, b) && !IsNewer(b, a);
+
+        /// <summary><c>2.8.2+46f9cfb</c> as <c>2.8.2 (46f9cfb)</c>, the way the launcher shows its own version.</summary>
+        public static string DisplayVersion(string version)
+        {
+            if (string.IsNullOrWhiteSpace(version))
                 return null;
-            }
+
+            int plus = version.IndexOf('+');
+            return plus < 0 ? version : version.Substring(0, plus) + " (" + version.Substring(plus + 1) + ")";
         }
 
         /// <summary>
@@ -187,8 +201,8 @@ namespace Bugtopia.Launch
 
             Downloads.Download(release.Url, storage.Plugin, log, progress);
 
-            // The marker is a convenience, not a guarantee: the plugin is already in place, so a
-            // failure to write it costs nothing but the version shown in the UI.
+            // The marker is for Vugtopia; the launcher reads the version out of the DLL. The plugin
+            // is already in place, so a failure to write it costs nothing here.
             try
             {
                 File.WriteAllText(Path.Combine(storage.Plugins, VersionMarker), release.Tag);

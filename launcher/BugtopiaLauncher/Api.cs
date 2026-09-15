@@ -591,6 +591,10 @@ namespace Bugtopia.Launcher
                 PushState();
             }
 
+            // Every launch, not only the first: a prepared tree is never laid out again, so this is
+            // what brings a newer launcher's bootstrap - and, offline, its mod - into storage.
+            Payload.RefreshCarried(storage, CarriedFiles(), Log);
+
             EnsurePlugin(storage);
             PushState();
 
@@ -772,13 +776,13 @@ namespace Bugtopia.Launcher
         }
 
         /// <summary>
-        /// The mod itself. An offline build carries it and Prepare has already written it; an online
+        /// The mod itself. An offline build carries it and has already put that copy in place; an online
         /// build fetches it from its releases, where a missing plugin is simply what a fresh install
         /// looks like rather than something to fail over.
         /// </summary>
         private void EnsurePlugin(StorageLayout storage)
         {
-            string installed = GitHub.InstalledTag(storage);
+            string installed = GitHub.InstalledVersion(storage);
             bool missing = !File.Exists(storage.Plugin);
 
             // Asked here rather than trusting the background check to have finished. With the
@@ -827,7 +831,7 @@ namespace Bugtopia.Launcher
             if (!Downloads.PluginFromGitHub || string.IsNullOrWhiteSpace(installed))
                 return null;
 
-            if (string.Equals(settings.PinnedMod, installed, StringComparison.OrdinalIgnoreCase))
+            if (GitHub.SameVersion(settings.PinnedMod, installed))
                 return null;
 
             return GitHub.IsNewer(settings.LatestSeen, installed) ? settings.LatestSeen : null;
@@ -1130,10 +1134,13 @@ namespace Bugtopia.Launcher
             w.WriteBoolean("prepared", prepared);
             w.WriteBoolean("hasInterop", hasInterop);
             w.WriteBoolean("hasPlugin", storage != null && File.Exists(storage.Plugin));
-            string installedMod = storage == null ? null : GitHub.InstalledTag(storage);
-            w.WriteString("pluginVersion", installedMod ?? "");
+            string installedMod = storage == null ? null : GitHub.InstalledVersion(storage);
+            w.WriteString("pluginVersion", GitHub.DisplayVersion(installedMod) ?? "");
             w.WriteString("modUpdate", ModUpdate(installedMod) ?? "");
             w.WriteString("pinnedMod", settings.PinnedMod ?? "");
+            // Compared here, not on the page: a pinned tag reads "v2.8.3" and the DLL says
+            // "2.8.3+46f9cfb" - the same build, never the same string.
+            w.WriteBoolean("pluginPinned", GitHub.SameVersion(settings.PinnedMod, installedMod));
             w.WriteBoolean("interopStale", hasInterop && IsInteropStale(storage, game));
 
             w.WriteStartArray("modReleases");

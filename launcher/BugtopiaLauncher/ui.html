@@ -837,7 +837,7 @@ function renderModVersions() {
   $("mod-hint").textContent = !state.pluginVersion
     ? (releases.length ? "" : "Nothing installed yet.")
     : "Installed: " + state.pluginVersion +
-      (state.pinnedMod === state.pluginVersion ? " (pinned - launches will not move past it)"
+      (state.pluginPinned ? " (pinned - launches will not move past it)"
        : state.modUpdate ? " - Launch updates it to " + state.modUpdate
        : "") +
       (releases.length ? "" : " - press Load versions to pick another.");
