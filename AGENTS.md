@@ -130,7 +130,7 @@ both launchers into `release/` as one file each:
 |---|---|---|
 | `Bugtopia-Launcher-<version>-offline.exe` | the mod; downloads nothing, ever | ~7.9 MB |
 | `Bugtopia-Launcher-<version>-online.exe` | no mod — fetches the newest release | ~4.2 MB |
-| `Bugtopia-Launcher-<version>-offline-nolink.exe` | only with `-NoLink`: the BepInEx mod built without the Telegram link | ~7.9 MB |
+| `Bugtopia-Launcher-<version>-offline-nolink.exe` | with `-NoLink` (CI always): the BepInEx mod built without the Telegram link | ~7.9 MB |
 
 Needs **MSVC with the C++ workload** on top of the mod's own prerequisites: NativeAOT needs the
 linker and the bootstrap needs `cl.exe`. `-PluginDll <path>` packages a published

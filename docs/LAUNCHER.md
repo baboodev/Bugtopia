@@ -186,7 +186,7 @@ pwsh launcher/build-launchers.ps1 -NoLink
 `-NoLink` adds `Bugtopia-Launcher-<version>-offline-nolink.exe`: the offline build with the BepInEx
 mod compiled `-p:Telegram=false` inside it. It publishes into its own `bin\offline-nolink\`, and the
 script fails if that plugin still carries a Telegram trace - the check CI runs on the Universal
-no-link DLL. CI does not build this variant.
+no-link DLL. CI builds it on every tag and attaches it to the release.
 
 `ci/publish-launcher.ps1` is the publish half on its own — CI calls it directly, so a local build
 and a release build cannot drift apart. It refuses to publish when a payload file is missing or when
@@ -215,12 +215,15 @@ missing.
 
 `.github/workflows/melonloader-releaseship.yml` runs on `v*` tags only and builds the mod first, so
 the offline launcher embeds `dist\bugtopia-bepinex.dll` — the exact file the release publishes, not
-a second copy built beside it. Both exes go into the artifacts and onto the release, named from the
-tag:
+a second copy built beside it. The offline-nolink launcher embeds `dist\bugtopia-bepinex-nolink.dll`,
+built with `-p:Telegram=false` and checked for Telegram traces like the Universal no-link DLL; that
+DLL itself goes into the artifacts but not onto the release. All three exes go into the artifacts
+and onto the release, named from the tag:
 
 ```
 Bugtopia-Launcher-2.8.3-offline.exe
 Bugtopia-Launcher-2.8.3-online.exe
+Bugtopia-Launcher-2.8.3-offline-nolink.exe
 ```
 
 ---
