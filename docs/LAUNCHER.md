@@ -252,7 +252,9 @@ the constructor has already shown the window. So the window is created at -32000
 Photino's own startup parameters and centred by `PhotinoHost.Reveal()` once the page says it has
 rendered. Off-screen rather than hidden, because a visible unowned window still gets a taskbar
 button, and that button is the only sign the launcher is starting at all. A five-second timeout
-reveals it regardless, so a page that never reports in cannot leave a launcher with no window.
+reveals it regardless, so a page that never reports in cannot leave a launcher with no window. The
+auto-launch countdown waits for the launcher's `revealed` message rather than the first render,
+which happens while the window is still off the screen.
 
 **The exe's version information is its own.** Left to itself, NativeAOT copies the Win32 resources
 out of the managed `Bugtopia.dll` the compiler produced, and the compiler writes that file's name

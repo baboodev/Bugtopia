@@ -136,6 +136,10 @@ namespace Bugtopia.Launcher
         /// <summary>
         /// Brings the parked window onto the screen, once. The page asks for this after its first
         /// render, so what appears is the finished launcher rather than an empty frame of it.
+        ///
+        /// The page is told once the window is actually up. It has no other way to know - it was
+        /// drawn while still off the screen - and the countdown to launching on its own must not
+        /// start before anyone can see it.
         /// </summary>
         public void Reveal()
         {
@@ -148,7 +152,11 @@ namespace Bugtopia.Launcher
 
             try
             {
-                w.Invoke(() => w.Center());
+                w.Invoke(() =>
+                {
+                    w.Center();
+                    w.SendWebMessage("{\"event\":\"revealed\"}");
+                });
             }
             catch (Exception)
             {

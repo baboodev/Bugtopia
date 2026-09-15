@@ -498,6 +498,9 @@ window.external.receiveMessage(raw => {
   // card speaks for itself again.
   if (m.event === "state") { setWorking("", ""); state = m.data; render(); return; }
   if (m.event === "confirm") { ask(m); return; }
+  // The window is on screen - whether the page asked for it or the startup timeout did. Nothing
+  // else says so: the page draws itself while the window is still parked off the screen.
+  if (m.event === "revealed") { windowShown = true; armAutoLaunch(); return; }
 
   const p = pending.get(m.id);
   if (!p) return;
@@ -707,7 +710,7 @@ function render() {
 // itself. Armed once per run whatever the outcome: a countdown that comes back after being told no
 // is worse than no countdown.
 
-let autoTimer = null, autoLeft = 0, autoArmed = false;
+let autoTimer = null, autoLeft = 0, autoArmed = false, windowShown = false;
 
 /** Every card that is showing is green - which is literally what the user sees. */
 function everythingGreen() {
@@ -716,8 +719,10 @@ function everythingGreen() {
 }
 
 function armAutoLaunch() {
-  // Not in expert mode: someone with every field open is configuring, not waiting to play.
-  if (autoArmed || autoTimer || busy || state.expert || !everythingGreen()) return;
+  // Not in expert mode: someone with every field open is configuring, not waiting to play. And not
+  // before the window is up: the first render happens while it is still off the screen, and a
+  // countdown started there has spent part of its three seconds before anyone can see or stop it.
+  if (autoArmed || autoTimer || busy || !windowShown || !state || state.expert || !everythingGreen()) return;
 
   autoArmed = true;
   autoLeft = 3;
