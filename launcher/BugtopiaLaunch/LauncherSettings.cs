@@ -66,6 +66,14 @@ namespace Bugtopia.Launch
         [JsonPropertyName("expert")]
         public bool Expert { get; set; }
 
+        /// <summary>
+        /// Start the game on its own after three seconds when nothing is left to set up. On unless
+        /// turned off: a file written before this existed has no such key, and the initialiser is
+        /// what it gets.
+        /// </summary>
+        [JsonPropertyName("autoLaunch")]
+        public bool AutoLaunch { get; set; } = true;
+
         /// <summary><c>%LocalLow%\Bugtopia\runtime</c> — beside the mod's own user data.</summary>
         public static string DefaultStorage => KnownPaths.DefaultStorage;
 

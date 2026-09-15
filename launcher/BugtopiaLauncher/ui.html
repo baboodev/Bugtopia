@@ -191,6 +191,8 @@ input[type=text]:focus { border-color: var(--primary-accent); }
 /* Under the button, because that is where someone is looking when they press it - and the key is
    the first thing they will need once the game is up. */
 .launch-hint { text-align: center; font-size: 0.75rem; color: var(--text-muted); }
+/* Centred under the button it belongs to; the footer is a column and would stretch it otherwise. */
+.auto-launch { align-self: center; }
 .launch-hint kbd {
   font-family: inherit; font-size: 0.72rem; font-weight: 600; color: var(--text-main);
   background: var(--secondary-bg); border: 1px solid var(--card-border);
@@ -457,6 +459,9 @@ a:hover { text-decoration: underline; }
         </button>
       </div>
     </div>
+    <label class="checkbox-label simple-only auto-launch" title="Start the game three seconds after the launcher opens, when nothing is left to set up">
+      <input type="checkbox" id="auto-launch" /><span>Launch automatically</span>
+    </label>
     <p class="launch-hint">In game, press <kbd>Insert</kbd> to open the mod menu.</p>
   </footer>
 </div>
@@ -635,6 +640,7 @@ function render() {
     : esc(state.version || "");
   document.body.classList.toggle("expert", !!state.expert);
   $("expert").checked = !!state.expert;
+  $("auto-launch").checked = state.autoLaunch !== false;
   renderSteps();
 
   for (const k of ["game", "source", "storage", "unityLibsZip"]) {
@@ -722,7 +728,8 @@ function armAutoLaunch() {
   // Not in expert mode: someone with every field open is configuring, not waiting to play. And not
   // before the window is up: the first render happens while it is still off the screen, and a
   // countdown started there has spent part of its three seconds before anyone can see or stop it.
-  if (autoArmed || autoTimer || busy || !windowShown || !state || state.expert || !everythingGreen()) return;
+  if (autoArmed || autoTimer || busy || !windowShown || !state || state.expert ||
+      state.autoLaunch === false || !everythingGreen()) return;
 
   autoArmed = true;
   autoLeft = 3;
@@ -893,6 +900,14 @@ function save() {
 $("expert").onchange = () => {
   stopAutoLaunch();
   run("setExpert", { value: $("expert").checked });
+};
+
+// Touching it means someone is here, so no countdown for the rest of this run whichever way it was
+// set - ticking it back on must not start the game three seconds later. The choice is for next time.
+$("auto-launch").onchange = () => {
+  autoArmed = true;
+  stopAutoLaunch();
+  run("setAutoLaunch", { value: $("auto-launch").checked });
 };
 
 $("step-detect").onclick = () => $("detect").onclick();

@@ -139,6 +139,14 @@ namespace Bugtopia.Launcher
                     Reply(id, WriteState);
                     break;
 
+                case "setAutoLaunch":
+                    settings.AutoLaunch = args.ValueKind == JsonValueKind.Object &&
+                                          args.TryGetProperty("value", out JsonElement flag) &&
+                                          flag.ValueKind == JsonValueKind.True;
+                    SafeSave();
+                    Reply(id, WriteState);
+                    break;
+
                 case "logo":
                     Reply(id, w => WriteValue(w, DataUri("logo.png", "image/png")));
                     break;
@@ -249,7 +257,7 @@ namespace Bugtopia.Launcher
         // Simple mode is sized to what it actually shows, and an online build shows one row more:
         // the mod it fetches rather than carries.
         internal static int WindowHeight(bool expert) =>
-            expert ? 760 : Downloads.PluginFromGitHub ? 660 : 580;
+            expert ? 760 : Downloads.PluginFromGitHub ? 690 : 610;
 
         /// <summary>Which view the window should open in, read before the window exists.</summary>
         internal bool Expert => settings.Expert;
@@ -1097,6 +1105,7 @@ namespace Bugtopia.Launcher
             w.WriteString("releasesPage", GitHub.ReleasesPage);
             w.WriteBoolean("downloads", Downloads.Enabled);
             w.WriteBoolean("expert", settings.Expert);
+            w.WriteBoolean("autoLaunch", settings.AutoLaunch);
             w.WriteString("bepInExVersion", Downloads.BepInExVersion);
             w.WriteString("bepInExUrl", Downloads.BepInExUrl);
             w.WriteString("preparedFrom", settings.PreparedFrom ?? "");
