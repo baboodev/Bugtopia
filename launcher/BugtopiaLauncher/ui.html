@@ -251,6 +251,9 @@ input[type=text]:focus { border-color: var(--primary-accent); }
 .modal-input { width: 100%; user-select: text; }
 .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-main); cursor: pointer; }
 .checkbox-label input { width: 16px; height: 16px; accent-color: var(--primary-accent); cursor: pointer; }
+/* Text someone needs to take elsewhere - the name of the BepInEx build to search for - opts back in
+   to selection, which the page otherwise switches off. */
+.copyable { user-select: text; cursor: text; }
 a { color: #a5b4fc; cursor: pointer; text-decoration: none; }
 a:hover { text-decoration: underline; }
 </style>
@@ -367,7 +370,7 @@ a:hover { text-decoration: underline; }
     </div>
   </section>
 
-  <section class="section-card">
+  <section class="section-card" id="unity-section">
     <label class="input-label" for="unityLibsZip">Unity libraries zip</label>
     <div class="input-group">
       <input type="text" id="unityLibsZip" placeholder="optional" readonly />
@@ -655,8 +658,16 @@ function render() {
   $("source-hint").innerHTML = state.downloads
     ? "The Unity.IL2CPP win-x64 archive — the zip as downloaded, or a folder already unpacked " +
       "from it. Needed only until Prepare."
+    // The build without links names the archive in full instead: which edition matters more than
+    // anything else about it, since the Mono and .NET Framework ones cannot run the mod.
+    : state.noLink
+    ? "The zip as downloaded, or a folder already unpacked from it: " + copyable(state.bepInExDescription) +
+      ". Not the Unity.Mono or NET.Framework edition." + copyLink(state.bepInExDescription)
     : 'The Unity.IL2CPP win-x64 archive — the zip as downloaded, or a folder already unpacked ' +
       'from it. <a data-url="' + state.bepInExUrl + '">Download it here</a>.';
+
+  // The Unity libraries option exists to point at a download, so the build without links has none.
+  $("unity-section").style.display = state.noLink ? "none" : "";
 
   $("unity-hint").innerHTML = state.unityLibsUrl
     ? (state.downloads
@@ -789,7 +800,8 @@ function renderSteps() {
   // whatever the row otherwise says - an online build that will fetch it, an offline one waiting
   // for a zip, and the case where one was already chosen but is being replaced. Expert mode has
   // carried this URL under the source field all along; nobody should have to open it for a link.
-  const getArchive = ' <a data-url="' + esc(state.bepInExUrl) + '">Download it here</a>.';
+  // The build without links says what to download in words instead.
+  const getArchive = state.noLink ? "" : ' <a data-url="' + esc(state.bepInExUrl) + '">Download it here</a>.';
   const haveSource = !!state.source || state.prepared;
   step("bepinex", state.prepared ? "done" : haveSource || state.downloads ? "info" : "todo",
        state.prepared ? "Installed"
@@ -800,6 +812,8 @@ function renderSteps() {
                ? "Launch installs " + esc(state.sourcePath) + "."
                : "Not installed - Launch installs the archive you chose.")
             : state.downloads ? "Not installed - Launch downloads it."
+            : state.noLink ? "Not installed. Download " + copyable(state.bepInExDescription) + ", then choose the zip." +
+                             copyLink(state.bepInExDescription)
             : "Not installed - choose the zip.") + getArchive,
        { archive: !state.prepared && !state.downloads });
 
@@ -824,6 +838,16 @@ function renderSteps() {
 // knows nothing about the step running right now.
 function keepWorking() {
   if (workingTarget) setWorking(workingTarget, workingText);
+}
+
+/** Text that can be selected, in a page that otherwise cannot. */
+function copyable(text) {
+  return '<span class="copyable">' + esc(text) + "</span>";
+}
+
+/** A link that puts the text on the clipboard - through the launcher, which owns a real window. */
+function copyLink(text) {
+  return ' <a data-copy="' + esc(text) + '">Copy</a>';
 }
 
 function esc(text) {
@@ -889,6 +913,18 @@ function run(cmd, args) {
 }
 
 document.addEventListener("click", async e => {
+  const copy = e.target.getAttribute && e.target.getAttribute("data-copy");
+  if (copy) {
+    const link = e.target;
+    call("copyText", { text: copy })
+      .then(ok => {
+        link.textContent = ok ? "Copied" : "Could not copy";
+        setTimeout(() => { link.textContent = "Copy"; }, 2000);
+      })
+      .catch(() => {});
+    return;
+  }
+
   const url = e.target.getAttribute && e.target.getAttribute("data-url");
   if (url) { call("openUrl", { url }); return; }
 

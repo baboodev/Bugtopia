@@ -17,5 +17,8 @@ namespace Bugtopia.Launcher
 
         /// <summary>Closes the launcher, once the game is running and injected.</summary>
         void Close();
+
+        /// <summary>Puts text on the clipboard, owned by the launcher's window. False when it could not.</summary>
+        bool CopyText(string text);
     }
 }

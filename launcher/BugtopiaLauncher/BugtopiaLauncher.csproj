@@ -64,6 +64,12 @@
     <DefineConstants>$(DefineConstants);BUGTOPIA_ONLINE</DefineConstants>
   </PropertyGroup>
 
+  <!-- offline-nolink: no web addresses at all - the BepInEx archive is described instead of linked,
+       and the Unity libraries option, which exists only to point at a download, is not shown. -->
+  <PropertyGroup Condition="'$(BugtopiaFlavour)' == 'offline-nolink'">
+    <DefineConstants>$(DefineConstants);BUGTOPIA_NOLINK</DefineConstants>
+  </PropertyGroup>
+
   <!-- Which window the launcher opens: the WebView2 page through Photino (default), or the native
        Win32 one - dotnet publish ... -p:BugtopiaUi=win32. The Win32 build carries no browser engine
        and no Photino, whose native shell imports urlmon's URLDownloadToFileW to fetch the WebView2

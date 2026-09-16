@@ -25,7 +25,16 @@ namespace Bugtopia.Launcher.Win32
     internal sealed unsafe partial class Win32Host : Surface, IDialogs
     {
         private const uint WM_INBOX = WM_APP + 1, WM_RESIZE_REQUEST = WM_APP + 2, WM_REVEAL = WM_APP + 3;
-        private const nuint TimerReveal = 1, TimerCountdown = 2, TimerSweep = 3;
+        private const nuint TimerReveal = 1, TimerCountdown = 2, TimerSweep = 3, TimerCopied = 4;
+
+        /// <summary>Links that copy rather than open carry their text behind this prefix.</summary>
+        private const string CopyPrefix = "copy:";
+
+        /// <summary>When a Copy link last worked: it reads "Copied" for two seconds after.</summary>
+        private long copiedAt = long.MinValue / 2;
+
+        private TextRun CopyRun(string text) =>
+            new TextRun(Environment.TickCount64 - copiedAt < 2000 ? "Copied" : "Copy", CopyPrefix + text);
         private const int IdDetect = 101, IdBrowse = 102, IdArchive = 103, IdCancel = 104, IdPlay = 105, IdAuto = 106,
                           IdExpert = 107;
 
@@ -499,17 +508,23 @@ namespace Bugtopia.Launcher.Win32
             }
             else
             {
+                bool noLink = B("noLink");
                 string lead = haveSource
                     ? (S("sourcePath").Length > 0 ? "Launch installs " + S("sourcePath") + "."
                                                   : "Not installed - Launch installs the archive you chose.")
                     : downloads ? "Not installed - Launch downloads it."
+                    // The build without links says what to download in words instead.
+                    : noLink ? "Not installed. Download " + S("bepInExDescription") + ", then choose the zip."
                     : "Not installed - choose the zip.";
-                step(cardBepInEx, haveSource || downloads ? "info" : "todo", new List<TextRun>
-                {
-                    new TextRun(lead + " "),
-                    new TextRun("Download it here", S("bepInExUrl")),
-                    new TextRun("."),
-                });
+                step(cardBepInEx, haveSource || downloads ? "info" : "todo", noLink
+                    ? (haveSource ? Plain(lead)
+                                  : new List<TextRun> { new TextRun(lead + " "), CopyRun(S("bepInExDescription")) })
+                    : new List<TextRun>
+                      {
+                          new TextRun(lead + " "),
+                          new TextRun("Download it here", S("bepInExUrl")),
+                          new TextRun("."),
+                      });
             }
             cardBepInEx.Shown[0] = !prepared && !downloads;
 
@@ -668,6 +683,22 @@ namespace Bugtopia.Launcher.Win32
                 string chosen = data.ValueKind == JsonValueKind.String ? data.GetString() : null;
                 if (!string.IsNullOrEmpty(chosen))
                     save(key, chosen);
+            });
+        }
+
+        /// <summary>A Copy link: the text goes on the clipboard, and the link says so for two seconds.</summary>
+        private void copyText(string text)
+        {
+            Call("copyText", w => w.WriteString("text", text), ok =>
+            {
+                if (ok.ValueKind != JsonValueKind.True)
+                {
+                    say("Could not copy to the clipboard.", true);
+                    return;
+                }
+                copiedAt = Environment.TickCount64;
+                SetTimer(Hwnd, TimerCopied, 2000, 0);
+                render();
             });
         }
 
@@ -1212,7 +1243,12 @@ namespace Bugtopia.Launcher.Win32
                 {
                     string url = LinkAt(LoWord(l), HiWord(l));
                     if (url != null && url == pressedLink)
-                        Call("openUrl", jw => jw.WriteString("url", url));
+                    {
+                        if (url.StartsWith(CopyPrefix, StringComparison.Ordinal))
+                            copyText(url.Substring(CopyPrefix.Length));
+                        else
+                            Call("openUrl", jw => jw.WriteString("url", url));
+                    }
                     pressedLink = null;
                     return 0;
                 }
@@ -1269,6 +1305,10 @@ namespace Bugtopia.Launcher.Win32
                         case TimerSweep:
                             Invalidate();
                             break;
+                        case TimerCopied:
+                            KillTimer(Hwnd, TimerCopied);
+                            render();   // "Copied" back to "Copy"
+                            break;
                     }
                     return 0;
 
@@ -1300,5 +1340,7 @@ namespace Bugtopia.Launcher.Win32
         public void Reveal() => PostMessageW(Hwnd, WM_REVEAL, 0, 0);
 
         public void Close() => PostMessageW(Hwnd, WM_CLOSE, 0, 0);
+
+        public bool CopyText(string text) => Clipboard.SetText(Hwnd, text);
     }
 }

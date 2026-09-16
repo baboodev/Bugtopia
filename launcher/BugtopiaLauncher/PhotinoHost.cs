@@ -181,6 +181,12 @@ namespace Bugtopia.Launcher
             }
         }
 
+        public bool CopyText(string text)
+        {
+            PhotinoWindow w = window;
+            return w != null && Clipboard.SetText(w.WindowHandle, text);
+        }
+
         public string PickFile(string title, string filterName, string[] extensions)
         {
             string[] chosen = window.ShowOpenFile(

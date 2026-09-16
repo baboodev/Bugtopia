@@ -30,4 +30,10 @@
     <DefineConstants>$(DefineConstants);BUGTOPIA_ONLINE</DefineConstants>
   </PropertyGroup>
 
+  <!-- The launcher without links (offline-nolink): the flavour name publish-launcher.ps1 already
+       passes, so it cannot be built one way and named the other. Leaves every web address out. -->
+  <PropertyGroup Condition="'$(BugtopiaFlavour)' == 'offline-nolink'">
+    <DefineConstants>$(DefineConstants);BUGTOPIA_NOLINK</DefineConstants>
+  </PropertyGroup>
+
 </Project>

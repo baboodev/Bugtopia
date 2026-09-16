@@ -173,6 +173,15 @@ namespace Bugtopia.Launcher.Win32
             const string sourceLead = "The Unity.IL2CPP win-x64 archive — the zip as downloaded, or a folder already unpacked from it. ";
             sourceHint = downloads
                 ? Plain(sourceLead + "Needed only until Prepare.")
+                // The build without links names the archive in full: the edition matters most, since the
+                // Mono and .NET Framework ones cannot run the mod.
+                : B("noLink")
+                ? new List<TextRun>
+                  {
+                      new TextRun("The zip as downloaded, or a folder already unpacked from it: " + S("bepInExDescription") +
+                                  ". Not the Unity.Mono or NET.Framework edition. "),
+                      CopyRun(S("bepInExDescription")),
+                  }
                 : new List<TextRun> { new TextRun(sourceLead), new TextRun("Download it here", S("bepInExUrl")), new TextRun(".") };
 
             unityHint = S("unityLibsUrl").Length > 0
@@ -526,10 +535,15 @@ namespace Bugtopia.Launcher.Win32
             y = Row(y, padX, width, fieldStorage, null, storageBrowse, storageDefault);
             y += gap;
 
-            y = Label("Unity libraries zip", padX, y);
-            y = Row(y, padX, width, fieldUnity, null, unityBrowse, downloads ? dlUnity : null);
-            y = Hint(unityHint, padX, y, width);
-            y += gap;
+            // The option exists to point at a download, so the build without links leaves it out; its
+            // field and buttons, not placed here, are hidden with everything else this pass skips.
+            if (!B("noLink"))
+            {
+                y = Label("Unity libraries zip", padX, y);
+                y = Row(y, padX, width, fieldUnity, null, unityBrowse, downloads ? dlUnity : null);
+                y = Hint(unityHint, padX, y, width);
+                y += gap;
+            }
 
             // Save profile and server, side by side.
             float colW = (width - S(12)) / 2, rightX = padX + colW + S(12);

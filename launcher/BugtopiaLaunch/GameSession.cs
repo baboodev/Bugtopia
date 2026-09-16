@@ -169,14 +169,6 @@ namespace Bugtopia.Launch
             return trimmed;
         }
 
-        /// <summary>BepInEx's own default source for the Unity base libraries, resolved for this game.</summary>
-        public static string UnityLibrariesUrl(string unityVersion)
-        {
-            return string.IsNullOrEmpty(unityVersion)
-                ? null
-                : "https://unity.bepinex.dev/libraries/" + unityVersion + ".zip";
-        }
-
         /// <summary>
         /// Starts the game with <c>BUGTOPIA_STORAGE</c> in its environment.
         ///

@@ -38,6 +38,23 @@ namespace Bugtopia.Launch
         /// </summary>
         public const string BepInExVersion = "6.0.0-be.785";
 
+        /// <summary>The archive's own file name, as it downloads.</summary>
+        public const string BepInExArchive = "BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785+6abdba4.zip";
+
+        /// <summary>
+        /// Which BepInEx to fetch, said in full for a build that carries no link to it: the channel and
+        /// build number, the edition, the platform, and the file. The edition is the part that matters -
+        /// the Unity.Mono and NET.Framework archives sit beside this one and cannot run the mod.
+        /// </summary>
+        public const string BepInExDescription =
+            "BepInEx 6 Bleeding Edge, build 785 (6.0.0-be.785), the Unity IL2CPP edition for 64-bit Windows: " +
+            BepInExArchive;
+
+#if BUGTOPIA_NOLINK && BUGTOPIA_ONLINE
+#error The launcher without links is an offline build; it cannot also be the one that downloads.
+#endif
+
+#if !BUGTOPIA_NOLINK
         public const string BepInExUrl =
             "https://builds.bepinex.dev/projects/bepinex_be/785/" +
             "BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785%2B6abdba4.zip";
@@ -45,6 +62,7 @@ namespace Bugtopia.Launch
         /// <summary>BepInEx's own default source for the base libraries, resolved for a Unity version.</summary>
         public static string UnityLibrariesUrl(string unityVersion) =>
             string.IsNullOrEmpty(unityVersion) ? null : "https://unity.bepinex.dev/libraries/" + unityVersion + ".zip";
+#endif
 
         // Everything below reaches the network, so it is compiled into an online build only. An
         // offline one keeps the constants above, which the page uses for its links, and nothing else.

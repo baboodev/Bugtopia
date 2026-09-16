@@ -167,6 +167,11 @@ namespace Bugtopia.Launcher
                     Reply(id, w => WriteValue(w, null));
                     break;
 
+                case "copyText":
+                    bool copied = dialogs.CopyText(Str(args, "text"));
+                    Reply(id, w => w.WriteBooleanValue(copied));
+                    break;
+
                 // The page has drawn. Until this arrives the window is parked off-screen, so that
                 // nobody watches WebView2 start up in an empty black rectangle.
                 case "reveal":
@@ -783,7 +788,12 @@ namespace Bugtopia.Launcher
 #else
             throw new InvalidOperationException(
                 "This build does not download anything. Fetch the BepInEx archive yourself and " +
-                "point the launcher at it:\n" + Downloads.BepInExUrl);
+                "point the launcher at it:\n" +
+#if BUGTOPIA_NOLINK
+                Downloads.BepInExDescription);
+#else
+                Downloads.BepInExUrl);
+#endif
 #endif
         }
 
@@ -1161,13 +1171,25 @@ namespace Bugtopia.Launcher
             w.WriteBoolean("expert", settings.Expert);
             w.WriteBoolean("autoLaunch", settings.AutoLaunch);
             w.WriteString("bepInExVersion", Downloads.BepInExVersion);
-            w.WriteString("bepInExUrl", Downloads.BepInExUrl);
+            w.WriteString("bepInExDescription", Downloads.BepInExDescription);
             w.WriteString("preparedFrom", settings.PreparedFrom ?? "");
 
             string game = settings.GameFolder;
             string unity = string.IsNullOrWhiteSpace(game) ? null : GameSession.ReadUnityVersion(game);
             w.WriteString("unityVersion", unity ?? "");
+
+            // The build without links carries no address at all: the page describes the archive
+            // instead of linking it, and leaves out the Unity libraries option, which is only a link.
+            // Written empty rather than omitted, so the page gets the same shape from every build.
+#if BUGTOPIA_NOLINK
+            w.WriteBoolean("noLink", true);
+            w.WriteString("bepInExUrl", "");
+            w.WriteString("unityLibsUrl", "");
+#else
+            w.WriteBoolean("noLink", false);
+            w.WriteString("bepInExUrl", Downloads.BepInExUrl);
             w.WriteString("unityLibsUrl", Downloads.UnityLibrariesUrl(unity) ?? "");
+#endif
             w.WriteBoolean("gameOk", !string.IsNullOrWhiteSpace(game) && Directory.Exists(game) && unity != null);
 
             bool prepared = false, hasInterop = false;
