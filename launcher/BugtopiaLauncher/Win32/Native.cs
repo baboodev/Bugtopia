@@ -40,7 +40,16 @@ namespace Bugtopia.Launcher.Win32
 
         internal const int SW_HIDE = 0, SW_SHOW = 5;
         internal const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010,
-                            SWP_SHOWWINDOW = 0x0040, SWP_HIDEWINDOW = 0x0080;
+                            SWP_SHOWWINDOW = 0x0040, SWP_HIDEWINDOW = 0x0080, SWP_NOCOPYBITS = 0x0100;
+        internal const uint WS_CLIPSIBLINGS = 0x04000000;
+
+        /// <summary>
+        /// How every child control is moved. Without NOCOPYBITS, Windows carries a moved window's old pixels
+        /// to its new place instead of repainting it - and while a scroll moves the controls one by one, those
+        /// pixels can already hold a neighbour moved a moment earlier. The text boxes then kept pieces of the
+        /// buttons: a real screen capture of a paced scroll reproduced it, and this removed it.
+        /// </summary>
+        internal const uint SWP_MOVECHILD = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS;
 
         internal const int SB_VERT = 1;
         internal const uint SIF_RANGE = 0x1, SIF_PAGE = 0x2, SIF_POS = 0x4, SIF_TRACKPOS = 0x10, SIF_ALL = 0x17;
@@ -195,6 +204,25 @@ namespace Bugtopia.Launcher.Win32
         [DllImport("user32.dll", ExactSpelling = true)] internal static extern int ShowScrollBar(nint hwnd, int bar, int show);
         [DllImport("user32.dll", ExactSpelling = true)] internal static extern int IsChild(nint parent, nint hwnd);
 
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern nint CreatePopupMenu();
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern int AppendMenuW(nint menu, uint flags, nuint id, char* text);
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern int TrackPopupMenuEx(nint menu, uint flags, int x, int y, nint hwnd, nint parameters);
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern int DestroyMenu(nint menu);
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern int ClientToScreen(nint hwnd, POINT* pt);
+
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern nint GetForegroundWindow();
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern int IsWindow(nint hwnd);
+
+        internal const uint WS_EX_TOPMOST = 0x00000008, WS_EX_TOOLWINDOW = 0x00000080, WS_EX_NOACTIVATE = 0x08000000;
+        internal const int SW_SHOWNOACTIVATE = 4;
+        internal const uint WM_ACTIVATE = 0x0006, WM_MOUSEACTIVATE = 0x0021, WM_NCLBUTTONDOWN = 0x00A1, WM_NCRBUTTONDOWN = 0x00A4,
+                            WM_LBUTTONDBLCLK = 0x0203, WM_RBUTTONDOWN = 0x0204, WM_MBUTTONDOWN = 0x0207;
+        internal const int VK_TAB = 0x09, VK_RETURN = 0x0D, VK_ESCAPE = 0x1B, VK_SPACE = 0x20, VK_PRIOR = 0x21, VK_NEXT = 0x22,
+                           VK_END = 0x23, VK_HOME = 0x24, VK_UP = 0x26, VK_DOWN = 0x28;
+        internal const uint MF_STRING = 0x0000, MF_GRAYED = 0x0001, MF_CHECKED = 0x0008;
+        internal const uint TPM_RETURNCMD = 0x0100, TPM_NONOTIFY = 0x0080;
+        internal const uint EM_LINESCROLL = 0x00B6, EM_REPLACESEL = 0x00C2, EM_SETLIMITTEXT = 0x00C5, EM_GETFIRSTVISIBLELINE = 0x00CE;
+        internal const int EN_SETFOCUS = 0x0100, EN_KILLFOCUS = 0x0200;
         internal const uint EM_GETLINECOUNT = 0x00BA;
         internal const uint SPI_GETWHEELSCROLLLINES = 0x0068;
         internal const uint ICON_SMALL = 0, ICON_BIG = 1;
@@ -284,6 +312,10 @@ namespace Bugtopia.Launcher.Win32
                 nint setPreferredAppMode = GetProcAddress(uxtheme, 135);
                 if (setPreferredAppMode != 0)
                     ((delegate* unmanaged<int, int>)setPreferredAppMode)(2);   // ForceDark
+                // Popup menus - the dropdowns' lists - pick the mode up only once their theme is flushed.
+                nint flushMenuThemes = GetProcAddress(uxtheme, 136);
+                if (flushMenuThemes != 0)
+                    ((delegate* unmanaged<void>)flushMenuThemes)();
             }
         }
 

@@ -20,6 +20,15 @@ namespace Bugtopia.Launcher.Win32
 
         /// <summary>.checkbox-label: an accent-coloured box and its label.</summary>
         Checkbox,
+
+        /// <summary>.btn.secondary without .compact: Detect, Browse..., Default in the expert view.</summary>
+        SecondaryLarge,
+
+        /// <summary>.btn.primary without .compact: the expert view's Launch.</summary>
+        PrimaryMedium,
+
+        /// <summary>.select-dropdown: the current choice and a chevron; the list opens as a menu.</summary>
+        Select,
     }
 
     /// <summary>
@@ -39,6 +48,9 @@ namespace Bugtopia.Launcher.Win32
 
         /// <summary>Where it sits in the owner's client area, in pixels, scroll included.</summary>
         internal RECT Bounds;
+
+        /// <summary>Shown by the layout pass in progress; whatever is not is hidden when it ends.</summary>
+        internal bool Placed;
     }
 
     /// <summary>
@@ -147,6 +159,9 @@ namespace Bugtopia.Launcher.Win32
 
         protected abstract void Report(Exception ex);
 
+        /// <summary>For a popup that belongs to this window: its errors go where this window's go.</summary>
+        internal void ReportError(Exception ex) => Report(ex);
+
         protected virtual nint Handle(uint msg, nint w, nint l)
         {
             switch (msg)
@@ -243,7 +258,7 @@ namespace Bugtopia.Launcher.Win32
             var button = new Button { Id = id, Kind = kind, Text = text, Icon = icon, Owner = this };
             fixed (char* cls = "BUTTON")
             fixed (char* t = text)
-                button.Hwnd = CreateWindowExW(0, cls, t, WS_CHILD | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 0, 0,
+                button.Hwnd = CreateWindowExW(0, cls, t, WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 0, 0,
                                               Hwnd, id, GetModuleHandleW(null), 0);
             SetWindowSubclass(button.Hwnd, &ButtonProc, 1, 0);
             AllButtons[button.Hwnd] = button;
@@ -269,6 +284,7 @@ namespace Bugtopia.Launcher.Win32
                 right = (int)MathF.Round(x + w),
                 bottom = (int)MathF.Round(y + h),
             };
+            b.Placed = visible;
             bool wasVisible = IsWindowVisible(b.Hwnd) != 0;
             bool moved = bounds.left != b.Bounds.left || bounds.top != b.Bounds.top ||
                          bounds.right != b.Bounds.right || bounds.bottom != b.Bounds.bottom;
@@ -276,7 +292,7 @@ namespace Bugtopia.Launcher.Win32
             if (moved || wasVisible != visible)
             {
                 SetWindowPos(b.Hwnd, 0, bounds.left, bounds.top, bounds.Width, bounds.Height,
-                             SWP_NOZORDER | SWP_NOACTIVATE | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+                             SWP_MOVECHILD | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
             }
         }
 
@@ -407,13 +423,33 @@ namespace Bugtopia.Launcher.Win32
                     return (S(20) * 2 + Fonts.Measure(Fonts.Button, b.Text), S(11) * 2 + Fonts.Button.LineHeight);
                 case ButtonKind.Primary:
                     return (S(14) * 2 + Fonts.Measure(Fonts.Button, b.Text), S(10) * 2 + Fonts.Button.LineHeight);
+                case ButtonKind.PrimaryMedium:
+                    return (S(20) * 2 + IconRun(b) + Fonts.Measure(Fonts.Button, b.Text), S(11) * 2 + Fonts.Button.LineHeight);
+                case ButtonKind.Select:
+                {
+                    // Width is the layout's to decide (flex: 1); the height is the select's own.
+                    float border = MathF.Max(1, MathF.Round(S(1)));
+                    return (S(14) + S(38) + border * 2 + Fonts.Measure(Fonts.Input, b.Text), S(10) * 2 + border * 2 + Fonts.Input.LineHeight);
+                }
+                case ButtonKind.SecondaryLarge:
+                {
+                    float border = MathF.Max(1, MathF.Round(S(1)));
+                    return (S(20) * 2 + border * 2 + IconRun(b) + Fonts.Measure(Fonts.Button, b.Text),
+                            S(11) * 2 + border * 2 + Fonts.Button.LineHeight);
+                }
                 default:
+                {
                     // .btn.secondary carries a 1px border on top of its padding.
                     float border = MathF.Max(1, MathF.Round(S(1)));
-                    return (S(14) * 2 + border * 2 + Fonts.Measure(Fonts.Button, b.Text),
+                    return (S(14) * 2 + border * 2 + IconRun(b) + Fonts.Measure(Fonts.Button, b.Text),
                             S(10) * 2 + border * 2 + Fonts.Button.LineHeight);
+                }
             }
         }
+
+        /// <summary>The icon and the 8px gap after it - or just the icon, for a button that is only an icon.</summary>
+        private float IconRun(Button b) =>
+            b.Icon == null ? 0 : S(17) + (string.IsNullOrEmpty(b.Text) ? 0 : S(8));
 
         private void PaintButton(nint dc, Button b, int w, int h, bool pressed, bool focus)
         {
@@ -441,11 +477,41 @@ namespace Bugtopia.Launcher.Win32
                         Gdip.StrokeRoundRect(g, Gdip.Argb(0xa5b4fc), -S(2), top - S(2), box + S(4), box + S(4), S(4), MathF.Max(2, S(2)));
                     Gdip.End(g);
 
-                    DrawLabel(dc, Fonts.Check, b.Text, S(16) + S(8), 0, w - S(24), h, TextMain, false);
+                    // A label with too little room wraps rather than running under its neighbour.
+                    float labelW = w - S(24);
+                    if (Fonts.Measure(Fonts.Check, b.Text) <= labelW + 0.5f)
+                    {
+                        DrawLabel(dc, Fonts.Check, b.Text, S(24), 0, labelW, h, TextMain, false);
+                    }
+                    else
+                    {
+                        TextBlock block = TextBlock.Layout(new List<TextRun> { new TextRun(b.Text) }, Fonts.Check, Fonts.Check,
+                                                           labelW, Fonts.Check.LineHeight);
+                        SetBkMode(dc, TRANSPARENT);
+                        block.Draw(dc, S(24), (h - block.Height) / 2, ColorRef(TextMain), ColorRef(TextMain));
+                    }
+                    return;
+                }
+
+                case ButtonKind.Select:
+                {
+                    float border = MathF.Max(1, MathF.Round(S(1)));
+                    Gdip.FillRoundRect(g, Gdip.Argb(Bg, 0.8f), 0, 0, w, h, radius);
+                    Gdip.StrokeRoundRect(g, b.Hover ? Gdip.Argb(0x475569, 0.7f) : Gdip.Argb(CardBorder, 0.08f),
+                                         0, 0, w, h, radius, border);
+                    if (focus)
+                        Gdip.StrokeRoundRect(g, Gdip.Argb(0xa5b4fc), 0, 0, w, h, radius, MathF.Max(2, S(2)));
+                    // The page's chevron: 14px, 13px in from the right, stroked in the muted colour.
+                    Gdip.StrokeIcon(g, Chevron, w - S(13) - S(14), (h - S(14)) / 2, S(14), Gdip.Argb(TextMuted), 2.5f);
+                    Gdip.End(g);
+
+                    float textX = border + S(14);
+                    DrawLabel(dc, Fonts.Input, EllipsisFit(Fonts.Input, b.Text, w - textX - S(38)), textX, 0, w, h, TextMain, false);
                     return;
                 }
 
                 case ButtonKind.Secondary:
+                case ButtonKind.SecondaryLarge:
                 {
                     uint fill = b.Hover ? Gdip.Argb(0x475569, 0.7f) : Gdip.Argb(0x334155, 0.5f);
                     Gdip.FillRoundRect(g, fill, 0, 0, w, h, radius);
@@ -472,7 +538,8 @@ namespace Bugtopia.Launcher.Win32
                 Gdip.StrokeRoundRect(g, Gdip.Argb(0xa5b4fc), 0, 0, w, h, radius, MathF.Max(2, S(2)));
 
             float textWidth = Fonts.Measure(font, b.Text);
-            float iconSize = b.Icon != null ? S(17) : 0, iconGap = b.Icon != null ? S(8) : 0;
+            float iconSize = b.Icon != null ? S(17) : 0;
+            float iconGap = b.Icon != null && !string.IsNullOrEmpty(b.Text) ? S(8) : 0;
             float left = (w - (iconSize + iconGap + textWidth)) / 2;
             if (b.Icon != null)
                 Gdip.StrokeIcon(g, b.Icon, left, (h - iconSize) / 2, iconSize, Gdip.Argb(textColor), 2f);
@@ -482,6 +549,17 @@ namespace Bugtopia.Launcher.Win32
         }
 
         internal static readonly string[] CheckMark = { "M20 6L9 17L4 12" };
+        internal static readonly string[] Chevron = { "M6 9L12 15L18 9" };
+
+        /// <summary>The text, cut with an ellipsis when it would not fit - a select shows one line, never two.</summary>
+        protected static string EllipsisFit(Font font, string text, float width)
+        {
+            if (string.IsNullOrEmpty(text) || Fonts.Measure(font, text) <= width)
+                return text;
+            const string dots = "…";
+            int fit = Fonts.Fit(font, text, width - Fonts.Measure(font, dots));
+            return fit <= 0 ? dots : text.Substring(0, fit) + dots;
+        }
 
         /// <summary>One line of GDI text, vertically centred in a box.</summary>
         protected static void DrawLabel(nint dc, Font font, string text, float x, float y, float w, float h, uint rgb, bool centre)

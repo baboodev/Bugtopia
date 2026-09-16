@@ -10,22 +10,24 @@ using static Bugtopia.Launcher.Win32.Native;
 namespace Bugtopia.Launcher.Win32
 {
     /// <summary>
-    /// The launcher's simple screen as a native window - what ui.html's simple view draws, without a
-    /// browser engine under it.
+    /// The launcher as a native window - what ui.html draws, without a browser engine under it.
     ///
     /// It talks to <see cref="Api"/> exactly as the page does: JSON commands in through
     /// <see cref="Api.Dispatch"/>, JSON replies and events out through the send callback. So the Api is
-    /// the same code in both builds, and this file is a port of the page's script rather than a second
+    /// the same code in both builds, and this is a port of the page's script rather than a second
     /// implementation of the launcher. Where it mirrors a function of the page, it keeps its name.
+    ///
+    /// This file holds the bridge, the window and the simple screen; Win32Host.Expert.cs the expert view.
     ///
     /// Everything here runs on the window thread. The Api answers from worker threads during jobs, so
     /// what it sends is queued and posted, and picked up by the message loop.
     /// </summary>
-    internal sealed unsafe class Win32Host : Surface, IDialogs
+    internal sealed unsafe partial class Win32Host : Surface, IDialogs
     {
         private const uint WM_INBOX = WM_APP + 1, WM_RESIZE_REQUEST = WM_APP + 2, WM_REVEAL = WM_APP + 3;
         private const nuint TimerReveal = 1, TimerCountdown = 2, TimerSweep = 3;
-        private const int IdDetect = 101, IdBrowse = 102, IdArchive = 103, IdCancel = 104, IdPlay = 105, IdAuto = 106;
+        private const int IdDetect = 101, IdBrowse = 102, IdArchive = 103, IdCancel = 104, IdPlay = 105, IdAuto = 106,
+                          IdExpert = 107;
 
         /// <summary>The page's rocket, path for path.</summary>
         private static readonly string[] Rocket =
@@ -56,6 +58,7 @@ namespace Bugtopia.Launcher.Win32
             internal string Mark = "info";
             internal List<TextRun> Detail = new List<TextRun>();
             internal Button[] Actions = Array.Empty<Button>();
+            internal bool[] Shown = Array.Empty<bool>();
             internal bool HasActions;
             internal int Progress;
             internal bool Working;
@@ -76,9 +79,12 @@ namespace Bugtopia.Launcher.Win32
         private JsonElement state;
         private bool haveState, busy;
 
+        /// <summary>body.expert: which of the two views is on screen, from the state once it arrives.</summary>
+        private bool expert;
+
         private string workingTarget = "", workingText = "";
         private string progressTarget = "";
-        private int progressValue;
+        private int progressValue, bannerProgress;
 
         private string bannerText = "";
         private bool bannerWarning;
@@ -89,7 +95,7 @@ namespace Bugtopia.Launcher.Win32
 
         private Card cardGame, cardClean, cardBepInEx, cardMod, cardInterop;
         private Card[] cards;
-        private Button detect, browse, archive, cancel, play, auto;
+        private Button expertBox, detect, browse, archive, cancel, play, auto;
 
         private nint logo;
         private float logoWidth, logoHeight;
@@ -99,7 +105,7 @@ namespace Bugtopia.Launcher.Win32
         private float logoX, logoY, logoW, logoH, titleX, titleY, versionX, versionY;
         private TextBlock versionBlock, bannerBlock;
         private float bannerX, bannerY, bannerW, bannerH;
-        private float hintY, hintX, hintW, kbdX, kbdW, kbdH;
+        private float hintY, hintX, kbdX, kbdW, kbdH;
         private string pressedLink;
 
         internal static int Run() => new Win32Host().Start();
@@ -110,30 +116,18 @@ namespace Bugtopia.Launcher.Win32
             PreferDarkMode();
             logo = Gdip.LoadImage(ReadResource("logo.png"), out logoWidth, out logoHeight);
 
-            Create("BugtopiaLauncher", "Bugtopia", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_VSCROLL, 0,
-                   CW_USEDEFAULT, CW_USEDEFAULT, Api.WindowWidth, Api.WindowHeight(false), 0, false);
+            api = new Api(Send, this);
+            expert = api.Expert;
+
+            Create("BugtopiaLauncher", "Bugtopia", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_VSCROLL, WS_EX_CONTROLPARENT,
+                   CW_USEDEFAULT, CW_USEDEFAULT, Api.WindowWidth, Api.WindowHeight(expert), 0, false);
             DarkTitleBar(Hwnd);
             DarkControl(Hwnd);   // the scrollbar
             SetScale(GetDpiForWindow(Hwnd));
             SetIcons();
+            CreateControls();
+            SizeAndCentre(Api.WindowWidth, Api.WindowHeight(expert));
 
-            detect = AddButton(IdDetect, ButtonKind.Secondary, "Detect");
-            browse = AddButton(IdBrowse, ButtonKind.Secondary, "Browse...");
-            archive = AddButton(IdArchive, ButtonKind.Secondary, "Choose the zip...");
-            cancel = AddButton(IdCancel, ButtonKind.Danger, "Cancel");
-            play = AddButton(IdPlay, ButtonKind.PrimaryLarge, "Launch Heartopia", Rocket);
-            auto = AddButton(IdAuto, ButtonKind.Checkbox, "Launch automatically");
-
-            cardGame = new Card { Key = "game", Title = "Heartopia", Actions = new[] { detect, browse }, HasActions = true };
-            cardClean = new Card { Key = "clean", Title = "Game folder" };
-            cardBepInEx = new Card { Key = "bepinex", Title = "BepInEx", Actions = new[] { archive }, HasActions = true };
-            cardMod = new Card { Key = "mod", Title = "Bugtopia", Hidden = true };
-            cardInterop = new Card { Key = "interop", Title = "Interop assemblies" };
-            cards = new[] { cardGame, cardClean, cardBepInEx, cardMod, cardInterop };
-
-            SizeAndCentre(Api.WindowWidth, Api.WindowHeight(false));
-
-            api = new Api(Send, this);
             Call("state", null, SetState, error => say(error, true));
 
             // A safety net, as in PhotinoHost: a window must appear even if the first state never does.
@@ -154,6 +148,31 @@ namespace Bugtopia.Launcher.Win32
                 DispatchMessageW(&msg);
             }
             return 0;
+        }
+
+        /// <summary>
+        /// Every control, created in the page's document order - which is the order Tab walks them in.
+        /// </summary>
+        private void CreateControls()
+        {
+            expertBox = AddButton(IdExpert, ButtonKind.Checkbox, "Expert mode");
+
+            detect = AddButton(IdDetect, ButtonKind.Secondary, "Detect");
+            browse = AddButton(IdBrowse, ButtonKind.Secondary, "Browse...");
+            archive = AddButton(IdArchive, ButtonKind.Secondary, "Choose the zip...");
+
+            cardGame = new Card { Key = "game", Title = "Heartopia", Actions = new[] { detect, browse }, Shown = new bool[2], HasActions = true };
+            cardClean = new Card { Key = "clean", Title = "Game folder" };
+            cardBepInEx = new Card { Key = "bepinex", Title = "BepInEx", Actions = new[] { archive }, Shown = new bool[1], HasActions = true };
+            cardMod = new Card { Key = "mod", Title = "Bugtopia", Hidden = true };
+            cardInterop = new Card { Key = "interop", Title = "Interop assemblies" };
+            cards = new[] { cardGame, cardClean, cardBepInEx, cardMod, cardInterop };
+
+            CreateExpertControls();
+
+            cancel = AddButton(IdCancel, ButtonKind.Danger, "Cancel");
+            play = AddButton(IdPlay, ButtonKind.PrimaryLarge, "Launch Heartopia", Rocket);
+            auto = AddButton(IdAuto, ButtonKind.Checkbox, "Launch automatically");
         }
 
         private static byte[] ReadResource(string name)
@@ -243,7 +262,11 @@ namespace Bugtopia.Launcher.Win32
                      if (data.ValueKind == JsonValueKind.Object && data.TryGetProperty("storage", out _))
                          SetState(data);
                  },
-                 error => say(error, true));
+                 error =>
+                 {
+                     appendLog("• " + error);
+                     say(error, true);
+                 });
         }
 
         private void Receive(string json)
@@ -255,6 +278,9 @@ namespace Bugtopia.Launcher.Win32
             {
                 switch (ev.GetString())
                 {
+                    case "log":
+                        appendLog(Str(root, "text"));
+                        break;
                     case "busy":
                         busy = root.GetProperty("value").GetBoolean();
                         if (!busy)
@@ -293,6 +319,8 @@ namespace Bugtopia.Launcher.Win32
                 callbacks.Fail?.Invoke(Str(root, "error") ?? "Failed.");
         }
 
+        private bool profilesLoaded;
+
         private void SetState(JsonElement data)
         {
             stateDoc?.Dispose();
@@ -300,6 +328,13 @@ namespace Bugtopia.Launcher.Win32
             state = stateDoc.RootElement;
             haveState = true;
             render();
+
+            // The page's refresh() loads the profiles once, after the first state.
+            if (!profilesLoaded)
+            {
+                profilesLoaded = true;
+                loadProfiles();
+            }
         }
 
         // ---- state accessors, with the page's truthiness ------------------------
@@ -331,12 +366,15 @@ namespace Bugtopia.Launcher.Win32
 
         // ---- the page's script, ported ------------------------------------------
 
+        /// <summary>Fills one step card, and clears every other; in expert mode, the banner instead.</summary>
         private void setProgress(string target, int percent)
         {
             if (!string.IsNullOrEmpty(target))
                 setWorking("", "");   // a number replaces the sweep
             progressTarget = target ?? "";
             progressValue = percent;
+            // Only in expert mode, which has no cards. Filling both at once showed the same bar twice.
+            bannerProgress = expert ? percent : 0;
         }
 
         private void setWorking(string target, string text)
@@ -369,14 +407,20 @@ namespace Bugtopia.Launcher.Win32
             if (!haveState)
                 return;
 
+            expert = B("expert");
+            expertBox.Checked = expert;
+            InvalidateRect(expertBox.Hwnd, null, 0);
             auto.Checked = !IsFalse("autoLaunch");
             InvalidateRect(auto.Hwnd, null, 0);
             renderSteps();
+            if (expert)
+                renderExpert();
 
             // Launch runs every missing step itself, so the button leads.
             bool ready = B("prepared") && B("hasInterop");
             if (!countdown)
                 SetButtonText(play, ready ? "Launch Heartopia" : "Set up and launch");
+            play.Kind = expert ? ButtonKind.PrimaryMedium : ButtonKind.PrimaryLarge;
 
             JsonElement existing = Existing;
             bool gameOk = B("gameOk");
@@ -404,8 +448,9 @@ namespace Bugtopia.Launcher.Win32
             Enable(archive, !busy);
 
             bool sweeping = false;
-            foreach (Card card in cards)
-                sweeping |= card.Working && !card.Hidden;
+            if (!expert)
+                foreach (Card card in cards)
+                    sweeping |= card.Working && !card.Hidden;
             if (sweeping)
                 SetTimer(Hwnd, TimerSweep, 33, 0);
             else
@@ -425,7 +470,7 @@ namespace Bugtopia.Launcher.Win32
 
             step(cardGame, gameOk ? "done" : "todo",
                  Plain(gameOk ? "Found" : S("game").Length > 0 ? "Not an IL2CPP build" : "Not found"));
-            detect.Checked = browse.Checked = !gameOk;   // "shown", reused: see Layout
+            cardGame.Shown[0] = cardGame.Shown[1] = !gameOk;
 
             if (!gameOk)
             {
@@ -466,7 +511,7 @@ namespace Bugtopia.Launcher.Win32
                     new TextRun("."),
                 });
             }
-            archive.Checked = !prepared && !downloads;
+            cardBepInEx.Shown[0] = !prepared && !downloads;
 
             // Only an online build has anything to say here: an offline one installs the copy it carries.
             cardMod.Hidden = !B("pluginFromGitHub");
@@ -514,9 +559,11 @@ namespace Bugtopia.Launcher.Win32
 
         private void armAutoLaunch()
         {
-            // Not before the window is up: a countdown started off-screen has spent part of its three
+            // Not in expert mode: someone with every field open is configuring, not waiting to play. And
+            // not before the window is up: a countdown started off-screen has spent part of its three
             // seconds before anyone can see or stop it.
-            if (autoArmed || countdown || busy || !windowShown || !haveState || IsFalse("autoLaunch") || !everythingGreen())
+            if (autoArmed || countdown || busy || !windowShown || !haveState || expert ||
+                IsFalse("autoLaunch") || !everythingGreen())
                 return;
 
             autoArmed = true;
@@ -585,64 +632,101 @@ namespace Bugtopia.Launcher.Win32
 
         // ---- commands ----------------------------------------------------------------
 
+        /// <summary>The page's #detect: shared by the simple card and the expert field.</summary>
+        private void detectGame()
+        {
+            Call("detectGame", null, data =>
+            {
+                string found = data.ValueKind == JsonValueKind.String ? data.GetString() : null;
+                if (!string.IsNullOrEmpty(found))
+                    save("game", found);
+                else
+                    say("No Heartopia install found. Point at it with Browse.", true);
+            }, e => say(e, true));
+        }
+
+        /// <summary>The page's save(): one path changed, the rest as they are.</summary>
+        private void save(string key, string value)
+        {
+            Call("setPaths", w => w.WriteString(key, value ?? ""), SetState, e =>
+            {
+                appendLog("• " + e);
+                say(e, true);
+            });
+        }
+
+        /// <summary>A data-pick button: a folder, or with data-file a zip, into one of the path fields.</summary>
+        private void pick(string key, bool file, string title)
+        {
+            Call(file ? "pickFile" : "pickFolder", w =>
+            {
+                w.WriteString("title", title);
+                if (!file)
+                    w.WriteString("current", S(key));
+            }, data =>
+            {
+                string chosen = data.ValueKind == JsonValueKind.String ? data.GetString() : null;
+                if (!string.IsNullOrEmpty(chosen))
+                    save(key, chosen);
+            });
+        }
+
+        // Both views take the zip the same way: it is unpacked into storage.
+        private void chooseArchive()
+        {
+            Call("pickFile", w => w.WriteString("title", "BepInEx-Unity.IL2CPP-win-x64 archive"), data =>
+            {
+                string chosen = data.ValueKind == JsonValueKind.String ? data.GetString() : null;
+                if (!string.IsNullOrEmpty(chosen))
+                    run("useArchive", w => w.WriteString("path", chosen));
+            });
+        }
+
         private void Clicked(int id)
         {
             switch (id)
             {
                 case IdDetect:
-                    Call("detectGame", null, data =>
-                    {
-                        string found = data.ValueKind == JsonValueKind.String ? data.GetString() : null;
-                        if (!string.IsNullOrEmpty(found))
-                            Call("setPaths", w => w.WriteString("game", found), SetState, e => say(e, true));
-                        else
-                            say("No Heartopia install found. Point at it with Browse.", true);
-                    }, e => say(e, true));
-                    break;
-
+                    detectGame();
+                    return;
                 case IdBrowse:
-                    Call("pickFolder", w =>
-                    {
-                        w.WriteString("title", "Select folder");
-                        w.WriteString("current", S("game"));
-                    }, data =>
-                    {
-                        string chosen = data.ValueKind == JsonValueKind.String ? data.GetString() : null;
-                        if (!string.IsNullOrEmpty(chosen))
-                            Call("setPaths", w => w.WriteString("game", chosen), SetState, e => say(e, true));
-                    });
-                    break;
-
-                // Both views take the zip the same way: it is unpacked into storage.
+                    pick("game", false, "Select folder");
+                    return;
                 case IdArchive:
-                    Call("pickFile", w => w.WriteString("title", "BepInEx-Unity.IL2CPP-win-x64 archive"), data =>
-                    {
-                        string chosen = data.ValueKind == JsonValueKind.String ? data.GetString() : null;
-                        if (!string.IsNullOrEmpty(chosen))
-                            run("useArchive", w => w.WriteString("path", chosen));
-                    });
-                    break;
-
+                    chooseArchive();
+                    return;
                 case IdCancel:
                     stopAutoLaunch();
-                    break;
-
+                    return;
                 case IdPlay:
                     stopAutoLaunch();
                     run("play");
-                    break;
+                    return;
+
+                case IdExpert:
+                {
+                    stopAutoLaunch();
+                    bool value = !expertBox.Checked;
+                    expertBox.Checked = value;
+                    InvalidateRect(expertBox.Hwnd, null, 0);
+                    run("setExpert", w => w.WriteBoolean("value", value));
+                    return;
+                }
 
                 // Touching it means someone is here, so no countdown for the rest of this run whichever
                 // way it was set. The choice is for next time.
                 case IdAuto:
+                {
                     auto.Checked = !auto.Checked;
                     InvalidateRect(auto.Hwnd, null, 0);
                     autoArmed = true;
                     stopAutoLaunch();
                     bool value = auto.Checked;
                     run("setAutoLaunch", w => w.WriteBoolean("value", value));
-                    break;
+                    return;
+                }
             }
+            ClickedExpert(id);
         }
 
         // ---- layout --------------------------------------------------------------
@@ -657,9 +741,28 @@ namespace Bugtopia.Launcher.Win32
             float clientW = rc.Width, clientH = rc.Height;
             float padX = S(32), padY = S(24);
             float width = MathF.Max(S(200), clientW - padX * 2);
-            float y = padY;
 
-            // Header: the brand in the middle of the window, the logo to its left.
+            foreach (Button b in Buttons)
+                b.Placed = false;
+            BeginExpertLayout();
+
+            float y = LayoutHeader(padY, padX, width);
+
+            y = expert ? LayoutExpert(y, padX, width, clientH) : LayoutSimple(y, padX, width);
+
+            // Whatever this pass did not put somewhere belongs to the other view.
+            foreach (Button b in Buttons)
+                if (!b.Placed)
+                    Place(b, 0, 0, 0, 0, false);
+            EndExpertLayout();
+
+            contentHeight = (int)MathF.Ceiling(y + padY);
+            UpdateScroll((int)clientH);
+        }
+
+        /// <summary>The brand in the middle of the window, the logo to its left, the Expert switch on the right.</summary>
+        private float LayoutHeader(float y, float padX, float width)
+        {
             const string title = "Bugtopia Launcher";
             var versionRuns = new List<TextRun> { new TextRun(S("version")) };
             if (S("updateVersion").Length > 0)
@@ -674,7 +777,8 @@ namespace Bugtopia.Launcher.Win32
             float brandH = Fonts.Title.LineHeight + S(1) + Fonts.Subtitle.LineHeight;
             logoH = logo != 0 ? S(60) : 0;
             logoW = logo != 0 && logoHeight > 0 ? logoH * logoWidth / logoHeight : 0;
-            float headerH = MathF.Max(logoH, brandH);
+            var box = Measure(expertBox);
+            float headerH = MathF.Max(logoH, MathF.Max(brandH, box.Height));
             float side = (width - brandW - S(16) * 2) / 2;
 
             logoX = padX + side - S(16) - logoW;
@@ -683,18 +787,17 @@ namespace Bugtopia.Launcher.Win32
             titleY = y + (headerH - brandH) / 2;
             versionX = padX + (width - versionBlock.Width) / 2;
             versionY = titleY + Fonts.Title.LineHeight + S(1);
-            y += headerH + S(14);
+            PlaceScrolled(expertBox, padX + width - box.Width, y + (headerH - box.Height) / 2, box.Width, box.Height, true);
+            return y + headerH + S(14);
+        }
 
-            // Steps.
+        private float LayoutSimple(float y, float padX, float width)
+        {
             bool first = true;
             foreach (Card card in cards)
             {
                 if (card.Hidden)
-                {
-                    foreach (Button b in card.Actions)
-                        Place(b, 0, 0, 0, 0, false);
                     continue;
-                }
                 if (!first)
                     y += S(10);
                 first = false;
@@ -705,20 +808,9 @@ namespace Bugtopia.Launcher.Win32
 
             // The banner, only when it has something of its own to report.
             if (bannerWarning && bannerText.Length > 0)
-            {
-                float border = MathF.Max(1, MathF.Round(S(1)));
-                bannerBlock = TextBlock.Layout(new List<TextRun> { new TextRun(bannerText) }, Fonts.Banner, Fonts.Banner,
-                                               width - S(16) * 2 - border * 2, Fonts.Banner.LineHeight);
-                bannerX = padX;
-                bannerY = y;
-                bannerW = width;
-                bannerH = border * 2 + S(10) * 2 + bannerBlock.Height;
-                y += bannerH + S(14);
-            }
+                y = LayoutBanner(y, padX, width) + S(14);
             else
-            {
                 bannerBlock = null;
-            }
 
             // Footer: [Cancel] [Launch], the checkbox, the hint.
             var playSize = Measure(play);
@@ -726,7 +818,8 @@ namespace Bugtopia.Launcher.Win32
             float rowH = MathF.Max(playSize.Height, countdown ? cancelSize.Height : 0);
             float rowW = playSize.Width + (countdown ? cancelSize.Width + S(12) : 0);
             float rowX = padX + (width - rowW) / 2;
-            PlaceScrolled(cancel, rowX, y + (rowH - cancelSize.Height) / 2, cancelSize.Width, cancelSize.Height, countdown);
+            if (countdown)
+                PlaceScrolled(cancel, rowX, y + (rowH - cancelSize.Height) / 2, cancelSize.Width, cancelSize.Height, true);
             PlaceScrolled(play, countdown ? rowX + cancelSize.Width + S(12) : rowX, y + (rowH - playSize.Height) / 2,
                           playSize.Width, playSize.Height, true);
             y += rowH + S(10);
@@ -735,19 +828,34 @@ namespace Bugtopia.Launcher.Win32
             PlaceScrolled(auto, padX + (width - autoSize.Width) / 2, y, autoSize.Width, autoSize.Height, true);
             y += autoSize.Height + S(10);
 
-            const string before = "In game, press ", key = "Insert", after = " to open the mod menu.";
-            float border1 = MathF.Max(1, MathF.Round(S(1)));
-            kbdW = Fonts.Measure(Fonts.Kbd, key) + S(7) * 2 + border1 * 2;
-            kbdH = Fonts.Kbd.LineHeight + S(1) * 2 + border1 * 2;
-            hintW = Fonts.Measure(Fonts.Hint, before) + S(1) + kbdW + S(1) + Fonts.Measure(Fonts.Hint, after);
-            hintX = padX + (width - hintW) / 2;
-            kbdX = hintX + Fonts.Measure(Fonts.Hint, before) + S(1);
-            float hintH = MathF.Max(Fonts.Hint.LineHeight, kbdH);
-            hintY = y;
-            y += hintH + padY;
+            return LayoutHint(y, padX, width);
+        }
 
-            contentHeight = (int)MathF.Ceiling(y);
-            UpdateScroll((int)clientH);
+        private float LayoutBanner(float y, float padX, float width)
+        {
+            float border = MathF.Max(1, MathF.Round(S(1)));
+            bannerBlock = TextBlock.Layout(new List<TextRun> { new TextRun(bannerText) }, Fonts.Banner, Fonts.Banner,
+                                           width - S(16) * 2 - border * 2, Fonts.Banner.LineHeight);
+            bannerX = padX;
+            bannerY = y;
+            bannerW = width;
+            bannerH = border * 2 + S(10) * 2 + bannerBlock.Height;
+            return y + bannerH;
+        }
+
+        private const string HintBefore = "In game, press ", HintKey = "Insert", HintAfter = " to open the mod menu.";
+
+        /// <summary>.launch-hint, centred: text, a key cap, text.</summary>
+        private float LayoutHint(float y, float padX, float width)
+        {
+            float border = MathF.Max(1, MathF.Round(S(1)));
+            kbdW = Fonts.Measure(Fonts.Kbd, HintKey) + S(7) * 2 + border * 2;
+            kbdH = Fonts.Kbd.LineHeight + S(1) * 2 + border * 2;
+            float hintW = Fonts.Measure(Fonts.Hint, HintBefore) + S(1) + kbdW + S(1) + Fonts.Measure(Fonts.Hint, HintAfter);
+            hintX = padX + (width - hintW) / 2;
+            kbdX = hintX + Fonts.Measure(Fonts.Hint, HintBefore) + S(1);
+            hintY = y;
+            return y + MathF.Max(Fonts.Hint.LineHeight, kbdH);
         }
 
         private void LayoutCard(Card card, float x, float y, float width)
@@ -760,10 +868,9 @@ namespace Bugtopia.Launcher.Win32
             var sizes = new (float W, float H)[card.Actions.Length];
             for (int i = 0; i < card.Actions.Length; i++)
             {
-                Button b = card.Actions[i];
-                if (!b.Checked)   // "shown" for these; see renderSteps
+                if (!card.Shown[i])
                     continue;
-                sizes[i] = Measure(b);
+                sizes[i] = Measure(card.Actions[i]);
                 actionsW += (actionsW > 0 ? S(8) : 0) + sizes[i].W;
                 actionsH = MathF.Max(actionsH, sizes[i].H);
             }
@@ -785,13 +892,9 @@ namespace Bugtopia.Launcher.Win32
             float ax = x + width - border - padH - actionsW;
             for (int i = 0; i < card.Actions.Length; i++)
             {
-                Button b = card.Actions[i];
-                if (!b.Checked)
-                {
-                    Place(b, 0, 0, 0, 0, false);
+                if (!card.Shown[i])
                     continue;
-                }
-                PlaceScrolled(b, ax, top + (contentH - sizes[i].H) / 2, sizes[i].W, sizes[i].H, true);
+                PlaceScrolled(card.Actions[i], ax, top + (contentH - sizes[i].H) / 2, sizes[i].W, sizes[i].H, true);
                 ax += sizes[i].W + S(8);
             }
         }
@@ -824,10 +927,12 @@ namespace Bugtopia.Launcher.Win32
             updatingScroll = true;
             try
             {
+                RECT before;
+                GetClientRect(Hwnd, &before);
                 SetScrollInfo(Hwnd, SB_VERT, &info, 1);
                 RECT after;
                 GetClientRect(Hwnd, &after);
-                if (after.Height != clientH || scrollChanged)
+                if (after.Width != before.Width || after.Height != before.Height || scrollChanged)
                     Layout();
             }
             finally
@@ -853,6 +958,7 @@ namespace Bugtopia.Launcher.Win32
         protected override void Render(nint dc, int width, int height)
         {
             float sy = -scrollY;
+            float border = MathF.Max(1, MathF.Round(S(1)));
             nint g = Gdip.Begin(dc);
 
             // The page's backdrop: #090d16, two soft glows fixed to the window, the card tint over them.
@@ -865,7 +971,60 @@ namespace Bugtopia.Launcher.Win32
             if (logo != 0)
                 Gdip.DrawImage(g, logo, logoX, logoY + sy, logoW, logoH);
 
-            float border = MathF.Max(1, MathF.Round(S(1)));
+            if (expert)
+                RenderExpertShapes(g, sy, border);
+            else
+                RenderSimpleShapes(g, sy, border);
+
+            if (bannerBlock != null)
+            {
+                Gdip.FillRoundRect(g, Gdip.Argb(Bg, 0.6f), bannerX, bannerY + sy, bannerW, bannerH, S(10));
+                if (bannerProgress > 0)
+                    Gdip.FillSweep(g, bannerX, bannerY + sy, bannerW, bannerH, S(10), bannerX,
+                                   MathF.Max(2, bannerW * Math.Clamp(bannerProgress, 0, 100) / 100f), FillColors, FillStops);
+                Gdip.StrokeRoundRect(g, bannerWarning ? Gdip.Argb(Warning, 0.35f) : Gdip.Argb(CardBorder, 0.06f),
+                                     bannerX, bannerY + sy, bannerW, bannerH, S(10), border);
+            }
+
+            // Box-shadows of the footer buttons: drawn here, since a button cannot draw outside itself.
+            if (IsWindowVisible(play.Hwnd) != 0)
+                ButtonGlow(g, play, Accent, play.Hover && IsWindowEnabled(play.Hwnd) != 0);
+            if (countdown)
+                ButtonGlow(g, cancel, Danger, cancel.Hover);
+
+            Gdip.FillRoundRect(g, Gdip.Argb(0x334155, 0.5f), kbdX, hintY + sy, kbdW, kbdH, S(5));
+            Gdip.StrokeRoundRect(g, Gdip.Argb(CardBorder, 0.08f), kbdX, hintY + sy, kbdW, kbdH, S(5), border);
+            Gdip.End(g);
+
+            // Text, with GDI.
+            SetBkMode(dc, TRANSPARENT);
+            DrawLabel(dc, Fonts.Title, "Bugtopia Launcher", titleX, titleY + sy, 10000, Fonts.Title.LineHeight, 0xeef2f7, false);
+            versionBlock?.Draw(dc, versionX, versionY + sy, ColorRef(TextMuted), ColorRef(Accent));
+
+            if (expert)
+                RenderExpertText(dc, sy);
+            else
+                RenderSimpleText(dc, sy);
+
+            if (bannerBlock != null)
+                bannerBlock.Draw(dc, bannerX + border + S(16), bannerY + sy + border + S(10),
+                                 ColorRef(bannerWarning ? Warning : TextMuted), ColorRef(bannerWarning ? Warning : TextMuted));
+
+            float hintLine = MathF.Max(Fonts.Hint.LineHeight, kbdH);
+            DrawLabel(dc, Fonts.Hint, HintBefore, hintX, hintY + sy, 10000, hintLine, TextMuted, false);
+            DrawLabel(dc, Fonts.Kbd, HintKey, kbdX, hintY + sy, kbdW, kbdH, TextMain, true);
+            DrawLabel(dc, Fonts.Hint, HintAfter, kbdX + kbdW + S(1), hintY + sy, 10000, hintLine, TextMuted, false);
+
+            if (Dimmed)
+            {
+                nint scrim = Gdip.Begin(dc);
+                Gdip.FillRect(scrim, Gdip.Argb(0x090d16, 0.72f), 0, 0, width, height);
+                Gdip.End(scrim);
+            }
+        }
+
+        private void RenderSimpleShapes(nint g, float sy, float border)
+        {
             float phase = (Environment.TickCount64 % 1500) / 1500f;
             foreach (Card card in cards)
             {
@@ -902,50 +1061,16 @@ namespace Bugtopia.Launcher.Win32
                         break;
                 }
             }
+        }
 
-            if (bannerBlock != null)
-            {
-                Gdip.FillRoundRect(g, Gdip.Argb(Bg, 0.6f), bannerX, bannerY + sy, bannerW, bannerH, S(10));
-                Gdip.StrokeRoundRect(g, Gdip.Argb(Warning, 0.35f), bannerX, bannerY + sy, bannerW, bannerH, S(10), border);
-            }
-
-            // Box-shadows of the footer buttons: drawn here, since a button cannot draw outside itself.
-            if (IsWindowVisible(play.Hwnd) != 0)
-                ButtonGlow(g, play, Accent, play.Hover && IsWindowEnabled(play.Hwnd) != 0);
-            if (countdown)
-                ButtonGlow(g, cancel, Danger, cancel.Hover);
-
-            Gdip.FillRoundRect(g, Gdip.Argb(0x334155, 0.5f), kbdX, hintY + sy, kbdW, kbdH, S(5));
-            Gdip.StrokeRoundRect(g, Gdip.Argb(CardBorder, 0.08f), kbdX, hintY + sy, kbdW, kbdH, S(5), border);
-            Gdip.End(g);
-
-            // Text, with GDI.
-            SetBkMode(dc, TRANSPARENT);
-            DrawLabel(dc, Fonts.Title, "Bugtopia Launcher", titleX, titleY + sy, 10000, Fonts.Title.LineHeight, 0xeef2f7, false);
-            versionBlock?.Draw(dc, versionX, versionY + sy, ColorRef(TextMuted), ColorRef(Accent));
-
+        private void RenderSimpleText(nint dc, float sy)
+        {
             foreach (Card card in cards)
             {
                 if (card.Hidden || card.Block == null)
                     continue;
                 DrawLabel(dc, Fonts.StepTitle, card.Title, card.BodyX, card.BodyY + sy, 10000, Fonts.StepTitle.LineHeight, TextMain, false);
                 card.Block.Draw(dc, card.BodyX, card.BodyY + sy + Fonts.StepTitle.LineHeight + S(3), ColorRef(TextMuted), ColorRef(Accent));
-            }
-
-            if (bannerBlock != null)
-                bannerBlock.Draw(dc, bannerX + border + S(16), bannerY + sy + border + S(10), ColorRef(Warning), ColorRef(Warning));
-
-            const string before = "In game, press ", after = " to open the mod menu.";
-            float hintLine = MathF.Max(Fonts.Hint.LineHeight, kbdH);
-            DrawLabel(dc, Fonts.Hint, before, hintX, hintY + sy, 10000, hintLine, TextMuted, false);
-            DrawLabel(dc, Fonts.Kbd, "Insert", kbdX, hintY + sy, kbdW, kbdH, TextMain, true);
-            DrawLabel(dc, Fonts.Hint, after, kbdX + kbdW + S(1), hintY + sy, 10000, hintLine, TextMuted, false);
-
-            if (Dimmed)
-            {
-                nint scrim = Gdip.Begin(dc);
-                Gdip.FillRect(scrim, Gdip.Argb(0x090d16, 0.72f), 0, 0, width, height);
-                Gdip.End(scrim);
             }
         }
 
@@ -974,6 +1099,9 @@ namespace Bugtopia.Launcher.Win32
                 if (url != null)
                     return url;
             }
+            if (expert)
+                return ExpertLinkAt(x, cy);
+
             foreach (Card card in cards)
             {
                 if (card.Hidden || card.Block == null)
@@ -1010,12 +1138,22 @@ namespace Bugtopia.Launcher.Win32
                 {
                     SetScale((uint)LoWord(w));
                     SetIcons();
+                    ExpertFontsChanged();
                     var suggested = (RECT*)l;
                     SetWindowPos(Hwnd, 0, suggested->left, suggested->top, suggested->Width, suggested->Height,
                                  SWP_NOZORDER | SWP_NOACTIVATE);
                     Layout();
                     Invalidate();
                     return 0;
+                }
+
+                case WM_CTLCOLOREDIT:
+                case WM_CTLCOLORSTATIC:
+                {
+                    nint brush = ExpertControlColor(w, l);
+                    if (brush != 0)
+                        return brush;
+                    break;
                 }
 
                 case WM_VSCROLL:
@@ -1082,9 +1220,14 @@ namespace Bugtopia.Launcher.Win32
                 case WM_COMMAND:
                 {
                     int id = LoWord(w), code = HiWord(w);
-                    if (l != 0 && code == (int)BN_CLICKED)
+                    if (l != 0 && ButtonFor(l) != null && code == (int)BN_CLICKED)
                     {
                         Clicked(id);
+                        return 0;
+                    }
+                    if (l != 0 && (code == EN_SETFOCUS || code == EN_KILLFOCUS))
+                    {
+                        Invalidate();   // a text field's border follows its focus
                         return 0;
                     }
                     if (l == 0 && id == IDOK)
@@ -1093,6 +1236,8 @@ namespace Bugtopia.Launcher.Win32
                         Button focused = ButtonFor(GetFocus());
                         if (focused != null && IsWindowEnabled(focused.Hwnd) != 0)
                             Clicked(focused.Id);
+                        else
+                            EnterInField(GetFocus());
                         return 0;
                     }
                     if (l == 0 && id == IDCANCEL)
@@ -1149,7 +1294,7 @@ namespace Bugtopia.Launcher.Win32
         public string PickFile(string title, string filterName, string[] extensions) =>
             FileDialogs.PickFile(Hwnd, title, filterName, extensions);
 
-        /// <summary>Only the page's expert switch asks for this, and this window has no expert view yet.</summary>
+        /// <summary>The switch between the two views asks for this: the expert view is taller.</summary>
         public void Resize(int width, int height) => PostMessageW(Hwnd, WM_RESIZE_REQUEST, width, height);
 
         public void Reveal() => PostMessageW(Hwnd, WM_REVEAL, 0, 0);

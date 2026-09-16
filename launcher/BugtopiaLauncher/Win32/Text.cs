@@ -25,10 +25,11 @@ namespace Bugtopia.Launcher.Win32
     internal sealed unsafe class Fonts : IDisposable
     {
         private static nint measureDc;
-        private static string textFace, displayFace;
+        private static string textFace, displayFace, monoFace;
 
         internal readonly Font Title, Subtitle, SubtitleLink, Check, StepTitle, Detail, DetailLink,
-                               Button, Play, Banner, Hint, Kbd, ModalTitle, ModalText, Input;
+                               Button, Play, Banner, Hint, Kbd, ModalTitle, ModalText, Input,
+                               Label, InputHint, StatusLabel, StatusValue, Log;
 
         private readonly List<Font> all = new List<Font>();
 
@@ -50,6 +51,11 @@ namespace Bugtopia.Launcher.Win32
             ModalTitle = Make(textFace, 16.8f, 700, false, scale);      // .modal-title: 1.05rem, 700
             ModalText = Make(textFace, 13.76f, 400, false, scale);      // .modal-text: 0.86rem
             Input = Make(textFace, 14.08f, 400, false, scale);          // input[type=text]: 0.88rem
+            Label = Make(textFace, 13.12f, 500, false, scale);          // .input-label: 0.82rem, 500
+            InputHint = Make(textFace, 11.52f, 400, false, scale);      // .input-hint: 0.72rem
+            StatusLabel = Make(textFace, 11.52f, 400, false, scale);    // .status-label: 0.72rem
+            StatusValue = Make(textFace, 14.72f, 600, false, scale);    // .status-value: 0.92rem, 600
+            Log = Make(monoFace, 11.84f, 400, false, scale);            // #log: 0.74rem, Cascadia Mono / Consolas
         }
 
         public void Dispose()
@@ -79,6 +85,7 @@ namespace Bugtopia.Launcher.Win32
                 return;
             textFace = Installed("Segoe UI Variable Text") ? "Segoe UI Variable Text" : "Segoe UI";
             displayFace = Installed("Segoe UI Variable Display") ? "Segoe UI Variable Display" : "Segoe UI";
+            monoFace = Installed("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
         }
 
         private static bool Installed(string face)
