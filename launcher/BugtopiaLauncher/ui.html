@@ -120,7 +120,10 @@ body:not(.expert) #play { padding: 15px 34px; font-size: 1rem; }
   font-size: 0.78rem; line-height: 1.4; color: var(--text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.step-detail.wrap { white-space: normal; }
+/* Wrapping alone is not enough for the one thing these rows carry that has no spaces in it: a path
+   longer than the line still overflows as a single token, and the ellipsis above eats its tail.
+   "anywhere" breaks inside a word only when it cannot fit, so ordinary prose is untouched. */
+.step-detail.wrap { white-space: normal; overflow-wrap: anywhere; }
 .step-detail a { color: var(--primary-accent); cursor: pointer; text-decoration: underline; }
 .step-action { flex: none; display: flex; gap: 8px; }
 #expert-view { display: flex; flex-direction: column; gap: 14px; }
@@ -782,13 +785,22 @@ function renderSteps() {
     step("clean", "done", "Clean - nothing else loads into this game.", {});
   }
 
+  // Every state that is not "installed" ends with the same link, so the archive is one click away
+  // whatever the row otherwise says - an online build that will fetch it, an offline one waiting
+  // for a zip, and the case where one was already chosen but is being replaced. Expert mode has
+  // carried this URL under the source field all along; nobody should have to open it for a link.
+  const getArchive = ' <a data-url="' + esc(state.bepInExUrl) + '">Download it here</a>.';
   const haveSource = !!state.source || state.prepared;
   step("bepinex", state.prepared ? "done" : haveSource || state.downloads ? "info" : "todo",
        state.prepared ? "Installed"
-       : haveSource ? "Not installed - Launch installs the archive you chose."
-       : state.downloads ? "Not installed - Launch downloads it."
-       : 'Not installed. <a data-url="' + esc(state.bepInExUrl) + '">Download the archive</a>, ' +
-         'then choose the zip.',
+       : (haveSource
+            // Naming the file is the only acknowledgement this screen can give: picking a zip
+            // unpacks it into the same folder every time and leaves every other word unchanged.
+            ? (state.sourcePath
+               ? "Launch installs " + esc(state.sourcePath) + "."
+               : "Not installed - Launch installs the archive you chose.")
+            : state.downloads ? "Not installed - Launch downloads it."
+            : "Not installed - choose the zip.") + getArchive,
        { archive: !state.prepared && !state.downloads });
 
   // Only an online build has anything to say here: an offline one installs the copy it carries.

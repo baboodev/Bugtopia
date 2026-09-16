@@ -107,7 +107,16 @@ namespace Bugtopia.Launcher
 
                 case "setPaths":
                     settings.GameFolder = Str(args, "game") ?? settings.GameFolder;
-                    settings.BepInExSource = Str(args, "source") ?? settings.BepInExSource;
+                    // A different folder picked here replaces whatever zip was unpacked, so the
+                    // remembered archive goes with it rather than naming a file nothing now uses.
+                    // The page sends the unchanged value on every other save, hence the comparison.
+                    string pickedSource = Str(args, "source");
+                    if (pickedSource != null &&
+                        !string.Equals(pickedSource, settings.BepInExSource, StringComparison.OrdinalIgnoreCase))
+                    {
+                        settings.BepInExArchive = null;
+                    }
+                    settings.BepInExSource = pickedSource ?? settings.BepInExSource;
                     settings.Storage = Str(args, "storage") ?? settings.Storage;
                     settings.UnityLibsZip = Str(args, "unityLibsZip") ?? settings.UnityLibsZip;
                     SafeSave();
@@ -423,6 +432,7 @@ namespace Bugtopia.Launcher
             Payload.ValidateSource(target, out string coreDir, out _);
 
             settings.BepInExSource = target;
+            settings.BepInExArchive = zipPath;
             SafeSave();
             Log("BepInEx " + (Payload.ReadBepInExVersion(coreDir) ?? "archive") + " is ready to install.");
         }
@@ -437,6 +447,7 @@ namespace Bugtopia.Launcher
             Downloads.FetchBepInEx(target, Log, Progress("bepinex"));
 
             settings.BepInExSource = target;
+            settings.BepInExArchive = null;   // nothing the user picked, so nothing to name
             SafeSave();
         }
 
@@ -1117,6 +1128,14 @@ namespace Bugtopia.Launcher
             w.WriteStartObject();
             w.WriteString("game", settings.GameFolder ?? "");
             w.WriteString("source", settings.BepInExSource ?? "");
+            // The file the user picked, for the simple screen, which has no path field: without it
+            // "an archive was chosen" and "nothing happened" look exactly alike, since UseArchive
+            // leaves BepInExSource pointing at the same unpack folder every time. Falls back to the
+            // source folder, which is what a Folder... pick and an older settings file leave behind.
+            w.WriteString("sourcePath",
+                string.IsNullOrWhiteSpace(settings.BepInExArchive)
+                    ? settings.BepInExSource ?? ""
+                    : settings.BepInExArchive);
             w.WriteString("storage", string.IsNullOrWhiteSpace(settings.Storage)
                 ? LauncherSettings.DefaultStorage
                 : settings.Storage);
