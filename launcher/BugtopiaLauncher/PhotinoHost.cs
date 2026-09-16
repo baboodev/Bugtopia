@@ -211,21 +211,6 @@ namespace Bugtopia.Launcher
         }
     }
 
-    internal interface IDialogs
-    {
-        string PickFolder(string title, string current);
-        string PickFile(string title, string filterName, string[] extensions);
-
-        /// <summary>Resizes the window, for the switch between the simple and expert views.</summary>
-        void Resize(int width, int height);
-
-        /// <summary>Puts the window on screen, once the page has drawn itself.</summary>
-        void Reveal();
-
-        /// <summary>Closes the launcher, once the game is running and injected.</summary>
-        void Close();
-    }
-
     /// <summary>
     /// Unpacks the native webview shell and points Photino's P/Invokes at it.
     ///

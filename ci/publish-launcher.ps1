@@ -40,13 +40,19 @@
 .PARAMETER SkipPayloadCheck
     Publish even when a payload file is missing. The build only warns about those, which is right
     for day-to-day work and wrong for a release, so this script refuses by default.
+
+.PARAMETER Win32
+    Publish every flavour with the native Win32 window (-p:BugtopiaUi=win32) instead of the Photino
+    page: no WebView2 and no Photino.Native.dll inside. The files are named ...-<flavour>-win32.exe and
+    build into bin\<flavour>-win32\, so they sit beside the Photino builds rather than replacing them.
 #>
 param(
     [string]$OutputDirectory = "",
     [string]$PluginDll = "",
     [string]$NoLinkPluginDll = "",
     [string]$VersionLabel = "",
-    [switch]$SkipPayloadCheck
+    [switch]$SkipPayloadCheck,
+    [switch]$Win32
 )
 
 $ErrorActionPreference = "Stop"
@@ -125,9 +131,16 @@ if (-not $vcvars) {
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
+# The window the launchers are built with. Everything that names or finds a build carries the suffix,
+# so a Win32 publish and a Photino publish into the same folder keep each other's files.
+$uiSuffix = if ($Win32) { "-win32" } else { "" }
+$uiArg = if ($Win32) { "-p:BugtopiaUi=win32" } else { "" }
+
 # Clear this script's own earlier output. The names carry a commit hash, so without this the folder
-# fills up with builds from other commits and stops saying which two are the release.
+# fills up with builds from other commits and stops saying which two are the release. Only the files
+# of the window being built: the other kind is not this run's to remove.
 Get-ChildItem $OutputDirectory -Filter "Bugtopia-Launcher-*.exe" -ErrorAction SilentlyContinue |
+    Where-Object { $_.BaseName.EndsWith("-win32") -eq [bool]$Win32 } |
     Remove-Item -Force
 
 $pluginArg = if ($PluginDll) { "-p:PluginDllPath=`"$PluginDll`"" } else { "" }
@@ -150,24 +163,26 @@ foreach ($flavour in $flavours) {
 
     # vcvars is quiet on success but still prints its own vswhere grumble; the exit code is what
     # decides here, so both streams go to nul.
+    $name = $flavour.Name + $uiSuffix
     $command = "`"$($vcvars.FullName)`" >nul 2>&1 && dotnet publish `"$project`" -c Release " +
-               "-p:IlcUseEnvironmentalTools=true $($flavour.Args) --nologo -v minimal"
+               "-p:IlcUseEnvironmentalTools=true $($flavour.Args) $uiArg --nologo -v minimal"
 
     $output = cmd /c $command
     if ($LASTEXITCODE -ne 0) {
         $output | Select-Object -Last 25 | ForEach-Object { Write-Host $_ }
-        throw "Publishing the $($flavour.Name) build failed."
+        throw "Publishing the $name build failed."
     }
 
-    # vcvars sets Platform=x64, which moves the output under bin\<flavour>\x64\.
-    $exe = Get-ChildItem (Join-Path $repoRoot "launcher\BugtopiaLauncher\bin\$($flavour.Name)") `
+    # vcvars sets Platform=x64, which moves the output under bin\<flavour>\x64\. The Win32 window
+    # builds into bin\<flavour>-win32\ (launcher/Directory.Build.props).
+    $exe = Get-ChildItem (Join-Path $repoRoot "launcher\BugtopiaLauncher\bin\$name") `
                          -Recurse -Filter "Bugtopia.exe" -ErrorAction SilentlyContinue |
            Where-Object { $_.FullName -like "*\publish\*" } |
            Sort-Object LastWriteTime -Descending |
            Select-Object -First 1
 
     if (-not $exe) {
-        throw "The $($flavour.Name) publish produced no exe."
+        throw "The $name publish produced no exe."
     }
 
     # 2.8.2+57579db is the informational version; the plus is legal in a filename but awkward in a
@@ -176,11 +191,11 @@ foreach ($flavour in $flavours) {
     if ([string]::IsNullOrWhiteSpace($version)) { $version = "unversioned" }
     $version = $version.Replace("+", "-")
 
-    $target = Join-Path $OutputDirectory ("Bugtopia-Launcher-{0}-{1}.exe" -f $version, $flavour.Name)
+    $target = Join-Path $OutputDirectory ("Bugtopia-Launcher-{0}-{1}.exe" -f $version, $name)
     Copy-Item $exe.FullName $target -Force
 
     $built += [pscustomobject]@{
-        Flavour = $flavour.Name
+        Flavour = $name
         File    = Split-Path $target -Leaf
         MB      = [math]::Round($exe.Length / 1MB, 2)
         Bytes   = $exe.Length

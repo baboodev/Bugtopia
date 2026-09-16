@@ -14,8 +14,14 @@
 // The group id the compiler used, so the icon resource is laid out as before.
 32512 ICON "assets\\bugtopia.ico"
 
-// RT_MANIFEST, CREATEPROCESS_MANIFEST_RESOURCE_ID - byte-identical to the SDK default it replaces.
+// RT_MANIFEST, CREATEPROCESS_MANIFEST_RESOURCE_ID. The webview build's is byte-identical to the SDK
+// default it replaces. The Win32 build draws its own window, so it also asks for common controls v6
+// and per-monitor DPI awareness - the page gets both from WebView2 instead.
+#ifdef BUGTOPIA_WIN32
+1 24 "assets\\app.win32.manifest"
+#else
 1 24 "assets\\app.manifest"
+#endif
 
 1 VERSIONINFO
 FILEVERSION     BUGTOPIA_FILEVERSION

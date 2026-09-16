@@ -32,12 +32,18 @@
 .PARAMETER SkipMod
     Do not build or embed the mod. The online build is unaffected; the offline one is then missing
     its plugin, so this is for working on the launcher itself, not for producing anything.
+
+.PARAMETER Win32
+    Publish every launcher - offline-nolink too, with -NoLink - with the native Win32 window instead
+    of the Photino page, so no WebView2 and no Photino.Native.dll ride inside. The files end in
+    -win32.exe and do not replace the Photino ones. The payload is built the same way either way.
 #>
 param(
     [string]$OutputDirectory = "",
     [string]$PluginDll = "",
     [switch]$NoLink,
-    [switch]$SkipMod
+    [switch]$SkipMod,
+    [switch]$Win32
 )
 
 $ErrorActionPreference = "Stop"
@@ -181,6 +187,10 @@ elseif ($PluginDll) {
 
 if ($noLinkPluginDll) {
     $arguments.NoLinkPluginDll = $noLinkPluginDll
+}
+
+if ($Win32) {
+    $arguments.Win32 = $true
 }
 
 Write-Host ""

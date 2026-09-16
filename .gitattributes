@@ -7,3 +7,4 @@
 # The launcher's manifest is embedded into the exe as it is on disk (launcher/BugtopiaLauncher/Bugtopia.rc),
 # so its bytes ship: kept exactly as extracted from the SDK default, CRLF and BOM included.
 launcher/BugtopiaLauncher/assets/app.manifest -text
+launcher/BugtopiaLauncher/assets/app.win32.manifest -text

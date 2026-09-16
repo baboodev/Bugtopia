@@ -64,6 +64,14 @@
     <DefineConstants>$(DefineConstants);BUGTOPIA_ONLINE</DefineConstants>
   </PropertyGroup>
 
+  <!-- Which window the launcher opens: the WebView2 page through Photino (default), or the native
+       Win32 one - dotnet publish ... -p:BugtopiaUi=win32. The Win32 build carries no browser engine
+       and no Photino, whose native shell imports urlmon's URLDownloadToFileW to fetch the WebView2
+       installer; see docs/LAUNCHER.md. Both drive the same Api over the same JSON messages. -->
+  <PropertyGroup Condition="'$(BugtopiaUi)' == 'win32'">
+    <DefineConstants>$(DefineConstants);BUGTOPIA_WIN32</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup>
     <PublishAot>true</PublishAot>
     <!-- The exe's Win32 resources come from Bugtopia.rc, not from the managed assembly - see
@@ -152,8 +160,11 @@
     <WriteLinesToFile File="$(_LauncherResourceDir)launcher_version.h" Lines="@(_LauncherVersionHeader)"
                       Overwrite="true" WriteOnlyWhenDifferent="true" />
     <!-- The include path is passed without its trailing backslash, which would escape the quote. -->
+    <PropertyGroup>
+      <_LauncherRcDefines Condition="'$(BugtopiaUi)' == 'win32'">/d BUGTOPIA_WIN32</_LauncherRcDefines>
+    </PropertyGroup>
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)"
-          Command="&quot;$(_LauncherRc)&quot; /nologo /I &quot;$(_LauncherResourceDir.TrimEnd('\'))&quot; /fo &quot;$(_LauncherResourceFile)&quot; Bugtopia.rc" />
+          Command="&quot;$(_LauncherRc)&quot; /nologo $(_LauncherRcDefines) /I &quot;$(_LauncherResourceDir.TrimEnd('\'))&quot; /fo &quot;$(_LauncherResourceFile)&quot; Bugtopia.rc" />
 
     <ItemGroup>
       <NativeLibrary Include="$(_LauncherResourceFile)" />
@@ -164,11 +175,23 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BugtopiaLaunch\BugtopiaLaunch.csproj" />
-    <PackageReference Include="Photino.NET" Version="4.0.16" />
+    <PackageReference Include="Photino.NET" Version="4.0.16" Condition="'$(BugtopiaUi)' != 'win32'" />
+  </ItemGroup>
+
+  <!-- Each window's sources compile only into its own build: the Photino host needs the package the
+       Win32 build leaves out, and the Win32 host is nothing but P/Invoke the webview build has no use for. -->
+  <ItemGroup Condition="'$(BugtopiaUi)' == 'win32'">
+    <Compile Remove="PhotinoHost.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(BugtopiaUi)' != 'win32'">
+    <Compile Remove="Win32\**" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BugtopiaUi)' != 'win32'">
+    <EmbeddedResource Include="ui.html" LogicalName="ui.html" />
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="ui.html" LogicalName="ui.html" />
     <!-- The header graphic, folded into the page as a data URI when it is loaded. -->
     <EmbeddedResource Include="assets\logo.png" LogicalName="logo.png" />
     <!-- ApplicationIcon above puts this in the exe's Win32 resources, which is what Explorer
@@ -177,11 +200,11 @@
     <!-- The webview shell itself. AOT cannot bundle a native dependency and the package ships no
          static library, so it rides as a resource and NativeShell unpacks it on first run. -->
     <EmbeddedResource Include="$(PhotinoNativePath)" LogicalName="Photino.Native.dll"
-                      Condition="Exists('$(PhotinoNativePath)')" />
+                      Condition="'$(BugtopiaUi)' != 'win32' and Exists('$(PhotinoNativePath)')" />
     <!-- Photino.Native imports this one. Leaving it out is not a smaller build, it is a build that
          only starts on a machine that happens to have a copy on PATH. -->
     <EmbeddedResource Include="$(WebView2LoaderPath)" LogicalName="WebView2Loader.dll"
-                      Condition="Exists('$(WebView2LoaderPath)')" />
+                      Condition="'$(BugtopiaUi)' != 'win32' and Exists('$(WebView2LoaderPath)')" />
     <EmbeddedResource Include="$(InjectDllPath)" LogicalName="payload.bugtopia_inject.dll"
                       Condition="Exists('$(InjectDllPath)')" />
     <EmbeddedResource Include="$(InteropShimPath)" LogicalName="payload.BugtopiaInterop.dll"
@@ -196,9 +219,9 @@
        webview shell is different: without it there is no window at all, so that one is an error. -->
   <Target Name="CheckPayload" BeforeTargets="Build">
     <Error Text="Photino.Native.dll not found at $(PhotinoNativePath) - restore the Photino.NET package first."
-           Condition="!Exists('$(PhotinoNativePath)')" />
+           Condition="'$(BugtopiaUi)' != 'win32' and !Exists('$(PhotinoNativePath)')" />
     <Error Text="WebView2Loader.dll not found at $(WebView2LoaderPath) - restore the Photino.NET package first."
-           Condition="!Exists('$(WebView2LoaderPath)')" />
+           Condition="'$(BugtopiaUi)' != 'win32' and !Exists('$(WebView2LoaderPath)')" />
     <Warning Text="Payload missing: $(InjectDllPath) - run launcher/BugtopiaInject/build.bat"
              Condition="!Exists('$(InjectDllPath)')" />
     <Warning Text="Payload missing: $(InteropShimPath) - build launcher/BugtopiaInterop -c Release"
