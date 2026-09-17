@@ -203,22 +203,25 @@ namespace Bugtopia.Launch
         }
 
         /// <summary>
-        /// Writes the carried files that differ from what storage already holds, and nothing else.
+        /// Writes the carried files storage is missing, and - when <paramref name="replaceExisting"/>
+        /// - replaces the ones that differ. Returns false when a file could not be written.
         ///
         /// <see cref="Prepare"/> writes them once, when the tree is laid out, and a prepared tree is
         /// never laid out again - so without this a newer launcher went on starting the bootstrap
-        /// and the mod an older one had left. Compared by content, not by version: the offline and
-        /// offline-nolink builds carry mods with the same version and different bytes, and so does
-        /// a rebuild of the same commit.
+        /// and the mod an older one had left. The caller replaces only when a different launcher ran
+        /// here last (<see cref="StorageLayout.CarriedStamp"/>): replacing whatever differed on every
+        /// launch also undid a mod DLL put in place by hand, every time. Once a launcher has run, what
+        /// is installed is left alone, and a copy that no longer matches is logged as kept.
         ///
         /// A file the running game holds open cannot be replaced; that is logged and the installed
         /// copy is used, as with a failed mod update. The bytes go to a side file first and are moved
         /// over the old one, so a failed write never leaves half a DLL behind.
         /// </summary>
-        public static void RefreshCarried(StorageLayout storage, IEnumerable<PayloadFile> files,
-                                          Action<string> log = null)
+        public static bool RefreshCarried(StorageLayout storage, IEnumerable<PayloadFile> files,
+                                          Action<string> log = null, bool replaceExisting = true)
         {
             log ??= delegate { };
+            bool complete = true;
 
             foreach (PayloadFile file in files ?? Array.Empty<PayloadFile>())
             {
@@ -233,6 +236,15 @@ namespace Bugtopia.Launch
                         // Not carried by this build: the online one has no mod inside it.
                         if (carried == null || (existed && SameContent(carried, target)))
                             continue;
+                    }
+
+                    if (existed && !replaceExisting)
+                    {
+                        string kept = VersionOf(target);
+                        log("  kept " + file.RelativePath + (kept != null ? " (" + kept + ")" : "") +
+                            ": it differs from this launcher's copy, which already ran here - delete it " +
+                            "to have that copy written again");
+                        continue;
                     }
 
                     string before = existed ? VersionOf(target) : null;
@@ -254,10 +266,12 @@ namespace Bugtopia.Launch
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
                     TryDelete(pending);
+                    complete = false;
                     log("  could not update " + file.RelativePath + " (" + ex.Message +
                         ") - the installed copy stays");
                 }
             }
+            return complete;
         }
 
         /// <summary>

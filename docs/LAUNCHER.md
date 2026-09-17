@@ -53,10 +53,15 @@ One job, each step skipped when its result is already on disk:
    coexisting with it. A BepInEx tree is *moved* into storage, interop and all; MelonLoader is
    removed. Never without a modal yes.
 3. **Fetch BepInEx** (online build) or use the archive the user chose (offline build).
-4. **Lay out the storage tree** — see §5. After that, on every launch, the files the launcher
-   carries — the bootstrap, the generator shim and, in the offline build, the mod — are compared
-   byte for byte with what storage holds and replaced where they differ, so a newer launcher brings
-   its own copies. A file the running game holds open is left as it is and logged.
+4. **Lay out the storage tree** — see §5. After that, the files the launcher carries — the
+   bootstrap, the generator shim and, in the offline build, the mod — are rewritten only when a
+   different launcher ran here last: `bin\launcher.version` records the version, commit and flavour
+   (`3.0.5+c5ef461 offline-nolink`) of the one that last wrote them. A new launcher replaces every
+   file that differs and moves the record on; the same launcher writes only what is missing and
+   leaves the rest, so a mod DLL replaced by hand stays until the next launcher version (the log
+   says it was kept; deleting it brings the launcher's copy back). The flavour is in the record
+   because offline and offline-nolink of one version carry different mods. A file the running game
+   holds open is left as it is and logged, and the record then stays behind for another try.
 5. **Fetch or update the mod** (online build only; the offline build carries it). A newer
    release is installed on the way past — the mod and the launcher ship in the same release, so
    the tag the update check already recorded, set against the version the installed DLL declares,

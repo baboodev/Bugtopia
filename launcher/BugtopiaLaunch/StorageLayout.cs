@@ -52,6 +52,12 @@ namespace Bugtopia.Launch
         /// <summary>The generator assembly, loaded by BepInEx's own CoreCLR rather than by us.</summary>
         public string InteropShim => Path.Combine(Bin, InteropShimName);
         public string InjectConfig => Path.Combine(Bin, InjectConfigName);
+
+        /// <summary>
+        /// Which launcher last laid its carried files in here - version, commit and flavour - so the
+        /// next one knows whether they are its own. Kept in bin\, the launcher's folder, not beside the mod.
+        /// </summary>
+        public string CarriedStamp => Path.Combine(Bin, "launcher.version");
         public string Plugin => Path.Combine(Plugins, PluginName);
         public string Stamp => Path.Combine(Root, StampName);
         public string InteropHash => Path.Combine(Interop, "assembly-hash.txt");

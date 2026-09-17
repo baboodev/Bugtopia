@@ -421,6 +421,7 @@ namespace Bugtopia.Launcher
             string source = Require(settings.BepInExSource, "the unpacked BepInEx folder");
 
             Payload.Prepare(source, storage, CarriedFiles(), Log);
+            WriteCarriedStamp(storage);   // every carried file was just written by this launcher
             if (!string.IsNullOrWhiteSpace(settings.UnityLibsZip))
                 Payload.InstallUnityLibs(settings.UnityLibsZip, storage, Log);
 
@@ -623,9 +624,17 @@ namespace Bugtopia.Launcher
                 PushState();
             }
 
-            // Every launch, not only the first: a prepared tree is never laid out again, so this is
-            // what brings a newer launcher's bootstrap - and, offline, its mod - into storage.
-            Payload.RefreshCarried(storage, CarriedFiles(), Log);
+            // A prepared tree is never laid out again, so this is what brings a newer launcher's
+            // bootstrap - and, offline, its mod - into storage. Only when a different launcher ran here
+            // last, though: after that the installed files are left as they are, so a mod DLL replaced
+            // by hand stays replaced. Missing files are written either way. The record moves on only
+            // once every file is in: one the running game held open gets another try next launch.
+            string lastLauncher = ReadCarriedStamp(storage);
+            bool newLauncher = lastLauncher != LauncherIdentity;
+            if (newLauncher)
+                Log("Launcher " + (lastLauncher ?? "(none recorded)") + " -> " + LauncherIdentity + ": writing its files.");
+            if (Payload.RefreshCarried(storage, CarriedFiles(), Log, replaceExisting: newLauncher) && newLauncher)
+                WriteCarriedStamp(storage);
 
             EnsurePlugin(storage);
             PushState();
@@ -1055,6 +1064,47 @@ namespace Bugtopia.Launcher
             using var buffer = new MemoryStream();
             stream.CopyTo(buffer);
             return "data:" + mediaType + ";base64," + Convert.ToBase64String(buffer.ToArray());
+        }
+
+        /// <summary>
+        /// This launcher, as <see cref="StorageLayout.CarriedStamp"/> records it: version and commit,
+        /// and the flavour. The flavour is part of it because offline and offline-nolink of one version
+        /// carry different mods - moving between them has to swap the DLL, which the version alone
+        /// would not.
+        /// </summary>
+        private static string LauncherIdentity => HeartopiaMod.ModBuildVersion.Informational + " " + LauncherFlavour;
+
+#if BUGTOPIA_ONLINE
+        private const string LauncherFlavour = "online";
+#elif BUGTOPIA_NOLINK
+        private const string LauncherFlavour = "offline-nolink";
+#else
+        private const string LauncherFlavour = "offline";
+#endif
+
+        private static string ReadCarriedStamp(StorageLayout storage)
+        {
+            try
+            {
+                return File.Exists(storage.CarriedStamp) ? File.ReadAllText(storage.CarriedStamp).Trim() : null;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return null;   // unreadable counts as unknown: the files are written, as for a new launcher
+            }
+        }
+
+        private void WriteCarriedStamp(StorageLayout storage)
+        {
+            try
+            {
+                Directory.CreateDirectory(storage.Bin);
+                File.WriteAllText(storage.CarriedStamp, LauncherIdentity + Environment.NewLine);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                Log("Could not record the launcher version in storage: " + ex.Message);
+            }
         }
 
         /// <summary>The files this exe carries, written into the storage tree by Prepare.</summary>
