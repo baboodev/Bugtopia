@@ -244,9 +244,15 @@ namespace Bugtopia.Launcher
                     break;
 
                 case "profileCreate":
-                    Log(Profiles.Create(Str(args, "name")));
+                {
+                    string created = Str(args, "name");
+                    Log(Profiles.Create(created));
+                    // Selected the moment it exists, as picking a profile from the list is: creating one
+                    // and then finding the old one still active reads as the new one not having worked.
+                    Log(Profiles.Switch(created));
                     Reply(id, w => WriteProfiles(w, Profiles.List()));
                     break;
+                }
 
                 case "profileSwitch":
                     Log(Profiles.Switch(Str(args, "name")));
