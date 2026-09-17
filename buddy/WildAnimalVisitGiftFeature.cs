@@ -6,7 +6,7 @@ using Object = UnityEngine.Object;
 namespace HeartopiaMod
 {
     // Visiting wild animals that carry a gift: a radar / game-map marker ("Daily -> Gift Animals")
-    // and an opt-in auto-claim (Animal Care, beta-gated).
+    // and an opt-in auto-claim (Animal Care).
     //
     // How the game models it (ilspy-dumps + live session, 2026-09-14):
     //   - A wild animal that comes to visit carries XDT.Scene.Shared.Modules.Gift.AnimalGiftComponent
@@ -30,8 +30,8 @@ namespace HeartopiaMod
     // DataCenter component update that dispatches no EventCenter event. GetComponents<WildAnimalComponent>
     // returns a handful of animals, so a 2 s scan is cheap.
     //
-    // Auto-claim hides behind the beta gate (HeartopiaComplete.Beta.cs): a claim from range was
-    // tested once, and nobody knows yet whether the server keeps a record of the distance.
+    // Auto-claim shipped for everyone 2026-09-17 (it started behind the beta gate). Whether the server
+    // keeps a record of the claim distance is still unknown.
     public partial class HeartopiaComplete
     {
         private const string WildVisitGiftTag = "WildVisitGift";
@@ -65,7 +65,7 @@ namespace HeartopiaMod
 
         // Radar category — session-only, like every other radar flag.
         private bool showWildGiftAnimalRadar;
-        // Persisted (Config.xml); only honoured while the beta gate is open.
+        // Persisted (Config.xml).
         private bool wildAnimalAutoClaimVisitGifts;
 
         private readonly Dictionary<uint, WildVisitGiftEntry> wildVisitGiftEntries = new Dictionary<uint, WildVisitGiftEntry>();
@@ -85,7 +85,7 @@ namespace HeartopiaMod
         private bool wildVisitGiftAutoLastState;
         private FeatureBreakerState wildVisitGiftBreaker;
 
-        private bool IsWildVisitGiftAutoClaimActive => BetaEnabled && this.wildAnimalAutoClaimVisitGifts;
+        private bool IsWildVisitGiftAutoClaimActive => this.wildAnimalAutoClaimVisitGifts;
 
         internal string GetWildVisitGiftLiveSummary()
         {

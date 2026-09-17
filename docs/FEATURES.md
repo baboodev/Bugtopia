@@ -1490,15 +1490,15 @@ Full pipeline: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#bag--warehouse-tr
   its own entity with no gift-box entity at all, and `HaveGift()` (the gift-box group list) does not
   list it — so **Claim All** stops at "no wild gifts available" and never reaches it (live, 2026-09-14).
 
-### Auto-claim visiting animal gifts (`WildAnimalVisitGiftFeature`, beta)
+### Auto-claim visiting animal gifts (`WildAnimalVisitGiftFeature`)
 
-- Checkbox under **Claim All Wild Gifts** (Animal Care), shown only with the beta marker; saved in
+- Checkbox under **Claim All Wild Gifts** (Animal Care), available to everyone (out of beta 2026-09-17); saved in
   Config.xml (`wildAnimalAutoClaimVisitGifts`).
 - Shares the Gift Animals radar scan; for each animal with a claimable gift it calls
   `AnimalProtocolManager.TakeGift(netId)` — up to 3 sends per animal, 10 s apart, 0.5 s between sends,
   never while Claim All is running. No distance limit of its own: the command carries no position, and a
   claim from **36.7 m** was accepted in the live test (the gift flag cleared and the reward reached the
-  bag). Whether the server records the distance is unknown — hence beta.
+  bag). Whether the server records the distance is unknown.
 - Log tag `[WildVisitGift]`: `+ gift animal`, `TakeGift(netId) attempt N dist=…`, `claimed netId=…`,
   session totals on disable. Live status row "Auto-claim Animal Gifts".
 
