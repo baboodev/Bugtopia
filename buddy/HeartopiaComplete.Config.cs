@@ -139,6 +139,7 @@ namespace HeartopiaMod
             data.keyEquipSeaCleaner = (int)this.keyEquipSeaCleaner;
             data.seaCleanAutoRadius = this.seaCleanAutoRadius;
             data.seaCleanCleanNoDelay = this.seaCleanCleanNoDelay;
+            data.cleanupBossAutoEnabled = this.cleanupBossAutoEnabled;
             data.autoCleanseCorruptedEnabled = this.autoCleanseCorruptedEnabled;
             data.hideSeaCleanBannerEnabled = this.hideSeaCleanBannerEnabled;
             data.disableOobTeleportEnabled = this.disableOobTeleportEnabled;
@@ -502,6 +503,7 @@ namespace HeartopiaMod
                 ? SeaCleanAutoRadiusDefault
                 : Mathf.Clamp(data.seaCleanAutoRadius, SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax);
             this.seaCleanCleanNoDelay = data.seaCleanCleanNoDelay;
+            this.cleanupBossAutoEnabled = data.cleanupBossAutoEnabled;
             this.autoCleanseCorruptedEnabled = data.autoCleanseCorruptedEnabled;
             this.hideSeaCleanBannerEnabled = data.hideSeaCleanBannerEnabled;
             this.disableOobTeleportEnabled = data.disableOobTeleportEnabled;

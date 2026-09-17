@@ -789,7 +789,8 @@ namespace HeartopiaMod
         // a term from it every underwater relocation got rolled back 48 m upward. A quest walk
         // drives the same walker through the same water, so it needs the same suppression.
         internal bool FarmWalkRunActive => (this.farmWalkToNodeEnabled && this.autoFarmActive)
-                                           || this.questWalkFollowing;
+                                           || this.questWalkFollowing
+                                           || this.CleanupBossDrivingWalker;
 
         // How many alternative end nodes to try when the direct line to a node is blocked.
         private const int FarmWalkDetourAttempts = 4;
@@ -1274,8 +1275,18 @@ namespace HeartopiaMod
             // and the snap is exactly what fails there: 86 nodes to cover a whole sea floor, so
             // "no reachable graph node within 60m" refuses routes that a fifteen-metre swim would
             // have finished. Asking first also skips an A* whose answer we were going to discard.
-            if (this.IsFarmWalkDirectSwimClear(from, to, out string swimWhy))
+            // Rule 4.11: the Ocean Cleanup safe-zone dash is a straight swim by decree, not by
+            // sweep. The countdown is 8 s and the bubble is 8-23 m away; a blocked-sweep refusal
+            // would hand the job to the graph, and the graph detour costs the bubble.
+            bool straightByRule = string.Equals(this.farmWalkLabel, "cleanupboss:safezone", StringComparison.Ordinal);
+            string swimWhy = string.Empty;
+            if (straightByRule || this.IsFarmWalkDirectSwimClear(from, to, out swimWhy))
             {
+                if (straightByRule)
+                {
+                    swimWhy = "safe-zone dash, straight by rule 4.11 over "
+                        + Vector3.Distance(from, to).ToString("F1") + "m";
+                }
                 this.farmWalkCorners.Clear();
                 this.farmWalkCorners.Add(to);
                 this.farmWalkCornerIndex = 0;
@@ -2883,6 +2894,11 @@ namespace HeartopiaMod
         private void TryRefineFarmWalkTargetHeight(Vector3 selfPos)
         {
             if (this.farmWalkHeightRefined
+                // The Ocean Cleanup boss walks aim at a point in open water (the boss standoff, the
+                // safe-zone centre) — a collectable that happens to stand near it says nothing about
+                // the aim's height. 01:4x: a bend of the bubble dash was lifted 5 m onto a pollutant
+                // and the leg cost 4.7 of the 8 s. CleanupBossFeature.cs.
+                || this.farmWalkLabel.StartsWith("cleanupboss:", StringComparison.Ordinal)
                 || this.farmWalkAimOffsetY != 0f    // contamination standoff owns its own height
                 || HorizontalDistance(selfPos, this.farmWalkTarget) > FarmWalkHeightRefineRange)
             {

@@ -458,6 +458,20 @@ even once. **[M]**
 **4.10** **[?]** One depth hold moves about 0.72 m — more than the deadband. Near the last metre the
 controller never settles and oscillates. Not fixed.
 
+**4.11** ⭐ **The Ocean Cleanup safe-zone dash swims straight, always** — label `cleanupboss:safezone`
+takes `corners = [target]` with no sweep and no graph, on the first build and on every re-path. The
+countdown is 8 s and the bubble sits 8–23 m away; a graph detour or a blocked-sweep refusal costs the
+bubble, and the explosion then throws the player across the arena. Four fights, twelve dashes: the
+eleven straight ones reached the bubble with 2.2–5.2 s to spare; the one the sweep refused (the line
+ran 1.2 m from the boss centre, 01:16:41) went to the graph, which led 20 m the wrong way, and the
+bubble was missed. **The boss on the line is not an obstacle.** Every dash in the recorder
+(2026-09-15 manual, 2026-09-16 automatic) whose straight line ran 0.2-4.9 m from the boss centre
+reached the bubble — twelve of them, e.g. 1.3 m → 1.7 m from the centre at the explosion, 0.2 m →
+fine. Its collider only fools the sweep, which is exactly why the sweep is bypassed here. A one-bend
+detour round the boss was tried on 2026-09-16 and removed the same night: the bend point got its
+height re-anchored onto a pollutant 5 m up (the walker's live-entity height refine, now skipped for
+`cleanupboss:*` walks) and the leg cost 4.7 of the 8 s. **[M]**
+
 ---
 
 ## 5. Forbidden

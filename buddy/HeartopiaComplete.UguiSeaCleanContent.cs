@@ -139,6 +139,11 @@ namespace HeartopiaMod
             // The three flag+save toggles
             public Toggle NoDelayToggle;
             public Toggle HideBannerToggle;
+            // Ocean Cleanup boss automation (flag + save) + its LIVE status line (level 1:
+            // cleanupBossAutoEnabled) — CleanupBossFeature.cs
+            public Toggle BossToggle;
+            public GameObject BossStatusLabel;
+            public string BossStatusRawSeen;
             public Toggle LittleWhaleToggle;
 
             // Little Whale block — TWO independent visibility levels (file header)
@@ -298,6 +303,14 @@ namespace HeartopiaMod
             handle.HideBannerToggle = this.CreateUguiCheckbox(scrollContent, "HideBanner",
                 this.L("Hide Crystal Clear Banner"), this.hideSeaCleanBannerEnabled,
                 new System.Action<bool>(this.OnUguiSeaCleanHideBannerToggled));
+            handle.BossToggle = this.CreateUguiCheckbox(scrollContent, "CleanupBoss",
+                this.L("Auto Ocean Cleanup Boss"), this.cleanupBossAutoEnabled,
+                new System.Action<bool>(this.OnUguiSeaCleanBossToggled));
+            handle.BossStatusRawSeen = this.cleanupBossStatus;
+            handle.BossStatusLabel = this.CreateUguiLabel(scrollContent, "CleanupBossStatus",
+                this.L("Boss: ") + this.cleanupBossStatus, 12f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.BossStatusLabel);
+            handle.BossStatusLabel.SetActive(false);
             handle.LittleWhaleToggle = this.CreateUguiCheckbox(scrollContent, "LittleWhaleFinder",
                 this.L("Little Whale Finder"), this.littleWhaleFinderEnabled,
                 new System.Action<bool>(this.OnUguiSeaCleanLittleWhaleToggled));
@@ -392,6 +405,15 @@ namespace HeartopiaMod
             yCur += 36f;                               // :942
             PlaceUguiTopLeft(handle.HideBannerToggle.gameObject, 8f, yCur, 360f, 30f);
             yCur += 36f;                               // :952
+            PlaceUguiTopLeft(handle.BossToggle.gameObject, 8f, yCur, 360f, 30f);
+            yCur += 36f;
+            bool bossOn = this.cleanupBossAutoEnabled;
+            SetUguiGoActive(handle.BossStatusLabel, bossOn);
+            if (bossOn)
+            {
+                PlaceUguiTopLeft(handle.BossStatusLabel, 8f, yCur, panelW, 40f);
+                yCur += 44f;
+            }
             PlaceUguiTopLeft(handle.LittleWhaleToggle.gameObject, 8f, yCur, 360f, 30f);
             yCur += 36f;                               // :961
 
@@ -461,7 +483,8 @@ namespace HeartopiaMod
         {
             int packed = (this.littleWhaleFinderEnabled ? 1 : 0)
                 | (this.farmState == HeartopiaComplete.AutoFarmState.CleansingCorruption ? 4 : 0)
-                | (this.seaCleanQteEnabled ? 8 : 0);
+                | (this.seaCleanQteEnabled ? 8 : 0)
+                | (this.cleanupBossAutoEnabled ? 16 : 0);
             if (this.littleWhaleFinderEnabled && this.littleWhalePresent)
             {
                 packed |= 2;
@@ -535,6 +558,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SeaCleanToggle, this.seaCleanQteEnabled);
                 this.SyncUguiToggleFromField(handle.NoDelayToggle, this.seaCleanCleanNoDelay);
                 this.SyncUguiToggleFromField(handle.HideBannerToggle, this.hideSeaCleanBannerEnabled);
+                this.SyncUguiToggleFromField(handle.BossToggle, this.cleanupBossAutoEnabled);
                 this.SyncUguiToggleFromField(handle.LittleWhaleToggle, this.littleWhaleFinderEnabled);
                 this.SyncUguiToggleFromField(handle.AutoCleanseToggle, this.autoCleanseCorruptedEnabled);
 
@@ -596,6 +620,17 @@ namespace HeartopiaMod
                     {
                         handle.StatusRawSeen = statusRaw;
                         this.SetUguiLabelText(handle.StatusLabel, this.L("Status: ") + statusRaw);
+                    }
+                }
+
+                // Boss status — LIVE while its level-1 gate shows it (CleanupBossFeature.cs).
+                if (this.cleanupBossAutoEnabled)
+                {
+                    string bossRaw = this.cleanupBossStatus;
+                    if (!ReferenceEquals(bossRaw, handle.BossStatusRawSeen))
+                    {
+                        handle.BossStatusRawSeen = bossRaw;
+                        this.SetUguiLabelText(handle.BossStatusLabel, this.L("Boss: ") + bossRaw);
                     }
                 }
 
@@ -692,6 +727,34 @@ namespace HeartopiaMod
             }
             this.seaCleanCleanNoDelay = value;
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Ocean Cleanup boss automation — flag + save + toast, then the relayout its status
+        // line hangs off. Turning it off mid-fight stops the run on the next tick
+        // (ProcessCleanupBossOnUpdate releases the button and the walker).
+        private void OnUguiSeaCleanBossToggled(bool value)
+        {
+            if (value == this.cleanupBossAutoEnabled)
+            {
+                return;
+            }
+            this.cleanupBossAutoEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+            this.AddMenuNotification(
+                $"Auto Ocean Cleanup Boss {(value ? "Enabled" : "Disabled")}",
+                value ? UguiSeaCleanOnColor : UguiSeaCleanOffColor);
+            ModLogger.Msg("[CleanupBoss] " + (value ? "enabled" : "disabled") + " from the Sea Clean tab.");
+
+            UguiShellNewFeaturesSeaCleanHandle handle = this.uguiShellNewFeaturesSeaClean;
+            if (handle == null || handle.Root == null)
+            {
+                return;
+            }
+            try
+            {
+                this.RelayoutUguiShellNewFeaturesSeaClean(handle);
+            }
+            catch { }
         }
 
         // :946-951 — flag + save only (the SeaCleanBannerHideFeature.cs field).

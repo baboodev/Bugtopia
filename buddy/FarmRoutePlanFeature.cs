@@ -1192,6 +1192,14 @@ namespace HeartopiaMod
         // switching to it is both cheaper and quieter than a warp.
         private bool HasAnotherFarmTourStop(Vector3 exceptThis)
         {
+            // Ocean Cleanup event mode bypasses the tour, so the plan is always empty here and the
+            // rescue teleport would fire on every failed approach (02:2x: node:walk-rescue with 20
+            // live targets around). The live scan answers instead (CleanupBossFeature.cs).
+            if (this.CleanupEventFarmModeActive)
+            {
+                return this.HasAnotherCleanupEventTarget(exceptThis);
+            }
+
             for (int i = 0; i < this.farmTourStops.Count; i++)
             {
                 if (!IsSameFarmTourStop(this.farmTourStops[i].Position, exceptThis))

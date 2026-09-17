@@ -173,7 +173,9 @@ namespace HeartopiaMod
                         // Corrupted debuff (buff 610) + Contamination radar: park at the nearest
                         // cleansing coral until it clears. Repair still wins (gate above); an
                         // in-flight Collecting dwell is never interrupted (this state only).
-                        if (this.TryBeginCorruptionCleanse())
+                        // Not during an Ocean Cleanup event: the trip to the coral costs the
+                        // personal stage, and the debuff clears on its own (CleanupBossFeature.cs).
+                        if (!this.CleanupEventFarmModeActive && this.TryBeginCorruptionCleanse())
                         {
                             break;
                         }
@@ -391,7 +393,21 @@ namespace HeartopiaMod
                         // costs the same from anywhere, so ordering buys nothing there.
                         Vector3? vector;
                         string scanNodeLabel;
-                        if (this.farmWalkToNodeEnabled)
+                        if (this.CleanupEventFarmHoldActive)
+                        {
+                            // The post-event pause (CleanupBossFeature.cs): nothing is picked.
+                            vector = null;
+                            scanNodeLabel = string.Empty;
+                        }
+                        else if (this.CleanupEventFarmModeActive)
+                        {
+                            // Ocean Cleanup event mode: nearest live pollutant, no tour
+                            // (CleanupBossFeature.cs, docs/plans/2026-09-16-ocean-cleanup-farm-mode.md).
+                            vector = this.TryPickCleanupEventTarget(out Vector3 eventStop, out scanNodeLabel)
+                                ? new Vector3?(eventStop)
+                                : null;
+                        }
+                        else if (this.farmWalkToNodeEnabled)
                         {
                             Vector3 tourOrigin = this.ResolveFarmTourOrigin();
                             this.TopUpFarmTour(tourOrigin, 0);
@@ -437,6 +453,17 @@ namespace HeartopiaMod
                             this.autoCollectClickedSinceArrival = false;
                             this.cameraRotationAttempts = 0;
                             this.BeginFarmNodeDwell(scanNodeLabel);
+                        }
+                        else if (this.CleanupEventFarmHoldActive)
+                        {
+                            this.autoFarmStatus = "Ocean Cleanup over — resuming in a moment...";
+                        }
+                        else if (this.CleanupEventFarmModeActive)
+                        {
+                            // Event mode: an empty scan is a pause, never a relocation — the next
+                            // wave of pollution streams in with the stage, and a farm-location hop
+                            // would leave the arena (or, after the sea exit, the level).
+                            this.autoFarmStatus = "Ocean Cleanup: waiting for pollution...";
                         }
                         else if (this.ShouldHoldFarmScanForSkippedNode())
                         {
@@ -605,6 +632,18 @@ namespace HeartopiaMod
                     }
                 case HeartopiaComplete.AutoFarmState.MovingToLocation:
                     {
+                        // Ocean Cleanup event mode: no relocation at all — back to the scan, which
+                        // waits in place on an empty pick (CleanupBossFeature.cs).
+                        if (this.CleanupEventFarmModeActive || this.CleanupEventFarmHoldActive)
+                        {
+                            this.AutoFarmLog(this.CleanupEventFarmModeActive
+                                ? "Relocation skipped: Ocean Cleanup event mode is on."
+                                : "Relocation skipped: the post-event hold is running.");
+                            this.farmState = HeartopiaComplete.AutoFarmState.ScanningForNodes;
+                            this.autoFarmTimer = 0f;
+                            break;
+                        }
+
                         // Auto Repair coordination: hold the location hop while a repair runs.
                         if (this.IsAutoRepairBusy())
                         {
@@ -614,7 +653,7 @@ namespace HeartopiaMod
                         }
 
                         // Corrupted debuff: cleanse before hopping to the next farm location.
-                        if (this.TryBeginCorruptionCleanse())
+                        if (!this.CleanupEventFarmModeActive && this.TryBeginCorruptionCleanse())
                         {
                             break;
                         }
@@ -844,7 +883,18 @@ namespace HeartopiaMod
                         // single relocation was costing a second, pointless teleport.
                         Vector3? vector2;
                         string waitingNodeLabel;
-                        if (this.farmWalkToNodeEnabled)
+                        if (this.CleanupEventFarmHoldActive)
+                        {
+                            vector2 = null;
+                            waitingNodeLabel = string.Empty;
+                        }
+                        else if (this.CleanupEventFarmModeActive)
+                        {
+                            vector2 = this.TryPickCleanupEventTarget(out Vector3 eventWaitStop, out waitingNodeLabel)
+                                ? new Vector3?(eventWaitStop)
+                                : null;
+                        }
+                        else if (this.farmWalkToNodeEnabled)
                         {
                             Vector3 waitOrigin = this.ResolveFarmTourOrigin();
                             this.TopUpFarmTour(waitOrigin, 0);
@@ -2933,6 +2983,13 @@ namespace HeartopiaMod
                             bool flag5 = markerOnCooldown;
                             if (!flag5)
                             {
+                                // Ocean Cleanup (CleanupBossFeature.cs): while the event is joined
+                                // the farm targets only contamination inside the event area.
+                                if (this.CleanupEventFarmGateActive
+                                    && !this.IsCleanupEventFarmCandidate(markerLabel, child.position))
+                                {
+                                    continue;
+                                }
                                 // Authoritative live check bypassing marker-rebuild/stamp lag:
                                 // a candidate whose entity is known cold is never targeted.
                                 bool liveCandidateCold;
