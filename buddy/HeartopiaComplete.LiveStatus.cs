@@ -307,6 +307,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Interact Build-Mode Bypass", this.interactBuildModeStatus));
             }
 
+            if (this.petHeightLimitBypassEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Pet Height Limit Bypass", this.petHeightLimitStatus));
+            }
+
             if (this.persistentHudEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Persistent HUD", this.persistentHudLastStatus));

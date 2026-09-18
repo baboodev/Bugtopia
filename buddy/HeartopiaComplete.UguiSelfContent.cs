@@ -113,6 +113,7 @@ namespace HeartopiaMod
             public Toggle CraftDirectSendToggle;
             public Toggle InteractObstacleToggle;
             public Toggle InteractBuildModeToggle;
+            public Toggle PetHeightLimitToggle;
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
             public Toggle AutoLikeOwnHomeToggle;
@@ -400,6 +401,9 @@ namespace HeartopiaMod
             handle.InteractBuildModeToggle = this.CreateUguiCheckbox(scrollContent, "InteractBuildModeToggle",
                 this.L("Ignore build mode on the interaction target"), this.interactBuildModeBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfInteractBuildModeToggled));
+            handle.PetHeightLimitToggle = this.CreateUguiCheckbox(scrollContent, "PetHeightLimitToggle",
+                this.L("Pet cats and dogs from any height"), this.petHeightLimitBypassEnabled,
+                new System.Action<bool>(this.OnUguiSelfPetHeightLimitToggled));
             handle.BlockTutorialsToggle = this.CreateUguiCheckbox(scrollContent, "BlockTutorialsToggle",
                 this.L("Disable tutorials"), this.blockTutorials,
                 new System.Action<bool>(this.OnUguiSelfBlockTutorialsToggled));
@@ -702,6 +706,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.PetHeightLimitToggle != null)
+            {
+                PlaceUguiTopLeft(handle.PetHeightLimitToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.BlockTutorialsToggle != null)
             {
                 PlaceUguiTopLeft(handle.BlockTutorialsToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -775,6 +785,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
                 this.SyncUguiToggleFromField(handle.InteractObstacleToggle, this.interactObstacleBypassEnabled);
                 this.SyncUguiToggleFromField(handle.InteractBuildModeToggle, this.interactBuildModeBypassEnabled);
+                this.SyncUguiToggleFromField(handle.PetHeightLimitToggle, this.petHeightLimitBypassEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
                 this.SyncUguiToggleFromField(handle.AutoLikeOwnHomeToggle, this.autoLikeOwnHome);
@@ -1303,6 +1314,16 @@ namespace HeartopiaMod
                 return;
             }
             this.interactBuildModeBypassEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfPetHeightLimitToggled(bool value)
+        {
+            if (value == this.petHeightLimitBypassEnabled)
+            {
+                return;
+            }
+            this.petHeightLimitBypassEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

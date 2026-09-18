@@ -343,6 +343,16 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
   toggle arms it independently. `IsBuildInBuilding` also clears a stale build-mode flag of your own
   (`CharacterProtocolManager.PostBuildMode(false, 4)`) — the original still runs through the
   trampoline, so that self-heal is kept.
+- **Third toggle — Pet cats and dogs from any height** (`PetHeightLimitBypassFeature.cs`, default
+  off). Removes **"Too far to interact."** = `InteractErrorCode.BeyondHeightLimit` (11041). Despite the
+  wording it is a *vertical* test: `AnimalComponent.CheckHigh` →
+  `|player.y − pet.y| > PetConfig.interactHeightLimit`, with the config taken from
+  `LevelScriptableConfig.Instance.catConfig` / `.dogConfig`. Producers: `PetTouchUtil.IsExecutable`
+  (petting) and `FeedPetCommand.IsExecutable` (feeding / "Here we go"). Lever is a **data write**, not
+  a detour: `interactHeightLimit` is raised to 10000 on both configs from the world-ready gate
+  (originals captured first, restored when the toggle goes off). A code-rewrite detour would be wrong
+  here, because `FeedPetCommand` tests height *before* busy, so rewriting 11041 → 0 would also skip the
+  busy test. Client gate only: the pet RPC still goes to the server.
 - Live status shows how many blocks were cleared this session; `[InteractObstacle]` verbose logging
   is a Settings → Logging row.
 - Persisted; default off. Source: `buddy/InteractObstacleBypassFeature.cs`.

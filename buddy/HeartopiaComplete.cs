@@ -773,6 +773,7 @@ namespace HeartopiaMod
             this.ProcessRepairThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
             this.ProcessInteractObstacleBypassOnUpdate();
+            this.ProcessPetHeightLimitBypassOnUpdate();
             this.ProcessFishingCameraHudOnUpdate();
             this.ProcessServerSideFishingOnUpdate();
             this.EnsureCollectColdRegistrations();
