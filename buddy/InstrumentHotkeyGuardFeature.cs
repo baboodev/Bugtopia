@@ -79,6 +79,7 @@ namespace HeartopiaMod
         // the ~50 keybind checks per frame dedupe to one EventSystem lookup.
         private int textInputFocusFrame = -1;
         private bool textInputFocusedCached;
+        private float textInputFocusLastSeenAt = -999f;
 
         private static bool IsMouseKeyCode(KeyCode key)
         {
@@ -250,7 +251,14 @@ namespace HeartopiaMod
             }
 
             this.textInputFocusFrame = Time.frameCount;
-            this.textInputFocusedCached = this.ResolveGameTextInputFocused();
+            // Stay "focused" for a short grace after the field lets go: the Enter/Esc that closes
+            // a field deactivates it inside EventSystem.Update, which can run before this frame's
+            // hotkey poll — without the grace that same key would also fire as a mod hotkey.
+            if (this.ResolveGameTextInputFocused())
+            {
+                this.textInputFocusLastSeenAt = Time.unscaledTime;
+            }
+            this.textInputFocusedCached = Time.unscaledTime - this.textInputFocusLastSeenAt < 0.3f;
             return this.textInputFocusedCached;
         }
 

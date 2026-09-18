@@ -95,6 +95,8 @@ namespace HeartopiaMod
         private const float UguiBuildingMovePanelBaseH = 206f;   // strip 24 + coord + 5 rows
         private const float UguiBuildingMovePanelGodH = 402f;    // + the 7 god-mode jog rows
         private const int UguiBuildingMovePanelSortingOrder = 29350; // Overlay 29300 < this < Shell 29400
+        private const float UguiBuildingMovePanelControlsY = 50f;
+        private const float UguiBuildingCoordEditExtraH = 28f;    // the editor's Apply/Cancel row
 
         private const float UguiFreePlacementRowStep = 28f;
         private const float UguiFreePlacementBaseRowsH = 5f * UguiFreePlacementRowStep;  // 140
@@ -199,6 +201,14 @@ namespace HeartopiaMod
             public UguiFreePlacementControlsHandle Controls;
             public GameObject CoordLabel;
             public string CoordShown;
+            public GameObject CoordButton;         // click target over the coordinate line (god mode)
+            // Typed-coordinate editor: X / Y / Z / yaw fields + Apply / Cancel, shown in place of
+            // the coordinate line; the controls below shift down by UguiBuildingCoordEditExtraH.
+            public GameObject CoordEditor;
+            public InputField[] CoordFields;
+            public string[] CoordFieldStart;       // text each field opened with (unchanged = skip)
+            public bool CoordEditOpen;
+            public bool CoordEditWasFocused;       // a field had focus last frame (Enter/Esc edge)
             public float LastSyncedUiScale = -1f;  // Phase 2e shell scale-sync idiom
             public int ErrorCount;
         }
@@ -931,8 +941,9 @@ namespace HeartopiaMod
                 handle.CoordLabel = this.CreateUguiLabel(panelT, "Coords", "",
                     11f, new Color(text.r, text.g, text.b, 0.95f), false);
                 PlaceUguiTopLeft(handle.CoordLabel, 12f, 26f, UguiBuildingMovePanelW - 24f, 18f);
+                this.BuildUguiBuildingCoordEditor(handle, panelT);
 
-                handle.Controls = this.BuildUguiFreePlacementControls(panelT, 14f, 50f, UguiBuildingMovePanelW - 28f);
+                handle.Controls = this.BuildUguiFreePlacementControls(panelT, 14f, UguiBuildingMovePanelControlsY, UguiBuildingMovePanelW - 28f);
 
                 // Content-fit height for the CURRENT god state (BuildUguiFreePlacementControls
                 // already applied the god rows' visibility), then scale + spawn position.
@@ -997,7 +1008,8 @@ namespace HeartopiaMod
                 return;
             }
             bool god = handle.Controls != null && handle.Controls.GodRowsVisible;
-            float target = god ? UguiBuildingMovePanelGodH : UguiBuildingMovePanelBaseH;
+            float target = (god ? UguiBuildingMovePanelGodH : UguiBuildingMovePanelBaseH)
+                + (handle.CoordEditOpen ? UguiBuildingCoordEditExtraH : 0f);
             if (Mathf.Approximately(win.Size.y, target))
             {
                 return;
@@ -1009,6 +1021,243 @@ namespace HeartopiaMod
             pos.y -= delta * 0.5f; // pin the top edge (y grows upward; height grows both ways)
             win.PanelRt.anchoredPosition = pos;
             this.ClampUguiWindowPosition(win);
+        }
+
+        // ----------------------------------------------------------------------------------------
+        // Typed coordinates — click the coordinate line (god mode) to edit X / Y / Z / yaw.
+        // Enter or Apply moves the object there (TryPlaceFocusedAtLocal), Esc or Cancel closes,
+        // Tab / Shift+Tab walks the fields. Only fields whose text changed are applied. While a
+        // field has focus the game's key listeners are muted (UpdateBuildingCoordEditInputGuard).
+        // ----------------------------------------------------------------------------------------
+
+        private static readonly string[] UguiBuildingCoordAxisCaptions = { "X", "Y", "Z", "°" };
+
+        private void BuildUguiBuildingCoordEditor(UguiBuildingMovePanelHandle handle, Transform panelT)
+        {
+            // Click target behind the coordinate line; the label stops catching rays so the click
+            // lands on the button.
+            Color fill = this.UguiKitControlFill();
+            handle.CoordButton = this.CreateUguiGo("CoordButton", panelT);
+            Image btnBg = this.AddUguiImage(handle.CoordButton, new Color(fill.r, fill.g, fill.b, 0.45f), true, 1.5f);
+            btnBg.raycastTarget = true;
+            Button btn = handle.CoordButton.AddComponent<Button>();
+            btn.targetGraphic = btnBg;
+            this.WireUguiClick(btn.onClick, new System.Action(this.OnUguiBuildingCoordLineClicked));
+            PlaceUguiTopLeft(handle.CoordButton, 8f, 25f, UguiBuildingMovePanelW - 16f, 20f);
+            handle.CoordButton.transform.SetSiblingIndex(handle.CoordLabel.transform.GetSiblingIndex());
+            Graphic labelGraphic = handle.CoordLabel.GetComponent<Graphic>();
+            if (labelGraphic != null)
+            {
+                labelGraphic.raycastTarget = false;
+            }
+
+            handle.CoordEditor = this.CreateUguiGo("CoordEditor", panelT);
+            PlaceUguiTopLeft(handle.CoordEditor, 0f, 24f, UguiBuildingMovePanelW, 24f + UguiBuildingCoordEditExtraH);
+            Transform edT = handle.CoordEditor.transform;
+            Color text = this.UguiKitTextColor();
+
+            // Row 1: "X [..] Y [..] Z [..] ° [..]" — 12 px caption + 72 px field per axis.
+            handle.CoordFields = new InputField[4];
+            handle.CoordFieldStart = new string[4];
+            for (int i = 0; i < 4; i++)
+            {
+                float x = 12f + i * 89f;
+                GameObject cap = this.CreateUguiLabel(edT, "Cap" + i, UguiBuildingCoordAxisCaptions[i],
+                    11f, new Color(text.r, text.g, text.b, 0.8f), true);
+                PlaceUguiTopLeft(cap, x, 2f, 12f, 20f);
+                InputField field = this.CreateUguiInputField(edT, "Coord" + i, "", 10, null);
+                field.contentType = InputField.ContentType.DecimalNumber;
+                PlaceUguiTopLeft(field.gameObject, x + 14f, 2f, 72f, 20f);
+                handle.CoordFields[i] = field;
+            }
+
+            // Row 2: Apply / Cancel.
+            GameObject apply = this.CreateUguiPrimaryButton(edT, "CoordApply", this.L("Apply"),
+                new System.Action(this.OnUguiBuildingCoordApplyClicked));
+            PlaceUguiTopLeft(apply, 12f, 26f, 110f, 22f);
+            GameObject cancel = this.CreateUguiSecondaryButton(edT, "CoordCancel", this.L("Cancel"),
+                new System.Action(this.OnUguiBuildingCoordCancelClicked));
+            PlaceUguiTopLeft(cancel, 128f, 26f, 110f, 22f);
+
+            handle.CoordEditor.SetActive(false);
+        }
+
+        private void OnUguiBuildingCoordLineClicked()
+        {
+            UguiBuildingMovePanelHandle handle = this.uguiBuildingMovePanel;
+            if (handle == null || handle.CoordEditOpen || !this.buildingMovePanelHasPos || !this.buildingMovePanelGodMode)
+            {
+                return;
+            }
+            Vector3 p = this.buildingMovePanelObjPos;
+            float yaw = Mathf.Repeat(this.buildingMovePanelObjYaw, 360f);
+            handle.CoordFieldStart[0] = p.x.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            handle.CoordFieldStart[1] = p.y.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            handle.CoordFieldStart[2] = p.z.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            handle.CoordFieldStart[3] = yaw.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+            for (int i = 0; i < 4; i++)
+            {
+                handle.CoordFields[i].text = handle.CoordFieldStart[i];
+            }
+            this.SetUguiBuildingCoordEditorOpen(handle, true);
+            this.FocusUguiBuildingCoordField(handle, 0);
+        }
+
+        private void OnUguiBuildingCoordApplyClicked()
+        {
+            UguiBuildingMovePanelHandle handle = this.uguiBuildingMovePanel;
+            if (handle != null && handle.CoordEditOpen)
+            {
+                this.ApplyUguiBuildingCoordEditor(handle);
+            }
+        }
+
+        private void OnUguiBuildingCoordCancelClicked()
+        {
+            UguiBuildingMovePanelHandle handle = this.uguiBuildingMovePanel;
+            if (handle != null)
+            {
+                this.SetUguiBuildingCoordEditorOpen(handle, false);
+            }
+        }
+
+        private void SetUguiBuildingCoordEditorOpen(UguiBuildingMovePanelHandle handle, bool open)
+        {
+            if (handle.CoordEditOpen == open)
+            {
+                return;
+            }
+            handle.CoordEditOpen = open;
+            handle.CoordEditWasFocused = false;
+            if (!open)
+            {
+                for (int i = 0; i < handle.CoordFields.Length; i++)
+                {
+                    if (handle.CoordFields[i] != null && handle.CoordFields[i].isFocused)
+                    {
+                        handle.CoordFields[i].DeactivateInputField();
+                    }
+                }
+            }
+            handle.CoordEditor.SetActive(open);
+            handle.CoordLabel.SetActive(!open);
+            handle.CoordButton.SetActive(!open);
+            if (handle.Controls != null && handle.Controls.Root != null)
+            {
+                RectTransform rt = handle.Controls.Root.GetComponent<RectTransform>();
+                rt.anchoredPosition = new Vector2(rt.anchoredPosition.x,
+                    -(UguiBuildingMovePanelControlsY + (open ? UguiBuildingCoordEditExtraH : 0f)));
+            }
+            this.ApplyUguiBuildingMovePanelHeight(handle);
+        }
+
+        private void FocusUguiBuildingCoordField(UguiBuildingMovePanelHandle handle, int index)
+        {
+            InputField field = handle.CoordFields[index];
+            if (field == null)
+            {
+                return;
+            }
+            field.Select();
+            field.ActivateInputField();
+        }
+
+        private static bool TryParseUguiBuildingCoord(string text, out float value)
+        {
+            string s = (text ?? string.Empty).Trim().Replace(',', '.');
+            return float.TryParse(s, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out value)
+                && !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        // Parse the changed fields and place the object. A bad number keeps the editor open with
+        // that field focused; success (or nothing changed) closes it.
+        private void ApplyUguiBuildingCoordEditor(UguiBuildingMovePanelHandle handle)
+        {
+            Vector3 pos = this.buildingMovePanelObjPos;
+            bool moved = false;
+            float yawDelta = 0f;
+            for (int i = 0; i < 4; i++)
+            {
+                string t = handle.CoordFields[i].text;
+                if (string.Equals((t ?? string.Empty).Trim(), handle.CoordFieldStart[i], StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (!TryParseUguiBuildingCoord(t, out float v))
+                {
+                    this.BuildingLog("coord edit: '" + t + "' is not a number (" + UguiBuildingCoordAxisCaptions[i] + ")");
+                    this.FocusUguiBuildingCoordField(handle, i);
+                    return;
+                }
+                if (i < 3)
+                {
+                    pos[i] = v;
+                    moved = true;
+                }
+                else
+                {
+                    yawDelta = Mathf.DeltaAngle(this.buildingMovePanelObjYaw, v);
+                }
+            }
+
+            if (moved || Mathf.Abs(yawDelta) > 0.01f)
+            {
+                this.TryPlaceFocusedAtLocal(moved ? (Vector3?)pos : null, yawDelta);
+            }
+            this.SetUguiBuildingCoordEditorOpen(handle, false);
+        }
+
+        // Per-frame editor driver, run while the panel is shown. Closes the editor when there is
+        // nothing to edit, handles Tab / Enter / Esc, and feeds the game-input mute.
+        private void ProcessUguiBuildingCoordEditor(UguiBuildingMovePanelHandle handle)
+        {
+            if (handle.CoordButton != null)
+            {
+                bool clickable = this.buildingMovePanelHasPos && this.buildingMovePanelGodMode;
+                Button btn = handle.CoordButton.GetComponent<Button>();
+                if (btn != null && btn.interactable != clickable)
+                {
+                    btn.interactable = clickable;
+                }
+            }
+
+            if (handle.CoordEditOpen && (!this.buildingMovePanelHasPos || !this.buildingMovePanelGodMode))
+            {
+                this.SetUguiBuildingCoordEditorOpen(handle, false);
+            }
+
+            int focused = -1;
+            if (handle.CoordEditOpen)
+            {
+                for (int i = 0; i < handle.CoordFields.Length; i++)
+                {
+                    if (handle.CoordFields[i] != null && handle.CoordFields[i].isFocused)
+                    {
+                        focused = i;
+                        break;
+                    }
+                }
+
+                bool typingEdge = focused >= 0 || handle.CoordEditWasFocused;
+                if (focused >= 0 && Input.GetKeyDown(KeyCode.Tab))
+                {
+                    bool back = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                    int next = (focused + (back ? 3 : 1)) % 4;
+                    this.FocusUguiBuildingCoordField(handle, next);
+                }
+                else if (typingEdge && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)))
+                {
+                    this.ApplyUguiBuildingCoordEditor(handle);
+                }
+                else if (typingEdge && Input.GetKeyDown(KeyCode.Escape))
+                {
+                    this.SetUguiBuildingCoordEditorOpen(handle, false);
+                }
+                handle.CoordEditWasFocused = handle.CoordEditOpen && focused >= 0;
+            }
+
+            this.UpdateBuildingCoordEditInputGuard(handle.CoordEditOpen && focused >= 0);
         }
 
         // Called every frame from OnUpdate (HeartopiaComplete.cs, next to the other UGUI
@@ -1027,6 +1276,7 @@ namespace HeartopiaMod
                 UguiBuildingMovePanelHandle handle = this.uguiBuildingMovePanel;
                 if (handle == null)
                 {
+                    this.UpdateBuildingCoordEditInputGuard(false);
                     if (!show || this.uguiBuildingMovePanelBuildFailed)
                     {
                         return; // nothing to show, or already failed once this session
@@ -1041,6 +1291,7 @@ namespace HeartopiaMod
 
                 if (handle.ErrorCount >= 3)
                 {
+                    this.UpdateBuildingCoordEditInputGuard(false);
                     return;
                 }
 
@@ -1050,6 +1301,8 @@ namespace HeartopiaMod
                 }
                 if (!show)
                 {
+                    this.SetUguiBuildingCoordEditorOpen(handle, false);
+                    this.UpdateBuildingCoordEditInputGuard(false);
                     return;
                 }
 
@@ -1078,6 +1331,7 @@ namespace HeartopiaMod
                     this.SetUguiLabelText(handle.CoordLabel, coordText);
                 }
 
+                this.ProcessUguiBuildingCoordEditor(handle);
                 this.SyncUguiFreePlacementControls(handle.Controls);
                 this.ApplyUguiBuildingMovePanelHeight(handle);
             }
