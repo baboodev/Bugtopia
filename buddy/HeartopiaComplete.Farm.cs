@@ -458,6 +458,11 @@ namespace HeartopiaMod
                         {
                             this.autoFarmStatus = "Ocean Cleanup over — resuming in a moment...";
                         }
+                        else if (this.CleanupEventPreStartActive)
+                        {
+                            // Nothing left inside the bounds: wait for the start where we stand.
+                            this.autoFarmStatus = "Ocean Cleanup joined — waiting for the start...";
+                        }
                         else if (this.CleanupEventFarmModeActive)
                         {
                             // Event mode: an empty scan is a pause, never a relocation — the next
@@ -634,11 +639,13 @@ namespace HeartopiaMod
                     {
                         // Ocean Cleanup event mode: no relocation at all — back to the scan, which
                         // waits in place on an empty pick (CleanupBossFeature.cs).
-                        if (this.CleanupEventFarmModeActive || this.CleanupEventFarmHoldActive)
+                        if (this.CleanupEventFarmModeActive || this.CleanupEventFarmHoldActive || this.CleanupEventPreStartActive)
                         {
                             this.AutoFarmLog(this.CleanupEventFarmModeActive
                                 ? "Relocation skipped: Ocean Cleanup event mode is on."
-                                : "Relocation skipped: the post-event hold is running.");
+                                : this.CleanupEventPreStartActive
+                                    ? "Relocation skipped: joined the Ocean Cleanup, waiting for its start."
+                                    : "Relocation skipped: the post-event hold is running.");
                             this.farmState = HeartopiaComplete.AutoFarmState.ScanningForNodes;
                             this.autoFarmTimer = 0f;
                             break;
@@ -2987,6 +2994,12 @@ namespace HeartopiaMod
                                 // the farm targets only contamination inside the event area.
                                 if (this.CleanupEventFarmGateActive
                                     && !this.IsCleanupEventFarmCandidate(markerLabel, child.position))
+                                {
+                                    continue;
+                                }
+                                // Joined, not started: any kind of target, but only inside the bounds.
+                                if (this.CleanupEventPreStartActive
+                                    && !IsInsideCleanupEventBounds(child.position))
                                 {
                                     continue;
                                 }

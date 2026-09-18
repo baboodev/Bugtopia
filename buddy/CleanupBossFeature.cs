@@ -174,6 +174,12 @@ namespace HeartopiaMod
         private int cleanupEventStage = -1;
         private int cleanupEventStageIndex = -1;
         private bool cleanupEventFarmModeWas;
+        // "Joined, not started": the player is a member of the activity (ActivityEventSystem.
+        // IsSelfInActivity, polled — the Joined event only says the activity entity streamed in)
+        // and no stage has arrived yet. Aura Farm stays inside the event bounds meanwhile.
+        private bool cleanupEventMember;
+        private float cleanupEventMemberNextPollAt;
+        private bool cleanupEventPreStartWas;
         private float cleanupEventFarmHoldUntil = -1f;
         private float cleanupEventPickEmptyAt = -100f;
         private bool cleanupEventPickQuiet;
@@ -237,6 +243,14 @@ namespace HeartopiaMod
         internal bool CleanupEventFarmModeActive =>
             this.cleanupBossAutoEnabled && this.autoFarmActive && this.IsCleanupEventFarmStage;
 
+        // Joined and waiting for the start (user rule 2026-09-18): targets only INSIDE the event
+        // bounds — any kind, the event's own pollution does not exist yet — and no relocation, so
+        // the start finds the player in the arena. 2026-09-18: joined, then Glasswort 94 m away and
+        // Sea Grape at x=93 while the event was about to begin. Read by HeartopiaComplete.Farm.cs.
+        internal bool CleanupEventPreStartActive =>
+            this.cleanupBossAutoEnabled && this.autoFarmActive
+            && this.cleanupEventJoined && this.cleanupEventStage < 0 && this.cleanupEventMember;
+
         // The post-event pause: Aura Farm neither picks nor relocates while it runs. Read by
         // HeartopiaComplete.Farm.cs next to CleanupEventFarmModeActive.
         internal bool CleanupEventFarmHoldActive =>
@@ -259,6 +273,11 @@ namespace HeartopiaMod
                 return false;
             }
 
+            return IsInsideCleanupEventBounds(position);
+        }
+
+        internal static bool IsInsideCleanupEventBounds(Vector3 position)
+        {
             return position.x >= CleanupEventMinX && position.x <= CleanupEventMaxX
                 && position.y >= CleanupEventMinY && position.y <= CleanupEventMaxY
                 && position.z >= CleanupEventMinZ && position.z <= CleanupEventMaxZ;
@@ -317,6 +336,8 @@ namespace HeartopiaMod
                     return;
                 }
 
+                this.TickCleanupEventMembership(now);
+                this.TrackCleanupEventPreStart();
                 this.TrackCleanupEventFarmMode();
                 if (!this.CleanupBossRunActive)
                 {
@@ -357,6 +378,7 @@ namespace HeartopiaMod
             }
 
             this.cleanupEventJoined = false;
+            this.cleanupEventMember = false;
             this.cleanupEventStage = -1;
             this.cleanupEventStageIndex = -1;
             this.cleanupBossAlive = false;
@@ -405,7 +427,8 @@ namespace HeartopiaMod
             this.cleanupExploding = false;
             CleanupBossLog("joined configIdx=" + configIdx + " stageIndex=" + stageIndex
                 + " activityNetId=" + activityNetId
-                + (this.cleanupBossAutoEnabled ? " — farm gate on (contamination inside the event area only)." : "."));
+                + " — the activity entity is in range; membership is polled.");
+            this.cleanupEventMemberNextPollAt = 0f;
             if (this.cleanupBossAutoEnabled)
             {
                 this.cleanupBossStatus = "Event joined — waiting for the boss.";
@@ -1231,6 +1254,94 @@ namespace HeartopiaMod
             if (this.cleanupBossAutoEnabled && !this.CleanupBossRunActive)
             {
                 this.cleanupBossStatus = "Event stage " + CleanupStageName(stage) + ".";
+            }
+        }
+
+        // Membership poll, only while it matters: joined, no stage yet. A started event needs no
+        // membership test — the stage events only reach participants.
+        private void TickCleanupEventMembership(float now)
+        {
+            if (!this.cleanupEventJoined || this.cleanupEventStage >= 0)
+            {
+                return;
+            }
+
+            if (now < this.cleanupEventMemberNextPollAt)
+            {
+                return;
+            }
+
+            this.cleanupEventMemberNextPollAt = now + 2f;
+            if (!AuraMonoPinningAvailable || !this.TryResolveActivityAutoDeclineMethods())
+            {
+                return;
+            }
+
+            IntPtr instance = this.TryGetAuraMonoDataModuleInstance(this.activityEventSystemClass);
+            if (instance == IntPtr.Zero)
+            {
+                return;
+            }
+
+            bool member;
+            uint pin = AuraMonoPinNew(instance);
+            try
+            {
+                if (!this.TryInvokePartySystemBool(instance, this.activityIsSelfInActivityMethod, out member))
+                {
+                    return;
+                }
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+
+            if (member != this.cleanupEventMember)
+            {
+                this.cleanupEventMember = member;
+                CleanupBossLog(member
+                    ? "joined the activity as a member — the event has not started yet."
+                    : "no longer a member of the activity.");
+            }
+        }
+
+        // The pre-start state flipping: on the way in the plan is dropped and a walk heading out of
+        // the bounds is aborted, exactly like the event mode does at the start.
+        private void TrackCleanupEventPreStart()
+        {
+            bool active = this.CleanupEventPreStartActive;
+            if (active == this.cleanupEventPreStartWas)
+            {
+                return;
+            }
+
+            this.cleanupEventPreStartWas = active;
+            if (!active)
+            {
+                CleanupBossLog("pre-start hold OFF (stage " + CleanupStageName(this.cleanupEventStage) + ").");
+                return;
+            }
+
+            CleanupBossLog("pre-start hold ON: member of the event, not started — Aura Farm stays inside the event bounds, no relocation.");
+            try
+            {
+                this.ResetFarmTour();
+                if (this.farmWalkActive
+                    && this.farmState == HeartopiaComplete.AutoFarmState.WalkingToNode
+                    && !IsInsideCleanupEventBounds(this.farmWalkTrueTarget))
+                {
+                    CleanupBossLog("dropping the walk in progress (" + this.farmWalkLabel + " -> "
+                        + FormatNavMeshVector(this.farmWalkTrueTarget) + ") — it leaves the event bounds.");
+                    this.AbortFarmWalk();
+                    this.farmState = HeartopiaComplete.AutoFarmState.ScanningForNodes;
+                    this.autoFarmTimer = 0f;
+                    this.autoFarmStatus = "Ocean Cleanup joined — staying in the event area...";
+                }
+            }
+            catch (Exception ex)
+            {
+                CleanupBossLog("pre-start switch threw: " + ex.Message);
             }
         }
 
