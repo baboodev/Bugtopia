@@ -8,8 +8,8 @@ namespace HeartopiaMod
     // ============================================================================================
     // UGUI SHELL — Phase 3 tab CONTENT, New Features round (migration plan item 12): the EXTRA
     // sub-tab — DrawExtraFeaturesTab (AnimalCareFeature.cs:72-94), newFeaturesSubTab == 5
-    // (AnimalCareFeature.cs:54-57 dispatcher). Four sections stack vertically into this ONE
-    // sub-tab, the first three in the source's own order:
+    // (AnimalCareFeature.cs:54-57 dispatcher). Three sections stack vertically into this ONE
+    // sub-tab:
     //   1. AnimalCareFeature.cs:72-94   — header + the Open Craft Panel button (toast-only
     //      feedback; NO persistent status field exists for it and none is invented here);
     //   2. ClearMissedCallsFeature.cs   — Missed Calls. The one section with NO IMGUI ancestor:
@@ -17,17 +17,14 @@ namespace HeartopiaMod
     //      Header / hint / one primary button / status line — Carpet Stamp's shape, deliberately,
     //      and fixed-height, so it costs the relayout nothing;
     //   3. CarpetStampFeature.cs:466-555 — DrawCarpetStampSection (scan/step controls + the
-    //      scan-result list with per-row CONDITIONAL tails);
-    //   4. SanrioGachaFinderFeature.cs:848-967 — DrawSanrioGachaSection (toggle-gated block:
-    //      hint, daily counter, 3 fixed Star Town rows, the frame-resorted placed-machine list,
-    //      overflow + empty-state).
+    //      scan-result list with per-row CONDITIONAL tails).
     //
     // Ground rules (same as every prior round):
     //  - The IMGUI drawers and every backend method they call stay fully functional and
     //    untouched — this file only READS the same fields and CALLS the same action methods
     //    (all directly on HeartopiaComplete via the three feature partials; ZERO backend
     //    additions: TryOpenCraftPanel, TryCarpetStampScan/StepOn/StepOff, CarpetStampLog,
-    //    StartSanrioGachaTeleport, SaveKeybinds, AddMenuNotification + the fields/consts).
+    //    AddMenuNotification + the fields/consts).
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
     //    UguiShellExtraSubIndex = 5, declared with their siblings in UguiShellTabIndices.cs),
     //    never label comparison. The processor gates on the SAME
@@ -38,12 +35,9 @@ namespace HeartopiaMod
     // Source nuances verified against the drawers, replayed exactly:
     //  - LOCALIZATION SPLIT: part 1 localizes both strings (extra.title / craft.open dot-keys);
     //    part 2 (Carpet Stamp) localizes NOTHING — every header/hint/button/status/row string is
-    //    an unlocalized source literal, kept verbatim; part 3 localizes nearly everything via
-    //    L/LF, including the leading-spaces key "  ✓ collected today" and the L("live") /
-    //    L("map point") fragments. DrawSwitchToggle and DrawSecondaryActionButton L() their
-    //    labels internally (UiKitPrimitives.cs:744-763), so the kit checkbox/buttons here get
-    //    this.L(...) once at the call site (Sand Sculpture's convention; the source's own
-    //    L("Teleport") into DrawSecondaryActionButton double-L's — one L is the intent).
+    //    an unlocalized source literal, kept verbatim. DrawSecondaryActionButton L()s its
+    //    label internally (UiKitPrimitives.cs:744-763), so the kit buttons here get this.L(...)
+    //    once at the call site (Sand Sculpture's convention).
     //  - "Step On Nearest" (CarpetStampFeature.cs:485-511) is a LINEAR FIRST-MATCH over
     //    carpetStampScanResults for HasSkills — NOT nearest-by-distance despite its label. The
     //    quirk is reproduced as-is (including the "nothing steppable" status + toast +
@@ -65,45 +59,6 @@ namespace HeartopiaMod
     //  - Row CLICK closures capture the SLOT INDEX and read the live list at click time (bounds-
     //    guarded), exactly like the IMGUI buttons act on the entry at that index of the live
     //    list — a pooled row never holds a stale entry copy.
-    //  - SANRIO TOGGLE GATE (:868-871 — `if (!enabled) return y + 4`): everything below the
-    //    toggle is ONE SanrioDetails container SetActive'd by the relayout — a true hide of the
-    //    whole block (hint, counter, scene rows, placed list, overflow, empty-state), not a
-    //    skip in a build loop. Toggle change = flag + SaveKeybinds(false) ONLY (:860-865, no
-    //    notification), guarded on actual change (kit checkbox build-fire idiom).
-    //  - PLACED LIST RESORT (:917-926): the source Clear()s sanrioPlacedSorted, refills it from
-    //    the sanrioPlacedMachines dictionary and re-Sorts by squared distance to Camera.main
-    //    EVERY DRAWN FRAME while the toggle is on (verified — it is a genuine frame-driven
-    //    resort, not change-gated). Reproduced at the same cadence: every gated frame with the
-    //    toggle on, the SHARED sorted list (both surfaces one truth — the IMGUI twin refills it
-    //    before reading anyway, so cross-surface writes cannot corrupt either) is rebuilt and
-    //    re-sorted, then diffed against the pooled rows. The sort comparison is a build-time
-    //    cached Comparison reading a camPos field (identical ordering, no per-frame closure
-    //    alloc — the one divergence from the IMGUI line, which allocates its lambda per frame).
-    //    Sorting only happens when Camera.main exists, same as the source's `if (cam != null)`.
-    //  - NO ICONS anywhere in this round (verified — part 3 renders no textures/sprites), and
-    //    the Star Town block is a FIXED-COUNT loop over SanrioSceneMachineCount = 3
-    //    (SanrioGachaFinderFeature.cs:39, compile-time const) — 3 always-active rows, plain
-    //    static build, not a pooled list. Scene machine 302506-08 rows and placed rows share
-    //    one row shape: CreateUguiListRow shape (b) (label + one right-aligned 130px Secondary
-    //    "Teleport" button; visible only when Present — placed rows' button is unconditional),
-    //    label recolored to the source's muted bodyStyle (uiSubTabText @ 0.92, :854-855 — the
-    //    kit row label defaults to full text color; SetUguiLabelColor re-applies the source
-    //    role).
-    //  - Row text recomposition rides per-row VALUE-TUPLE diffs (netId/HasSkills/Distance/label
-    //    ref for carpet — Distance is a SCAN-TIME SNAPSHOT stored in the entry, not live;
-    //    present/live/doneBit/(int)dist for scene rows; netId/(int)dist/done for placed rows —
-    //    (int) truncation means a row recomposes only on whole-meter changes while moving), so
-    //    the every-gated-frame read stays allocation-free until something displayed actually
-    //    changes. Counters and overflow labels ride int caches the same way.
-    //  - WRAPPED PARAGRAPHS (hint :873-876 500x62+66, empty-state :959-965 500x34+38, both
-    //    bodyStyle wordWrap): heights measured via the Pictures round's proven
-    //    MeasureUguiPicturesWrappedHeight (GetPreferredValues width-constrained flavor, Ceil+4,
-    //    sanity gate) with the source rect heights (62/34) as fallbacks; advance = height + 4
-    //    (the source's rect+4 cursor step). The spike's build-time caveat applies (built on a
-    //    non-active sub-tab, possibly inside an inactive details container): a rejected measure
-    //    keeps the fallback and the 0.5s tick retries while the sub-tab is visible AND the
-    //    toggle is on (a hidden details block can't awaken its TMP components — retrying while
-    //    hidden is pointless; enabling makes the next tick measure for real).
     //
     // Positions replay the source cursor chains verbatim (content top margin 8 standing in for
     // startY, x=8 for the source's uniform left=40; fixed widths 460/360/210/200/130/55 kept,
@@ -119,26 +74,16 @@ namespace HeartopiaMod
     //   Scan y=250 (200x30 PRIMARY) | Step On Nearest x=218 (200x30 Secondary)   (+36)
     //   carpet status y=286 (panelW x20)                       (+26)
     //   carpet rows top y=312 — FIXED (rows h=22, pitch 24, ≤ CarpetStampMaxRowsShown=12)
-    //   [overflow +22]  → +8 (section return)  → +14 (the dispatcher's inter-section gap)
-    //   sanrio header (460x24)  (+30)  toggle (360x30)  (+36)
-    //   [details: hint (panelW x measured, +H+4); counter (+26); 3 scene rows (h=26, pitch 28 —
-    //    the source's 22-label/26-button-at-y-4 pair enclosed in one 26px row, same 28 pitch);
-    //    placed counter (+26); ≤ SanrioPlacedRowsShown=8 placed rows (pitch 28); [overflow +24];
-    //    [empty-state +H+4]; +8 (section return)] | toggle off: +4 (:870)
+    //   [overflow +22]  → +8 (section return)
     //   content height = final cursor + 20 (DrawExtraFeaturesTab:93; DrawNewFeaturesTab adds 0).
     // Everything through the carpet status line is static (built-once positions); the carpet
-    // overflow and the whole Sanrio section flow — RelayoutUguiShellNewFeaturesExtra owns those
-    // positions and the details SetActive, re-run when the layout signature changes (packed
-    // counts/flags: shown carpet rows + overflow, enabled, shown placed rows + overflow, empty-
-    // state visibility, scene Present/Live bits + the done mask — per this round's brief — plus
-    // the two measured heights).
+    // overflow and the content height flow — RelayoutUguiShellNewFeaturesExtra owns those, re-run
+    // when the layout signature (shown carpet rows + overflow) changes.
     //
     // Cross-surface sync cadence: every gated frame (shell visible + New Features tab + Extra
-    // sub-tab) — toggle re-sync (WithoutNotify), carpet status raw-reference diff, carpet row
-    // tuple diffs, and (toggle on) the placed-list resort + scene/placed row tuple diffs +
-    // counter/overflow int diffs, then the layout-signature check. The 0.5s tick carries only
-    // the wrapped-paragraph measure retries. Per-frame sync disabled after 3 consecutive errors
-    // (LIVE rail idiom).
+    // sub-tab) — carpet status raw-reference diff, carpet row tuple diffs, then the layout-
+    // signature check. The 0.5s tick carries the missed-calls status re-check. Per-frame sync
+    // disabled after 3 consecutive errors (LIVE rail idiom).
     // ============================================================================================
     public partial class HeartopiaComplete
     {
@@ -151,7 +96,6 @@ namespace HeartopiaMod
             public GameObject Root;
             public Transform ScrollContent;
             public float PanelW;
-            public Color MutedColor;              // the Sanrio bodyStyle color (grow-time rows)
 
             // -------- Missed Calls --------
             public GameObject MissedCallsStatusLabel;
@@ -169,36 +113,10 @@ namespace HeartopiaMod
             public GameObject CarpetOverflowLabel;
             public int CarpetOverflowCount = -1;  // -1 = never composed
 
-            // -------- Sanrio Gacha --------
-            public GameObject SanrioHeader;
-            public Toggle SanrioToggle;
-            public GameObject SanrioDetails;      // SetActive gate over the whole below-toggle block
-            public GameObject SanrioHintLabel;
-            public float SanrioHintH;             // measured (fallback 62 — the source rect)
-            public bool SanrioHintMeasureOk;
-            public GameObject SanrioCounterLabel;
-            public int SanrioCounterShownTotal = -1;
-            public readonly UguiListRowHandle[] SanrioSceneRows = new UguiListRowHandle[SanrioSceneMachineCount];
-            public readonly int[] SanrioSceneSig = new int[SanrioSceneMachineCount];   // present|live|done bits
-            public readonly int[] SanrioSceneDist = new int[SanrioSceneMachineCount];  // (int)dist, sentinel MinValue
-            public GameObject SanrioPlacedCounterLabel;
-            public int SanrioPlacedCounterShown = -1;
-            public readonly List<UguiListRowHandle> SanrioPlacedRows = new List<UguiListRowHandle>();
-            public readonly List<uint> SanrioPlacedNetId = new List<uint>();
-            public readonly List<int> SanrioPlacedDistInt = new List<int>();
-            public readonly List<bool> SanrioPlacedDone = new List<bool>();
-            public GameObject SanrioPlacedOverflowLabel;
-            public int SanrioPlacedOverflowCount = -1;
-            public GameObject SanrioEmptyLabel;
-            public float SanrioEmptyH;            // measured (fallback 34 — the source rect)
-            public bool SanrioEmptyMeasureOk;
-
             // Layout signature — the exact values the last relayout used
             public int LayoutPacked = -1;
-            public float LayoutHintH = -1f;
-            public float LayoutEmptyH = -1f;
 
-            public float NextSlowSyncAt;          // 0.5s tick (measure retries only)
+            public float NextSlowSyncAt;          // 0.5s tick (missed-calls status)
             public int ErrorCount;                // per-frame sync disabled at 3 (LIVE rail idiom)
         }
 
@@ -213,11 +131,6 @@ namespace HeartopiaMod
         // 198 before the Missed Calls section was inserted above it; that block is fixed-height,
         // so the only layout consequence is this constant and the four carpet chrome positions.
         private const float UguiExtraCarpetRowsTopY = 312f;
-
-        // Cached sort state for the per-frame placed resort (file header: identical ordering to
-        // the source's per-frame lambda, without its per-frame closure allocation).
-        private Vector3 uguiExtraSanrioSortCamPos;
-        private Comparison<SanrioPlacedMachine> uguiExtraSanrioSortComparison;
 
         // ----------------------------------------------------------------------------------------
         // Builder
@@ -265,12 +178,8 @@ namespace HeartopiaMod
             handle.ScrollContent = scrollContent;
             handle.PanelW = panelW;
 
-            // The two text roles this round needs beyond the kit defaults (file header):
-            // headers = bold 14 in uiText (all three sections build the same headerStyle), and
-            // the Sanrio bodyStyle = 12 wordWrap in uiSubTabText @ 0.92 (:854-855).
+            // Headers = bold 14 in uiText (every section builds the same headerStyle).
             Color headerColor = this.UguiKitTextColor();
-            Color mutedColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
-            handle.MutedColor = mutedColor;
 
             // ==================== Part 1 — Extra header + Open Craft Panel ====================
 
@@ -345,103 +254,8 @@ namespace HeartopiaMod
             // Rows themselves are pooled on demand by SyncUguiExtraCarpetRows (fixed region top —
             // nothing above them ever moves).
 
-            // ==================== Part 4 — Sanrio Gacha Machines ====================
-
-            // :857 — header (positions from here down are owned by the relayout — the carpet
-            // list above changes their y).
-            handle.SanrioHeader = this.CreateUguiLabel(scrollContent, "SanrioHeader",
-                this.L("Sanrio Gacha Machines"), 14f, headerColor, false);
-            this.TrySetUguiLabelBold(handle.SanrioHeader);
-
-            // :860-865 — DrawSwitchToggle (L()s internally → one L here); flag + save only.
-            handle.SanrioToggle = this.CreateUguiCheckbox(scrollContent, "SanrioFinderToggle",
-                this.L("Sanrio Gacha Finder"), this.sanrioGachaFinderEnabled,
-                new System.Action<bool>(this.OnUguiExtraSanrioFinderToggled));
-
-            // :868-871 — everything below lives in ONE container the relayout SetActives.
-            GameObject details = this.CreateUguiGo("SanrioDetails", scrollContent);
-            PlaceUguiTopLeft(details, 0f, 0f, contentWidth, 10f); // children use content coords
-            handle.SanrioDetails = details;
-
-            // :873-876 — the wrapped hint paragraph (measured height, fallback = source rect 62).
-            handle.SanrioHintLabel = this.CreateUguiLabel(details.transform, "SanrioHint",
-                this.L("Finds every SANRIO gacha machine around you and pins it on the game map: the three event machines in Star Town plus machines placed by players in their homes (found while you roam; remembered for the session). Touching each machine drops a capsule reward once per day — up to 5 per day."),
-                12f, mutedColor, false);
-            this.TrySetUguiLabelWrapped(handle.SanrioHintLabel);
-
-            // :880-883 — bold daily counter (text seeded by the first sync pass).
-            handle.SanrioCounterLabel = this.CreateUguiLabel(details.transform, "SanrioCounter",
-                "", 12f, mutedColor, false);
-            this.TrySetUguiLabelBold(handle.SanrioCounterLabel);
-
-            // :888-914 — the three FIXED Star Town rows (shape (b): label + 130px Secondary
-            // Teleport, hidden while !Present; muted label per the source bodyStyle).
-            for (int i = 0; i < SanrioSceneMachineCount; i++)
-            {
-                int slot = i; // capture a copy for the click closure
-                UguiListRowHandle row = this.CreateUguiListRow(details.transform, "SanrioScene" + i,
-                    8f, 0f, panelW, 26f,
-                    "", null, null, false, true, null,
-                    new UguiListRowButtonSpec[]
-                    {
-                        new UguiListRowButtonSpec
-                        {
-                            Label = this.L("Teleport"), Tier = UguiListRowTierSecondary,
-                            Width = 130f, Enabled = true,
-                            OnClick = new System.Action(() => this.OnUguiExtraSanrioSceneTeleportClicked(slot))
-                        }
-                    });
-                this.SetUguiLabelColor(row.Label, mutedColor);
-                handle.SanrioSceneRows[i] = row;
-                handle.SanrioSceneSig[i] = -1;              // never composed
-                handle.SanrioSceneDist[i] = int.MinValue;
-            }
-
-            // :928-930 — placed-machines counter.
-            handle.SanrioPlacedCounterLabel = this.CreateUguiLabel(details.transform, "SanrioPlacedCounter",
-                "", 12f, mutedColor, false);
-
-            // :952-957 — placed overflow (visibility/position owned by the relayout).
-            handle.SanrioPlacedOverflowLabel = this.CreateUguiLabel(details.transform, "SanrioPlacedOverflow",
-                "", 12f, mutedColor, false);
-            handle.SanrioPlacedOverflowLabel.SetActive(false);
-
-            // :959-965 — empty-state paragraph (wrapped; measured, fallback = source rect 34).
-            handle.SanrioEmptyLabel = this.CreateUguiLabel(details.transform, "SanrioEmpty",
-                this.L("Event machines stand in Star Town (event runs 2026-07-17 – 2026-08-23); player-placed ones are discovered as you roam homes and plazas."),
-                12f, mutedColor, false);
-            this.TrySetUguiLabelWrapped(handle.SanrioEmptyLabel);
-            handle.SanrioEmptyLabel.SetActive(false);
-
-            // Placed rows are pooled on demand by SyncUguiExtraSanrioPlacedRows.
-
-            // Cached placed-sort comparison (file header — the source's :924-925 ordering with a
-            // field-read camPos instead of a per-frame closure capture).
-            this.uguiExtraSanrioSortComparison = delegate (SanrioPlacedMachine a, SanrioPlacedMachine b)
-            {
-                return (a.Pos - this.uguiExtraSanrioSortCamPos).sqrMagnitude
-                    .CompareTo((b.Pos - this.uguiExtraSanrioSortCamPos).sqrMagnitude);
-            };
-
-            // First measurements (may run while this sub-tab — or the details block — is
-            // inactive; a rejected measure keeps the source-rect fallback and the slow tick
-            // retries once actually visible, the Pictures spike caveat).
-            bool ok;
-            handle.SanrioHintH = this.MeasureUguiExtraHintHeight(handle, true, out ok);
-            handle.SanrioHintMeasureOk = ok;
-            handle.SanrioEmptyH = this.MeasureUguiExtraHintHeight(handle, false, out ok);
-            handle.SanrioEmptyMeasureOk = ok;
-
-            // Seed pass: rows/counters/status from the live backend state, then the first layout.
-            Camera cam = Camera.main;
-            Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
+            // Seed pass: rows from the live backend state, then the first layout.
             this.SyncUguiExtraCarpetRows(handle);
-            if (this.sanrioGachaFinderEnabled)
-            {
-                this.RefreshUguiExtraSanrioPlacedSorted(cam, camPos);
-                this.SyncUguiExtraSanrioSceneRows(handle, cam, camPos);
-                this.SyncUguiExtraSanrioPlacedRows(handle, cam, camPos);
-            }
             this.RelayoutUguiShellNewFeaturesExtra(handle);
 
             handle.Root = block;
@@ -449,35 +263,15 @@ namespace HeartopiaMod
             return block;
         }
 
-        // Measurement wrapper for the two wrapped Sanrio paragraphs — reuses the Pictures
-        // round's MeasureUguiPicturesWrappedHeight (same class, the migration's one proven
-        // GetPreferredValues path) with this round's texts/fallbacks. hint=true → the big hint
-        // (fallback 62); false → the empty-state (fallback 34). Texts re-read via L so a
-        // language change after a failed first measure re-measures the CURRENT string.
-        private float MeasureUguiExtraHintHeight(UguiShellNewFeaturesExtraHandle handle, bool hint, out bool ok)
-        {
-            if (hint)
-            {
-                return this.MeasureUguiPicturesWrappedHeight(handle.SanrioHintLabel,
-                    this.L("Finds every SANRIO gacha machine around you and pins it on the game map: the three event machines in Star Town plus machines placed by players in their homes (found while you roam; remembered for the session). Touching each machine drops a capsule reward once per day — up to 5 per day."),
-                    handle.PanelW, handle.SanrioHintH > 0f ? handle.SanrioHintH : 62f, out ok);
-            }
-            return this.MeasureUguiPicturesWrappedHeight(handle.SanrioEmptyLabel,
-                this.L("Event machines stand in Star Town (event runs 2026-07-17 – 2026-08-23); player-placed ones are discovered as you roam homes and plazas."),
-                handle.PanelW, handle.SanrioEmptyH > 0f ? handle.SanrioEmptyH : 34f, out ok);
-        }
-
         // ----------------------------------------------------------------------------------------
-        // Relayout — replays the flowing part of the source cursor (everything from the carpet
-        // overflow down; the region above the carpet rows is static), SetActives the details
-        // block, and stores the signature values it laid out with.
+        // Relayout — replays the flowing part of the source cursor (the carpet overflow and the
+        // content height; the region above the carpet rows is static) and stores the signature
+        // value it laid out with.
         // ----------------------------------------------------------------------------------------
 
         private void RelayoutUguiShellNewFeaturesExtra(UguiShellNewFeaturesExtraHandle handle)
         {
-            float panelW = handle.PanelW;
-
-            // Carpet rows occupy the fixed region; overflow + everything below flow.
+            // Carpet rows occupy the fixed region; the overflow line flows below them.
             int carpetTotal = this.carpetStampScanResults.Count;
             int carpetShown = Math.Min(carpetTotal, CarpetStampMaxRowsShown);
             bool carpetOverflow = carpetTotal > carpetShown;
@@ -489,106 +283,17 @@ namespace HeartopiaMod
                 yCur += 22f;
             }
             yCur += 8f;   // DrawCarpetStampSection:554 return y + 8
-            yCur += 14f;  // DrawExtraFeaturesTab:91 — DrawSanrioGachaSection(y + 14)
-
-            // Sanrio header + toggle (:857-866).
-            PlaceUguiTopLeft(handle.SanrioHeader, 8f, yCur, 460f, 24f);
-            PlaceUguiTopLeft(handle.SanrioToggle.gameObject, 8f, yCur + 30f, 360f, 30f);
-            float sy = yCur + 66f; // +30 header advance, +36 toggle advance
-
-            bool enabled = this.sanrioGachaFinderEnabled;
-            SetUguiGoActive(handle.SanrioDetails, enabled);
-            if (!enabled)
-            {
-                // :870 return y + 4; DrawExtraFeaturesTab:93 return y + 20.
-                this.SetUguiScrollContentHeight(handle.ScrollContent, sy + 4f + 20f);
-                handle.LayoutPacked = this.ComputeUguiExtraLayoutPacked();
-                handle.LayoutHintH = handle.SanrioHintH;
-                handle.LayoutEmptyH = handle.SanrioEmptyH;
-                return;
-            }
-
-            // Details children (content coords inside the full-size container).
-            PlaceUguiTopLeft(handle.SanrioHintLabel, 8f, sy, panelW, handle.SanrioHintH);
-            sy += handle.SanrioHintH + 4f;            // :876 rect 62 + advance 66
-
-            PlaceUguiTopLeft(handle.SanrioCounterLabel, 8f, sy, panelW, 22f);
-            sy += 26f;                                 // :883
-
-            for (int i = 0; i < SanrioSceneMachineCount; i++)
-            {
-                PlaceUguiTopLeft(handle.SanrioSceneRows[i].Root, 8f, sy, panelW, 26f);
-                sy += 28f;                             // :913
-            }
-
-            PlaceUguiTopLeft(handle.SanrioPlacedCounterLabel, 8f, sy, panelW, 22f);
-            sy += 26f;                                 // :930
-
-            int placedTotal = this.sanrioPlacedSorted.Count;
-            int placedShown = Math.Min(placedTotal, SanrioPlacedRowsShown);
-            for (int i = 0; i < placedShown && i < handle.SanrioPlacedRows.Count; i++)
-            {
-                PlaceUguiTopLeft(handle.SanrioPlacedRows[i].Root, 8f, sy, panelW, 26f);
-                sy += 28f;                             // :950
-            }
-
-            bool placedOverflow = placedTotal > placedShown;
-            SetUguiGoActive(handle.SanrioPlacedOverflowLabel, placedOverflow);
-            if (placedOverflow)
-            {
-                PlaceUguiTopLeft(handle.SanrioPlacedOverflowLabel, 8f, sy, 460f, 20f);
-                sy += 24f;                             // :956
-            }
-
-            bool emptyVisible = this.sanrioLocatedCount == 0 && placedTotal == 0;   // :959
-            SetUguiGoActive(handle.SanrioEmptyLabel, emptyVisible);
-            if (emptyVisible)
-            {
-                PlaceUguiTopLeft(handle.SanrioEmptyLabel, 8f, sy, panelW, handle.SanrioEmptyH);
-                sy += handle.SanrioEmptyH + 4f;        // :964 rect 34 + advance 38
-            }
-
-            sy += 8f;    // :967 return y + 8
-            this.SetUguiScrollContentHeight(handle.ScrollContent, sy + 20f); // DrawExtraFeaturesTab:93
+            this.SetUguiScrollContentHeight(handle.ScrollContent, yCur + 20f); // DrawExtraFeaturesTab:93
 
             handle.LayoutPacked = this.ComputeUguiExtraLayoutPacked();
-            handle.LayoutHintH = handle.SanrioHintH;
-            handle.LayoutEmptyH = handle.SanrioEmptyH;
         }
 
-        // Packed layout drivers (file header): shown carpet rows + overflow, enabled, shown
-        // placed rows + overflow, empty-state visibility, scene Present/Live bits + done mask.
-        // Sanrio components read as 0 while the toggle is off — the hidden block can't drive
-        // layout, and sanrioPlacedSorted is deliberately NOT read while disabled (the source
-        // doesn't refresh it then either).
+        // Packed layout drivers: shown carpet rows + overflow.
         private int ComputeUguiExtraLayoutPacked()
         {
             int carpetTotal = this.carpetStampScanResults.Count;
             int carpetShown = Math.Min(carpetTotal, CarpetStampMaxRowsShown);
-            int packed = carpetShown
-                | ((carpetTotal > carpetShown) ? 1 : 0) << 4
-                | (this.sanrioGachaFinderEnabled ? 1 : 0) << 5;
-            if (this.sanrioGachaFinderEnabled)
-            {
-                int placedTotal = this.sanrioPlacedSorted.Count;
-                int placedShown = Math.Min(placedTotal, SanrioPlacedRowsShown);
-                packed |= placedShown << 6
-                    | ((placedTotal > placedShown) ? 1 : 0) << 10
-                    | ((this.sanrioLocatedCount == 0 && placedTotal == 0) ? 1 : 0) << 11
-                    | (this.sanrioDropSceneDoneMask & 7) << 15;
-                for (int i = 0; i < SanrioSceneMachineCount; i++)
-                {
-                    if (this.sanrioMachines[i].Present)
-                    {
-                        packed |= 1 << (12 + i);
-                    }
-                    if (this.sanrioMachines[i].Live)
-                    {
-                        packed |= 1 << (18 + i);
-                    }
-                }
-            }
-            return packed;
+            return carpetShown | ((carpetTotal > carpetShown) ? 1 : 0) << 4;
         }
 
         // ----------------------------------------------------------------------------------------
@@ -690,183 +395,6 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Sanrio syncs — the shared-list resort (source cadence) + tuple-diffed row/counter text
-        // ----------------------------------------------------------------------------------------
-
-        // :917-926 verbatim semantics over the SHARED sorted list (file header): clear, refill
-        // from the live dictionary, sort by squared camera distance — every gated frame while
-        // the toggle is on; sorting skipped (order = dictionary enumeration) when no camera,
-        // exactly like the source's `if (cam != null)`.
-        private void RefreshUguiExtraSanrioPlacedSorted(Camera cam, Vector3 camPos)
-        {
-            this.sanrioPlacedSorted.Clear();
-            foreach (KeyValuePair<uint, SanrioPlacedMachine> kv in this.sanrioPlacedMachines)
-            {
-                this.sanrioPlacedSorted.Add(kv.Value);
-            }
-            if (cam != null && this.uguiExtraSanrioSortComparison != null)
-            {
-                this.uguiExtraSanrioSortCamPos = camPos;
-                this.sanrioPlacedSorted.Sort(this.uguiExtraSanrioSortComparison);
-            }
-        }
-
-        // :880-914 — the daily counter + the three fixed Star Town rows. Row text recomposes on
-        // (present|live|done, (int)dist) tuple change; the Teleport button shows only while
-        // Present (its visibility flips inside the same changed branch).
-        private void SyncUguiExtraSanrioSceneRows(UguiShellNewFeaturesExtraHandle handle, Camera cam, Vector3 camPos)
-        {
-            // :881-882 — "Capsule drops today (tracked): {0}/{1}" (int-cached).
-            if (handle.SanrioCounterShownTotal != this.sanrioDropTotalToday)
-            {
-                handle.SanrioCounterShownTotal = this.sanrioDropTotalToday;
-                this.SetUguiLabelText(handle.SanrioCounterLabel,
-                    this.LF("Capsule drops today (tracked): {0}/{1}", this.sanrioDropTotalToday, SanrioDropDailyCap));
-            }
-
-            for (int i = 0; i < SanrioSceneMachineCount; i++)
-            {
-                bool present = this.sanrioMachines[i].Present;
-                bool live = this.sanrioMachines[i].Live;
-                bool done = (this.sanrioDropSceneDoneMask & (1 << i)) != 0;
-                int distInt = int.MinValue;
-                if (present && cam != null)
-                {
-                    distInt = (int)Vector3.Distance(camPos, this.sanrioMachines[i].Pos); // :893/:896 (int) cast
-                }
-                else if (present)
-                {
-                    distInt = -1; // located, no camera → the no-meters variant (:897)
-                }
-
-                int sig = (present ? 1 : 0) | (live ? 2 : 0) | (done ? 4 : 0);
-                if (sig == handle.SanrioSceneSig[i] && distInt == handle.SanrioSceneDist[i])
-                {
-                    continue;
-                }
-                handle.SanrioSceneSig[i] = sig;
-                handle.SanrioSceneDist[i] = distInt;
-
-                // :890-906 — the exact three-way text + the collected suffix.
-                string text;
-                if (present)
-                {
-                    string src = live ? this.L("live") : this.L("map point");
-                    text = distInt >= 0
-                        ? this.LF("Star Town machine {0}: located ({1}) — {2}m", i + 1, src, distInt)
-                        : this.LF("Star Town machine {0}: located ({1})", i + 1, src);
-                }
-                else
-                {
-                    text = this.LF("Star Town machine {0}: not found", i + 1);
-                }
-                if (done)
-                {
-                    text += this.L("  ✓ collected today");
-                }
-                this.SetUguiLabelText(handle.SanrioSceneRows[i].Label, text);
-
-                // :908-909 — the Teleport button only exists while Present.
-                SetUguiGoActive(handle.SanrioSceneRows[i].Buttons.Count > 0
-                    ? handle.SanrioSceneRows[i].Buttons[0] : null, present);
-            }
-        }
-
-        // :928-957 — placed counter + pooled rows over the freshly-resorted shared list +
-        // overflow. Row text recomposes on (netId, (int)dist, done) tuple change.
-        private void SyncUguiExtraSanrioPlacedRows(UguiShellNewFeaturesExtraHandle handle, Camera cam, Vector3 camPos)
-        {
-            List<SanrioPlacedMachine> sorted = this.sanrioPlacedSorted;
-            int total = sorted.Count;
-            int shown = Math.Min(total, SanrioPlacedRowsShown);
-
-            if (handle.SanrioPlacedCounterShown != total)
-            {
-                handle.SanrioPlacedCounterShown = total;
-                this.SetUguiLabelText(handle.SanrioPlacedCounterLabel,
-                    this.LF("Placed machines found this session: {0}", total));
-            }
-
-            for (int i = 0; i < shown; i++)
-            {
-                if (i >= handle.SanrioPlacedRows.Count)
-                {
-                    // Grow the pool: same shape (b) as the Star Town rows (file header); the
-                    // relayout positions it this same frame (row-count growth changes the
-                    // packed signature).
-                    int slot = i; // capture a copy for the click closure
-                    UguiListRowHandle row = this.CreateUguiListRow(handle.SanrioDetails.transform,
-                        "SanrioPlaced" + i, 8f, 0f, handle.PanelW, 26f,
-                        "", null, null, false, true, null,
-                        new UguiListRowButtonSpec[]
-                        {
-                            new UguiListRowButtonSpec
-                            {
-                                Label = this.L("Teleport"), Tier = UguiListRowTierSecondary,
-                                Width = 130f, Enabled = true,
-                                OnClick = new System.Action(() => this.OnUguiExtraSanrioPlacedTeleportClicked(slot))
-                            }
-                        });
-                    this.SetUguiLabelColor(row.Label, handle.MutedColor);
-                    handle.SanrioPlacedRows.Add(row);
-                    handle.SanrioPlacedNetId.Add(0U);
-                    handle.SanrioPlacedDistInt.Add(int.MinValue); // sentinel → first compose
-                    handle.SanrioPlacedDone.Add(false);
-                }
-
-                UguiListRowHandle pooled = handle.SanrioPlacedRows[i];
-                if (pooled.Root != null && !pooled.Root.activeSelf)
-                {
-                    pooled.Root.SetActive(true);
-                }
-
-                SanrioPlacedMachine placed = sorted[i];
-                int distInt = cam != null ? (int)Vector3.Distance(camPos, placed.Pos) : -1; // :936-938 (int) cast
-                if (handle.SanrioPlacedNetId[i] == placed.NetId
-                    && handle.SanrioPlacedDistInt[i] == distInt
-                    && handle.SanrioPlacedDone[i] == placed.DoneToday)
-                {
-                    continue;
-                }
-                handle.SanrioPlacedNetId[i] = placed.NetId;
-                handle.SanrioPlacedDistInt[i] = distInt;
-                handle.SanrioPlacedDone[i] = placed.DoneToday;
-
-                // :937-944 — the exact composition (meters variant, net suffix, done suffix).
-                string text = distInt >= 0
-                    ? this.LF("Placed machine: {0}m", distInt)
-                    : this.L("Placed machine");
-                text += "  (net=" + placed.NetId + ")";
-                if (placed.DoneToday)
-                {
-                    text += this.L("  ✓ collected today");
-                }
-                this.SetUguiLabelText(pooled.Label, text);
-            }
-
-            for (int i = shown; i < handle.SanrioPlacedRows.Count; i++)
-            {
-                GameObject root = handle.SanrioPlacedRows[i].Root;
-                if (root != null && root.activeSelf)
-                {
-                    root.SetActive(false);
-                }
-            }
-
-            // :952-956 — overflow text (int-cached).
-            int over = total - shown;
-            if (over != handle.SanrioPlacedOverflowCount)
-            {
-                handle.SanrioPlacedOverflowCount = over;
-                if (over > 0)
-                {
-                    this.SetUguiLabelText(handle.SanrioPlacedOverflowLabel,
-                        this.LF("...and {0} more (all pinned on the map).", over));
-                }
-            }
-        }
-
-        // ----------------------------------------------------------------------------------------
         // Per-frame driver (called from ProcessUguiShellOnUpdate)
         // ----------------------------------------------------------------------------------------
 
@@ -881,9 +409,6 @@ namespace HeartopiaMod
 
             try
             {
-                // Toggle re-sync (external IMGUI edits) — WithoutNotify only.
-                this.SyncUguiToggleFromField(handle.SanrioToggle, this.sanrioGachaFinderEnabled);
-
                 // Carpet status — raw-reference diff, composes only on an actual change.
                 if (!ReferenceEquals(handle.CarpetStatusRaw, this.carpetStampStatus))
                 {
@@ -896,19 +421,7 @@ namespace HeartopiaMod
                 // from EITHER surface).
                 this.SyncUguiExtraCarpetRows(handle);
 
-                // Sanrio block — only while the toggle is on (the source early-returns before
-                // any of this at :868-871; the resort must not run while disabled).
-                if (this.sanrioGachaFinderEnabled)
-                {
-                    Camera cam = Camera.main;                                   // :885-886
-                    Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
-                    this.RefreshUguiExtraSanrioPlacedSorted(cam, camPos);       // EVERY gated frame (file header)
-                    this.SyncUguiExtraSanrioSceneRows(handle, cam, camPos);
-                    this.SyncUguiExtraSanrioPlacedRows(handle, cam, camPos);
-                }
-
-                // 0.5s tick — wrapped-paragraph measure retries (spike caveat; only useful
-                // while the details block is actually active, see file header).
+                // 0.5s tick — the missed-calls status re-check.
                 if (Time.unscaledTime >= handle.NextSlowSyncAt)
                 {
                     handle.NextSlowSyncAt = Time.unscaledTime + 0.5f;
@@ -923,28 +436,10 @@ namespace HeartopiaMod
                         handle.MissedCallsStatusShown = missedStatus;
                         this.SetUguiLabelText(handle.MissedCallsStatusLabel, missedStatus);
                     }
-
-                    if (this.sanrioGachaFinderEnabled)
-                    {
-                        if (!handle.SanrioHintMeasureOk)
-                        {
-                            bool ok;
-                            handle.SanrioHintH = this.MeasureUguiExtraHintHeight(handle, true, out ok);
-                            handle.SanrioHintMeasureOk = ok;
-                        }
-                        if (!handle.SanrioEmptyMeasureOk)
-                        {
-                            bool ok;
-                            handle.SanrioEmptyH = this.MeasureUguiExtraHintHeight(handle, false, out ok);
-                            handle.SanrioEmptyMeasureOk = ok;
-                        }
-                    }
                 }
 
-                // Layout signature — packed counts/flags + the two measured heights.
-                if (handle.LayoutPacked != this.ComputeUguiExtraLayoutPacked()
-                    || handle.LayoutHintH != handle.SanrioHintH
-                    || handle.LayoutEmptyH != handle.SanrioEmptyH)
+                // Layout signature — packed carpet counts/flags.
+                if (handle.LayoutPacked != this.ComputeUguiExtraLayoutPacked())
                 {
                     this.RelayoutUguiShellNewFeaturesExtra(handle);
                 }
@@ -1062,57 +557,5 @@ namespace HeartopiaMod
             this.AddMenuNotification("Carpet step: " + stepStatus, ok ? UguiExtraOkColor : UguiExtraFailColor);
         }
 
-        // SanrioGachaFinderFeature.cs:860-865 — flag + SaveKeybinds(false) ONLY (no
-        // notification), guarded on actual change (kit checkbox build-fire idiom); then an
-        // immediate show/hide + relayout so the block reacts this same frame.
-        private void OnUguiExtraSanrioFinderToggled(bool value)
-        {
-            if (value == this.sanrioGachaFinderEnabled)
-            {
-                return;
-            }
-            this.sanrioGachaFinderEnabled = value;
-            try { this.SaveKeybinds(false); } catch { }
-
-            UguiShellNewFeaturesExtraHandle handle = this.uguiShellNewFeaturesExtra;
-            if (handle == null || handle.Root == null)
-            {
-                return;
-            }
-            try
-            {
-                if (value)
-                {
-                    Camera cam = Camera.main;
-                    Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
-                    this.RefreshUguiExtraSanrioPlacedSorted(cam, camPos);
-                    this.SyncUguiExtraSanrioSceneRows(handle, cam, camPos);
-                    this.SyncUguiExtraSanrioPlacedRows(handle, cam, camPos);
-                }
-                this.RelayoutUguiShellNewFeaturesExtra(handle);
-            }
-            catch { }
-        }
-
-        // :908-911 — Star Town teleport (Present-guarded, like the button's own existence).
-        private void OnUguiExtraSanrioSceneTeleportClicked(int index)
-        {
-            if (index < 0 || index >= SanrioSceneMachineCount || !this.sanrioMachines[index].Present)
-            {
-                return;
-            }
-            this.StartSanrioGachaTeleport(this.sanrioMachines[index].Pos,
-                this.LF("Star Town machine {0}", index + 1));
-        }
-
-        // :946-949 — placed-machine teleport, reading the live sorted list at the clicked slot.
-        private void OnUguiExtraSanrioPlacedTeleportClicked(int index)
-        {
-            if (index < 0 || index >= this.sanrioPlacedSorted.Count)
-            {
-                return;
-            }
-            this.StartSanrioGachaTeleport(this.sanrioPlacedSorted[index].Pos, this.L("placed machine"));
-        }
     }
 }

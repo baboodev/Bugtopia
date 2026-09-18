@@ -804,8 +804,6 @@ namespace HeartopiaMod
             this.ProcessLittleWhaleFinderOnUpdate();
             Breadcrumbs.Phase("ou.research");
             this.ProcessResearchMonitorOnUpdate();
-            Breadcrumbs.Phase("ou.sanrio");
-            this.ProcessSanrioGachaFinderOnUpdate();
             // Quest Walk drives the SAME walker the farm does, so it must tick before the shell
             // (which only paints) and outside the farm state machine (which owns the walker only
             // while a farm run is going). QuestWalkFeature.cs.

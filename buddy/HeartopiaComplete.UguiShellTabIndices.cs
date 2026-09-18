@@ -149,7 +149,7 @@ namespace HeartopiaMod
         // dispatcher, IceSkatingSequenceFeature.cs:100 drawer chaining into DrawExtraTab,
         // AutoIceSkatingFeature.cs:4041; HeartopiaComplete.UguiIceSkatingContent.cs); Extra =
         // 5 → DrawExtraFeaturesTab (AnimalCareFeature.cs:54-57 dispatcher, :72 drawer chaining
-        // DrawCarpetStampSection + DrawSanrioGachaSection;
+        // DrawCarpetStampSection;
         // HeartopiaComplete.UguiExtraContent.cs); round 7 = Sea Clean = 7 → DrawSeaCleanQteTab
         // (AnimalCareFeature.cs:64-66 dispatcher, SeaCleanQteFeature.cs:891 drawer;
         // HeartopiaComplete.UguiSeaCleanContent.cs).

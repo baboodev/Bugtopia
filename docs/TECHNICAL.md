@@ -335,7 +335,6 @@ and nothing polls before it.
 | Analog move bridge (`MonoInputManager`) | 3 s | gate |
 | Game UI timings apply (restore stays ungated) | 0.5 s | gate |
 | Map avatar/name detours ×6 | 2 s | gate (install side only; Undo stays ungated) |
-| Sanrio config walk | 15 s | gate |
 
 Deliberate exceptions, all **registration**, not resolution:
 

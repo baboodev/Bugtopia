@@ -428,7 +428,6 @@ namespace HeartopiaMod
             this.bubbleSpawnNextInstallAttemptAt = this.WorldReadyWarmupSlot(slot++);
             this.bubbleCreateNextInstallAttemptAt = this.WorldReadyWarmupSlot(slot++);
             this.avatarPatchNextTryAt = this.WorldReadyWarmupSlot(slot++);
-            this.sanrioNextConfigWalkAt = this.WorldReadyWarmupSlot(slot++);
             return true;
         }
 
