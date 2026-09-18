@@ -82,6 +82,8 @@ namespace HeartopiaMod
             public bool seaCleanCleanNoDelay = true;
             // Ocean Cleanup boss automation (CleanupBossFeature.cs). Off by default.
             public bool cleanupBossAutoEnabled;
+            // Ocean Cleanup: no knockback from the boss explosion (CleanupBossFeature.cs). Off by default.
+            public bool cleanupNoBounceEnabled;
             // Aura Farm: auto-teleport to a cleansing coral area while the Corrupted debuff (610)
             // is active and hold until it clears. Default true; old configs keep the initializer.
             public bool autoCleanseCorruptedEnabled = true;

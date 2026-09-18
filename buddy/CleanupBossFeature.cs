@@ -150,6 +150,19 @@ namespace HeartopiaMod
 
         // Persisted (Config.xml); Sea Clean tab.
         internal bool cleanupBossAutoEnabled;
+
+        // "No Explosion Knockback" (persisted; Sea Clean tab). The knockback is 100 % client-side:
+        // CleanupEventModule.TryBouncePlayerFromExplosion runs on ExplosionFinished, tests the LOCAL
+        // player against the safe zone and casts a PlayerBounceContext — and returns before any of
+        // that when the active config's ExplosionBounceDistance is <= 0. The config row lives in
+        // ConfigManager.SeaCleanCleanupEventConfig.Parties (the module only borrows the reference
+        // on every boss spawn), so zeroing the field there disables the knockback and nothing else:
+        // the countdown, the screen light and the explosion VFX all still run. The module itself
+        // is a ViewModule and is deliberately NOT resolved (auramono-viewmodule-resolve-typecrash).
+        internal bool cleanupNoBounceEnabled;
+        private bool cleanupNoBounceApplied;
+        private float cleanupNoBounceNextTryAt;
+        private readonly Dictionary<int, float> cleanupNoBounceOriginals = new Dictionary<int, float>();
         internal string cleanupBossStatus = string.Empty;
 
         private bool cleanupBossHooksRegistered;
@@ -255,12 +268,16 @@ namespace HeartopiaMod
 
         private void ProcessCleanupBossOnUpdate()
         {
-            if (!this.cleanupBossAutoEnabled)
+            if (!this.cleanupBossAutoEnabled && this.CleanupBossRunActive)
             {
-                if (this.CleanupBossRunActive)
-                {
-                    this.StopCleanupBossRun("disabled");
-                }
+                this.StopCleanupBossRun("disabled");
+            }
+
+            // The knockback option rides the same tick (and the same hooks) but does not need the
+            // automation: it also has to run once after being switched OFF, to put the value back.
+            bool bounceWork = this.cleanupNoBounceEnabled != this.cleanupNoBounceApplied;
+            if (!this.cleanupBossAutoEnabled && !this.cleanupNoBounceEnabled && !bounceWork)
+            {
                 return;
             }
 
@@ -293,9 +310,14 @@ namespace HeartopiaMod
                 }
 
                 this.EnsureCleanupBossEventHooks();
-                this.TrackCleanupEventFarmMode();
-
                 float now = Time.unscaledTime;
+                this.TickCleanupNoBounce(now);
+                if (!this.cleanupBossAutoEnabled)
+                {
+                    return;
+                }
+
+                this.TrackCleanupEventFarmMode();
                 if (!this.CleanupBossRunActive)
                 {
                     if (this.cleanupBossStartRequested)
@@ -415,6 +437,11 @@ namespace HeartopiaMod
             this.cleanupBossPhase = phase;
             this.cleanupBossPosKnown = false;
             this.cleanupExploding = false;
+            if (this.cleanupNoBounceEnabled)
+            {
+                this.cleanupNoBounceApplied = false;   // re-check the row before the first explosion
+                this.cleanupNoBounceNextTryAt = 0f;
+            }
             CleanupBossLog("boss spawned netId=" + netId + " hp=" + hp.ToString("F0") + "/" + maxHp.ToString("F0")
                 + " phase=" + phase + (this.cleanupBossAutoEnabled ? "" : " (automation off)."));
             if (this.cleanupBossAutoEnabled && !this.CleanupBossRunActive)
@@ -992,6 +1019,115 @@ namespace HeartopiaMod
             {
                 this.cleanupBossNextStatusAt = now + CleanupBossStatusInterval;
                 this.cleanupBossStatus = "Inside the bubble (" + d.ToString("F1") + "m) — " + Mathf.Max(0f, this.cleanupSafeZoneUntil - now).ToString("F0") + "s.";
+            }
+        }
+
+        // Apply / restore the knockback distance (see cleanupNoBounceEnabled). Runs when the wanted
+        // state differs from the applied one, at most every 5 s until it succeeds.
+        private void TickCleanupNoBounce(float now)
+        {
+            bool want = this.cleanupNoBounceEnabled;
+            if (want == this.cleanupNoBounceApplied || now < this.cleanupNoBounceNextTryAt)
+            {
+                return;
+            }
+
+            this.cleanupNoBounceNextTryAt = now + 5f;
+            if (!AuraMonoPinningAvailable)
+            {
+                CleanupBossLog("knockback option: pinning unavailable — not touching the config.");
+                return;
+            }
+
+            if (!this.TryResolveCorruptionConfigManager(out IntPtr configManagerObj, out uint managerPin, out string status)
+                || configManagerObj == IntPtr.Zero)
+            {
+                CleanupBossLog("knockback option: ConfigManager unresolved (" + status + ") — retrying.");
+                return;
+            }
+
+            List<uint> pins = new List<uint>();
+            try
+            {
+                if (!this.TryGetMonoObjectMember(configManagerObj, "SeaCleanCleanupEventConfig", out IntPtr eventConfigObj)
+                    || eventConfigObj == IntPtr.Zero)
+                {
+                    CleanupBossLog("knockback option: SeaCleanCleanupEventConfig is null — retrying.");
+                    return;
+                }
+
+                uint eventConfigPin = AuraMonoPinNew(eventConfigObj);
+                if (eventConfigPin != 0U)
+                {
+                    pins.Add(eventConfigPin);
+                }
+
+                if (!this.TryGetMonoObjectMember(eventConfigObj, "Parties", out IntPtr partiesObj) || partiesObj == IntPtr.Zero)
+                {
+                    CleanupBossLog("knockback option: Parties list is null — retrying.");
+                    return;
+                }
+
+                uint partiesPin = AuraMonoPinNew(partiesObj);
+                if (partiesPin != 0U)
+                {
+                    pins.Add(partiesPin);
+                }
+
+                List<IntPtr> parties = new List<IntPtr>(4);
+                if (!this.TryEnumerateAuraMonoCollectionItems(partiesObj, parties, pins) || parties.Count == 0)
+                {
+                    CleanupBossLog("knockback option: Parties is empty — retrying.");
+                    return;
+                }
+
+                System.Text.StringBuilder trace = new System.Text.StringBuilder(64);
+                int written = 0;
+                for (int i = 0; i < parties.Count; i++)
+                {
+                    IntPtr party = parties[i];
+                    if (party == IntPtr.Zero || !this.TryGetMonoSingleMember(party, "ExplosionBounceDistance", out float current))
+                    {
+                        continue;
+                    }
+
+                    float target;
+                    if (want)
+                    {
+                        if (current > 0f && !this.cleanupNoBounceOriginals.ContainsKey(i))
+                        {
+                            this.cleanupNoBounceOriginals[i] = current;
+                        }
+                        target = 0f;
+                    }
+                    else if (!this.cleanupNoBounceOriginals.TryGetValue(i, out target))
+                    {
+                        continue;   // never zeroed by us — leave it alone
+                    }
+
+                    if (Mathf.Abs(current - target) > 0.0001f && !this.TrySetMonoSingleField(party, "ExplosionBounceDistance", target))
+                    {
+                        CleanupBossLog("knockback option: write failed on party " + i + " — retrying.");
+                        return;
+                    }
+
+                    written++;
+                    trace.Append(" [").Append(i).Append("] ").Append(current.ToString("F1")).Append("->").Append(target.ToString("F1"));
+                }
+
+                if (written == 0 && want)
+                {
+                    CleanupBossLog("knockback option: no party row carried ExplosionBounceDistance — retrying.");
+                    return;
+                }
+
+                this.cleanupNoBounceApplied = want;
+                CleanupBossLog("knockback " + (want ? "DISABLED" : "restored") + " — ExplosionBounceDistance" + trace + ".");
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+                AuraMonoPinFree(managerPin);
             }
         }
 

@@ -142,6 +142,7 @@ namespace HeartopiaMod
             // Ocean Cleanup boss automation (flag + save) + its LIVE status line (level 1:
             // cleanupBossAutoEnabled) — CleanupBossFeature.cs
             public Toggle BossToggle;
+            public Toggle NoBounceToggle;           // Ocean Cleanup: no explosion knockback (flag + save)
             public GameObject BossStatusLabel;
             public string BossStatusRawSeen;
             public Toggle LittleWhaleToggle;
@@ -306,6 +307,9 @@ namespace HeartopiaMod
             handle.BossToggle = this.CreateUguiCheckbox(scrollContent, "CleanupBoss",
                 this.L("Auto Ocean Cleanup Boss"), this.cleanupBossAutoEnabled,
                 new System.Action<bool>(this.OnUguiSeaCleanBossToggled));
+            handle.NoBounceToggle = this.CreateUguiCheckbox(scrollContent, "CleanupNoBounce",
+                this.L("No Explosion Knockback"), this.cleanupNoBounceEnabled,
+                new System.Action<bool>(this.OnUguiSeaCleanNoBounceToggled));
             handle.BossStatusRawSeen = this.cleanupBossStatus;
             handle.BossStatusLabel = this.CreateUguiLabel(scrollContent, "CleanupBossStatus",
                 this.L("Boss: ") + this.cleanupBossStatus, 12f, mutedColor, false);
@@ -406,6 +410,8 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.HideBannerToggle.gameObject, 8f, yCur, 360f, 30f);
             yCur += 36f;                               // :952
             PlaceUguiTopLeft(handle.BossToggle.gameObject, 8f, yCur, 360f, 30f);
+            yCur += 36f;
+            PlaceUguiTopLeft(handle.NoBounceToggle.gameObject, 8f, yCur, 360f, 30f);
             yCur += 36f;
             bool bossOn = this.cleanupBossAutoEnabled;
             SetUguiGoActive(handle.BossStatusLabel, bossOn);
@@ -559,6 +565,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.NoDelayToggle, this.seaCleanCleanNoDelay);
                 this.SyncUguiToggleFromField(handle.HideBannerToggle, this.hideSeaCleanBannerEnabled);
                 this.SyncUguiToggleFromField(handle.BossToggle, this.cleanupBossAutoEnabled);
+                this.SyncUguiToggleFromField(handle.NoBounceToggle, this.cleanupNoBounceEnabled);
                 this.SyncUguiToggleFromField(handle.LittleWhaleToggle, this.littleWhaleFinderEnabled);
                 this.SyncUguiToggleFromField(handle.AutoCleanseToggle, this.autoCleanseCorruptedEnabled);
 
@@ -727,6 +734,23 @@ namespace HeartopiaMod
             }
             this.seaCleanCleanNoDelay = value;
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Ocean Cleanup: no explosion knockback — flag + save + toast. The config write itself
+        // happens on the feature's tick (CleanupBossFeature.cs), both ways.
+        private void OnUguiSeaCleanNoBounceToggled(bool value)
+        {
+            if (value == this.cleanupNoBounceEnabled)
+            {
+                return;
+            }
+            this.cleanupNoBounceEnabled = value;
+            this.cleanupNoBounceNextTryAt = 0f;
+            try { this.SaveKeybinds(false); } catch { }
+            this.AddMenuNotification(
+                $"No Explosion Knockback {(value ? "Enabled" : "Disabled")}",
+                value ? UguiSeaCleanOnColor : UguiSeaCleanOffColor);
+            ModLogger.Msg("[CleanupBoss] knockback option " + (value ? "enabled" : "disabled") + " from the Sea Clean tab.");
         }
 
         // Ocean Cleanup boss automation — flag + save + toast, then the relayout its status
