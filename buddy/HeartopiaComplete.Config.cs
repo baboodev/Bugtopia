@@ -256,8 +256,8 @@ namespace HeartopiaMod
             data.craftDirectSendEnabled = this.craftDirectSendEnabled;
             data.interactObstacleBypassEnabled = this.interactObstacleBypassEnabled;
             data.interactBuildModeBypassEnabled = this.interactBuildModeBypassEnabled;
-            data.persistentHudEnabled = this.persistentHudEnabled;
             data.petHeightLimitBypassEnabled = this.petHeightLimitBypassEnabled;
+            data.persistentHudEnabled = this.persistentHudEnabled;
             data.vehicleBypassEnabled = this.vehicleBypassEnabled;
             data.vehicleBypassServerEventsEnabled = this.vehicleBypassServerEventsEnabled;
             data.warehouseBypassEnabled = this.warehouseBypassEnabled;
@@ -660,9 +660,9 @@ namespace HeartopiaMod
             this.craftDirectSendEnabled = data.craftDirectSendEnabled;
             this.interactObstacleBypassEnabled = data.interactObstacleBypassEnabled;
             this.interactBuildModeBypassEnabled = data.interactBuildModeBypassEnabled;
+            this.petHeightLimitBypassEnabled = data.petHeightLimitBypassEnabled;
             this.persistentHudEnabled = data.persistentHudEnabled;
             // Plain assignment is enough: ApplyKeybindConfig only ever runs once, from LoadKeybinds
-            this.petHeightLimitBypassEnabled = data.petHeightLimitBypassEnabled;
             // at startup (HeartopiaComplete.cs:533), so every retry/latch field is still at its
             // freshly-constructed value and the per-feature OnUpdate gates pick the flags up from
             // there. The install work itself is deferred to the world-ready gate.
@@ -1090,9 +1090,9 @@ namespace HeartopiaMod
                         else if (line.Contains("craftDirectSendEnabled")) this.craftDirectSendEnabled = GetJsonInt(line, "\"craftDirectSendEnabled\":") != 0;
                         else if (line.Contains("interactObstacleBypassEnabled")) this.interactObstacleBypassEnabled = GetJsonInt(line, "\"interactObstacleBypassEnabled\":") != 0;
                         else if (line.Contains("interactBuildModeBypassEnabled")) this.interactBuildModeBypassEnabled = GetJsonInt(line, "\"interactBuildModeBypassEnabled\":") != 0;
+                        else if (line.Contains("petHeightLimitBypassEnabled")) this.petHeightLimitBypassEnabled = GetJsonInt(line, "\"petHeightLimitBypassEnabled\":") != 0;
                         else if (line.Contains("persistentHudEnabled")) this.persistentHudEnabled = GetJsonInt(line, "\"persistentHudEnabled\":") != 0;
                         else if (line.Contains("autoIceSkatingMinUltimateScore")) this.autoIceSkatingMinUltimateScore = Mathf.Clamp(GetJsonInt(line, "\"autoIceSkatingMinUltimateScore\":"), 0, AutoIceSkatingMinUltimateScoreSliderMax);
-                        else if (line.Contains("petHeightLimitBypassEnabled")) this.petHeightLimitBypassEnabled = GetJsonInt(line, "\"petHeightLimitBypassEnabled\":") != 0;
                         else if (line.Contains("autoIceSkatingOnlyX2Ultimate")) this.autoIceSkatingOnlyX2Ultimate = GetJsonInt(line, "\"autoIceSkatingOnlyX2Ultimate\":") != 0;
                         else if (line.Contains("autoIceSkatingLast30sUltimate")) this.autoIceSkatingLast30sUltimate = GetJsonInt(line, "\"autoIceSkatingLast30sUltimate\":") != 0;
                         else if (line.Contains("autoIceSkatingPerfectMove")) this.autoIceSkatingPerfectMove = GetJsonInt(line, "\"autoIceSkatingPerfectMove\":") != 0;

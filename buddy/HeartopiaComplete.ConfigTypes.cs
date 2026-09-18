@@ -243,9 +243,9 @@ namespace HeartopiaMod
             public bool craftDirectSendEnabled;
             public bool interactObstacleBypassEnabled;
             public bool interactBuildModeBypassEnabled;
+            public bool petHeightLimitBypassEnabled;
             public bool persistentHudEnabled;
             // Self-tab bypass toggles. These were session-only until now even though their UI
-            public bool petHeightLimitBypassEnabled;
             // handlers already called SaveKeybinds — the fields simply had no home in the config.
             public bool vehicleBypassEnabled;
             public bool vehicleBypassServerEventsEnabled;
