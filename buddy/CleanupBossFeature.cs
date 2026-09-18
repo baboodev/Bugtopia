@@ -1080,6 +1080,18 @@ namespace HeartopiaMod
             this.cleanupEventStage = stage;
             this.cleanupEventJoined = true;
             CleanupBossLog("stage " + CleanupStageName(stage) + " (" + stage + ", index " + stageIndex + ").");
+
+            // The event is over: hold Aura Farm for a few seconds. Armed HERE, not on the event
+            // mode's ON->OFF flip — the mode is already off through Public, the boss run restarts
+            // the farm on the kill, and Over arrives a beat later with no flip to hang the hold on
+            // (2026-09-18: restarted Aura Farm -> stage Over -> the tour planned at once).
+            if (stage == CleanupStageOver)
+            {
+                this.cleanupEventFarmHoldUntil = Time.unscaledTime + CleanupEventEndFarmHold;
+                CleanupBossLog("event over — Aura Farm " + (this.autoFarmActive
+                    ? "held " + CleanupEventEndFarmHold.ToString("F0") + "s."
+                    : "is off, nothing to hold."));
+            }
             if (this.cleanupBossAutoEnabled && !this.CleanupBossRunActive)
             {
                 this.cleanupBossStatus = "Event stage " + CleanupStageName(stage) + ".";
