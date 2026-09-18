@@ -393,7 +393,10 @@ namespace HeartopiaMod
             else
             {
                 this.buildingMovePanelHasPos = false;
-                this.ResetBuildingAxisSliders(); // focus ended → next object starts fresh
+                if (!active)
+                {
+                    this.ResetBuildingAxisSliders(); // focus ended → next object starts fresh
+                }
             }
         }
 
@@ -405,7 +408,7 @@ namespace HeartopiaMod
             pos = Vector3.zero;
             yaw = 0f;
 
-            if (!this.TryGetBuildingFocusedElementQuiet(out IntPtr elementObj) || elementObj == IntPtr.Zero)
+            if (!this.TryGetBuildingFocusedAnchorElementQuiet(out IntPtr elementObj) || elementObj == IntPtr.Zero)
             {
                 return false;
             }
@@ -490,7 +493,7 @@ namespace HeartopiaMod
         private bool TryGetFocusedFieldRootRotation(out Quaternion rootRot)
         {
             rootRot = Quaternion.identity;
-            if (!this.TryGetBuildingFocusedElementQuiet(out IntPtr element) || element == IntPtr.Zero)
+            if (!this.TryGetBuildingFocusedAnchorElementQuiet(out IntPtr element) || element == IntPtr.Zero)
             {
                 return false;
             }
@@ -872,6 +875,47 @@ namespace HeartopiaMod
             }
             if ((!this.TryGetMonoObjectMember(buildObj, "element", out elementObj) || elementObj == IntPtr.Zero)
                 && (!this.TryInvokeAuraMonoZeroArg(buildObj, out elementObj, "get_Element", "get_element") || elementObj == IntPtr.Zero))
+            {
+                elementObj = IntPtr.Zero;
+                return false;
+            }
+            return true;
+        }
+
+        // Like TryGetBuildingFocusedElementQuiet, but also resolves a multi-selection. With "move all"
+        // the craft box holds a BuildGroup, which has no `element` — only `Singles` (BuildSingle[]).
+        // Every single's element root stays in the field-local frame (BuildSingle.UpdateMatrix →
+        // SetRootMatrix(worldToLocal * m)), so Singles[0] works as the anchor for the coordinate
+        // readout and the field-root rotation. Kept separate so free-angle/free-grid still only touch
+        // a single focused object.
+        private bool TryGetBuildingFocusedAnchorElementQuiet(out IntPtr elementObj)
+        {
+            if (this.TryGetBuildingFocusedElementQuiet(out elementObj) && elementObj != IntPtr.Zero)
+            {
+                return true;
+            }
+            elementObj = IntPtr.Zero;
+            if (auraMonoArrayLength == null || auraMonoArrayAddrWithSize == null
+                || !this.TryGetPadBuildAuraModule(out IntPtr moduleObj)
+                || !this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr craftBoxObj, "GetCraftBox") || craftBoxObj == IntPtr.Zero)
+            {
+                return false;
+            }
+            IntPtr buildObj;
+            if ((!this.TryInvokeAuraMonoZeroArg(craftBoxObj, out buildObj, "get_buildObject") || buildObj == IntPtr.Zero)
+                && (!this.TryGetMonoObjectMember(craftBoxObj, "buildObject", out buildObj) || buildObj == IntPtr.Zero))
+            {
+                return false;
+            }
+            if (!this.TryGetMonoObjectMember(buildObj, "Singles", out IntPtr singlesArr) || singlesArr == IntPtr.Zero
+                || auraMonoArrayLength(singlesArr).ToUInt64() == 0UL)
+            {
+                return false;
+            }
+            IntPtr slot = auraMonoArrayAddrWithSize(singlesArr, IntPtr.Size, UIntPtr.Zero);
+            IntPtr single = slot != IntPtr.Zero ? Marshal.ReadIntPtr(slot) : IntPtr.Zero;
+            if (single == IntPtr.Zero
+                || !this.TryGetMonoObjectMember(single, "element", out elementObj) || elementObj == IntPtr.Zero)
             {
                 elementObj = IntPtr.Zero;
                 return false;
