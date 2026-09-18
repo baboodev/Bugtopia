@@ -343,6 +343,11 @@ namespace HeartopiaMod
         private const int FarmWalkMaxFutileRepaths = 3;
 
         private int farmWalkFutileRepaths;
+        // The furthest corner index reached on the CURRENT route shape. An identical rebuild puts the
+        // index back to the first corner still ahead; re-advancing over corners already cleared on
+        // that same route is not progress and must not reset the futile tally (see the corner
+        // advance and the re-path block).
+        private int farmWalkHighestCorner = -1;
 
         // Waypoints proven unwalkable, mapped to the time their ban lifts. Survives between walks —
         // the blockage is a property of the world, and re-learning it costs a whole walk each time.
@@ -968,6 +973,7 @@ namespace HeartopiaMod
             // third target was abandoned after ONE rebuild and the fourth after one more, which is
             // what turned "try another node" into "teleport" so quickly.
             this.farmWalkFutileRepaths = 0;
+            this.farmWalkHighestCorner = -1;
 
             // A retry avoids the final waypoint whose approach already failed; every other walk
             // starts with no end-side restriction.
@@ -2055,7 +2061,19 @@ namespace HeartopiaMod
                 this.farmWalkEverAdvanced = true;
 
                 // Real progress along the route — the futile-rebuild tally starts over.
-                this.farmWalkFutileRepaths = 0;
+                //
+                // ⚠️ ONLY FOR A CORNER NOT CLEARED BEFORE ON THIS ROUTE. 2026-09-18, node:Wakame:
+                // twenty-four "re-pathed (safety cadence) … now at 0 (IDENTICAL)" in a row, five
+                // minutes on one walk. The leg after corner 0 was blocked; the player cleared corner
+                // 0, was pushed back off the leg, the 12 s rebuild handed the identical route back
+                // starting at corner 0 again, the player cleared it again — and every one of those
+                // re-clears zeroed the tally here, so three futile rebuilds never accumulated and
+                // the walk could not end.
+                if (this.farmWalkCornerIndex > this.farmWalkHighestCorner)
+                {
+                    this.farmWalkHighestCorner = this.farmWalkCornerIndex;
+                    this.farmWalkFutileRepaths = 0;
+                }
             }
 
             if (this.farmWalkCornerIndex >= this.farmWalkCorners.Count)
@@ -2168,6 +2186,7 @@ namespace HeartopiaMod
                 // From here down the route is our own, whoever owned it until now.
                 this.farmWalkOwnRouteSeq++;
                 int cornersBefore = this.farmWalkCorners.Count;
+                int cornerIndexBefore = this.farmWalkCornerIndex;
                 Vector3 firstBefore = this.farmWalkCorners.Count > 0 ? this.farmWalkCorners[0] : Vector3.zero;
                 if (this.TryBuildFarmWalkRoute(selfPos, this.farmWalkTarget) && this.farmWalkCorners.Count > 0)
                 {
@@ -2194,7 +2213,7 @@ namespace HeartopiaMod
                                 + ", corner " + triggerCornerIndex + " was " + triggerToCorner.ToString("F1") + "m away"
                             : notClosing ? "not closing" : "safety cadence")
                         + "): " + cornersBefore + " -> " + this.farmWalkCorners.Count
-                        + " corners, now at " + this.farmWalkCornerIndex
+                        + " corners, was at " + cornerIndexBefore + ", now at " + this.farmWalkCornerIndex
                         // ⚠️ SAY WHAT IS BEING COMPARED. "no shorter" reads as old route vs new
                         // route, and it is not: rebuiltRemaining is measured against
                         // farmWalkBestDistance, the best remaining this walk has ever achieved. Once
@@ -2229,6 +2248,8 @@ namespace HeartopiaMod
                         this.farmWalkBestDistance = rebuiltRemaining;
                         this.farmWalkBestAt = now;
                         this.farmWalkFutileRepaths = 0;
+                        // A new shape: its corners have not been cleared yet.
+                        this.farmWalkHighestCorner = this.farmWalkCornerIndex - 1;
                     }
                     else
                     {
