@@ -1114,6 +1114,32 @@ namespace HeartopiaMod
                 this.cleanupEventPickEmptyAt = -100f;
                 CleanupBossLog("farm event mode ON (stage " + CleanupStageName(this.cleanupEventStage)
                     + "): nearest live pollutant, no tour, no relocation; corrupted-debuff cleanse trips suppressed.");
+
+                // A walk already under way belongs to the old plan. 2026-09-18: the event started
+                // 20 m into a 129 m "zone haul to Sea Area 2" and the farm swam out of the arena
+                // until Aura Farm was restarted by hand — the mode only ever governed the NEXT pick.
+                // Any walk whose target is not event pollution is dropped and the scan takes over.
+                if (this.farmWalkActive
+                    && this.farmState == HeartopiaComplete.AutoFarmState.WalkingToNode
+                    && !(this.farmWalkLabel.StartsWith("node:Contaminated", StringComparison.Ordinal)
+                        && this.IsCleanupEventFarmCandidate("Contaminated", this.farmWalkTrueTarget)))
+                {
+                    CleanupBossLog("dropping the walk in progress (" + this.farmWalkLabel + " -> "
+                        + FormatNavMeshVector(this.farmWalkTrueTarget) + ") — it is not event pollution.");
+                    try
+                    {
+                        this.AbortFarmWalk();
+                    }
+                    catch (Exception ex)
+                    {
+                        CleanupBossLog("AbortFarmWalk threw: " + ex.Message);
+                    }
+
+                    this.ResetFarmTour();
+                    this.farmState = HeartopiaComplete.AutoFarmState.ScanningForNodes;
+                    this.autoFarmTimer = 0f;
+                    this.autoFarmStatus = "Ocean Cleanup started — switching to the event...";
+                }
             }
             else
             {
