@@ -40,6 +40,21 @@ namespace HeartopiaMod
     //     within ~3%).
     //   Curve: 0 m/s -> "Zoom at rest", top speed -> "Zoom at top speed", log-interpolated. Top speed
     //   = the current car's RunForwardMaxSpeed (VehicleComponent), 8 m/s (fastest Car row) on foot.
+    //
+    // LOOK-AHEAD (arrow sits off-centre while moving so more map shows ahead; verified live
+    // 2026-09-20 with the probe):
+    //   offset o (bar space) is added to the arrow (map_spot_me@img@t - the game only rotates it), to
+    //   maproot@t (the game only rewrites it on a level change) and to the spot layer offset.
+    //   Rotating-map mode (PlayerPrefs "MapRotation"): o = screen-down; north-up: o = -heading.
+    //   ! DefaultModule._playerMapPos (the spot cut-off / clamp centre) cannot be moved: the game
+    //   rewrites it before the spot widgets tick. So while look-ahead is on:
+    //     trackDistance = huge  -> tracked pins arrive at their TRUE position; the mod then clamps any
+    //                              pin outside the circle onto the circle edge along the ray from the
+    //                              arrow (true direction from the player), every frame after the game
+    //     distance = R - |o|    -> ordinary spots only within the circle around the player that fits
+    //                              inside the shifted circle (their look-ahead is the price)
+    //   A pin's true position is re-learned whenever its anchoredPosition differs from what the mod
+    //   last wrote (the game refreshes positions ~6x/s).
     public partial class HeartopiaComplete
     {
         private const float MiniMapZoomMin = 0.5f;
@@ -48,6 +63,11 @@ namespace HeartopiaMod
         private const float MiniMapZoomTopMax = 1.5f;
         private const float MiniMapZoomDefaultRest = 1.5f;
         private const float MiniMapZoomDefaultTop = 0.6f;
+        private const float MiniMapLookAheadMin = 0.1f;          // fraction of the circle radius
+        private const float MiniMapLookAheadMax = 0.6f;
+        private const float MiniMapLookAheadDefault = 0.4f;
+        private const float MiniMapLookAheadFullSpeed = 3.5f;    // full offset from running speed up
+        private const float MiniMapTrackDistanceUnbounded = 100000f;
 
         // CommonMapBar constants (TriggerByMe's literal 0.55, MapSystem.MapRatio 5).
         private const float MiniMapVanillaSketchScale = 0.55f;
@@ -75,20 +95,38 @@ namespace HeartopiaMod
         private bool miniMapAutoZoomEnabled;
         private float miniMapZoomTop = MiniMapZoomDefaultTop;
         private int miniMapZoomReaction = 1;
+        private bool miniMapLookAheadEnabled;
+        private float miniMapLookAheadAmount = MiniMapLookAheadDefault;
 
         // --- runtime ---
         private sealed class MiniMapBar
         {
+            public RectTransform Root;
             public RectTransform Maproot;
             public RectTransform Sketch;
             public RectTransform Dec;
+            public RectTransform Me;
             public bool IsVehiclePanel;
-            public bool Alive => this.Maproot != null && this.Sketch != null && this.Dec != null;
+            public bool Alive => this.Maproot != null && this.Sketch != null && this.Dec != null
+                && this.Me != null && this.Root != null;
+        }
+
+        // A position the game owns but the mod offsets: the base is re-learned whenever the live value
+        // is not the one the mod wrote last (a level change moves maproot, a refresh moves a spot).
+        private struct MiniMapOwnedPos
+        {
+            public Vector2 Base;
+            public Vector2 Written;
         }
 
         private readonly List<MiniMapBar> miniMapBars = new List<MiniMapBar>();
         private readonly Dictionary<int, float> miniMapIconBase = new Dictionary<int, float>();
         private readonly Dictionary<int, float> miniMapIconWritten = new Dictionary<int, float>();
+        private readonly Dictionary<int, MiniMapOwnedPos> miniMapOwnedPos = new Dictionary<int, MiniMapOwnedPos>();
+        private readonly Dictionary<int, RectTransform> miniMapSpotRects = new Dictionary<int, RectTransform>();
+        private Vector2 miniMapLookOffset;      // smoothed, screen-aligned (bar space in north-up mode)
+        private bool miniMapRotatingMap;
+        private float miniMapNextPrefsAt;
         private Transform miniMapStatusRoot;
         private int miniMapLoggedBarCount = -1;
         private float miniMapNextRescanAt;
@@ -113,7 +151,8 @@ namespace HeartopiaMod
         private float miniMapOrigDistance = 40f;
         private float miniMapOrigTrackDistance = 40f;
         private bool miniMapOrigCaptured;
-        private float miniMapWrittenDistanceK = 1f;
+        private float miniMapWrittenDistance = 40f;
+        private float miniMapWrittenTrackDistance = 40f;
         private int miniMapDistanceEpoch = -1;
         private float miniMapNextDistanceAt;
 
@@ -150,6 +189,9 @@ namespace HeartopiaMod
                     this.miniMapBars.Clear();
                     this.miniMapIconBase.Clear();
                     this.miniMapIconWritten.Clear();
+                    this.miniMapOwnedPos.Clear();
+                    this.miniMapSpotRects.Clear();
+                    this.miniMapLookOffset = Vector2.zero;
                     this.miniMapStatusRoot = null;
                     this.miniMapLastMapAt = -1f;
                     this.miniMapSmoothSpeed = 0f;
@@ -164,7 +206,7 @@ namespace HeartopiaMod
                 }
 
                 float k = this.miniMapZoomRest;
-                if (this.miniMapAutoZoomEnabled)
+                if (this.miniMapAutoZoomEnabled || this.miniMapLookAheadEnabled)
                 {
                     if (now >= this.miniMapNextSampleAt)
                     {
@@ -173,7 +215,10 @@ namespace HeartopiaMod
                     }
 
                     this.SmoothMiniMapSpeed(now, Time.unscaledDeltaTime);
-                    k = this.MiniMapZoomForSpeed(this.miniMapSmoothSpeed);
+                    if (this.miniMapAutoZoomEnabled)
+                    {
+                        k = this.MiniMapZoomForSpeed(this.miniMapSmoothSpeed);
+                    }
                 }
 
                 this.miniMapCurrentK = Mathf.Clamp(k, MiniMapZoomTopMin, MiniMapZoomMax);
@@ -186,15 +231,27 @@ namespace HeartopiaMod
                     return;
                 }
 
+                this.UpdateMiniMapLookOffset(now, Time.unscaledDeltaTime);
                 this.ApplyMiniMapZoom(this.miniMapCurrentK);
 
                 if (now >= this.miniMapNextDistanceAt)
                 {
                     this.miniMapNextDistanceAt = now + MiniMapDistanceApplyInterval;
-                    this.ApplyMiniMapDistances(this.miniMapCurrentK, force: false);
+                    float kd = this.miniMapCurrentK;
+                    if (this.miniMapLookAheadEnabled)
+                    {
+                        // Ordinary spots: the circle around the player that fits in the shifted circle.
+                        float edgePx = this.miniMapOrigTrackDistance * MiniMapPixelsPerMetre;
+                        float keep = Mathf.Clamp01((edgePx - this.miniMapLookOffset.magnitude) / edgePx);
+                        this.ApplyMiniMapDistances(this.miniMapOrigDistance * keep / kd, MiniMapTrackDistanceUnbounded, force: false);
+                    }
+                    else
+                    {
+                        this.ApplyMiniMapDistances(this.miniMapOrigDistance / kd, this.miniMapOrigTrackDistance / kd, force: false);
+                    }
                 }
 
-                this.MiniMapZoomSetStatus(this.miniMapAutoZoomEnabled
+                this.MiniMapZoomSetStatus(this.miniMapAutoZoomEnabled || this.miniMapLookAheadEnabled
                     ? this.LF("{0:F1} m/s ({1}), zoom {2:F2}x", this.miniMapRawSpeed, this.miniMapSpeedSource, this.miniMapCurrentK)
                     : this.LF("Zoom {0:F2}x", this.miniMapCurrentK), log: false);
                 this.miniMapZoomBreaker.Success();
@@ -250,8 +307,10 @@ namespace HeartopiaMod
                 // FindObjectsOfType<RectTransform> happened to cache a RectTransform wrapper for it.
                 MiniMapBar bar = new MiniMapBar
                 {
+                    Root = barT.GetComponent<RectTransform>(),
                     Maproot = MiniMapFindRect(barT, "realmask_map/maproot@t"),
                     Sketch = MiniMapFindRect(barT, "map_sketch@t"),
+                    Me = MiniMapFindRect(barT, "map_spot_me@img@t"),
                     IsVehiclePanel = panel.name.StartsWith("VehicleStatusPanel", StringComparison.Ordinal),
                 };
                 if (bar.Maproot != null)
@@ -306,13 +365,149 @@ namespace HeartopiaMod
                     bar.Sketch.localScale = new Vector3(sketchScale, sketchScale, sketchScale);
                 }
 
+                // Look-ahead offset in this bar's own (camera-rotated in rotating-map mode) space.
+                Vector2 o = Vector2.zero;
+                if (this.miniMapLookOffset.sqrMagnitude > 0.01f)
+                {
+                    Vector3 local = new Vector3(this.miniMapLookOffset.x, this.miniMapLookOffset.y, 0f);
+                    if (this.miniMapRotatingMap)
+                    {
+                        local = Quaternion.Inverse(bar.Root.rotation) * local;
+                    }
+                    o = new Vector2(local.x, local.y);
+                }
+
+                this.SetMiniMapOwnedPos(bar.Me, o);
+                this.SetMiniMapOwnedPos(bar.Maproot, o);
+
                 // The game rewrote the spot layer offset this frame with its 0.55 literal; the picture
                 // (dec_sketch) got the same vector inside the now-scaled maproot.
-                bar.Sketch.anchoredPosition = bar.Dec.anchoredPosition * k;
+                bar.Sketch.anchoredPosition = bar.Dec.anchoredPosition * k + o;
                 this.CounterScaleMiniMapIcons(bar, 1f / k);
+                if (this.miniMapLookAheadEnabled)
+                {
+                    this.ClampMiniMapTrackedSpots(bar, o, sketchScale);
+                }
             }
 
             this.miniMapApplied = true;
+        }
+
+        // Adds `offset` to a game-owned anchoredPosition (zero restores it).
+        private void SetMiniMapOwnedPos(RectTransform rt, Vector2 offset)
+        {
+            int id = rt.GetInstanceID();
+            Vector2 current = rt.anchoredPosition;
+            if (!this.miniMapOwnedPos.TryGetValue(id, out MiniMapOwnedPos owned) || (current - owned.Written).sqrMagnitude > 1e-4f)
+            {
+                owned.Base = current; // first sight, or the game moved it
+            }
+
+            owned.Written = owned.Base + offset;
+            if ((current - owned.Written).sqrMagnitude > 1e-4f)
+            {
+                rt.anchoredPosition = owned.Written;
+            }
+            this.miniMapOwnedPos[id] = owned;
+        }
+
+        // With trackDistance unbounded every spot sits at its true position; pins that fall outside
+        // the circle go onto its edge along the ray from the arrow - the direction from the player,
+        // as the vanilla clamp shows it, but against the shifted circle.
+        private void ClampMiniMapTrackedSpots(MiniMapBar bar, Vector2 arrow, float sketchScale)
+        {
+            if (bar.Sketch.childCount == 0 || sketchScale <= 0f)
+            {
+                return;
+            }
+
+            float edge = this.miniMapOrigTrackDistance * MiniMapPixelsPerMetre; // vanilla pin radius (110 px)
+            Vector2 layerOrigin = bar.Sketch.anchoredPosition;
+            Transform spots = bar.Sketch.GetChild(0); // map_spots@t
+            for (int i = 0; i < spots.childCount; i++)
+            {
+                Transform child = spots.GetChild(i);
+                if (!child.gameObject.activeSelf)
+                {
+                    continue;
+                }
+
+                int id = child.GetInstanceID();
+                if (!this.miniMapSpotRects.TryGetValue(id, out RectTransform rt) || rt == null)
+                {
+                    rt = child.GetComponent<RectTransform>();
+                    this.miniMapSpotRects[id] = rt;
+                }
+
+                Vector2 current = rt.anchoredPosition;
+                if (!this.miniMapOwnedPos.TryGetValue(id, out MiniMapOwnedPos owned) || (current - owned.Written).sqrMagnitude > 1e-4f)
+                {
+                    owned.Base = current; // the game's fresh (true, unclamped) position
+                }
+
+                Vector2 onBar = layerOrigin + owned.Base * sketchScale;
+                Vector2 target = owned.Base;
+                if (onBar.sqrMagnitude > edge * edge)
+                {
+                    Vector2 dir = onBar - arrow;
+                    float len = dir.magnitude;
+                    if (len > 1e-3f)
+                    {
+                        dir /= len;
+                        // |arrow + t*dir| = edge, t > 0 (the arrow is always inside the circle)
+                        float b = Vector2.Dot(arrow, dir);
+                        float c = arrow.sqrMagnitude - edge * edge;
+                        float t = -b + Mathf.Sqrt(Mathf.Max(0f, b * b - c));
+                        target = (arrow + dir * t - layerOrigin) / sketchScale;
+                    }
+                }
+
+                owned.Written = target;
+                if ((current - target).sqrMagnitude > 1e-4f)
+                {
+                    rt.anchoredPosition = target;
+                }
+                this.miniMapOwnedPos[id] = owned;
+            }
+        }
+
+        // Target offset from the smoothed speed, full from running speed up. Rotating map: straight
+        // down the screen (camera-forward is up). North-up: behind the arrow's heading.
+        private void UpdateMiniMapLookOffset(float now, float dt)
+        {
+            if (now >= this.miniMapNextPrefsAt)
+            {
+                this.miniMapNextPrefsAt = now + 1f;
+                this.miniMapRotatingMap = PlayerPrefs.GetInt("MapRotation", 0) >= 1;
+            }
+
+            Vector2 target = Vector2.zero;
+            if (this.miniMapLookAheadEnabled && this.miniMapBars.Count > 0 && this.miniMapBars[0].Alive)
+            {
+                float edgePx = this.miniMapOrigTrackDistance * MiniMapPixelsPerMetre;
+                float d = edgePx * this.miniMapLookAheadAmount
+                    * Mathf.Clamp01(this.miniMapSmoothSpeed / MiniMapLookAheadFullSpeed);
+                if (this.miniMapRotatingMap)
+                {
+                    target = new Vector2(0f, -d);
+                }
+                else
+                {
+                    // The game sets the arrow's localEulerAngles = back * yaw, i.e. z = -yaw.
+                    float yaw = -this.miniMapBars[0].Me.localEulerAngles.z * Mathf.Deg2Rad;
+                    target = new Vector2(-Mathf.Sin(yaw), -Mathf.Cos(yaw)) * d;
+                }
+            }
+
+            if (dt > 0f)
+            {
+                int r = Mathf.Clamp(this.miniMapZoomReaction, 0, MiniMapReactionUp.Length - 1);
+                float settle = target.sqrMagnitude > this.miniMapLookOffset.sqrMagnitude
+                    ? MiniMapReactionUp[r]
+                    : MiniMapReactionDown[r];
+                float alpha = 1f - Mathf.Exp(-dt * 3f / Mathf.Max(0.05f, settle));
+                this.miniMapLookOffset += (target - this.miniMapLookOffset) * alpha;
+            }
         }
 
         private void CounterScaleMiniMapIcons(MiniMapBar bar, float factor)
@@ -360,19 +555,25 @@ namespace HeartopiaMod
                 bar.Maproot.localScale = Vector3.one;
                 bar.Sketch.localScale = new Vector3(MiniMapVanillaSketchScale, MiniMapVanillaSketchScale, MiniMapVanillaSketchScale);
                 this.CounterScaleMiniMapIcons(bar, 1f);
+                this.SetMiniMapOwnedPos(bar.Me, Vector2.zero);
+                this.SetMiniMapOwnedPos(bar.Maproot, Vector2.zero);
+                // The spot layer and the pins are rewritten by the game on its next refresh.
             }
 
             // MiniMapSystem is a world-scoped module; only worth restoring while a world exists (a
             // new world builds a fresh instance with vanilla values anyway).
             if (this.IsWorldReady)
             {
-                this.ApplyMiniMapDistances(1f, force: true);
+                this.ApplyMiniMapDistances(this.miniMapOrigDistance, this.miniMapOrigTrackDistance, force: true);
             }
 
             this.miniMapApplied = false;
             this.miniMapCurrentK = 1f;
+            this.miniMapLookOffset = Vector2.zero;
             this.miniMapIconBase.Clear();
             this.miniMapIconWritten.Clear();
+            this.miniMapOwnedPos.Clear();
+            this.miniMapSpotRects.Clear();
             this.MiniMapZoomSetStatus("Restored.", log: true);
         }
 
@@ -553,10 +754,12 @@ namespace HeartopiaMod
 
         // --- MiniMapSystem.distance / trackDistance --------------------------------------------
 
-        private unsafe void ApplyMiniMapDistances(float k, bool force)
+        private unsafe void ApplyMiniMapDistances(float distanceMetres, float trackMetres, bool force)
         {
             bool newWorld = this.miniMapDistanceEpoch != AuraMonoWorldEpoch;
-            if (!force && !newWorld && Mathf.Abs(k - this.miniMapWrittenDistanceK) <= this.miniMapWrittenDistanceK * 0.03f)
+            if (!force && !newWorld
+                && Mathf.Abs(distanceMetres - this.miniMapWrittenDistance) <= this.miniMapWrittenDistance * 0.03f
+                && Mathf.Abs(trackMetres - this.miniMapWrittenTrackDistance) <= this.miniMapWrittenTrackDistance * 0.03f)
             {
                 return;
             }
@@ -623,11 +826,12 @@ namespace HeartopiaMod
                 this.miniMapDistanceEpoch = AuraMonoWorldEpoch;
 
                 // Value-type float fields: mono_field_set_value takes a pointer TO the value.
-                float distance = this.miniMapOrigDistance / k;
-                float trackDistance = this.miniMapOrigTrackDistance / k;
+                float distance = distanceMetres;
+                float trackDistance = trackMetres;
                 auraMonoFieldSetValue(instance, this.miniMapDistanceField, (IntPtr)(&distance));
                 auraMonoFieldSetValue(instance, this.miniMapTrackDistanceField, (IntPtr)(&trackDistance));
-                this.miniMapWrittenDistanceK = k;
+                this.miniMapWrittenDistance = distance;
+                this.miniMapWrittenTrackDistance = trackDistance;
             }
             finally
             {
@@ -654,6 +858,8 @@ namespace HeartopiaMod
             data.miniMapAutoZoomEnabled = this.miniMapAutoZoomEnabled;
             data.miniMapZoomTop = this.miniMapZoomTop;
             data.miniMapZoomReaction = this.miniMapZoomReaction;
+            data.miniMapLookAheadEnabled = this.miniMapLookAheadEnabled;
+            data.miniMapLookAheadAmount = this.miniMapLookAheadAmount;
         }
 
         private void LoadMiniMapZoomFromConfig(KeybindConfigData data)
@@ -667,6 +873,10 @@ namespace HeartopiaMod
                 ? MiniMapZoomDefaultTop
                 : Mathf.Clamp(data.miniMapZoomTop, MiniMapZoomTopMin, MiniMapZoomTopMax);
             this.miniMapZoomReaction = Mathf.Clamp(data.miniMapZoomReaction, 0, MiniMapZoomReactionNames.Length - 1);
+            this.miniMapLookAheadEnabled = data.miniMapLookAheadEnabled;
+            this.miniMapLookAheadAmount = data.miniMapLookAheadAmount <= 0f
+                ? MiniMapLookAheadDefault
+                : Mathf.Clamp(data.miniMapLookAheadAmount, MiniMapLookAheadMin, MiniMapLookAheadMax);
         }
     }
 }

@@ -131,6 +131,9 @@ namespace HeartopiaMod
             public bool miniMapAutoZoomEnabled;
             public float miniMapZoomTop;
             public int miniMapZoomReaction = 1;
+            // Look-ahead: arrow pushed off-centre while moving; amount = fraction of the circle radius.
+            public bool miniMapLookAheadEnabled;
+            public float miniMapLookAheadAmount;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

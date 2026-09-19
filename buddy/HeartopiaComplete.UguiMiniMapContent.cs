@@ -32,6 +32,10 @@ namespace HeartopiaMod
             public Dropdown ReactionDropdown;
             public bool ReactionListenerWired;
             public int ReactionLastValue;          // poll-fallback change detection
+            public Toggle LookAheadToggle;
+            public GameObject LookAheadLabel;
+            public string LookAheadShown;
+            public Slider LookAheadSlider;
             public GameObject StatusLabel;
             public string StatusShown;
             public float NextSlowSyncAt;
@@ -52,9 +56,14 @@ namespace HeartopiaMod
             return this.LF("Zoom at top speed: {0:F2}x", this.miniMapZoomTop);
         }
 
+        private string BuildUguiSelfMiniMapLookAheadLabelText()
+        {
+            return this.LF("Look-ahead: {0:F0}% of radius", this.miniMapLookAheadAmount * 100f);
+        }
+
         private string BuildUguiSelfMiniMapStatusText()
         {
-            return this.L("Scales the HUD minimap (both the normal and the vehicle HUD). Above 1x is closer. Auto-zoom widens the view as you speed up and zooms back in after you stop; top speed is the current car's maximum.")
+            return this.L("Scales the HUD minimap (both the normal and the vehicle HUD). Above 1x is closer. Auto-zoom widens the view as you speed up and zooms back in after you stop; top speed is the current car's maximum. Look-ahead pushes your arrow toward the bottom while you move so more of the map ahead is visible.")
                 + (this.miniMapZoomEnabled ? " Status: " + this.miniMapZoomStatus : string.Empty);
         }
 
@@ -123,6 +132,21 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.ReactionDropdown.gameObject, sliderX, yCur, 180f, 28f);
             yCur += 44f;
 
+            handle.LookAheadToggle = this.CreateUguiCheckbox(block.transform, "LookAheadToggle",
+                this.L("Look-ahead while moving (arrow moves toward the bottom)"), this.miniMapLookAheadEnabled,
+                new System.Action<bool>(this.OnUguiSelfMiniMapLookAheadToggled));
+            PlaceUguiTopLeft(handle.LookAheadToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 32f;
+
+            handle.LookAheadShown = this.BuildUguiSelfMiniMapLookAheadLabelText();
+            handle.LookAheadLabel = this.CreateUguiBodyLabel(block.transform, "LookAheadLabel", handle.LookAheadShown, 13f);
+            PlaceUguiTopLeft(handle.LookAheadLabel, pad, yCur + 2f, labelW, 20f);
+            handle.LookAheadSlider = this.CreateUguiSlider(block.transform, "LookAheadSlider",
+                MiniMapLookAheadMin, MiniMapLookAheadMax, this.miniMapLookAheadAmount, false,
+                new System.Action<float>(this.OnUguiSelfMiniMapLookAheadChanged));
+            PlaceUguiTopLeft(handle.LookAheadSlider.gameObject, sliderX, yCur + 3f, sliderW, 20f);
+            yCur += 40f;
+
             handle.StatusShown = this.BuildUguiSelfMiniMapStatusText();
             handle.StatusLabel = this.CreateUguiLabel(block.transform, "Status",
                 handle.StatusShown, 11f, new Color(muted.r, muted.g, muted.b, 0.85f), false);
@@ -158,6 +182,12 @@ namespace HeartopiaMod
 
                 this.SyncUguiToggleFromField(handle.EnabledToggle, this.miniMapZoomEnabled);
                 this.SyncUguiToggleFromField(handle.AutoToggle, this.miniMapAutoZoomEnabled);
+                this.SyncUguiToggleFromField(handle.LookAheadToggle, this.miniMapLookAheadEnabled);
+                if (handle.LookAheadSlider != null && Mathf.Abs(handle.LookAheadSlider.value - this.miniMapLookAheadAmount) > 0.0005f)
+                {
+                    handle.LookAheadSlider.SetValueWithoutNotify(this.miniMapLookAheadAmount);
+                }
+                this.SyncUguiSelfLabelText(handle.LookAheadLabel, ref handle.LookAheadShown, this.BuildUguiSelfMiniMapLookAheadLabelText());
 
                 if (handle.RestSlider != null && Mathf.Abs(handle.RestSlider.value - this.miniMapZoomRest) > 0.0005f)
                 {
@@ -240,6 +270,28 @@ namespace HeartopiaMod
                 return;
             }
             this.miniMapZoomTop = rounded;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfMiniMapLookAheadToggled(bool value)
+        {
+            if (value == this.miniMapLookAheadEnabled)
+            {
+                return;
+            }
+            this.miniMapLookAheadEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // 5% steps.
+        private void OnUguiSelfMiniMapLookAheadChanged(float value)
+        {
+            float rounded = Mathf.Clamp(Mathf.Round(value * 20f) / 20f, MiniMapLookAheadMin, MiniMapLookAheadMax);
+            if (Mathf.Abs(rounded - this.miniMapLookAheadAmount) <= 0.0001f)
+            {
+                return;
+            }
+            this.miniMapLookAheadAmount = rounded;
             try { this.SaveKeybinds(false); } catch { }
         }
 

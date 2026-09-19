@@ -735,9 +735,16 @@ its own switch and its own hook latch. Chain: `MailSyncSystem` (`WorldSystem.Sho
   rewritten every frame after `CommonMapBar.TriggerByMe`, spot icons counter-scaled to keep their
   size, and `MiniMapSystem.distance`/`trackDistance` divided by k so spots stay inside the circle.
   `MapSystem.MapRatio` is not touched (the big map shares it). Client-only UI; nothing is sent.
-- Disabling restores the vanilla scales and the original distances. Persisted as
+- **Look-ahead while moving** (10–60 % of the radius, full from running speed): the arrow moves
+  off-centre so more map shows ahead — straight down the screen with the game's rotating-map
+  setting, behind the heading with north-up. Arrow, `maproot@t` and the spot layer get the same
+  offset. The spot cut-off centre (`DefaultModule._playerMapPos`) cannot be moved (the game
+  rewrites it before the spots tick), so while look-ahead is on `trackDistance` is unbounded and
+  the mod clamps tracked pins onto the shifted circle's edge itself (ray from the arrow), while
+  ordinary spots are limited to the circle around the player that fits inside it.
+- Disabling restores the vanilla scales, positions and the original distances. Persisted as
   `miniMapZoomEnabled` / `miniMapZoomRest` / `miniMapAutoZoomEnabled` / `miniMapZoomTop` /
-  `miniMapZoomReaction`. Implementation: `MiniMapZoomFeature.cs` (+ `HeartopiaComplete.UguiMiniMapContent.cs`).
+  `miniMapZoomReaction` / `miniMapLookAheadEnabled` / `miniMapLookAheadAmount`. Implementation: `MiniMapZoomFeature.cs` (+ `HeartopiaComplete.UguiMiniMapContent.cs`).
 
 ### Game LOD — World Detail / Draw Distance (Self → Game LOD sub-tab)
 
