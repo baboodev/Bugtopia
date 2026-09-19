@@ -204,6 +204,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellSelfPrivacyOnUpdate();
             this.ProcessUguiShellSelfGameUiOnUpdate();
             this.ProcessUguiShellSelfGameLodOnUpdate();
+            this.ProcessUguiShellSelfMiniMapOnUpdate();
             this.ProcessUguiShellBagWarehouseOnUpdate();
             this.ProcessUguiShellForagingOnUpdate();
             this.ProcessUguiShellFishingOnUpdate();
@@ -444,7 +445,7 @@ namespace HeartopiaMod
                 };
                 string[][] subTabLabels = new string[][]
                 {
-                    new string[] { this.L("Main"), this.L("Building"), this.L("Fun"), this.L("Privacy"), this.L("Game UI"), this.L("Game LOD") },
+                    new string[] { this.L("Main"), this.L("Building"), this.L("Fun"), this.L("Privacy"), this.L("Game UI"), this.L("Game LOD"), this.L("Minimap") },
                     new string[] { this.L("Foraging"), this.L("Fishing"), this.L("Insects"), this.L("Birds"), this.L("Combined") },
                     new string[] { this.L("Main"), this.L("Food & Repair"), this.L("Snow Sculpting"), this.L("Auto Buy"), this.L("Auto Sell"), this.L("Mass Cook"), this.L("Puzzle"), this.L("Pet Care") },
                     new string[] { this.L("Animal Care"), this.L("Daily Quests"), this.L("homeland_farm.title"), this.L("pictures.title"), this.L("Ice Skating"), this.L("extra.title"), this.L("Sand Sculpture"), this.L("Sea Clean") },
@@ -669,6 +670,13 @@ namespace HeartopiaMod
                                     // Self → Game LOD (GameLodFeature.cs world detail overrides;
                                     // HeartopiaComplete.UguiGameLodContent.cs). New page, no IMGUI twin.
                                     subContents[j] = this.BuildUguiShellSelfGameLodContent(
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
+                                }
+                                else if (i == UguiShellSelfTabIndex && j == UguiShellSelfMiniMapSubIndex)
+                                {
+                                    // Self → Minimap (MiniMapZoomFeature.cs HUD minimap zoom;
+                                    // HeartopiaComplete.UguiMiniMapContent.cs). New page, no IMGUI twin.
+                                    subContents[j] = this.BuildUguiShellSelfMiniMapContent(
                                         container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellSettingsTabIndex && j == UguiShellSettingsAboutSubIndex)

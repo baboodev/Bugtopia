@@ -720,6 +720,25 @@ its own switch and its own hook latch. Chain: `MailSyncSystem` (`WorldSystem.Sho
 - Sliders 0.5–15 s + "Reset to game defaults" button; persisted in config
   (`gameUiTimingsEnabled` / `gameUiTimingSeconds`). Implementation: `GameUiTimingsFeature.cs`.
 
+### Minimap Zoom (Self → Minimap sub-tab)
+
+- Scales the HUD minimap: **Zoom** 0.5×–3× (above 1× = closer). Applies to both minimaps — the
+  normal `StatusPanel` one and the `VehicleStatusPanel` one shown while riding.
+- **Auto-zoom by speed**: 0 m/s → "Zoom at rest", the current car's `RunForwardMaxSpeed`
+  (8 m/s on foot) → "Zoom at top speed" (0.3×–1.5×), log-interpolated. **Reaction**
+  Smooth / Normal / Fast sets how fast it zooms out when speeding up, how slowly it zooms back
+  in, and how long a slowdown is ignored first.
+- Speed: on foot / swimming / skating `MovementComponent._realSpeed`; driving the vehicle
+  controller's `moveSpeed`; as a passenger (`VehicleLocomotionRemote`, whose `currSpeed` only
+  mirrors network messages and sticks) the visible minimap's own offset delta.
+- How: `maproot@t` scaled by k, the spot layer `map_sketch@t` scaled 0.55k with its offset
+  rewritten every frame after `CommonMapBar.TriggerByMe`, spot icons counter-scaled to keep their
+  size, and `MiniMapSystem.distance`/`trackDistance` divided by k so spots stay inside the circle.
+  `MapSystem.MapRatio` is not touched (the big map shares it). Client-only UI; nothing is sent.
+- Disabling restores the vanilla scales and the original distances. Persisted as
+  `miniMapZoomEnabled` / `miniMapZoomRest` / `miniMapAutoZoomEnabled` / `miniMapZoomTop` /
+  `miniMapZoomReaction`. Implementation: `MiniMapZoomFeature.cs` (+ `HeartopiaComplete.UguiMiniMapContent.cs`).
+
 ### Game LOD — World Detail / Draw Distance (Self → Game LOD sub-tab)
 
 Overrides the game's five client-side LOD/streaming systems so more world objects render, further

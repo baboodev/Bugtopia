@@ -312,6 +312,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Pet Height Limit Bypass", this.petHeightLimitStatus));
             }
 
+            if (this.miniMapZoomEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Minimap Zoom", this.miniMapZoomStatus));
+            }
+
             if (this.persistentHudEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Persistent HUD", this.persistentHudLastStatus));

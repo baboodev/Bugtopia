@@ -124,6 +124,13 @@ namespace HeartopiaMod
             // GameUiTimingFieldNames (GameUiTimingsFeature.cs). Null/short/0 entries = game defaults.
             public bool gameUiTimingsEnabled;
             public float[] gameUiTimingSeconds;
+            // HUD minimap zoom (MiniMapZoomFeature.cs). Zooms are scale factors (>1 = closer); 0/absent
+            // = feature default. Reaction indexes MiniMapZoomReactionNames (0 Smooth, 1 Normal, 2 Fast).
+            public bool miniMapZoomEnabled;
+            public float miniMapZoomRest;
+            public bool miniMapAutoZoomEnabled;
+            public float miniMapZoomTop;
+            public int miniMapZoomReaction = 1;
             public int keyGameSpeed1x;
             public int keyGameSpeed2x;
             public int keyGameSpeed5x;

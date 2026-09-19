@@ -366,6 +366,7 @@
     <Compile Include="HeartopiaComplete.UguiBuildingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSelfContent.cs" />
     <Compile Include="HeartopiaComplete.UguiGameLodContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiMiniMapContent.cs" />
     <Compile Include="HeartopiaComplete.UguiBagWarehouseContent.cs" />
     <Compile Include="HeartopiaComplete.UguiForagingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiFishingContent.cs" />
@@ -481,6 +482,7 @@
     <Compile Include="SwimSprintTweakFeature.cs" />
     <Compile Include="JumpTuningFeature.cs" />
     <Compile Include="GameUiTimingsFeature.cs" />
+    <Compile Include="MiniMapZoomFeature.cs" />
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="SandSculptureFeature.cs" />

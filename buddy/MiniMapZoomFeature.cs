@@ -1,0 +1,672 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using UnityEngine;
+
+namespace HeartopiaMod
+{
+    // Minimap Zoom — HUD minimap scale, fixed or speed-driven (Self -> Minimap tab).
+    //
+    // HOW THE VANILLA MINIMAP IS BUILT (XDTGame.UI.Widget.CommonMapBar, ilspy-dumps/XDTGameUI):
+    //   TriggerByMe writes, EVERY frame, anchoredPosition = -pos.xz * MapSystem.MapRatio(5) * 0.55 into
+    //     map_bar@go@w/realmask_map/maproot@t/dec_sketch@t@img   (picture, prefab localScale 0.55)
+    //     map_bar@go@w/map_sketch@t                              (spot layer, prefab localScale 0.55)
+    //   Spots sit in map_sketch@t/map_spots@t at pos * 5 (MiniMapSpotWidget.RefreshMiniMapPosition).
+    //   → 2.75 px per metre; the 224 px circular mask shows ~40 m of radius.
+    //   The spot layer is NOT under the mask: MiniMapSystem.distance (40) hides spots and
+    //   MiniMapSystem.trackDistance (40) clamps tracked pins to the edge.
+    //
+    // ZOOM k (verified live 2026-09-20 with tools/MiniMapZoomProbe):
+    //   maproot@t.localScale = k             — picture and its offset live in one space, nothing else
+    //   map_sketch@t.localScale = 0.55k       — plus anchoredPosition = dec_sketch.anchoredPosition * k,
+    //                                           rewritten every frame after the game's own write
+    //                                           (OnUpdate runs after CommonMapBar.Update)
+    //   spot widgets (map_spots@t children)   — counter-scaled by 1/k so icons keep their size;
+    //                                           SetData re-sets their base scale (1.15/1.3), detected by
+    //                                           comparing against the value we last wrote
+    //   MiniMapSystem.distance/trackDistance  — original / k, so nothing spills past the circle and
+    //                                           tracked pins still clamp to its edge
+    //   MapSystem.MapRatio is deliberately NOT touched: it is global, MapPanel/BusPanel read it and
+    //   MapPanel resets it to 5.
+    //
+    // TWO minimaps exist: StatusPanel and VehicleStatusPanel (shown while riding, created on demand).
+    // Every map_bar@go@w under XDUIRoot/Status is handled; the list is rescanned every 0.5 s.
+    //
+    // SPEED (auto-zoom; sources measured live, see project memory minimap-zoom-model):
+    //   on foot / swim / skate  -> self MovementComponent._realSpeed (run = 3.5 m/s)
+    //   driving (VehicleLocomotionNormal) -> vehicle controller.moveSpeed (0 -> 8 m/s, 0 on stop)
+    //   passenger (VehicleLocomotionRemote) -> NOT currSpeed: it holds the last synced value (stuck at
+    //     1.73-8.0 while parked). Uses the visible minimap's offset delta instead (matches real speed
+    //     within ~3%).
+    //   Curve: 0 m/s -> "Zoom at rest", top speed -> "Zoom at top speed", log-interpolated. Top speed
+    //   = the current car's RunForwardMaxSpeed (VehicleComponent), 8 m/s (fastest Car row) on foot.
+    public partial class HeartopiaComplete
+    {
+        private const float MiniMapZoomMin = 0.5f;
+        private const float MiniMapZoomMax = 3f;
+        private const float MiniMapZoomTopMin = 0.3f;
+        private const float MiniMapZoomTopMax = 1.5f;
+        private const float MiniMapZoomDefaultRest = 1.5f;
+        private const float MiniMapZoomDefaultTop = 0.6f;
+
+        // CommonMapBar constants (TriggerByMe's literal 0.55, MapSystem.MapRatio 5).
+        private const float MiniMapVanillaSketchScale = 0.55f;
+        private const float MiniMapPixelsPerMetre = 5f * 0.55f;
+        private const float MiniMapDefaultTopSpeed = 8f;   // Car.runForwardMaxSpeed max (81051+)
+        private const float MiniMapSpeedSampleInterval = 0.1f;
+        private const float MiniMapBarRescanInterval = 0.5f;
+        private const float MiniMapDistanceApplyInterval = 0.25f;
+        private const float MiniMapTeleportJumpMetres = 30f;
+        private const string MiniMapStatusRootPath = "GameApp/startup_root(Clone)/XDUIRoot/Status";
+        private const string MiniMapBarPath = "AniRoot@ani@queueanimation/top_left_layout@go/map_bar@go@w";
+        private const string MiniMapSystemTypeName = "XDTGameSystem.GameplaySystem.MapSpots.MiniMapSystem";
+
+        internal static readonly string[] MiniMapZoomReactionNames = { "Smooth", "Normal", "Fast" };
+
+        // Seconds to (roughly) settle when speeding up / slowing down, and how long a slowdown is
+        // ignored before the map starts zooming back in. Index = miniMapZoomReaction.
+        private static readonly float[] MiniMapReactionUp = { 1.0f, 0.5f, 0.25f };
+        private static readonly float[] MiniMapReactionDown = { 3.0f, 1.5f, 0.7f };
+        private static readonly float[] MiniMapReactionHold = { 2.0f, 1.0f, 0.3f };
+
+        // --- persisted settings ---
+        private bool miniMapZoomEnabled;
+        private float miniMapZoomRest = MiniMapZoomDefaultRest;
+        private bool miniMapAutoZoomEnabled;
+        private float miniMapZoomTop = MiniMapZoomDefaultTop;
+        private int miniMapZoomReaction = 1;
+
+        // --- runtime ---
+        private sealed class MiniMapBar
+        {
+            public RectTransform Maproot;
+            public RectTransform Sketch;
+            public RectTransform Dec;
+            public bool IsVehiclePanel;
+            public bool Alive => this.Maproot != null && this.Sketch != null && this.Dec != null;
+        }
+
+        private readonly List<MiniMapBar> miniMapBars = new List<MiniMapBar>();
+        private readonly Dictionary<int, float> miniMapIconBase = new Dictionary<int, float>();
+        private readonly Dictionary<int, float> miniMapIconWritten = new Dictionary<int, float>();
+        private Transform miniMapStatusRoot;
+        private int miniMapLoggedBarCount = -1;
+        private float miniMapNextRescanAt;
+        private int miniMapEpoch = -1;
+        private bool miniMapApplied;            // our scales are on screen (restore needed on disable)
+        private float miniMapCurrentK = 1f;
+
+        private float miniMapNextSampleAt;
+        private float miniMapRawSpeed;
+        private float miniMapSmoothSpeed;
+        private float miniMapLastFastAt;
+        private float miniMapTopSpeed = MiniMapDefaultTopSpeed;
+        private string miniMapSpeedSource = "-";
+        private Vector2 miniMapLastMapPos;
+        private float miniMapLastMapAt = -1f;
+        private bool miniMapLastMapVehicle;
+
+        private IntPtr miniMapSystemClass;
+        private IntPtr miniMapDistanceField;
+        private IntPtr miniMapTrackDistanceField;
+        private IntPtr miniMapFieldsClass;
+        private float miniMapOrigDistance = 40f;
+        private float miniMapOrigTrackDistance = 40f;
+        private bool miniMapOrigCaptured;
+        private float miniMapWrittenDistanceK = 1f;
+        private int miniMapDistanceEpoch = -1;
+        private float miniMapNextDistanceAt;
+
+        private string miniMapZoomStatus = "Idle.";
+        private string miniMapZoomLastLoggedStatus;
+        private FeatureBreakerState miniMapZoomBreaker;
+
+        private void ProcessMiniMapZoomOnUpdate()
+        {
+            bool active = this.miniMapZoomEnabled && this.IsWorldReady;
+            if (!active && !this.miniMapApplied)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (!this.miniMapZoomBreaker.ShouldRun(now))
+            {
+                return;
+            }
+
+            try
+            {
+                if (!active)
+                {
+                    this.RestoreMiniMapZoom();
+                    this.miniMapZoomBreaker.Success();
+                    return;
+                }
+
+                if (this.miniMapEpoch != AuraMonoWorldEpoch)
+                {
+                    this.miniMapEpoch = AuraMonoWorldEpoch;
+                    this.miniMapBars.Clear();
+                    this.miniMapIconBase.Clear();
+                    this.miniMapIconWritten.Clear();
+                    this.miniMapStatusRoot = null;
+                    this.miniMapLastMapAt = -1f;
+                    this.miniMapSmoothSpeed = 0f;
+                    this.miniMapRawSpeed = 0f;
+                    this.miniMapNextRescanAt = 0f;
+                }
+
+                if (now >= this.miniMapNextRescanAt || this.MiniMapAnyBarDead())
+                {
+                    this.miniMapNextRescanAt = now + MiniMapBarRescanInterval;
+                    this.RescanMiniMapBars();
+                }
+
+                float k = this.miniMapZoomRest;
+                if (this.miniMapAutoZoomEnabled)
+                {
+                    if (now >= this.miniMapNextSampleAt)
+                    {
+                        this.miniMapNextSampleAt = now + MiniMapSpeedSampleInterval;
+                        this.SampleMiniMapSpeed(now);
+                    }
+
+                    this.SmoothMiniMapSpeed(now, Time.unscaledDeltaTime);
+                    k = this.MiniMapZoomForSpeed(this.miniMapSmoothSpeed);
+                }
+
+                this.miniMapCurrentK = Mathf.Clamp(k, MiniMapZoomTopMin, MiniMapZoomMax);
+                if (this.miniMapBars.Count == 0)
+                {
+                    // No minimap on screen yet: widening the spot cut-off without scaling the map
+                    // would just scatter icons outside the circle.
+                    this.MiniMapZoomSetStatus("Waiting for the HUD minimap.", log: true);
+                    this.miniMapZoomBreaker.Success();
+                    return;
+                }
+
+                this.ApplyMiniMapZoom(this.miniMapCurrentK);
+
+                if (now >= this.miniMapNextDistanceAt)
+                {
+                    this.miniMapNextDistanceAt = now + MiniMapDistanceApplyInterval;
+                    this.ApplyMiniMapDistances(this.miniMapCurrentK, force: false);
+                }
+
+                this.MiniMapZoomSetStatus(this.miniMapAutoZoomEnabled
+                    ? this.LF("{0:F1} m/s ({1}), zoom {2:F2}x", this.miniMapRawSpeed, this.miniMapSpeedSource, this.miniMapCurrentK)
+                    : this.LF("Zoom {0:F2}x", this.miniMapCurrentK), log: false);
+                this.miniMapZoomBreaker.Success();
+            }
+            catch (Exception ex)
+            {
+                this.miniMapZoomBreaker.Failure("MiniMapZoom", ex, now);
+                this.miniMapZoomStatus = "Error: " + ex.Message;
+            }
+        }
+
+        // --- minimap instances ---------------------------------------------------------------
+
+        private bool MiniMapAnyBarDead()
+        {
+            for (int i = 0; i < this.miniMapBars.Count; i++)
+            {
+                if (!this.miniMapBars[i].Alive)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // XDUIRoot/Status holds a handful of HUD panels; only the ones with a map bar matter. A full
+        // FindObjectsOfType<RectTransform> would walk thousands of UI nodes every rescan.
+        private void RescanMiniMapBars()
+        {
+            if (this.miniMapStatusRoot == null)
+            {
+                GameObject statusGo = GameObject.Find(MiniMapStatusRootPath);
+                this.miniMapStatusRoot = statusGo != null ? statusGo.transform : null;
+            }
+
+            this.miniMapBars.Clear();
+            if (this.miniMapStatusRoot == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.miniMapStatusRoot.childCount; i++)
+            {
+                Transform panel = this.miniMapStatusRoot.GetChild(i);
+                Transform barT = panel != null ? panel.Find(MiniMapBarPath) : null;
+                if (barT == null)
+                {
+                    continue;
+                }
+
+                // NOT `Find(...) as RectTransform`: Il2CppInterop wraps the pointer as the method's
+                // declared return type (Transform), so the C# cast is null unless an earlier
+                // FindObjectsOfType<RectTransform> happened to cache a RectTransform wrapper for it.
+                MiniMapBar bar = new MiniMapBar
+                {
+                    Maproot = MiniMapFindRect(barT, "realmask_map/maproot@t"),
+                    Sketch = MiniMapFindRect(barT, "map_sketch@t"),
+                    IsVehiclePanel = panel.name.StartsWith("VehicleStatusPanel", StringComparison.Ordinal),
+                };
+                if (bar.Maproot != null)
+                {
+                    bar.Dec = MiniMapFindRect(bar.Maproot, "dec_sketch@t@img");
+                }
+
+                if (bar.Alive)
+                {
+                    this.miniMapBars.Add(bar);
+                }
+            }
+
+            // Nothing found under a cached root: the root may be a leftover from the loading UI, or
+            // the HUD is not built yet. Drop it so the next rescan resolves the path again.
+            if (this.miniMapBars.Count == 0)
+            {
+                this.miniMapStatusRoot = null;
+            }
+
+            if (this.miniMapBars.Count != this.miniMapLoggedBarCount)
+            {
+                this.miniMapLoggedBarCount = this.miniMapBars.Count;
+                ModLogger.Msg("[MiniMapZoom] minimaps found: " + this.miniMapBars.Count);
+            }
+        }
+
+        private static RectTransform MiniMapFindRect(Transform parent, string path)
+        {
+            Transform child = parent.Find(path);
+            return child != null ? child.GetComponent<RectTransform>() : null;
+        }
+
+        private void ApplyMiniMapZoom(float k)
+        {
+            float sketchScale = MiniMapVanillaSketchScale * k;
+            for (int i = 0; i < this.miniMapBars.Count; i++)
+            {
+                MiniMapBar bar = this.miniMapBars[i];
+                if (!bar.Alive)
+                {
+                    continue;
+                }
+
+                if (Mathf.Abs(bar.Maproot.localScale.x - k) > 1e-4f)
+                {
+                    bar.Maproot.localScale = new Vector3(k, k, 1f);
+                }
+
+                if (Mathf.Abs(bar.Sketch.localScale.x - sketchScale) > 1e-4f)
+                {
+                    bar.Sketch.localScale = new Vector3(sketchScale, sketchScale, sketchScale);
+                }
+
+                // The game rewrote the spot layer offset this frame with its 0.55 literal; the picture
+                // (dec_sketch) got the same vector inside the now-scaled maproot.
+                bar.Sketch.anchoredPosition = bar.Dec.anchoredPosition * k;
+                this.CounterScaleMiniMapIcons(bar, 1f / k);
+            }
+
+            this.miniMapApplied = true;
+        }
+
+        private void CounterScaleMiniMapIcons(MiniMapBar bar, float factor)
+        {
+            if (bar.Sketch.childCount == 0)
+            {
+                return;
+            }
+
+            Transform spots = bar.Sketch.GetChild(0); // map_spots@t
+            for (int i = 0; i < spots.childCount; i++)
+            {
+                Transform icon = spots.GetChild(i);
+                int id = icon.GetInstanceID();
+                float current = icon.localScale.x;
+                if (!this.miniMapIconWritten.TryGetValue(id, out float written) || Mathf.Abs(written - current) > 1e-4f)
+                {
+                    this.miniMapIconBase[id] = current; // SetData (re)set the base scale
+                }
+
+                float target = this.miniMapIconBase[id] * factor;
+                if (Mathf.Abs(current - target) > 1e-4f)
+                {
+                    icon.localScale = new Vector3(target, target, 1f);
+                }
+                this.miniMapIconWritten[id] = target;
+            }
+        }
+
+        private void RestoreMiniMapZoom()
+        {
+            if (this.miniMapBars.Count == 0 || this.MiniMapAnyBarDead())
+            {
+                this.RescanMiniMapBars();
+            }
+
+            for (int i = 0; i < this.miniMapBars.Count; i++)
+            {
+                MiniMapBar bar = this.miniMapBars[i];
+                if (!bar.Alive)
+                {
+                    continue;
+                }
+
+                bar.Maproot.localScale = Vector3.one;
+                bar.Sketch.localScale = new Vector3(MiniMapVanillaSketchScale, MiniMapVanillaSketchScale, MiniMapVanillaSketchScale);
+                this.CounterScaleMiniMapIcons(bar, 1f);
+            }
+
+            // MiniMapSystem is a world-scoped module; only worth restoring while a world exists (a
+            // new world builds a fresh instance with vanilla values anyway).
+            if (this.IsWorldReady)
+            {
+                this.ApplyMiniMapDistances(1f, force: true);
+            }
+
+            this.miniMapApplied = false;
+            this.miniMapCurrentK = 1f;
+            this.miniMapIconBase.Clear();
+            this.miniMapIconWritten.Clear();
+            this.MiniMapZoomSetStatus("Restored.", log: true);
+        }
+
+        // --- speed -----------------------------------------------------------------------------
+
+        private void SampleMiniMapSpeed(float now)
+        {
+            bool inVehicle = false;
+            bool remote = false;
+            float speed = 0f;
+            string source = "foot";
+
+            if (this.EnsureAuraMonoApiReady() && AuraMonoPinningAvailable)
+            {
+                IntPtr vehicleObj = this.TryGetSelfEntityVehicleComponentMono();
+                if (vehicleObj != IntPtr.Zero)
+                {
+                    inVehicle = true;
+                    uint vehiclePin = AuraMonoPinNew(vehicleObj);
+                    try
+                    {
+                        if (this.TryGetMonoSingleMember(vehicleObj, "RunForwardMaxSpeed", out float top) && top > 0.5f)
+                        {
+                            this.miniMapTopSpeed = top;
+                        }
+
+                        if (this.TryGetMonoObjectMember(vehicleObj, "controller", out IntPtr controllerObj) && controllerObj != IntPtr.Zero)
+                        {
+                            uint controllerPin = AuraMonoPinNew(controllerObj);
+                            try
+                            {
+                                remote = this.IsMiniMapRemoteVehicleLocomotion(controllerObj);
+                                if (!remote && this.TryGetMonoSingleMember(controllerObj, "moveSpeed", out float vehicleSpeed))
+                                {
+                                    speed = Mathf.Abs(vehicleSpeed);
+                                    source = "car";
+                                }
+                            }
+                            finally
+                            {
+                                AuraMonoPinFree(controllerPin);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(vehiclePin);
+                    }
+                }
+                else
+                {
+                    this.miniMapTopSpeed = MiniMapDefaultTopSpeed;
+                    if (this.TryGetAuraMonoLocalPlayerObject(out IntPtr playerObj) && playerObj != IntPtr.Zero)
+                    {
+                        uint playerPin = AuraMonoPinNew(playerObj);
+                        try
+                        {
+                            if (this.TryGetBunnyHopMonoMoveComponent(playerObj, out IntPtr moveObj) && moveObj != IntPtr.Zero
+                                && this.TryGetMonoSingleMember(moveObj, "_realSpeed", out float realSpeed))
+                            {
+                                speed = Mathf.Abs(realSpeed);
+                            }
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(playerPin);
+                        }
+                    }
+                }
+            }
+
+            // The visible minimap's offset delta: the passenger's source, and kept primed otherwise so
+            // switching to it never starts from a stale position.
+            float mapSpeed = this.SampleMiniMapOffsetSpeed(now, inVehicle, out bool mapValid);
+            if (inVehicle && (remote || source != "car"))
+            {
+                speed = mapValid ? mapSpeed : 0f;
+                source = "passenger";
+            }
+
+            this.miniMapRawSpeed = speed;
+            this.miniMapSpeedSource = source;
+        }
+
+        // VehicleLocomotionRemote = someone else drives and currSpeed only mirrors network messages.
+        private bool IsMiniMapRemoteVehicleLocomotion(IntPtr controllerObj)
+        {
+            if (auraMonoObjectGetClass == null || auraMonoClassGetName == null
+                || !this.TryGetMonoObjectMember(controllerObj, "_locomotion", out IntPtr locomotionObj) || locomotionObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr klass = auraMonoObjectGetClass(locomotionObj);
+            string name = klass != IntPtr.Zero ? Marshal.PtrToStringAnsi(auraMonoClassGetName(klass)) : null;
+            return name != null && name.IndexOf("Remote", StringComparison.Ordinal) >= 0;
+        }
+
+        private float SampleMiniMapOffsetSpeed(float now, bool inVehicle, out bool valid)
+        {
+            valid = false;
+            MiniMapBar bar = null;
+            for (int i = 0; i < this.miniMapBars.Count; i++)
+            {
+                if (this.miniMapBars[i].Alive && this.miniMapBars[i].IsVehiclePanel == inVehicle)
+                {
+                    bar = this.miniMapBars[i];
+                    break;
+                }
+            }
+
+            if (bar == null)
+            {
+                this.miniMapLastMapAt = -1f;
+                return 0f;
+            }
+
+            Vector2 pos = bar.Dec.anchoredPosition / -MiniMapPixelsPerMetre;
+            float speed = 0f;
+            if (this.miniMapLastMapAt > 0f && now > this.miniMapLastMapAt && this.miniMapLastMapVehicle == inVehicle)
+            {
+                float metres = (pos - this.miniMapLastMapPos).magnitude;
+                // A teleport or a panel handover looks like a huge jump — ignore that sample.
+                if (metres < MiniMapTeleportJumpMetres)
+                {
+                    speed = metres / (now - this.miniMapLastMapAt);
+                    valid = true;
+                }
+            }
+
+            this.miniMapLastMapPos = pos;
+            this.miniMapLastMapAt = now;
+            this.miniMapLastMapVehicle = inVehicle;
+            return speed;
+        }
+
+        // Fast when speeding up, slow (and after a hold) when slowing down — stops and turns must not
+        // make the map breathe. Settle times are ~3 time constants.
+        private void SmoothMiniMapSpeed(float now, float dt)
+        {
+            if (dt <= 0f)
+            {
+                return;
+            }
+
+            int r = Mathf.Clamp(this.miniMapZoomReaction, 0, MiniMapReactionUp.Length - 1);
+            float target = this.miniMapRawSpeed;
+            if (target >= this.miniMapSmoothSpeed * 0.9f)
+            {
+                this.miniMapLastFastAt = now;
+            }
+
+            float settle;
+            if (target > this.miniMapSmoothSpeed)
+            {
+                settle = MiniMapReactionUp[r];
+            }
+            else if (now - this.miniMapLastFastAt < MiniMapReactionHold[r])
+            {
+                return;
+            }
+            else
+            {
+                settle = MiniMapReactionDown[r];
+            }
+
+            float alpha = 1f - Mathf.Exp(-dt * 3f / Mathf.Max(0.05f, settle));
+            this.miniMapSmoothSpeed += (target - this.miniMapSmoothSpeed) * alpha;
+        }
+
+        private float MiniMapZoomForSpeed(float speed)
+        {
+            float t = Mathf.Clamp01(speed / Mathf.Max(0.5f, this.miniMapTopSpeed));
+            float logRest = Mathf.Log(Mathf.Max(0.05f, this.miniMapZoomRest));
+            float logTop = Mathf.Log(Mathf.Max(0.05f, this.miniMapZoomTop));
+            return Mathf.Exp(Mathf.Lerp(logRest, logTop, t));
+        }
+
+        // --- MiniMapSystem.distance / trackDistance --------------------------------------------
+
+        private unsafe void ApplyMiniMapDistances(float k, bool force)
+        {
+            bool newWorld = this.miniMapDistanceEpoch != AuraMonoWorldEpoch;
+            if (!force && !newWorld && Mathf.Abs(k - this.miniMapWrittenDistanceK) <= this.miniMapWrittenDistanceK * 0.03f)
+            {
+                return;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !AuraMonoPinningAvailable
+                || auraMonoFieldSetValue == null || auraMonoObjectGetClass == null)
+            {
+                return;
+            }
+
+            if (this.miniMapSystemClass == IntPtr.Zero)
+            {
+                this.miniMapSystemClass = this.FindAuraMonoClassByFullName(MiniMapSystemTypeName);
+                if (this.miniMapSystemClass == IntPtr.Zero)
+                {
+                    this.MiniMapZoomSetStatus("MiniMapSystem class unresolved (game update?).", log: true);
+                    return;
+                }
+            }
+
+            IntPtr instance = this.TryGetAuraMonoDataModuleInstance(this.miniMapSystemClass);
+            if (instance == IntPtr.Zero)
+            {
+                return; // not in a main-world level; retried on the next interval
+            }
+
+            uint pin = AuraMonoPinNew(instance);
+            try
+            {
+                IntPtr klass = auraMonoObjectGetClass(instance);
+                if (klass != this.miniMapFieldsClass)
+                {
+                    this.miniMapFieldsClass = klass;
+                    this.miniMapDistanceField = this.FindAuraMonoFieldOnHierarchy(klass, "distance");
+                    this.miniMapTrackDistanceField = this.FindAuraMonoFieldOnHierarchy(klass, "trackDistance");
+                }
+
+                if (this.miniMapDistanceField == IntPtr.Zero || this.miniMapTrackDistanceField == IntPtr.Zero)
+                {
+                    this.MiniMapZoomSetStatus("MiniMapSystem distance fields unresolved (game update?).", log: true);
+                    return;
+                }
+
+                // Originals captured once per process, BEFORE the first write (the module may outlive
+                // a world epoch, so a later read could return our own value). Every new instance
+                // starts from the same field initializers, so restoring these stays correct.
+                // Never write values we could not learn how to undo.
+                if (!this.miniMapOrigCaptured)
+                {
+                    if (!this.TryGetMonoSingleMember(instance, "distance", out float dist)
+                        || !this.TryGetMonoSingleMember(instance, "trackDistance", out float track)
+                        || dist <= 0f || track <= 0f)
+                    {
+                        return;
+                    }
+
+                    this.miniMapOrigDistance = dist;
+                    this.miniMapOrigTrackDistance = track;
+                    this.miniMapOrigCaptured = true;
+                    ModLogger.Msg("[MiniMapZoom] originals captured: distance=" + dist.ToString("F1")
+                        + " trackDistance=" + track.ToString("F1"));
+                }
+
+                this.miniMapDistanceEpoch = AuraMonoWorldEpoch;
+
+                // Value-type float fields: mono_field_set_value takes a pointer TO the value.
+                float distance = this.miniMapOrigDistance / k;
+                float trackDistance = this.miniMapOrigTrackDistance / k;
+                auraMonoFieldSetValue(instance, this.miniMapDistanceField, (IntPtr)(&distance));
+                auraMonoFieldSetValue(instance, this.miniMapTrackDistanceField, (IntPtr)(&trackDistance));
+                this.miniMapWrittenDistanceK = k;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        private void MiniMapZoomSetStatus(string status, bool log)
+        {
+            this.miniMapZoomStatus = status;
+            if (log && !string.Equals(status, this.miniMapZoomLastLoggedStatus, StringComparison.Ordinal))
+            {
+                this.miniMapZoomLastLoggedStatus = status;
+                ModLogger.Msg("[MiniMapZoom] " + status);
+            }
+        }
+
+        // --- Config bridge (called from PopulateKeybindConfig / ApplyKeybindConfig) --------------
+
+        private void SaveMiniMapZoomToConfig(KeybindConfigData data)
+        {
+            data.miniMapZoomEnabled = this.miniMapZoomEnabled;
+            data.miniMapZoomRest = this.miniMapZoomRest;
+            data.miniMapAutoZoomEnabled = this.miniMapAutoZoomEnabled;
+            data.miniMapZoomTop = this.miniMapZoomTop;
+            data.miniMapZoomReaction = this.miniMapZoomReaction;
+        }
+
+        private void LoadMiniMapZoomFromConfig(KeybindConfigData data)
+        {
+            this.miniMapZoomEnabled = data.miniMapZoomEnabled;
+            this.miniMapZoomRest = data.miniMapZoomRest <= 0f
+                ? MiniMapZoomDefaultRest
+                : Mathf.Clamp(data.miniMapZoomRest, MiniMapZoomMin, MiniMapZoomMax);
+            this.miniMapAutoZoomEnabled = data.miniMapAutoZoomEnabled;
+            this.miniMapZoomTop = data.miniMapZoomTop <= 0f
+                ? MiniMapZoomDefaultTop
+                : Mathf.Clamp(data.miniMapZoomTop, MiniMapZoomTopMin, MiniMapZoomTopMax);
+            this.miniMapZoomReaction = Mathf.Clamp(data.miniMapZoomReaction, 0, MiniMapZoomReactionNames.Length - 1);
+        }
+    }
+}

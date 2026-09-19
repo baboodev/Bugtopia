@@ -83,6 +83,10 @@ namespace HeartopiaMod
         // END of Self's sub array so the existing display indices above stay stable.
         private const int UguiShellSelfGameLodSubIndex = 5;          // "Game LOD" within Self's subs
 
+        // Self → Minimap (HUD minimap zoom, MiniMapZoomFeature.cs + HeartopiaComplete.UguiMiniMapContent.cs).
+        // New page with no IMGUI twin — appended after Game LOD for the same index-stability reason.
+        private const int UguiShellSelfMiniMapSubIndex = 6;          // "Minimap" within Self's subs
+
         // Bag/Warehouse (Phase 3 item 5, HeartopiaComplete.UguiBagWarehouseContent.cs): display
         // position 6 carries internal id 6 (UguiShellInternalTabIds[6]) = IMGUI selectedTab 6 =
         // DrawBulkSelectorTab (HeartopiaComplete.Gui.cs:1305). No sub-tabs (subTabLabels[6] is

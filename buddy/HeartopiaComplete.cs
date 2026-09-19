@@ -754,6 +754,7 @@ namespace HeartopiaMod
             this.ProcessSwimSprintTweakOnUpdate();
             this.ProcessJumpTuningOnUpdate();
             this.ProcessGameUiTimingsOnUpdate();
+            this.ProcessMiniMapZoomOnUpdate();
             this.UpdateMovementInputBridge();
             this.ProcessAutoIceSkatingOnUpdate();
             Breadcrumbs.Phase("ou.bubble");
