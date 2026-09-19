@@ -5,9 +5,7 @@ using System.Threading;
 namespace Bugtopia.Launcher
 {
     /// <summary>
-    /// Puts text on the Windows clipboard, for both windows. Neither Photino nor the Win32 host has a
-    /// clipboard of its own, and the page cannot be trusted to have one: a raw-string page in WebView2
-    /// is not a secure context.
+    /// Puts text on the Windows clipboard, on behalf of the launcher's window.
     /// </summary>
     internal static unsafe class Clipboard
     {

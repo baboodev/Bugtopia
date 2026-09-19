@@ -64,7 +64,7 @@ Bugtopia/
 │   ├── BugtopiaInject/       ← native C bootstrap, injected into the running game
 │   ├── BugtopiaInterop/      ← net6.0 shim: generates interop inside BepInEx's own CoreCLR
 │   ├── BugtopiaLaunch/       ← storage tree, injection, profiles, downloads
-│   ├── BugtopiaLauncher/     ← the app (NativeAOT + Photino), ui.html
+│   ├── BugtopiaLauncher/     ← the app (NativeAOT, native Win32 window in Win32/)
 │   └── Directory.Build.props ← per-flavour bin\ and obj\
 ├── ci/                       ← build scripts used by the workflow
 │   ├── publish-launcher.ps1  ← publishes both launchers into release/

@@ -10,12 +10,12 @@ using static Bugtopia.Launcher.Win32.Native;
 namespace Bugtopia.Launcher.Win32
 {
     /// <summary>
-    /// The launcher as a native window - what ui.html draws, without a browser engine under it.
+    /// The launcher's window, drawn natively - no browser engine under it.
     ///
-    /// It talks to <see cref="Api"/> exactly as the page does: JSON commands in through
-    /// <see cref="Api.Dispatch"/>, JSON replies and events out through the send callback. So the Api is
-    /// the same code in both builds, and this is a port of the page's script rather than a second
-    /// implementation of the launcher. Where it mirrors a function of the page, it keeps its name.
+    /// It talks to <see cref="Api"/> in JSON: commands in through <see cref="Api.Dispatch"/>, replies
+    /// and events out through the send callback. That is the protocol of the WebView2 page this window
+    /// replaced, and it was ported from that page's script, not rewritten: the functions that mirror
+    /// one of the page's keep its lower-case name (render, renderSteps, say, armAutoLaunch...).
     ///
     /// This file holds the bridge, the window and the simple screen; Win32Host.Expert.cs the expert view.
     ///
@@ -24,7 +24,7 @@ namespace Bugtopia.Launcher.Win32
     /// </summary>
     internal sealed unsafe partial class Win32Host : Surface, IDialogs
     {
-        private const uint WM_INBOX = WM_APP + 1, WM_RESIZE_REQUEST = WM_APP + 2, WM_REVEAL = WM_APP + 3;
+        private const uint WM_INBOX = WM_APP + 1, WM_RESIZE_REQUEST = WM_APP + 2;
         private const nuint TimerReveal = 1, TimerCountdown = 2, TimerSweep = 3, TimerCopied = 4;
 
         /// <summary>Links that copy rather than open carry their text behind this prefix.</summary>
@@ -139,7 +139,7 @@ namespace Bugtopia.Launcher.Win32
 
             Call("state", null, SetState, error => say(error, true));
 
-            // A safety net, as in PhotinoHost: a window must appear even if the first state never does.
+            // A safety net: a window must appear even if the first state never does.
             SetTimer(Hwnd, TimerReveal, 5000, 0);
 
             MSG msg;
@@ -1316,10 +1316,6 @@ namespace Bugtopia.Launcher.Win32
                     SizeAndCentre((int)w, (int)l);
                     return 0;
 
-                case WM_REVEAL:
-                    reveal();
-                    return 0;
-
                 case WM_DESTROY:
                     PostQuitMessage(0);
                     return 0;
@@ -1336,8 +1332,6 @@ namespace Bugtopia.Launcher.Win32
 
         /// <summary>The switch between the two views asks for this: the expert view is taller.</summary>
         public void Resize(int width, int height) => PostMessageW(Hwnd, WM_RESIZE_REQUEST, width, height);
-
-        public void Reveal() => PostMessageW(Hwnd, WM_REVEAL, 0, 0);
 
         public void Close() => PostMessageW(Hwnd, WM_CLOSE, 0, 0);
 

@@ -22,11 +22,7 @@ namespace Bugtopia.Launcher
             if (args.Length > 0 && args[0] == VerbInterop)
                 return RunInterop(args);
 
-#if BUGTOPIA_WIN32
             return Win32.Win32Host.Run();
-#else
-            return PhotinoHost.Run();
-#endif
         }
 
         private static int RunInterop(string[] args)

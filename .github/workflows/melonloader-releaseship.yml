@@ -240,25 +240,17 @@ jobs:
           dotnet build launcher/BugtopiaInterop/BugtopiaInterop.csproj -c Release --nologo
           if ($LASTEXITCODE -ne 0) { throw "Building the interop shim failed." }
 
-      # Twice: the Photino page, then the native Win32 window, each in all three flavours. The Win32
-      # files end in -win32.exe, and each run clears only its own kind from dist\, so neither removes
-      # the other's. Every run is checked on its own: a step's result is only its last command's.
       - name: Publish the launcher builds
         shell: pwsh
         run: |
           $label = "${{ github.ref_name }}" -replace '^v', ''
           if (-not $label) { $label = "dev" }
-          # The switch is added rather than passed as -Win32:$false: this runs the script in a child
-          # pwsh, where arguments arrive as text.
-          foreach ($window in @(), @("-Win32")) {
-            pwsh ci/publish-launcher.ps1 `
-              -OutputDirectory "${{ github.workspace }}\dist" `
-              -PluginDll "${{ github.workspace }}\dist\bugtopia-bepinex.dll" `
-              -NoLinkPluginDll "${{ github.workspace }}\dist\bugtopia-bepinex-nolink.dll" `
-              -VersionLabel $label `
-              @window
-            if ($LASTEXITCODE -ne 0) { throw "Publishing the launcher builds failed ($(if ($window) { 'Win32' } else { 'Photino' }))." }
-          }
+          pwsh ci/publish-launcher.ps1 `
+            -OutputDirectory "${{ github.workspace }}\dist" `
+            -PluginDll "${{ github.workspace }}\dist\bugtopia-bepinex.dll" `
+            -NoLinkPluginDll "${{ github.workspace }}\dist\bugtopia-bepinex-nolink.dll" `
+            -VersionLabel $label
+          if ($LASTEXITCODE -ne 0) { throw "Publishing the launcher builds failed." }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -275,7 +267,7 @@ jobs:
         run: |
           $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" `
             -f "tag_name=${{ github.ref_name }}" --jq .body
-          $notes = "Four builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n- **bugtopia-universal-nolink.dll** — same as universal, built without the Bugtopia News link (no URL or channel reference anywhere in the binary).`n`nAnd the launcher, one exe with everything inside it:`n- **Bugtopia-Launcher-*-offline.exe** — carries this release's mod; downloads nothing, ever.`n- **Bugtopia-Launcher-*-online.exe** — carries no mod and fetches the newest release itself.`n- **Bugtopia-Launcher-*-offline-nolink.exe** — the offline launcher, carrying the BepInEx mod built without the Bugtopia News link.`n`nEach launcher also comes as **...-win32.exe**: the same launcher in a native Windows window instead of a WebView2 page - no browser engine and no WebView2 component inside.`n`n$generated"
+          $notes = "Four builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n- **bugtopia-universal-nolink.dll** — same as universal, built without the Bugtopia News link (no URL or channel reference anywhere in the binary).`n`nAnd the launcher, one exe with everything inside it:`n- **Bugtopia-Launcher-*-offline.exe** — carries this release's mod; downloads nothing, ever.`n- **Bugtopia-Launcher-*-online.exe** — carries no mod and fetches the newest release itself.`n- **Bugtopia-Launcher-*-offline-nolink.exe** — the offline launcher, carrying the BepInEx mod built without the Bugtopia News link.`n`n$generated"
 
           # Globbed rather than named: the launcher files carry the version in their names.
           $assets = @(

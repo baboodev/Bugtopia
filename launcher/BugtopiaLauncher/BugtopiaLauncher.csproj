@@ -1,33 +1,33 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The launcher: Photino's native webview shell, published with NativeAOT, one file.
+  <!-- The launcher: a native Win32 window (Win32\), published with NativeAOT, one file.
 
-       Photino rather than the WebView2 .NET SDK, for a measured reason. The SDK marshals its
-       completion handler through COM from managed code, which NativeAOT cannot do at all, so it is
-       stuck on a JIT build at ~12 MB. Photino does the webview work in C++ behind plain P/Invoke,
-       compiles AOT cleanly, and lands at about 6 MB with the payload — see
-       docs/plans/2026-08-28-launcher-consolidation.md.
+       Native rather than a webview: the launcher used to be a WebView2 page hosted by Photino, and
+       Photino's native shell imports urlmon's URLDownloadToFileW to fetch the WebView2 installer -
+       which got the offline exe rejected for network imports - while WebView2 itself is a browser
+       engine that goes to the network on its own. The window is drawn with GDI and GDI+ over plain
+       Windows controls, so the exe imports nothing that talks to the network. See docs/LAUNCHER.md.
 
-       Two builds ship from here:
+       Three builds ship from here:
          offline (default)  - contains no network code at all, and carries the mod inside it
+         offline-nolink     - the offline build with -p:BugtopiaFlavour=offline-nolink: carries the mod
+                              built without the Telegram link, and no web address at all
          online             - dotnet publish ... -p:BugtopiaOnline=true
 
-       A compile-time switch rather than a setting, so the offline build cannot reach the network
-       even by accident and does not link the stack it would need to.
+       Compile-time switches rather than settings, so the offline builds cannot reach the network
+       even by accident and do not link the stack they would need to.
 
-       The two differ in what they carry, not just in what they can do. The offline build embeds
-       bugtopia.dll and installs that exact copy; the online build embeds no plugin at all and
+       They differ in what they carry, not just in what they can do. The offline builds embed
+       bugtopia.dll and install that exact copy; the online build embeds no plugin at all and
        fetches the newest release from github.com/baboodev/Bugtopia instead, so it never ships a
        mod that is already out of date.
 
-       Each flavour builds into bin\<flavour>\ and obj\<flavour>\, so the two can sit side by side
+       Each flavour builds into bin\<flavour>\ and obj\<flavour>\, so they can sit side by side
        instead of overwriting each other. See launcher/Directory.Build.props.
 
        NativeAOT needs the MSVC linker. In a shell where the toolchain probe cannot run vswhere,
        initialise vcvars64.bat first and add -p:IlcUseEnvironmentalTools=true; note vcvars sets
-       Platform=x64, which moves the output under bin\<flavour>\x64\. ALWAYS run the exe from publish\ —
-       bin\...\native\ holds the binary without its native shell, and a missing P/Invoke target under
-       AOT fail-fasts with 0xC0000409 instead of saying what is missing.
+       Platform=x64, which moves the output under bin\<flavour>\x64\. Run the exe from publish\.
 
        Publish: dotnet publish launcher/BugtopiaLauncher/BugtopiaLauncher.csproj -c Release
        Build the payload first: launcher/BugtopiaInject/build.bat, launcher/BugtopiaInterop, and the
@@ -70,14 +70,6 @@
     <DefineConstants>$(DefineConstants);BUGTOPIA_NOLINK</DefineConstants>
   </PropertyGroup>
 
-  <!-- Which window the launcher opens: the WebView2 page through Photino (default), or the native
-       Win32 one - dotnet publish ... -p:BugtopiaUi=win32. The Win32 build carries no browser engine
-       and no Photino, whose native shell imports urlmon's URLDownloadToFileW to fetch the WebView2
-       installer; see docs/LAUNCHER.md. Both drive the same Api over the same JSON messages. -->
-  <PropertyGroup Condition="'$(BugtopiaUi)' == 'win32'">
-    <DefineConstants>$(DefineConstants);BUGTOPIA_WIN32</DefineConstants>
-  </PropertyGroup>
-
   <PropertyGroup>
     <PublishAot>true</PublishAot>
     <!-- The exe's Win32 resources come from Bugtopia.rc, not from the managed assembly - see
@@ -96,8 +88,6 @@
 
   <PropertyGroup>
     <!-- Payload sources: build outputs of sibling projects rather than files in the tree. -->
-    <PhotinoNativePath>$(NuGetPackageRoot)photino.native\4.0.22\runtimes\win-x64\native\Photino.Native.dll</PhotinoNativePath>
-    <WebView2LoaderPath>$(NuGetPackageRoot)photino.native\4.0.22\runtimes\win-x64\native\WebView2Loader.dll</WebView2LoaderPath>
     <InjectDllPath>$(MSBuildThisFileDirectory)..\BugtopiaInject\bin\bugtopia_inject.dll</InjectDllPath>
     <InteropShimPath>$(MSBuildThisFileDirectory)..\BugtopiaInterop\bin\Release\net6.0\BugtopiaInterop.dll</InteropShimPath>
     <PluginDllPath Condition="'$(PluginDllPath)' == ''">$(MSBuildThisFileDirectory)..\..\buddy\bin\BepInEx\ReleaseShip\bugtopia.dll</PluginDllPath>
@@ -126,7 +116,8 @@
        Left to itself NativeAOT copies these out of the managed Bugtopia.dll the compiler produced,
        and the compiler fills InternalName and OriginalFilename with that file's name, so the
        published exe called itself "Bugtopia.dll" - which is also the name VirusTotal files it under.
-       IlcGenerateWin32Resources is off above and the linker takes this .res in its place.
+       IlcGenerateWin32Resources is off above and the linker takes this .res in its place. The
+       manifest matters to the window, too: it asks for common controls v6 and per-monitor DPI.
 
        Runs only on publish: SetupOSSpecificProps belongs to the NativeAOT pipeline, so a plain build
        never needs rc.exe. The newest Windows Kits rc.exe is used when there is one, which works with
@@ -166,11 +157,8 @@
     <WriteLinesToFile File="$(_LauncherResourceDir)launcher_version.h" Lines="@(_LauncherVersionHeader)"
                       Overwrite="true" WriteOnlyWhenDifferent="true" />
     <!-- The include path is passed without its trailing backslash, which would escape the quote. -->
-    <PropertyGroup>
-      <_LauncherRcDefines Condition="'$(BugtopiaUi)' == 'win32'">/d BUGTOPIA_WIN32</_LauncherRcDefines>
-    </PropertyGroup>
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)"
-          Command="&quot;$(_LauncherRc)&quot; /nologo $(_LauncherRcDefines) /I &quot;$(_LauncherResourceDir.TrimEnd('\'))&quot; /fo &quot;$(_LauncherResourceFile)&quot; Bugtopia.rc" />
+          Command="&quot;$(_LauncherRc)&quot; /nologo /I &quot;$(_LauncherResourceDir.TrimEnd('\'))&quot; /fo &quot;$(_LauncherResourceFile)&quot; Bugtopia.rc" />
 
     <ItemGroup>
       <NativeLibrary Include="$(_LauncherResourceFile)" />
@@ -181,53 +169,23 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BugtopiaLaunch\BugtopiaLaunch.csproj" />
-    <PackageReference Include="Photino.NET" Version="4.0.16" Condition="'$(BugtopiaUi)' != 'win32'" />
-  </ItemGroup>
-
-  <!-- Each window's sources compile only into its own build: the Photino host needs the package the
-       Win32 build leaves out, and the Win32 host is nothing but P/Invoke the webview build has no use for. -->
-  <ItemGroup Condition="'$(BugtopiaUi)' == 'win32'">
-    <Compile Remove="PhotinoHost.cs" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(BugtopiaUi)' != 'win32'">
-    <Compile Remove="Win32\**" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(BugtopiaUi)' != 'win32'">
-    <EmbeddedResource Include="ui.html" LogicalName="ui.html" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The header graphic, folded into the page as a data URI when it is loaded. -->
+    <!-- The header graphic, decoded with GDI+ when the window starts. -->
     <EmbeddedResource Include="assets\logo.png" LogicalName="logo.png" />
-    <!-- ApplicationIcon above puts this in the exe's Win32 resources, which is what Explorer
-         reads; the window itself needs a file on disk, so it rides as a resource too. -->
-    <EmbeddedResource Include="assets\bugtopia.ico" LogicalName="bugtopia.ico" />
-    <!-- The webview shell itself. AOT cannot bundle a native dependency and the package ships no
-         static library, so it rides as a resource and NativeShell unpacks it on first run. -->
-    <EmbeddedResource Include="$(PhotinoNativePath)" LogicalName="Photino.Native.dll"
-                      Condition="'$(BugtopiaUi)' != 'win32' and Exists('$(PhotinoNativePath)')" />
-    <!-- Photino.Native imports this one. Leaving it out is not a smaller build, it is a build that
-         only starts on a machine that happens to have a copy on PATH. -->
-    <EmbeddedResource Include="$(WebView2LoaderPath)" LogicalName="WebView2Loader.dll"
-                      Condition="'$(BugtopiaUi)' != 'win32' and Exists('$(WebView2LoaderPath)')" />
     <EmbeddedResource Include="$(InjectDllPath)" LogicalName="payload.bugtopia_inject.dll"
                       Condition="Exists('$(InjectDllPath)')" />
     <EmbeddedResource Include="$(InteropShimPath)" LogicalName="payload.BugtopiaInterop.dll"
                       Condition="Exists('$(InteropShimPath)')" />
-    <!-- Only the offline build carries the mod. See the header. -->
+    <!-- Only the offline builds carry the mod. See the header. -->
     <EmbeddedResource Include="$(PluginDllPath)" LogicalName="payload.bugtopia.dll"
                       Condition="'$(BugtopiaOnline)' != 'true' and Exists('$(PluginDllPath)')" />
   </ItemGroup>
 
   <!-- A launcher without its payload builds and runs, and says which piece is missing when Prepare
-       needs it. Failing the build would make the projects impossible to work on separately. The
-       webview shell is different: without it there is no window at all, so that one is an error. -->
+       needs it. Failing the build would make the projects impossible to work on separately. -->
   <Target Name="CheckPayload" BeforeTargets="Build">
-    <Error Text="Photino.Native.dll not found at $(PhotinoNativePath) - restore the Photino.NET package first."
-           Condition="'$(BugtopiaUi)' != 'win32' and !Exists('$(PhotinoNativePath)')" />
-    <Error Text="WebView2Loader.dll not found at $(WebView2LoaderPath) - restore the Photino.NET package first."
-           Condition="'$(BugtopiaUi)' != 'win32' and !Exists('$(WebView2LoaderPath)')" />
     <Warning Text="Payload missing: $(InjectDllPath) - run launcher/BugtopiaInject/build.bat"
              Condition="!Exists('$(InjectDllPath)')" />
     <Warning Text="Payload missing: $(InteropShimPath) - build launcher/BugtopiaInterop -c Release"
@@ -236,7 +194,7 @@
              Condition="'$(BugtopiaOnline)' != 'true' and !Exists('$(PluginDllPath)')" />
   </Target>
 
-  <!-- One file means one file: the native shell is inside the binary, not beside it. -->
+  <!-- One file means one file: everything the launcher needs is inside the binary, not beside it. -->
   <Target Name="TrimPublishOutput" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
       <ResolvedFileToPublish

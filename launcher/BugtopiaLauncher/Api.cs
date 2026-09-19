@@ -158,10 +158,6 @@ namespace Bugtopia.Launcher
                     Reply(id, WriteState);
                     break;
 
-                case "logo":
-                    Reply(id, w => WriteValue(w, DataUri("logo.png", "image/png")));
-                    break;
-
                 case "openUrl":
                     OpenUrl(Str(args, "url"));
                     Reply(id, w => WriteValue(w, null));
@@ -170,13 +166,6 @@ namespace Bugtopia.Launcher
                 case "copyText":
                     bool copied = dialogs.CopyText(Str(args, "text"));
                     Reply(id, w => w.WriteBooleanValue(copied));
-                    break;
-
-                // The page has drawn. Until this arrives the window is parked off-screen, so that
-                // nobody watches WebView2 start up in an empty black rectangle.
-                case "reveal":
-                    dialogs.Reveal();
-                    Reply(id, w => WriteValue(w, null));
                     break;
 
                 case "prepare":
@@ -1048,22 +1037,6 @@ namespace Bugtopia.Launcher
 
             Injector.Inject(process, storage.InjectDll);
             Log("Injected. The bootstrap's own account is in " + Path.Combine(storage.Bin, "bugtopia_inject.log"));
-        }
-
-        /// <summary>
-        /// An embedded file as a data URI, or null when this build does not carry it. Fetched by
-        /// the page rather than baked into it — see <c>PhotinoHost.LoadUi</c> for why the initial
-        /// page string has to stay small.
-        /// </summary>
-        private static string DataUri(string resource, string mediaType)
-        {
-            using Stream stream = typeof(Api).Assembly.GetManifestResourceStream(resource);
-            if (stream == null)
-                return null;
-
-            using var buffer = new MemoryStream();
-            stream.CopyTo(buffer);
-            return "data:" + mediaType + ";base64," + Convert.ToBase64String(buffer.ToArray());
         }
 
         /// <summary>

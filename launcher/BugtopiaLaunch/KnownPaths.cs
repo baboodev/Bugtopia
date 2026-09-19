@@ -60,16 +60,6 @@ namespace Bugtopia.Launch
 
         public static string LauncherLogFile => Path.Combine(BugtopiaData, "launcher.log");
 
-        /// <summary>
-        /// Where the launcher unpacks its native webview shell: inside the runtime folder, beside
-        /// everything else the launcher installs, rather than in <c>%TEMP%</c>. One folder holds all
-        /// of it and deleting that folder undoes the install.
-        ///
-        /// Deliberately the default runtime path rather than whichever storage folder the user
-        /// picked: this is needed to open the window at all, before any settings have been read.
-        /// </summary>
-        public static string NativeShellRoot => Path.Combine(DefaultStorage, "native");
-
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern int SHGetKnownFolderPath(in Guid id, uint flags, IntPtr token, out IntPtr path);
 

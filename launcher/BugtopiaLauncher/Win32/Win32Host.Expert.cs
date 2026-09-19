@@ -7,7 +7,7 @@ namespace Bugtopia.Launcher.Win32
 {
     /// <summary>
     /// The expert view: every path as a field, the save profile and server, the mod build, the status
-    /// grid, the log, and the steps Launch otherwise runs by itself. Ported from ui.html's #expert-view
+    /// grid, the log, and the steps Launch otherwise runs by itself. Ported from the old page's #expert-view
     /// and the parts of render() that fill it.
     /// </summary>
     internal sealed unsafe partial class Win32Host

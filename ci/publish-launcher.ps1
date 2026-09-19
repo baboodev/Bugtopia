@@ -40,19 +40,13 @@
 .PARAMETER SkipPayloadCheck
     Publish even when a payload file is missing. The build only warns about those, which is right
     for day-to-day work and wrong for a release, so this script refuses by default.
-
-.PARAMETER Win32
-    Publish every flavour with the native Win32 window (-p:BugtopiaUi=win32) instead of the Photino
-    page: no WebView2 and no Photino.Native.dll inside. The files are named ...-<flavour>-win32.exe and
-    build into bin\<flavour>-win32\, so they sit beside the Photino builds rather than replacing them.
 #>
 param(
     [string]$OutputDirectory = "",
     [string]$PluginDll = "",
     [string]$NoLinkPluginDll = "",
     [string]$VersionLabel = "",
-    [switch]$SkipPayloadCheck,
-    [switch]$Win32
+    [switch]$SkipPayloadCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -131,16 +125,9 @@ if (-not $vcvars) {
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
-# The window the launchers are built with. Everything that names or finds a build carries the suffix,
-# so a Win32 publish and a Photino publish into the same folder keep each other's files.
-$uiSuffix = if ($Win32) { "-win32" } else { "" }
-$uiArg = if ($Win32) { "-p:BugtopiaUi=win32" } else { "" }
-
 # Clear this script's own earlier output. The names carry a commit hash, so without this the folder
-# fills up with builds from other commits and stops saying which two are the release. Only the files
-# of the window being built: the other kind is not this run's to remove.
+# fills up with builds from other commits and stops saying which ones are the release.
 Get-ChildItem $OutputDirectory -Filter "Bugtopia-Launcher-*.exe" -ErrorAction SilentlyContinue |
-    Where-Object { $_.BaseName.EndsWith("-win32") -eq [bool]$Win32 } |
     Remove-Item -Force
 
 $pluginArg = if ($PluginDll) { "-p:PluginDllPath=`"$PluginDll`"" } else { "" }
@@ -163,9 +150,9 @@ foreach ($flavour in $flavours) {
 
     # vcvars is quiet on success but still prints its own vswhere grumble; the exit code is what
     # decides here, so both streams go to nul.
-    $name = $flavour.Name + $uiSuffix
+    $name = $flavour.Name
     $command = "`"$($vcvars.FullName)`" >nul 2>&1 && dotnet publish `"$project`" -c Release " +
-               "-p:IlcUseEnvironmentalTools=true $($flavour.Args) $uiArg --nologo -v minimal"
+               "-p:IlcUseEnvironmentalTools=true $($flavour.Args) --nologo -v minimal"
 
     $output = cmd /c $command
     if ($LASTEXITCODE -ne 0) {
@@ -173,8 +160,7 @@ foreach ($flavour in $flavours) {
         throw "Publishing the $name build failed."
     }
 
-    # vcvars sets Platform=x64, which moves the output under bin\<flavour>\x64\. The Win32 window
-    # builds into bin\<flavour>-win32\ (launcher/Directory.Build.props).
+    # vcvars sets Platform=x64, which moves the output under bin\<flavour>\x64\.
     $exe = Get-ChildItem (Join-Path $repoRoot "launcher\BugtopiaLauncher\bin\$name") `
                          -Recurse -Filter "Bugtopia.exe" -ErrorAction SilentlyContinue |
            Where-Object { $_.FullName -like "*\publish\*" } |
