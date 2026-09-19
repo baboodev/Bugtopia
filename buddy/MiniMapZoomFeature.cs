@@ -51,8 +51,16 @@ namespace HeartopiaMod
     //     trackDistance = huge  -> tracked pins arrive at their TRUE position; the mod then clamps any
     //                              pin outside the circle onto the circle edge along the ray from the
     //                              arrow (true direction from the player), every frame after the game
-    //     distance = R - |o|    -> ordinary spots only within the circle around the player that fits
-    //                              inside the shifted circle (their look-ahead is the price)
+    //     distance = R + |o|    -> ordinary spots out to the far edge ahead
+    //   and the mod decides by the icon CENTRE, as the game does: a centre outside the circle means
+    //   tracked pin -> onto the rim (110 px) along the ray from the arrow, ordinary spot -> hidden
+    //   (normal@go off). Icons whose centre is inside may overhang the rim, exactly like vanilla.
+    //   Which icons are tracked: MiniMapSystem.GetMiniMapSpots() every 0.5 s, entries with
+    //   isTrackedPoint || isNotification (the ones the game clamps instead of hiding), matched to icons
+    //   by position (no GameObject -> MiniMapSpotWidget link exists: UIWidget.GetUIWidget builds a
+    //   new wrapper each call).
+    //   (Earlier versions: distance = R - |o| cancelled zooming out while moving; a circular mask on
+    //   the spot layer clipped icons at the rim, which vanilla never does.)
     //   A pin's true position is re-learned whenever its anchoredPosition differs from what the mod
     //   last wrote (the game refreshes positions ~6x/s).
     public partial class HeartopiaComplete
@@ -68,6 +76,8 @@ namespace HeartopiaMod
         private const float MiniMapLookAheadDefault = 0.4f;
         private const float MiniMapLookAheadFullSpeed = 3.5f;    // full offset from running speed up
         private const float MiniMapTrackDistanceUnbounded = 100000f;
+        private const float MiniMapTrackedRefreshInterval = 0.5f;
+        private const float MiniMapTrackedMatchMetres = 2f;     // icon <-> GetMiniMapSpots entry
 
         // CommonMapBar constants (TriggerByMe's literal 0.55, MapSystem.MapRatio 5).
         private const float MiniMapVanillaSketchScale = 0.55f;
@@ -127,6 +137,11 @@ namespace HeartopiaMod
         private Vector2 miniMapLookOffset;      // smoothed, screen-aligned (bar space in north-up mode)
         private bool miniMapRotatingMap;
         private float miniMapNextPrefsAt;
+        private readonly List<Vector2> miniMapTrackedPositions = new List<Vector2>();   // world x,z
+        private readonly Dictionary<int, GameObject> miniMapSpotNormals = new Dictionary<int, GameObject>();
+        private readonly HashSet<int> miniMapHiddenSpots = new HashSet<int>();
+        private float miniMapNextTrackedRefreshAt;
+        private IntPtr miniMapGetSpotsMethod;
         private Transform miniMapStatusRoot;
         private int miniMapLoggedBarCount = -1;
         private float miniMapNextRescanAt;
@@ -191,6 +206,9 @@ namespace HeartopiaMod
                     this.miniMapIconWritten.Clear();
                     this.miniMapOwnedPos.Clear();
                     this.miniMapSpotRects.Clear();
+                    this.miniMapSpotNormals.Clear();
+                    this.miniMapHiddenSpots.Clear();
+                    this.miniMapTrackedPositions.Clear();
                     this.miniMapLookOffset = Vector2.zero;
                     this.miniMapStatusRoot = null;
                     this.miniMapLastMapAt = -1f;
@@ -240,10 +258,10 @@ namespace HeartopiaMod
                     float kd = this.miniMapCurrentK;
                     if (this.miniMapLookAheadEnabled)
                     {
-                        // Ordinary spots: the circle around the player that fits in the shifted circle.
+                        // Ordinary spots: out to the far edge ahead; the mask clips the rest.
                         float edgePx = this.miniMapOrigTrackDistance * MiniMapPixelsPerMetre;
-                        float keep = Mathf.Clamp01((edgePx - this.miniMapLookOffset.magnitude) / edgePx);
-                        this.ApplyMiniMapDistances(this.miniMapOrigDistance * keep / kd, MiniMapTrackDistanceUnbounded, force: false);
+                        float reach = 1f + this.miniMapLookOffset.magnitude / edgePx;
+                        this.ApplyMiniMapDistances(this.miniMapOrigDistance * reach / kd, MiniMapTrackDistanceUnbounded, force: false);
                     }
                     else
                     {
@@ -346,6 +364,12 @@ namespace HeartopiaMod
 
         private void ApplyMiniMapZoom(float k)
         {
+            if (this.miniMapLookAheadEnabled && Time.unscaledTime >= this.miniMapNextTrackedRefreshAt)
+            {
+                this.miniMapNextTrackedRefreshAt = Time.unscaledTime + MiniMapTrackedRefreshInterval;
+                this.RefreshMiniMapTrackedPositions();
+            }
+
             float sketchScale = MiniMapVanillaSketchScale * k;
             for (int i = 0; i < this.miniMapBars.Count; i++)
             {
@@ -386,8 +410,13 @@ namespace HeartopiaMod
                 this.CounterScaleMiniMapIcons(bar, 1f / k);
                 if (this.miniMapLookAheadEnabled)
                 {
-                    this.ClampMiniMapTrackedSpots(bar, o, sketchScale);
+                    this.PlaceMiniMapSpotsForLookAhead(bar, o, sketchScale);
                 }
+            }
+
+            if (!this.miniMapLookAheadEnabled && this.miniMapHiddenSpots.Count > 0)
+            {
+                this.UnhideMiniMapSpots();
             }
 
             this.miniMapApplied = true;
@@ -411,17 +440,121 @@ namespace HeartopiaMod
             this.miniMapOwnedPos[id] = owned;
         }
 
-        // With trackDistance unbounded every spot sits at its true position; pins that fall outside
-        // the circle go onto its edge along the ray from the arrow - the direction from the player,
-        // as the vanilla clamp shows it, but against the shifted circle.
-        private void ClampMiniMapTrackedSpots(MiniMapBar bar, Vector2 arrow, float sketchScale)
+        // Positions (world x,z) of the spots the game CLAMPS rather than hides (MiniMapSpotWidget:
+        // isTrackedPoint || isNotification). GetMiniMapSpots is what CommonMapBar itself calls on a
+        // refresh; it only rebuilds MiniMapSystem's private scratch list.
+        private void RefreshMiniMapTrackedPositions()
+        {
+            if (!this.EnsureAuraMonoApiReady() || !AuraMonoPinningAvailable || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null)
+            {
+                return;
+            }
+
+            if (this.miniMapSystemClass == IntPtr.Zero)
+            {
+                this.miniMapSystemClass = this.FindAuraMonoClassByFullName(MiniMapSystemTypeName);
+            }
+            if (this.miniMapSystemClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            IntPtr instance = this.TryGetAuraMonoDataModuleInstance(this.miniMapSystemClass);
+            if (instance == IntPtr.Zero)
+            {
+                return;
+            }
+
+            List<IntPtr> items = new List<IntPtr>();
+            List<uint> pins = new List<uint>();
+            uint instancePin = AuraMonoPinNew(instance);
+            uint listPin = 0U;
+            try
+            {
+                if (this.miniMapGetSpotsMethod == IntPtr.Zero)
+                {
+                    this.miniMapGetSpotsMethod = this.FindAuraMonoMethodOnHierarchy(
+                        auraMonoObjectGetClass(instance), "GetMiniMapSpots", 0);
+                    if (this.miniMapGetSpotsMethod == IntPtr.Zero)
+                    {
+                        this.MiniMapZoomSetStatus("MiniMapSystem.GetMiniMapSpots unresolved (game update?).", log: true);
+                        return;
+                    }
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr list = auraMonoRuntimeInvoke(this.miniMapGetSpotsMethod, instance, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || list == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                listPin = AuraMonoPinNew(list);
+                if (!this.TryEnumerateAuraMonoCollectionItems(list, items, pins))
+                {
+                    return;
+                }
+
+                this.miniMapTrackedPositions.Clear();
+                for (int i = 0; i < items.Count; i++)
+                {
+                    IntPtr spot = items[i]; // boxed MiniMapSpot, pinned
+                    bool tracked = this.TryGetMonoBoolMember(spot, "isTrackedPoint", out bool isTracked) && isTracked;
+                    bool notification = this.TryGetMonoBoolMember(spot, "isNotification", out bool isNote) && isNote;
+                    if ((tracked || notification) && this.TryGetMonoVector3Member(spot, "position", out Vector3 pos))
+                    {
+                        this.miniMapTrackedPositions.Add(new Vector2(pos.x, pos.z));
+                    }
+                }
+            }
+            finally
+            {
+                this.FreeMiniMapPins(pins);
+                if (listPin != 0U)
+                {
+                    AuraMonoPinFree(listPin);
+                }
+                AuraMonoPinFree(instancePin);
+            }
+        }
+
+        private void FreeMiniMapPins(List<uint> pins)
+        {
+            for (int i = 0; i < pins.Count; i++)
+            {
+                if (pins[i] != 0U)
+                {
+                    AuraMonoPinFree(pins[i]);
+                }
+            }
+            pins.Clear();
+        }
+
+        private bool IsMiniMapTrackedPosition(Vector2 world)
+        {
+            float tolSqr = MiniMapTrackedMatchMetres * MiniMapTrackedMatchMetres;
+            for (int i = 0; i < this.miniMapTrackedPositions.Count; i++)
+            {
+                if ((this.miniMapTrackedPositions[i] - world).sqrMagnitude <= tolSqr)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Vanilla rule, applied to the shifted circle: an icon whose CENTRE falls outside the circle
+        // is clamped onto the rim if the game would clamp it (tracked / notification) and hidden
+        // otherwise. trackDistance is unbounded, so every icon arrives at its true position.
+        private void PlaceMiniMapSpotsForLookAhead(MiniMapBar bar, Vector2 arrow, float sketchScale)
         {
             if (bar.Sketch.childCount == 0 || sketchScale <= 0f)
             {
                 return;
             }
 
-            float edge = this.miniMapOrigTrackDistance * MiniMapPixelsPerMetre; // vanilla pin radius (110 px)
+            float edge = this.miniMapOrigTrackDistance * MiniMapPixelsPerMetre; // vanilla rim (110 px)
             Vector2 layerOrigin = bar.Sketch.anchoredPosition;
             Transform spots = bar.Sketch.GetChild(0); // map_spots@t
             for (int i = 0; i < spots.childCount; i++)
@@ -447,18 +580,26 @@ namespace HeartopiaMod
 
                 Vector2 onBar = layerOrigin + owned.Base * sketchScale;
                 Vector2 target = owned.Base;
+                bool hide = false;
                 if (onBar.sqrMagnitude > edge * edge)
                 {
-                    Vector2 dir = onBar - arrow;
-                    float len = dir.magnitude;
-                    if (len > 1e-3f)
+                    if (this.IsMiniMapTrackedPosition(owned.Base / 5f))
                     {
-                        dir /= len;
-                        // |arrow + t*dir| = edge, t > 0 (the arrow is always inside the circle)
-                        float b = Vector2.Dot(arrow, dir);
-                        float c = arrow.sqrMagnitude - edge * edge;
-                        float t = -b + Mathf.Sqrt(Mathf.Max(0f, b * b - c));
-                        target = (arrow + dir * t - layerOrigin) / sketchScale;
+                        Vector2 dir = onBar - arrow;
+                        float len = dir.magnitude;
+                        if (len > 1e-3f)
+                        {
+                            dir /= len;
+                            // |arrow + t*dir| = edge, t > 0 (the arrow is always inside the circle)
+                            float b = Vector2.Dot(arrow, dir);
+                            float c = arrow.sqrMagnitude - edge * edge;
+                            float t = -b + Mathf.Sqrt(Mathf.Max(0f, b * b - c));
+                            target = (arrow + dir * t - layerOrigin) / sketchScale;
+                        }
+                    }
+                    else
+                    {
+                        hide = true;
                     }
                 }
 
@@ -468,7 +609,51 @@ namespace HeartopiaMod
                     rt.anchoredPosition = target;
                 }
                 this.miniMapOwnedPos[id] = owned;
+                this.SetMiniMapSpotHidden(child, id, hide);
             }
+        }
+
+        // normal@go is what the game itself toggles for out-of-range spots; it turns it back on at its
+        // next refresh while in range, so the mod re-applies every frame (after the game) and undoes
+        // only what it hid.
+        private void SetMiniMapSpotHidden(Transform spot, int id, bool hide)
+        {
+            if (!this.miniMapSpotNormals.TryGetValue(id, out GameObject normal) || normal == null)
+            {
+                Transform normalT = spot.Find("AniRoot/normal@go");
+                normal = normalT != null ? normalT.gameObject : null;
+                this.miniMapSpotNormals[id] = normal;
+            }
+            if (normal == null)
+            {
+                return;
+            }
+
+            if (hide)
+            {
+                if (normal.activeSelf)
+                {
+                    normal.SetActive(false);
+                }
+                this.miniMapHiddenSpots.Add(id);
+            }
+            else if (this.miniMapHiddenSpots.Remove(id) && !normal.activeSelf)
+            {
+                normal.SetActive(true);
+            }
+        }
+
+        // Look-ahead switched off (or the feature restored): give back what the mod hid.
+        private void UnhideMiniMapSpots()
+        {
+            foreach (int id in this.miniMapHiddenSpots)
+            {
+                if (this.miniMapSpotNormals.TryGetValue(id, out GameObject normal) && normal != null && !normal.activeSelf)
+                {
+                    normal.SetActive(true);
+                }
+            }
+            this.miniMapHiddenSpots.Clear();
         }
 
         // Target offset from the smoothed speed, full from running speed up. Rotating map: straight
@@ -570,6 +755,9 @@ namespace HeartopiaMod
             this.miniMapApplied = false;
             this.miniMapCurrentK = 1f;
             this.miniMapLookOffset = Vector2.zero;
+            this.UnhideMiniMapSpots();
+            this.miniMapSpotNormals.Clear();
+            this.miniMapTrackedPositions.Clear();
             this.miniMapIconBase.Clear();
             this.miniMapIconWritten.Clear();
             this.miniMapOwnedPos.Clear();

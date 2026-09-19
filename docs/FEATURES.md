@@ -739,9 +739,12 @@ its own switch and its own hook latch. Chain: `MailSyncSystem` (`WorldSystem.Sho
   off-centre so more map shows ahead — straight down the screen with the game's rotating-map
   setting, behind the heading with north-up. Arrow, `maproot@t` and the spot layer get the same
   offset. The spot cut-off centre (`DefaultModule._playerMapPos`) cannot be moved (the game
-  rewrites it before the spots tick), so while look-ahead is on `trackDistance` is unbounded and
-  the mod clamps tracked pins onto the shifted circle's edge itself (ray from the arrow), while
-  ordinary spots are limited to the circle around the player that fits inside it.
+  rewrites it before the spots tick), so while look-ahead is on `trackDistance` is unbounded,
+  `distance` reaches the far edge ahead, and the mod applies the vanilla rule itself against the
+  shifted circle: an icon whose centre is outside is put on the rim along the ray from the arrow
+  if it is a tracked pin / notification, hidden otherwise. Tracked icons are recognised by matching
+  positions against `MiniMapSystem.GetMiniMapSpots()` (`isTrackedPoint || isNotification`, every
+  0.5 s). Icons may overhang the rim exactly as in vanilla (no mask).
 - Disabling restores the vanilla scales, positions and the original distances. Persisted as
   `miniMapZoomEnabled` / `miniMapZoomRest` / `miniMapAutoZoomEnabled` / `miniMapZoomTop` /
   `miniMapZoomReaction` / `miniMapLookAheadEnabled` / `miniMapLookAheadAmount`. Implementation: `MiniMapZoomFeature.cs` (+ `HeartopiaComplete.UguiMiniMapContent.cs`).
