@@ -118,7 +118,6 @@ namespace Bugtopia.Launcher
                     }
                     settings.BepInExSource = pickedSource ?? settings.BepInExSource;
                     settings.Storage = Str(args, "storage") ?? settings.Storage;
-                    settings.UnityLibsZip = Str(args, "unityLibsZip") ?? settings.UnityLibsZip;
                     SafeSave();
                     Reply(id, WriteState);
                     break;
@@ -204,9 +203,6 @@ namespace Bugtopia.Launcher
                     });
                     break;
 
-                case "downloadUnityLibs":
-                    RunJob(id, "Download Unity libraries", DownloadUnityLibs);
-                    break;
 #endif
 
                 case "generateInterop":
@@ -1178,7 +1174,6 @@ namespace Bugtopia.Launcher
             w.WriteString("storage", string.IsNullOrWhiteSpace(settings.Storage)
                 ? LauncherSettings.DefaultStorage
                 : settings.Storage);
-            w.WriteString("unityLibsZip", settings.UnityLibsZip ?? "");
             w.WriteString("defaultStorage", LauncherSettings.DefaultStorage);
             w.WriteString("version", HeartopiaMod.ModBuildVersion.Display);
             // Both are online-only. Nothing in an offline build can learn about a newer one, and
@@ -1205,19 +1200,15 @@ namespace Bugtopia.Launcher
 
             string game = settings.GameFolder;
             string unity = string.IsNullOrWhiteSpace(game) ? null : GameSession.ReadUnityVersion(game);
-            w.WriteString("unityVersion", unity ?? "");
 
-            // The build without links carries no address at all: the page describes the archive
-            // instead of linking it, and leaves out the Unity libraries option, which is only a link.
-            // Written empty rather than omitted, so the page gets the same shape from every build.
+            // The build without links carries no address at all: the window describes the archive
+            // instead of linking it. Written empty rather than omitted, so the state has one shape.
 #if BUGTOPIA_NOLINK
             w.WriteBoolean("noLink", true);
             w.WriteString("bepInExUrl", "");
-            w.WriteString("unityLibsUrl", "");
 #else
             w.WriteBoolean("noLink", false);
             w.WriteString("bepInExUrl", Downloads.BepInExUrl);
-            w.WriteString("unityLibsUrl", Downloads.UnityLibrariesUrl(unity) ?? "");
 #endif
             w.WriteBoolean("gameOk", !string.IsNullOrWhiteSpace(game) && Directory.Exists(game) && unity != null);
 

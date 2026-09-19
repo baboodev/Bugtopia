@@ -212,6 +212,8 @@ namespace Bugtopia.Launcher.Win32
 
         [DllImport("user32.dll", ExactSpelling = true)] internal static extern nint GetForegroundWindow();
         [DllImport("user32.dll", ExactSpelling = true)] internal static extern int IsWindow(nint hwnd);
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern nint SetCapture(nint hwnd);
+        [DllImport("user32.dll", ExactSpelling = true)] internal static extern int ReleaseCapture();
 
         internal const uint WS_EX_TOPMOST = 0x00000008, WS_EX_TOOLWINDOW = 0x00000080, WS_EX_NOACTIVATE = 0x08000000;
         internal const int SW_SHOWNOACTIVATE = 4;

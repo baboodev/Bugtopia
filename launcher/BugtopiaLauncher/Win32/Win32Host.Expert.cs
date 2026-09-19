@@ -13,7 +13,7 @@ namespace Bugtopia.Launcher.Win32
     internal sealed unsafe partial class Win32Host
     {
         private const int IdExDetect = 120, IdExBrowseGame = 121, IdSourceZip = 122, IdSourceFolder = 123, IdDlBepInEx = 124,
-                          IdStorageBrowse = 125, IdStorageDefault = 126, IdUnityBrowse = 127, IdDlUnity = 128,
+                          IdStorageBrowse = 125, IdStorageDefault = 126,
                           IdProfile = 129, IdProfileCreate = 130, IdServer = 131, IdProfileOk = 132, IdProfileCancel = 133,
                           IdModVersion = 134, IdModLoad = 135, IdModInstall = 136, IdForce = 137, IdPrepare = 138, IdGenerate = 139;
 
@@ -40,13 +40,13 @@ namespace Bugtopia.Launcher.Win32
             internal bool Placed;
         }
 
-        private Field fieldGame, fieldSource, fieldStorage, fieldUnity, fieldNewProfile;
+        private Field fieldGame, fieldSource, fieldStorage, fieldNewProfile;
         private Field[] fields;
         private nint log, fieldBrush;
         private float logX, logY, logW, logH;
 
-        private Button exDetect, exBrowseGame, sourceZip, sourceFolder, dlBepInEx, storageBrowse, storageDefault, unityBrowse,
-                       dlUnity, profileSelect, profileCreate, serverSelect, profileOk, profileCancel, modSelect, modLoad,
+        private Button exDetect, exBrowseGame, sourceZip, sourceFolder, dlBepInEx, storageBrowse, storageDefault,
+                       profileSelect, profileCreate, serverSelect, profileOk, profileCancel, modSelect, modLoad,
                        modInstall, force, prepare, generate;
 
         private bool newProfileShown;
@@ -60,7 +60,7 @@ namespace Bugtopia.Launcher.Win32
         private string modChosen = "";
         private string modHint = "";
 
-        private List<TextRun> sourceHint = new List<TextRun>(), unityHint = new List<TextRun>();
+        private List<TextRun> sourceHint = new List<TextRun>();
 
         // Layout results, in content pixels.
         private readonly List<(string Text, float X, float Y)> labels = new List<(string, float, float)>();
@@ -85,9 +85,6 @@ namespace Bugtopia.Launcher.Win32
             storageBrowse = AddButton(IdStorageBrowse, ButtonKind.SecondaryLarge, "Browse...");
             storageDefault = AddButton(IdStorageDefault, ButtonKind.SecondaryLarge, "Default");
 
-            fieldUnity = CreateField(true, "optional");
-            unityBrowse = AddButton(IdUnityBrowse, ButtonKind.SecondaryLarge, "Browse...");
-            dlUnity = AddButton(IdDlUnity, ButtonKind.SecondaryLarge, "Download");
 
             profileSelect = AddButton(IdProfile, ButtonKind.Select, "No profiles found");
             profileCreate = AddButton(IdProfileCreate, ButtonKind.Secondary, "", PlusIcon);
@@ -111,7 +108,7 @@ namespace Bugtopia.Launcher.Win32
             prepare = AddButton(IdPrepare, ButtonKind.SecondaryLarge, "Prepare");
             generate = AddButton(IdGenerate, ButtonKind.SecondaryLarge, "Generate interop");
 
-            fields = new[] { fieldGame, fieldSource, fieldStorage, fieldUnity, fieldNewProfile };
+            fields = new[] { fieldGame, fieldSource, fieldStorage, fieldNewProfile };
             ExpertFontsChanged();
         }
 
@@ -168,7 +165,6 @@ namespace Bugtopia.Launcher.Win32
             SetField(fieldGame, S("game"));
             SetField(fieldSource, S("source"));
             SetField(fieldStorage, S("storage"));
-            SetField(fieldUnity, S("unityLibsZip"));
 
             const string sourceLead = "The Unity.IL2CPP win-x64 archive — the zip as downloaded, or a folder already unpacked from it. ";
             sourceHint = downloads
@@ -184,17 +180,6 @@ namespace Bugtopia.Launcher.Win32
                   }
                 : new List<TextRun> { new TextRun(sourceLead), new TextRun("Download it here", S("bepInExUrl")), new TextRun(".") };
 
-            unityHint = S("unityLibsUrl").Length > 0
-                ? (downloads
-                    ? Plain("Optional — BepInEx fetches these itself during the first generation.")
-                    : new List<TextRun>
-                      {
-                          new TextRun("Optional — "),
-                          new TextRun("download " + S("unityVersion") + ".zip", S("unityLibsUrl")),
-                          new TextRun("."),
-                      })
-                : Plain("Optional. Set the game directory first to resolve the Unity version.");
-
             renderModVersions();
 
             // The same words the step cards use, so the two views never disagree about what is installed.
@@ -209,7 +194,6 @@ namespace Bugtopia.Launcher.Win32
             Enable(generate, !busy && prepared && gameOk);
             Enable(dlBepInEx, !busy);
             Enable(sourceZip, !busy);
-            Enable(dlUnity, !busy && gameOk);
         }
 
         private static void SetField(Field field, string value)
@@ -246,7 +230,11 @@ namespace Bugtopia.Launcher.Win32
             Enable(modInstall, !busy);
         }
 
-        private static string ModOption((string Tag, string Asset) release) => release.Tag + "  (" + release.Asset + ")";
+        /// <summary>
+        /// A release as the list names it: the tag alone. The asset name is always the BepInEx DLL
+        /// (GitHub.Rank picks one per release), so it only repeated itself on every row.
+        /// </summary>
+        private static string ModOption((string Tag, string Asset) release) => release.Tag;
 
         private void loadProfiles()
         {
@@ -354,8 +342,6 @@ namespace Bugtopia.Launcher.Win32
                 case IdDlBepInEx: run("downloadBepInEx"); break;
                 case IdStorageBrowse: pick("storage", false, "Select folder"); break;
                 case IdStorageDefault: save("storage", S("defaultStorage")); break;
-                case IdUnityBrowse: pick("unityLibsZip", true, "Unity base libraries zip"); break;
-                case IdDlUnity: run("downloadUnityLibs"); break;
                 case IdModLoad: run("modReleases"); break;
                 case IdPrepare: run("prepare"); break;
 
@@ -534,16 +520,6 @@ namespace Bugtopia.Launcher.Win32
             y = Label("Storage folder", padX, y);
             y = Row(y, padX, width, fieldStorage, null, storageBrowse, storageDefault);
             y += gap;
-
-            // The option exists to point at a download, so the build without links leaves it out; its
-            // field and buttons, not placed here, are hidden with everything else this pass skips.
-            if (!B("noLink"))
-            {
-                y = Label("Unity libraries zip", padX, y);
-                y = Row(y, padX, width, fieldUnity, null, unityBrowse, downloads ? dlUnity : null);
-                y = Hint(unityHint, padX, y, width);
-                y += gap;
-            }
 
             // Save profile and server, side by side.
             float colW = (width - S(12)) / 2, rightX = padX + colW + S(12);
