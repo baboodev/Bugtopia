@@ -161,6 +161,17 @@ namespace HeartopiaMod
         // should still be celebrated. The window covers the server round trip that follows the
         // command — the event arrives with the level write, not with the send.
         private const string DailyClaimsHobbyUpgradedEventName = "XDTGameSystem.UI.HobbyUpgradedEvent";
+
+        // HobbyModule dispatches TWO events on the upgrade response, and this is the FIRST of them:
+        // HobbyInfoOpenEvent -> UIEventBridge.OnHobbyInfoOpen -> HobbyInfoPanel.Open(hobby), then
+        // HobbyUpgradedEvent for the card. Upgrading by hand happens from inside that screen, so
+        // re-opening it is invisible; upgrading in the background makes a full screen appear out of
+        // nowhere and stay. Suppressing only the card left exactly that behind.
+        //
+        // Single listener, and its body is nothing but the Open call. Nothing follows it in
+        // HobbyModule either, so it is not covering anything the way PetPhotoLoadingPanel was.
+        private const string DailyClaimsHobbyInfoOpenEventName = "XDTGameSystem.UI.HobbyInfoOpenEvent";
+        private const int DailyClaimsHobbyInfoOpenEventBytes = 4;   // int hobbyId
         private const int DailyClaimsHobbyUpgradedEventBytes = 0;   // nothing is read
         private const float DailyClaimsAutoHobbyPopupQuietSeconds = 8f;
         private const int DailyClaimsTaskUpdatedEventBytes = 8;   // uint taskNetId@0, int taskStaticId@4
@@ -337,6 +348,10 @@ namespace HeartopiaMod
 
                 // Registered but left forwarding: only the auto-upgrade turns suppression on, and
                 // only for its own window.
+                this.RegisterGameEventHook(
+                    DailyClaimsHobbyInfoOpenEventName,
+                    DailyClaimsHobbyInfoOpenEventBytes,
+                    this.OnDailyClaimsAutoHobbyUpgradedEvent);
                 this.RegisterGameEventHook(
                     DailyClaimsHobbyUpgradedEventName,
                     DailyClaimsHobbyUpgradedEventBytes,
@@ -669,6 +684,7 @@ namespace HeartopiaMod
 
             this.dailyClaimsAutoHobbyPopupSuppressed = suppress;
             this.SetGameEventHookSuppressForward(DailyClaimsHobbyUpgradedEventName, suppress);
+            this.SetGameEventHookSuppressForward(DailyClaimsHobbyInfoOpenEventName, suppress);
         }
 
         // Lifts the quiet window. Called from the drain rather than on a timer so the flag cannot be
