@@ -86,6 +86,21 @@
             "XDTGameSystem.UI.PetPhotoResultOpenRequestedEvent";
         private const int PetPhotoResultOpenRequestedEventPayloadBytes = 0;
 
+        // Карточки животных. Both are display-only, and each has exactly ONE listener in the whole
+        // game (UIEventBridge) whose handler is a bare Panel.Open:
+        //   AnimalModule.OnWildAnimalFavoriteLvChanged -> WildAnimalLevelUpEvent{AnimalGroup group}
+        //     -> UIEventBridge.OnWildAnimalLevelUp -> AnimalLevelUpPanel.Open — the "Bond Level Up"
+        //     card that stays up until it is tapped (the one the gift auto-claim keeps raising);
+        //   AnimalModule.OnWildAnimalVisitEventChanged -> WildAnimalVisitNotifyEvent{group, state}
+        //     -> UIEventBridge.OnWildAnimalVisit -> AnimalArrivedTipPanel.Open — "an animal came to
+        //     visit". The bond level and the visit are server state that is already updated when the
+        //     dispatch happens, so swallowing it removes the card and nothing else.
+        // SEPARATE TOGGLE (own latch, own slots), like the two below.
+        private const string WildAnimalLevelUpEventName = "XDTGameSystem.UI.WildAnimalLevelUpEvent";
+        private const int WildAnimalLevelUpEventPayloadBytes = 4;     // AnimalGroup, int-backed enum
+        private const string WildAnimalVisitNotifyEventName = "XDTGameSystem.UI.WildAnimalVisitNotifyEvent";
+        private const int WildAnimalVisitNotifyEventPayloadBytes = 0; // group + bool: layout is Mono's to pick
+
         internal static bool MasterLogQuietPopups = false;
 
         private bool quietCongratsPopups;
@@ -98,10 +113,14 @@
         private bool quietPetPhotoResultPopup;
         private bool quietPetPhotoHookRegistered;
 
+        private bool quietAnimalCardPopups;
+        private bool quietAnimalCardHooksRegistered;
+
         private void ProcessQuietPopupsOnUpdate()
         {
             this.ProcessQuietBpPayRewardOnUpdate();
             this.ProcessQuietPetPhotoResultOnUpdate();
+            this.ProcessQuietAnimalCardsOnUpdate();
 
             bool on = this.quietCongratsPopups;
             if (!on && !this.quietPopupsHooksRegistered)
@@ -233,6 +252,58 @@
             }
 
             this.SetGameEventHookSuppressForward(PetPhotoResultOpenRequestedEventName, on);
+        }
+
+        // Own latch, own two slots — same reasoning as the two toggles above.
+        private void ProcessQuietAnimalCardsOnUpdate()
+        {
+            bool on = this.quietAnimalCardPopups;
+            if (!on && !this.quietAnimalCardHooksRegistered)
+            {
+                return;
+            }
+
+            if (!this.quietAnimalCardHooksRegistered)
+            {
+                this.quietAnimalCardHooksRegistered = true;
+                bool levelOk = this.RegisterGameEventHook(
+                    WildAnimalLevelUpEventName, WildAnimalLevelUpEventPayloadBytes, this.OnWildAnimalLevelUpEventHook);
+                bool visitOk = this.RegisterGameEventHook(
+                    WildAnimalVisitNotifyEventName, WildAnimalVisitNotifyEventPayloadBytes, this.OnWildAnimalVisitNotifyEventHook);
+                if (!levelOk || !visitOk)
+                {
+                    ModLogger.Warning("[QuietPopups] animal card hooks refused — those cards will still show:"
+                        + " bondLevelUp=" + levelOk + " animalVisit=" + visitOk);
+                }
+                else if (MasterLogQuietPopups)
+                {
+                    ModLogger.Msg("[QuietPopups] animal card hooks registered");
+                }
+            }
+
+            this.SetGameEventHookSuppressForward(WildAnimalLevelUpEventName, on);
+            this.SetGameEventHookSuppressForward(WildAnimalVisitNotifyEventName, on);
+        }
+
+        private void OnWildAnimalLevelUpEventHook(GameEventSnapshot e)
+        {
+            if (!MasterLogQuietPopups)
+            {
+                return;
+            }
+
+            ModLogger.Msg("[QuietPopups] WildAnimalLevelUpEvent group=" + e.ReadInt32(0)
+                + " suppress=" + this.quietAnimalCardPopups);
+        }
+
+        private void OnWildAnimalVisitNotifyEventHook(GameEventSnapshot e)
+        {
+            if (!MasterLogQuietPopups)
+            {
+                return;
+            }
+
+            ModLogger.Msg("[QuietPopups] WildAnimalVisitNotifyEvent suppress=" + this.quietAnimalCardPopups);
         }
 
         private void OnPetPhotoResultOpenRequestedEventHook(GameEventSnapshot e)

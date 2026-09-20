@@ -709,6 +709,22 @@ its own switch and its own hook latch. Chain: `MailSyncSystem` (`WorldSystem.Sho
 `AlertBPPayRewardPanel.Open`. Hooked at the lower, terminal channel for the same reason
 `AlertRewardsEvent` is preferred over `AlertRewardEvent`. payloadBytes 0.
 
+**Separate toggle: "Hide animal cards"** (`quietAnimalCardPopups`, own latch, two hook slots).
+Two wild-animal cards, both display-only with a single `UIEventBridge` listener whose handler is a
+bare `Panel.Open`:
+
+- **Bond Level Up** — `AnimalModule.OnWildAnimalFavoriteLvChanged` →
+  **`XDTGameSystem.UI.WildAnimalLevelUpEvent`** `{AnimalGroup group}` →
+  `UIEventBridge.OnWildAnimalLevelUp` → `AnimalLevelUpPanel.Open`. A full-width card ("Tap empty
+  area to close") that sits there until it is tapped — the one the visiting-gift auto-claim keeps
+  raising. payloadBytes 4 (the group, traced only).
+- **An animal came to visit** — `AnimalModule.OnWildAnimalVisitEventChanged` →
+  **`XDTGameSystem.UI.WildAnimalVisitNotifyEvent`** → `UIEventBridge.OnWildAnimalVisit` →
+  `AnimalArrivedTipPanel.Open`. payloadBytes 0 (group + bool, Mono picks the layout).
+
+Bond level and visit state are server-side and already updated when the dispatch happens, so
+swallowing it removes the card and nothing else. Default **Off**.
+
 ### Game UI — Custom UI Timings (Self → Game UI sub-tab)
 
 - Editable display durations for the game's tip/toast popups: item-obtained bubbles

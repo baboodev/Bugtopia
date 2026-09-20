@@ -247,6 +247,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Quiet BP Reward Popup", "Active"));
             }
 
+            if (this.quietAnimalCardPopups)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Quiet Animal Cards", "Active"));
+            }
+
             if (this.activityRewardAutoClaim)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Auto-Claim Event Rewards", this.GetActivityRewardClaimStatus()));

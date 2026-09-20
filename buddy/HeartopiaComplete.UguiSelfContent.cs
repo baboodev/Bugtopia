@@ -104,6 +104,7 @@ namespace HeartopiaMod
             public Toggle QuietPopupsToggle;
             public Toggle QuietBpPayToggle;
             public Toggle QuietPetPhotoToggle;
+            public Toggle QuietAnimalCardToggle;
             public Toggle ActivityRewardClaimToggle;
             public Toggle ActivityHideEndPanelToggle;
             public GameObject QuietPopupsHint;
@@ -372,6 +373,10 @@ namespace HeartopiaMod
             handle.QuietPetPhotoToggle = this.CreateUguiCheckbox(scrollContent, "QuietPetPhotoToggle",
                 this.L("Hide the pet photo card"), this.quietPetPhotoResultPopup,
                 new System.Action<bool>(this.OnUguiSelfQuietPetPhotoToggled));
+
+            handle.QuietAnimalCardToggle = this.CreateUguiCheckbox(scrollContent, "QuietAnimalCardToggle",
+                this.L("Hide animal cards"), this.quietAnimalCardPopups,
+                new System.Action<bool>(this.OnUguiSelfQuietAnimalCardToggled));
 
             handle.ActivityRewardClaimToggle = this.CreateUguiCheckbox(scrollContent, "ActivityRewardClaimToggle",
                 this.L("Auto-Claim Event Rewards"), this.activityRewardAutoClaim,
@@ -658,6 +663,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.QuietAnimalCardToggle != null)
+            {
+                PlaceUguiTopLeft(handle.QuietAnimalCardToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.ActivityRewardClaimToggle != null)
             {
                 PlaceUguiTopLeft(handle.ActivityRewardClaimToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -777,6 +788,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.QuietPopupsToggle, this.quietCongratsPopups);
                 this.SyncUguiToggleFromField(handle.QuietBpPayToggle, this.quietBpPayRewardPopup);
                 this.SyncUguiToggleFromField(handle.QuietPetPhotoToggle, this.quietPetPhotoResultPopup);
+                this.SyncUguiToggleFromField(handle.QuietAnimalCardToggle, this.quietAnimalCardPopups);
                 this.SyncUguiToggleFromField(handle.ActivityRewardClaimToggle, this.activityRewardAutoClaim);
                 this.SyncUguiToggleFromField(handle.ActivityHideEndPanelToggle, this.activityHideEndPanel);
                 this.SyncUguiToggleFromField(handle.EmoteUnlockToggle, this.emoteUnlockEnabled);
@@ -1230,6 +1242,17 @@ namespace HeartopiaMod
                 return;
             }
             this.quietPetPhotoResultPopup = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Own toggle, own hook latch — see QuietPopupsFeature. Save only.
+        private void OnUguiSelfQuietAnimalCardToggled(bool value)
+        {
+            if (value == this.quietAnimalCardPopups)
+            {
+                return;
+            }
+            this.quietAnimalCardPopups = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

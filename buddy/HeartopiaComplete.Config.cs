@@ -245,6 +245,7 @@ namespace HeartopiaMod
             data.quietCongratsPopups = this.quietCongratsPopups;
             data.quietBpPayRewardPopup = this.quietBpPayRewardPopup;
             data.quietPetPhotoResultPopup = this.quietPetPhotoResultPopup;
+            data.quietAnimalCardPopups = this.quietAnimalCardPopups;
             data.emoteUnlockEnabled = this.emoteUnlockEnabled;
             data.paintStyleUnlockEnabled = this.paintStyleUnlockEnabled;
             data.furnitureDyePickerEnabled = this.furnitureDyePickerEnabled;
@@ -650,6 +651,7 @@ namespace HeartopiaMod
             this.quietCongratsPopups = data.quietCongratsPopups;
             this.quietBpPayRewardPopup = data.quietBpPayRewardPopup;
             this.quietPetPhotoResultPopup = data.quietPetPhotoResultPopup;
+            this.quietAnimalCardPopups = data.quietAnimalCardPopups;
             this.emoteUnlockEnabled = data.emoteUnlockEnabled;
             this.paintStyleUnlockEnabled = data.paintStyleUnlockEnabled;
             this.furnitureDyePickerEnabled = data.furnitureDyePickerEnabled;
