@@ -74,7 +74,10 @@ namespace HeartopiaMod
         private const float MiniMapLookAheadMin = 0.1f;          // fraction of the circle radius
         private const float MiniMapLookAheadMax = 0.6f;
         private const float MiniMapLookAheadDefault = 0.4f;
-        private const float MiniMapLookAheadFullSpeed = 3.5f;    // full offset from running speed up
+        // The offset uses the SAME speed scale as the zoom curve (the current car's
+        // RunForwardMaxSpeed, 8 m/s on foot), so running (3.5 m/s) offsets about half as far as a car
+        // at full speed. Per-mode references made running and driving look identical, and a fixed
+        // 3.5 m/s reference made everything above walking look identical.
         private const float MiniMapTrackDistanceUnbounded = 100000f;
         private const float MiniMapTrackedRefreshInterval = 0.5f;
         private const float MiniMapTrackedMatchMetres = 2f;     // icon <-> GetMiniMapSpots entry
@@ -671,7 +674,7 @@ namespace HeartopiaMod
             {
                 float edgePx = this.miniMapOrigTrackDistance * MiniMapPixelsPerMetre;
                 float d = edgePx * this.miniMapLookAheadAmount
-                    * Mathf.Clamp01(this.miniMapSmoothSpeed / MiniMapLookAheadFullSpeed);
+                    * Mathf.Clamp01(this.miniMapSmoothSpeed / Mathf.Max(0.5f, this.miniMapTopSpeed));
                 if (this.miniMapRotatingMap)
                 {
                     target = new Vector2(0f, -d);
