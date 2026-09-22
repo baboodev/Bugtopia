@@ -755,6 +755,29 @@ namespace HeartopiaMod
         // saves — which is exactly the judgement that constant already encodes.
         internal void TryRemountFarmWalkVehicle(Vector3 selfPos)
         {
+            // The delayed first summon ("Vehicle Delay"): the walk began on foot, the delay has
+            // run, and the rest of the haul is still worth a vehicle. Not during an escape — the
+            // summon would land the car on the obstacle the walker is working around.
+            if (this.farmWalkVehicleDelayedUntil >= 0f && Time.unscaledTime >= this.farmWalkVehicleDelayedUntil)
+            {
+                this.farmWalkVehicleDelayedUntil = -1f;
+                if (this.farmWalkUnstickPhase != FarmWalkUnstickIdle)
+                {
+                    ModLogger.Msg("[FarmVehicle] delay over mid-escape — staying on foot for this haul.");
+                }
+                else if (!this.ShouldFarmWalkSummonVehicle(selfPos, this.farmWalkTarget))
+                {
+                    ModLogger.Msg("[FarmVehicle] delay over, but only " + this.ComputeFarmWalkRouteRemaining(selfPos).ToString("F0")
+                        + "m of route left (or no summon possible) — walking the rest.");
+                }
+                else
+                {
+                    ModLogger.Msg("[FarmVehicle] delay over with " + this.ComputeFarmWalkRouteRemaining(selfPos).ToString("F0")
+                        + "m to go — summoning now.");
+                    this.TryFarmWalkSummonAndMount();
+                }
+            }
+
             if (!this.farmWalkVehicleLeftForObstacle)
             {
                 return;

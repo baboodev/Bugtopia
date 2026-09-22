@@ -199,6 +199,7 @@ namespace HeartopiaMod
             data.farmWalkVehicleFixEnabled = this.farmWalkVehicleFixEnabled;
             data.farmWalkVehicleMinDistance = this.farmWalkVehicleMinDistance;
             data.farmWalkVehicleDismountDistance = this.farmWalkVehicleDismountDistance;
+            data.farmWalkVehicleDelaySeconds = this.farmWalkVehicleDelaySeconds;
             data.farmWalkCornerReachFoot = this.farmWalkCornerReachFoot;
             data.farmWalkCornerReachVehicle = this.farmWalkCornerReachVehicle;
             data.farmWalkCornerReachSwim = this.farmWalkCornerReachSwim;
@@ -588,6 +589,11 @@ namespace HeartopiaMod
                 ? 10f
                 : Mathf.Clamp(data.farmWalkVehicleDismountDistance,
                     FarmWalkVehicleDismountFloor, FarmWalkVehicleDismountCeiling);
+
+            // 0 is a legal value for the delay too: absent = the field's -1 initializer.
+            this.farmWalkVehicleDelaySeconds = data.farmWalkVehicleDelaySeconds < 0f
+                ? 0f
+                : Mathf.Clamp(data.farmWalkVehicleDelaySeconds, FarmWalkVehicleDelayFloor, FarmWalkVehicleDelayCeiling);
 
             // 0 is a legal value for this one, so absence is a NEGATIVE sentinel (the field's own
             // initializer), not zero.

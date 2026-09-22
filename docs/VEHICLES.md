@@ -213,3 +213,8 @@ next several `OnUpdate` frames (resolve the class → inflate `DispatchEvent<T>`
 of a session is guaranteed to lose its result.
 
 Register unconditionally from `OnUpdate`, not in the same call that sends the command.
+
+**Vehicle Delay** (Foraging settings, 0–30 s, default 0): the first N seconds of a haul are walked
+on foot and the vehicle is summoned only then. The summon still has to be worth it at that moment —
+`ShouldFarmWalkSummonVehicle` re-measures the remaining route against Vehicle From — and it is
+skipped while an escape is running. Aborting the walk drops the pending summon.

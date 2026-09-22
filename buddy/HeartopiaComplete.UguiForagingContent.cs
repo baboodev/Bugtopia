@@ -113,6 +113,9 @@ namespace HeartopiaMod
             public Slider WalkCornerReachSwimSlider;
             public string WalkCornerReachSwimShown;
             public Toggle WalkVehicleToggle;      // Use Vehicle (shown while Walk to Nodes is on)
+            public GameObject WalkVehicleDelayLabel;      // Vehicle Delay slider row, same gate as the distance rows
+            public Slider WalkVehicleDelaySlider;
+            public string WalkVehicleDelayShown;
             public GameObject WalkVehicleDistanceLabel;   // slider row, shown only while Use Vehicle is on
             public Slider WalkVehicleDistanceSlider;
             public string WalkVehicleDistanceShown;
@@ -571,6 +574,14 @@ namespace HeartopiaMod
                 this.farmWalkVehicleDismountDistance, true,
                 new System.Action<float>(this.OnUguiForagingWalkVehicleDismountChanged));
 
+            handle.WalkVehicleDelayShown = this.LF("Vehicle Delay: {0}s", (int)this.farmWalkVehicleDelaySeconds);
+            handle.WalkVehicleDelayLabel = this.CreateUguiBodyLabel(settings.transform,
+                "WalkVehicleDelayLabel", handle.WalkVehicleDelayShown, 13f);
+            handle.WalkVehicleDelaySlider = this.CreateUguiSlider(settings.transform, "WalkVehicleDelaySlider",
+                FarmWalkVehicleDelayFloor, FarmWalkVehicleDelayCeiling,
+                this.farmWalkVehicleDelaySeconds, true,
+                new System.Action<float>(this.OnUguiForagingWalkVehicleDelayChanged));
+
             // Steering the walker can drive with (FarmWalkVehicleFeature.ApplyFarmWalkVehicleMovementFix).
             handle.WalkVehicleFixToggle = this.CreateUguiCheckbox(settings.transform, "WalkVehicleFixToggle",
                 this.L("Fix Vehicle Movement"), this.farmWalkVehicleFixEnabled,
@@ -720,6 +731,8 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.WalkVehicleDistanceSlider != null ? handle.WalkVehicleDistanceSlider.gameObject : null, vehicleRow);
             SetUguiGoActive(handle.WalkVehicleDismountLabel, vehicleRow);
             SetUguiGoActive(handle.WalkVehicleDismountSlider != null ? handle.WalkVehicleDismountSlider.gameObject : null, vehicleRow);
+            SetUguiGoActive(handle.WalkVehicleDelayLabel, vehicleRow);
+            SetUguiGoActive(handle.WalkVehicleDelaySlider != null ? handle.WalkVehicleDelaySlider.gameObject : null, vehicleRow);
             SetUguiGoActive(handle.WalkVehicleFixToggle != null ? handle.WalkVehicleFixToggle.gameObject : null, vehicleRow);
 
             if (walkRows)
@@ -798,6 +811,16 @@ namespace HeartopiaMod
                     if (handle.WalkVehicleDismountSlider != null)
                     {
                         PlaceUguiTopLeft(handle.WalkVehicleDismountSlider.gameObject, 224f, rowY + 1f, panelW - 252f, 20f);
+                    }
+
+                    rowY += 26f;
+                    if (handle.WalkVehicleDelayLabel != null)
+                    {
+                        PlaceUguiTopLeft(handle.WalkVehicleDelayLabel, 46f, rowY, 170f, 20f);
+                    }
+                    if (handle.WalkVehicleDelaySlider != null)
+                    {
+                        PlaceUguiTopLeft(handle.WalkVehicleDelaySlider.gameObject, 224f, rowY + 1f, panelW - 252f, 20f);
                     }
 
                     rowY += 30f;
@@ -957,6 +980,8 @@ namespace HeartopiaMod
                     this.LF("Vehicle From: {0}m", (int)this.farmWalkVehicleMinDistance));
                 this.SyncUguiSelfLabelText(handle.WalkVehicleDismountLabel, ref handle.WalkVehicleDismountShown,
                     this.LF("Get Out At: {0}m", (int)this.farmWalkVehicleDismountDistance));
+                this.SyncUguiSelfLabelText(handle.WalkVehicleDelayLabel, ref handle.WalkVehicleDelayShown,
+                    this.LF("Vehicle Delay: {0}s", (int)this.farmWalkVehicleDelaySeconds));
                 this.SyncUguiToggleFromField(handle.WalkVehicleFixToggle, this.farmWalkVehicleFixEnabled);
                 this.SyncUguiToggleFromField(handle.TrackCompareToggle, this.farmWalkTrackCompareEnabled);
                 this.SyncUguiToggleFromField(handle.StealthBlockToggle, this.stealthBlockEnabled);
@@ -1286,6 +1311,18 @@ namespace HeartopiaMod
             }
 
             this.farmWalkUseVehicleEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiForagingWalkVehicleDelayChanged(float value)
+        {
+            float clamped = Mathf.Clamp(Mathf.Round(value), FarmWalkVehicleDelayFloor, FarmWalkVehicleDelayCeiling);
+            if (Mathf.Approximately(clamped, this.farmWalkVehicleDelaySeconds))
+            {
+                return;
+            }
+
+            this.farmWalkVehicleDelaySeconds = clamped;
             try { this.SaveKeybinds(false); } catch { }
         }
 

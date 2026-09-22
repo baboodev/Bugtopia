@@ -786,6 +786,15 @@ namespace HeartopiaMod
         internal const float FarmWalkVehicleMinDistanceCeiling = 1000f;
         internal float farmWalkVehicleMinDistance = 50f;
 
+        // "Vehicle Delay": walk the first N seconds of a haul on foot and summon the vehicle only
+        // then (user request 2026-09-22). 0 = summon at the start, as before. The summon still
+        // needs the remaining haul to be worth it when the delay ends (ShouldFarmWalkSummonVehicle
+        // re-measures), so a short leg walked most of the way stays on foot.
+        internal const float FarmWalkVehicleDelayFloor = 0f;
+        internal const float FarmWalkVehicleDelayCeiling = 30f;
+        internal float farmWalkVehicleDelaySeconds;
+        private float farmWalkVehicleDelayedUntil = -1f;   // < 0 = no summon pending
+
         // Mirrors StealthForagingActive: the toggle only means anything while a run is going.
         // Read by OutOfBoundsGuardFeature — see IsOutOfBoundsGuardRequested for why.
         //
@@ -1115,9 +1124,20 @@ namespace HeartopiaMod
             // the hotkey put the player in a vehicle that then went nowhere.
             //
             // The vehicle is transport for a journey; whether the journey exists is decided first.
+            this.farmWalkVehicleDelayedUntil = -1f;
             if (!alreadyInRange && this.ShouldFarmWalkSummonVehicle(selfPos, target))
             {
-                this.TryFarmWalkSummonAndMount(); // failure means "walk it", never "abort"
+                if (this.farmWalkVehicleDelaySeconds > 0f)
+                {
+                    // Walk first; the tick summons when the delay has run (TryRemountFarmWalkVehicle).
+                    this.farmWalkVehicleDelayedUntil = Time.unscaledTime + this.farmWalkVehicleDelaySeconds;
+                    ModLogger.Msg("[FarmVehicle] " + label + ": vehicle in " + this.farmWalkVehicleDelaySeconds.ToString("F0")
+                        + "s — walking the first stretch.");
+                }
+                else
+                {
+                    this.TryFarmWalkSummonAndMount(); // failure means "walk it", never "abort"
+                }
             }
 
             // Generous deadline: straight-line metres at the configured speed, tripled for detours,
@@ -3441,6 +3461,7 @@ namespace HeartopiaMod
             this.farmWalkPendingCleanse = false;
             this.farmWalkPendingArea = false;
             this.farmWalkVehicleLeftForObstacle = false;   // never leaks into the next walk
+            this.farmWalkVehicleDelayedUntil = -1f;
             if (this.farmWalkVehicleOurs && !keepVehicle)
             {
                 this.TryFarmWalkDismount("walk aborted");
@@ -3690,6 +3711,7 @@ namespace HeartopiaMod
             this.farmWalkVehicleLastSummonAt = 0f;
             this.farmWalkVehicleLastDismountAt = -999f;
             this.farmWalkVehicleLeftForObstacle = false;
+            this.farmWalkVehicleDelayedUntil = -1f;
             this.farmWalkVehicleUnstickRounds = 0;
             this.farmWalkVehicleSideSign = 1;
 
