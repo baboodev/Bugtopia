@@ -182,6 +182,15 @@ within proof range. Judge every kind by the same list that produced it. **[M]**
 
 ---
 
+**0.16** ⭐ **A no-go list of nodes the walker never targets** (`FarmWalkNoGoNodes`, matched within
+2 m of the marker, walk mode only). Entry rule: the geometry around the spot defeats routing — the
+straight leg is blocked by a ledge, the graph answers with a loop across the map, the walk wanders
+off. First entry (2026-09-22): the Oyster at (-101.6, 28.0, 189.7) on a rock ledge in the mushroom
+field — 13.5 m by line, 110 m via 22 corners by graph; the walk got 55 m away, the mushroom
+streamed out, and the "collected while we walked" verdict fired on a mushroom still standing.
+That verdict now needs the same 12 m closeness as "is not there at all": absence at range is
+streaming, not a collect. **[M]**
+
 ## 1. Building a route
 
 **1.1** Order: snap the start → snap the end → A\* over the waypoint graph → append the real target →

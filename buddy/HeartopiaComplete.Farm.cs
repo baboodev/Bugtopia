@@ -3003,6 +3003,12 @@ namespace HeartopiaMod
                                 {
                                     continue;
                                 }
+                                // Walk mode never targets a no-go node (FarmWalkNoGoNodes); this
+                                // sits before the candidate sink, so the tour never sees it either.
+                                if (this.farmWalkToNodeEnabled && this.IsFarmWalkNoGoNode(child.position))
+                                {
+                                    continue;
+                                }
                                 // Authoritative live check bypassing marker-rebuild/stamp lag:
                                 // a candidate whose entity is known cold is never targeted.
                                 bool liveCandidateCold;

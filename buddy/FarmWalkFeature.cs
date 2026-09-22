@@ -806,6 +806,39 @@ namespace HeartopiaMod
                                            || this.questWalkFollowing
                                            || this.CleanupBossDrivingWalker;
 
+        // ⛔ NODES THE WALKER NEVER TARGETS. Spots whose surrounding geometry defeats routing:
+        // the straight leg is blocked by a ledge, the graph answers with a loop across the map,
+        // and the walk wanders until something gives. Positions are the radar marker's, matched
+        // within FarmWalkNoGoRadius. Teleport mode is unaffected — the ban is about walking.
+        //   * (-101.6, 28.0, 189.7) Oyster on a rock ledge in the mushroom field: 13.5 m away by
+        //     line, 110 m via 22 corners by graph, walked 55 m off and gave up (2026-09-22).
+        private static readonly Vector3[] FarmWalkNoGoNodes =
+        {
+            new Vector3(-101.62f, 28.00f, 189.73f),
+        };
+        private const float FarmWalkNoGoRadius = 2f;
+        private float farmWalkNoGoLoggedAt = -100f;
+
+        private bool IsFarmWalkNoGoNode(Vector3 position)
+        {
+            for (int i = 0; i < FarmWalkNoGoNodes.Length; i++)
+            {
+                if (HorizontalDistance(FarmWalkNoGoNodes[i], position) <= FarmWalkNoGoRadius)
+                {
+                    float now = Time.unscaledTime;
+                    if (now >= this.farmWalkNoGoLoggedAt + 60f)
+                    {
+                        this.farmWalkNoGoLoggedAt = now;
+                        ModLogger.Msg("[FarmWalk] no-go node at " + FormatNavMeshVector(position)
+                            + " skipped — its geometry defeats routing (see FarmWalkNoGoNodes).");
+                    }
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         // How many alternative end nodes to try when the direct line to a node is blocked.
         private const int FarmWalkDetourAttempts = 4;
 
@@ -3138,8 +3171,15 @@ namespace HeartopiaMod
                 why = "went on cooldown while we walked" + this.DescribeFarmWalkColdSource(this.farmWalkTrueTarget);
             }
             else if (this.farmWalkTargetSeenAt >= 0f
-                && this.liveCollectableScanCompletedAt > this.farmWalkTargetSeenAt)
+                && this.liveCollectableScanCompletedAt > this.farmWalkTargetSeenAt
+                && distance <= FarmWalkDrainedCloseDistance)
             {
+                // ⚠️ THIS IS AN ABSENCE CASE TOO, so it takes the same distance rule as the one
+                // below. A prior sighting does not make "not in the scan" conclusive at range:
+                // the scan holds only what is streamed in, and a walk that wandered off (a 110 m
+                // graph loop for a 13.5 m target, 2026-09-22) dropped the mushroom out of
+                // streaming at 55 m. The verdict fired, the live mushroom got a cold stamp, and
+                // the farm left for the next one while it stood there untouched.
                 why = "was collected while we walked";
             }
             else if (distance <= FarmWalkDrainedCloseDistance)
