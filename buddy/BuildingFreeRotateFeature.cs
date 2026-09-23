@@ -338,6 +338,10 @@ namespace HeartopiaMod
             if (this.TryGetPadBuildAuraModule(out IntPtr module) && module != IntPtr.Zero)
             {
                 this.buildingMovePanelGodMode = this.TryGetMonoBoolMember(module, "InGodMode", out bool g) && g;
+                if (this.buildingMovePanelGodMode)
+                {
+                    this.SyncBuildingPlaneHeightFromGame(module);
+                }
                 if (this.TryGetPadBuildAuraSubState(module, out int sub))
                 {
                     this.buildingMovePanelSubState = sub;
@@ -360,6 +364,34 @@ namespace HeartopiaMod
                     this.ResetBuildingAxisSliders(); // focus ended → next object starts fresh
                 }
             }
+        }
+
+        // Since 2026-09-24 the game also sets the build plane itself (Ctrl+wheel ->
+        // PlaneHeightWidget.SetPlaneHeightByWheel, 0..16), through the same SetPlaneHeight the mod
+        // slider uses (0..24). Adopt the game's current plane into the slider so the two never
+        // disagree; both the value and its applied twin move, so nothing is written back. A change
+        // the user is still applying (value != applied) is left alone.
+        private void SyncBuildingPlaneHeightFromGame(IntPtr module)
+        {
+            if (!Mathf.Approximately(this.buildingPlaneHeight, this.buildingPlaneHeightApplied)
+                && this.buildingPlaneHeightApplied >= 0f)
+            {
+                return;
+            }
+            if (!this.TryGetMonoSingleMember(module, "_standardHeight", out float standard)
+                || !this.TryGetMonoSingleMember(module, "_basePlaneHeight", out float basePlane))
+            {
+                return;
+            }
+
+            float offset = standard - basePlane;
+            if (float.IsNaN(offset) || float.IsInfinity(offset) || Mathf.Abs(offset - this.buildingPlaneHeight) < 0.01f)
+            {
+                return;
+            }
+
+            this.buildingPlaneHeight = offset;
+            this.buildingPlaneHeightApplied = offset;
         }
 
         // Quiet (no logging) read of the focused object's local position + yaw, for the live panel
