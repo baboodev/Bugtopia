@@ -7,11 +7,18 @@ namespace HeartopiaMod
     // recycle panel that backs RecycleProtocolManager.CmdQuickSell. This is NOT the shop BUY flow:
     // SalePanel (see ShopQuickBuyFeature.cs) is buy-only (ShopItemData -> SalePanel.Open). ItemSellPanel
     // has no item parameter; it self-populates from BackPackSystem.GetItems, so opening it needs no
-    // netId/staticId/count input — just UIManager.OpenView<ItemSellPanel>(new Intent()), exactly how the
-    // game opens it (UIEventBridge.OnCoinBusinessFeatureRequested / DialogueNodeBranch case 5).
+    // netId/staticId/count input.
+    //
+    // Since the 2026-09-24 game update the panel is a view + PanelLogic pair
+    // (XDTGame.UI.Logic.ItemSellPanelLogic, plus ManagementItemSellPanelLogic for the resort shop), and
+    // the game opens it with the static ItemSellPanelLogic.Open(Intent) (UIEventBridge / DialogueNodeBranch).
+    // A bare UIManager.OpenView<ItemSellPanel> now shows an empty shell with no list and no back handler
+    // (ViewData.onBack is set by the logic) that the player cannot close. Older builds had no logic and
+    // opened through OpenView(Type, Intent) — kept as the fallback.
     public partial class HeartopiaComplete
     {
         private const string ShopQuickSellPanelTypeName = "XDTGame.UI.Panel.ItemSellPanel";
+        private const string ShopQuickSellLogicTypeName = "XDTGame.UI.Logic.ItemSellPanelLogic";
 
         private string shopQuickSellStatus = "Idle.";
 
@@ -95,11 +102,38 @@ namespace HeartopiaMod
         }
 
 
-        // AuraMono path: XDTGame.UI.Panel.* are usually AuraMono-class-only (no interop stub), so resolve
-        // the class and invoke UIManager.OpenView(Type, null-Intent) through mono_runtime_invoke.
-        private bool TryOpenSellPanelAura(string successStatus, out string error)
+        // AuraMono path: XDTGame.UI.* are AuraMono-class-only (no interop stub). Primary: the static
+        // ItemSellPanelLogic.Open(Intent) with a null intent (the game passes Intent.Get() / null and the
+        // logic substitutes its own). Fallback for pre-2026-09-24 builds: UIManager.OpenView(Type, null).
+        private unsafe bool TryOpenSellPanelAura(string successStatus, out string error)
         {
             error = null;
+            if (this.EnsureAuraMonoApiReady() && this.AttachAuraMonoThread() && auraMonoRuntimeInvoke != null)
+            {
+                IntPtr logicClass = this.FindAuraMonoClassByFullName(ShopQuickSellLogicTypeName);
+                if (logicClass == IntPtr.Zero)
+                {
+                    logicClass = this.FindAuraMonoClassInImages("XDTGame.UI.Logic", "ItemSellPanelLogic",
+                        new string[] { "XDTGameUI", "XDTGameUI.dll" });
+                }
+
+                IntPtr openMethod = logicClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(logicClass, "Open", 1) : IntPtr.Zero;
+                if (openMethod != IntPtr.Zero)
+                {
+                    IntPtr* args = stackalloc IntPtr[1];
+                    args[0] = IntPtr.Zero; // Intent intent = null
+                    IntPtr exc = IntPtr.Zero;
+                    auraMonoRuntimeInvoke(openMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                    if (exc == IntPtr.Zero)
+                    {
+                        return true;
+                    }
+
+                    error = "ItemSellPanelLogic.Open raised an exception.";
+                    return false; // the logic exists: never fall back to the bare view on this build
+                }
+            }
+
             if (this.TryOpenAuraPanelByTypeNameViaMono(ShopQuickSellPanelTypeName, successStatus))
             {
                 return true;
