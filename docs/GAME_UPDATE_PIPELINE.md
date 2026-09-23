@@ -159,6 +159,74 @@ The check is **differential**, and it has to be:
 
 The regression signal is: **present in the old dump, gone from the new one.**
 
+### A7b. `modtouch` — read the bodies of the types the mod drives
+
+```bash
+python tools/gameupdate/hcode.py modtouch --old <work>/old
+```
+
+The three checks above answer one question: *does what the mod names still resolve?* That is
+not the question that broke the mod on 2026-09-24. Every binding resolved, and still:
+
+- `BuildModule.Update` started panning the god camera on WASD, and the mod's own WASD pan
+  doubled it;
+- `BuildStatusPanel.BindPcInput` bound 15 build hotkeys that fired while typing in mod fields;
+- `ItemSellPanel` became a view + `PanelLogic` pair, so the mod's bare `UIManager.OpenView`
+  showed an empty shell the player could not close;
+- `TrackData` gained `PositionState`, whose zero value (`Unresolved`) the map now hides — so every
+  radar marker the mod built in a zero-filled buffer disappeared from the map and minimap.
+
+`BuildModule` alone had 381 changed lines. It was a number in a count, and nobody read it.
+`modtouch` makes those bodies impossible to skip:
+
+- **Which types.** Every changed game type the mod references — **tier 1** by full name or
+  `("namespace", "Type")` pair (how AuraMono classes are resolved), **tier 2** by short name only
+  (a `Name(Clone)` path segment or a bare literal; weaker, common names collide).
+- **Per type:** the changed members (the enclosing method/property of every changed line), the
+  members the mod names by string **in the same files that reference the type**, and the full
+  unified diff in `reports/modtouch/<Module>__<Type>.diff`. Index: `reports/modtouch.md`.
+- **PRIORITY** lists the types where a member the mod names changed, or a per-frame / input
+  member (`Update`, `LateUpdate`, `Tick*`, `*Input*`, `Bind*`, `OnKey*`, `OnPc*`) changed, or —
+  for a struct — the **field layout** changed. Read every PRIORITY diff.
+- **ARITY** — a method the mod names whose overload parameter counts changed. The mod resolves
+  methods by name + count, and a lookup routed through a helper (e.g. a detour installer) is
+  invisible to the binding audit: `VehicleProtocolManager.ServerRemoveVehicle` went 2 → 3 on
+  2026-09-24 and only this line reported it. The flag compares the game builds, so it stays up
+  after the mod is fixed — confirm the mod's own count, then move on.
+- **STRUCT LAYOUT** — added / removed / reordered instance fields of a changed struct. The mod
+  builds several game structs in raw buffers (event payloads, `StartTrack`/`TrackData`); a new
+  field there is zero-filled by the mod, and a zero enum often means `None`/`Unresolved`.
+- **Panels that gained a `PanelLogic`** (`[PanelLogic(typeof(X))]` present in the new dump, absent
+  in the old) that the mod names. From that build on they must be opened through the logic
+  (`XLogic.Open(...)` / `UIManager.StartLogic`), never a bare `OpenView`.
+
+Verified against the pre-fix mod (`--buddy <old checkout>/buddy`) on the 09-21 → 09-24 pair: it
+names `BuildModule` (`Update`, `SetGodMoveInputDisabled`), `BuildStatusPanel` (`BindPcInput`,
+`OnPc*`), `TrackData` (`+PositionState`) and `ItemSellPanel` (gained `ItemSellPanelLogic`) —
+all four breaks that the other checks missed.
+
+### A7c. `inputs` — keys the game started reading, crossed with the mod's keys
+
+```bash
+python tools/gameupdate/hcode.py inputs --old <work>/old
+```
+
+Differential: a key read that is **new in this build** (`KeyCode.X`, `InputEvent.KeyX`, an
+`Input.GetAxis` name, a mouse button) is matched against the keys the mod reads.
+
+- **CONFLICT** — the mod reads that key hard-wired (`Input.GetKey(KeyCode.X)`): a double action.
+- **WARN** — only a rebindable mod default uses it.
+- Modifiers are included on purpose: on 2026-09-24 the game's Ctrl+Z / Ctrl+wheel collided with
+  a mod "Ctrl = camera down" that read Ctrl on its own.
+
+Each hit names the game file and member (`BuildModule.cs in Update`) and the mod `file:line`.
+A hit is not automatically a bug — the game may read the key in a mode the mod feature never runs
+in (Noclip's Ctrl vs build mode) — but every one needs a decision: remove the mod key (the game
+now does it), move it off a game modifier, or confirm the two never run together.
+
+Both checks run inside `run`, after `uipaths`. `--buddy <dir>` points either at another mod
+checkout to see what the check would have said about an older mod.
+
 ### A8. `events` — regenerate `docs/GAME_EVENTS_LIST.md`
 
 Scans every `struct X : … IEvent` and diffs against the committed list.
@@ -320,9 +388,11 @@ changed was the ECS-internal `XD.GameGerm.Ecs.Boost.Services.EventCenter`, while
 one the mod actually detours (`XDTGame.Core.EventCenter` in `XDTBaseService`) was
 byte-identical. Always confirm *which* type by full namespace.
 
-**Three checks, three blind spots.** The type diff sees removals but not string
+**Five checks, five blind spots.** The type diff sees removals but not string
 literals; the binding audit sees symbols but not UI paths; `uipaths` sees UI paths but
-not table schemas. Run all of them.
+not table schemas; none of those sees a **behaviour** change inside a type that still
+resolves — that is `modtouch` (bodies, struct layouts, panels that gained a logic) and
+`inputs` (keys the game started reading). Run all of them; `run` does.
 
 ---
 
@@ -355,6 +425,7 @@ baseline that exists.** Note its path when the pipeline prints it.
 | 2026-08-06 | +0 / −0 / ~22 | 911 tables, no row change | `IconsBarWidget` renamed one node → 16 broken `GameObject.Find` paths |
 | 2026-08-20 | +774 / −92 / ~1078 | 911 → 948 tables, 337 746 → 376 657 rows | `ReadUInt64` opcode added to the decoder; `AreaPriorityManager` moved namespace (diagnostic-only break) |
 | 2026-08-27 | +0 / −0 / ~16 | 14 of 949 tables edited, all micro-fixes | a stale `old/` archive in the work dir made `promote` SKIP silently — bindings/uipaths then diffed the wrong pair; move the archive aside and rerun promote+checks |
+| 2026-09-24 | +2001 / −531 / ~1661 (≈310 of the removals are namespace moves, `XDTGame.UGC` → `XDTGame.GAS`) | 948 → 985 tables, 376 661 → 413 629 rows | two new ctor shapes broke the schema parser (`arrN = TableArrayPool.Share(arrN)`, collections sized after the count via `TableEmptyDictionary`); the failed decode truncated `cn_tables.db` and the rerun snapshotted the 0-byte file — `snapshot` now keeps the first snapshot. Baseline rebuilt from a second machine's `cn.ab` + its own `EcsClient` |
 
 See also: [GAME_ASSEMBLIES_AND_TOOLS.md](GAME_ASSEMBLIES_AND_TOOLS.md) (runtime access,
 IL2CPP tree), [GAME_EVENTS.md](GAME_EVENTS.md) (the event engine),
