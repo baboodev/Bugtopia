@@ -54,8 +54,18 @@ namespace HeartopiaMod
         // disable is balanced by exactly one enable), so digits / Enter / Esc / Delete typed into
         // the field never reach the build UI's shortcuts. Held a short grace after focus ends so
         // the Enter/Esc that closed the field is swallowed too.
+        //
+        // Since the 2026-09-24 game update BuildStatusPanel binds 15 PC shortcuts (Delete = pack the
+        // focused furniture, Tab = switch mode, Enter = confirm, R/M/C/K/O/P, 1-4, Ctrl+Z), so the
+        // same mute now covers ANY focused text field (the mod's own search/settings fields
+        // included) while the build panel is up — ProcessBuildingTextInputGuardOnUpdate. The move
+        // panel only reports its own focus through buildingCoordEditTyping.
         private bool buildingCoordEditInputDisabled;
         private float buildingCoordEditInputReleaseAt;
+        private bool buildingCoordEditTyping;
+        private bool buildingTextGuardPanelOpen;
+        private float buildingTextGuardPanelCheckAt = -999f;
+        private const float BuildingTextGuardPanelCheckInterval = 0.25f;
         private const float BuildingCoordEditInputGrace = 0.3f;
 
         // Free-snap toggles. While on + an object focused, the focused BuildComponent's snap config
@@ -591,9 +601,33 @@ namespace HeartopiaMod
             return list.ToArray();
         }
 
-        // Called every frame by the move panel with "one of my fields has focus". Mutes on the
-        // rising edge, unmutes once the grace after the last focused frame has run out. Also called
-        // with false when the panel hides, so a closed panel can never leave the game muted.
+        // Every frame from OnUpdate. Typing = the move panel's coordinate editor has focus, or any
+        // text field is focused while BuildStatusPanel is open. The panel lookup (GameObject.Find)
+        // runs only while a field is focused, and at most 4x per second.
+        private void ProcessBuildingTextInputGuardOnUpdate()
+        {
+            bool typing = this.buildingCoordEditTyping;
+            if (!typing && this.IsGameTextInputFocused())
+            {
+                float now = Time.unscaledTime;
+                if (now >= this.buildingTextGuardPanelCheckAt)
+                {
+                    this.buildingTextGuardPanelCheckAt = now + BuildingTextGuardPanelCheckInterval;
+                    this.buildingTextGuardPanelOpen = this.TryFindPadBuildPanelRoot() != null;
+                }
+                typing = this.buildingTextGuardPanelOpen;
+            }
+            else if (!typing)
+            {
+                this.buildingTextGuardPanelCheckAt = -999f; // re-check at once on the next focus
+            }
+
+            this.UpdateBuildingCoordEditInputGuard(typing);
+        }
+
+        // Mutes on the rising edge, unmutes once the grace after the last typing frame has run out.
+        // Driven only by ProcessBuildingTextInputGuardOnUpdate, so it is always called with false
+        // once nothing is focused and can never leave the game muted.
         private void UpdateBuildingCoordEditInputGuard(bool typing)
         {
             float now = Time.unscaledTime;

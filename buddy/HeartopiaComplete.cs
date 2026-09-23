@@ -1285,6 +1285,7 @@ namespace HeartopiaMod
             this.UpdateBuildingFreeSnapOverrides();
             this.UpdateBuildingMovePanelState();
             this.ProcessGodCameraMoveOnUpdate();
+            this.ProcessBuildingTextInputGuardOnUpdate();
             this.RunAntiAfkTick();
 
             // Check live durability / energy panel triggers on separate lightweight schedules.

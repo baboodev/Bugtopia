@@ -1027,7 +1027,7 @@ namespace HeartopiaMod
         // Typed coordinates — click the coordinate line (god mode) to edit X / Y / Z / yaw.
         // Enter or Apply moves the object there (TryPlaceFocusedAtLocal), Esc or Cancel closes,
         // Tab / Shift+Tab walks the fields. Only fields whose text changed are applied. While a
-        // field has focus the game's key listeners are muted (UpdateBuildingCoordEditInputGuard).
+        // field has focus the game's key listeners are muted (ProcessBuildingTextInputGuardOnUpdate).
         // ----------------------------------------------------------------------------------------
 
         private static readonly string[] UguiBuildingCoordAxisCaptions = { "X", "Y", "Z", "°" };
@@ -1257,7 +1257,7 @@ namespace HeartopiaMod
                 handle.CoordEditWasFocused = handle.CoordEditOpen && focused >= 0;
             }
 
-            this.UpdateBuildingCoordEditInputGuard(handle.CoordEditOpen && focused >= 0);
+            this.buildingCoordEditTyping = handle.CoordEditOpen && focused >= 0;
         }
 
         // Called every frame from OnUpdate (HeartopiaComplete.cs, next to the other UGUI
@@ -1276,7 +1276,7 @@ namespace HeartopiaMod
                 UguiBuildingMovePanelHandle handle = this.uguiBuildingMovePanel;
                 if (handle == null)
                 {
-                    this.UpdateBuildingCoordEditInputGuard(false);
+                    this.buildingCoordEditTyping = false;
                     if (!show || this.uguiBuildingMovePanelBuildFailed)
                     {
                         return; // nothing to show, or already failed once this session
@@ -1291,7 +1291,7 @@ namespace HeartopiaMod
 
                 if (handle.ErrorCount >= 3)
                 {
-                    this.UpdateBuildingCoordEditInputGuard(false);
+                    this.buildingCoordEditTyping = false;
                     return;
                 }
 
@@ -1302,7 +1302,7 @@ namespace HeartopiaMod
                 if (!show)
                 {
                     this.SetUguiBuildingCoordEditorOpen(handle, false);
-                    this.UpdateBuildingCoordEditInputGuard(false);
+                    this.buildingCoordEditTyping = false;
                     return;
                 }
 
