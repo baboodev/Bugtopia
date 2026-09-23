@@ -95,6 +95,7 @@ namespace HeartopiaMod
             public Vector3 Position;
             public bool IsOak;
             public bool OnCooldown;
+            public bool ColdKnown;    // OnCooldown came from a readable live inCold (not a guess / memory)
             public uint NetId;        // 0 when the entity's netId could not be read
         }
 
@@ -198,8 +199,22 @@ namespace HeartopiaMod
                 // rows for these two carry the next-06:00 end, so the marker stays a cooldown
                 // one — and the farm's candidate filter skips cooldown markers, which is what
                 // keeps a collected daily from being re-targeted.
-                bool ledgerCold = this.TryGetPersistedColdAtPosition(hit.Position, out _)
-                    || this.IsRoamingHitColdByVerdict(hit);
+                //
+                // ⚠️ A READABLE LIVE inCold OUTRANKS THE POSITIONAL LEDGER. These two get a new netId
+                // every session and often come back to the SAME spot, so the positional row of an
+                // earlier session's entity lands exactly on today's one. Measured 2026-09-24: the
+                // fluorite (netId 20012) read inCold=false and the server sent end=0 for it, while a
+                // disk row of netId 20062 at the same position (0.05 m) still claimed a cooldown —
+                // the marker went cooldown and the map sync skipped it. The ledger is for what we
+                // cannot see; once the component in front of us answers, it has the last word
+                // (the same rule as the farm's "component refutes a stored cooldown").
+                bool verdictCold = this.IsRoamingHitColdByVerdict(hit);
+                bool ledgerCold = !hit.ColdKnown
+                    && (this.TryGetPersistedColdAtPosition(hit.Position, out _) || verdictCold);
+                if (hit.ColdKnown && !hit.OnCooldown)
+                {
+                    this.DropRefutedRoamingColdRows(hit);
+                }
                 if (hit.IsOak)
                 {
                     this.CreateMarker(hit.Position, (hit.OnCooldown || ledgerCold) ? "oakoak_cooldown" : "oakoak", line, fill, null);
@@ -294,13 +309,15 @@ namespace HeartopiaMod
                         // component caches in _collectable; unreadable -> treat as ready (the
                         // marker is the point, the cooldown tint is a bonus).
                         bool onCooldown = false;
+                        bool coldKnown = false;
                         if (this.TryGetMonoObjectMember(comp, "_collectable", out IntPtr collectableObj)
                             && collectableObj != IntPtr.Zero)
                         {
                             uint collectablePin = AuraMonoPinNew(collectableObj);
                             try
                             {
-                                onCooldown = this.TryGetMonoBoolMember(collectableObj, "inCold", out bool inCold) && inCold;
+                                coldKnown = this.TryGetMonoBoolMember(collectableObj, "inCold", out bool inCold);
+                                onCooldown = coldKnown && inCold;
                             }
                             finally
                             {
@@ -308,7 +325,7 @@ namespace HeartopiaMod
                             }
                         }
 
-                        this.AddRoamingHit(pos, isOak, onCooldown, netId);
+                        this.AddRoamingHit(pos, isOak, onCooldown, netId, coldKnown);
                     }
                     finally
                     {
@@ -366,7 +383,46 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.AddRoamingHit(spot.Position, isOak, spot.OnCooldown, spot.NetId);
+            this.AddRoamingHit(spot.Position, isOak, spot.OnCooldown, spot.NetId, false);
+        }
+
+        // The live component just called this spot ready: delete every stored cooldown within the
+        // positional-lookup radius that belongs to a DIFFERENT (earlier-session) netId, both the
+        // disk row and its seeded in-memory copy, so neither the radar nor the farm's marker
+        // filter keeps treating today's object as collected.
+        private void DropRefutedRoamingColdRows(RoamingCollectableHit hit)
+        {
+            List<uint> refuted = null;
+            foreach (var pair in this.coldLedgerPersisted)
+            {
+                if (pair.Key == hit.NetId)
+                {
+                    continue;
+                }
+
+                Vector3 p = pair.Value.Position;
+                float dx = p.x - hit.Position.x;
+                float dz = p.z - hit.Position.z;
+                if (p.sqrMagnitude >= 0.01f && (dx * dx) + (dz * dz) <= 2.25f)
+                {
+                    (refuted = refuted ?? new List<uint>()).Add(pair.Key);
+                }
+            }
+
+            if (refuted == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < refuted.Count; i++)
+            {
+                this.coldLedgerPersisted.Remove(refuted[i]);
+                this.collectColdByNetId.Remove(refuted[i]);
+            }
+
+            this.coldLedgerDirty = true;
+            ModLogger.Msg("[RoamingRadar] " + (hit.IsOak ? "Oak-Oak" : "Flawless Fluorite") + " netId " + hit.NetId
+                + " reads ready: dropped " + refuted.Count + " stale cooldown row(s) of an earlier session at the same spot.");
         }
 
         // ⭐ THE VERDICT FOR THIS ENTITY, BY NETID — THE POSITIONAL LEDGER LOOKUP MISSES THESE TWO.
@@ -422,7 +478,7 @@ namespace HeartopiaMod
 
         // Merge a position into the hit list, deduped within 2 m; a position reported as
         // on-cooldown by any source stays on-cooldown.
-        private void AddRoamingHit(Vector3 pos, bool isOak, bool onCooldown, uint netId)
+        private void AddRoamingHit(Vector3 pos, bool isOak, bool onCooldown, uint netId, bool coldKnown)
         {
             for (int i = 0; i < this.roamingHits.Count; i++)
             {
@@ -445,6 +501,12 @@ namespace HeartopiaMod
                     changed = true;
                 }
 
+                if (coldKnown && !existing.ColdKnown)
+                {
+                    existing.ColdKnown = true;
+                    changed = true;
+                }
+
                 if (changed)
                 {
                     this.roamingHits[i] = existing;
@@ -457,6 +519,7 @@ namespace HeartopiaMod
                 Position = pos,
                 IsOak = isOak,
                 OnCooldown = onCooldown,
+                ColdKnown = coldKnown,
                 NetId = netId,
             });
         }
