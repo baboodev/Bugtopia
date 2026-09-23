@@ -29,7 +29,9 @@ namespace HeartopiaMod
     //   MapSystem.MapRatio is deliberately NOT touched: it is global, MapPanel/BusPanel read it and
     //   MapPanel resets it to 5.
     //
-    // TWO minimaps exist: StatusPanel and VehicleStatusPanel (shown while riding, created on demand).
+    // Since 2026-09-24 ONE minimap exists, in its own MapHudPanel (map_root@go/map_bar@go@w) that
+    // every game mode shares. Before that there were two, inside StatusPanel and VehicleStatusPanel
+    // (AniRoot@ani@queueanimation/top_left_layout@go/map_bar@go@w); both layouts are still matched.
     // Every map_bar@go@w under XDUIRoot/Status is handled; the list is rescanned every 0.5 s.
     //
     // SPEED (auto-zoom; sources measured live, see project memory minimap-zoom-model):
@@ -91,7 +93,11 @@ namespace HeartopiaMod
         private const float MiniMapDistanceApplyInterval = 0.25f;
         private const float MiniMapTeleportJumpMetres = 30f;
         private const string MiniMapStatusRootPath = "GameApp/startup_root(Clone)/XDUIRoot/Status";
-        private const string MiniMapBarPath = "AniRoot@ani@queueanimation/top_left_layout@go/map_bar@go@w";
+        private static readonly string[] MiniMapBarPaths =
+        {
+            "map_root@go/map_bar@go@w",                                    // MapHudPanel (2026-09-24+)
+            "AniRoot@ani@queueanimation/top_left_layout@go/map_bar@go@w",  // StatusPanel / VehicleStatusPanel (older builds)
+        };
         private const string MiniMapSystemTypeName = "XDTGameSystem.GameplaySystem.MapSpots.MiniMapSystem";
 
         internal static readonly string[] MiniMapZoomReactionNames = { "Smooth", "Normal", "Fast" };
@@ -120,6 +126,7 @@ namespace HeartopiaMod
             public RectTransform Dec;
             public RectTransform Me;
             public bool IsVehiclePanel;
+            public bool IsSharedPanel;   // MapHudPanel: the one minimap for every mode, riding included
             public bool Alive => this.Maproot != null && this.Sketch != null && this.Dec != null
                 && this.Me != null && this.Root != null;
         }
@@ -317,7 +324,11 @@ namespace HeartopiaMod
             for (int i = 0; i < this.miniMapStatusRoot.childCount; i++)
             {
                 Transform panel = this.miniMapStatusRoot.GetChild(i);
-                Transform barT = panel != null ? panel.Find(MiniMapBarPath) : null;
+                Transform barT = null;
+                for (int p = 0; panel != null && barT == null && p < MiniMapBarPaths.Length; p++)
+                {
+                    barT = panel.Find(MiniMapBarPaths[p]);
+                }
                 if (barT == null)
                 {
                     continue;
@@ -333,6 +344,7 @@ namespace HeartopiaMod
                     Sketch = MiniMapFindRect(barT, "map_sketch@t"),
                     Me = MiniMapFindRect(barT, "map_spot_me@img@t"),
                     IsVehiclePanel = panel.name.StartsWith("VehicleStatusPanel", StringComparison.Ordinal),
+                    IsSharedPanel = panel.name.StartsWith("MapHudPanel", StringComparison.Ordinal),
                 };
                 if (bar.Maproot != null)
                 {
@@ -869,7 +881,8 @@ namespace HeartopiaMod
             MiniMapBar bar = null;
             for (int i = 0; i < this.miniMapBars.Count; i++)
             {
-                if (this.miniMapBars[i].Alive && this.miniMapBars[i].IsVehiclePanel == inVehicle)
+                if (this.miniMapBars[i].Alive
+                    && (this.miniMapBars[i].IsSharedPanel || this.miniMapBars[i].IsVehiclePanel == inVehicle))
                 {
                     bar = this.miniMapBars[i];
                     break;
