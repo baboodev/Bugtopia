@@ -4494,6 +4494,19 @@ namespace HeartopiaMod
                 return this.homelandFarmAuraRendererComponentClass;
             }
 
+            // 2026-09-24: Core.World moved to XDTGame.GAS.Client (still the XDTDataAndProtocol image).
+            // FindAuraMonoClassByFullName routes an XDTGame.* namespace to the XDTGameUI image first,
+            // so ask the owning image directly. Not Core.RenderEngine.RendererComponent — unrelated.
+            IntPtr gasRenderer = this.FindAuraMonoClassInImages(
+                "XDTGame.GAS.Client",
+                "RendererComponent",
+                new string[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+            if (gasRenderer != IntPtr.Zero)
+            {
+                this.homelandFarmAuraRendererComponentClass = gasRenderer;
+                return gasRenderer;
+            }
+
             string[] fullNames =
             {
                 "XDTLevelAndEntity.Core.World.RendererComponent",
