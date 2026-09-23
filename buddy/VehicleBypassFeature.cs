@@ -150,8 +150,11 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void VehicleBypassRemovePlayerVehicleHookDelegate(IntPtr self, IntPtr removeEvent);
 
+        // VehicleProtocolManager.ServerRemoveVehicle(EcsEntity vehicleEntity, uint netId, bool realDel) since
+        // 2026-09-24 (was (uint, bool)). EcsEntity is a 16-byte struct, so Win64 passes it BY REFERENCE: the
+        // first slot is a pointer to the caller's copy. It is only forwarded to the trampoline, never read.
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void VehicleBypassServerRemoveVehicleHookDelegate(uint netId, int realDel);
+        private delegate void VehicleBypassServerRemoveVehicleHookDelegate(IntPtr vehicleEntity, uint netId, int realDel);
 
         private static VehicleBypassCreateDrivingHookDelegate vehicleBypassCreateDrivingHook;
         private static VehicleBypassCreateDrivingHookDelegate vehicleBypassCreateDrivingTrampoline;
@@ -550,7 +553,7 @@ namespace HeartopiaMod
                     VehicleBypassProtocolImages,
                     "XDTDataAndProtocol.ProtocolService.Vehicle.VehicleProtocolManager",
                     "ServerRemoveVehicle",
-                    2);
+                    3);
 
                 this.TryInstallVehicleBypassTrampolineDetour(
                     ref vehicleBypassRemovePlayerVehicleSlot,
@@ -1098,7 +1101,9 @@ namespace HeartopiaMod
             return 0;
         }
 
-        private static void VehicleBypassServerRemoveVehicleNative(uint netId, int realDel)
+        // Blocking returns before BOTH halves of the new body — the DataCenter DeleteEntity(netId) added on
+        // 2026-09-24 and the RemoveVehicle dispatch — so the latched vehicle keeps its data as well as its view.
+        private static void VehicleBypassServerRemoveVehicleNative(IntPtr vehicleEntity, uint netId, int realDel)
         {
             if (VehicleBypassBlockForcedVehicleExit()
                 && netId != 0
@@ -1109,7 +1114,7 @@ namespace HeartopiaMod
 
             if (vehicleBypassServerRemoveVehicleTrampoline != null)
             {
-                vehicleBypassServerRemoveVehicleTrampoline(netId, realDel);
+                vehicleBypassServerRemoveVehicleTrampoline(vehicleEntity, netId, realDel);
             }
         }
 
