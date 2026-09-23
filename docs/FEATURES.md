@@ -127,6 +127,26 @@ All five are gated on `BuildModule.SubState == CraftState.Focus` — in simple P
 
 Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `Managers.GetModule(Type)` → UI button clicks); see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) and [plans/2026-06-10-pad-build-api-migration.md](./plans/2026-06-10-pad-build-api-migration.md). Debug log flag: `MasterLogPadBuild`.
 
+**Since the game update of 2026-09-24 the build panel has PC shortcuts of its own** (Enter confirm,
+Delete pack/wreck, R rotate, M move, K spatial axis, O size, P dye, C connect, Tab mode, 1-4 tabs,
+Ctrl+Z / Ctrl+Shift+Z undo/redo, Esc cancel). Binding a Pad key to one of them makes the action fire
+twice in build mode — a doubled confirm can place a second copy — so the keybind screen shows a
+warning when that happens. Rebinding is not refused: on a gamepad it is a different button, and the
+mod's hold-to-repeat rotate has no game equivalent.
+
+### Building — god-mode camera and typing while building
+
+- **Horizontal pan is the game's own** since 2026-09-24 (WASD in Advanced/God mode). The mod's
+  WASD pan was removed: both ran together and the camera moved ~1.33x.
+- **Vertical camera move stays a mod extra: E or Space up, Q down** (it was Space/Ctrl — Ctrl is
+  now the game's modifier for Ctrl+Z and Ctrl+wheel, and each of those dipped the camera).
+- The build-plane slider (0-24 m) follows the game's own Ctrl+wheel plane height (0-16 m), so the
+  two never disagree.
+- **While any text field is focused in build mode** (mod search, settings, the move panel's
+  coordinate editor, or a game field) the game's build input events are muted, so typing Delete,
+  Tab or Enter never packs the focused item, switches mode or confirms. Released 0.3 s after the
+  field lets go. `ProcessBuildingTextInputGuardOnUpdate` in `BuildingFreeRotateFeature.cs`.
+
 ---
 
 ## Self Tab
@@ -419,8 +439,11 @@ Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `M
 
 ### Building — Bypass Overlap
 
-- Client-side building placement overlap bypass.
-- Applies additional Harmony patch on demand (`EnsureBypassPatched`).
+- Client-side building placement overlap bypass: Mono `NativeDetour`s on
+  `IntersectionTesting.Test` and `BuildSingle.OverlapCompleteWithSlab` (no Harmony / IL2CPP patch).
+- The game's own **Ignore Overlap** setting (2026-09-24, needs Home Evaluation > 1500) is weaker: it
+  still refuses overlap with scene colliders and slab-on-slab overlap, and it is hidden below the
+  score. Details: [HOUSE_BUILDING.md §12](./HOUSE_BUILDING.md).
 - Credits third-party contributor in UI.
 
 ### Building — Unlock all wall / floor paint styles (Self → Building sub-tab)
