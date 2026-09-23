@@ -33,12 +33,9 @@ namespace HeartopiaMod
         private float buildingRotZ;
         private float buildingRotZApplied;
 
-        // God-mode camera WASD pan. BuildModule._buildCamera (BuildFreeCamera).Move(Vector2) pans the
-        // camera in the XZ plane along the flattened forward/right (the same path mouse-drag uses).
-        private IntPtr godCamMoveMethod = IntPtr.Zero;
+        // God-mode camera vertical move (the horizontal WASD pan is the game's own since 2026-09-24).
         private IntPtr godCamMoveDirectMethod = IntPtr.Zero; // BuildFreeCamera._Move(Vector3) — raw position set
-        private const float GodCameraMoveSpeed = 500f;       // horizontal pan units/sec (game-scaled inside Move)
-        private const float GodCameraVerticalSpeed = 6f;     // Space/Ctrl vertical, world units/sec
+        private const float GodCameraVerticalSpeed = 6f;     // E/Space up, Q down, world units/sec
 
         // Auto move-panel: appears while CraftState.Focus (object grabbed/being moved) and the menu is closed.
         private bool buildingMovePanelActive;
@@ -231,8 +228,15 @@ namespace HeartopiaMod
             }
         }
 
-        // WASD pans the god-mode camera in the XZ plane (mirrors the mouse drag-pan). Only acts in god
-        // mode and when no keys are held it does no AuraMono work. Gated off while the mod menu is open.
+        // Vertical god-mode camera: E or Space up, Q down. Only acts in god mode (checked inside
+        // TryGodCameraVertical); with no key held it does no AuraMono work. Gated off while the mod
+        // menu is open or any text field is focused.
+        //
+        // Since the 2026-09-24 game update the game pans the god camera on WASD itself
+        // (BuildModule.Update -> BuildFreeCamera.Move at BuildConfig.camera.KeyboardMoveSpeed), so the
+        // mod's own WASD pan was removed — both ran and the camera moved ~1.33x. Down moved off Ctrl
+        // for the same update: Ctrl is now the game's modifier for Ctrl+wheel (plane height) and
+        // Ctrl+Z / Ctrl+Shift+Z (undo/redo), and every one of those dipped the camera.
         private void ProcessGodCameraMoveOnUpdate()
         {
             // "Menu open" = any MODAL registry surface (the UGUI shell) — showMenu is retired.
@@ -240,26 +244,17 @@ namespace HeartopiaMod
             {
                 return;
             }
-            float x = 0f, ydir = 0f;
-            if (Input.GetKey(KeyCode.W)) ydir -= 1f; // forward
-            if (Input.GetKey(KeyCode.S)) ydir += 1f; // back
-            if (Input.GetKey(KeyCode.A)) x += 1f;    // left
-            if (Input.GetKey(KeyCode.D)) x -= 1f;    // right
-            if (x != 0f || ydir != 0f)
-            {
-                this.TryGodCameraMove(new Vector2(x, ydir) * (GodCameraMoveSpeed * Time.unscaledDeltaTime));
-            }
 
             float dy = 0f;
-            if (Input.GetKey(KeyCode.Space)) dy += 1f;                                       // up
-            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) dy -= 1f; // down
+            if (Input.GetKey(KeyCode.E) || Input.GetKey(KeyCode.Space)) dy += 1f; // up
+            if (Input.GetKey(KeyCode.Q)) dy -= 1f;                                 // down
             if (dy != 0f)
             {
                 this.TryGodCameraVertical(dy * GodCameraVerticalSpeed * Time.unscaledDeltaTime);
             }
         }
 
-        // Move the god camera vertically by dy world units (Space up / Ctrl down). Writes the camera
+        // Move the god camera vertically by dy world units (E/Space up, Q down). Writes the camera
         // group position via BuildFreeCamera._Move (the canonical setter); the camera Update leaves an
         // Idle/zero-velocity position untouched, so it holds.
         private unsafe bool TryGodCameraVertical(float dy)
@@ -301,48 +296,6 @@ namespace HeartopiaMod
                 IntPtr* args = stackalloc IntPtr[1];
                 args[0] = (IntPtr)(&newPos);
                 auraMonoRuntimeInvoke(this.godCamMoveDirectMethod, cam, (IntPtr)args, ref exc);
-                return exc == IntPtr.Zero;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private unsafe bool TryGodCameraMove(Vector2 delta)
-        {
-            if (auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
-            {
-                return false;
-            }
-            if (!this.TryGetPadBuildAuraModule(out IntPtr module) || module == IntPtr.Zero)
-            {
-                return false;
-            }
-            if (!(this.TryGetMonoBoolMember(module, "InGodMode", out bool g) && g))
-            {
-                return false; // build free camera only exists in god mode
-            }
-            if (!this.TryGetMonoObjectMember(module, "_buildCamera", out IntPtr cam) || cam == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (this.godCamMoveMethod == IntPtr.Zero)
-                {
-                    this.godCamMoveMethod = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(cam), "Move", 1);
-                }
-                if (this.godCamMoveMethod == IntPtr.Zero)
-                {
-                    return false;
-                }
-                Vector2 d = delta;
-                IntPtr exc = IntPtr.Zero;
-                IntPtr* args = stackalloc IntPtr[1];
-                args[0] = (IntPtr)(&d);
-                auraMonoRuntimeInvoke(this.godCamMoveMethod, cam, (IntPtr)args, ref exc);
                 return exc == IntPtr.Zero;
             }
             catch
