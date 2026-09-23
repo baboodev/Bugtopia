@@ -107,6 +107,18 @@ namespace HeartopiaMod
         // SkillWidget.MainJoyState.Null (Fishing=0, SweepNet=1, Handhold=2, Empty=3, SeaClean=4, Null=5).
         private const int PersistentHudMainJoyStateNull = 5;
 
+        // Since 2026-09-24 the minimap is no longer part of StatusPanel: it lives in its own
+        // MapHudPanel (Status layer), whose MapHudPanelLogic.SupportsMap shows map_root@go only in
+        // Free/Drive/BirdCamouflage/WaterCorridor/RollerCoaster. So reopening StatusPanel no longer
+        // brings the map back in Fishing/Skate/Carousel/Sightseeing; it is forced on while a mode
+        // panel is up and handed back to the game (MapHudPanel.RefreshUI -> SetActive(ViewData.visible))
+        // when the mode ends. Handing back instead of SetActive(false) matters: on the return to Free
+        // the game has already made it visible again.
+        private const string PersistentHudMapHudPanelName = "MapHudPanel";
+        private const string PersistentHudMapHudPanelTypeName = "XDTGame.UI.Panel.MapHudPanel";
+        private const string PersistentHudMapRootPath = "map_root@go";
+        private bool persistentHudMapForced;
+
         private bool persistentHudEnabled;
         private bool persistentHudHookRegistered;
         private float persistentHudNextPollAt;
@@ -179,6 +191,11 @@ namespace HeartopiaMod
                     try { this.TryPersistentHudSetSkillJoy(suppress: false); } catch { }
                 }
 
+                if (this.persistentHudMapForced)
+                {
+                    try { this.PersistentHudReleaseMap(); } catch { }
+                }
+
                 this.persistentHudSkillJoyRestoreUntil = 0f;
 
                 return;
@@ -239,6 +256,7 @@ namespace HeartopiaMod
                 // Full HUD not on screen (reopen pending/failed, full-screen view has focus, or a
                 // non-wanted mode) — never leave the native panels stripped in that state.
                 this.PersistentHudRestoreHiddenNodes();
+                this.PersistentHudReleaseMap();
                 return;
             }
 
@@ -287,11 +305,18 @@ namespace HeartopiaMod
                 activeModePanelRoot = PersistentHudFindPanelRoot("SightseeingStatusPanel");
             }
 
+            // No mode panel up (mode exited): the map goes back under MapHudPanelLogic's control.
+            if (activeModePanelRoot == null)
+            {
+                this.PersistentHudReleaseMap();
+            }
+
             // A mode panel is up: get StatusPanel's tool-skill joystick out of the way of the mode's
             // primary control (fishing strike / vehicle exit). Owner = the mode panel root, so the
             // standard restore path re-enables the skill bar the moment the mode exits.
             if (activeModePanelRoot != null)
             {
+                this.PersistentHudForceMapVisible();
                 this.PersistentHudHideNode(activeModePanelRoot, statusRoot, PersistentHudStatusSkillBlockPath, "StatusPanel");
 
                 // Hiding the node is NOT enough: SkillWidget's OnStart already ran RefreshSkillJoy
@@ -495,6 +520,111 @@ namespace HeartopiaMod
             if (MasterLogPersistentHud)
             {
                 ModLogger.Msg("[PersistentHud] hid " + label + "/" + childPath);
+            }
+        }
+
+        // Re-asserted every dedupe tick: MapHudPanelLogic only rewrites map_root@go when its own
+        // visibility flag flips, so a forced-on node stays on for the rest of the mode.
+        private void PersistentHudForceMapVisible()
+        {
+            GameObject mapPanel = PersistentHudFindPanelRoot(PersistentHudMapHudPanelName);
+            Transform mapRoot = mapPanel != null ? mapPanel.transform.Find(PersistentHudMapRootPath) : null;
+            if (mapRoot == null)
+            {
+                return;
+            }
+
+            if (!mapRoot.gameObject.activeSelf)
+            {
+                mapRoot.gameObject.SetActive(true);
+                if (MasterLogPersistentHud)
+                {
+                    ModLogger.Msg("[PersistentHud] forced MapHudPanel/" + PersistentHudMapRootPath + " on");
+                }
+            }
+
+            this.persistentHudMapForced = true;
+        }
+
+        private void PersistentHudReleaseMap()
+        {
+            if (!this.persistentHudMapForced)
+            {
+                return;
+            }
+
+            this.persistentHudMapForced = false;
+            bool ok = this.TryPersistentHudRefreshMapHud();
+            if (MasterLogPersistentHud)
+            {
+                ModLogger.Msg("[PersistentHud] MapHudPanel handed back to the game (RefreshUI=" + ok + ")");
+            }
+        }
+
+        // UIManager.GetView(MapHudPanel).RefreshUI(): the view's own visibility write. Same pinning
+        // discipline as TryPersistentHudSetSkillJoy.
+        private unsafe bool TryPersistentHudRefreshMapHud()
+        {
+            try
+            {
+                if (!this.TryPersistentHudResolveUiManager(out IntPtr uiManagerObj))
+                {
+                    return false;
+                }
+
+                uint uiManagerPin = AuraMonoPinNew(uiManagerObj);
+                try
+                {
+                    if (!this.TryCreateAuraMonoSystemTypeObject(PersistentHudMapHudPanelTypeName, out IntPtr typeObj) || typeObj == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    IntPtr exc = IntPtr.Zero;
+                    IntPtr view;
+                    {
+                        IntPtr* args = stackalloc IntPtr[1];
+                        args[0] = typeObj;
+                        view = auraMonoRuntimeInvoke(this.persistentHudGetViewMethod, uiManagerObj, (IntPtr)args, ref exc);
+                    }
+
+                    if (exc != IntPtr.Zero || view == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    uint viewPin = AuraMonoPinNew(view);
+                    try
+                    {
+                        IntPtr viewClass = auraMonoObjectGetClass(view);
+                        IntPtr refresh = viewClass != IntPtr.Zero ? this.FindAuraMonoMethodOnHierarchy(viewClass, "RefreshUI", 0) : IntPtr.Zero;
+                        if (refresh == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+
+                        exc = IntPtr.Zero;
+                        auraMonoRuntimeInvoke(refresh, view, IntPtr.Zero, ref exc);
+                        return exc == IntPtr.Zero;
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(viewPin);
+                    }
+                }
+                finally
+                {
+                    AuraMonoPinFree(uiManagerPin);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (MasterLogPersistentHud)
+                {
+                    ModLogger.Msg("[PersistentHud] MapHudPanel refresh failed: " + ex.Message);
+                }
+
+                return false;
             }
         }
 
