@@ -53,7 +53,7 @@ namespace HeartopiaMod
                 }
 
                 string path = this.GetHierarchyPath(btn.transform);
-                if (string.IsNullOrEmpty(path) || !path.Contains("/friend@go/friend@btn"))
+                if (string.IsNullOrEmpty(path) || !IsLobbyFriendJoinButton(btn.transform, path))
                 {
                     continue;
                 }
@@ -63,6 +63,27 @@ namespace HeartopiaMod
             }
 
             return false;
+        }
+
+        // RoomCellWidget, 2026-09-24+: every non-self cell joins through nodes/join@btn, and a friend
+        // cell is the one whose state@frame/friend@go is shown (the game hides join@btn while the
+        // friend is offline, so the activeInHierarchy check already skips those). Older builds had a
+        // dedicated friend@go/friend@btn.
+        private static bool IsLobbyFriendJoinButton(Transform btn, string path)
+        {
+            if (path.Contains("/friend@go/friend@btn"))
+            {
+                return true;
+            }
+
+            if (!path.EndsWith("/nodes/join@btn", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            Transform cell = btn.parent != null ? btn.parent.parent : null;
+            Transform friendGo = cell != null ? cell.Find("state@frame/friend@go") : null;
+            return friendGo != null && friendGo.gameObject.activeInHierarchy;
         }
 
         private void StartLobbyAutoJoinFriend(string reason)
@@ -197,7 +218,9 @@ namespace HeartopiaMod
                     break;
 
                 case HeartopiaComplete.LobbyJoinState.ClickMyTownJoin:
-                    if (this.ClickButtonIfExistsReturn("GameApp/startup_root(Clone)/XDUIRoot/Full/LoginRoomPanel(Clone)/AniRoot/popup/content/background/town@unbreakscroll/Content/RoomCellWidget/selfRoom@go/selfRoomEnter@btn"))
+                    // nodes/selfRoomEnter@btn since 2026-09-24; selfRoom@go/selfRoomEnter@btn before.
+                    if (this.ClickButtonIfExistsReturn("GameApp/startup_root(Clone)/XDUIRoot/Full/LoginRoomPanel(Clone)/AniRoot/popup/content/background/town@unbreakscroll/Content/RoomCellWidget/nodes/selfRoomEnter@btn")
+                        || this.ClickButtonIfExistsReturn("GameApp/startup_root(Clone)/XDUIRoot/Full/LoginRoomPanel(Clone)/AniRoot/popup/content/background/town@unbreakscroll/Content/RoomCellWidget/selfRoom@go/selfRoomEnter@btn"))
                     {
                         this.StopLobbyAutoJoin("Joined My Town");
                         break;
