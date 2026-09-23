@@ -8,8 +8,9 @@ namespace HeartopiaMod
     // Carpet Stamp (New Features → Extra) — research tool for the party "stampede" carpets
     // (Slippery Rug 260242 / Slime Rug 260243, prefab p_mechanism_party_*carpet_1).
     //
-    // Scan: walks the static UGCWorld._uActors dictionary (XDTGame.UGC.UGCWorld, one UActor per
-    // UGC mechanism entity on the map) via AuraMono and snapshots every actor with
+    // Scan: walks the static UGCWorld._actors dictionary (XDTGame.GAS.UGCWorld, one UgcEntity per
+    // UGC mechanism entity on the map; before 2026-09-24 XDTGame.UGC.UGCWorld._uActors of UActor)
+    // via AuraMono and snapshots every actor with
     // UgcType.StampedeInteraction (=1002) or a known carpet staticId. Everything found is logged.
     //
     // Step send: replays the exact wire command the game emits when the local player's capsule
@@ -93,11 +94,25 @@ namespace HeartopiaMod
 
             if (this.carpetStampUgcWorldClass == IntPtr.Zero)
             {
-                // UGCWorld lives in the XDTDataAndProtocol image despite the XDTGame.UGC namespace.
-                IntPtr dataImage = this.FindAuraMonoImage(new string[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
-                if (dataImage != IntPtr.Zero && auraMonoClassFromName != null)
+                // 2026-09-24: UGC was renamed to GAS and UGCWorld moved to the XDTLevelAndEntity image
+                // (it was XDTGame.UGC.UGCWorld in XDTDataAndProtocol). The old pair stays as a fallback.
+                string[][] candidates =
                 {
-                    this.carpetStampUgcWorldClass = auraMonoClassFromName(dataImage, "XDTGame.UGC", "UGCWorld");
+                    new string[] { "XDTLevelAndEntity", "XDTGame.GAS" },
+                    new string[] { "XDTDataAndProtocol", "XDTGame.UGC" },
+                };
+                for (int c = 0; c < candidates.Length && this.carpetStampUgcWorldClass == IntPtr.Zero; c++)
+                {
+                    IntPtr image = this.FindAuraMonoImage(new string[] { candidates[c][0], candidates[c][0] + ".dll" });
+                    if (image != IntPtr.Zero && auraMonoClassFromName != null)
+                    {
+                        this.carpetStampUgcWorldClass = auraMonoClassFromName(image, candidates[c][1], "UGCWorld");
+                    }
+                }
+
+                if (this.carpetStampUgcWorldClass == IntPtr.Zero)
+                {
+                    this.carpetStampUgcWorldClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTGame.GAS", "UGCWorld");
                 }
 
                 if (this.carpetStampUgcWorldClass == IntPtr.Zero)
@@ -115,16 +130,17 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryGetAuraMonoStaticObjectField(this.carpetStampUgcWorldClass, "_uActors", out IntPtr actorsDict)
-                || actorsDict == IntPtr.Zero)
+            IntPtr actorsDict = IntPtr.Zero;
+            if ((!this.TryGetAuraMonoStaticObjectField(this.carpetStampUgcWorldClass, "_actors", out actorsDict) || actorsDict == IntPtr.Zero)
+                && (!this.TryGetAuraMonoStaticObjectField(this.carpetStampUgcWorldClass, "_uActors", out actorsDict) || actorsDict == IntPtr.Zero))
             {
-                status = "UGCWorld._uActors unavailable (no UGC mechanisms loaded?).";
+                status = "UGCWorld._actors unavailable (no UGC mechanisms loaded?).";
                 CarpetStampLog("Scan aborted: " + status);
                 return false;
             }
 
             bool playerPosKnown = this.TryGetLocalPlayerPosition(out Vector3 playerPos);
-            CarpetStampLog("Scan: _uActors dict=0x" + actorsDict.ToInt64().ToString("X")
+            CarpetStampLog("Scan: _actors dict=0x" + actorsDict.ToInt64().ToString("X")
                 + " playerPos=" + (playerPosKnown ? FormatCarpetStampVector(playerPos) : "unknown"));
 
             List<IntPtr> entries = new List<IntPtr>();
@@ -165,7 +181,7 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    // The pins list only covers the boxed KVP entries; the UActor / entity objects
+                    // The pins list only covers the boxed KVP entries; the UgcEntity / entity objects
                     // read out of them are separate heap objects — pin them across their member
                     // reads (each read allocates mono-side, so the moving SGen GC could relocate
                     // them mid-loop otherwise).
@@ -181,7 +197,10 @@ namespace HeartopiaMod
                         staticIdKnown = this.TryGetMonoInt32Member(actorObj, "StaticId", out staticId);
                         ugcTypeKnown = this.TryGetMonoInt32Member(actorObj, "UgcType", out ugcType);
 
-                        if (this.TryGetMonoObjectMember(actorObj, "_entity", out IntPtr entityObj) && entityObj != IntPtr.Zero)
+                        // UgcEntity._renderEntity since 2026-09-24 (UActor._entity before).
+                        IntPtr entityObj = IntPtr.Zero;
+                        if ((this.TryGetMonoObjectMember(actorObj, "_renderEntity", out entityObj) && entityObj != IntPtr.Zero)
+                            || (this.TryGetMonoObjectMember(actorObj, "_entity", out entityObj) && entityObj != IntPtr.Zero))
                         {
                             uint entityPin = AuraMonoPinNew(entityObj);
                             try
