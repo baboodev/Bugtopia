@@ -55,6 +55,15 @@ locally (no server). Enums are **byte**: `TrackType` (`Player`=1, `Bird`=5, `Fis
 `MapResource`=8, `NavigationPoint`=11, `Furniture`=14), `TrackReason.Local`=1. Each track also spawns an
 on-screen HUD pointer → **limit the count** (`radarGameTrackLimit`).
 
+⚠️ **Since the 2026-09-24 game update `TrackData.PositionState` must be set to `Resolved` (1).** The field
+(`TrackPositionState : byte { Unresolved, Resolved, Cached }`, raw offset 12, in what used to be padding
+before `Token`) is new, and **`Unresolved` = 0 is filtered out** by `MiniMapSystem.GetMiniMapSpots`
+(`MiniMapSystem.cs:88`), `MapSpot` (`:502`) and the map track HUD. A zero-filled buffer therefore added
+every track successfully (`addOk` counts looked healthy) while nothing appeared on the map or minimap.
+`DispatchStartTrack` resolves the offset optionally (absent on older builds) and writes `Resolved`; the
+game itself does the same for local markers (`PhotoStatusPanel.cs:939`). The other field offsets did not
+move.
+
 ### Big-map spot injection
 `MapSpotProtocolManager.AddSpot(SpotEnum category, int useId, Vector3 pos, SpotReason reason, GameSceneId)`
 / `RemoveSpot(... 4 args)` (static, value args; image XDTDataAndProtocol, ns ...ProtocolService.MapSpot).

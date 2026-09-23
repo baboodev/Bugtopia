@@ -140,6 +140,11 @@ namespace HeartopiaMod
         private IntPtr mapTrackDispatchStartMethod = IntPtr.Zero; // inflated DispatchEvent<StartTrack>
         private IntPtr mapTrackDispatchStopMethod = IntPtr.Zero;  // inflated DispatchEvent<StopTrack>
         private int offTdPosition, offTdToken, offTdTargetNetId, offTdStaticId, offTdTrackType, offTdTrackReason;
+        // TrackData.PositionState (byte enum TrackPositionState { Unresolved, Resolved, Cached }), added
+        // 2026-09-24. Unresolved = 0 is HIDDEN by MiniMapSystem.GetMiniMapSpots, MapSpot and the
+        // MapTrackHud, so a zeroed buffer made every injected marker invisible. -1 = field absent (older build).
+        private int offTdPositionState = -1;
+        private const byte MapTrackPositionResolved = 1;
         private int offStToken;
 
         private float mapTrackNextSyncAt;
@@ -774,6 +779,12 @@ namespace HeartopiaMod
             {
                 this.MapSpotsLog("track field offset resolve failed");
                 return false;
+            }
+
+            // Optional: absent before 2026-09-24, and required from then on (see the field comment).
+            if (!this.TryGetTrackFieldRawOffset(trackDataClass, "PositionState", out this.offTdPositionState))
+            {
+                this.offTdPositionState = -1;
             }
 
             // Publish the TrackType raw offset for the IsSameType hook (allocation-free field read).
@@ -3826,6 +3837,10 @@ namespace HeartopiaMod
             *(int*)(buf + this.offTdStaticId) = staticId;
             *(buf + this.offTdTrackType) = trackType;
             *(buf + this.offTdTrackReason) = MapTrackReasonLocal;
+            if (this.offTdPositionState >= 0)
+            {
+                *(buf + this.offTdPositionState) = MapTrackPositionResolved;
+            }
 
             IntPtr exc = IntPtr.Zero;
             IntPtr* args = stackalloc IntPtr[1];
