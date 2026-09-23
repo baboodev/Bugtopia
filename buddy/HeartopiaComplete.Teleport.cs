@@ -682,7 +682,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        // DataCenter.LevelId (static RoomLevelId field) -> GameSceneId, replicating the game's
+        // DataCenter.LevelId (static GameLevelId field; RoomLevelId before 2026-09-24) -> GameSceneId, replicating the game's
         // LevelConst.ToGameSceneId switch + the GetMaxMapGameSceneId StarTown default.
         private unsafe int ResolveCurrentNpcGameSceneId()
         {
@@ -738,16 +738,20 @@ namespace HeartopiaMod
 
                 int levelId = 0;
                 auraMonoFieldStaticGetValue(this.npcSceneDataCenterVtable, this.npcSceneLevelIdField, (IntPtr)(&levelId));
+                // DataCenter.LevelId is a GameLevelId since 2026-09-24 (was RoomLevelId; values 1-6 kept,
+                // BluePrintRoom = 100 removed). Mirrors GameLevelIdExtensions.ToSceneId.
                 switch (levelId)
                 {
-                    case 1:   // RoomLevelId.StarTown
-                    case 100: // RoomLevelId.BluePrintRoom
+                    case 1: // GameLevelId.StarTown
+                    case 8: // GameLevelId.MicroHomeland -> the game maps it to StarTown too
                         return GameSceneIdStarTown;
-                    case 2: return 2; // MusicRoom
-                    case 3: return 3; // SeaWorld
-                    case 4: return 5; // BuildCompetition
-                    case 5: return 6; // BuildCompetitionView
-                    case 6: return 8; // SystemPartyFestival
+                    case 2: return 2;  // MusicRoom
+                    case 3: return 3;  // SeaWorld
+                    case 4: return 5;  // BuildCompetition
+                    case 5: return 6;  // BuildCompetitionView
+                    case 6: return 8;  // SystemPartyFestival
+                    case 7: return 9;  // ManyuanVillage -> GameSceneId.MicroTourismHomeland
+                    case 9: return 10; // ResortSimulation -> GameSceneId.ResortSimulator
                     default:
                         return GameSceneIdStarTown; // TargetLevelId==0 spots are keyed StarTown by the game
                 }
