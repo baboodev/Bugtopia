@@ -73,6 +73,16 @@ One job, each step skipped when its result is already on disk:
 7. **Generate the interop assemblies** — see §4.
 8. **Start the game and inject the bootstrap.** The launcher closes itself on success.
 
+   With **I start the game myself** ticked (`waitForGame` in the settings), this last step waits
+   instead: the launcher polls for a process of the game's executable, whatever started it — Steam,
+   TapTap, a shortcut — and injects into that one, which keeps their overlay and playtime. A game
+   already running when Launch is pressed is injected into at once, unless the bootstrap is in it
+   already. Nothing else about the injection changes: the game is not started suspended either way,
+   the bootstrap goes in once the window is up, and it reads its storage path from
+   `bin\bugtopia_inject.cfg` when `BUGTOPIA_STORAGE` is not in the environment. The wait has no
+   timeout and is called off with **Stop waiting**; a game that never becomes ready is left running,
+   since it is not this launcher's to kill.
+
 The launcher **is** the injector, so it has to stay alive from the moment the game starts until the
 bootstrap is inside it. That is why it closes when the job finishes rather than on the click.
 

@@ -36,7 +36,7 @@ namespace Bugtopia.Launcher.Win32
         private TextRun CopyRun(string text) =>
             new TextRun(Environment.TickCount64 - copiedAt < 2000 ? "Copied" : "Copy", CopyPrefix + text);
         private const int IdDetect = 101, IdBrowse = 102, IdArchive = 103, IdCancel = 104, IdPlay = 105, IdAuto = 106,
-                          IdExpert = 107;
+                          IdExpert = 107, IdWaitForGame = 108;
 
         /// <summary>The page's rocket, path for path.</summary>
         private static readonly string[] Rocket =
@@ -104,7 +104,10 @@ namespace Bugtopia.Launcher.Win32
 
         private Card cardGame, cardClean, cardBepInEx, cardMod, cardInterop;
         private Card[] cards;
-        private Button expertBox, detect, browse, archive, cancel, play, auto;
+        private Button expertBox, detect, browse, archive, cancel, play, auto, waitForGame;
+
+        /// <summary>A launch is waiting for the game someone else will start; Cancel stops that wait.</summary>
+        private bool waiting;
 
         private nint logo;
         private float logoWidth, logoHeight;
@@ -182,6 +185,7 @@ namespace Bugtopia.Launcher.Win32
             cancel = AddButton(IdCancel, ButtonKind.Danger, "Cancel");
             play = AddButton(IdPlay, ButtonKind.PrimaryLarge, "Launch Heartopia", Rocket);
             auto = AddButton(IdAuto, ButtonKind.Checkbox, "Launch automatically");
+            waitForGame = AddButton(IdWaitForGame, ButtonKind.Checkbox, "I start the game myself");
         }
 
         private static byte[] ReadResource(string name)
@@ -289,6 +293,10 @@ namespace Bugtopia.Launcher.Win32
                 {
                     case "log":
                         appendLog(Str(root, "text"));
+                        break;
+                    case "waiting":
+                        waiting = root.GetProperty("value").GetBoolean();
+                        render();
                         break;
                     case "busy":
                         busy = root.GetProperty("value").GetBoolean();
@@ -421,18 +429,19 @@ namespace Bugtopia.Launcher.Win32
             InvalidateRect(expertBox.Hwnd, null, 0);
             auto.Checked = !IsFalse("autoLaunch");
             InvalidateRect(auto.Hwnd, null, 0);
+            waitForGame.Checked = B("waitForGame");
+            InvalidateRect(waitForGame.Hwnd, null, 0);
             renderSteps();
             if (expert)
                 renderExpert();
 
-            // Launch runs every missing step itself, so the button leads.
-            bool ready = B("prepared") && B("hasInterop");
             if (!countdown)
-                SetButtonText(play, ready ? "Launch Heartopia" : "Set up and launch");
+                playLabel();
+            SetButtonText(cancel, waiting ? "Stop waiting" : "Cancel");
             play.Kind = expert ? ButtonKind.PrimaryMedium : ButtonKind.PrimaryLarge;
 
             JsonElement existing = Existing;
-            bool gameOk = B("gameOk");
+            bool gameOk = B("gameOk"), ready = B("prepared") && B("hasInterop");
             if (Truthy(existing, "found"))
                 say(Truthy(existing, "root")
                     ? "An existing install already loads the mod, from " + Str(existing, "root") +
@@ -590,7 +599,21 @@ namespace Bugtopia.Launcher.Win32
             Invalidate();
         }
 
-        private void showCountdown() => SetButtonText(play, "Launching in " + autoLeft + "…");
+        /// <summary>
+        /// What the button says when it is not counting down. Launch runs every missing step itself,
+        /// so the button leads; with the game started elsewhere it sets everything up and then waits.
+        /// </summary>
+        private void playLabel()
+        {
+            bool ready = B("prepared") && B("hasInterop");
+            SetButtonText(play, waitForGame.Checked
+                ? (ready ? "Wait for Heartopia" : "Set up and wait")
+                : (ready ? "Launch Heartopia" : "Set up and launch"));
+        }
+
+        // The countdown ends in whatever the button says it will do, so it counts down to that.
+        private void showCountdown() =>
+            SetButtonText(play, (waitForGame.Checked ? "Waiting in " : "Launching in ") + autoLeft + "…");
 
         private void stopAutoLaunch()
         {
@@ -598,7 +621,7 @@ namespace Bugtopia.Launcher.Win32
                 return;
             KillTimer(Hwnd, TimerCountdown);
             countdown = false;
-            SetButtonText(play, "Launch Heartopia");
+            playLabel();
             Layout();
             Invalidate();
         }
@@ -727,7 +750,10 @@ namespace Bugtopia.Launcher.Win32
                     chooseArchive();
                     return;
                 case IdCancel:
-                    stopAutoLaunch();
+                    if (countdown)
+                        stopAutoLaunch();
+                    else if (waiting)
+                        Call("stopWaiting", null, null, e => say(e, true));
                     return;
                 case IdPlay:
                     stopAutoLaunch();
@@ -746,6 +772,19 @@ namespace Bugtopia.Launcher.Win32
 
                 // Touching it means someone is here, so no countdown for the rest of this run whichever
                 // way it was set. The choice is for next time.
+                // Which of the two things Launch ends with. Touching it also calls off a countdown:
+                // someone is here, and the next press should be theirs.
+                case IdWaitForGame:
+                {
+                    autoArmed = true;
+                    stopAutoLaunch();
+                    waitForGame.Checked = !waitForGame.Checked;
+                    InvalidateRect(waitForGame.Hwnd, null, 0);
+                    bool wait = waitForGame.Checked;
+                    run("setWaitForGame", w => w.WriteBoolean("value", wait));
+                    return;
+                }
+
                 case IdAuto:
                 {
                     auto.Checked = !auto.Checked;
@@ -843,21 +882,27 @@ namespace Bugtopia.Launcher.Win32
             else
                 bannerBlock = null;
 
-            // Footer: [Cancel] [Launch], the checkbox, the hint.
+            // Footer: [Cancel] [Launch], the two checkboxes, the hint. Cancel is there for a countdown
+            // and for a wait - the two things a press can call off.
+            bool cancellable = countdown || waiting;
             var playSize = Measure(play);
             var cancelSize = Measure(cancel);
-            float rowH = MathF.Max(playSize.Height, countdown ? cancelSize.Height : 0);
-            float rowW = playSize.Width + (countdown ? cancelSize.Width + S(12) : 0);
+            float rowH = MathF.Max(playSize.Height, cancellable ? cancelSize.Height : 0);
+            float rowW = playSize.Width + (cancellable ? cancelSize.Width + S(12) : 0);
             float rowX = padX + (width - rowW) / 2;
-            if (countdown)
+            if (cancellable)
                 PlaceScrolled(cancel, rowX, y + (rowH - cancelSize.Height) / 2, cancelSize.Width, cancelSize.Height, true);
-            PlaceScrolled(play, countdown ? rowX + cancelSize.Width + S(12) : rowX, y + (rowH - playSize.Height) / 2,
+            PlaceScrolled(play, cancellable ? rowX + cancelSize.Width + S(12) : rowX, y + (rowH - playSize.Height) / 2,
                           playSize.Width, playSize.Height, true);
             y += rowH + S(10);
 
             var autoSize = Measure(auto);
             PlaceScrolled(auto, padX + (width - autoSize.Width) / 2, y, autoSize.Width, autoSize.Height, true);
             y += autoSize.Height + S(10);
+
+            var waitSize = Measure(waitForGame);
+            PlaceScrolled(waitForGame, padX + (width - waitSize.Width) / 2, y, waitSize.Width, waitSize.Height, true);
+            y += waitSize.Height + S(10);
 
             return LayoutHint(y, padX, width);
         }
@@ -1020,7 +1065,7 @@ namespace Bugtopia.Launcher.Win32
             // Box-shadows of the footer buttons: drawn here, since a button cannot draw outside itself.
             if (IsWindowVisible(play.Hwnd) != 0)
                 ButtonGlow(g, play, Accent, play.Hover && IsWindowEnabled(play.Hwnd) != 0);
-            if (countdown)
+            if (IsWindowVisible(cancel.Hwnd) != 0)
                 ButtonGlow(g, cancel, Danger, cancel.Hover);
 
             Gdip.FillRoundRect(g, Gdip.Argb(0x334155, 0.5f), kbdX, hintY + sy, kbdW, kbdH, S(5));

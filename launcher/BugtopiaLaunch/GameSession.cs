@@ -198,6 +198,45 @@ namespace Bugtopia.Launch
         }
 
         /// <summary>
+        /// The running game, when there is one: a process of that executable's name whose image is
+        /// that executable. Started by anything - Steam, TapTap, a shortcut - since nothing about the
+        /// injection depends on who created the process.
+        ///
+        /// A process whose image path cannot be read is accepted on its name alone: the path is
+        /// unreadable exactly when the process is more privileged, and refusing then would report
+        /// "not running" for a game that is plainly there. The injection reports that case itself.
+        /// </summary>
+        public static Process FindRunning(string gameExe)
+        {
+            string full = Path.GetFullPath(gameExe);
+            foreach (Process candidate in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(full)))
+            {
+                try
+                {
+                    if (candidate.HasExited)
+                        continue;
+
+                    string image = null;
+                    try
+                    {
+                        image = candidate.MainModule?.FileName;
+                    }
+                    catch (Exception)
+                    {
+                    }
+
+                    if (image == null || string.Equals(Path.GetFullPath(image), full, StringComparison.OrdinalIgnoreCase))
+                        return candidate;
+                }
+                catch (Exception)
+                {
+                    // Exited between the listing and the question, or refuses to be asked. Next one.
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Waits until the game is far enough along to be injected: GameAssembly.dll mapped and a
         /// window belonging to the process. The bootstrap itself waits for the IL2CPP domain, which
         /// cannot be observed from outside the process.

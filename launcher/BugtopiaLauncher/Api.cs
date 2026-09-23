@@ -149,6 +149,20 @@ namespace Bugtopia.Launcher
                     Reply(id, WriteState);
                     break;
 
+                case "setWaitForGame":
+                    settings.WaitForGame = args.ValueKind == JsonValueKind.Object &&
+                                           args.TryGetProperty("value", out JsonElement wait) &&
+                                           wait.ValueKind == JsonValueKind.True;
+                    SafeSave();
+                    Reply(id, WriteState);
+                    break;
+
+                // Not a job of its own: the job it stops is the one holding the launcher busy.
+                case "stopWaiting":
+                    stopWaiting = true;
+                    Reply(id, w => WriteValue(w, null));
+                    break;
+
                 case "setAutoLaunch":
                     settings.AutoLaunch = args.ValueKind == JsonValueKind.Object &&
                                           args.TryGetProperty("value", out JsonElement flag) &&
@@ -1019,6 +1033,13 @@ namespace Bugtopia.Launcher
             }
 
             string exe = GameSession.FindGameExe(game);
+
+            if (settings.WaitForGame)
+            {
+                Attach(storage, exe);
+                return;
+            }
+
             Log("Starting " + exe);
 
             Process process = GameSession.Start(exe, storage);
@@ -1032,6 +1053,71 @@ namespace Bugtopia.Launcher
             }
 
             Injector.Inject(process, storage.InjectDll);
+            Log("Injected. The bootstrap's own account is in " + Path.Combine(storage.Bin, "bugtopia_inject.log"));
+        }
+
+        /// <summary>Set while a launch is waiting for the game; cleared by the window's Stop waiting.</summary>
+        private volatile bool stopWaiting;
+
+        /// <summary>
+        /// Waits for the game to be started by something else and injects into it when it appears -
+        /// so it can be started from Steam or TapTap, with their overlay and playtime intact, and the
+        /// launcher only does the rest.
+        ///
+        /// Nothing about the injection needs the launcher to have created the process: the game is not
+        /// started suspended either way, the bootstrap is injected once the window is up, and it finds
+        /// its storage through bin\bugtopia_inject.cfg when BUGTOPIA_STORAGE is not in the environment.
+        ///
+        /// A game that never becomes ready is left alone here, unlike a launch that started it: it is
+        /// the user's own session, not one this launcher may kill.
+        /// </summary>
+        private void Attach(StorageLayout storage, string exe)
+        {
+            Process game = GameSession.FindRunning(exe);
+            if (game != null)
+            {
+                Log("The game is already running (pid " + game.Id + ").");
+            }
+            else
+            {
+                stopWaiting = false;
+                Event("waiting", true);
+                Working("game", "Waiting for the game to start.");
+                Log("Waiting for " + exe + " - start the game however you like.");
+                try
+                {
+                    DateTime since = DateTime.UtcNow, nextHeartbeat = DateTime.UtcNow.AddSeconds(30);
+                    while ((game = GameSession.FindRunning(exe)) == null)
+                    {
+                        if (stopWaiting)
+                            throw new InvalidOperationException("Stopped waiting for the game.");
+
+                        if (DateTime.UtcNow >= nextHeartbeat)
+                        {
+                            Log($"still waiting for the game ({(DateTime.UtcNow - since).TotalSeconds:F0}s).");
+                            nextHeartbeat = DateTime.UtcNow.AddSeconds(30);
+                        }
+                        Thread.Sleep(500);
+                    }
+                }
+                finally
+                {
+                    Event("waiting", false);
+                }
+                Log("The game started (pid " + game.Id + ").");
+            }
+
+            if (Injector.IsModuleLoaded(game, storage.InjectDll))
+            {
+                Log("The bootstrap is already in that process - nothing to inject.");
+                return;
+            }
+
+            Working("game", "Injecting into the game.");
+            if (!GameSession.WaitUntilReady(game, TimeSpan.FromMinutes(2), out string reason, Log))
+                throw new InvalidOperationException("The game never became ready: " + reason + ".");
+
+            Injector.Inject(game, storage.InjectDll);
             Log("Injected. The bootstrap's own account is in " + Path.Combine(storage.Bin, "bugtopia_inject.log"));
         }
 
@@ -1194,6 +1280,7 @@ namespace Bugtopia.Launcher
             w.WriteBoolean("downloads", Downloads.Enabled);
             w.WriteBoolean("expert", settings.Expert);
             w.WriteBoolean("autoLaunch", settings.AutoLaunch);
+            w.WriteBoolean("waitForGame", settings.WaitForGame);
             w.WriteString("bepInExVersion", Downloads.BepInExVersion);
             w.WriteString("bepInExDescription", Downloads.BepInExDescription);
             w.WriteString("preparedFrom", settings.PreparedFrom ?? "");

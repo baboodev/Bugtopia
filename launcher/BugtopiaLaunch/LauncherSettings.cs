@@ -40,6 +40,13 @@ namespace Bugtopia.Launch
         public string PreparedFrom { get; set; }
 
         /// <summary>
+        /// Wait for the game to be started by something else - Steam, TapTap, a shortcut - instead of
+        /// starting it. Everything before that is the same; only the last step of a launch changes.
+        /// </summary>
+        [JsonPropertyName("waitForGame")]
+        public bool WaitForGame { get; set; }
+
+        /// <summary>
         /// A GitHub personal access token, asked for only when the API turns the launcher away for
         /// a reason a token would fix. Needs no scopes: it exists to raise the anonymous rate limit
         /// of 60 requests an hour, not to reach anything private.
