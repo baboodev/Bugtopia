@@ -129,6 +129,16 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Self-respawn hold (SelfRespawnGuardFeature.cs): while the server re-creates our player
+            // the state machine stands still and autoFarmTimer does not advance, so the collect wait
+            // of the node we just hopped to resumes once the player is back instead of timing out
+            // during the gap and parking a healthy spot.
+            if (this.IsSelfRespawnHoldActive(out string respawnHold))
+            {
+                this.autoFarmStatus = respawnHold;
+                return;
+            }
+
             // Repair-aura hold, ahead of the state machine so it applies in EVERY state. A repair
             // kit thrown underwater drops its aura on the sea floor; if the player keeps swimming
             // (or just floats where the throw happened) the repair never starts. Bounded inside.

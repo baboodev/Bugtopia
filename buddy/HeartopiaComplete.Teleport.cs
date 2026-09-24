@@ -1247,7 +1247,8 @@ namespace HeartopiaMod
             }
 
             bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
-            GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
+            // Inside a server respawn our skeleton is gone and Find would hit a remote player.
+            GameObject gameObject = IsSelfPlayerRespawnGap ? null : GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (flag)
             {
@@ -1290,7 +1291,7 @@ namespace HeartopiaMod
             }
 
             bool warped = this.TryGameTeleportAuraMono(targetPos, true, targetRot);
-            GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
+            GameObject gameObject = IsSelfPlayerRespawnGap ? null : GameObject.Find("p_player_skeleton(Clone)");
             bool flag = gameObject == null;
             if (flag)
             {

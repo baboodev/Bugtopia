@@ -782,11 +782,17 @@ namespace HeartopiaMod
         // pair every foot-noclip write goes through, and the pair the hover seed reads its anchor
         // from, so the two can never end up on different players. TryGetAuraMonoLocalPlayerObject
         // walks Character.character.Player, which is genuinely self; the cache carries the world
-        // epoch, so it fails closed across a world change.
+        // epoch, so it fails closed across a world change. A server respawn of our player is NOT a
+        // world change: SelfRespawnGuardFeature drops this cache on both edges and this refuses to
+        // resolve inside the gap, where Character may still hand back the entity being deleted.
         private bool TryEnsureNoclipPlayerDriveObjects(out IntPtr playerObj, out IntPtr moveObj)
         {
             playerObj = IntPtr.Zero;
             moveObj = IntPtr.Zero;
+            if (IsSelfPlayerRespawnGap)
+            {
+                return false;
+            }
 
             if (!this.EnsureAuraMonoApiReady()
                 || !this.AttachAuraMonoThread()

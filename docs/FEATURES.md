@@ -219,6 +219,25 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   triggered from (the map may stay open) and exited the current player state first (we warp as-is,
   like every other mod teleport).
 - Persisted; default off. Source: `buddy/InstantTeleportFeature.cs`.
+- Since the 2026-09-24 update a warp over ~50-80 m makes the **server** unspawn and respawn the
+  player (2-6 s invisible and frozen; `PlayerSyncSystem` logs `UnSpawnPlayer`/`SpawnPlayer`). Vanilla
+  hides it behind its splash. The warp itself stays instant; the mod only keeps itself consistent
+  across the gap (Self-respawn guard below).
+
+### Self-respawn guard (always on)
+
+- When the server re-creates our player (see Instant Teleport above) the client deletes the player
+  entity and builds a new one. The guard follows the game's `PlayerUnSpawnEvent` /
+  `PlayerSpawnEvent` for our netId and, between them (plus a 0.5 s settle, bounded at 25 s):
+  - holds the Auto Farm state machine without advancing its clock, so the collect wait of the node
+    just hopped to resumes afterwards instead of timing out and parking a healthy spot;
+  - skips the Aura Farm tick (no player to scan from);
+  - makes `GetLocalPlayer()` return null instead of a nearby remote player's skeleton, and keeps
+    `TeleportToLocation` from writing to one;
+  - drops the noclip drive cache on both edges — it used to keep driving the deleted component, so
+    noclip and Stealth Foraging lost the player until the next world change.
+- Log: `[SelfRespawn] the server removed our player (respawn #n)` / `player back (…)`.
+  Source: `buddy/SelfRespawnGuardFeature.cs`.
 
 ### Skip Craft / Dye Animations
 

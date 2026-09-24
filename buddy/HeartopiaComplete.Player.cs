@@ -653,6 +653,13 @@ namespace HeartopiaMod
 
         public static GameObject GetLocalPlayer()
         {
+            // While the server re-creates our player there is no local skeleton, and the Find below
+            // would return a nearby REMOTE player (SelfRespawnGuardFeature.cs).
+            if (IsSelfPlayerRespawnGap)
+            {
+                return null;
+            }
+
             // Quick return if cached and valid
             try
             {

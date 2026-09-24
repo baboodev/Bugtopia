@@ -517,6 +517,13 @@ namespace HeartopiaMod
                 return;
             }
 
+            // No player entity while the server re-creates it: the checker and the interact system
+            // have nothing to scan from (SelfRespawnGuardFeature.cs).
+            if (IsSelfPlayerRespawnGap)
+            {
+                return;
+            }
+
             this.auraNextTickAt = now + AuraScanInterval;
             this.auraLastScanAt = now;
 

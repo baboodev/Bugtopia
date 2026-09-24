@@ -426,6 +426,7 @@
     <Compile Include="HeartopiaComplete.WorldReady.cs" />
     <Compile Include="HeartopiaComplete.GameWorldProbe.cs" />
     <Compile Include="InstantTeleportFeature.cs" />
+    <Compile Include="SelfRespawnGuardFeature.cs" />
     <Compile Include="InteractObstacleBypassFeature.cs" />
     <Compile Include="PetHeightLimitBypassFeature.cs" />
     <Compile Include="HeartopiaComplete.Config.cs" />
