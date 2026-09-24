@@ -8,16 +8,16 @@ namespace HeartopiaMod
     // UGUI SHELL — Phase 3 tab CONTENT, New Features round 7 of 8 (migration plan item 12): the
     // SEA CLEAN sub-tab — newFeaturesSubTab == 7 (AnimalCareFeature.cs:64-66 dispatcher) →
     // DrawSeaCleanQteTab (SeaCleanQteFeature.cs:891-1040), replayed here top-to-bottom. The tab
-    // reads toggle fields owned by three sibling backends (SeaCleanBannerHideFeature.cs,
-    // LittleWhaleFinderFeature.cs, CorruptionCleanseFeature.cs) — none of which has a drawer of
-    // its own — plus the mod-wide farmState/autoFarmStatus pair.
+    // reads toggle fields owned by sibling backends (SeaCleanBannerHideFeature.cs,
+    // CorruptionCleanseFeature.cs, CleanupBossFeature.cs) — none of which has a drawer of its
+    // own — plus the mod-wide farmState/autoFarmStatus pair. (The Little Whale finder that used
+    // to sit here was removed on 2026-09-24.)
     //
     // Ground rules (same as every prior round):
     //  - The IMGUI drawer and every backend it touches stay fully functional and untouched —
     //    this file only READS the same fields and CALLS the same action methods (all directly
     //    on HeartopiaComplete via the feature partials; ZERO backend interop additions:
-    //    StartLittleWhaleTeleport, SaveKeybinds, AddMenuNotification, FormatKeybindLabel + the
-    //    fields/consts).
+    //    SaveKeybinds, AddMenuNotification, FormatKeybindLabel + the fields/consts).
     //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
     //    UguiShellSeaCleanSubIndex = 7, declared with their siblings in UguiShellTabIndices.cs),
     //    never label comparison. The processor gates on the SAME
@@ -29,9 +29,8 @@ namespace HeartopiaMod
     //  - SAVE ASYMMETRY (the round's main trap): the master "Auto Sea Clean" toggle (:911-918)
     //    posts the green/red toast and does NOT SaveKeybinds — genuinely absent in the source,
     //    not an oversight; do NOT add one. "Auto-Cleanse Corrupted" (:997-1005) posts the SAME
-    //    toast palette AND SaveKeybinds(false), in that order. The three middle toggles
-    //    (:936-960 — No Delays / Hide Banner / Little Whale Finder) are flag + save only, no
-    //    toast. Toast palette = the source literals green (0.45,1,0.55) / red (1,0.55,0.55)
+    //    toast palette AND SaveKeybinds(false), in that order. The middle toggles
+    //    (:936-960 — No Delays / Hide Banner) are flag + save only, no toast. Toast palette = the source literals green (0.45,1,0.55) / red (1,0.55,0.55)
     //    (NOT Extra's 1,0.5,0.4 red), and the toast strings are UNLOCALIZED interpolations.
     //  - RADIUS SLIDER (:926-933): snaps to the NEAREST 0.5 — Mathf.Round(value * 2f) / 2f
     //    (not Ice Skating's nearest-50, not tenths) — over [SeaCleanAutoRadiusMin=1,
@@ -40,24 +39,13 @@ namespace HeartopiaMod
     //    LF("Clean radius: {0:F1}m") sits LEFT of the slider on the same row (label 230 wide at
     //    left, slider 200x20 at left+240, y+2). The UGUI handler stores the snapped float; the
     //    per-frame epsilon re-sync pulls the handle onto it (Sand Sculpture's snap idiom).
-    //  - TWO independent TWO-LEVEL conditionals, each with its own inner level:
-    //      * Little Whale block (:963-992) — level 1 littleWhaleFinderEnabled shows the
-    //        figurine status label (+26); level 2 littleWhalePresent ADDITIONALLY shows the
-    //        primary "TELEPORT TO FIGURINE" button, and the block's tail advance is
-    //        present ? 36 : 4 (:991) — the two levels are INDEPENDENT, never flattened.
-    //      * Sea Clean status block (:1025-1037) — level 1 seaCleanQteEnabled shows the
-    //        "Cleaned this session: {n}" counter (+24); level 2 non-empty seaCleanAutoLastStatus
-    //        ADDITIONALLY shows the "Status: " line (panelW x40, +44).
-    //    Plus ONE single-level conditional between them (:1013-1017): the "Cleansing now: "
+    //  - One TWO-LEVEL conditional: the Sea Clean status block (:1025-1037) — level 1
+    //    seaCleanQteEnabled shows the "Cleaned this session: {n}" counter (+24); level 2
+    //    non-empty seaCleanAutoLastStatus ADDITIONALLY shows the "Status: " line (panelW x40, +44).
+    //    Plus ONE single-level conditional above it (:1013-1017): the "Cleansing now: "
     //    label, visible only while farmState == AutoFarmState.CleansingCorruption (enum field
     //    owned by Auto Farm — read-only here), its text LIVE (autoFarmStatus re-read every
     //    gated frame while visible, raw-reference diffed).
-    //  - FIGURINE STATUS (:965-979) is a live THREE-WAY text: present + Camera.main → distance
-    //    variant (styleNo = littleWhaleActiveConfigId - LittleWhaleConfigIdFirst + 1, meters
-    //    shown (int)-truncated); present without camera → no-meters variant; not present → the
-    //    "not found" hint. Recomposed on a (present|styleNo, intDist) tuple diff — whole-meter
-    //    granularity while swimming, allocation-free otherwise (the Sanrio scene-row idiom).
-    //    Only computed while the finder toggle shows the label, same as the source.
     //  - HOTKEY LINE (:1019-1023): read-only text — LF("Hotkey: {0} (rebind in Settings >
     //    Keybinds)", FormatKeybindLabel(seaCleanQteHotkey)); no control. KeyCode-cached so a
     //    rebind from Settings → Keybinds recomposes it live.
@@ -67,14 +55,13 @@ namespace HeartopiaMod
     //    conditional blocks are currently visible (420 with everything off and fallback
     //    paragraph heights, up to 576 with everything on).
     //  - LOCALIZATION: DrawSwitchToggle and DrawPrimaryActionButton L() their labels internally
-    //    (UiKitPrimitives.cs:749/:731), so the kit checkbox/button here get this.L(...) once at
-    //    the call site (the source's own L("TELEPORT TO FIGURINE") into DrawPrimaryActionButton
-    //    double-L's — one L is the intent, the Extra-round convention). Header/hints/status
+    //    (UiKitPrimitives.cs:749/:731), so the kit checkboxes here get this.L(...) once at
+    //    the call site (the Extra-round convention). Header/hints/status
     //    composites all go through L/LF at their call sites, matching the drawer; the two
     //    enable/disable toasts are raw interpolations (no L in the source — mirrored).
     //  - Text roles: header = bold 14 in uiText (:897-898); EVERY other label uses the drawer's
     //    bodyStyle = fontSize 12 wordWrap in uiSubTabText @ 0.92 (:900-906). Toggles are kit
-    //    checkboxes (the kit carries the switch-row look); teleport = Primary tier (:986).
+    //    checkboxes (the kit carries the switch-row look).
     //  - WRAPPED PARAGRAPHS (auto-clean hint :921-923 500x76+82, Aura Farm hint :1008-1010
     //    500x34+38): heights measured via the Pictures round's proven
     //    MeasureUguiPicturesWrappedHeight with the source rect heights (76/34) as fallbacks;
@@ -89,8 +76,8 @@ namespace HeartopiaMod
     //   toggle Auto Sea Clean y=42 (360x30)                            (+40)
     //   hint y=82 (panelW x hintH, source 76)                          (+hintH+6, source 82)
     //   radius row: label (230x22) | slider x=248 y+2 (200x20)         (+28)
-    //   toggles No Delays / Hide Banner / Little Whale (360x30)        (+36 each)
-    //   [figurine status (panelW x22) (+26); [teleport 240x30]; +36 present / +4 not]
+    //   toggles No Delays / Hide Banner / Boss / No Knockback (360x30) (+36 each)
+    //   [boss status (panelW x40)                                      (+44)]
     //   toggle Auto-Cleanse Corrupted (360x30)                         (+36)
     //   aura hint (panelW x auraH, source 34)                          (+auraH+4, source 38)
     //   [cleansing label (panelW x22)                                  (+26)]
@@ -99,13 +86,13 @@ namespace HeartopiaMod
     //   content height = final cursor + 20 (:1039 return y + 20).
     // Header + master toggle are static; the relayout owns everything from the hint down
     // (hintH can change on a measure retry) plus the conditional SetActives, re-run when the
-    // layout signature changes — packed visibility bits (finderEnabled, finderEnabled&&present,
-    // cleansing-active, qteEnabled, qteEnabled&&status-non-empty; hidden levels masked to 0,
-    // the Extra convention) plus the two measured heights.
+    // layout signature changes — packed visibility bits (cleansing-active, qteEnabled,
+    // qteEnabled&&status-non-empty, bossEnabled; hidden levels masked to 0, the Extra
+    // convention) plus the two measured heights.
     //
     // Cross-surface sync cadence: every gated frame (shell visible + New Features tab + Sea
-    // Clean sub-tab) — 5 toggle re-syncs (SetIsOnWithoutNotify), the slider epsilon re-sync +
-    // its float-cached value label, the figurine tuple diff (while shown), the cleansing
+    // Clean sub-tab) — the toggle re-syncs (SetIsOnWithoutNotify), the slider epsilon re-sync +
+    // its float-cached value label, the cleansing
     // raw-ref diff (while shown), the hotkey KeyCode diff, the counter int diff + status
     // raw-ref diff (while shown), then the layout-signature check. The 0.5s tick carries only
     // the wrapped-paragraph measure retries. Per-frame sync disabled after 3 consecutive
@@ -145,13 +132,6 @@ namespace HeartopiaMod
             public Toggle NoBounceToggle;           // Ocean Cleanup: no explosion knockback (flag + save)
             public GameObject BossStatusLabel;
             public string BossStatusRawSeen;
-            public Toggle LittleWhaleToggle;
-
-            // Little Whale block — TWO independent visibility levels (file header)
-            public GameObject FigurineStatusLabel;  // level 1: littleWhaleFinderEnabled
-            public int FigurineSig;                 // (present | styleNo<<1); -1 = never composed
-            public int FigurineDistInt;             // (int) meters; -1 no camera; MinValue absent
-            public GameObject TeleportButton;       // level 2: finderEnabled AND littleWhalePresent
 
             // Auto-Cleanse toggle (toast + save) + its hint paragraph (measured, fallback 34)
             public Toggle AutoCleanseToggle;
@@ -315,20 +295,6 @@ namespace HeartopiaMod
                 this.L("Boss: ") + this.cleanupBossStatus, 12f, mutedColor, false);
             this.TrySetUguiLabelWrapped(handle.BossStatusLabel);
             handle.BossStatusLabel.SetActive(false);
-            handle.LittleWhaleToggle = this.CreateUguiCheckbox(scrollContent, "LittleWhaleFinder",
-                this.L("Little Whale Finder"), this.littleWhaleFinderEnabled,
-                new System.Action<bool>(this.OnUguiSeaCleanLittleWhaleToggled));
-
-            // -------- Little Whale block (:963-992 — two INDEPENDENT levels, file header) ------
-            handle.FigurineSig = -1;                 // never composed
-            handle.FigurineDistInt = int.MinValue;
-            handle.FigurineStatusLabel = this.CreateUguiLabel(scrollContent, "FigurineStatus",
-                string.Empty, 12f, mutedColor, false);
-            handle.FigurineStatusLabel.SetActive(false);
-            handle.TeleportButton = this.CreateUguiPrimaryButton(scrollContent, "TeleportFigurine",
-                this.L("TELEPORT TO FIGURINE"),
-                new System.Action(this.OnUguiSeaCleanLittleWhaleTeleportClicked));
-            handle.TeleportButton.SetActive(false);
 
             // -------- Auto-Cleanse toggle (:997-1005 — toast AND save) + hint (:1008-1010) -----
             handle.AutoCleanseToggle = this.CreateUguiCheckbox(scrollContent, "AutoCleanse",
@@ -370,12 +336,6 @@ namespace HeartopiaMod
             handle.AuraHintH = this.MeasureUguiSeaCleanHintHeight(handle, false, out ok);
             handle.AuraHintMeasureOk = ok;
 
-            // Seed pass: figurine text from the live backend state (only while its level-1 gate
-            // shows it — the source computes it inside the if), then the first layout.
-            if (this.littleWhaleFinderEnabled)
-            {
-                this.SyncUguiSeaCleanFigurineStatus(handle);
-            }
             this.RelayoutUguiShellNewFeaturesSeaClean(handle);
 
             handle.Root = block;
@@ -420,25 +380,6 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.BossStatusLabel, 8f, yCur, panelW, 40f);
                 yCur += 44f;
             }
-            PlaceUguiTopLeft(handle.LittleWhaleToggle.gameObject, 8f, yCur, 360f, 30f);
-            yCur += 36f;                               // :961
-
-            // Little Whale block — the two INDEPENDENT levels (:963-992): the label needs
-            // level 1 only; the button needs BOTH; the tail advance is present ? 36 : 4.
-            bool finderOn = this.littleWhaleFinderEnabled;
-            bool present = this.littleWhalePresent;
-            SetUguiGoActive(handle.FigurineStatusLabel, finderOn);
-            SetUguiGoActive(handle.TeleportButton, finderOn && present);
-            if (finderOn)
-            {
-                PlaceUguiTopLeft(handle.FigurineStatusLabel, 8f, yCur, panelW, 22f);
-                yCur += 26f;                           // :980
-                if (present)
-                {
-                    PlaceUguiTopLeft(handle.TeleportButton, 8f, yCur, 240f, 30f);  // :986
-                }
-                yCur += present ? 36f : 4f;            // :991 — the two-level advance
-            }
 
             PlaceUguiTopLeft(handle.AutoCleanseToggle.gameObject, 8f, yCur, 360f, 30f);
             yCur += 36f;                               // :1006
@@ -482,67 +423,19 @@ namespace HeartopiaMod
             handle.LayoutAuraHintH = handle.AuraHintH;
         }
 
-        // Packed layout drivers (file header): the five visibility bits, with each inner level
+        // Packed layout drivers (file header): the visibility bits, with each inner level
         // masked to 0 while its outer level hides it (the Extra convention — hidden state churn
         // must not trigger relayouts).
         private int ComputeUguiSeaCleanLayoutPacked()
         {
-            int packed = (this.littleWhaleFinderEnabled ? 1 : 0)
-                | (this.farmState == HeartopiaComplete.AutoFarmState.CleansingCorruption ? 4 : 0)
+            int packed = (this.farmState == HeartopiaComplete.AutoFarmState.CleansingCorruption ? 4 : 0)
                 | (this.seaCleanQteEnabled ? 8 : 0)
                 | (this.cleanupBossAutoEnabled ? 16 : 0);
-            if (this.littleWhaleFinderEnabled && this.littleWhalePresent)
-            {
-                packed |= 2;
-            }
             if (this.seaCleanQteEnabled && !string.IsNullOrEmpty(this.seaCleanAutoLastStatus))
             {
                 packed |= 16;
             }
             return packed;
-        }
-
-        // ----------------------------------------------------------------------------------------
-        // Figurine status — the live three-way text (:965-979), recomposed on a
-        // (present|styleNo, intDist) tuple change; (int) truncation means whole-meter
-        // granularity while swimming (the Sanrio scene-row idiom). Called only while the
-        // finder toggle shows the label, same as the source's enclosing if.
-        // ----------------------------------------------------------------------------------------
-
-        private void SyncUguiSeaCleanFigurineStatus(UguiShellNewFeaturesSeaCleanHandle handle)
-        {
-            bool present = this.littleWhalePresent;
-            int sig = 0;
-            int distInt = int.MinValue;
-            int styleNo = 0;
-            if (present)
-            {
-                styleNo = this.GetLittleWhaleStyleNumber(this.littleWhaleActiveConfigId);   // color index (:970)
-                sig = 1 | (styleNo << 1);
-                Camera figCam = Camera.main;                                               // :968
-                distInt = figCam != null
-                    ? (int)Vector3.Distance(figCam.transform.position, this.littleWhaleLastPos)
-                    : -1;                                                                  // :969
-            }
-            if (sig == handle.FigurineSig && distInt == handle.FigurineDistInt)
-            {
-                return;
-            }
-            handle.FigurineSig = sig;
-            handle.FigurineDistInt = distInt;
-
-            string text;
-            if (present)
-            {
-                text = distInt >= 0
-                    ? this.LF("Figurine located (style {0}) — {1}m away", styleNo, distInt)  // :972
-                    : this.LF("Figurine located (style {0})", styleNo);                      // :973
-            }
-            else
-            {
-                text = this.L("Figurine not found — take the daily task and enter the canyon"); // :977
-            }
-            this.SetUguiLabelText(handle.FigurineStatusLabel, text);
         }
 
         // ----------------------------------------------------------------------------------------
@@ -566,7 +459,6 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.HideBannerToggle, this.hideSeaCleanBannerEnabled);
                 this.SyncUguiToggleFromField(handle.BossToggle, this.cleanupBossAutoEnabled);
                 this.SyncUguiToggleFromField(handle.NoBounceToggle, this.cleanupNoBounceEnabled);
-                this.SyncUguiToggleFromField(handle.LittleWhaleToggle, this.littleWhaleFinderEnabled);
                 this.SyncUguiToggleFromField(handle.AutoCleanseToggle, this.autoCleanseCorruptedEnabled);
 
                 // Radius re-sync: pulls the handle onto the nearest-0.5-snapped field after a
@@ -582,12 +474,6 @@ namespace HeartopiaMod
                     handle.RadiusShownValue = this.seaCleanAutoRadius;
                     this.SetUguiLabelText(handle.RadiusLabel,
                         this.LF("Clean radius: {0:F1}m", this.seaCleanAutoRadius));
-                }
-
-                // Figurine status — only while its level-1 gate shows it (source :963).
-                if (this.littleWhaleFinderEnabled)
-                {
-                    this.SyncUguiSeaCleanFigurineStatus(handle);
                 }
 
                 // Cleansing label — LIVE re-read every gated frame while visible (:1013-1016);
@@ -790,41 +676,6 @@ namespace HeartopiaMod
             }
             this.hideSeaCleanBannerEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
-        }
-
-        // :955-960 — flag + save only (the LittleWhaleFinderFeature.cs field); then an
-        // immediate figurine-text seed + relayout so the block it gates reacts this same
-        // frame (Extra's Sanrio-toggle idiom).
-        private void OnUguiSeaCleanLittleWhaleToggled(bool value)
-        {
-            if (value == this.littleWhaleFinderEnabled)
-            {
-                return;
-            }
-            this.littleWhaleFinderEnabled = value;
-            try { this.SaveKeybinds(false); } catch { }
-
-            UguiShellNewFeaturesSeaCleanHandle handle = this.uguiShellNewFeaturesSeaClean;
-            if (handle == null || handle.Root == null)
-            {
-                return;
-            }
-            try
-            {
-                if (value)
-                {
-                    this.SyncUguiSeaCleanFigurineStatus(handle);
-                }
-                this.RelayoutUguiShellNewFeaturesSeaClean(handle);
-            }
-            catch { }
-        }
-
-        // :984-989 — straight to the teleport (the button only shows while the figurine is
-        // present; StartLittleWhaleTeleport carries its own guards, same as the IMGUI twin).
-        private void OnUguiSeaCleanLittleWhaleTeleportClicked()
-        {
-            this.StartLittleWhaleTeleport();
         }
 
         // :997-1005 — toast AND SaveKeybinds(false), in the source's order (the toast first).

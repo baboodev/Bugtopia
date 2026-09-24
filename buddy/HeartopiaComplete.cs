@@ -798,8 +798,6 @@ namespace HeartopiaMod
             this.ProcessForagingTeleportTraceOnUpdate();
             Breadcrumbs.Phase("ou.oobguard");
             this.ProcessOutOfBoundsGuardOnUpdate();
-            Breadcrumbs.Phase("ou.whalefinder");
-            this.ProcessLittleWhaleFinderOnUpdate();
             Breadcrumbs.Phase("ou.research");
             this.ProcessResearchMonitorOnUpdate();
             // Quest Walk drives the SAME walker the farm does, so it must tick before the shell

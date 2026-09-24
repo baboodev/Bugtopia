@@ -102,8 +102,6 @@ namespace HeartopiaMod
             // The wait-for-field companion defaults to ON (old configs keep the initializer).
             public bool instantTeleportEnabled;
             public bool instantTeleportWaitFieldLoaded = true;
-            // Little Whale figurine finder (daily photo hide-and-seek, MapDynamicResource 300023-33).
-            public bool littleWhaleFinderEnabled;
             // Custom Swim Sprint (underwater dash SwimSprintConfig override). Duration 0/absent =
             // "use default 0.5s"; slider max (30) = Infinite. Cooldown 0 = instant re-dash.
             public bool swimSprintTweakEnabled;

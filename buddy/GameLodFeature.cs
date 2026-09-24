@@ -974,8 +974,9 @@ namespace HeartopiaMod
         // ----------------------------------------------------------------------------------------
 
         // Managers._serviceDic[typeof(interface)].manager — the proven module-dict walk
-        // (TryResolveDynamicObjectManagerAura) retargeted at the SERVICE dictionary, whose values
-        // wrap the manager in ServiceObject.manager. Returned object is pinned; caller frees.
+        // (Managers._moduleDic[Type].module, first used by the removed Little Whale finder)
+        // retargeted at the SERVICE dictionary, whose values wrap the manager in
+        // ServiceObject.manager. Returned object is pinned; caller frees.
         private unsafe bool TryResolveGameLodService(string interfaceFullName, out IntPtr managerObj, out uint managerPin, out string status)
         {
             managerObj = IntPtr.Zero;

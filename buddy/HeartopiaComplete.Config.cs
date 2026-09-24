@@ -147,7 +147,6 @@ namespace HeartopiaMod
             data.noclipSyncPositionEnabled = this.noclipSyncPositionEnabled;
             data.instantTeleportEnabled = this.instantTeleportEnabled;
             data.instantTeleportWaitFieldLoaded = this.instantTeleportWaitFieldLoaded;
-            data.littleWhaleFinderEnabled = this.littleWhaleFinderEnabled;
             data.swimSprintTweakEnabled = this.swimSprintTweakEnabled;
             data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
             data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
@@ -507,7 +506,6 @@ namespace HeartopiaMod
             this.noclipSyncPositionEnabled = data.noclipSyncPositionEnabled;
             this.instantTeleportEnabled = data.instantTeleportEnabled;
             this.instantTeleportWaitFieldLoaded = data.instantTeleportWaitFieldLoaded;
-            this.littleWhaleFinderEnabled = data.littleWhaleFinderEnabled;
             this.swimSprintTweakEnabled = data.swimSprintTweakEnabled;
             this.swimSprintDurationSeconds = data.swimSprintDurationSeconds <= 0f
                 ? SwimSprintDurationDefault

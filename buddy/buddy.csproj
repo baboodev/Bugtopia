@@ -490,7 +490,6 @@
     <Compile Include="CleanupBossFeature.cs" />
     <Compile Include="SeaCleanBannerHideFeature.cs" />
     <Compile Include="StealthForagingFeature.cs" />
-    <Compile Include="LittleWhaleFinderFeature.cs" />
     <Compile Include="RoamingCollectableFinderFeature.cs" />
     <Compile Include="SwimSprintVerticalGuardFeature.cs" />
     <Compile Include="ChatForceTranslateFeature.cs" />
