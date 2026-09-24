@@ -169,11 +169,6 @@ namespace HeartopiaMod
             data.keyEquipSprinkler = (int)this.keyEquipSprinkler;
             data.keyEquipBirdScanner = (int)this.keyEquipBirdScanner;
             data.keyEquipPad = (int)this.keyEquipPad;
-            data.keyPadConfirm = (int)this.keyPadConfirm;
-            data.keyPadCancel = (int)this.keyPadCancel;
-            data.keyPadRotate = (int)this.keyPadRotate;
-            data.keyPadMove = (int)this.keyPadMove;
-            data.keyPadDelete = (int)this.keyPadDelete;
             data.keyAutoInsectFarm = (int)this.keyAutoInsectFarm;
             data.keyAutoBirdFarm = (int)this.keyAutoBirdFarm;
             data.keyMassCook = (int)this.keyMassCook;
@@ -546,11 +541,6 @@ namespace HeartopiaMod
             this.keyEquipSprinkler = (KeyCode)data.keyEquipSprinkler;
             this.keyEquipBirdScanner = (KeyCode)data.keyEquipBirdScanner;
             this.keyEquipPad = (KeyCode)data.keyEquipPad;
-            this.keyPadConfirm = (KeyCode)data.keyPadConfirm;
-            this.keyPadCancel = (KeyCode)data.keyPadCancel;
-            this.keyPadRotate = (KeyCode)data.keyPadRotate;
-            this.keyPadMove = (KeyCode)data.keyPadMove;
-            this.keyPadDelete = (KeyCode)data.keyPadDelete;
             this.keyAutoInsectFarm = (KeyCode)data.keyAutoInsectFarm;
             this.keyAutoBirdFarm = (KeyCode)data.keyAutoBirdFarm;
             this.keyMassCook = (KeyCode)data.keyMassCook;
@@ -1280,11 +1270,6 @@ namespace HeartopiaMod
             this.keyEquipSprinkler = KeyCode.None;
             this.keyEquipBirdScanner = KeyCode.None;
             this.keyEquipPad = KeyCode.None;
-            this.keyPadConfirm = KeyCode.None;
-            this.keyPadCancel = KeyCode.None;
-            this.keyPadRotate = KeyCode.None;
-            this.keyPadMove = KeyCode.None;
-            this.keyPadDelete = KeyCode.None;
             this.keyAutoInsectFarm = KeyCode.None;
             this.keyAutoBirdFarm = KeyCode.None;
             this.keyMassCook = KeyCode.None;
@@ -1417,11 +1402,6 @@ namespace HeartopiaMod
                 case "Equip Sprinkler": this.keyEquipSprinkler = newKey; break;
                 case "Equip Bird Scanner": this.keyEquipBirdScanner = newKey; break;
                 case "Equip Pad": this.keyEquipPad = newKey; break;
-                case "Pad Confirm": this.keyPadConfirm = newKey; break;
-                case "Pad Cancel": this.keyPadCancel = newKey; break;
-                case "Pad Rotate": this.keyPadRotate = newKey; break;
-                case "Pad Move": this.keyPadMove = newKey; break;
-                case "Pad Delete": this.keyPadDelete = newKey; break;
                 case "Auto Insect Farm": this.keyAutoInsectFarm = newKey; break;
                 case "Auto Bird Farm": this.keyAutoBirdFarm = newKey; break;
                 case "Mass Cook": this.keyMassCook = newKey; break;
@@ -1440,44 +1420,6 @@ namespace HeartopiaMod
             this.AddMenuNotification(
                 this.LF("{0}: {1}", this.L(bindingLabel), FormatKeybindLabel(newKey)),
                 new Color(this.uiAccentR, this.uiAccentG, this.uiAccentB));
-
-            if (bindingLabel.StartsWith("Pad ", StringComparison.Ordinal) && IsGameBuildShortcutKey(newKey))
-            {
-                this.AddMenuNotification(
-                    this.L("The game uses this key in build mode too - it will fire twice there"),
-                    new Color(1f, 0.72f, 0.3f));
-            }
-        }
-
-        // BuildStatusPanel's own PC shortcuts (BindPcInput, added 2026-09-24): Enter/Numpad Enter
-        // confirm, Delete pack/wreck, R rotate, M move, K spatial axis, O size, P dye, C connect,
-        // Tab mode, 1-4 tabs, Z (Ctrl+Z undo), Esc cancel. A Pad hotkey on one of these fires the action twice —
-        // a doubled confirm can place a second copy. Warned about, not refused: on a gamepad the
-        // binding is a different button, and the mod's hold-to-repeat rotate has no game twin.
-        private static bool IsGameBuildShortcutKey(KeyCode key)
-        {
-            switch (key)
-            {
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                case KeyCode.Delete:
-                case KeyCode.R:
-                case KeyCode.M:
-                case KeyCode.K:
-                case KeyCode.O:
-                case KeyCode.P:
-                case KeyCode.C:
-                case KeyCode.Tab:
-                case KeyCode.Z:
-                case KeyCode.Escape:
-                case KeyCode.Alpha1:
-                case KeyCode.Alpha2:
-                case KeyCode.Alpha3:
-                case KeyCode.Alpha4:
-                    return true;
-                default:
-                    return false;
-            }
         }
 
         private void TryCaptureSideMouseKeybindOnUpdate()

@@ -9,7 +9,7 @@ namespace HeartopiaMod
     // UGUI SHELL — Phase 3 tab CONTENT, item 9 (migration plan: cosmic-waddling-rainbow.md):
     // Settings→Keybinds. UGUI mirror of the DrawSettingsTab fallthrough branch
     // (HeartopiaComplete.Config.cs:930, settingsSubTab == 1): "KEYBIND SETTINGS" header, four
-    // section panels (CORE 6 / AUTOMATION 21 / PLAYER 6 / SPEED & TOOLS 16 = 49 click-to-rebind
+    // section panels (CORE 7 / AUTOMATION 22 / PLAYER 6 / SPEED & TOOLS 11 = 46 click-to-rebind
     // rows), a DANGER reset button, and the capture-mode view that REPLACES the section list
     // while this.keyBindingActive is non-empty.
     //
@@ -26,7 +26,7 @@ namespace HeartopiaMod
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //
-    // The 49 rows are ONE data-driven array grouped by section (the Logging-round 39-binding
+    // The 46 rows are ONE data-driven array grouped by section (the Logging-round 39-binding
     // precedent, KeyCode getters instead of bools). Each binding carries the EXACT label string
     // its IMGUI row passes to DrawKeybindRowInPanel — that string is ALSO the ApplyActiveKeybind
     // switch key, so arming capture with it routes the eventual write through the same backend
@@ -56,7 +56,8 @@ namespace HeartopiaMod
     {
         // ----------------------------------------------------------------------------------------
         // Data-driven bindings — labels/pairs/ORDER copied exactly from the IMGUI drawer
-        // (HeartopiaComplete.Config.cs:964-1022). 6 + 21 + 6 + 16 = 49 rows.
+        // (HeartopiaComplete.Config.cs:964-1022). 7 + 22 + 6 + 11 = 46 rows (the five Pad build
+        // hotkeys were removed 2026-09-24 — the game's own build shortcuts replace them).
         // ----------------------------------------------------------------------------------------
 
         private struct UguiKeybindRowBinding
@@ -145,12 +146,7 @@ namespace HeartopiaMod
                     new UguiKeybindRowBinding("Equip Sprinkler", () => this.keyEquipSprinkler),
                     new UguiKeybindRowBinding("Equip Bird Scanner", () => this.keyEquipBirdScanner),
                     new UguiKeybindRowBinding("Equip Pad", () => this.keyEquipPad),
-                    new UguiKeybindRowBinding("Equip Sea Cleaner", () => this.keyEquipSeaCleaner),
-                    new UguiKeybindRowBinding("Pad Confirm", () => this.keyPadConfirm),
-                    new UguiKeybindRowBinding("Pad Cancel", () => this.keyPadCancel),
-                    new UguiKeybindRowBinding("Pad Rotate", () => this.keyPadRotate),
-                    new UguiKeybindRowBinding("Pad Move", () => this.keyPadMove),
-                    new UguiKeybindRowBinding("Pad Delete", () => this.keyPadDelete)
+                    new UguiKeybindRowBinding("Equip Sea Cleaner", () => this.keyEquipSeaCleaner)
                 })
             };
         }
@@ -174,7 +170,7 @@ namespace HeartopiaMod
         private UguiShellKeybindsHandle uguiShellKeybinds;
 
         // ----------------------------------------------------------------------------------------
-        // Construction — everything is static layout (all 49 rows always exist; the only dynamic
+        // Construction — everything is static layout (all 46 rows always exist; the only dynamic
         // pieces are label texts and the normal/capture view swap), so unlike Settings→Main there
         // is no relayout pass. Handle assigned LAST (Research idiom).
         // ----------------------------------------------------------------------------------------
@@ -229,11 +225,11 @@ namespace HeartopiaMod
             {
                 totalRows += (sections[s].Rows != null) ? sections[s].Rows.Length : 0;
             }
-            if (totalRows != 49)
+            if (totalRows != 46)
             {
                 // The IMGUI drawer has no shared row-count constant (BeginKeybindSection takes
-                // literals 6/21/6/16), so this only guards THIS array against local edits.
-                ModLogger.Msg("[UguiShell] Keybinds bindings (" + totalRows + ") != expected 49 — check BuildUguiKeybindSections");
+                // literals), so this only guards THIS array against local edits.
+                ModLogger.Msg("[UguiShell] Keybinds bindings (" + totalRows + ") != expected 46 — check BuildUguiKeybindSections");
             }
 
             Color rowText = this.UguiKitTextColor();

@@ -1,33 +1,28 @@
 using System;
-using System.Reflection;
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.UI;
 
 namespace HeartopiaMod
 {
+    // BuildModule access shared by the build-mode features (BuildingFreeRotateFeature, the move
+    // panel, FurnitureDyeFeature, the build text-input guard).
+    //
+    // This file used to also host the "Pad build hotkeys" (Pad Confirm / Cancel / Rotate / Move /
+    // Delete). They were removed on 2026-09-24: the game's own build panel now has PC shortcuts
+    // for every one of them (Enter, Esc, R, M, Delete — BuildStatusPanel.BindPcInput), and those
+    // are rebindable in Settings→Game Keys, so the mod's copies only doubled the action. What is
+    // left is the module resolution the rest of the build code depends on; the file keeps its name
+    // because the docs cite it as the worked example for Managers.GetModule(Type).
+    //
+    // BuildModule resolution (docs/TYPE_RESOLUTION.md): find the BuildModule class in the
+    // XDTLevelAndEntity image (NOTE: the XDTGUI.Module.Build namespace lives there, NOT in
+    // XDTGameUI — FindAuraMonoClassByFullName picks the wrong image for it, hence
+    // FindAuraMonoClassInImages with an explicit list), build a System.Type via
+    // mono_type_get_object, invoke Managers.GetModule(Type). No Type.GetType(string) (hard-crashes
+    // the runtime) and no _moduleDic enumeration (ValueCollection yields 0 via AuraMono).
     public partial class HeartopiaComplete
     {
         private static bool PadBuildHotkeyLogsEnabled => MasterLogPadBuild;
-        private const float PadBuildRotateInitialRepeatDelay = 0.6f;  // hold delay before auto-repeat
-        private const float PadBuildRotateRepeatInterval = 0.1f;      // auto-repeat cadence while held
         private const float PadBuildAuraResolveRetrySeconds = 5f;
-        private const int PadBuildCraftStateFree = 1;  // CraftState.Free — pad roam, interact move/delete
-        private const int PadBuildCraftStateFocus = 2; // CraftState.Focus — placing confirm/cancel/rotate
-        private const int PadBuildCraftStateEditBrush = 3;     // CraftState.EditBrush — paint/brush apply
-        private const int PadBuildCraftStateEditPaintPick = 6; // CraftState.EditPaintPick — colour pick
-
-        // BuildModule resolution, three tiers (docs/TYPE_RESOLUTION.md):
-        //  1. Managed reflection — FindLoadedType + TryGetManagedModule (Managers.GetModule(Type)).
-        //     Dead on the current build (interop never stubbed BuildModule) but kept first: it is
-        //     miss-cached, future-proof, and the cleanest if a later interop regen includes it.
-        //  2. AuraMono — find the BuildModule class in the XDTLevelAndEntity image (NOTE: the
-        //     XDTGUI.Module.Build namespace lives there, NOT in XDTGameUI — FindAuraMonoClassByFullName
-        //     picks the wrong image for it, hence FindAuraMonoClassInImages with an explicit list),
-        //     build a System.Type via mono_type_get_object, invoke Managers.GetModule(Type).
-        //     No Type.GetType(string) (hard-crashes the runtime) and no _moduleDic enumeration
-        //     (ValueCollection yields 0 via AuraMono).
-        //  3. UI fallback — click the BuildStatusPanel buttons via GameObject.Find.
 
         // BuildModule (namespace XDTGUI.Module.Build) is compiled into XDTLevelAndEntity.
         private static readonly string[] PadBuildModuleImageNames =
@@ -48,20 +43,11 @@ namespace HeartopiaMod
             "Assembly-CSharp", "Assembly-CSharp.dll"
         };
 
-        // Tier 1 (managed) cache.
-
-        // Tier 2 (AuraMono) cache. Module object is dropped on any invoke failure (pointer can go
-        // stale after GC/level switch); class + method ptrs are stable for the process lifetime.
+        // Module object is dropped on any invoke failure (pointer can go stale after GC/level
+        // switch); class + method ptrs are stable for the process lifetime.
         private AuraMonoObjectCache padBuildAuraModuleObj;
         private IntPtr padBuildAuraModuleClass = IntPtr.Zero;
-        private IntPtr padBuildAuraConfirmMethod = IntPtr.Zero;
-        private IntPtr padBuildAuraCancelMethod = IntPtr.Zero;
-        private IntPtr padBuildAuraRotateMethod = IntPtr.Zero;
-        private IntPtr padBuildAuraGetSubStateMethod = IntPtr.Zero;
-        private IntPtr padBuildAuraMoveMethod = IntPtr.Zero;
-        private IntPtr padBuildAuraPickupMethod = IntPtr.Zero;
-        private IntPtr padBuildAuraDeleteMethod = IntPtr.Zero;
-        private IntPtr padBuildAuraBrushMethod = IntPtr.Zero; // InteractExecuteBrush(bool) — paint apply
+        private IntPtr padBuildAuraGetSubStateMethod = IntPtr.Zero; // read by TryGetPadBuildAuraSubState
         private float nextPadBuildAuraResolveAt = -999f;
 
         private static readonly string[] PadBuildPanelRootPaths =
@@ -71,243 +57,6 @@ namespace HeartopiaMod
             "GameApp/startup_root(Clone)/XDUIRoot/Full/BuildStatusPanel(Clone)",
             "BuildStatusPanel(Clone)"
         };
-
-        private static readonly string[] PadBuildConfirmRelativePaths =
-        {
-            "AniRoot@ani@queueanimation/Bottom/confirm_bar@go/confirm@swap@go",
-            "AniRoot@ani@queueanimation/Bottom/confirm_bar@go/confirm@swap"
-        };
-
-        private static readonly string[] PadBuildCancelRelativePaths =
-        {
-            "AniRoot@ani@queueanimation/Bottom/confirm_bar@go/cancel@btn"
-        };
-
-        private static readonly string[] PadBuildRotateRelativePaths =
-        {
-            "AniRoot@ani@queueanimation/Bottom/skills@go/interact_rotate@btn"
-        };
-
-        private static readonly string[] PadBuildMoveRelativePaths =
-        {
-            "AniRoot@ani@queueanimation/Bottom/skills@go/interact_move@btn"
-        };
-
-        // Delete = remove the focused object. For furniture that's "pack furniture" (move to
-        // backpack); "wreck stable" only applies to structures (walls/floors, god mode).
-        private static readonly string[] PadBuildDeleteRelativePaths =
-        {
-            "AniRoot@ani@queueanimation/Bottom/skills@go/interact_pack_furniture@btn",
-            "AniRoot@ani@queueanimation/Bottom/skills@go/interact_wreck_stable@btn"
-        };
-
-        private float padBuildRotateRepeatAt = float.MaxValue;
-
-        private void ProcessPadBuildHotkeysOnUpdate()
-        {
-            if (this.TryGetModHotkeyDown(this.keyPadConfirm))
-            {
-                if (!this.TryPadBuildConfirm(out string confirmStatus))
-                {
-                    this.PadBuildHotkeyLog("confirm skipped: " + confirmStatus);
-                }
-                this.ResetBuildingAxisSliders(); // confirm → zero the X/Y/Z jog sliders
-            }
-
-            if (this.TryGetModHotkeyDown(this.keyPadCancel))
-            {
-                if (!this.TryPadBuildCancel(out string cancelStatus))
-                {
-                    this.PadBuildHotkeyLog("cancel skipped: " + cancelStatus);
-                }
-            }
-
-            // Rotate: tap = one step. Hold = one step now, then after a 0.6 s delay repeat every 0.25 s.
-            if (this.TryGetModHotkeyDown(this.keyPadRotate))
-            {
-                this.FirePadBuildRotate();
-                this.padBuildRotateRepeatAt = Time.unscaledTime + PadBuildRotateInitialRepeatDelay;
-            }
-            else if (this.keyPadRotate != KeyCode.None
-                && this.TryGetModHotkeyHeld(this.keyPadRotate)
-                && Time.unscaledTime >= this.padBuildRotateRepeatAt)
-            {
-                this.FirePadBuildRotate();
-                this.padBuildRotateRepeatAt = Time.unscaledTime + PadBuildRotateRepeatInterval;
-            }
-
-            if (this.TryGetModHotkeyDown(this.keyPadMove))
-            {
-                if (!this.TryPadBuildMove(out string moveStatus))
-                {
-                    this.PadBuildHotkeyLog("move skipped: " + moveStatus);
-                }
-            }
-
-            if (this.TryGetModHotkeyDown(this.keyPadDelete))
-            {
-                if (!this.TryPadBuildDelete(out string deleteStatus))
-                {
-                    this.PadBuildHotkeyLog("delete skipped: " + deleteStatus);
-                }
-            }
-        }
-
-        // --- Dispatchers: managed → AuraMono → UI ----------------------------------------------
-
-        private bool TryPadBuildConfirm(out string status)
-        {
-            if (this.TryGetPadBuildAuraModule(out IntPtr aura))
-            {
-                if (!this.TryGetPadBuildAuraSubState(aura, out int sub))
-                {
-                    status = "sub state unavailable";
-                    return false;
-                }
-
-                // Focus → ConfirmPlacing; paint/brush state → InteractExecuteBrush (apply the stroke,
-                // which is what the on-screen confirm does in paint mode).
-                if (sub == PadBuildCraftStateFocus)
-                {
-                    return this.InvokePadBuildAura(aura, this.padBuildAuraConfirmMethod, isConfirm: true, "confirm", out status);
-                }
-                if (sub == PadBuildCraftStateEditBrush || sub == PadBuildCraftStateEditPaintPick)
-                {
-                    if (this.padBuildAuraBrushMethod == IntPtr.Zero)
-                    {
-                        status = "brush method unavailable";
-                        return false;
-                    }
-                    return this.InvokePadBuildAura(aura, this.padBuildAuraBrushMethod, isConfirm: true, "brush", out status);
-                }
-
-                status = "sub state " + sub;
-                return false;
-            }
-
-            return this.TryPadBuildConfirmViaUi(out status);
-        }
-
-        private bool TryPadBuildCancel(out string status)
-        {
-            if (this.TryGetPadBuildAuraModule(out IntPtr aura))
-            {
-                if (!this.IsPadBuildAuraFocus(aura, out status))
-                {
-                    return false;
-                }
-
-                return this.InvokePadBuildAura(aura, this.padBuildAuraCancelMethod, isConfirm: false, "cancel", out status);
-            }
-
-            return this.TryPadBuildCancelViaUi(out status);
-        }
-
-        private void FirePadBuildRotate()
-        {
-            // The craft modes throttle every input to BuildSystemBaseMode.ThresholdTime (0.3 s) via a
-            // shared _inputTime in CheckInputThreshold, which caps our repeat far below 0.1 s. Reset
-            // _inputTime to 0 on the active mode right before each rotate so this one call always passes
-            // (the rotate itself then re-stamps _inputTime; we only ever bypass our own rotate cadence,
-            // leaving the throttle intact for every other input).
-            this.ResetPadBuildRotateThrottle();
-
-            if (!this.TryPadBuildRotate(out string rotateStatus))
-            {
-                this.PadBuildHotkeyLog("rotate skipped: " + rotateStatus);
-            }
-        }
-
-        // Zero _inputTime on the active craft mode (GodControl in god mode, TpsControl otherwise — the
-        // inactive one returns null) so the next CheckInputThreshold passes regardless of ThresholdTime.
-        private void ResetPadBuildRotateThrottle()
-        {
-            if (!this.TryGetPadBuildAuraModule(out IntPtr moduleObj) || moduleObj == IntPtr.Zero)
-            {
-                return;
-            }
-            if (this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr god, "get_GodControl") && god != IntPtr.Zero)
-            {
-                this.TrySetBuildingFloatField(god, "_inputTime", 0f);
-            }
-            if (this.TryInvokeAuraMonoZeroArg(moduleObj, out IntPtr tps, "get_TpsControl") && tps != IntPtr.Zero)
-            {
-                this.TrySetBuildingFloatField(tps, "_inputTime", 0f);
-            }
-        }
-
-        // Timing is driven by the key-repeat logic in ProcessPadBuildHotkeysOnUpdate, so no debounce here.
-        private bool TryPadBuildRotate(out string status)
-        {
-            status = string.Empty;
-
-            if (this.TryGetPadBuildAuraModule(out IntPtr aura))
-            {
-                return this.IsPadBuildAuraFocus(aura, out status)
-                    && this.InvokePadBuildAura(aura, this.padBuildAuraRotateMethod, isConfirm: false, "rotate", out status);
-            }
-
-            return this.TryPadBuildRotateViaUi(out status);
-        }
-
-        private bool TryPadBuildMove(out string status)
-        {
-            // Free gate — InteractExecuteMove is the BuildControl interact path (not placing/Focus).
-            if (this.TryGetPadBuildAuraModule(out IntPtr aura))
-            {
-                if (!this.IsPadBuildAuraFree(aura, out status))
-                {
-                    return false;
-                }
-
-                if (this.IsPadBuildAuraGodMode(aura))
-                {
-                    status = "move: grab by clicking in god mode";
-                    return false;
-                }
-
-                return this.InvokePadBuildAura(aura, this.padBuildAuraMoveMethod, isConfirm: false, "move", out status);
-            }
-
-            return this.TryPadBuildMoveViaUi(out status);
-        }
-
-        private bool TryPadBuildDelete(out string status)
-        {
-            // Delete acts on the focused/selected object, but the required CraftState differs by mode:
-            //   god mode → InteractExecuteDelete → GodControl.Focus_Delete() — THROWS unless _state ==
-            //              Focus (GodCraftMode.cs:1931); the focused item sits at SubState=Focus(2).
-            //   pad mode → InteractExecutePickup → TpsControl.Focus_ConfirmDelete() — packs the build
-            //              selected while roaming, which happens at SubState=Free(1).
-            // (Gating both on a single state is wrong: Free-only skipped god mode with "sub state 2",
-            //  Focus-only skipped pad mode with "sub state 1".)
-            if (this.TryGetPadBuildAuraModule(out IntPtr aura))
-            {
-                bool god = this.IsPadBuildAuraGodMode(aura);
-                bool stateOk = god
-                    ? this.IsPadBuildAuraFocus(aura, out status)
-                    : this.IsPadBuildAuraFree(aura, out status);
-                if (!stateOk)
-                {
-                    return false;
-                }
-
-                IntPtr method = god ? this.padBuildAuraDeleteMethod : this.padBuildAuraPickupMethod;
-                return this.InvokePadBuildAura(aura, method, isConfirm: false, "delete", out status);
-            }
-
-            return this.TryPadBuildDeleteViaUi(out status);
-        }
-
-        // --- Tier 1: managed module resolution & invocation ------------------------------------
-
-
-
-
-
-
-
-        // --- Tier 2: AuraMono module resolution & invocation ------------------------------------
 
         private unsafe bool TryGetPadBuildAuraModule(out IntPtr moduleObj)
         {
@@ -378,20 +127,12 @@ namespace HeartopiaMod
                 if (moduleClass != this.padBuildAuraModuleClass)
                 {
                     this.padBuildAuraModuleClass = moduleClass;
-                    this.padBuildAuraConfirmMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "ConfirmPlacing", 1);
-                    this.padBuildAuraCancelMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "CancelPlacing", 0);
-                    this.padBuildAuraRotateMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "RotateAround", 0);
                     this.padBuildAuraGetSubStateMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "get_SubState", 0);
-                    this.padBuildAuraMoveMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecuteMove", 0);
-                    this.padBuildAuraPickupMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecutePickup", 0);
-                    this.padBuildAuraDeleteMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecuteDelete", 0);
-                    this.padBuildAuraBrushMethod = this.FindAuraMonoMethodOnHierarchy(moduleClass, "InteractExecuteBrush", 1);
                 }
 
-                if (this.padBuildAuraConfirmMethod == IntPtr.Zero || this.padBuildAuraCancelMethod == IntPtr.Zero
-                    || this.padBuildAuraRotateMethod == IntPtr.Zero || this.padBuildAuraGetSubStateMethod == IntPtr.Zero)
+                if (this.padBuildAuraGetSubStateMethod == IntPtr.Zero)
                 {
-                    this.PadBuildHotkeyLog("aura: BuildModule methods missing");
+                    this.PadBuildHotkeyLog("aura: BuildModule.get_SubState missing");
                     moduleObj = IntPtr.Zero;
                     return false;
                 }
@@ -409,243 +150,6 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool IsPadBuildAuraFocus(IntPtr moduleObj, out string status)
-        {
-            return this.IsPadBuildAuraSubState(moduleObj, PadBuildCraftStateFocus, "focus active", out status);
-        }
-
-        private unsafe bool IsPadBuildAuraFree(IntPtr moduleObj, out string status)
-        {
-            return this.IsPadBuildAuraSubState(moduleObj, PadBuildCraftStateFree, "free active", out status);
-        }
-
-        private unsafe bool IsPadBuildAuraSubState(IntPtr moduleObj, int requiredState, string okStatus, out string status)
-        {
-            status = "build inactive";
-            if (moduleObj == IntPtr.Zero || this.padBuildAuraGetSubStateMethod == IntPtr.Zero
-                || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                IntPtr exc = IntPtr.Zero;
-                IntPtr boxed = auraMonoRuntimeInvoke(this.padBuildAuraGetSubStateMethod, moduleObj, IntPtr.Zero, ref exc);
-                if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
-                {
-                    this.padBuildAuraModuleObj.Clear(); // possibly stale — re-resolve next press
-                    status = "sub state unavailable";
-                    return false;
-                }
-
-                IntPtr raw = auraMonoObjectUnbox(boxed);
-                if (raw == IntPtr.Zero)
-                {
-                    status = "sub state unbox failed";
-                    return false;
-                }
-
-                int subState = *(byte*)raw;
-                if (subState != requiredState)
-                {
-                    status = "sub state " + subState;
-                    return false;
-                }
-
-                status = okStatus;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.padBuildAuraModuleObj.Clear();
-                status = "sub state exc: " + ex.Message;
-                return false;
-            }
-        }
-
-        private bool IsPadBuildAuraGodMode(IntPtr moduleObj)
-        {
-            return moduleObj != IntPtr.Zero
-                && this.TryGetMonoBoolMember(moduleObj, "InGodMode", out bool inGodMode)
-                && inGodMode;
-        }
-
-        private unsafe bool InvokePadBuildAura(IntPtr moduleObj, IntPtr method, bool isConfirm, string op, out string status)
-        {
-            status = op + " method unavailable";
-            if (moduleObj == IntPtr.Zero || method == IntPtr.Zero || auraMonoRuntimeInvoke == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                IntPtr exc = IntPtr.Zero;
-                if (isConfirm)
-                {
-                    // ConfirmPlacing(bool down): mono_runtime_invoke wants a pointer to the raw value.
-                    byte down = 0;
-                    IntPtr* args = stackalloc IntPtr[1];
-                    args[0] = (IntPtr)(&down);
-                    auraMonoRuntimeInvoke(method, moduleObj, (IntPtr)args, ref exc);
-                }
-                else
-                {
-                    auraMonoRuntimeInvoke(method, moduleObj, IntPtr.Zero, ref exc);
-                }
-
-                if (exc != IntPtr.Zero)
-                {
-                    this.padBuildAuraModuleObj.Clear();
-                    status = op + " invoke exc";
-                    return false;
-                }
-
-                status = "aura " + op;
-                this.PadBuildHotkeyLog(status);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.padBuildAuraModuleObj.Clear();
-                status = op + " invoke exception: " + ex.Message;
-                return false;
-            }
-        }
-
-        // --- Tier 3: UI fallback (BuildStatusPanel button clicks) -------------------------------
-
-        private bool TryPadBuildConfirmViaUi(out string status)
-        {
-            status = string.Empty;
-            if (!this.TryIsPadBuildUiActive(out status))
-            {
-                return false;
-            }
-
-            GameObject confirmObj = this.TryFindPadBuildUiObject(PadBuildConfirmRelativePaths);
-            if (confirmObj == null)
-            {
-                status = "confirm button not found";
-                return false;
-            }
-
-            if (!this.TrySimulatePadBuildSwapConfirm(confirmObj))
-            {
-                status = "confirm simulate failed";
-                return false;
-            }
-
-            status = "ui confirm";
-            this.PadBuildHotkeyLog(status);
-            return true;
-        }
-
-        private bool TryPadBuildCancelViaUi(out string status)
-        {
-            status = string.Empty;
-            if (!this.TryIsPadBuildUiActive(out status))
-            {
-                return false;
-            }
-
-            if (!this.TryClickPadBuildUiButton(PadBuildCancelRelativePaths, out status))
-            {
-                if (status.Length == 0)
-                {
-                    status = "cancel button not found";
-                }
-
-                return false;
-            }
-
-            this.PadBuildHotkeyLog(status);
-            return true;
-        }
-
-        private bool TryPadBuildRotateViaUi(out string status)
-        {
-            status = string.Empty;
-            if (!this.TryIsPadBuildUiActive(out status))
-            {
-                return false;
-            }
-
-            if (!this.TryClickPadBuildUiButton(PadBuildRotateRelativePaths, out status))
-            {
-                if (status.Length == 0)
-                {
-                    status = "rotate button not found";
-                }
-
-                return false;
-            }
-
-            this.PadBuildHotkeyLog(status);
-            return true;
-        }
-
-        private bool TryPadBuildMoveViaUi(out string status)
-        {
-            status = string.Empty;
-            if (!this.TryClickPadBuildUiButton(PadBuildMoveRelativePaths, out status))
-            {
-                if (status.Length == 0)
-                {
-                    status = "move button not active";
-                }
-
-                return false;
-            }
-
-            this.PadBuildHotkeyLog(status);
-            return true;
-        }
-
-        private bool TryPadBuildDeleteViaUi(out string status)
-        {
-            status = string.Empty;
-            if (!this.TryClickPadBuildUiButton(PadBuildDeleteRelativePaths, out status))
-            {
-                if (status.Length == 0)
-                {
-                    status = "delete button not active";
-                }
-
-                return false;
-            }
-
-            this.PadBuildHotkeyLog(status);
-            return true;
-        }
-
-        private bool TryIsPadBuildUiActive(out string status)
-        {
-            status = "build ui inactive";
-            GameObject panelRoot = this.TryFindPadBuildPanelRoot();
-            if (panelRoot == null)
-            {
-                return false;
-            }
-
-            GameObject confirmObj = this.TryFindPadBuildUiObject(PadBuildConfirmRelativePaths);
-            if (confirmObj != null && confirmObj.activeInHierarchy)
-            {
-                status = "confirm visible";
-                return true;
-            }
-
-            GameObject rotateObj = this.TryFindPadBuildUiObject(PadBuildRotateRelativePaths);
-            if (rotateObj != null && rotateObj.activeInHierarchy)
-            {
-                status = "rotate visible";
-                return true;
-            }
-
-            return false;
-        }
-
         private GameObject TryFindPadBuildPanelRoot()
         {
             for (int i = 0; i < PadBuildPanelRootPaths.Length; i++)
@@ -658,121 +162,6 @@ namespace HeartopiaMod
             }
 
             return null;
-        }
-
-        private GameObject TryFindPadBuildUiObject(string[] relativePaths)
-        {
-            if (relativePaths == null || relativePaths.Length == 0)
-            {
-                return null;
-            }
-
-            GameObject panelRoot = this.TryFindPadBuildPanelRoot();
-            if (panelRoot != null)
-            {
-                for (int i = 0; i < relativePaths.Length; i++)
-                {
-                    Transform child = panelRoot.transform.Find(relativePaths[i]);
-                    if (child != null)
-                    {
-                        return child.gameObject;
-                    }
-                }
-            }
-
-            for (int i = 0; i < PadBuildPanelRootPaths.Length; i++)
-            {
-                string panelRootPath = PadBuildPanelRootPaths[i];
-                for (int j = 0; j < relativePaths.Length; j++)
-                {
-                    GameObject candidate = GameObject.Find(panelRootPath + "/" + relativePaths[j]);
-                    if (candidate != null)
-                    {
-                        return candidate;
-                    }
-                }
-            }
-
-            for (int j = 0; j < relativePaths.Length; j++)
-            {
-                string leafName = relativePaths[j];
-                int slash = leafName.LastIndexOf('/');
-                if (slash >= 0 && slash < leafName.Length - 1)
-                {
-                    leafName = leafName.Substring(slash + 1);
-                }
-
-                GameObject byName = GameObject.Find(leafName);
-                if (byName != null && byName.activeInHierarchy)
-                {
-                    return byName;
-                }
-            }
-
-            return null;
-        }
-
-        // Clicks the first active+clickable button among the given paths. Iterating per path (rather
-        // than TryFindPadBuildUiObject over the whole set) matters when several candidates exist in
-        // the hierarchy but only one is active — e.g. delete's pack/wreck pair.
-        private bool TryClickPadBuildUiButton(string[] relativePaths, out string status)
-        {
-            status = string.Empty;
-            if (relativePaths == null)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < relativePaths.Length; i++)
-            {
-                GameObject target = this.TryFindPadBuildUiObject(new[] { relativePaths[i] });
-                if (target == null || !target.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                Button button = this.ResolveClickableButton(target);
-                if (button != null && button.interactable)
-                {
-                    button.onClick.Invoke();
-                    status = "ui click " + target.name;
-                    return true;
-                }
-
-                if (this.SimulateClick(target))
-                {
-                    status = "ui simulate " + target.name;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool TrySimulatePadBuildSwapConfirm(GameObject target)
-        {
-            if (target == null || !target.activeInHierarchy)
-            {
-                return false;
-            }
-
-            try
-            {
-                EventSystem eventSystem = this.EnsureGameplayEventSystemAvailable();
-                PointerEventData eventData = new PointerEventData(eventSystem)
-                {
-                    position = RectTransformUtility.WorldToScreenPoint(null, target.transform.position)
-                };
-
-                ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerDownHandler);
-                ExecuteEvents.Execute(target, eventData, ExecuteEvents.pointerUpHandler);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                FeatureLog.Fail("PadBuild", "confirm simulate error: " + ex.Message);
-                return false;
-            }
         }
 
         private void PadBuildHotkeyLog(string message)

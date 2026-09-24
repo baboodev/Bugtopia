@@ -382,7 +382,7 @@ All merge into `public partial class HeartopiaComplete`:
 | `PicturesDecryptFeature.cs` | 1322 | ScreenCapture pictures decrypt/browse |
 | `ShopBuyAllFeature.cs` | 1197 | Clothing shop buy-all |
 | `BubbleFeature.cs` | 1164 | Bubble radar, spawn, SendCommand Harmony |
-| `PadBuildHotkeyFeature.cs` | 913 | Pad build hotkeys (confirm/cancel/rotate/move/delete); 3-tier `BuildModule` resolve: managed → AuraMono `Managers.GetModule(Type)` → UI clicks |
+| `PadBuildHotkeyFeature.cs` | 170 | Shared `BuildModule` access (AuraMono `Managers.GetModule(Type)`, `get_SubState`, build panel root); its Pad build hotkeys were removed 2026-09-24 |
 | `NoclipFeature.cs` | 883 | Noclip movement (incl. vehicle) |
 | `ItemDumpFeature.cs` | 863 | Item table dump tooling |
 | `WildAnimalGiftFeature.cs` | ~700 | Claim wild animal gifts (AuraMono entity scan) |

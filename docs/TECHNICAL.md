@@ -610,31 +610,17 @@ with a second component check — currently unused because all observed fields a
 
 ---
 
-## Pad Build Hotkeys (`PadBuildHotkeyFeature.cs`)
+## BuildModule access (`PadBuildHotkeyFeature.cs`)
 
-Keyboard control of the building pad: confirm / cancel / rotate / move / delete, all rebindable
-(default `None`), processed in `ProcessPadBuildHotkeysOnUpdate` from `OnUpdate` via
-`TryGetModHotkeyDown` (respects the instrument + text-input hotkey guards and rebind capture).
+The Pad build hotkeys that gave this file its name were removed on 2026-09-24 (the game's own
+build shortcuts replace them, rebindable in Settings → Game Keys). What remains is the shared
+`BuildModule` access every build feature uses: `TryGetPadBuildAuraModule` (AuraMono
+`Managers.GetModule(Type)`), `get_SubState` for `TryGetPadBuildAuraSubState`, and
+`TryFindPadBuildPanelRoot`.
 
-**Action mapping (panel parity, gated on `BuildModule.SubState == CraftState.Focus`):**
-
-- confirm → `BuildModule.ConfirmPlacing(false)`; cancel → `CancelPlacing()`; rotate →
-  `RotateAround()` (250 ms debounce)
-- move → `InteractExecuteMove()`; no-op in god mode (grabbing is a click there)
-- delete → Pad mode `InteractExecutePickup()` (pack furniture to backpack); god mode
-  `InteractExecuteDelete()` (wreck)
-- not focused (simple Pad free-roam) → silent no-op for all five
-
-**`BuildModule` instance — three tiers** (full detail in
-[TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md#resolving-module-instances-managersgetmodule--worked-example-buildmodule)):
-
-1. Managed `FindLoadedType` + `TryGetManagedModule` — dormant (interop has no `BuildModule` stub),
-   self-heals after an interop regen.
-2. **AuraMono (active):** class via `FindAuraMonoClassInImages("XDTGUI.Module.Build", "BuildModule",
-   [XDTLevelAndEntity, …])` → `mono_type_get_object` → invoke `Managers.GetModule(Type)`. Module
-   object cached, dropped on any invoke exception (stale after GC/level switch), resolve throttled 5 s.
-3. UI fallback — clicks `BuildStatusPanel` buttons by `GameObject.Find` paths from
-   `BuildStatusPanel_Auto.cs`.
+Resolution: class via `FindAuraMonoClassInImages("XDTGUI.Module.Build", "BuildModule",
+[XDTLevelAndEntity, …])` → `mono_type_get_object` → invoke `Managers.GetModule(Type)`. Module
+object cached, dropped on any invoke exception (stale after GC/level switch), resolve throttled 5 s.
 
 Known traps (never retry): `Type.GetType(string)` via `mono_runtime_invoke` crashes the runtime;
 `Managers._moduleDic.Values` does not enumerate via AuraMono (and values are `ModuleObject`
@@ -667,8 +653,7 @@ Despite the `.xml` extension, serialization uses `System.Xml.Serialization.XmlSe
 
 ### `KeybindConfigData` (selected fields)
 
-Integer fields store `(int)KeyCode` values (one per rebindable action — e.g. `keyEquipPad`,
-`keyPadConfirm` / `keyPadCancel` / `keyPadRotate` / `keyPadMove` / `keyPadDelete`).
+Integer fields store `(int)KeyCode` values (one per rebindable action — e.g. `keyEquipPad`).
 
 Notable floats:
 

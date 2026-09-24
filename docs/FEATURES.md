@@ -111,28 +111,11 @@ disabled except the menu toggle** — so typing a message never accidentally tri
 you can still open/close the mod menu. Instrument note-keys are likewise suppressed while an
 instrument panel is open. Both are automatic, no configuration needed (`InstrumentHotkeyGuardFeature.cs`).
 
-### Pad build hotkeys (`PadBuildHotkeyFeature.cs`)
+### Pad build hotkeys — removed
 
-Keyboard control of the building pad without touching the on-screen `BuildStatusPanel` buttons. Five rebindable keys (Settings → Keybinds, default unbound):
-
-| Key | Action | Behaviour |
-|-----|--------|-----------|
-| Pad Confirm | `BuildModule.ConfirmPlacing(false)` | Places the held object (panel hold-button parity) |
-| Pad Cancel | `BuildModule.CancelPlacing()` | Cancels current placing |
-| Pad Rotate | `BuildModule.RotateAround()` | Rotates the held object; 250 ms debounce |
-| Pad Move | `BuildModule.InteractExecuteMove()` | Picks up the focused object for moving; no-op in god mode (grab is a click there) |
-| Pad Delete | Pad mode: `InteractExecutePickup()` (pack to backpack); god mode: `InteractExecuteDelete()` (wreck) | Removes the focused object |
-
-All five are gated on `BuildModule.SubState == CraftState.Focus` — in simple Pad free-roam (no object focused/being placed) every key is a **silent no-op**. Works in both homeland build modes (Pad/TPS and god top-down view).
-
-Implementation is a three-tier `BuildModule` resolution (managed → AuraMono `Managers.GetModule(Type)` → UI button clicks); see [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) and [plans/2026-06-10-pad-build-api-migration.md](./plans/2026-06-10-pad-build-api-migration.md). Debug log flag: `MasterLogPadBuild`.
-
-**Since the game update of 2026-09-24 the build panel has PC shortcuts of its own** (Enter confirm,
-Delete pack/wreck, R rotate, M move, K spatial axis, O size, P dye, C connect, Tab mode, 1-4 tabs,
-Ctrl+Z / Ctrl+Shift+Z undo/redo, Esc cancel). Binding a Pad key to one of them makes the action fire
-twice in build mode — a doubled confirm can place a second copy — so the keybind screen shows a
-warning when that happens. Rebinding is not refused: on a gamepad it is a different button, and the
-mod's hold-to-repeat rotate has no game equivalent.
+Removed 2026-09-24. The game's build panel now has its own PC shortcuts for all five (Enter,
+Esc, R, M, Delete — `BuildStatusPanel.BindPcInput`), rebindable in **Settings → Game Keys → Build
+mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled the action.
 
 ### Building — god-mode camera and typing while building
 
@@ -2010,7 +1993,7 @@ All default to **KeyCode.None** except menu toggle. Grouped as in Settings → K
 | CORE | Toggle Menu (**Insert**), Toggle Radar, Bypass UI, Disable All, Inspect Player, Inspect Move |
 | AUTOMATION | Auto Foraging, Aura Farm, Water + Weed Radius, Auto Insect Farm, Auto Bird Farm, Fish Shadow Net, Mass Cook, Auto Puzzle, Auto Cat Play, Auto Dog Train, Auto Pet Wash, Feed All Cats, Feed All Dogs, Auto Snow Sculpture, Auto Sand Sculpture, Bird Vacuum, Spawn Bubble, Auto Repair, Auto Eat |
 | PLAYER | Noclip, Camera Toggle, Auto Ice Skating, Join My Town, Anti AFK, Bypass Overlap |
-| SPEED & TOOLS | Game Speed 1×/2×/5×/10×, Equip Axe / Net / Rod / Sprinkler / Bird Scanner / Pad, Pad Confirm / Cancel / Rotate / Move / Delete |
+| SPEED & TOOLS | Game Speed 1×/2×/5×/10×, Equip Axe / Net / Rod / Sprinkler / Bird Scanner / Pad |
 
 Rebind by clicking the button in Settings and pressing a new key. Mouse buttons are bindable too. Layout note: panel section heights are sized by row count (`BeginKeybindSection` rowCount) and the scroll height by `CalculateSettingsTabHeight` — both must be bumped when adding rows, or the new rows render outside the panel/scroll.
 

@@ -74,11 +74,6 @@ namespace HeartopiaMod
         private KeyCode keyEquipBirdScanner = KeyCode.None;
         private KeyCode keyEquipPad = KeyCode.None;
         private KeyCode keyEquipSeaCleaner = KeyCode.None;
-        private KeyCode keyPadConfirm = KeyCode.None;
-        private KeyCode keyPadCancel = KeyCode.None;
-        private KeyCode keyPadRotate = KeyCode.None;
-        private KeyCode keyPadMove = KeyCode.None;
-        private KeyCode keyPadDelete = KeyCode.None;
         private KeyCode keyAutoInsectFarm = KeyCode.None;
         private KeyCode keyAutoBirdFarm = KeyCode.None;
         private KeyCode keyMassCook = KeyCode.None;
@@ -1278,7 +1273,6 @@ namespace HeartopiaMod
                         this.AddOrUpdateMenuNotification("tool-equip", unequipped ? "Unequipping Sea Cleaner" : "Equipping Sea Cleaner", new Color(0.45f, 1f, 0.55f));
                     }
                 }
-                this.ProcessPadBuildHotkeysOnUpdate();
             }
 
             Breadcrumbs.Drop("ou.afterhotkeys");

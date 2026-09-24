@@ -144,11 +144,6 @@ namespace HeartopiaMod
             public int keyEquipSprinkler;
             public int keyEquipBirdScanner;
             public int keyEquipPad;
-            public int keyPadConfirm;
-            public int keyPadCancel;
-            public int keyPadRotate;
-            public int keyPadMove;
-            public int keyPadDelete;
             public int keyAutoInsectFarm;
             public int keyAutoBirdFarm;
             public int keyMassCook;
