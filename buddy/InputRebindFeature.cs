@@ -114,6 +114,9 @@ namespace HeartopiaMod
         private readonly List<Image> keyIconTargets = new List<Image>();
         private readonly List<Sprite> keyIconOriginals = new List<Sprite>();
         private readonly List<Sprite> keyIconApplied = new List<Sprite>();
+        // The hint's sizeDelta before our first write. Hint rects are sized to their own sprite
+        // (Del 62x40, Tab 68x40, a letter 40x40), so a swap across widths must resize the rect too.
+        private readonly List<Vector2> keyIconOriginalSizes = new List<Vector2>();
         private readonly List<int> keyIconTargetIds = new List<int>();
 
         // Containers the hints live under (the interaction bar's cell list, each HUD chip node).
@@ -233,6 +236,7 @@ namespace HeartopiaMod
                         this.keyIconTargets.RemoveAt(i);
                         this.keyIconOriginals.RemoveAt(i);
                         this.keyIconApplied.RemoveAt(i);
+                        this.keyIconOriginalSizes.RemoveAt(i);
                         this.keyIconTargetIds.RemoveAt(i);
                     }
                 }
@@ -257,6 +261,11 @@ namespace HeartopiaMod
                     if (want != null && (current == null || current.GetInstanceID() != want.GetInstanceID()))
                     {
                         image.sprite = want;
+                    }
+
+                    if (want != null)
+                    {
+                        FitKeyIconSize(image, want, this.keyIconOriginalSizes[i]);
                     }
                 }
             }
@@ -517,6 +526,7 @@ namespace HeartopiaMod
             this.keyIconTargets.Add(image);
             this.keyIconOriginals.Add(sprite);
             this.keyIconApplied.Add(replacement);
+            this.keyIconOriginalSizes.Add(image.rectTransform.sizeDelta);
             this.keyIconTargetIds.Add(id);
             this.RememberKeyIconRoot(image.transform);
         }
@@ -666,15 +676,42 @@ namespace HeartopiaMod
                 if (current != null && current.GetInstanceID() == applied.GetInstanceID())
                 {
                     image.sprite = original;
+                    RectTransform rect = image.rectTransform;
+                    if (rect != null && rect.anchorMin == rect.anchorMax)
+                    {
+                        rect.sizeDelta = this.keyIconOriginalSizes[i];
+                    }
                 }
             }
 
             this.keyIconTargets.Clear();
             this.keyIconOriginals.Clear();
             this.keyIconApplied.Clear();
+            this.keyIconOriginalSizes.Clear();
             this.keyIconTargetIds.Clear();
             // Roots are NOT cleared: they are scene containers, not our writes, and keeping them
             // means a changed layout re-applies on the next tick instead of after a full scan.
+        }
+
+        // Keeps the hint's height and gives it the replacement sprite's proportions. The game sizes
+        // each hint rect to its own sprite, so writing only Image.sprite stretched a 40x40 "V" across
+        // the 62x40 rect of the "Del" it replaced (wide pill, wide letter next to round O/P/F).
+        // Height is kept rather than the sprite's native size because the generated family can sit
+        // in a scaled rect. Stretch-anchored rects are left alone: there sizeDelta is not the size.
+        private static void FitKeyIconSize(Image image, Sprite sprite, Vector2 originalSize)
+        {
+            RectTransform rect = image.rectTransform;
+            float spriteHeight = sprite.rect.height;
+            if (rect == null || spriteHeight <= 0f || originalSize.y <= 0f || rect.anchorMin != rect.anchorMax)
+            {
+                return;
+            }
+
+            Vector2 want = new Vector2(Mathf.Round(originalSize.y * sprite.rect.width / spriteHeight), originalSize.y);
+            if (rect.sizeDelta != want)
+            {
+                rect.sizeDelta = want;
+            }
         }
 
         // Sprites pulled out of an atlas come back named "<name>(Clone)", so compare on the stem.
