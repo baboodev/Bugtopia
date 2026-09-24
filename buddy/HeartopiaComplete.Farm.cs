@@ -1049,6 +1049,58 @@ namespace HeartopiaMod
         // node isn't lost for minutes. The old flat 15s expired faster than a 2-3-dead-node loop
         // takes, so the farm circled the same depleted trees/bushes indefinitely.
         private const float FarmVisitedRetryStampSeconds = 15f;
+
+        // ⚠️ A COLLECT TIMEOUT WITH NO COLD EVIDENCE USED TO COST 15 s, EVERY TIME. A user log
+        // (2026-09-23 22:19-22:21) shows two Penny Bun spots taken in turns for three minutes:
+        // the bushes still had charges (CollectColdEvent availableNum 3->2->1, so the marker
+        // stayed available), but the walker parked 0.8-1.8 m ABOVE them on a ledge ("blocked at
+        // knee height, clear at chest height"), the aura reached nothing, the axe-checker capture
+        // fell back to the player's own netId, the wait timed out, the 15 s retry stamp expired,
+        // and the tour took the spot again. Nothing counted the failures. Now they escalate per
+        // spot: 1st timeout 15 s (streaming lag is real), 2nd 2 min, 3rd and on 10 min.
+        private readonly Dictionary<Vector3, int> farmNodeCollectTimeouts = new Dictionary<Vector3, int>();
+        private bool auraCollectSelfCaptureLogged;
+        private const float FarmNodeTimeoutSameSpot = 2.5f;
+
+        private void ForgetFarmNodeCollectTimeouts(Vector3 node)
+        {
+            Vector3 key = default;
+            bool found = false;
+            foreach (KeyValuePair<Vector3, int> pair in this.farmNodeCollectTimeouts)
+            {
+                if ((pair.Key - node).sqrMagnitude <= FarmNodeTimeoutSameSpot * FarmNodeTimeoutSameSpot)
+                {
+                    key = pair.Key;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (found)
+            {
+                this.farmNodeCollectTimeouts.Remove(key);
+            }
+        }
+
+        private float NoteFarmNodeCollectTimeout(Vector3 node, out int strikes)
+        {
+            strikes = 1;
+            Vector3 key = node;
+            foreach (KeyValuePair<Vector3, int> pair in this.farmNodeCollectTimeouts)
+            {
+                if ((pair.Key - node).sqrMagnitude <= FarmNodeTimeoutSameSpot * FarmNodeTimeoutSameSpot)
+                {
+                    key = pair.Key;
+                    strikes = pair.Value + 1;
+                    break;
+                }
+            }
+
+            this.farmNodeCollectTimeouts[key] = strikes;
+            return strikes <= 1 ? FarmVisitedRetryStampSeconds
+                : strikes == 2 ? FarmVisitedColdStampFallbackSeconds
+                : FarmVisitedColdStampMaxSeconds;
+        }
         // How old a visited stamp must be before the warm-purge may overrule it. Longer than the
         // retry stamp on purpose: a retry stamp expires on its own and never needs correcting.
         private const float FarmVisitedPurgeMinAge = 30f;
@@ -2280,6 +2332,21 @@ namespace HeartopiaMod
                 return;
             }
 
+            // The axe-checker hands back the PLAYER's own netId when nothing is in reach (every
+            // failed visit in the 2026-09-23 log: "owner captured netId=352081" = the player, at
+            // eleven different spots). That is not a node owner; capturing it made the wait look
+            // bound to a resource that does not exist. Leave the wait unbound — the marker and the
+            // timeout do the rest.
+            if (this.TryResolveSelfPlayerNetId(out uint selfNetId) && selfNetId != 0U && ownerNetId == selfNetId)
+            {
+                if (!this.auraCollectSelfCaptureLogged)
+                {
+                    this.auraCollectSelfCaptureLogged = true;
+                    this.AutoFarmLog($"Aura node capture ignored: the axe-checker returned the player's own netId ({ownerNetId}) — nothing in reach at {this.lastNodePosition}.");
+                }
+                return;
+            }
+
             // Most discovery paths register targets WITHOUT positions (owner-only), so the
             // cached anchor is usually zero — resolve the entity position on demand instead
             // (same chain the live cooldown sync uses). Owners that resolved >3m away are
@@ -2579,6 +2646,7 @@ namespace HeartopiaMod
                     float hopAnchor = Mathf.Max(this.auraCollectNodeConfirmedAt, this.auraCollectLastBackpackAt);
                     if (now - hopAnchor >= 1f || now - this.auraCollectNodeConfirmedAt >= 3f)
                     {
+                        this.ForgetFarmNodeCollectTimeouts(this.lastNodePosition);
                         this.AutoFarmLog($"Aura collect done after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (bagRefresh={(this.auraCollectLastBackpackAt >= 0f ? "yes" : "none")})");
                         // We just drained it — block for its real remaining cooldown.
                         this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
@@ -2703,7 +2771,20 @@ namespace HeartopiaMod
                 this.AutoFarmLog($"Aura collect wait timed out after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (marker={markerState}, label={(string.IsNullOrEmpty(nodeMarkerLabel) ? "<none>" : nodeMarkerLabel)}, clicked={this.autoCollectClickedSinceArrival})");
                 // Cooldown evidence at timeout => real/fallback block; otherwise short retry (streaming lag).
                 bool timedOutCold = (markerFound && markerOnCooldown) || (liveNodeFound && liveNodeCold);
-                this.StampVisitedNode(this.lastNodePosition, now + (timedOutCold ? this.GetVisitedColdStampSeconds(knownColdEndMs) : FarmVisitedRetryStampSeconds));
+                float stampSeconds;
+                if (timedOutCold)
+                {
+                    stampSeconds = this.GetVisitedColdStampSeconds(knownColdEndMs);
+                }
+                else
+                {
+                    stampSeconds = this.NoteFarmNodeCollectTimeout(this.lastNodePosition, out int strikes);
+                    if (strikes > 1)
+                    {
+                        this.AutoFarmLog($"Collect timeout #{strikes} at {this.lastNodePosition} with no cold evidence — parking it for {stampSeconds:F0}s.");
+                    }
+                }
+                this.StampVisitedNode(this.lastNodePosition, now + stampSeconds);
                 this.FinishCollectingCycle();
                 return;
             }
@@ -3522,6 +3603,7 @@ namespace HeartopiaMod
                 // Per-run state: a node that beat the walker last session deserves a fresh try, and
                 // the rescue cooldown should not carry over into a run that starts minutes later.
                 this.farmWalkNodeFailures.Clear();
+                this.farmNodeCollectTimeouts.Clear();
                 this.farmWalkLastRescueTeleportAt = 0f;
                 this.lastFarmNodeActivityAt = 0f;
                 this.farmWalkBlockedGraphNodes.Clear();  // bans are per-run heuristics
@@ -3561,6 +3643,7 @@ namespace HeartopiaMod
                 // common path and quietly fails for exactly the cases where stale state is likeliest.
                 this.ResetFarmWalkRunState();
                 this.farmWalkNodeFailures.Clear();
+                this.farmNodeCollectTimeouts.Clear();
                 this.farmWalkBlockedGraphNodes.Clear();
                 this.farmWalkLastRescueTeleportAt = 0f;
                 this.ResetFarmTour();
