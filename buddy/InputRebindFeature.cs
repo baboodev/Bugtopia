@@ -691,15 +691,26 @@ namespace HeartopiaMod
             string stem = (clone >= 0 ? spriteName.Substring(0, clone) : spriteName).Trim();
 
             // Chip first: both start with "keymapping_", only one starts with "keymapping_KB_".
+            string key;
             if (stem.StartsWith(KeyChipIconPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 chip = true;
-                return stem.Substring(KeyChipIconPrefix.Length);
+                key = stem.Substring(KeyChipIconPrefix.Length);
+            }
+            else if (stem.StartsWith(KeyIconPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                key = stem.Substring(KeyIconPrefix.Length);
+            }
+            else
+            {
+                return null;
             }
 
-            return stem.StartsWith(KeyIconPrefix, StringComparison.OrdinalIgnoreCase)
-                ? stem.Substring(KeyIconPrefix.Length)
-                : null;
+            // The build panel's hints (2026-09-24, keymapping_icon_KB_*) spell Delete "Del", while
+            // the generated family and IconKeyForControlPath say "Delete" — one name, or a rebound
+            // Delete never relabels its build hint. The combined CtrlZ / CtrlShiftZ / Ctrl sprites
+            // stay as they are: there is no Ctrl+<key> art to swap them to.
+            return string.Equals(key, "Del", StringComparison.OrdinalIgnoreCase) ? "Delete" : key;
         }
 
         // Same family when it has the key; otherwise the other one. A hint in the wrong STYLE is a
