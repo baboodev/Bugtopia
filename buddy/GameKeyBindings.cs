@@ -54,13 +54,43 @@ namespace HeartopiaMod
         //                                      current interact target — see CameraModeHotkeyGuard)
         // These are exactly the keys the camera-mode interaction bar uses, and the ones whose hint
         // sprites sit above the tracked object.
+        // Since 2026-09-24 the build panel ALSO uses 1-4 (BuildStatusPanel.OnPc1..4 -> Furniture /
+        // Materials / Paint / Module tabs). One binding cannot get two rows, so the caption says both.
         private static readonly string[][] GameKeyFeaturedDirectActions =
         {
-            new[] { "1", "Interact slot 1" },
-            new[] { "2", "Interact slot 2" },
-            new[] { "3", "Interact slot 3" },
-            new[] { "4", "Interact slot 4" },
+            new[] { "1", "Interact slot 1  ·  Build: Furniture tab" },
+            new[] { "2", "Interact slot 2  ·  Build: Materials tab" },
+            new[] { "3", "Interact slot 3  ·  Build: Paint tab" },
+            new[] { "4", "Interact slot 4  ·  Build: Module tab" },
             new[] { "q", "Switch interact bar" },
+        };
+
+        // Build-mode PC shortcuts added by the 2026-09-24 game update — BuildStatusPanel.BindPcInput
+        // registers them through UIManager.RegisterViewInput on InputEvent.KeyX, and every KeyX is
+        // AllKeyboardKeysMap's self-named action, so rebinding these rows moves the shortcut. Each
+        // key presses the matching visible build button. Not listed because the game reads them
+        // raw (Input.GetKey) and they cannot be rebound: WASD camera pan and Ctrl+wheel plane height
+        // in Advanced mode, and the Ctrl / Shift modifiers of Ctrl+Z / Ctrl+Shift+Z.
+        //
+        // Esc is NOT GameActionMap "cancle" (that is InputEvent.ChatCancel — chat only; it merely
+        // shares the physical key). Every UIView registers InputEvent.KeyEscape -> the direct
+        // "escape" action and presses its EscBtn (UIView.RegisterPcControl / EscOnClick);
+        // BuildStatusPanel overrides EscBtn: cancel_btn (the ESC-labelled button, CancelAllActions)
+        // when shown, else close_btn in Free with the action bar open, else the finish widget's back.
+        private static readonly string[][] GameKeyBuildDirectActions =
+        {
+            new[] { "enter", "Build: confirm" },
+            new[] { "numpadEnter", "Build: confirm (numpad)" },
+            new[] { "delete", "Build: pack to backpack / demolish" },
+            new[] { "r", "Build: rotate" },
+            new[] { "m", "Build: move" },
+            new[] { "k", "Build: spatial axis (floating placement)" },
+            new[] { "o", "Build: size / set" },
+            new[] { "p", "Build: dye / pick colour" },
+            new[] { "c", "Build: connect / mirror / track" },
+            new[] { "z", "Build: undo (Ctrl+Z) / redo (Ctrl+Shift+Z)" },
+            new[] { "tab", "Build: switch normal / Advanced mode" },
+            new[] { "escape", "Build: cancel / close (Esc of every panel)" },
         };
 
         // Display order + section titles. A map missing from the asset is simply skipped.
@@ -290,14 +320,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                for (int f = 0; f < GameKeyFeaturedDirectActions.Length; f++)
-                {
-                    if (string.Equals(row.Action, GameKeyFeaturedDirectActions[f][0], StringComparison.Ordinal))
-                    {
-                        row.Caption = GameKeyFeaturedDirectActions[f][1];
-                        break;
-                    }
-                }
+                row.Caption = FeaturedDirectCaption(row.Action) ?? string.Empty;
 
                 string shared;
                 if (gameplayByPath.TryGetValue(row.DefaultPath, out shared))
@@ -309,15 +332,24 @@ namespace HeartopiaMod
 
         internal static bool IsFeaturedDirectAction(string action)
         {
-            for (int f = 0; f < GameKeyFeaturedDirectActions.Length; f++)
+            return FeaturedDirectCaption(action) != null;
+        }
+
+        // Caption of a hoisted direct key (camera-mode or build-mode table), null if it is neither.
+        private static string FeaturedDirectCaption(string action)
+        {
+            foreach (string[][] table in new[] { GameKeyFeaturedDirectActions, GameKeyBuildDirectActions })
             {
-                if (string.Equals(action, GameKeyFeaturedDirectActions[f][0], StringComparison.Ordinal))
+                for (int f = 0; f < table.Length; f++)
                 {
-                    return true;
+                    if (string.Equals(action, table[f][0], StringComparison.Ordinal))
+                    {
+                        return table[f][1];
+                    }
                 }
             }
 
-            return false;
+            return null;
         }
 
         // Only keyboard and mouse are offered: gamepad/joystick/touch paths exist in the asset but

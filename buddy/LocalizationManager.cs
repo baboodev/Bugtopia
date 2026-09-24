@@ -25,6 +25,8 @@ namespace HeartopiaMod
             // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
             { "Game Keys", "Game Keys" },
             { "Camera mode", "Camera mode" },
+            { "Build mode", "Build mode" },
+            { "Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo.", "Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo." },
             { "Map Spots", "Map Spots" },
             { "Rebinding moves every action sharing that key — the game draws one hint per key.", "Rebinding moves every action sharing that key — the game draws one hint per key." },
             { "GAME KEY BINDINGS", "GAME KEY BINDINGS" },
@@ -1260,6 +1262,8 @@ namespace HeartopiaMod
             // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
             { "Game Keys", "Teclas del juego" },
             { "Camera mode", "Modo cámara" },
+            { "Build mode", "Modo construcción" },
+            { "Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo.", "No se pueden reasignar (el juego los lee directamente): desplazamiento WASD y Ctrl+rueda en el modo avanzado, Ctrl / Shift para deshacer / rehacer." },
             { "Map Spots", "Puntos del mapa" },
             { "Rebinding moves every action sharing that key — the game draws one hint per key.", "Reasignar mueve todas las acciones de esa tecla: el juego dibuja una sola pista por tecla." },
             { "GAME KEY BINDINGS", "TECLAS DEL JUEGO" },
@@ -2493,6 +2497,8 @@ namespace HeartopiaMod
             // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
             { "Game Keys", "游戏按键" },
             { "Camera mode", "镜头模式" },
+            { "Build mode", "建造模式" },
+            { "Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo.", "无法重新绑定（游戏直接读取）：高级模式中的 WASD 平移和 Ctrl+滚轮，以及撤销 / 重做用的 Ctrl / Shift。" },
             { "Map Spots", "地图标点" },
             { "Rebinding moves every action sharing that key — the game draws one hint per key.", "重新绑定会移动该按键上的所有操作 — 游戏每个按键只画一个提示。" },
             { "GAME KEY BINDINGS", "游戏按键设置" },
@@ -3724,6 +3730,8 @@ namespace HeartopiaMod
             // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
             { "Game Keys", "Teclas do jogo" },
             { "Camera mode", "Modo câmera" },
+            { "Build mode", "Modo construção" },
+            { "Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo.", "Não reatribuíveis (o jogo lê diretamente): movimento WASD e Ctrl+roda no modo avançado, Ctrl / Shift para desfazer / refazer." },
             { "Map Spots", "Pontos do mapa" },
             { "Rebinding moves every action sharing that key — the game draws one hint per key.", "Revincular move todas as ações dessa tecla — o jogo desenha uma dica por tecla." },
             { "GAME KEY BINDINGS", "TECLAS DO JOGO" },
@@ -4950,6 +4958,8 @@ namespace HeartopiaMod
             // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
             { "Game Keys", "ปุ่มของเกม" },
             { "Camera mode", "โหมดกล้อง" },
+            { "Build mode", "โหมดสร้าง" },
+            { "Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo.", "ตั้งปุ่มใหม่ไม่ได้ (เกมอ่านโดยตรง): เลื่อนด้วย WASD และ Ctrl+ล้อเมาส์ในโหมดขั้นสูง, Ctrl / Shift สำหรับเลิกทำ / ทำซ้ำ" },
             { "Map Spots", "จุดบนแผนที่" },
             { "Rebinding moves every action sharing that key — the game draws one hint per key.", "การผูกใหม่จะย้ายทุกการกระทำที่ใช้ปุ่มนั้น — เกมแสดงคำใบ้เดียวต่อปุ่ม" },
             { "GAME KEY BINDINGS", "การตั้งค่าปุ่มของเกม" },
@@ -6176,6 +6186,8 @@ namespace HeartopiaMod
             // Settings -> Game Keys (HeartopiaComplete.UguiGameKeysContent.cs)
             { "Game Keys", "게임 키" },
             { "Camera mode", "카메라 모드" },
+            { "Build mode", "건설 모드" },
+            { "Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo.", "재지정 불가 (게임이 직접 읽음): 고급 모드의 WASD 이동과 Ctrl+휠, 실행 취소 / 다시 실행의 Ctrl / Shift." },
             { "Map Spots", "지도 지점" },
             { "Rebinding moves every action sharing that key — the game draws one hint per key.", "키를 다시 지정하면 그 키를 쓰는 모든 동작이 함께 옮겨집니다 — 게임은 키당 힌트를 하나만 표시합니다." },
             { "GAME KEY BINDINGS", "게임 키 설정" },

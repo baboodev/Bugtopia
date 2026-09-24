@@ -141,25 +141,24 @@ namespace HeartopiaMod
             // anonymously ("1", "q") among 110 siblings behind a collapsed toggle — which is exactly
             // where they could not be found. These are also the only rows whose hint sprites the
             // icon layer can relabel, since hints resolve through InputEvent.KeyN -> that map.
-            List<GameKeyRow> featured = new List<GameKeyRow>();
-            for (int f = 0; f < GameKeyFeaturedDirectActions.Length; f++)
-            {
-                string want = GameKeyFeaturedDirectActions[f][0];
-                for (int i = 0; i < rows.Count; i++)
-                {
-                    if (string.Equals(rows[i].Map, GameKeyDirectMapName, StringComparison.Ordinal)
-                        && string.Equals(rows[i].Action, want, StringComparison.Ordinal))
-                    {
-                        featured.Add(rows[i]);
-                        break;
-                    }
-                }
-            }
-
+            List<GameKeyRow> featured = PickDirectRows(rows, GameKeyFeaturedDirectActions);
             if (featured.Count > 0)
             {
                 yCur = this.BuildUguiGameKeysPanel(handle, scrollContent, featured,
                     this.L("Camera mode"), pad, yCur, panelW, rowW, rowText, out GameObject _);
+            }
+
+            // The build-panel shortcuts (2026-09-24) — also direct keys, so without this they sit
+            // unnamed ("k", "delete") inside the collapsed 110-row list.
+            List<GameKeyRow> buildKeys = PickDirectRows(rows, GameKeyBuildDirectActions);
+            if (buildKeys.Count > 0)
+            {
+                yCur = this.BuildUguiGameKeysPanel(handle, scrollContent, buildKeys,
+                    this.L("Build mode"), pad, yCur, panelW, rowW, rowText, out GameObject _);
+                GameObject buildNote = this.CreateUguiLabel(scrollContent, "BuildModeNote",
+                    this.L("Not rebindable (the game reads them directly): WASD pan and Ctrl+wheel in Advanced mode, Ctrl / Shift for undo / redo."), 11f, this.UguiKitMutedColor(), false);
+                PlaceUguiTopLeft(buildNote, pad + 4f, yCur - 8f, panelW - 8f, 32f);
+                yCur += 30f;
             }
 
             // Everything except the direct-key map, in the documented display order.
@@ -258,6 +257,27 @@ namespace HeartopiaMod
         }
 
         private const string GameKeyDirectMapName = "AllKeyboardKeysMap";
+
+        // The direct-map rows named by a featured table, in the table's order.
+        private static List<GameKeyRow> PickDirectRows(List<GameKeyRow> rows, string[][] table)
+        {
+            List<GameKeyRow> picked = new List<GameKeyRow>();
+            for (int f = 0; f < table.Length; f++)
+            {
+                string want = table[f][0];
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    if (string.Equals(rows[i].Map, GameKeyDirectMapName, StringComparison.Ordinal)
+                        && string.Equals(rows[i].Action, want, StringComparison.Ordinal))
+                    {
+                        picked.Add(rows[i]);
+                        break;
+                    }
+                }
+            }
+
+            return picked;
+        }
 
         // Sort key for a direct-map row: the control name, with single characters padded so "g"
         // lands among the letters instead of ahead of every multi-character name.
