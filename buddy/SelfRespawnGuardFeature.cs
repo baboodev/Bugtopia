@@ -23,10 +23,18 @@ namespace HeartopiaMod
     //
     // Driven by the game's own PlayerUnSpawnEvent / PlayerSpawnEvent (GLOBAL, payload
     // { uint playerNetId }, BasePlayerComponent.OnUnSpawn / OnSpawned), filtered to our netId.
-    // Between the two the "respawn gap" is open: GetLocalPlayer() returns null, the farm state
-    // machine and the aura hold (their clocks do not advance), and the noclip caches are dropped on
-    // both edges. The gap closes on the spawn event plus a short settle, or after a hard bound in
-    // case the spawn event is missed.
+    // Between the two the "respawn gap" is open: the farm state machine and the aura hold (their
+    // clocks do not advance). Until the spawn event arrives, GetLocalPlayer() returns null and
+    // noclip does not resolve the player; the caches are dropped on both edges. The gap closes on
+    // the spawn event plus a short settle, or after a hard bound in case the spawn event is missed.
+    //
+    // Closing it also checks WHERE the player came back. A Stealth Foraging area hop dives ~30 m
+    // under the ground, and one respawn there (2026-09-24, Ideapad) never fired its spawn event:
+    // the new entity fell for the whole 25 s bound and was found at y = -1254, so the radar saw no
+    // nodes and the farm abandoned the area. The mod teleport that triggered the respawn is
+    // remembered; if the player is back more than 30 m from it, that teleport is repeated once,
+    // and the Stealth Foraging hover is pinned to it again instead of re-seeding wherever the
+    // player happens to be.
     public partial class HeartopiaComplete
     {
         private const string PlayerUnSpawnEventName = "ScriptsRefactory.DataAndProtocol.Events.PlayerUnSpawnEvent";
@@ -38,9 +46,21 @@ namespace HeartopiaMod
         private const float SelfRespawnSettleSeconds = 0.5f;
         // WaitSpawnPrepared gives up after 20 s on the client; the server's own gap is ~2 s.
         private const float SelfRespawnGapMaxSeconds = 25f;
+        // A mod teleport this recent is what the server reacted to.
+        private const float SelfRespawnTeleportWindowSeconds = 2f;
+        // Back farther than this from that teleport's target = the respawn put us somewhere else.
+        private const float SelfRespawnTargetToleranceMeters = 30f;
 
         // Read by the static GetLocalPlayer(), hence static.
         private static bool selfPlayerRespawnGap;
+        // The part of the gap before the spawn event: no entity to read or drive at all.
+        private static bool selfPlayerAwaitingSpawn;
+
+        private Vector3 selfRespawnLastTeleportTarget;
+        private float selfRespawnLastTeleportAt = -999f;
+        private bool selfRespawnHasTarget;
+        private Vector3 selfRespawnTarget;
+        private bool selfRespawnRetriedTarget;
 
         private bool selfRespawnRegistered;
         private uint selfRespawnNetId;
@@ -50,6 +70,18 @@ namespace HeartopiaMod
         private int selfRespawnCount;
 
         internal static bool IsSelfPlayerRespawnGap => selfPlayerRespawnGap;
+        internal static bool IsSelfPlayerAwaitingSpawn => selfPlayerAwaitingSpawn;
+
+        // Called by both TeleportToLocation overloads. A new destination re-arms the one-shot retry.
+        private void NoteSelfTeleportTarget(Vector3 target)
+        {
+            if ((target - this.selfRespawnLastTeleportTarget).sqrMagnitude > 1f)
+            {
+                this.selfRespawnRetriedTarget = false;
+            }
+            this.selfRespawnLastTeleportTarget = target;
+            this.selfRespawnLastTeleportAt = Time.unscaledTime;
+        }
 
         // Every frame from OnUpdate (cheap when idle: one bool and one float compare).
         private void ProcessSelfRespawnGuardOnUpdate()
@@ -115,11 +147,14 @@ namespace HeartopiaMod
             {
                 this.selfRespawnCount++;
                 this.selfRespawnGapOpenedAt = Time.unscaledTime;
+                this.selfRespawnHasTarget = Time.unscaledTime - this.selfRespawnLastTeleportAt <= SelfRespawnTeleportWindowSeconds;
+                this.selfRespawnTarget = this.selfRespawnLastTeleportTarget;
                 ModLogger.Msg("[SelfRespawn] the server removed our player (respawn #" + this.selfRespawnCount
                     + ") — holding the farm and the aura until it is back.");
             }
 
             selfPlayerRespawnGap = true;
+            selfPlayerAwaitingSpawn = true;
             this.selfRespawnReleaseAt = -1f;
             this.DropSelfPlayerCaches();
         }
@@ -131,17 +166,66 @@ namespace HeartopiaMod
                 return;
             }
 
-            // The new entity exists now; its skeleton is findable, so the caches can re-resolve.
+            // The new entity exists now; its skeleton is findable, so the caches can re-resolve,
+            // and noclip may hold it during the settle (a Stealth dive has no ground to land on).
             this.DropSelfPlayerCaches();
+            selfPlayerAwaitingSpawn = false;
             this.selfRespawnReleaseAt = Time.unscaledTime + SelfRespawnSettleSeconds;
         }
 
         private void CloseSelfRespawnGap(string reason)
         {
+            bool sawSpawn = !selfPlayerAwaitingSpawn;
             selfPlayerRespawnGap = false;
+            selfPlayerAwaitingSpawn = false;
             this.selfRespawnReleaseAt = -1f;
-            this.DropSelfPlayerCaches();
+            if (!sawSpawn)
+            {
+                this.DropSelfPlayerCaches(); // on a spawn event they were dropped then
+            }
             ModLogger.Msg("[SelfRespawn] player back (" + reason + ").");
+            this.RestoreSelfRespawnTarget();
+        }
+
+        // See the file header: put the player back where the teleport that caused the respawn was
+        // going. One retry per destination: if the server moves us away again it has an opinion,
+        // and a second round would only chain respawns.
+        private void RestoreSelfRespawnTarget()
+        {
+            if (!this.selfRespawnHasTarget)
+            {
+                return;
+            }
+
+            this.selfRespawnHasTarget = false;
+            Vector3 target = this.selfRespawnTarget;
+            if (!this.TryGetNoclipSelfAnchorPose(out Vector3 selfPos, out _, out _, out string source))
+            {
+                ModLogger.Msg("[SelfRespawn] position after the respawn unreadable — not checking it against " + target.ToString("F1") + ".");
+                return;
+            }
+
+            float offBy = Vector3.Distance(selfPos, target);
+            if (offBy > SelfRespawnTargetToleranceMeters)
+            {
+                if (this.selfRespawnRetriedTarget)
+                {
+                    ModLogger.Msg("[SelfRespawn] back at " + selfPos.ToString("F1") + ", " + offBy.ToString("F0")
+                        + " m from " + target.ToString("F1") + " again after a retry — leaving it there.");
+                    return;
+                }
+
+                this.selfRespawnRetriedTarget = true;
+                ModLogger.Msg("[SelfRespawn] back at " + selfPos.ToString("F1") + " (via " + source + "), "
+                    + offBy.ToString("F0") + " m from the teleport target " + target.ToString("F1") + " — repeating that teleport.");
+                this.TeleportToLocation(target);
+            }
+
+            // The Stealth Foraging hover is the dive target, not wherever the new entity ended up.
+            if (this.StealthForagingActive)
+            {
+                this.PinStealthForagingNoclipHold(target);
+            }
         }
 
         // Everything that holds our player across frames. Both edges call it: on the unspawn so

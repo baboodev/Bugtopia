@@ -235,7 +235,12 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   - makes `GetLocalPlayer()` return null instead of a nearby remote player's skeleton, and keeps
     `TeleportToLocation` from writing to one;
   - drops the noclip drive cache on both edges — it used to keep driving the deleted component, so
-    noclip and Stealth Foraging lost the player until the next world change.
+    noclip and Stealth Foraging lost the player until the next world change. Noclip may take the new
+    entity from the spawn event on (during the settle), so a Stealth dive does not fall meanwhile.
+- On close it checks where the player came back against the mod teleport that caused the respawn
+  (within the last 2 s). More than 30 m off (seen once: a Stealth area dive whose spawn event never
+  came, player found at y = -1254) repeats that teleport, once per destination; Stealth Foraging's
+  hover is re-pinned to the dive target either way.
 - Log: `[SelfRespawn] the server removed our player (respawn #n)` / `player back (…)`.
   Source: `buddy/SelfRespawnGuardFeature.cs`.
 

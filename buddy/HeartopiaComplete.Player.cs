@@ -655,7 +655,7 @@ namespace HeartopiaMod
         {
             // While the server re-creates our player there is no local skeleton, and the Find below
             // would return a nearby REMOTE player (SelfRespawnGuardFeature.cs).
-            if (IsSelfPlayerRespawnGap)
+            if (IsSelfPlayerAwaitingSpawn)
             {
                 return null;
             }
