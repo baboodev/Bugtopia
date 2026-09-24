@@ -317,6 +317,57 @@ namespace HeartopiaMod
             }
         }
 
+        // InputEvent._Count (ScriptsRefactory.BaseService.Input.InputEvent): Move = 0 .. Interaction4 = 154.
+        private const int KeyCaptureMutedInputEventCount = 155;
+
+        // Covers the release of the captured key and the frame the capture ends on: the capture
+        // pollers bind on key DOWN, and the game would otherwise still see that press or its hold.
+        private const float KeyCaptureInputGrace = 0.35f;
+
+        // While a Keybinds or Game Keys row waits for a key, the key the user presses is meant for
+        // the mod alone - without this the game ran it too (Esc opened its menu, E interacted, a
+        // digit swapped the tool). Mutes every game InputEvent through MonoInputManager's refcounted
+        // DisableInput, so it stacks with the menu Move block and the build text-input guard.
+        // Called every frame from OnUpdate, so it always sees capture end and can never leave the
+        // game muted.
+        private void UpdateKeyCaptureInputBlock()
+        {
+            float now = Time.unscaledTime;
+            bool capturing = !string.IsNullOrEmpty(this.keyBindingActive) || this.gameKeyCaptureIndex >= 0;
+            if (capturing)
+            {
+                this.keyCaptureInputReleaseAt = now + KeyCaptureInputGrace;
+            }
+            bool want = capturing || now < this.keyCaptureInputReleaseAt;
+            if (want == this.keyCaptureInputDisabled)
+            {
+                return;
+            }
+
+            if (want)
+            {
+                // The first call proves the input manager is reachable; only then commit to the
+                // whole set, so a half-applied disable can't leave the refcounts unbalanced.
+                if (!this.TrySetMonoInputDisabled(0, true))
+                {
+                    return; // retry next frame
+                }
+                for (int e = 1; e < KeyCaptureMutedInputEventCount; e++)
+                {
+                    this.TrySetMonoInputDisabled(e, true);
+                }
+                this.keyCaptureInputDisabled = true;
+            }
+            else
+            {
+                for (int e = 0; e < KeyCaptureMutedInputEventCount; e++)
+                {
+                    this.TrySetMonoInputDisabled(e, false);
+                }
+                this.keyCaptureInputDisabled = false;
+            }
+        }
+
         // How far the axis must have moved behind our back before we treat it as the game's doing
         // rather than smoothing noise. Comfortably above a fast mouse frame's own contribution
         // (which is already folded into the accumulator, so it never shows up here) and well below

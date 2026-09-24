@@ -646,6 +646,7 @@ namespace HeartopiaMod
             // game's MonoInputManager (the player isn't driven by Unity's CharacterController.Move),
             // so no hot-path Harmony patch is installed for this.
             this.UpdateMenuMovementInputBlock();
+            this.UpdateKeyCaptureInputBlock();
             Breadcrumbs.Drop("ou.patched");
 
             if (BirdNetFarm.IsEnabled)
@@ -4752,6 +4753,8 @@ namespace HeartopiaMod
         // True while we have an outstanding DisableInput(Move) on the game's MonoInputManager
         // because the mod menu is open with "block game input" on. Must be balanced 1:1 with EnableInput.
         private bool menuMoveInputDisabled = false;
+        private bool keyCaptureInputDisabled = false;
+        private float keyCaptureInputReleaseAt = -999f;
 
         // Bypass overlap building state (patch = Mono NativeDetours in BuildingFreeRotateFeature.cs)
         private bool bypassOverlapEnabled = false;
