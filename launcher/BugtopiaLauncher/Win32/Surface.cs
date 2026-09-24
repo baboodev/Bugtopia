@@ -462,7 +462,15 @@ namespace Bugtopia.Launcher.Win32
             {
                 case ButtonKind.Checkbox:
                 {
-                    float box = S(16), top = (h - box) / 2;
+                    // A label with too little room wraps rather than running under its neighbour; the box
+                    // then sits on its first line, not in the middle of the paragraph.
+                    float box = S(16), labelW = w - S(24);
+                    TextBlock wrapped = Fonts.Measure(Fonts.Check, b.Text) <= labelW + 0.5f
+                        ? null
+                        : TextBlock.Layout(new List<TextRun> { new TextRun(b.Text) }, Fonts.Check, Fonts.Check,
+                                           labelW, Fonts.Check.LineHeight);
+                    float labelTop = wrapped == null ? 0 : (h - wrapped.Height) / 2;
+                    float top = MathF.Max(0, labelTop + (wrapped == null ? h : Fonts.Check.LineHeight) / 2 - box / 2);
                     if (b.Checked)
                     {
                         Gdip.FillRoundRect(g, Gdip.Argb(b.Hover ? AccentHover : Accent), 0, top, box, box, S(3));
@@ -477,18 +485,14 @@ namespace Bugtopia.Launcher.Win32
                         Gdip.StrokeRoundRect(g, Gdip.Argb(0xa5b4fc), -S(2), top - S(2), box + S(4), box + S(4), S(4), MathF.Max(2, S(2)));
                     Gdip.End(g);
 
-                    // A label with too little room wraps rather than running under its neighbour.
-                    float labelW = w - S(24);
-                    if (Fonts.Measure(Fonts.Check, b.Text) <= labelW + 0.5f)
+                    if (wrapped == null)
                     {
                         DrawLabel(dc, Fonts.Check, b.Text, S(24), 0, labelW, h, TextMain, false);
                     }
                     else
                     {
-                        TextBlock block = TextBlock.Layout(new List<TextRun> { new TextRun(b.Text) }, Fonts.Check, Fonts.Check,
-                                                           labelW, Fonts.Check.LineHeight);
                         SetBkMode(dc, TRANSPARENT);
-                        block.Draw(dc, S(24), (h - block.Height) / 2, ColorRef(TextMain), ColorRef(TextMain));
+                        wrapped.Draw(dc, S(24), labelTop, ColorRef(TextMain), ColorRef(TextMain));
                     }
                     return;
                 }

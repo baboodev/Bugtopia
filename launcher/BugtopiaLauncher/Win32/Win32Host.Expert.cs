@@ -560,18 +560,29 @@ namespace Bugtopia.Launcher.Win32
             var playSize = Measure(play);
             bool cancellable = countdown || waiting;
 
-            // The buttons never shrink (white-space: nowrap); a checkbox's label wraps instead when the
-            // row is too narrow for all of it, as the page's flex row did.
+            // The buttons never shrink (white-space: nowrap), so the checkboxes take what is left of the
+            // row. Squeezing a label into a sliver a couple of words wide reads as broken, so once the
+            // room is below what the wider label needs, the pair moves to a row of its own above the
+            // buttons - side by side when they fit, stacked when they do not.
             float buttonsW = prepareSize.Width + generateSize.Width + playSize.Width + S(12) * 2 +
                              (cancellable ? cancelSize.Width + S(12) : 0);
             float checkRoom = width - buttonsW - S(12);
-            forceSize = WrapLabel(force, forceSize, checkRoom);
-            waitSize = WrapLabel(waitForGame, waitSize, checkRoom);
+            bool checksOwnRow = MathF.Max(forceSize.Width, waitSize.Width) > checkRoom;
+            bool checksSideBySide = checksOwnRow && forceSize.Width + S(16) + waitSize.Width <= width;
+            if (!checksOwnRow)
+            {
+                forceSize = WrapLabel(force, forceSize, checkRoom);
+                waitSize = WrapLabel(waitForGame, waitSize, checkRoom);
+            }
 
-            float checksH = forceSize.Height + S(6) + waitSize.Height;
-            float rowH = MathF.Max(checksH, MathF.Max(prepareSize.Height, MathF.Max(generateSize.Height, playSize.Height)));
+            float checksH = checksSideBySide
+                ? MathF.Max(forceSize.Height, waitSize.Height)
+                : forceSize.Height + S(6) + waitSize.Height;
+            float buttonsH = MathF.Max(prepareSize.Height, MathF.Max(generateSize.Height, playSize.Height));
+            float rowH = checksOwnRow ? buttonsH : MathF.Max(checksH, buttonsH);
             float kbdHeight = Fonts.Kbd.LineHeight + S(1) * 2 + border * 2;
-            float footerH = rowH + S(10) + MathF.Max(Fonts.Hint.LineHeight, kbdHeight);
+            float footerH = (checksOwnRow ? checksH + S(10) : 0) +
+                            rowH + S(10) + MathF.Max(Fonts.Hint.LineHeight, kbdHeight);
 
             logX = padX;
             logY = y;
@@ -585,9 +596,19 @@ namespace Bugtopia.Launcher.Win32
 
             // [Force regenerate]  ....... [Prepare] [Generate interop] ([Cancel]) [Launch]
             // [I start the game myself]
-            float checksY = y + (rowH - checksH) / 2;
+            // - or, when the buttons leave the checkboxes no room, a row of their own first:
+            // [Force regenerate] [I start the game myself]
+            // ................................ [Prepare] [Generate interop] ([Cancel]) [Launch]
+            float checksY = checksOwnRow ? y : y + (rowH - checksH) / 2;
             PlaceScrolled(force, padX, checksY, forceSize.Width, forceSize.Height, true);
-            PlaceScrolled(waitForGame, padX, checksY + forceSize.Height + S(6), waitSize.Width, waitSize.Height, true);
+            if (checksSideBySide)
+                PlaceScrolled(waitForGame, padX + forceSize.Width + S(16), checksY,
+                              waitSize.Width, waitSize.Height, true);
+            else
+                PlaceScrolled(waitForGame, padX, checksY + forceSize.Height + S(6),
+                              waitSize.Width, waitSize.Height, true);
+            if (checksOwnRow)
+                y += checksH + S(10);
 
             float bx = padX + width - playSize.Width;
             PlaceScrolled(play, bx, y + (rowH - playSize.Height) / 2, playSize.Width, playSize.Height, true);
