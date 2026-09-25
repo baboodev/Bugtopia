@@ -110,6 +110,10 @@ namespace HeartopiaMod
         private int uguiDyeSyncedStaticId = -1;
         private string uguiDyeStatus = string.Empty;
         private float uguiDyeNextFocusAt;
+        // Set while the picker writes the hex field itself. InputField.text's setter fires
+        // onValueChanged synchronously, so without this the display refresh re-enters the input
+        // path and stages a dye edit nobody asked for (see OnUguiDyeHexChanged).
+        private bool uguiDyeHexWriting;
 
         // The user-facing switch (Self -> Building). Persisted as furnitureDyePickerEnabled.
         private bool furnitureDyePickerEnabled;
@@ -315,7 +319,46 @@ namespace HeartopiaMod
 
             this.uguiDyeApplyPending = false;
             this.uguiDyeNextApplyAt = Time.unscaledTime + UguiDyeApplyIntervalSec;
-            this.ApplyUguiDyeSelection(target, this.CurrentUguiDyePacked());
+
+            int packed = this.CurrentUguiDyePacked();
+            if (this.UguiDyeSelectedPartAlreadyIs(target, packed))
+            {
+                return;
+            }
+            this.ApplyUguiDyeSelection(target, packed);
+        }
+
+        // True when every body of the selected part already carries `packed` - on the object, or
+        // as its default when the object is undyed. Staging that would be a paid no-op.
+        private bool UguiDyeSelectedPartAlreadyIs(FurnitureDyeTarget target, int packed)
+        {
+            int idx = Mathf.Clamp(this.uguiDyeSelectedPart, 0, target.Parts.Count - 1);
+            List<FurnitureDyeSubPart> sub = target.Parts[idx].Sub;
+            for (int i = 0; i < sub.Count; i++)
+            {
+                int have = target.Current.TryGetValue(sub[i].Body, out int live) ? live : sub[i].DefaultColor;
+                if (!UguiDyeSameColour(have, packed))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // The picker holds HSV and packs back to RGB, so a colour adopted from the object comes
+        // back up to 1/255 off per channel. That is not a choice the player made - treat it as
+        // the same colour, or the no-op guard above would wave the round-trip through as "new".
+        private static bool UguiDyeSameColour(int a, int b)
+        {
+            for (int shift = 8; shift <= 24; shift += 8)
+            {
+                int d = ((a >> shift) & 0xFF) - ((b >> shift) & 0xFF);
+                if (d > 1 || d < -1)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private int CurrentUguiDyePacked()
@@ -450,6 +493,15 @@ namespace HeartopiaMod
 
         private void OnUguiDyeHexChanged(string text)
         {
+            // BUG FIX: the picker's own display refresh assigns HexField.text, and that fires this
+            // handler. Treating it as input staged the item's CURRENT colour the moment the window
+            // appeared - in panel mode a Confirm then charged a dye for a no-op, and in build mode
+            // merely focusing an object re-wrote its colours into the build save. Only the player's
+            // typing is input.
+            if (this.uguiDyeHexWriting)
+            {
+                return;
+            }
             if (!TryParseFurnitureDyeHex(text, out int packed))
             {
                 return; // half-typed input is not an error — just not a colour yet
@@ -527,7 +579,15 @@ namespace HeartopiaMod
                 // is harmless, but skip it while the field has focus so typing is never stomped.
                 if (!handle.HexField.isFocused)
                 {
-                    handle.HexField.text = hex;
+                    this.uguiDyeHexWriting = true;
+                    try
+                    {
+                        handle.HexField.text = hex;
+                    }
+                    finally
+                    {
+                        this.uguiDyeHexWriting = false;
+                    }
                 }
             }
 
