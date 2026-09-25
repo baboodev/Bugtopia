@@ -27,6 +27,8 @@ namespace HeartopiaMod
         private const float TravelArriveDistance = 2.5f;
         private const float TravelWalkerEndAccept = 6f;
         private const float TravelResumeGrace = 1.5f;
+        // A repair hold on the way is bounded the same way the farm bounds its own (~30 s window).
+        private const float TravelRepairHoldMax = 40f;
         private const float TravelDeadlineSeconds = 300f;
         private const int TravelMaxWalkFailures = 2;
 
@@ -105,6 +107,8 @@ namespace HeartopiaMod
         private static bool travelling;
         private static bool travelWalking;          // the walker is driving right now
         private static bool travelPausedForFishing;
+        private static bool travelPausedForRepair;
+        private static float travelRepairHoldSince = -1f;
         private static int travelIndex = -1;
         private static Vector3 travelTarget;
         private static float travelStartedAt = -999f;
@@ -538,6 +542,8 @@ namespace HeartopiaMod
             travelling = true;
             travelWalking = false;
             travelPausedForFishing = false;
+            travelPausedForRepair = false;
+            travelRepairHoldSince = -1f;
             travelIndex = index;
             travelTarget = pos;
             travelStartedAt = Time.unscaledTime;
@@ -601,6 +607,54 @@ namespace HeartopiaMod
                     TeleportFallback(host, "no route after fishing");
                 }
                 return;
+            }
+
+            // An auto repair on the way (user rule 2026-09-25): the kit use is silently ignored
+            // unless the player stands still, and the restore aura only helps while the player is
+            // inside it. Queued, in use, or aura running — stand still until it is over. Bounded,
+            // so a wedged repair cannot pin the route.
+            bool repairBusy;
+            try { repairBusy = host.IsAutoRepairBusy(); } catch { repairBusy = false; }
+            if (repairBusy && (travelRepairHoldSince < 0f || now - travelRepairHoldSince <= TravelRepairHoldMax))
+            {
+                if (travelRepairHoldSince < 0f)
+                {
+                    travelRepairHoldSince = now;
+                }
+
+                if (travelWalking)
+                {
+                    host.FishingRouteAbortWalk();
+                    travelWalking = false;
+                    ModLogger.Msg("[FishingRoute] auto repair on the way — stopped walking to '" + GetSpotName(travelIndex) + "'.");
+                }
+
+                travelPausedForRepair = true;
+                travelResumeAt = now + TravelResumeGrace;
+                lastStatus = "Paused for repair on the way";
+                return;
+            }
+
+            if (travelPausedForRepair)
+            {
+                if (now < travelResumeAt)
+                {
+                    return;
+                }
+
+                travelPausedForRepair = false;
+                travelRepairHoldSince = -1f;
+                ModLogger.Msg("[FishingRoute] repair " + (repairBusy ? "hold timed out" : "done") + " — walking on to '" + GetSpotName(travelIndex) + "'.");
+                if (!StartTravelWalk(host, "repair over"))
+                {
+                    TeleportFallback(host, "no route after repair");
+                }
+                return;
+            }
+
+            if (!repairBusy)
+            {
+                travelRepairHoldSince = -1f;
             }
 
             // Another farm slice owns the tool: stand still, resume when it hands back.
@@ -675,6 +729,7 @@ namespace HeartopiaMod
             travelling = false;
             travelWalking = false;
             travelPausedForFishing = false;
+            travelPausedForRepair = false;
             MarkArrived(index, "Arriving at spot");
             ModLogger.Msg("[FishingRoute] arrived at spot " + (index + 1) + "/" + TotalSpotCount + " '" + GetSpotName(index)
                 + "' on foot (" + away.ToString("F1") + "m, " + took.ToString("F0") + "s).");
@@ -703,6 +758,7 @@ namespace HeartopiaMod
             travelling = false;
             travelWalking = false;
             travelPausedForFishing = false;
+            travelPausedForRepair = false;
             Log("travel ended: " + why);
         }
 
