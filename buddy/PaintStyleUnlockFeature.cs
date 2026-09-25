@@ -105,6 +105,10 @@ namespace HeartopiaMod
             }
 
             paintStyleUnlockActive = this.paintStyleUnlockEnabled && paintStyleUnlockDetour != null;
+
+            // A joint build never asks the detoured services at all — see
+            // PaintStyleUnlockFeature.JointBuild.cs.
+            this.ProcessPaintStyleJointBuildOnUpdate();
         }
 
         private void EnsurePaintStyleUnlockHooks()
