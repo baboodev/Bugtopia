@@ -1414,6 +1414,11 @@ namespace HeartopiaMod
                 this.UpdateMarkers();
                 this.UpdateRadarGroundRings();
             }
+            else
+            {
+                // The walk route line lives on without the radar (FarmWalkRadarFocusFeature.cs).
+                this.SyncFarmWalkRouteLine(null);
+            }
             this.ProcessGameMapSpotsOnUpdate();
             bool flag10 = this.autoFarmActive;
             if (flag10)
@@ -2982,6 +2987,12 @@ namespace HeartopiaMod
             {
                 Object.Destroy(this.radarLineMaterial);
                 this.radarLineMaterial = null;
+            }
+            this.ClearFarmWalkRouteLine();
+            if (this.farmWalkRouteLineMaterial != null)
+            {
+                Object.Destroy(this.farmWalkRouteLineMaterial);
+                this.farmWalkRouteLineMaterial = null;
             }
             if (this.radarFillMaterial != null)
             {

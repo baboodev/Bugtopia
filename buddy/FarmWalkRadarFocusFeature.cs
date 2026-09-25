@@ -24,6 +24,9 @@ namespace HeartopiaMod
 
         private GameObject farmWalkRouteLineObject;
         private LineRenderer farmWalkRouteLine;
+        // Own material for when the radar is off: the radar's line material only exists while the
+        // radar runs, and the route line must not depend on it.
+        private Material farmWalkRouteLineMaterial;
         private readonly List<Vector3> farmWalkRoutePoints = new List<Vector3>();
 
         // The line hangs off the Compare Game Track switch rather than Walk to Nodes itself: it
@@ -41,11 +44,16 @@ namespace HeartopiaMod
             return true;
         }
 
-        // Ticks every frame from UpdateMarkers. Keeps the polyline running from the player through
-        // the corners that are left.
+        // Ticks every frame: from UpdateMarkers while the radar runs, from OnUpdate otherwise.
+        // Keeps the polyline running from the player through the corners that are left.
+        //
+        // ⚠️ NOT TIED TO THE RADAR. This used to require radarContainer and was ticked only from
+        // UpdateMarkers, so the line existed only while the radar was on — which Auto Farm needs
+        // and Quest Walk / Fishing Locations do not. The user saw "the route is drawn only in auto
+        // foraging" (2026-09-25). The line now hangs off its own root and is ticked either way.
         internal void SyncFarmWalkRouteLine(Material lineMaterial)
         {
-            if (!this.IsFarmWalkRadarFocusActive(out Vector3 target) || this.radarContainer == null)
+            if (!this.IsFarmWalkRadarFocusActive(out Vector3 target))
             {
                 this.ClearFarmWalkRouteLine();
                 return;
@@ -80,7 +88,10 @@ namespace HeartopiaMod
             if (this.farmWalkRouteLineObject == null)
             {
                 this.farmWalkRouteLineObject = new GameObject(FarmWalkRouteLineName);
-                this.farmWalkRouteLineObject.transform.SetParent(this.radarContainer.transform);
+                if (this.radarContainer != null)
+                {
+                    this.farmWalkRouteLineObject.transform.SetParent(this.radarContainer.transform);
+                }
                 this.farmWalkRouteLineObject.transform.position = Vector3.zero;
                 this.farmWalkRouteLine = this.farmWalkRouteLineObject.AddComponent<LineRenderer>();
                 this.farmWalkRouteLine.useWorldSpace = true;
@@ -92,6 +103,15 @@ namespace HeartopiaMod
                 return;
             }
 
+            if (lineMaterial == null)
+            {
+                if (this.farmWalkRouteLineMaterial == null)
+                {
+                    this.farmWalkRouteLineMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+                    this.farmWalkRouteLineMaterial.SetInt("_ZTest", 0);
+                }
+                lineMaterial = this.farmWalkRouteLineMaterial;
+            }
             if (lineMaterial != null && this.farmWalkRouteLine.material != lineMaterial)
             {
                 this.farmWalkRouteLine.material = lineMaterial;
