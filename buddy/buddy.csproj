@@ -305,6 +305,7 @@
     <Compile Include="PaintStyleUnlockFeature.cs" />
     <Compile Include="HeartopiaComplete.UguiColorPicker.cs" />
     <Compile Include="FurnitureDyeFeature.cs" />
+    <Compile Include="FurnitureDyePanelFeature.cs" />
     <Compile Include="ActionPanelFeature.cs" />
     <Compile Include="ForagingAnimationFeature.cs" />
     <Compile Include="ForagingAnimationFeature.SeaClean.cs" />

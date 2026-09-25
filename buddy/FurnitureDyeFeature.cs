@@ -112,11 +112,24 @@ namespace HeartopiaMod
         }
 
         // What is focused right now, as far as dyeing is concerned.
+        // Where the colour has to be written. The two are genuinely different actions, not two
+        // skins of one: Build edits a focused build object and rides the build save, Panel fills in
+        // the game's own dye panel and rides the player's Confirm.
+        internal enum FurnitureDyeSource
+        {
+            Build,
+            Panel,
+        }
+
         internal sealed class FurnitureDyeTarget
         {
+            public FurnitureDyeSource Source;
             public int StaticId;
             public List<FurnitureDyePart> Parts;
             public readonly Dictionary<byte, int> Current = new Dictionary<byte, int>();
+            // Panel mode only: the tab the game's own panel has selected. The picker follows it
+            // rather than offering its own part row — the panel already has one.
+            public int PanelSelectedPart;
         }
 
         // staticId -> parts (null = looked up and NOT dyeable). The config never changes at
@@ -161,6 +174,14 @@ namespace HeartopiaMod
                     return;
                 }
 
+                // The dye panel is a full-screen modal: while it is up it owns the interaction, so
+                // it wins over whatever build object happens to still be focused behind it.
+                if (this.TryRefreshFurnitureDyePanelTarget())
+                {
+                    this.furnitureDyeWhyNot = string.Empty;
+                    return;
+                }
+
                 if (!this.TryGetFurnitureDyeHandles(out IntPtr buildSingle, out IntPtr element)
                     || element == IntPtr.Zero)
                 {
@@ -191,7 +212,12 @@ namespace HeartopiaMod
                 // Same target as last frame: refresh only the live colours, keep the parts.
                 if (this.furnitureDyeTarget == null || this.furnitureDyeTargetStaticId != staticId)
                 {
-                    this.furnitureDyeTarget = new FurnitureDyeTarget { StaticId = staticId, Parts = parts };
+                    this.furnitureDyeTarget = new FurnitureDyeTarget
+                    {
+                        Source = FurnitureDyeSource.Build,
+                        StaticId = staticId,
+                        Parts = parts,
+                    };
                     this.furnitureDyeTargetStaticId = staticId;
                     FeatureLog.Once(FurnitureDyeTag, "target:" + staticId,
                         "focused a dyeable item: staticId " + staticId + ", " + parts.Count + " part(s)");
