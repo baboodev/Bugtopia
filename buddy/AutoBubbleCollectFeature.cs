@@ -31,21 +31,7 @@ namespace HeartopiaMod
     {
         // -- config (persisted; GUI in the Automation tab bubble block) --
         private bool autoBubbleCollectEnabled = false;
-        private float autoBubbleCollectRadius = AutoBubbleCollectRadiusMax; // meters
-        // Slider range. Older builds allowed up to 100 m and 0 = unlimited; both are mapped onto
-        // this range on load (see ClampAutoBubbleCollectRadius).
-        private const float AutoBubbleCollectRadiusMin = 0.1f;
-        private const float AutoBubbleCollectRadiusMax = 3f;
-
-        // A legacy 0 meant "unlimited", so it becomes the widest allowed radius, not the narrowest.
-        private static float ClampAutoBubbleCollectRadius(float value)
-        {
-            if (value <= 0.01f)
-            {
-                return AutoBubbleCollectRadiusMax;
-            }
-            return Mathf.Clamp(value, AutoBubbleCollectRadiusMin, AutoBubbleCollectRadiusMax);
-        }
+        private float autoBubbleCollectRadius = 10f; // meters; 0 = unlimited, default 10m
 
         // -- shared compile helper for the bubble detour pair (A + B) --
         private delegate IntPtr BubbleDetourCompileMethodDelegate(IntPtr method);
@@ -327,7 +313,7 @@ namespace HeartopiaMod
             }
 
             float radius = this.autoBubbleCollectRadius;
-            float maxDistSqr = radius * radius;
+            float maxDistSqr = radius <= 0.01f ? float.MaxValue : radius * radius;
 
             this.bubbleSweepCandidateBuffer.Clear();
             bool scanOk;
@@ -568,17 +554,16 @@ namespace HeartopiaMod
                 return; // stale (e.g. queued right before a world switch)
             }
 
-            // Radius gate. Skeleton-first player position — transform.root is the SHIP while
-            // sea-fishing, so never use the root for distance checks. No position = no claim:
-            // the radius is a hard limit, not a best-effort filter.
-            if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+            // Radius gate (0 = unlimited). Skeleton-first player position — transform.root is
+            // the SHIP while sea-fishing, so never use the root for distance checks.
+            if (this.autoBubbleCollectRadius > 0.01f
+                && this.TryGetLocalPlayerPosition(out Vector3 playerPos))
             {
-                return;
-            }
-            float r = this.autoBubbleCollectRadius;
-            if ((claim.Position - playerPos).sqrMagnitude > r * r)
-            {
-                return; // too far — skip this bubble entirely
+                float r = this.autoBubbleCollectRadius;
+                if ((claim.Position - playerPos).sqrMagnitude > r * r)
+                {
+                    return; // too far — skip this bubble entirely
+                }
             }
 
             if (this.TryInvokeBubbleGetAwardAura(claim.NetId))

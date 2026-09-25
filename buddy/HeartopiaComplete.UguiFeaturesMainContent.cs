@@ -148,8 +148,11 @@ namespace HeartopiaMod
 
         private string BuildUguiFeaturesMainCollectRadiusText()
         {
-            // One decimal: the range is only 0.1..3 m.
-            return "Collect radius: " + string.Format("{0:F1} m", this.autoBubbleCollectRadius);
+            // Gui.cs:539-542 — the LITERAL STRING "unlimited" at <= 0.01f, else "{0:F0} m".
+            string collectRadiusText = this.autoBubbleCollectRadius <= 0.01f
+                ? "unlimited"
+                : string.Format("{0:F0} m", this.autoBubbleCollectRadius);
+            return "Collect radius: " + collectRadiusText;
         }
 
         private int ComputeUguiFeaturesMainLayoutSignature()
@@ -246,7 +249,7 @@ namespace HeartopiaMod
             handle.CollectRadiusLabel = this.CreateUguiBodyLabel(scrollContent, "CollectRadiusLabel",
                 handle.CollectRadiusShown, 13f);
             handle.CollectRadiusSlider = this.CreateUguiSlider(scrollContent, "CollectRadiusSlider",
-                AutoBubbleCollectRadiusMin, AutoBubbleCollectRadiusMax, this.autoBubbleCollectRadius, false,
+                0f, 100f, this.autoBubbleCollectRadius, false,
                 new System.Action<float>(this.OnUguiFeaturesMainCollectRadiusChanged));
 
             handle.PlayerAvatarsToggle = this.CreateUguiCheckbox(scrollContent, "PlayerAvatarsToggle",
@@ -613,7 +616,7 @@ namespace HeartopiaMod
             {
                 return;
             }
-            this.autoBubbleCollectRadius = Mathf.Clamp(value, AutoBubbleCollectRadiusMin, AutoBubbleCollectRadiusMax);
+            this.autoBubbleCollectRadius = Mathf.Clamp(value, 0f, 100f);
             try { this.SaveKeybinds(false); } catch { }
         }
 

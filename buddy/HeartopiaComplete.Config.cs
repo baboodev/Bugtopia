@@ -777,7 +777,7 @@ namespace HeartopiaMod
             this.bubbleBubblesPerMinute = Mathf.Clamp(data.bubbleBubblesPerMinute, 0f, 100f);
             this.bubbleSpawnAtPlayerEnabled = data.bubbleSpawnAtPlayerEnabled;
             this.autoBubbleCollectEnabled = data.autoBubbleCollectEnabled;
-            this.autoBubbleCollectRadius = ClampAutoBubbleCollectRadius(data.autoBubbleCollectRadius);
+            this.autoBubbleCollectRadius = Mathf.Clamp(data.autoBubbleCollectRadius, 0f, 100f);
             this.petFeedScanRadiusMeters = Mathf.Clamp(data.petFeedScanRadiusMeters > 0f ? data.petFeedScanRadiusMeters : PetFeedDefaultScanRadiusMeters, PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters);
             this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
             this.netCookScanRadiusMeters = Mathf.Clamp(data.netCookScanRadiusMeters > 0f ? data.netCookScanRadiusMeters : NetCookDefaultScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
@@ -1114,7 +1114,7 @@ namespace HeartopiaMod
                         else if (line.Contains("snowQteSuccessCount")) this.snowQteSuccessCount = Mathf.Clamp(GetJsonInt(line, "\"snowQteSuccessCount\":"), SnowQteSuccessMin, SnowQteSuccessMax);
                         else if (line.Contains("bubbleSpawnAtPlayerEnabled")) this.bubbleSpawnAtPlayerEnabled = GetJsonInt(line, "\"bubbleSpawnAtPlayerEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectEnabled")) this.autoBubbleCollectEnabled = GetJsonInt(line, "\"autoBubbleCollectEnabled\":") != 0;
-                        else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = ClampAutoBubbleCollectRadius(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"));
+                        else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = Mathf.Clamp(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"), 0f, 100f);
             else if (line.Contains("petFeedScanRadiusMeters")) this.petFeedScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"petFeedScanRadiusMeters\":"), PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters);
             else if (line.Contains("netCookInterval")) this.netCookInterval = GetJsonFloat(line, "\"netCookInterval\":");
             else if (line.Contains("netCookScanRadiusMeters")) this.netCookScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"netCookScanRadiusMeters\":"), NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
