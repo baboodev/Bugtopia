@@ -588,8 +588,8 @@ namespace HeartopiaMod
             this.TrySetUguiLabelRightAligned(handle.PrivacyValueLabel);
             PlaceUguiTopLeft(handle.PrivacyValueLabel, 16f + rowW * 0.55f, 34f, rowW * 0.45f, 18f);
 
-            // 0..100 with 0 = off: one control, no companion toggle (autoBubbleCollectRadius
-            // precedent). The default is 0, so a fresh install behaves exactly as before.
+            // 0..100 with 0 = off: one control, no companion toggle.
+            // The default is 0, so a fresh install behaves exactly as before.
             handle.PrivacySlider = this.CreateUguiSlider(privacyCard.transform, "PrivacySlider",
                 HomelandFarmPrivacyMinRadius, HomelandFarmPrivacyMaxRadius, this.homelandFarmPrivacyRadius,
                 true, new System.Action<float>(this.OnUguiHomelandFarmPrivacyRadiusChanged));

@@ -53,7 +53,7 @@ namespace HeartopiaMod
     {
         private const string HomelandFarmPrivacyTag = "HomelandFarmPrivacy";
 
-        // One slider, 0 = off (the autoBubbleCollectRadius precedent) — no separate toggle.
+        // One slider, 0 = off — no separate toggle.
         private const float HomelandFarmPrivacyMinRadius = 0f;
         private const float HomelandFarmPrivacyMaxRadius = 100f;
         private const float HomelandFarmPrivacyDefaultRadius = 0f;
