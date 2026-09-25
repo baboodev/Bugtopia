@@ -2207,12 +2207,24 @@ namespace HeartopiaMod
                 // it with NO verdict, and no verdict on a dynamic bush means "unconfirmed => hide"
                 // — the live rule written for exactly that species. What becomes visible again is
                 // what the component positively calls ready.
+                //
+                // ⚠️ AND IT DID RE-OPEN THE TRAP — for the one family it promised not to. On a
+                // dynamic bush inCold=false is "no data", so "the component calls it ready" is
+                // never true there, and this refutation must not read it as such. A user log
+                // (2026-09-24 19:09-19:11, Penny Buns): every 30 s sweep sent the maturity first
+                // (endMs = 19:10:47, 19:10:07, 19:11:12 local) and the zero second; the guard
+                // above blocked the zero, this branch then deleted the maturity because the bush
+                // component read inCold=false, the marker went "available", and the farm walked
+                // to growing mushrooms for minutes — every attempt landed before the maturity it
+                // had just thrown away, the one at 19:11:04 eight seconds early. The component's
+                // word counts here only for the species whose inCold is trustworthy.
                 bool scanHoldsItReady = false;
                 for (int i = 0; i < this.liveCollectableColds.Count; i++)
                 {
                     if (this.liveCollectableColds[i].NetId == resourceNetId)
                     {
-                        scanHoldsItReady = !this.liveCollectableColds[i].OnCooldown;
+                        scanHoldsItReady = !this.liveCollectableColds[i].OnCooldown
+                            && !IsDynamicBushStaticId(this.liveCollectableColds[i].StaticId);
                         break;
                     }
                 }
