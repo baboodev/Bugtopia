@@ -43,51 +43,57 @@ namespace HeartopiaMod
             }
         }
 
+        // ⭐ MEASURED CYCLE, NOT A CATALOGUE. The list used to be grouped by water type (rivers,
+        // lakes, seas), which made every group boundary a haul across the map: a full round
+        // was 6 538 m of walker route with twelve legs over 150 m (up to 520 m). This order is
+        // the shortest cycle over the walker's own route lengths between all 40 spots,
+        // measured in game on 2026-09-25 (tools/FishRouteProbe, nearest-neighbour + 2-opt):
+        // 3 412 m, longest leg 165 m. The route starts at the spot nearest the player and goes
+        // round from there, so the first entry is arbitrary. Custom spots are appended at
+        // runtime and sit outside this cycle. Shallow River 1 snaps to an isolated graph node
+        // (no route measurable to or from it); it stays next to Shallow River 2.
         private static readonly FixedSpot[] FixedSpots = new FixedSpot[]
         {
-            // RIVER ====================
             new FixedSpot("Rosy River 1", -132.044f, 20.728f, 123.636f),
-            new FixedSpot("Rosy River 2", -110.786f, 20.096f, 121.876f),
-            new FixedSpot("Shallow River 1", 109.264f, 19.823f, 107.453f),
-            new FixedSpot("Shallow River 2", 77.957f, 20.506f, 97.549f),
-            new FixedSpot("Tranquil River 1", -112.565f, 15.698f, -138.189f),
-            new FixedSpot("Tranquil River 2", -91.925f, 19.004f, -97.962f),
-            new FixedSpot("Giantwood River 1", 68.196f, 19.838f, -95.980f),
-            new FixedSpot("Giantwood River 2", 89.264f, 18.126f, -114.870f),
-            // LAKE ====================
-            new FixedSpot("Forest Lake 1", 169.729f, 31.086f, 79.796f),
-            new FixedSpot("Forest Lake 2", 156.001f, 21.425f, 8.155f),
-            new FixedSpot("Forest Lake 3", 150.090f, 21.495f, -52.907f),
-            new FixedSpot("Meadow Lake", -188.604f, 19.717f, -21.203f),
-            new FixedSpot("Onsen Mountain Lake 1", 7.902f, 20.045f, 166.517f),
-            new FixedSpot("Onsen Mountain Lake 2", -68.906f, 28.009f, 199.926f),
-            new FixedSpot("Suburban Lake 1", -77.757f, 20.781f, 91.570f),
-            new FixedSpot("Suburban Lake 2", -15.798f, 23.880f, 86.701f),
-            new FixedSpot("Suburban Lake 3", 81.600f, 22.236f, 38.265f),
-            new FixedSpot("Suburban Lake 4", 84.599f, 21.996f, 11.957f),
-            new FixedSpot("Suburban Lake 5", 63.881f, 22.350f, -34.296f),
-            new FixedSpot("Suburban Lake 6", -9.485f, 15.069f, -72.374f),
-            new FixedSpot("Suburban Lake 7", -99.859f, 19.652f, -53.989f),
-            new FixedSpot("Suburban Lake 8", -91.586f, 25.915f, 60.682f),
-            // SEA ====================
-            new FixedSpot("East Sea 1", 266.370f, 11.274f, -105.900f),
-            new FixedSpot("East Sea 2", 222.824f, 10.609f, -61.501f),
-            new FixedSpot("East Sea 3", 249.190f, 10.640f, -4.454f),
-            new FixedSpot("East Sea 4", 245.587f, 10.670f, 33.395f),
-            new FixedSpot("East Sea 5", 250.926f, 13.364f, 94.227f),
             new FixedSpot("Old Sea 1", -182.468f, 10.563f, 201.788f),
             new FixedSpot("Old Sea 2", -157.400f, 10.841f, 250.438f),
             new FixedSpot("Old Sea 3", -138.933f, 10.926f, 303.255f),
             new FixedSpot("Old Sea 4", -94.604f, 10.557f, 267.479f),
             new FixedSpot("Old Sea 5", 2.903f, 10.833f, 250.543f),
-            new FixedSpot("Whale Sea 1", -226.625f, 11.911f, -56.772f),
-            new FixedSpot("Whale Sea 2", -223.321f, 10.472f, -13.959f),
-            new FixedSpot("Whale Sea 3", -251.356f, 10.776f, 8.765f),
-            new FixedSpot("Zephyr Sea 1", 46.434f, 11.500f, -180.964f),
+            new FixedSpot("Onsen Mountain Lake 2", -68.906f, 28.009f, 199.926f),
+            new FixedSpot("Onsen Mountain Lake 1", 7.902f, 20.045f, 166.517f),
+            new FixedSpot("Suburban Lake 2", -15.798f, 23.880f, 86.701f),
+            new FixedSpot("Shallow River 2", 77.957f, 20.506f, 97.549f),
+            new FixedSpot("Shallow River 1", 109.264f, 19.823f, 107.453f),
+            new FixedSpot("Forest Lake 1", 169.729f, 31.086f, 79.796f),
+            new FixedSpot("East Sea 5", 250.926f, 13.364f, 94.227f),
+            new FixedSpot("East Sea 4", 245.587f, 10.670f, 33.395f),
+            new FixedSpot("East Sea 3", 249.190f, 10.640f, -4.454f),
+            new FixedSpot("East Sea 1", 266.370f, 11.274f, -105.900f),
+            new FixedSpot("East Sea 2", 222.824f, 10.609f, -61.501f),
+            new FixedSpot("Forest Lake 3", 150.090f, 21.495f, -52.907f),
+            new FixedSpot("Forest Lake 2", 156.001f, 21.425f, 8.155f),
+            new FixedSpot("Suburban Lake 3", 81.600f, 22.236f, 38.265f),
+            new FixedSpot("Suburban Lake 4", 84.599f, 21.996f, 11.957f),
+            new FixedSpot("Suburban Lake 5", 63.881f, 22.350f, -34.296f),
+            new FixedSpot("Giantwood River 1", 68.196f, 19.838f, -95.980f),
+            new FixedSpot("Giantwood River 2", 89.264f, 18.126f, -114.870f),
             new FixedSpot("Zephyr Sea 2", 40.823f, 11.601f, -158.479f),
+            new FixedSpot("Zephyr Sea 1", 46.434f, 11.500f, -180.964f),
             new FixedSpot("Zephyr Sea 3", 0.809f, 11.698f, -142.726f),
+            new FixedSpot("Suburban Lake 6", -9.485f, 15.069f, -72.374f),
             new FixedSpot("Zephyr Sea 4", -40.134f, 11.298f, -145.853f),
             new FixedSpot("Zephyr Sea 5", -114.150f, 11.407f, -185.543f),
+            new FixedSpot("Tranquil River 1", -112.565f, 15.698f, -138.189f),
+            new FixedSpot("Tranquil River 2", -91.925f, 19.004f, -97.962f),
+            new FixedSpot("Suburban Lake 7", -99.859f, 19.652f, -53.989f),
+            new FixedSpot("Whale Sea 1", -226.625f, 11.911f, -56.772f),
+            new FixedSpot("Whale Sea 3", -251.356f, 10.776f, 8.765f),
+            new FixedSpot("Whale Sea 2", -223.321f, 10.472f, -13.959f),
+            new FixedSpot("Meadow Lake", -188.604f, 19.717f, -21.203f),
+            new FixedSpot("Suburban Lake 8", -91.586f, 25.915f, 60.682f),
+            new FixedSpot("Suburban Lake 1", -77.757f, 20.781f, 91.570f),
+            new FixedSpot("Rosy River 2", -110.786f, 20.096f, 121.876f),
         };
 
         private static readonly List<HeartopiaComplete.CustomTeleportEntry> customSpots = new List<HeartopiaComplete.CustomTeleportEntry>();

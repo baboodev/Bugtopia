@@ -66,3 +66,4 @@ tools/**/obj/
 release/
 tools/VehicleTuneProbe
 tools/CleanupProbe
+tools/FishRouteProbe
