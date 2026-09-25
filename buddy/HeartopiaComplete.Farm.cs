@@ -1070,6 +1070,78 @@ namespace HeartopiaMod
         // spot: 1st timeout 15 s (streaming lag is real), 2nd 2 min, 3rd and on 10 min.
         private readonly Dictionary<Vector3, int> farmNodeCollectTimeouts = new Dictionary<Vector3, int>();
         private bool auraCollectSelfCaptureLogged;
+
+        // "Don't Wait for Regrowth" (persisted; Foraging settings). A dynamic bush regrows as a NEW
+        // entity 90-120 s after the pick (Shiitake, measured 2026-09-25 in a user log), so a
+        // mushroom field never empties and the farm stays in it for as long as it runs. With this
+        // on, a spot where a dynamic bush was picked this run is not targeted again for
+        // FarmHarvestedSpotTtl, the scan runs dry once the field is done, and the ordinary
+        // relocation takes the farm to the next area — the truffle behaviour, whose maturity is
+        // hours, for every mushroom. Off by default: continuous picking in one field is the better
+        // yield per hour for those who want that.
+        internal bool farmNoRegrowthWait;
+        private readonly Dictionary<Vector3, float> farmHarvestedSpots = new Dictionary<Vector3, float>();
+        private const float FarmHarvestedSpotTtl = 20f * 60f;
+        private const float FarmHarvestedSpotRadius = 2.5f;
+        private string autoFarmTargetLabel = string.Empty;
+
+        private void MarkHarvestedSpot(Vector3 node)
+        {
+            Vector3 key = node;
+            foreach (KeyValuePair<Vector3, float> pair in this.farmHarvestedSpots)
+            {
+                if ((pair.Key - node).sqrMagnitude <= FarmHarvestedSpotRadius * FarmHarvestedSpotRadius)
+                {
+                    key = pair.Key;
+                    break;
+                }
+            }
+
+            this.farmHarvestedSpots[key] = Time.unscaledTime + FarmHarvestedSpotTtl;
+            this.AutoFarmLog($"Harvested spot {node} — not targeted again this run (Don't Wait for Regrowth, {this.farmHarvestedSpots.Count} spot(s)).");
+        }
+
+        private bool IsHarvestedSpot(Vector3 position)
+        {
+            float now = Time.unscaledTime;
+            foreach (KeyValuePair<Vector3, float> pair in this.farmHarvestedSpots)
+            {
+                if (now <= pair.Value && (pair.Key - position).sqrMagnitude <= FarmHarvestedSpotRadius * FarmHarvestedSpotRadius)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Is the node just collected a dynamic bush (mushroom, event plant)? The live scan's
+        // static id by position first; the marker label as the fallback when the entity has
+        // already gone (a picked bush despawns).
+        private bool IsDynamicBushNodeAt(Vector3 position)
+        {
+            float bestSqr = FarmHarvestedSpotRadius * FarmHarvestedSpotRadius;
+            int staticId = 0;
+            bool found = false;
+            for (int i = 0; i < this.liveCollectableColds.Count; i++)
+            {
+                Vector3 delta = this.liveCollectableColds[i].Position - position;
+                float sqr = delta.x * delta.x + delta.z * delta.z;
+                if (sqr < bestSqr)
+                {
+                    bestSqr = sqr;
+                    staticId = this.liveCollectableColds[i].StaticId;
+                    found = true;
+                }
+            }
+
+            if (found && staticId > 0)
+            {
+                return IsDynamicBushStaticId(staticId);
+            }
+
+            return !string.IsNullOrEmpty(this.autoFarmTargetLabel) && this.ShouldShowMushroomByLabel(this.autoFarmTargetLabel);
+        }
         private const float FarmNodeTimeoutSameSpot = 2.5f;
 
         private void ForgetFarmNodeCollectTimeouts(Vector3 node)
@@ -1479,6 +1551,7 @@ namespace HeartopiaMod
         private void BeginFarmNodeDwell(string nodeLabel)
         {
             this.ResetContaminationDwellState();
+            this.autoFarmTargetLabel = nodeLabel ?? string.Empty;
             bool contamination = string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal);
             this.autoFarmTargetIsContamination = contamination;
             this.autoFarmTargetIsBubble = string.Equals(nodeLabel, "Bubble", StringComparison.Ordinal);
@@ -2669,6 +2742,10 @@ namespace HeartopiaMod
                     if (now - hopAnchor >= 1f || now - this.auraCollectNodeConfirmedAt >= 3f)
                     {
                         this.ForgetFarmNodeCollectTimeouts(this.lastNodePosition);
+                        if (this.farmNoRegrowthWait && this.IsDynamicBushNodeAt(this.lastNodePosition))
+                        {
+                            this.MarkHarvestedSpot(this.lastNodePosition);
+                        }
                         this.AutoFarmLog($"Aura collect done after {this.autoFarmTimer:F1}s at {this.lastNodePosition} (bagRefresh={(this.auraCollectLastBackpackAt >= 0f ? "yes" : "none")})");
                         // We just drained it — block for its real remaining cooldown.
                         this.StampVisitedNode(this.lastNodePosition, now + this.GetVisitedColdStampSeconds(knownColdEndMs));
@@ -3109,6 +3186,11 @@ namespace HeartopiaMod
                                 // Walk mode never targets a no-go node (FarmWalkNoGoNodes); this
                                 // sits before the candidate sink, so the tour never sees it either.
                                 if (this.farmWalkToNodeEnabled && this.IsFarmWalkNoGoNode(child.position))
+                                {
+                                    continue;
+                                }
+                                // "Don't Wait for Regrowth": a bush picked this run is done with.
+                                if (this.farmNoRegrowthWait && this.IsHarvestedSpot(child.position))
                                 {
                                     continue;
                                 }
@@ -3626,6 +3708,7 @@ namespace HeartopiaMod
                 // the rescue cooldown should not carry over into a run that starts minutes later.
                 this.farmWalkNodeFailures.Clear();
                 this.farmNodeCollectTimeouts.Clear();
+                this.farmHarvestedSpots.Clear();
                 this.farmWalkLastRescueTeleportAt = 0f;
                 this.lastFarmNodeActivityAt = 0f;
                 this.farmWalkBlockedGraphNodes.Clear();  // bans are per-run heuristics
@@ -3666,6 +3749,7 @@ namespace HeartopiaMod
                 this.ResetFarmWalkRunState();
                 this.farmWalkNodeFailures.Clear();
                 this.farmNodeCollectTimeouts.Clear();
+                this.farmHarvestedSpots.Clear();
                 this.farmWalkBlockedGraphNodes.Clear();
                 this.farmWalkLastRescueTeleportAt = 0f;
                 this.ResetFarmTour();

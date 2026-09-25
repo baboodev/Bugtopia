@@ -246,6 +246,7 @@ namespace HeartopiaMod
             data.furnitureDyePickerEnabled = this.furnitureDyePickerEnabled;
             data.friendInteractUnlockEnabled = this.friendInteractUnlockEnabled;
             data.foragingAnimEnabled = this.foragingAnimEnabled;
+            data.farmNoRegrowthWait = this.farmNoRegrowthWait;
             data.skipCraftDyeAnimations = this.skipCraftDyeAnimations;
             data.autoLearnRecipes = this.autoLearnRecipes;
             data.wildAnimalAutoClaimVisitGifts = this.wildAnimalAutoClaimVisitGifts;
@@ -654,6 +655,7 @@ namespace HeartopiaMod
             this.furnitureDyePickerEnabled = data.furnitureDyePickerEnabled;
             this.friendInteractUnlockEnabled = data.friendInteractUnlockEnabled;
             this.foragingAnimEnabled = data.foragingAnimEnabled;
+            this.farmNoRegrowthWait = data.farmNoRegrowthWait;
             this.skipCraftDyeAnimations = data.skipCraftDyeAnimations;
             this.autoLearnRecipes = data.autoLearnRecipes;
             this.wildAnimalAutoClaimVisitGifts = data.wildAnimalAutoClaimVisitGifts;

@@ -100,6 +100,7 @@ namespace HeartopiaMod
             public Toggle StealthToggle;          // Stealth Foraging (always visible)
             public Toggle WalkToggle;             // Walk to Nodes (always visible)
             public Toggle ForagingAnimToggle;     // Play animations when watched (walk mode only)
+            public Toggle NoRegrowthToggle;       // Don't Wait for Regrowth (mushroom spots picked once per run)
             public Toggle WalkToAreaToggle;       // Walk to Zone Point (shown while Walk to Nodes is on)
             public Toggle WalkHoldRouteToggle;    // Hold Route Near Corners (same gate)
             public Toggle WalkKeepFinalToggle;    // Keep Final Waypoint (same gate)
@@ -516,6 +517,12 @@ namespace HeartopiaMod
                 this.L("Play gathering animations when a player is near"), this.foragingAnimEnabled,
                 new System.Action<bool>(this.OnUguiForagingAnimToggled));
 
+            // Mushroom fields regrow in ~2 min; with this on, each spot is picked once per run and
+            // the farm moves on to the next area (HeartopiaComplete.Farm.cs, farmNoRegrowthWait).
+            handle.NoRegrowthToggle = this.CreateUguiCheckbox(settings.transform, "NoRegrowthToggle",
+                this.L("Don't Wait for Regrowth"), this.farmNoRegrowthWait,
+                new System.Action<bool>(this.OnUguiForagingNoRegrowthToggled));
+
             handle.WalkToggle = this.CreateUguiCheckbox(settings.transform, "WalkToggle",
                 this.L("Walk to Nodes"), this.farmWalkToNodeEnabled,
                 new System.Action<bool>(this.OnUguiForagingWalkToggled));
@@ -847,6 +854,12 @@ namespace HeartopiaMod
             rowY += 16f; // this row is 16px taller than a normal one; keep the rows below spaced
 
             rowY += 34f;
+            if (handle.NoRegrowthToggle != null)
+            {
+                PlaceUguiTopLeft(handle.NoRegrowthToggle.gameObject, 14f, rowY, 250f, 24f);
+            }
+
+            rowY += 34f;
             if (handle.TrackCompareToggle != null)
             {
                 PlaceUguiTopLeft(handle.TrackCompareToggle.gameObject, 14f, rowY, 250f, 24f);
@@ -966,6 +979,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
                 this.SyncUguiToggleFromField(handle.WalkToggle, this.farmWalkToNodeEnabled);
                 this.SyncUguiToggleFromField(handle.ForagingAnimToggle, this.foragingAnimEnabled);
+                this.SyncUguiToggleFromField(handle.NoRegrowthToggle, this.farmNoRegrowthWait);
                 this.SyncUguiToggleFromField(handle.WalkToAreaToggle, this.farmWalkToAreaEnabled);
                 this.SyncUguiToggleFromField(handle.WalkHoldRouteToggle, this.farmWalkRepathHoldNearCorner);
                 this.SyncUguiToggleFromField(handle.WalkKeepFinalToggle, this.farmWalkKeepFinalNode);
@@ -1171,6 +1185,23 @@ namespace HeartopiaMod
             }
 
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // "Don't Wait for Regrowth" — flag + save; takes effect on the next pick, the harvested
+        // list keeps what it has either way.
+        private void OnUguiForagingNoRegrowthToggled(bool value)
+        {
+            if (value == this.farmNoRegrowthWait)
+            {
+                return;
+            }
+
+            this.farmNoRegrowthWait = value;
+            try { this.SaveKeybinds(false); } catch { }
+            this.AddMenuNotification(
+                $"Don't Wait for Regrowth {(value ? "Enabled" : "Disabled")}",
+                value ? new Color(0.55f, 0.88f, 1f) : new Color(1f, 0.75f, 0.45f));
+            ModLogger.Msg("[AutoFarm] Don't Wait for Regrowth " + (value ? "enabled" : "disabled") + " from the Foraging tab.");
         }
 
         private void OnUguiForagingWalkToggled(bool value)
