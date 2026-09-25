@@ -245,6 +245,11 @@ namespace HeartopiaMod
             public bool skipCraftDyeAnimations;
             public bool autoLearnRecipes;
             public bool wildAnimalAutoClaimVisitGifts;
+            // Trough-feed food filters. Default on; absent from configs written before they were
+            // persisted, and XmlSerializer keeps the initializer for a missing element.
+            public bool wildAnimalFeedSkipFiveStarFood = true;
+            public bool wildAnimalFeedSkipRareFood = true;
+            public bool wildAnimalFeedSkipEgg = true;
             public bool autoLikeOwnHome;
             public bool craftDirectSendEnabled;
             public bool interactObstacleBypassEnabled;

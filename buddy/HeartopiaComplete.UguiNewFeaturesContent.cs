@@ -30,9 +30,9 @@ namespace HeartopiaMod
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //
-    // The 3 trough toggles are flag-only in the source (WildAnimalFeedFeature.cs:3820-3838 —
-    // plain assignments, no SaveKeybinds, no AddMenuNotification): the change handlers here
-    // write ONLY the bool. Verified against the IMGUI drawer — do not add a save or a toast.
+    // Trough toggles: Prefer Favorite Food is flag-only (no save, no toast). The three food
+    // filters (Skip 5 Star / Skip Rare / Skip Egg) are persisted to the config on change, with
+    // no toast.
     //
     // NEW pattern this round — LIVE-TIMER busy gates. Both primary buttons disable while
     //   feed: wildAnimalFeedCoroutine != null || Time.realtimeSinceStartup < wildAnimalFeedBusyUntil
@@ -98,9 +98,10 @@ namespace HeartopiaMod
         {
             public GameObject Root;
 
-            // TROUGHS card — 3 flag-only switch toggles
+            // TROUGHS card — 4 switch toggles (the three Skip* ones are persisted)
             public Toggle PreferFavoritesToggle;
             public Toggle SkipFiveStarToggle;
+            public Toggle SkipRareToggle;
             public Toggle SkipEggToggle;
 
             // Feed action card + its free-floating status line
@@ -221,8 +222,11 @@ namespace HeartopiaMod
             // The kit panel chrome carries the header. 2026-07-29: was the source's fixed 198 —
             // ~46px of empty card under the last checkbox. Now the real extent: last checkbox
             // ends at 124+28 = 152, +16 bottom pad = 168. Everything below rose by the same 30.
+            // The "Skip Rare Food" row (under Skip 5 Star) grows the card by
+            // UguiAnimalCareTroughRareRowHeight and everything below it moves down with it.
+            float troughExtra = UguiAnimalCareTroughRareRowHeight;
             GameObject troughs = this.CreateUguiSettingsMainPanel(scrollContent, "TroughsPanel", this.L("WILD ANIMAL TROUGHS"));
-            PlaceUguiTopLeft(troughs, 8f, 8f, panelW, 168f);
+            PlaceUguiTopLeft(troughs, 8f, 8f, panelW, 168f + troughExtra);
 
             // Rows replay the source rowY chain: +40, then += 42 twice; widths 300/300/280.
             handle.PreferFavoritesToggle = this.CreateUguiCheckbox(troughs.transform, "PreferFavorites",
@@ -235,15 +239,20 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiAnimalCareSkipFiveStarToggled));
             PlaceUguiTopLeft(handle.SkipFiveStarToggle.gameObject, 16f, 82f, 300f, 28f);
 
+            handle.SkipRareToggle = this.CreateUguiCheckbox(troughs.transform, "SkipRare",
+                this.L("Skip Rare Food"), this.wildAnimalFeedSkipRareFood,
+                new System.Action<bool>(this.OnUguiAnimalCareSkipRareToggled));
+            PlaceUguiTopLeft(handle.SkipRareToggle.gameObject, 16f, 124f, 300f, 28f);
+
             handle.SkipEggToggle = this.CreateUguiCheckbox(troughs.transform, "SkipEgg",
                 this.L("Skip Egg"), this.wildAnimalFeedSkipEgg,
                 new System.Action<bool>(this.OnUguiAnimalCareSkipEggToggled));
-            PlaceUguiTopLeft(handle.SkipEggToggle.gameObject, 16f, 124f, 280f, 28f);
+            PlaceUguiTopLeft(handle.SkipEggToggle.gameObject, 16f, 124f + troughExtra, 280f, 28f);
 
             // -------- Unlabeled feed action card (h=74, :3841-3851; source cursor y=218, now
             // 188 = troughs bottom 176 + the chain's 12px gap after the troughs trim) --------
             GameObject feedAction = this.CreateUguiSettingsMainPanel(scrollContent, "FeedActionPanel", string.Empty);
-            PlaceUguiTopLeft(feedAction, 8f, 188f, panelW, 74f);
+            PlaceUguiTopLeft(feedAction, 8f, 188f + troughExtra, panelW, 74f);
 
             handle.FeedButton = this.CreateUguiPrimaryButton(feedAction.transform, "FeedAllButton",
                 this.L("Feed All Troughs"), new System.Action(this.OnUguiAnimalCareFeedAllClicked));
@@ -256,7 +265,7 @@ namespace HeartopiaMod
             handle.FeedStatusLabel = this.CreateUguiLabel(scrollContent, "FeedStatus",
                 handle.FeedStatusShown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.FeedStatusLabel);
-            PlaceUguiTopLeft(handle.FeedStatusLabel, 8f, 272f, panelW, 36f);
+            PlaceUguiTopLeft(handle.FeedStatusLabel, 8f, 272f + troughExtra, panelW, 36f);
 
             // -------- WILD ANIMAL GIFTS card (feed's source cursor returned 346, now 316 after
             // the troughs trim; h=74, gift :784-796) --------
@@ -264,7 +273,7 @@ namespace HeartopiaMod
             // UguiAnimalCareGiftAutoRowHeight and everything below it moves down with it.
             float giftExtra = UguiAnimalCareGiftAutoRowHeight;
             GameObject gifts = this.CreateUguiSettingsMainPanel(scrollContent, "GiftsPanel", this.L("WILD ANIMAL GIFTS"));
-            PlaceUguiTopLeft(gifts, 8f, 316f, panelW, 74f + giftExtra);
+            PlaceUguiTopLeft(gifts, 8f, 316f + troughExtra, panelW, 74f + giftExtra);
 
             handle.GiftButton = this.CreateUguiPrimaryButton(gifts.transform, "ClaimGiftsButton",
                 this.L("Claim All Wild Gifts"), new System.Action(this.OnUguiAnimalCareClaimGiftsClicked));
@@ -281,7 +290,7 @@ namespace HeartopiaMod
             handle.GiftStatusLabel = this.CreateUguiLabel(scrollContent, "GiftStatus",
                 handle.GiftStatusShown, 11f, statusColor, false);
             this.TrySetUguiLabelWrapped(handle.GiftStatusLabel);
-            PlaceUguiTopLeft(handle.GiftStatusLabel, 8f, 400f + giftExtra, panelW, 36f);
+            PlaceUguiTopLeft(handle.GiftStatusLabel, 8f, 400f + troughExtra + giftExtra, panelW, 36f);
 
             // -------- ROSTER card (UGUI-only; rows are dynamic, see the file header) --------
             // Placed at 444 = gift status end (436) + the 8px gap this chain uses. Its height and
@@ -303,9 +312,11 @@ namespace HeartopiaMod
 
         // Content-space Y where the roster card starts (gift status ends at 436 + the chain's 8px
         // gap). Everything above it keeps the fixed positions documented in the file header.
-        // Pushed down by the auto-claim checkbox row the gifts card carries.
+        // Pushed down by the Skip Rare Food row the troughs card carries and the auto-claim
+        // checkbox row the gifts card carries.
+        private const float UguiAnimalCareTroughRareRowHeight = 42f;
         private const float UguiAnimalCareGiftAutoRowHeight = 42f;
-        private const float UguiAnimalCareRosterTopY = 444f + UguiAnimalCareGiftAutoRowHeight;
+        private const float UguiAnimalCareRosterTopY = 444f + UguiAnimalCareTroughRareRowHeight + UguiAnimalCareGiftAutoRowHeight;
 
         private const float UguiAnimalCareRosterRowHeight = 42f;
         private const float UguiAnimalCareRosterRowsTopY = 34f;   // card-local, under the header
@@ -460,6 +471,7 @@ namespace HeartopiaMod
                 // Toggle re-syncs (external IMGUI edits) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.PreferFavoritesToggle, this.wildAnimalFeedPreferFavorites);
                 this.SyncUguiToggleFromField(handle.SkipFiveStarToggle, this.wildAnimalFeedSkipFiveStarFood);
+                this.SyncUguiToggleFromField(handle.SkipRareToggle, this.wildAnimalFeedSkipRareFood);
                 this.SyncUguiToggleFromField(handle.SkipEggToggle, this.wildAnimalFeedSkipEgg);
                 if (handle.AutoClaimVisitGiftsToggle != null)
                 {
@@ -508,16 +520,36 @@ namespace HeartopiaMod
             this.wildAnimalFeedPreferFavorites = value;
         }
 
-        // WildAnimalFeedFeature.cs:3827-3831 — flag only.
+        // The three food filters are persisted: flag + SaveKeybinds(false), guarded on actual
+        // change (kit checkbox build-fire idiom), same shape as the Daily Quests Skip 5 Star toggle.
         private void OnUguiAnimalCareSkipFiveStarToggled(bool value)
         {
+            if (value == this.wildAnimalFeedSkipFiveStarFood)
+            {
+                return;
+            }
             this.wildAnimalFeedSkipFiveStarFood = value;
+            try { this.SaveKeybinds(false); } catch { }
         }
 
-        // WildAnimalFeedFeature.cs:3834-3838 — flag only.
+        private void OnUguiAnimalCareSkipRareToggled(bool value)
+        {
+            if (value == this.wildAnimalFeedSkipRareFood)
+            {
+                return;
+            }
+            this.wildAnimalFeedSkipRareFood = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
         private void OnUguiAnimalCareSkipEggToggled(bool value)
         {
+            if (value == this.wildAnimalFeedSkipEgg)
+            {
+                return;
+            }
             this.wildAnimalFeedSkipEgg = value;
+            try { this.SaveKeybinds(false); } catch { }
         }
 
         // WildAnimalFeedFeature.cs:3847-3850 — the button routes straight to StartWildAnimalFeedAll

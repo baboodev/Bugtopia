@@ -34,8 +34,48 @@ namespace HeartopiaMod
             WildAnimalFeedShopEggStaticId
         };
 
+        // "Rare food": every fish that never spawns in sunny weather — only rain/snow and/or rainbow.
+        // Generated from cn_tables.db Fish (appearWeather lacks 1 = Sunny family) with
+        // `tools/HeartopiaTables/conditional_spawns.py --weather-not 1`; fish ids == item staticIds.
+        // Re-run that after a game update that adds fish.
+        private static readonly HashSet<int> WildAnimalFeedRareFishStaticIds = new HashSet<int>
+        {
+            10003, // Golden King Crab (rainbow)
+            10004, // Large Pearl Mussel (rainbow)
+            10006, // Mussel
+            10102, // Northern Pike
+            10117, // Chum Salmon (rainbow)
+            10131, // Arctic Char
+            10135, // Huchen (rainbow)
+            10201, // Tadpole
+            10205, // Three-Spined Stickleback
+            10212, // Mottled Sculpin
+            10216, // Goldfish
+            10218, // Lionhead (rainbow)
+            10219, // Pink Betta
+            10220, // Asian Arowana (rainbow)
+            10221, // Angelfish (rainbow)
+            10306, // Bluefin Tuna (rainbow)
+            10307, // Swordfish (rainbow)
+            10310, // Smooth Hammerhead (rainbow)
+            10319, // King Crab (rainbow)
+            10323, // Tub Gurnard (rainbow)
+            10328, // Blackspot Seabream
+            10332, // Shortfin Mako Shark (rainbow)
+            10335, // European Eel (rainbow)
+            10357, // Permit
+            10362, // Ghost Frog
+            10363, // Moon Jelly
+            10364, // Green Sea Turtle (rainbow)
+            10366, // Mahi-Mahi (rainbow)
+            10386, // Butterfly Koi
+            10388, // White-Faced Surgeonfish
+            10391  // Lionfish
+        };
+
         private bool wildAnimalFeedPreferFavorites = true;
         private bool wildAnimalFeedSkipFiveStarFood = true;
+        private bool wildAnimalFeedSkipRareFood = true;
         private bool wildAnimalFeedSkipEgg = true;
         private object wildAnimalFeedCoroutine = null;
         private float wildAnimalFeedBusyUntil = 0f;
@@ -104,6 +144,7 @@ namespace HeartopiaMod
             public int RawItems;
             public int Accepted;
             public int SkippedStar;
+            public int SkippedRare;
             public int SkippedEgg;
             public int SkippedFavorite;
             public int SkippedLock;
@@ -955,6 +996,7 @@ namespace HeartopiaMod
             Invalid,
             Lock,
             Star,
+            Rare,
             Egg,
             NoGroup
         }
@@ -970,6 +1012,9 @@ namespace HeartopiaMod
             {
                 case WildAnimalFeedSkipReason.Star:
                     stats.SkippedStar++;
+                    break;
+                case WildAnimalFeedSkipReason.Rare:
+                    stats.SkippedRare++;
                     break;
                 case WildAnimalFeedSkipReason.Egg:
                     stats.SkippedEgg++;
@@ -1720,6 +1765,12 @@ namespace HeartopiaMod
             if (this.wildAnimalFeedSkipFiveStarFood && starRate >= 5)
             {
                 skipReason = WildAnimalFeedSkipReason.Star;
+                return false;
+            }
+
+            if (this.wildAnimalFeedSkipRareFood && staticId > 0 && WildAnimalFeedRareFishStaticIds.Contains(staticId))
+            {
+                skipReason = WildAnimalFeedSkipReason.Rare;
                 return false;
             }
 
@@ -2549,6 +2600,7 @@ namespace HeartopiaMod
         {
             this.WildAnimalFeedLog("Toggles preferFav=" + this.wildAnimalFeedPreferFavorites
                 + " skip5star=" + this.wildAnimalFeedSkipFiveStarFood
+                + " skipRare=" + this.wildAnimalFeedSkipRareFood
                 + " skipEgg=" + this.wildAnimalFeedSkipEgg
                 + " eggIds=" + string.Join(",", WildAnimalFeedEggStaticIds.Select(id => id.ToString()).ToArray()));
         }
@@ -2559,6 +2611,7 @@ namespace HeartopiaMod
             switch (reason)
             {
                 case WildAnimalFeedSkipReason.Star: return "5star";
+                case WildAnimalFeedSkipReason.Rare: return "rare";
                 case WildAnimalFeedSkipReason.Egg: return "egg";
                 case WildAnimalFeedSkipReason.Lock: return "locked";
                 case WildAnimalFeedSkipReason.NoGroup: return "wrong-group";

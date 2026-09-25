@@ -177,6 +177,7 @@ Config: **Skip 5 Star Items** persisted in `KeybindConfigData.dailyQuestSubmitSk
 
 - Scans backpack storage(s) for food static IDs valid for the trough **group**.
 - **Skip 5 Star Food** excludes `starRate >= 5` before scoring.
+- **Skip Rare Food** excludes the weather-gated fish in `WildAnimalFeedRareFishStaticIds` (never spawn in sunny weather; regenerate with `conditional_spawns.py --weather-not 1` after an update that adds fish).
 - Picks highest **SortScore** (bond + fullness, favorites weighted).
 - Reserves `netId` counts within one bulk run so the same stack is not double-spent.
 

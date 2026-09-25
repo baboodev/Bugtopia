@@ -1565,7 +1565,8 @@ Full pipeline: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#bag--warehouse-tr
 ### Wild animal feed (`WildAnimalFeedFeature`)
 
 - Scans **backpack** via `GetAllItem`; matches food allowed for the animal **group** (fullness table per `staticId` + star).
-- **Skip 5 Star Food** (default on): never uses 5★ food.
+- **Skip 5 Star Food** (default on): never uses 5★ food. This, Skip Rare Food and Skip Egg are saved in the config.
+- **Skip Rare Food** (default on): never uses the 31 fish that cannot be caught in sunny weather (rain/snow and/or rainbow only) — `WildAnimalFeedRareFishStaticIds`, generated with `tools/HeartopiaTables/conditional_spawns.py --weather-not 1`.
 - Picks food with highest score: bond EXP (favorites weighted) + fullness contribution.
 - Manual **Feed**; separate from daily quests.
 
