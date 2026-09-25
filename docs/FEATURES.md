@@ -1039,6 +1039,12 @@ UI displays user-friendly status:
 
 Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
 
+**Fishing Locations with Walk to Nodes on:** hops between spots are walked (and driven, by the
+Foraging vehicle settings) instead of teleported. Fishing keeps running on the way — a cast, bite
+or battle stops the walk and it resumes once the session is over. Aura Farm is stopped when the
+route starts driving the walker. The teleport remains the fallback when the walker is unavailable
+or refuses a route, when a walk fails twice, or after 300 s of travel.
+
 **Note:** Startup log explicitly states `AutoFish subsystem disabled` — refers to the **old** `AutoFishLogic` pipeline, not `AutoFishingFarm`.
 
 ### Insects (`InsectNetFarm`)

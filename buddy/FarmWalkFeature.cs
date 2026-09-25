@@ -804,7 +804,8 @@ namespace HeartopiaMod
         // drives the same walker through the same water, so it needs the same suppression.
         internal bool FarmWalkRunActive => (this.farmWalkToNodeEnabled && this.autoFarmActive)
                                            || this.questWalkFollowing
-                                           || this.CleanupBossDrivingWalker;
+                                           || this.CleanupBossDrivingWalker
+                                           || FishingRouteFeature.Walking;
 
         // ⛔ NODES THE WALKER NEVER TARGETS. Spots whose surrounding geometry defeats routing:
         // the straight leg is blocked by a ledge, the graph answers with a loop across the map,

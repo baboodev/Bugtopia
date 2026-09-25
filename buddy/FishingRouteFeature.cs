@@ -10,12 +10,25 @@ namespace HeartopiaMod
     // it restores whatever the user had before. Hops to the next spot when the radius has been
     // fish-free for NoFishHopSeconds, but never mid-cast/battle, and defers the hop teleport
     // while an auto repair is running (fishing itself keeps going during the pause).
+    //
+    // With Walk to Nodes on, a hop is a WALK (and a ride, by the walker's own vehicle rules)
+    // instead of a teleport — user rule 2026-09-25. The engine keeps fishing on the way: when a
+    // session starts (cast / bite / battle) the walk is aborted and the player stands still until
+    // it ends, then the walk to the same spot resumes. Aura Farm is stopped for the route (one
+    // writer on the walker). The teleport stays as the fallback: walker unavailable or refusing,
+    // the walk failing twice, or the travel running past its deadline.
     public static class FishingRouteFeature
     {
         private const float NoFishHopSeconds = 10f;
         private const float SettleGraceSeconds = 3f;
         private const float WorldUnavailableStopSeconds = 30f;
         private const float ForcedDetectRange = 200f;
+        // Travel: arrive this close to the spot (flat), or accept the walker's own end this close.
+        private const float TravelArriveDistance = 2.5f;
+        private const float TravelWalkerEndAccept = 6f;
+        private const float TravelResumeGrace = 1.5f;
+        private const float TravelDeadlineSeconds = 300f;
+        private const int TravelMaxWalkFailures = 2;
 
         private struct FixedSpot
         {
@@ -88,6 +101,18 @@ namespace HeartopiaMod
         private static float worldNotReadySince = -1f;
         private static bool pausedForRepair;
         private static string lastStatus = "Idle";
+        // Travel state (walk / ride between spots).
+        private static bool travelling;
+        private static bool travelWalking;          // the walker is driving right now
+        private static bool travelPausedForFishing;
+        private static int travelIndex = -1;
+        private static Vector3 travelTarget;
+        private static float travelStartedAt = -999f;
+        private static float travelResumeAt = -999f;
+        private static float travelNextStatusAt = -999f;
+        private static int travelWalkFailures;
+        // Read by FarmWalkRunActive: the out-of-bounds rescue stays suppressed while we drive.
+        public static bool Walking => travelling && travelWalking;
 
         // Snapshot of the user's settings taken at Start; restored on Stop. Also read by the
         // config writer so a save during an active route persists the user's values, not the
@@ -237,10 +262,10 @@ namespace HeartopiaMod
             }
 
             active = true;
-            currentIndex = 0;
+            currentIndex = FindNearestSpotIndex(host);
             pausedForRepair = false;
             worldNotReadySince = -1f;
-            TeleportToSpot(host, currentIndex);
+            GoToSpot(host, currentIndex);
             FeatureLog.Life("FishingRoute", $"route started: {TotalSpotCount} spot(s)");
             Log($"Route started: {TotalSpotCount} spots, snapshot range={snapshotDetectRange:F0} eat={snapshotAutoEatPanel} repair={snapshotAutoRepair} fish={snapshotAutoFishEnabled}");
         }
@@ -257,6 +282,7 @@ namespace HeartopiaMod
             noFishSinceAt = -1f;
             worldNotReadySince = -1f;
             lastStatus = "Idle";
+            EndTravel(host, "route stopped");
 
             if (hasSnapshot)
             {
@@ -310,6 +336,12 @@ namespace HeartopiaMod
                     try { host.UI_AddMenuNotification(host.UI_Localize("Fishing Locations stopped (world unavailable)"), new Color(1f, 0.65f, 0.45f)); } catch { }
                 }
 
+                // Every cached position belongs to the map that is going away.
+                if (travelling)
+                {
+                    EndTravel(host, "world is changing");
+                }
+
                 lastStatus = "Waiting for world";
                 return;
             }
@@ -322,6 +354,12 @@ namespace HeartopiaMod
             {
                 Stop(host);
                 try { host.UI_AddMenuNotification(host.UI_Localize("Fishing Locations stopped (Auto Fishing disabled)"), new Color(1f, 0.65f, 0.45f)); } catch { }
+                return;
+            }
+
+            if (travelling)
+            {
+                TickTravel(host, now);
                 return;
             }
 
@@ -419,20 +457,253 @@ namespace HeartopiaMod
 
             pausedForRepair = false;
             currentIndex = (currentIndex + 1) % TotalSpotCount;
-            TeleportToSpot(host, currentIndex);
+            GoToSpot(host, currentIndex);
+        }
+
+        // The route opens at the spot nearest the player and goes round the list from there
+        // (user rule 2026-09-25) — starting at index 0 sent a player standing at Forest Lake
+        // across the map to Rosy River first. Flat distance; unknown position = index 0.
+        private static int FindNearestSpotIndex(HeartopiaComplete host)
+        {
+            int total = TotalSpotCount;
+            int best = 0;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < total; i++)
+            {
+                float d = host.FishingRouteDistanceTo(GetSpotPos(i));
+                if (d >= 0f && d < bestDist)
+                {
+                    bestDist = d;
+                    best = i;
+                }
+            }
+
+            if (bestDist < float.MaxValue)
+            {
+                ModLogger.Msg("[FishingRoute] starting at the nearest spot " + (best + 1) + "/" + total + " '" + GetSpotName(best)
+                    + "' (" + bestDist.ToString("F0") + "m away).");
+            }
+
+            return best;
+        }
+
+        // A hop: walk when the walker is available, teleport otherwise.
+        private static void GoToSpot(HeartopiaComplete host, int index)
+        {
+            if (host.FishingRouteWalkAvailable && TryBeginTravel(host, index))
+            {
+                return;
+            }
+
+            TeleportToSpot(host, index);
         }
 
         private static void TeleportToSpot(HeartopiaComplete host, int index)
         {
             Vector3 pos = GetSpotPos(index);
             host.TeleportToLocationWithOffset(pos, 0f);
+            MarkArrived(index, "Teleporting");
+            Log($"Hop to spot {index + 1}/{TotalSpotCount} '{GetSpotName(index)}' at {pos}");
+        }
+
+        private static void MarkArrived(int index, string status)
+        {
             float now = Time.unscaledTime;
             spotArrivedAt = now;
             graceUntil = now + SettleGraceSeconds;
             noFishSinceAt = -1f;
             lastHandledScanAt = -999f;
-            lastStatus = "Teleporting";
-            Log($"Hop to spot {index + 1}/{TotalSpotCount} '{GetSpotName(index)}' at {pos}");
+            lastStatus = status;
+        }
+
+        // ---- Travel (walk / ride) ----------------------------------------------------------
+
+        private static bool TryBeginTravel(HeartopiaComplete host, int index)
+        {
+            if (!host.FishingRoutePrepareWalk(out string why))
+            {
+                ModLogger.Msg("[FishingRoute] walking unavailable (" + why + ") — teleporting to '" + GetSpotName(index) + "'.");
+                return false;
+            }
+
+            Vector3 pos = GetSpotPos(index);
+            float away = host.FishingRouteDistanceTo(pos);
+            if (away >= 0f && away <= TravelArriveDistance)
+            {
+                MarkArrived(index, "Arriving at spot");
+                ModLogger.Msg("[FishingRoute] already at '" + GetSpotName(index) + "' (" + away.ToString("F1") + "m).");
+                return true;
+            }
+
+            travelling = true;
+            travelWalking = false;
+            travelPausedForFishing = false;
+            travelIndex = index;
+            travelTarget = pos;
+            travelStartedAt = Time.unscaledTime;
+            travelResumeAt = -999f;
+            travelNextStatusAt = -999f;
+            travelWalkFailures = 0;
+            if (!StartTravelWalk(host, "hop"))
+            {
+                travelling = false;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool StartTravelWalk(HeartopiaComplete host, string why)
+        {
+            if (!host.FishingRouteBeginWalk(travelTarget, GetSpotName(travelIndex)))
+            {
+                ModLogger.Msg("[FishingRoute] the walker refused a route to '" + GetSpotName(travelIndex) + "' (" + why + ") — teleporting.");
+                return false;
+            }
+
+            travelWalking = true;
+            float away = host.FishingRouteDistanceTo(travelTarget);
+            lastStatus = "Walking to spot " + (travelIndex + 1) + "/" + TotalSpotCount;
+            ModLogger.Msg("[FishingRoute] walking to spot " + (travelIndex + 1) + "/" + TotalSpotCount + " '" + GetSpotName(travelIndex)
+                + "' " + (away >= 0f ? away.ToString("F0") + "m away" : "") + " (" + why + ").");
+            return true;
+        }
+
+        private static void TickTravel(HeartopiaComplete host, float now)
+        {
+            // Fishing on the way: a session (cast / bite / battle) stops the walk; it resumes
+            // once the session is over and has stayed over for a moment.
+            if (AutoFishingFarm.IsInFishingSession)
+            {
+                if (travelWalking)
+                {
+                    host.FishingRouteAbortWalk();
+                    travelWalking = false;
+                    ModLogger.Msg("[FishingRoute] fish on the way — stopped walking to '" + GetSpotName(travelIndex) + "'.");
+                }
+
+                travelPausedForFishing = true;
+                travelResumeAt = now + TravelResumeGrace;
+                lastStatus = "Fishing on the way";
+                return;
+            }
+
+            if (travelPausedForFishing)
+            {
+                if (now < travelResumeAt)
+                {
+                    return;
+                }
+
+                travelPausedForFishing = false;
+                if (!StartTravelWalk(host, "fishing over"))
+                {
+                    TeleportFallback(host, "no route after fishing");
+                }
+                return;
+            }
+
+            // Another farm slice owns the tool: stand still, resume when it hands back.
+            if (!CombinedFarmFeature.AllowsRouteHop)
+            {
+                if (travelWalking)
+                {
+                    host.FishingRouteAbortWalk();
+                    travelWalking = false;
+                    ModLogger.Msg("[FishingRoute] another farm is running — walk to '" + GetSpotName(travelIndex) + "' paused.");
+                }
+
+                lastStatus = "Paused (another farm is running)";
+                return;
+            }
+
+            if (!travelWalking)
+            {
+                if (!StartTravelWalk(host, "resume"))
+                {
+                    TeleportFallback(host, "no route on resume");
+                }
+                return;
+            }
+
+            float away = host.FishingRouteDistanceTo(travelTarget);
+            if (away >= 0f && away <= TravelArriveDistance)
+            {
+                ArriveByWalk(host, away);
+                return;
+            }
+
+            if (now - travelStartedAt > TravelDeadlineSeconds)
+            {
+                TeleportFallback(host, "travel deadline (" + TravelDeadlineSeconds.ToString("F0") + "s)");
+                return;
+            }
+
+            if (now >= travelNextStatusAt)
+            {
+                travelNextStatusAt = now + 0.5f;
+                lastStatus = "Walking to spot " + (travelIndex + 1) + "/" + TotalSpotCount
+                    + (away >= 0f ? " (" + away.ToString("F0") + "m)" : "");
+            }
+
+            if (host.FishingRouteTickWalk())
+            {
+                // The walker ended the leg itself: its own arrival test, or it gave up.
+                travelWalking = false;
+                away = host.FishingRouteDistanceTo(travelTarget);
+                if (away >= 0f && away <= TravelWalkerEndAccept)
+                {
+                    ArriveByWalk(host, away);
+                    return;
+                }
+
+                travelWalkFailures++;
+                ModLogger.Msg("[FishingRoute] the walker ended the leg " + (away >= 0f ? away.ToString("F0") + "m" : "?")
+                    + " from '" + GetSpotName(travelIndex) + "' (" + travelWalkFailures + "/" + TravelMaxWalkFailures + ").");
+                if (travelWalkFailures >= TravelMaxWalkFailures || !StartTravelWalk(host, "retry"))
+                {
+                    TeleportFallback(host, "walk failed");
+                }
+            }
+        }
+
+        private static void ArriveByWalk(HeartopiaComplete host, float away)
+        {
+            host.FishingRouteAbortWalk();   // stops the axis and gets out of the vehicle
+            int index = travelIndex;
+            float took = Time.unscaledTime - travelStartedAt;
+            travelling = false;
+            travelWalking = false;
+            travelPausedForFishing = false;
+            MarkArrived(index, "Arriving at spot");
+            ModLogger.Msg("[FishingRoute] arrived at spot " + (index + 1) + "/" + TotalSpotCount + " '" + GetSpotName(index)
+                + "' on foot (" + away.ToString("F1") + "m, " + took.ToString("F0") + "s).");
+        }
+
+        private static void TeleportFallback(HeartopiaComplete host, string why)
+        {
+            int index = travelIndex;
+            EndTravel(host, why);
+            ModLogger.Msg("[FishingRoute] falling back to the teleport (" + why + ").");
+            TeleportToSpot(host, index);
+        }
+
+        private static void EndTravel(HeartopiaComplete host, string why)
+        {
+            if (!travelling)
+            {
+                return;
+            }
+
+            if (travelWalking)
+            {
+                try { host?.FishingRouteAbortWalk(); } catch (Exception ex) { ModLogger.Msg("[FishingRoute] abort threw: " + ex.Message); }
+            }
+
+            travelling = false;
+            travelWalking = false;
+            travelPausedForFishing = false;
+            Log("travel ended: " + why);
         }
 
         private static void SaveCurrentLocation(HeartopiaComplete host)

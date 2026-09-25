@@ -148,7 +148,11 @@ namespace HeartopiaMod
             // Any mod-driven walk qualifies, not only Auto Farm: the quest-walk hotkey summons the
             // same vehicle through the same TryBeginFarmWalk and suffered the same turn lag, but the
             // fix was gated on autoFarmActive alone and silently skipped it.
-            if (!this.farmWalkVehicleFixEnabled || (!this.autoFarmActive && !this.questWalkFollowing))
+            // ⚠️ The Fishing Locations route drives the walker too (2026-09-25) and its rides went
+            // out without the fix: three summons in one session, not one "movement fix applied".
+            // Any walker driver qualifies — the same set FarmWalkRunActive names.
+            if (!this.farmWalkVehicleFixEnabled
+                || (!this.autoFarmActive && !this.questWalkFollowing && !FishingRouteFeature.Walking))
             {
                 return;
             }

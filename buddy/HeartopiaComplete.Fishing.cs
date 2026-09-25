@@ -3917,6 +3917,75 @@ namespace HeartopiaMod
             return false;
         }
 
+        // ---- Fishing Locations on foot / by vehicle (FishingRouteFeature.cs) ----------------
+        //
+        // The route is a static class and the walker is private to this partial, so these are
+        // the whole surface it gets. One writer on the walker: Aura Farm is stopped through its
+        // own toggle (releases the axis, surfaces, resets its run), a Quest Walk is stopped, and
+        // a boss run refuses — the route then falls back to its teleport.
+
+        internal bool FishingRouteWalkAvailable => this.farmWalkToNodeEnabled;
+
+        internal bool FishingRoutePrepareWalk(out string why)
+        {
+            why = string.Empty;
+            if (this.CleanupBossRunActive)
+            {
+                why = "the Ocean Cleanup boss run owns the walker";
+                return false;
+            }
+
+            if (this.questWalkFollowing)
+            {
+                this.StopQuestWalk("fishing route");
+                ModLogger.Msg("[FishingRoute] stopped Quest Walk — the route drives the walker now.");
+            }
+
+            if (this.autoFarmActive)
+            {
+                this.ToggleAutoFarm();
+                ModLogger.Msg(this.autoFarmActive
+                    ? "[FishingRoute] could not stop Aura Farm — walking anyway."
+                    : "[FishingRoute] stopped Aura Farm — the route drives the walker now.");
+            }
+
+            return true;
+        }
+
+        internal bool FishingRouteBeginWalk(Vector3 spot, string spotName)
+        {
+            return this.TryBeginFarmWalkToArea(spot, "Fishing " + spotName);
+        }
+
+        internal bool FishingRouteTickWalk()
+        {
+            return this.RunFarmWalkTick();
+        }
+
+        internal void FishingRouteAbortWalk()
+        {
+            this.AbortFarmWalk();
+            // The steering fix is per ride; give the table its values back unless another walker
+            // driver is still running (their own stop restores in that case).
+            if (!this.autoFarmActive && !this.questWalkFollowing)
+            {
+                this.RestoreFarmWalkVehicleMovementFix("fishing route walk ended");
+            }
+        }
+
+        // Flat distance from the player to a point; negative when the position is unavailable.
+        internal float FishingRouteDistanceTo(Vector3 to)
+        {
+            if (!this.TryGetLocalPlayerPosition(out Vector3 me))
+            {
+                return -1f;
+            }
+
+            float dx = to.x - me.x;
+            float dz = to.z - me.z;
+            return Mathf.Sqrt(dx * dx + dz * dz);
+        }
+
         public bool IsFishingAutomationWorldReady()
         {
             try
